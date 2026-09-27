@@ -47,6 +47,10 @@ type battleSession struct {
 	fs    vfs.FSOps
 	shell *gameShell
 
+	// slowSim holds the simulation batches a live trace keeps until its census
+	// takes them (battle_sim_timing.go); always empty without a trace.
+	slowSim []slowSimRecord
+
 	// Retain the original saved origin until installation knows the battle
 	// surface size; clamping a provisional viewport must not lose it.
 	entrySavedCamera *save.Camera
@@ -469,7 +473,7 @@ func newDirectBattleView(opts Options, cs *contentSet) (*gameShell, *client.Clie
 				return nil, nil, err
 			}
 		}
-		shell.liveTrace = liveTraceOptions(opts, shell, meta)
+		shell.liveTrace = liveTraceOptions(opts, func() *gameShell { return shell }, meta)
 	}
 	entered = true
 	return shell, cl, nil

@@ -76,9 +76,11 @@ type Client struct {
 	// pruneLive is pruneCachedModelBodies's live-unit set, kept between
 	// records so its storage is reused.
 	pruneLive map[uint64]struct{}
-	// simulationJoin* accumulate NoteSimulationJoin for the live frame trace.
+	// simulationJoin* accumulate NoteSimulationJoin, and simulationReleased
+	// NoteTicksReleased, for the live frame trace.
 	simulationJoinWait, simulationJoinBatch int64 // nanoseconds
 	simulationJoins                         int
+	simulationReleased                      int
 	// frameTiming is presentation-only instrumentation for the +fps overlay.
 	// The window adapter changes it only after joining any pre-record worker.
 	frameTiming         bool

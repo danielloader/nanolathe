@@ -230,8 +230,11 @@ func (c *Client) SnapCameraBlend() {
 // scale independently: lerp(origin*zoom)/lerp(zoom) keeps an anchored world
 // point fixed for every displayed fraction (DESIGN_GPU_RENDERER §16.5).
 func (c *Client) blendedCameraView() camera.PresentationView {
-	prev, cur := c.camPrevView, c.camCurView
-	f := float64(c.cameraFraction16) / float64(fractionOne)
+	return c.blendCameraView(c.camPrevView, c.camCurView, c.cameraFraction16)
+}
+
+func (c *Client) blendCameraView(prev, cur camera.PresentationView, fraction16 int32) camera.PresentationView {
+	f := float64(fraction16) / float64(fractionOne)
 	factor := prev.Factor + (cur.Factor-prev.Factor)*f
 	axis := func(a, b float64, viewport int32) float64 {
 		if prev.Factor == cur.Factor && viewport > 0 && math.Abs(b-a) > float64(viewport) {
@@ -241,6 +244,39 @@ func (c *Client) blendedCameraView() camera.PresentationView {
 	}
 	w, h := c.cam.EffectiveView()
 	return camera.PresentationView{X: axis(prev.X, cur.X, w), Z: axis(prev.Z, cur.Z, h), Factor: factor}
+}
+
+// CameraViewFor is the camera view a recording pass with inputs d frames the
+// world through: the blend of its two stepped samples when it has them, its
+// integer origin otherwise. It is for host diagnostics — the live trace times
+// camera motion with it — and reads nothing the digest does not carry apart
+// from the viewport, which only decides that a long move is a jump.
+func (c *Client) CameraViewFor(d PresentationInputs) camera.PresentationView {
+	if c == nil || c.cam == nil {
+		return camera.PresentationView{X: float64(d.CamX), Z: float64(d.CamZ), Factor: 1}
+	}
+	if d.Interpolation && d.CamSamples >= 2 && d.CameraFractionSet && c.committedPrevious() != nil {
+		return c.blendCameraView(d.CamPrevView, d.CamCurView, d.CameraFraction16)
+	}
+	return camera.PresentationView{X: float64(d.CamX), Z: float64(d.CamZ), Factor: d.CamZoom.Float()}
+}
+
+// PresentedTicks names the committed pair the current presentation pass reads
+// — the pinned pair under the asynchronous simulation — and whether the world
+// is blended between them; unblended, both are the one tick shown. It is for
+// host diagnostics.
+func (c *Client) PresentedTicks() (prev, cur uint32, blended bool) {
+	if c == nil {
+		return 0, 0, false
+	}
+	f := c.committedFrame()
+	if f == nil {
+		return 0, 0, false
+	}
+	if p := c.committedPrevious(); p != nil && c.interpolation {
+		return p.Tick, f.Tick, true
+	}
+	return f.Tick, f.Tick, false
 }
 
 // presentationCameraView is shared by recording, paused reuse and strategic

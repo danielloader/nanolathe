@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Summarize --live-trace directories: presented-frame intervals, where each
-frame's time went, and what the late frames coincided with.
+frame's time went, what the late frames coincided with, how evenly the world
+and the camera moved, the display's refresh rate and the slow simulation
+batches.
 
 usage: tools/live-trace-report [--skip SECONDS] [--late N] DIR [DIR ...]
 
 --skip drops the first SECONDS of each trace (default 3: battle entry, first
-uses of shaders and art). --late N lists the N longest intervals with their
-segment times. See docs/BATTLE_BENCHMARK.md "Live window trace".
+uses of shaders and art). --late N lists the N longest intervals, the N worst
+motion steps and the N slowest simulation batches. See
+docs/BATTLE_BENCHMARK.md "Live window trace".
 """
 import csv
 import json
@@ -14,9 +17,19 @@ import pathlib
 import statistics
 import sys
 
-# A presented interval longer than this many refresh periods missed at least
-# one refresh; the report calls it late.
-LATE_REFRESHES = 1.5
+# A presented interval longer than the interval the window presents at by
+# this many refresh periods missed at least one refresh; the report calls it
+# late.
+LATE_REFRESHES = 0.5
+
+# A presented frame whose content moved this many milliseconds more or less
+# than the display time since the previous one is a motion step error: a
+# quarter of a 60 Hz frame, half of a 120 Hz one.
+STEP_ERROR_MS = 4.0
+
+# The blend fractions' unit (16.16), and the camera's 30 Hz update rate.
+FRACTION_ONE = 65536.0
+CAMERA_HZ = 30.0
 
 
 def pct(values, p):
@@ -78,9 +91,107 @@ def classify(seg, gc):
     return "+".join(causes) or "other"
 
 
+def refresh_of(row, fallback):
+    """The refresh period the window measured at this Draw, in ms."""
+    return row.get("refresh_us", 0) / 1000.0 or fallback
+
+
+def nominal_of(row, fallback):
+    """The interval the window presents at: the cap or the refresh, the
+    longer, in ms. Traces from before the columns existed use fallback."""
+    return max(row.get("cap_us", 0), row.get("refresh_us", 0)) / 1000.0 or fallback
+
+
+def refresh_regimes(rows):
+    """Seconds spent at each display refresh rate, and the switches between
+    rates that held for at least half a second."""
+    spans, switches, current, pending, since = {}, 0, None, None, 0
+    for a, b in zip(rows, rows[1:]):
+        us = a.get("refresh_us", 0)
+        if not us:
+            continue
+        hz = round(1e6 / us / 6) * 6  # ProMotion rates are multiples of 6 Hz
+        spans[hz] = spans.get(hz, 0.0) + (b["upd_start"] - a["upd_start"]) / 1e6
+        if hz != current:
+            if hz != pending:
+                pending, since = hz, a["upd_start"]
+            elif a["upd_start"] - since >= 5e5:
+                switches += current is not None
+                current, pending = hz, None
+        else:
+            pending = None
+    return spans, switches
+
+
+def motion(presented, key, rate_of, late_rows, label, seconds):
+    """Motion evenness: for each pair of consecutive presented frames, how
+    far the content they show moved, in milliseconds of content time, against
+    the display time between them. key gives a frame's content position in
+    its own units, rate_of the units per millisecond around it (None where
+    content is not moving, as when paused)."""
+    errors = []
+    for i, (a, b) in enumerate(zip(presented, presented[1:])):
+        ca, cb = key(a), key(b)
+        if ca is None or cb is None:
+            continue
+        rate = rate_of(i)
+        if not rate:
+            continue
+        display = ms(b["draw_start"] - a["draw_start"])
+        moved = (cb - ca) / rate
+        if abs(moved - display) > 100:  # a load, a jump, a battle change
+            continue
+        errors.append((moved - display, a))
+    if not errors:
+        return
+    mags = [abs(e) for e, _ in errors]
+    per_min = lambda n: 60.0 * n / max(seconds, 1e-9)
+    over = sum(1 for m in mags if m > STEP_ERROR_MS)
+    over2 = sum(1 for m in mags if m > 2 * STEP_ERROR_MS)
+    held = sum(1 for e, a in errors if e < 0 and abs(e) > STEP_ERROR_MS)
+    print(f"  {label} motion: step error p50 {pct(mags, 50):.2f} p99 {pct(mags, 99):.2f} max {max(mags):.1f} ms over {len(errors)} steps;"
+          f" > {STEP_ERROR_MS:.0f} ms {over} ({per_min(over):.1f}/min, {held} behind), > {2 * STEP_ERROR_MS:.0f} ms {over2} ({per_min(over2):.1f}/min)")
+    for e, a in sorted(errors, key=lambda t: -abs(t[0]))[:late_rows]:
+        print(f"    {e:+6.1f} ms at {a['draw_start'] / 1e6:6.2f} s frame {a['frame']}")
+
+
+def world_position(r):
+    if not r.get("tick"):
+        return None
+    prev, cur = r["tick_prev"], r["tick"]
+    return prev + (cur - prev) * r["tick16"] / FRACTION_ONE
+
+
+def camera_position(r):
+    if not r.get("tick"):
+        return None
+    return r["bodies"] + r["cam16"] / FRACTION_ONE
+
+
+def local_rates(presented, key, window=30):
+    """Content units per display millisecond around each step: the median
+    over a window of steps, so game speed and pauses are followed. Zero while
+    the content is not advancing."""
+    steps = []
+    for a, b in zip(presented, presented[1:]):
+        ca, cb = key(a), key(b)
+        d = ms(b["draw_start"] - a["draw_start"])
+        steps.append((cb - ca) / d if ca is not None and cb is not None and d > 0 else None)
+    rates = []
+    for i in range(len(steps)):
+        near = [x for x in steps[max(0, i - window):i + window + 1] if x is not None and 0 <= x < 1]
+        rates.append(statistics.median(near) if len(near) > window // 2 else 0)
+    return lambda i: rates[i] if rates[i] > 1e-6 else None
+
+
 def report(directory, skip, late_rows):
     rows, summary, census = load(directory)
     rows = [r for r in rows if r["draw_start"] > 0 and r["upd_start"] >= skip * 1e6]
+    if rows and "battle" in rows[0]:
+        between = sum(1 for r in rows if not r["battle"])
+        rows = [r for r in rows if r["battle"]]
+    else:
+        between = 0
     presented = [r for r in rows if r["due"]]
     if len(presented) < 3:
         print(f"{directory}: too few presented frames ({len(presented)})")
@@ -90,16 +201,38 @@ def report(directory, skip, late_rows):
     refresh = statistics.median(frames) if frames else 0.0
     intervals = [(ms(b["draw_start"] - a["draw_start"]), a, b) for a, b in zip(presented, presented[1:])]
     values = [x for x, _, _ in intervals]
-    late_at = LATE_REFRESHES * refresh
+
+    meta = summary.get("metadata") or {}
+    # Traces from before the per-frame columns: the cap the run started with.
+    cap = meta.get("fps_cap") or 0
+    nominal = max(refresh, 1000.0 / cap if cap > 0 else 0.0)
+
+    def late(x, a):
+        return x > nominal_of(a, nominal) + LATE_REFRESHES * refresh_of(a, refresh)
+
     by_frame = {r["frame"]: r for r in rows}
     print(f"== {directory}")
-    meta = summary.get("metadata") or {}
     scene = meta.get("scene", {})
-    print(f"  map {meta.get('map')}  scene {scene.get('kind') or 'none'}  fps cap {meta.get('fps_cap')}  zoom {meta.get('zoom')}  gomaxprocs {summary.get('gomaxprocs')}")
+    print(f"  {meta.get('mode') or 'map ' + str(meta.get('map'))}  scene {scene.get('kind') or 'none'}  fps cap {meta.get('fps_cap')}  zoom {meta.get('zoom')}  gomaxprocs {summary.get('gomaxprocs')}")
     print(f"  {len(presented) - 1} presented over {span:.1f} s: {(len(presented) - 1) / span:.1f} fps, refresh {refresh:.2f} ms")
+    lates = sum(1 for x, a, _ in intervals if late(x, a))
     print(f"  interval p50 {pct(values, 50):.2f}  p90 {pct(values, 90):.2f}  p99 {pct(values, 99):.2f}  max {max(values):.1f} ms;"
-          f" within 5% of refresh {100.0 * sum(1 for x in values if x <= refresh * 1.05) / len(values):.1f}%;"
-          f" late (> {late_at:.1f} ms) {sum(1 for x in values if x > late_at)}, > 25 ms {sum(1 for x in values if x > 25)}")
+          f" on time {100.0 * (len(values) - lates) / len(values):.1f}%;"
+          f" late (missed a refresh) {lates} ({60.0 * lates / span:.1f}/min), > 25 ms {sum(1 for x in values if x > 25)}, > 50 ms {sum(1 for x in values if x > 50)}")
+    if "refresh_us" in rows[0]:
+        spans, switches = refresh_regimes(rows)
+        total = sum(spans.values()) or 1
+        rates = ", ".join(f"{hz} Hz {100 * t / total:.1f}%" for hz, t in sorted(spans.items(), key=lambda kv: -kv[1]) if t / total >= 0.001)
+        unfocused = sum(1 for r in presented if not r["focused"])
+        print(f"  display refresh {rates}; {switches} switches; unfocused {100.0 * unfocused / len(presented):.1f}% of frames;"
+              f" {between} Ebitengine frames outside a battle left out")
+        motion(presented, world_position, local_rates(presented, world_position), late_rows, "world", span)
+        moving = [(a, b) for a, b in zip(presented, presented[1:]) if (a["cam_x100"], a["cam_z100"]) != (b["cam_x100"], b["cam_z100"])]
+        print(f"  camera moving in {100.0 * len(moving) / max(1, len(presented) - 1):.1f}% of steps")
+        moving_set = {id(a) for a, _ in moving}
+        index = {id(a): i for i, a in enumerate(presented)}
+        camera_rate = lambda i: CAMERA_HZ / 1000.0 if id(presented[i]) in moving_set else None
+        motion(presented, camera_position, camera_rate, late_rows, "camera (while moving)", span)
     comps = {}
     for r in presented:
         seg = segments(r, by_frame.get(r["frame"] + 1))
@@ -123,7 +256,7 @@ def report(directory, skip, late_rows):
     causes = {}
     detail = []
     for x, a, b in intervals:
-        if x <= late_at:
+        if not late(x, a):
             continue
         agg = {}
         for r in rows:
@@ -131,6 +264,11 @@ def report(directory, skip, late_rows):
                 for k, v in segments(r, by_frame.get(r["frame"] + 1)).items():
                     agg[k] = agg.get(k, 0.0) + v
         key = classify(agg, b["gc_cycles"] != a["gc_cycles"])
+        span_rows = [r for r in rows if a["frame"] <= r["frame"] <= b["frame"] and r.get("refresh_us")]
+        if span_rows and max(r["refresh_us"] for r in span_rows) > 1.3 * min(r["refresh_us"] for r in span_rows):
+            key += "+refresh change"
+        if not b.get("focused", 1):
+            key += "+unfocused"
         causes[key] = causes.get(key, 0) + 1
         detail.append((x, a, key, agg))
     if causes:
@@ -138,8 +276,15 @@ def report(directory, skip, late_rows):
     for x, a, key, agg in sorted(detail, key=lambda t: -t[0])[:late_rows]:
         parts = "  ".join(f"{k} {v:.1f}" for k, v in agg.items() if v >= 0.3)
         print(f"    {x:6.1f} ms at {a['draw_start'] / 1e6:6.2f} s frame {a['frame']}: {key}; {parts}")
+    slow = [s for line in census for s in ((line.get("census") or {}).get("slow_sim") or [])]
+    if slow:
+        print(f"  simulation batches over 16 ms: {len(slow)} ({60.0 * len(slow) / span:.1f}/min), max {max(s['ms'] for s in slow):.1f} ms")
+        for s in sorted(slow, key=lambda s: -s["ms"])[:late_rows]:
+            top = sorted(s["phases"], key=lambda p: -p["ms"])[:3]
+            print(f"    {s['ms']:6.1f} ms at tick {s['tick']} ({s['ticks']} ticks): " + ", ".join(f"{p['phase']} {p['ms']:.1f}" for p in top))
     if census:
-        last = census[-1].get("census") or {}
+        last = next((line.get("census") for line in reversed(census) if line.get("census")), None) or {}
+        last = {k: v for k, v in last.items() if k != "slow_sim"}
         print(f"  census at end: {json.dumps(last, sort_keys=True)}")
 
 

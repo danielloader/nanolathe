@@ -40,8 +40,9 @@ import (
 
 // simRun is one launched batch.
 type simRun struct {
-	sess *session.Session
-	plan session.StepPlan
+	sess   *session.Session
+	plan   session.StepPlan
+	timing *simPhaseTimer
 }
 
 // battleSim is the simulation goroutine and the host's bookkeeping for it. All
@@ -76,6 +77,12 @@ type battleSim struct {
 	// read, so the batch only notes it and the join applies it.
 	retireTick    uint32
 	retirePending bool
+	// timing times each batch by phase while a live trace runs, and
+	// observerBefore is the session's phase observer it chained; launchedTicks
+	// is the running batch's tick count (battle_sim_timing.go).
+	timing         *simPhaseTimer
+	observerBefore func(string, uint32)
+	launchedTicks  int
 }
 
 func newBattleSim() *battleSim {
@@ -95,8 +102,15 @@ func (r *battleSim) serve() {
 	ebitenapp.RaiseCurrentThread()
 	for run := range r.runs {
 		started := time.Now()
+		if run.timing != nil {
+			run.timing.begin(started)
+		}
 		run.sess.ExecuteStep(run.plan)
-		r.done <- time.Since(started)
+		elapsed := time.Since(started)
+		if run.timing != nil {
+			run.timing.end(started.Add(elapsed))
+		}
+		r.done <- elapsed
 	}
 }
 
@@ -115,6 +129,9 @@ func (b *battleSession) syncSimulationMode(cl *client.Client) {
 		if cur := b.sess.Snapshot.Current(); cur != nil {
 			r.observedTick, r.observedValid = cur.Tick, true
 			r.terminal = cur.Result.Ended
+		}
+		if b.shell != nil && b.shell.opts.LiveTrace != "" {
+			r.traceSimulation(b.sess)
 		}
 		b.sim = r
 		b.sess.BindMessageRetirement(r.noteRetire)
@@ -141,6 +158,7 @@ func (b *battleSession) joinSimulation(cl *client.Client) {
 			cl.NoteSimulationTime(r.lastRun)
 			cl.NoteSimulationJoin(time.Since(waitStarted), r.lastRun)
 		}
+		b.keepSlowBatch(r)
 	}
 	// In the synchronous order: captions a sub-tick's audio queue resolved,
 	// then the tail's retire [01 R-PLAT-02 §8].
@@ -190,6 +208,7 @@ func (b *battleSession) launchSimulation(cl *client.Client) {
 		cl.DeferCaptions(true)
 	}
 	b.sim.running = true
+	b.sim.launchedTicks = run.plan.Ticks()
 	b.sim.runs <- run
 }
 
@@ -200,6 +219,9 @@ func (b *battleSession) stopSimulation(cl *client.Client) {
 		return
 	}
 	b.joinSimulation(cl)
+	if b.sim.timing != nil && b.sess != nil {
+		b.sess.PhaseObserver = b.sim.observerBefore
+	}
 	close(b.sim.runs)
 	b.sim = nil
 	if cl != nil {
@@ -211,8 +233,9 @@ func (b *battleSession) stopSimulation(cl *client.Client) {
 
 // prepareSimulationStep is the asynchronous half of the controller's step: it
 // releases this pump's sub-ticks with PrepareStep, stamps the release for the
-// presentation clock, and leaves ExecuteStep to the simulation goroutine.
-func (b *battleSession) prepareSimulationStep(scaled int32) {
+// presentation clock, and leaves ExecuteStep to the simulation goroutine. It
+// returns how many sub-ticks the pump released.
+func (b *battleSession) prepareSimulationStep(scaled int32) int {
 	plan := b.sess.PrepareStep(scaled)
 	if plan.Ticks() > 0 {
 		if b.millisSource == nil {
@@ -229,7 +252,7 @@ func (b *battleSession) prepareSimulationStep(scaled int32) {
 	b.simPaused = b.sess.Clock.Paused
 	b.simActive = b.sess.Clock.Active
 	if !plan.Runs() {
-		return
+		return plan.Ticks()
 	}
 	if b.sess.HasPendingHumanCommand(session.HumanGameplay) {
 		// A gameplay switch reassigns rule state the HUD reads while it draws
@@ -237,9 +260,10 @@ func (b *battleSession) prepareSimulationStep(scaled int32) {
 		// applies it runs here, before any recording pass; the join still
 		// observes its publications.
 		b.sess.ExecuteStep(plan)
-		return
+		return plan.Ticks()
 	}
-	b.sim.pending = &simRun{sess: b.sess, plan: plan}
+	b.sim.pending = &simRun{sess: b.sess, plan: plan, timing: b.sim.timing}
+	return plan.Ticks()
 }
 
 // presentationTick names the committed tick the modern window presents under

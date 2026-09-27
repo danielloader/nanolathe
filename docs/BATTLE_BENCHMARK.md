@@ -377,6 +377,21 @@ saved presentation and effect preferences (`--fps` and `--zoom` override
 those two). `--live-seconds` ends the run (default 30); the clock starts at the
 first battle Draw, so loading and menus are outside it.
 
+Without `--map` it times play itself: the menus open as usual, and the trace
+starts at the first battle and follows every battle until the window closes
+(`--live-seconds` defaults to 0 there), including one loaded with
+`--load-save`. Rows between battles are marked and left out of the report. A
+trace of play is the player's session, not a benchmark: it takes no lock, so
+a game never waits on another agent's benchmark (nor stops one from starting
+beside it), and settings are saved as usual. Build it with `go run` rather
+than `tools/live-trace`, whose build waits for the benchmark lock, and pass no
+`--fps`, so the cap in force is the player's own:
+
+```
+go run ./cmd/nanolathe --live-trace=$HOME/nanolathe-trace/play1 --live-flight
+tools/live-trace-report --late 10 $HOME/nanolathe-trace/play1
+```
+
 ```
 tools/live-trace --map 'Town & Country' --live-scene=field:534 \
   --live-trace=/tmp/lt-field1600 --fps 120 --live-seconds 60
@@ -403,8 +418,11 @@ the ordinary direct `--map` battle.
 
 `DIR` receives `frames.csv`, one row per Ebitengine frame (an Update call and
 the Draw after it); `census.jsonl`, one line a second with unit, projectile and
-effect counts from a pinned publication and the renderer's `ModelStats`; and
-`summary.json` with the run's metadata. Times in `frames.csv` are microseconds
+effect counts from a pinned publication and the renderer's `ModelStats`, plus
+`slow_sim`, the simulation batches since the last line that took 16 ms or more
+on their goroutine, each with its tick, tick count and time by phase (the
+session's host phase observer; time after the last phase is the executor
+tail); and `summary.json` with the run's metadata. Times in `frames.csv` are microseconds
 since the first battle Draw; spans are microseconds:
 
 - `upd_start`/`upd_end`, `steps` (host clock steps the Update saw) and
@@ -426,13 +444,39 @@ since the first battle Draw; spans are microseconds:
   vertices and model-lane subjects.
 - `gc_cycles`, `alloc_bytes`, `gc_cpu_us`, `gc_pause_us`, `heap_live`:
   cumulative runtime counters.
+- `released`: the simulation ticks the host steps in this row released. At 1x
+  every host step should release one; a step that releases none freezes the
+  world until one that releases two, and the second tick is never shown.
+- `battle`, `focused`: whether a battle was live and the window focused.
+  `refresh_us` is the display refresh period the present cap measured
+  (a ProMotion panel changes it while the game runs) and `cap_us` the cap's
+  interval, zero for none.
+- What the presented frame showed, zero on a Draw that presented no recorded
+  battle frame (a skipped one, or a paused redraw): `tick_prev` and `tick`, the
+  committed pair the world blends between (equal when unblended), and `tick16`
+  and `cam16`, the world's and the camera's blend fractions in 1/65536 — on a
+  pre-record hit, the ones the list was predicted for, which is the instant
+  the player sees (DESIGN_GPU_RENDERER §13.10). `bodies` counts the host steps
+  run so far, the camera's samples, and `cam_x100`/`cam_z100` are the blended
+  camera origin in hundredths of a world pixel.
 
 The time from one Draw's return to the next Update is Ebitengine's flush and
 present plus the wait for the next display-link callback; the report calls it
 `outside`. On a ProMotion panel the display link does not hold to a fixed
 grid, so the interval between presented Draws is the frame time the player
-sees. The report counts an interval above 1.5 refresh periods as late and
-names the segments that were abnormal around it. It is a coincidence, not a
+sees. The report counts an interval as late when it exceeds the interval the
+window presents at — the cap or the refresh, the longer — by half a refresh,
+and names the segments that were abnormal around it, including a refresh-rate
+change or lost focus.
+
+A frame on time can still show the wrong instant, so the report also measures
+motion: for each pair of presented frames, how far the world's blended tick
+(and, while it moves, the camera's blended step) advanced, in milliseconds of
+content time, against the display time between them. A step error over 4 ms
+is a quarter of a 60 Hz frame; a world that freezes and then skips a tick
+shows as a pair of 33 ms errors. It lists the slow simulation batches with
+their three costliest phases, and the time spent at each display refresh
+rate. It is a coincidence, not a
 proof of cause: a late frame that coincides with nothing of ours in `frames.csv`
 (and one appears every ten to twenty seconds even in an empty skirmish) is
 the display link or the compositor.
@@ -449,8 +493,10 @@ idle P during a cycle), or the render thread blocked in a Metal call.
 `--live-flight` keeps a Go execution-trace flight recorder running for the whole
 trace instead and writes `flight-<frame>.trace` (the last three seconds or so)
 when a frame spikes: a host step, record, join or Execute far over a 120 Hz
-budget, or a presented interval over 25 ms. At most one snapshot every two
-seconds and eight per run are written. It is how a hitch that comes once every
+budget, a host step held 6 ms by the simulation, or a presented frame at least
+12 ms later than the interval the window presents at (two refreshes at
+120 Hz). At most one snapshot every two seconds is written, and eight per run
+(32 for a trace of play). It is how a hitch that comes once every
 few minutes is caught with every goroutine's state and blocking stacks around
 it; a music track change opening its MP3 on the host step was found this way.
 It cannot be combined with `--live-exec-trace`.

@@ -17,9 +17,10 @@ import (
 // The live window trace (docs/BATTLE_BENCHMARK.md "Live window trace") times
 // the ordinary window loop — Ebitengine's own scheduling, the present cap, the
 // record/submit pipeline and the asynchronous simulation — on a direct --map
-// battle, optionally staged at a scale an ordinary opening never reaches. It
-// is a host diagnostic: the battle it stages is the benchmark's fixture, and
-// the trace itself never reaches the client or the session.
+// battle, optionally staged at a scale an ordinary opening never reaches, or
+// on the player's own games started from the menus. It is a host diagnostic:
+// the battle it stages is the benchmark's fixture, and the trace itself never
+// reaches the client or the session.
 
 // liveScene is a parsed --live-scene: one of
 //
@@ -148,16 +149,31 @@ func stageLiveScene(opts Options, shell *gameShell, scene liveScene) (map[string
 	return meta, nil
 }
 
+// liveFlightLimit is how many flight snapshots a trace of menu play may
+// write: a session of play is far longer than a timed run.
+const liveFlightLimit = 32
+
 // liveTraceOptions builds the window's frame trace for a --live-trace run.
-func liveTraceOptions(opts Options, shell *gameShell, meta map[string]any) *ebitenapp.FrameTraceOptions {
+// current returns the shell the window holds when it is called, which a
+// content reload in menu play can replace.
+func liveTraceOptions(opts Options, current func() *gameShell, meta map[string]any) *ebitenapp.FrameTraceOptions {
 	if opts.LiveTrace == "" {
 		return nil
 	}
 	if meta == nil {
 		meta = map[string]any{}
 	}
-	meta["map"] = opts.Map
-	meta["seed"] = opts.Seed
+	shell := current()
+	flightLimit := 0
+	if opts.Map == "" {
+		// The map, seed and settings of each game are the player's; the
+		// census names the battle's tick and the rows carry the cap in force.
+		meta["mode"] = "menu play"
+		flightLimit = liveFlightLimit
+	} else {
+		meta["map"] = opts.Map
+		meta["seed"] = opts.Seed
+	}
 	meta["fps_cap"] = shell.presentation.FPS
 	meta["display"] = loadedSettings().Display
 	meta["effects"] = presentationEffects(shell.presentation)
@@ -170,10 +186,11 @@ func liveTraceOptions(opts Options, shell *gameShell, meta map[string]any) *ebit
 		}
 	}
 	census := func() any {
-		b := shell.battle
+		b := current().battle
 		if b == nil || b.sess == nil || b.sess.Snapshot == nil {
 			return nil
 		}
+		slow := b.takeSlowBatches()
 		// The simulation may be running a batch: read only a pinned
 		// publication, never the session.
 		f, prev := b.sess.Snapshot.PinLatest()
@@ -204,12 +221,17 @@ func liveTraceOptions(opts Options, shell *gameShell, meta map[string]any) *ebit
 				burning++
 			}
 		}
-		return map[string]any{"tick": f.Tick, "units": len(f.Units), "in_view_units": inView, "nanoframes": building,
+		out := map[string]any{"tick": f.Tick, "units": len(f.Units), "in_view_units": inView, "nanoframes": building,
 			"projectiles": len(f.Projectiles), "effects": len(f.Effects), "fragments": len(f.Fragments), "burning_features": burning}
+		if len(slow) > 0 {
+			out["slow_sim"] = slow
+		}
+		return out
 	}
 	return &ebitenapp.FrameTraceOptions{
 		Directory: opts.LiveTrace, Seconds: opts.LiveSeconds,
-		ProfileFrom: opts.LiveProfileFrom, ExecTraceSeconds: opts.LiveExecTrace, Flight: opts.LiveFlight,
+		ProfileFrom: opts.LiveProfileFrom, ExecTraceSeconds: opts.LiveExecTrace, Flight: opts.LiveFlight, FlightLimit: flightLimit,
 		Census: census, Metadata: meta,
+		Battle: func() bool { return current().battle != nil },
 	}
 }

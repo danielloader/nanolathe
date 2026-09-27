@@ -104,6 +104,9 @@ type app struct {
 	presentedAt     time.Time
 	presentFollowed bool
 	refresh         refreshEstimate
+	// refreshPeriod is the estimate presentDue last measured, zero while it
+	// is still settling; the live trace records it with every Draw.
+	refreshPeriod time.Duration
 	// pipe is the record/submit pipeline's host state
 	// (docs/DESIGN_GPU_RENDERER.md §13.10). It is modern-only: the classic path
 	// never launches a pre-record and never joins one it did not launch.
@@ -279,6 +282,7 @@ func (a *app) updateBody() {
 	a.c.SetFocused(ebiten.IsFocused())
 	a.stepClient()
 	if a.trace != nil {
+		a.trace.row.released += a.c.TakeTicksReleased()
 		wait, batch, joins := a.c.TakeSimulationJoin()
 		a.trace.row.simWait += int64(wait / time.Microsecond)
 		a.trace.row.simBatch += int64(batch / time.Microsecond)
@@ -462,7 +466,11 @@ func (a *app) Draw(screen *ebiten.Image) {
 	// cadence — so it does not consume the update's pending flag; the blended
 	// view differs between two Draws of one update (§13.5).
 	if a.mode == RendererModern {
-		if !a.presentDue(arrived) {
+		due := a.presentDue(arrived)
+		if a.trace != nil {
+			a.trace.markDraw(a.refreshPeriod, a.presentInterval, ebiten.IsFocused())
+		}
+		if !due {
 			return
 		}
 		if a.trace != nil {
@@ -569,7 +577,17 @@ func (a *app) drawModern(screen *ebiten.Image, width, height int, showFPS bool) 
 			a.trace.row.armed = a.pipe.armed
 			a.trace.row.preNanos = a.c.PreRecordNanos()
 		}
-		list, hit := a.c.TakePreRecord(a.c.PresentationDigest(), tolerance)
+		want := a.c.PresentationDigest()
+		list, hit := a.c.TakePreRecord(want, tolerance)
+		if a.trace != nil {
+			// A hit presents the instant the list was predicted for, not the one
+			// this Draw measured (§13.10): that is the frame the player sees.
+			shown := want
+			if hit {
+				shown = a.c.PreRecordedInputs()
+			}
+			a.trace.markShown(a.c, shown, a.bodies)
+		}
 		switch {
 		case hit:
 			a.pipe.hits++
@@ -754,6 +772,7 @@ func (a *app) launchPreRecord(now, sampledAt time.Time, period time.Duration, ti
 // refresh estimate still settling after a rate switch cannot move it.
 func (a *app) presentDue(now time.Time) bool {
 	refresh := a.refresh.observe(now)
+	a.refreshPeriod = refresh
 	if a.presentInterval > 0 && !a.presentedAt.IsZero() {
 		if !a.presentFollowed {
 			a.presentFollowed = true

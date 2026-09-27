@@ -189,7 +189,7 @@ var ErrHelp = errors.New("help requested")
 
 func parseFlags(args []string, out io.Writer) (Options, error) {
 	var opts Options
-	var unitLimitSet bool
+	var unitLimitSet, liveSecondsSet bool
 	set := flag.NewFlagSet("nanolathe", flag.ContinueOnError)
 	set.BoolVar(&opts.Arrival, "arrival", true, "modern battle opening: commander arrival for new games, map reveal for saves")
 	set.Float64Var(&opts.ShotArrivalTime, "shot-arrival-time", -1, "capture the arrival prototype at these presentation seconds (requires --shot --shot-ticks=0)")
@@ -251,8 +251,8 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	set.IntVar(&opts.BenchmarkTPS, "benchmark-tps", 30, "battle benchmark presentation rate: 30, 60 or 120 FPS, with 30 simulation ticks per second")
 	set.Float64Var(&opts.BenchmarkScale, "benchmark-scale", 1, "scale the coastal benchmark scene's mobile rosters (1 = the documented fixture)")
 	set.IntVar(&opts.BenchmarkCaptureCopies, "benchmark-capture-copies", 1, "stage a --benchmark-capture bundle this many times, each copy offset by five cells (1..4)")
-	set.StringVar(&opts.LiveTrace, "live-trace", "", "time the ordinary window loop of a --map battle into this NEW directory (docs/BATTLE_BENCHMARK.md)")
-	set.Float64Var(&opts.LiveSeconds, "live-seconds", 30, "end a --live-trace run after this many seconds of battle presentation (0 = until closed)")
+	set.StringVar(&opts.LiveTrace, "live-trace", "", "time the ordinary window loop — play from the menus, or a --map battle — into this NEW directory (docs/BATTLE_BENCHMARK.md)")
+	set.Float64Var(&opts.LiveSeconds, "live-seconds", 30, "end a --live-trace run after this many seconds of battle presentation (0 = until closed; menu play defaults to 0)")
 	set.StringVar(&opts.LiveScene, "live-scene", "", "stage a --live-trace battle: coastal[:scale], field[:army] or capture:<dir>[:copies]")
 	set.Float64Var(&opts.LiveProfileFrom, "live-profile-from", -1, "start a CPU profile this many seconds into a --live-trace run (negative = none)")
 	set.Float64Var(&opts.LiveExecTrace, "live-exec-trace", 0, "with --live-profile-from, also record this many seconds of Go execution trace")
@@ -380,6 +380,8 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 			opts.RendererSet = true
 		case "fps":
 			opts.FPSSet = true
+		case "live-seconds":
+			liveSecondsSet = true
 		}
 	})
 	if opts.Survival {
@@ -450,8 +452,13 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 		}
 	}
 	if opts.LiveTrace != "" || opts.LiveScene != "" {
-		if opts.LiveTrace == "" || opts.Map == "" || opts.Mission != "" || opts.LoadSave != "" || opts.Headless || opts.Shot != "" || opts.BattleBenchmark != "" || opts.Film != "" {
-			return opts, fmt.Errorf("nanolathe: --live-trace requires a windowed --map battle, and --live-scene requires --live-trace")
+		// Without --map the trace times play started from the menus, and a
+		// session of play runs until the window closes unless told otherwise.
+		if opts.LiveTrace == "" || opts.LiveScene != "" && opts.Map == "" || opts.Mission != "" || opts.LoadSave != "" && opts.Map != "" || opts.Headless || opts.Shot != "" || opts.BattleBenchmark != "" || opts.Film != "" {
+			return opts, fmt.Errorf("nanolathe: --live-trace requires the window, from the menus (with or without --load-save) or a --map battle, and --live-scene requires --live-trace and --map")
+		}
+		if opts.Map == "" && !liveSecondsSet {
+			opts.LiveSeconds = 0
 		}
 		scene, err := parseLiveScene(opts.LiveScene)
 		if err != nil {

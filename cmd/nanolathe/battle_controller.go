@@ -159,7 +159,10 @@ func (c *BattleController) Step(frame BattleInputFrame, cl *client.Client) {
 		c.cursorScaledValid = false
 	}
 	if c.battle.sim != nil {
-		c.battle.prepareSimulationStep(scaled)
+		released := c.battle.prepareSimulationStep(scaled)
+		if cl != nil {
+			cl.NoteTicksReleased(released)
+		}
 		return
 	}
 	c.battle.sess.Step(scaled)

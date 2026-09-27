@@ -35,8 +35,19 @@ func TestLiveTraceFlags(t *testing.T) {
 	if err != nil || opts.LiveTrace != "/tmp/unused-live" || opts.LiveScene != "field:267" || opts.LiveSeconds != 12 || opts.Seed != 7 {
 		t.Fatalf("live trace flags: opts=%+v err=%v", opts, err)
 	}
+	// Without --map the trace times play from the menus, until the window
+	// closes unless --live-seconds says otherwise.
+	opts, err = parseFlags([]string{"--live-trace=/tmp/unused-live"}, io.Discard)
+	if err != nil || opts.LiveSeconds != 0 {
+		t.Fatalf("menu play trace: opts=%+v err=%v", opts, err)
+	}
+	opts, err = parseFlags([]string{"--live-trace=/tmp/unused-live", "--load-save=/tmp/unused.sav", "--live-seconds=40"}, io.Discard)
+	if err != nil || opts.LiveSeconds != 40 {
+		t.Fatalf("menu play trace of a save: opts=%+v err=%v", opts, err)
+	}
 	for _, args := range [][]string{
-		{"--live-trace=/tmp/unused-live"},
+		{"--live-trace=/tmp/unused-live", "--live-scene=field"},
+		{"--map=Town & Country", "--live-trace=/tmp/unused-live", "--load-save=/tmp/unused.sav"},
 		{"--map=Town & Country", "--live-scene=field"},
 		{"--map=Moon Quartet", "--live-trace=/tmp/unused-live", "--live-scene=capture:/tmp/c"},
 		{"--map=Town & Country", "--live-trace=/tmp/unused-live", "--live-scene=bogus"},

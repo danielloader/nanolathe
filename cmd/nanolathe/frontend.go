@@ -449,7 +449,12 @@ func runGameShell(launch, opts Options, cs *contentSet) error {
 	fmt.Fprintf(os.Stderr, "nanolathe: retail frontend: %d skirmish maps\n", len(shell.maps))
 	shell.queueStartupMovie()
 	defer func() { host.shell.closeIntro(cl) }()
-	return ebitenapp.Run(cl, rendererMode(shell.opts), host.windowOptions())
+	options := host.windowOptions()
+	// A trace of menu play is the player's own session, not a benchmark: it
+	// takes no benchmark lock (a game should not wait on one) and saves
+	// settings as usual. It starts at the first battle.
+	options.FrameTrace = liveTraceOptions(opts, func() *gameShell { return host.shell }, nil)
+	return ebitenapp.Run(cl, rendererMode(shell.opts), options)
 }
 
 // startWindowedShell builds the menu shell on cs and binds the client to it.

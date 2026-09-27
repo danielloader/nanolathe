@@ -352,6 +352,17 @@ func (c *Client) TakePreRecord(want PresentationInputs, tol int32) (*drawlist.Li
 	return nil, false
 }
 
+// PreRecordedInputs is the digest the last pre-record was recorded for. After
+// a TakePreRecord hit it describes the presented list, which shows the instant
+// it was predicted for rather than the one the Draw measured (§13.10); the
+// live trace reads it there.
+func (c *Client) PreRecordedInputs() PresentationInputs {
+	if c == nil {
+		return PresentationInputs{}
+	}
+	return c.pre.recorded
+}
+
 // dropPreRecord discards a joined pre-record's product. The list itself needs
 // no undoing — the next recording pass resets it — but the presentation CRT the
 // segmented-projectile pass drew from is a stream, and it is put back where the

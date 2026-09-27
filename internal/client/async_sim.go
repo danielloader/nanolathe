@@ -210,6 +210,25 @@ func (c *Client) NoteSimulationJoin(wait, batch time.Duration) {
 	}
 }
 
+// NoteTicksReleased records the sub-ticks one host step released under the
+// asynchronous simulation, for the live frame trace.
+func (c *Client) NoteTicksReleased(n int) {
+	if c != nil {
+		c.simulationReleased += n
+	}
+}
+
+// TakeTicksReleased returns the sub-ticks noted since the last call and
+// resets them.
+func (c *Client) TakeTicksReleased() int {
+	if c == nil {
+		return 0
+	}
+	n := c.simulationReleased
+	c.simulationReleased = 0
+	return n
+}
+
 // TakeSimulationJoin returns the joins noted since the last call and resets
 // them.
 func (c *Client) TakeSimulationJoin() (wait, batch time.Duration, joins int) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +14,8 @@ import (
 	"runtime/trace"
 	"strconv"
 	"time"
+
+	"github.com/nanolathe-gg/nanolathe/internal/client"
 )
 
 // FrameTraceOptions configure the live window's frame trace: a host-only
@@ -39,9 +42,18 @@ type FrameTraceOptions struct {
 	// few minutes is caught with every goroutine's state around it. It cannot
 	// be combined with ExecTraceSeconds.
 	Flight bool
+	// FlightLimit caps the snapshots a run writes; zero keeps eight. A trace of
+	// a whole play session needs more than a timed run, and each snapshot is
+	// the recorder's whole window, tens of megabytes.
+	FlightLimit int
 	// Census is called about once a second on the game goroutine, after a host
 	// step has joined the simulation, and its value is appended to census.jsonl.
 	Census func() any
+	// Battle reports whether a battle is live. The trace starts at the first
+	// Draw it reports one, and marks every row with it, so a trace of menu play
+	// leaves the menus before the first battle out and flags those between
+	// battles. Nil means a battle from the first Draw, which a --map run is.
+	Battle func() bool
 	// Metadata is written into summary.json unchanged.
 	Metadata map[string]any
 }
@@ -84,10 +96,23 @@ type frameRow struct {
 	record, execute, blit             int64
 	body, launch                      int64
 	simWait, simBatch                 int64
-	simJoins                          int
+	simJoins, released                int
 	passes, vertices, subs            int
 	xPrepare, xModel, xPlace, xReplay int64
 	preNanos                          int64
+	// What the presented frame showed and when, for motion evenness: the
+	// refresh period presentDue measured and the cap it applied, whether a
+	// battle was live and the window focused, the host steps run before the
+	// Draw (the camera's sample count), the committed pair the world blended
+	// and the two fractions the presented list was recorded at, and the
+	// blended camera origin in hundredths of a world pixel. Zero where the
+	// Draw presented no recorded battle frame.
+	battle, focused  bool
+	refresh, capUS   int64
+	bodies           int64
+	tickPrev, tick   uint32
+	tick16, cam16    int32
+	camX100, camZ100 int64
 }
 
 func newFrameTrace(opts *FrameTraceOptions) (*frameTrace, error) {
@@ -117,8 +142,36 @@ func newFrameTrace(opts *FrameTraceOptions) (*frameTrace, error) {
 			{Name: "/sched/pauses/total/gc:seconds"},
 			{Name: "/gc/heap/live:bytes"},
 		}}
-	fmt.Fprintln(t.w, "frame,upd_start,upd_end,steps,upd_bodies,draw_start,draw_end,due,hit,armed,sync,join1,join2,record,execute,blit,body,sim_wait,sim_batch,sim_joins,launch,passes,vertices,subjects,gc_cycles,alloc_bytes,gc_cpu_us,gc_pause_us,heap_live,x_prepare,x_model,x_place,x_replay,pre_us")
+	fmt.Fprintln(t.w, "frame,upd_start,upd_end,steps,upd_bodies,draw_start,draw_end,due,hit,armed,sync,join1,join2,record,execute,blit,body,sim_wait,sim_batch,sim_joins,launch,passes,vertices,subjects,gc_cycles,alloc_bytes,gc_cpu_us,gc_pause_us,heap_live,x_prepare,x_model,x_place,x_replay,pre_us,released,battle,focused,refresh_us,cap_us,bodies,tick_prev,tick,tick16,cam16,cam_x100,cam_z100")
 	return t, nil
+}
+
+// markDraw records the presentation context of a battle Draw, presented or
+// skipped by the cap.
+func (t *frameTrace) markDraw(refresh, capInterval time.Duration, focused bool) {
+	if t == nil || !t.started {
+		return
+	}
+	t.row.battle = t.opts.Battle == nil || t.opts.Battle()
+	t.row.focused = focused
+	t.row.refresh = int64(refresh / time.Microsecond)
+	t.row.capUS = int64(capInterval / time.Microsecond)
+}
+
+// markShown records what the presented frame shows: the committed pair the
+// world blends, the two fractions its list was recorded at, the host steps
+// run so far (the camera blends between the last two of them), and the camera
+// origin those inputs put on screen.
+func (t *frameTrace) markShown(c *client.Client, shown client.PresentationInputs, bodies int64) {
+	if t == nil || !t.started {
+		return
+	}
+	prev, cur, _ := c.PresentedTicks()
+	view := c.CameraViewFor(shown)
+	t.row.tickPrev, t.row.tick = prev, cur
+	t.row.tick16, t.row.cam16 = shown.TickFraction16, shown.CameraFraction16
+	t.row.bodies = bodies
+	t.row.camX100, t.row.camZ100 = int64(math.Round(view.X*100)), int64(math.Round(view.Z*100))
 }
 
 func (t *frameTrace) now() int64 {
@@ -135,7 +188,7 @@ func (t *frameTrace) since(start time.Time) int64 {
 // begin starts the clock at the first battle Draw, so menus and loading are
 // outside every measurement.
 func (t *frameTrace) begin() {
-	if t == nil || t.started {
+	if t == nil || t.started || t.opts.Battle != nil && !t.opts.Battle() {
 		return
 	}
 	t.started = true
@@ -187,20 +240,29 @@ func (t *frameTrace) beginUpdate() {
 }
 
 // flightSpike reports whether the frame just closed is worth a flight
-// snapshot: a segment far over a 120 Hz budget, or a presented interval of
-// three refreshes.
+// snapshot: a segment far over a 120 Hz budget, a host step held up by the
+// simulation, or a presented frame at least 12 ms later than the interval the
+// window presents at — two refreshes at 120 Hz, whatever the cap.
 func (t *frameTrace) flightSpike(r frameRow) bool {
-	if r.body-r.simWait > 6000 || r.record > 6000 || r.execute > 10000 || r.join1+r.join2 > 6000 {
+	if r.body-r.simWait > 6000 || r.simWait > 6000 || r.record > 6000 || r.execute > 10000 || r.join1+r.join2 > 6000 {
 		return true
 	}
-	return r.due && t.lastDraw != 0 && r.drawStart-t.lastDraw > 25000
+	nominal := max(r.capUS, r.refresh)
+	if nominal == 0 {
+		nominal = 8333
+	}
+	return r.due && t.lastDraw != 0 && r.drawStart-t.lastDraw-nominal >= 12000
 }
 
 // snapshotFlight writes the flight recorder's window, at most once every two
-// seconds and eight times a run, so a burst of spikes costs one file.
+// seconds and FlightLimit times a run, so a burst of spikes costs one file.
 func (t *frameTrace) snapshotFlight() {
 	elapsed := time.Since(t.origin)
-	if t.flights >= 8 || (t.flights > 0 && elapsed-t.lastFlight < 2*time.Second) {
+	limit := t.opts.FlightLimit
+	if limit <= 0 {
+		limit = 8
+	}
+	if t.flights >= limit || (t.flights > 0 && elapsed-t.lastFlight < 2*time.Second) {
 		return
 	}
 	f, err := os.Create(filepath.Join(t.opts.Directory, fmt.Sprintf("flight-%d.trace", t.rows)))
@@ -265,13 +327,14 @@ func (t *frameTrace) flushRow() {
 			}
 		}
 	}
-	fmt.Fprintf(t.w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", t.rows,
+	fmt.Fprintf(t.w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", t.rows,
 		r.updStart, r.updEnd, r.steps, r.updBodies, r.drawStart, r.drawEnd, b(r.due), b(r.hit), b(r.armed), b(r.sync),
 		r.join1, r.join2, r.record, r.execute, r.blit, r.body, r.simWait, r.simBatch, r.simJoins, r.launch,
 		r.passes, r.vertices, r.subs,
 		t.samples[0].Value.Uint64(), t.samples[1].Value.Uint64(),
 		int64(t.samples[2].Value.Float64()*1e6), int64(pauses*1e6), t.samples[4].Value.Uint64(),
-		r.xPrepare, r.xModel, r.xPlace, r.xReplay, r.preNanos/1000)
+		r.xPrepare, r.xModel, r.xPlace, r.xReplay, r.preNanos/1000, r.released,
+		b(r.battle), b(r.focused), r.refresh, r.capUS, r.bodies, r.tickPrev, r.tick, r.tick16, r.cam16, r.camX100, r.camZ100)
 	t.rows++
 	if t.rows%256 == 0 {
 		t.w.Flush()

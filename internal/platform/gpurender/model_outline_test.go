@@ -82,7 +82,7 @@ func TestOutlineRingMatchesTheWalk(t *testing.T) {
 		g := &drawlist.ModelGeometry{Width: 36, Height: 30}
 		f := &drawlist.ModelFace{Vertices: v, Color: 9}
 		r.modelDirect.params.reset()
-		ring, ok := r.describeOutlineRing(g, f)
+		ring, ok := r.describeOutlineRing(r.laneCtx(), g, f)
 		want := walkOutlineEndpoints(g, v)
 		if !ok {
 			walked++

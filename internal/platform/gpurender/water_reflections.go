@@ -116,9 +116,37 @@ func (s *waterReflections) fan(run *reflectionRun, n int) {
 // Called after the ordinary face has passed front-face admission. The original
 // key/quad mapping rejects source pixels hidden by another piece. Atlas colour
 // already contains material shading, construction reveal and waterline verdicts.
+// The reflecting subject and its region are the batch's active ones, and a
+// construction child's group region and key delta the lane's.
 func (r *Renderer) reflectModelFace(f *drawlist.ModelFace, ox, oy, scale, cx, cy, fat float32, quad int, page int32) {
+	m := modelFaceReflection{f: f, ox: ox, oy: oy, scale: scale, cx: cx, cy: cy, fat: fat, quad: quad, page: page,
+		g: r.reflections.active, region: r.reflections.region, group: r.modelDirect.groupReflection, keyDelta: r.modelDirect.keyDelta}
+	r.reflectModelFaceAs(&m)
+}
+
+// modelFaceReflection is one model face's reflection: the face, where and at
+// what scale its raster lands on the atlas, its centroid and fattening, its
+// quad's parameter entry and its atlas page, and the packet state the
+// reflection reads — the reflecting subject and its region, a construction
+// child's group region and the key delta. A placement worker records one per
+// reflected face and the placing goroutine appends them in order after the
+// jobs are laid out, because the batch's runs and its cap depend on every
+// reflection before (docs/DESIGN_GPU_RENDERER.md §22, "Placement workers").
+type modelFaceReflection struct {
+	f                          *drawlist.ModelFace
+	ox, oy, scale, cx, cy, fat float32
+	quad                       int
+	page                       int32
+	g                          *drawlist.ModelGeometry
+	region, group              modelDirectRegion
+	keyDelta                   int32
+}
+
+// reflectModelFaceAs appends one recorded face reflection (reflectModelFace).
+func (r *Renderer) reflectModelFaceAs(m *modelFaceReflection) {
+	f, ox, oy, scale, cx, cy, fat, quad, page := m.f, m.ox, m.oy, m.scale, m.cx, m.cy, m.fat, m.quad, m.page
 	s := &r.reflections
-	g := s.active
+	g := m.g
 	n := len(f.Vertices)
 	if g == nil || !g.ReflectWater || s.disabled || r.water.disabled || n < 3 || n > 256 || len(s.verts)+max(n, 3*(n-2)) > reflectionVertexLimit-4096 {
 		return
@@ -136,9 +164,10 @@ func (r *Renderer) reflectModelFace(f *drawlist.ModelFace, ox, oy, scale, cx, cy
 	// the erased child's height (GPU design §22.4).
 	occlusionPage := int32(-1)
 	var groupX, groupY, mode float32
-	if group := r.modelDirect.groupReflection; group.ok {
-		groupX = float32(group.x-s.region.x) + 2*float32(s.region.bounds.Min.X-group.bounds.Min.X)
-		groupY = float32(group.y-s.region.y) + 2*float32(s.region.bounds.Min.Y-group.bounds.Min.Y)
+	region := m.region
+	if group := m.group; group.ok {
+		groupX = float32(group.x-region.x) + 2*float32(region.bounds.Min.X-group.bounds.Min.X)
+		groupY = float32(group.y-region.y) + 2*float32(region.bounds.Min.Y-group.bounds.Min.Y)
 		occlusionPage, mode = group.page, -1
 	}
 	run := s.run(page, -1, occlusionPage)
@@ -148,15 +177,15 @@ func (r *Renderer) reflectModelFace(f *drawlist.ModelFace, ox, oy, scale, cx, cy
 		// The camera subtracts half physical height [03 §2.5]. Reflecting that
 		// height about sea adds one full above-water height to screen Y.
 		// Keep the ground footprint intact, including a diagonal hull's slope.
-		x := float32(s.region.bounds.Min.X) + (sx-float32(s.region.x))*.5
-		sourceY := float32(s.region.bounds.Min.Y) + (sy-float32(s.region.y))*.5
+		x := float32(region.bounds.Min.X) + (sx-float32(region.x))*.5
+		sourceY := float32(region.bounds.Min.Y) + (sy-float32(region.y))*.5
 		y := sourceY + height
 		// A mapped face's colour lanes carry the subject's packed frame, which
 		// its key gradient would otherwise ride (model_shaders.go,
 		// modelQuadFrame): the parameters are subject-local.
 		s.verts = append(s.verts, ebiten.Vertex{DstX: x, DstY: y, SrcX: sx, SrcY: sy,
 			ColorR: ox - modelQuadLocalBias, ColorG: oy - modelQuadLocalBias, ColorB: groupX, ColorA: groupY,
-			Custom0: height, Custom1: r.modelDirect.laneKey(v.Key), Custom2: float32(quad), Custom3: mode})
+			Custom0: height, Custom1: float32(modelDirectShiftKey(v.Key, m.keyDelta)), Custom2: float32(quad), Custom3: mode})
 	}
 	if quad != 0 {
 		s.fan(run, n)

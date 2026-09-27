@@ -260,6 +260,14 @@ tools/battle-bench --battle-benchmark=/tmp/survival-capture-modern \
   --benchmark-pre-ticks=0 --benchmark-frames=600 --seed=1893983080
 ```
 
+`--benchmark-capture-copies=N` (1..4) stages the bundle N times, each copy
+shifted five terrain cells further along both axes, with orders remapped
+within their own copy; a later copy's unit that cannot be created where it
+lands is skipped and counted. Two copies of the 803-unit wave-13 capture are
+the 1,600-unit Survival fixture the live window trace below uses. The copies
+overlap the same view, so this is more units in view, not an independent
+second battle.
+
 The diagnostic bundle is a snapshot, not a save. The benchmark creates fresh
 path, COB, AI, economy, visibility and effect state, and begins with the normal
 Survival starting units in addition to the captured units. Orders that cannot
@@ -355,3 +363,93 @@ Compilation by `go run` precedes executable startup and is outside the lock.
 Build binaries before queueing runs when comparing performance, and avoid
 unrelated builds or other performance workloads during measurement. Older
 binaries without locking cannot participate in this serialization.
+
+## Live window trace
+
+The benchmark above paces its own draws and pins two runtime workers, so it
+measures work, not what a player sees. `--live-trace=DIR` times the ordinary
+window loop instead: Ebitengine's own scheduling on the display link, the FPS
+cap, the record/submit pipeline of DESIGN_GPU_RENDERER §13.10 and the
+asynchronous simulation of §13.13, with the process's normal runtime settings.
+It needs a display and a windowed `--map` battle; it takes the benchmark lock
+and leaves the settings file untouched, but otherwise runs with the player's
+saved presentation and effect preferences (`--fps` and `--zoom` override
+those two). `--live-seconds` ends the run (default 30); the clock starts at the
+first battle Draw, so loading and menus are outside it.
+
+```
+tools/live-trace --map 'Town & Country' --live-scene=field:534 \
+  --live-trace=/tmp/lt-field1600 --fps 120 --live-seconds 60
+tools/live-trace-report --late 10 /tmp/lt-field1600
+```
+
+`--live-scene` stages a battle an ordinary opening does not reach:
+
+- `field[:army]` composes the simulation benchmark's scene
+  ([SIM_BENCHMARK.md](SIM_BENCHMARK.md)) on `--map`, three computer armies of
+  `army` units each (250..1000, default 250) plus the passive human, with that
+  slot's map unmasked (as `+nowisee`) so the armies are drawn. `field:267`
+  is about 800 units, `field:534` about 1,600. Land only; Town & Country's
+  features burn.
+- `coastal[:scale]` is the battle benchmark's coastal scene on Expanded
+  Confluence with its mobile rosters scaled; slots with no free footprint are
+  skipped and counted, so check the census for what was actually staged.
+- `capture:DIR[:copies]` stages a Ctrl+Shift+F11 bundle as
+  `--benchmark-capture` does (it needs `--survival` and the capture's map and
+  seed); `:2` doubles it.
+
+The camera is pointed at the staged battle. Without `--live-scene` the run is
+the ordinary direct `--map` battle.
+
+`DIR` receives `frames.csv`, one row per Ebitengine frame (an Update call and
+the Draw after it); `census.jsonl`, one line a second with unit, projectile and
+effect counts from a pinned publication and the renderer's `ModelStats`; and
+`summary.json` with the run's metadata. Times in `frames.csv` are microseconds
+since the first battle Draw; spans are microseconds:
+
+- `upd_start`/`upd_end`, `steps` (host clock steps the Update saw) and
+  `upd_bodies` (host bodies it ran rather than deferring).
+- `draw_start`/`draw_end`; `due` says the FPS cap presented this Draw.
+- `join1`/`join2`: waits for the pre-record at the two barriers; `hit`,
+  `armed`, `sync` and `record`: whether the pre-recorded list was presented,
+  and the synchronous record's time when it was not; `pre_us` is the consumed
+  pre-record's time on its goroutine.
+- `execute` (gpurender Execute) with its stages `x_prepare`, `x_model`
+  (`x_place` of it is the model lane's CPU placement) and `x_replay`;
+  `blit` is the screen copy.
+- `body`: the host step run in the Draw's tail, with `sim_wait` the time it
+  waited to join the simulation batch, `sim_batch` that batch's own time on
+  its goroutine and `sim_joins` the joins.
+- `passes`, `vertices`, `subjects`: the executor's device passes, submitted
+  vertices and model-lane subjects.
+- `gc_cycles`, `alloc_bytes`, `gc_cpu_us`, `gc_pause_us`, `heap_live`:
+  cumulative runtime counters.
+
+The time from one Draw's return to the next Update is Ebitengine's flush and
+present plus the wait for the next display-link callback; the report calls it
+`outside`. On a ProMotion panel the display link does not hold to a fixed
+grid, so the interval between presented Draws is the frame time the player
+sees. The report counts an interval above 1.5 refresh periods as late and
+names the segments that were abnormal around it. It is a coincidence, not a
+proof of cause: a late frame that coincides with nothing of ours in `frames.csv`
+(and one appears every ten to twenty seconds even in an empty skirmish) is
+the display link or the compositor.
+
+`--live-profile-from=S` writes `cpu.pprof` and the allocation pair
+`alloc-base.pprof`/`alloc.pprof` from `S` seconds to the end, and `heap.pprof`
+after a final collection; `--live-exec-trace=T` adds `exec.trace`, a Go
+execution trace of `T` seconds from the same instant, with each frame's
+number logged in it under the category `frame` so the two files align. The
+execution trace is the tool for the runtime's side of a late frame: a critical
+goroutine left runnable while every P is busy (the GC's mark workers take every
+idle P during a cycle), or the render thread blocked in a Metal call.
+
+`--live-flight` keeps a Go execution-trace flight recorder running for the whole
+trace instead and writes `flight-<frame>.trace` (the last three seconds or so)
+when a frame spikes: a host step, record, join or Execute far over a 120 Hz
+budget, or a presented interval over 25 ms. At most one snapshot every two
+seconds and eight per run are written. It is how a hitch that comes once every
+few minutes is caught with every goroutine's state and blocking stacks around
+it; a music track change opening its MP3 on the host step was found this way.
+It cannot be combined with `--live-exec-trace`.
+

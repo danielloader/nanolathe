@@ -23,8 +23,10 @@ type modelGPUFace struct {
 
 // prepareOutlineRing walks one ring's rows: on every row where the right
 // chain's column is past the left's, the two columns are the row's endpoints,
-// each one native pixel kept inside the packet's box.
-func (r *Renderer) prepareOutlineRing(g *drawlist.ModelGeometry, f *drawlist.ModelFace) []modelGPUFace {
+// each one native pixel kept inside the packet's box. The endpoint quads are
+// taken from arena a, the preparation store of the placement context walking
+// the ring.
+func (a *modelPrepScratch) prepareOutlineRing(g *drawlist.ModelGeometry, f *drawlist.ModelFace) []modelGPUFace {
 	v := f.Vertices
 	if len(v) < 2 {
 		return nil
@@ -42,8 +44,8 @@ func (r *Renderer) prepareOutlineRing(g *drawlist.ModelGeometry, f *drawlist.Mod
 	if rows == 0 {
 		return nil
 	}
-	out := r.modelPrep.strips.take(2 * rows)[:0]
-	corners := r.modelPrep.vertices.take(8 * rows)
+	out := a.strips.take(2 * rows)[:0]
+	corners := a.vertices.take(8 * rows)
 	used := 0
 	for y := v[top].Y; y < v[bottom].Y; y++ {
 		left, a := chainAt(v, top, bottom, -1, y)

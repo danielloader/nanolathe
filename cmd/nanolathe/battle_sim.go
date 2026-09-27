@@ -134,10 +134,12 @@ func (b *battleSession) joinSimulation(cl *client.Client) {
 	}
 	r := b.sim
 	if r.running {
+		waitStarted := time.Now()
 		r.lastRun = <-r.done
 		r.running = false
 		if cl != nil {
 			cl.NoteSimulationTime(r.lastRun)
+			cl.NoteSimulationJoin(time.Since(waitStarted), r.lastRun)
 		}
 	}
 	// In the synchronous order: captions a sub-tick's audio queue resolved,

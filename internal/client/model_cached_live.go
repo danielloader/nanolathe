@@ -664,7 +664,14 @@ func (c *Client) pruneCachedModelBodies(cur *frame.Frame) {
 		clear(c.modelOrientation)
 		return
 	}
-	live := make(map[uint64]struct{}, len(cur.Units))
+	// The live set is rebuilt every record; keeping the map and clearing it
+	// keeps its storage, where a fresh map per frame allocated it anew.
+	if c.pruneLive == nil {
+		c.pruneLive = make(map[uint64]struct{}, len(cur.Units))
+	} else {
+		clear(c.pruneLive)
+	}
+	live := c.pruneLive
 	for i := range cur.Units {
 		if id := unitPresentationID(cur.Units[i]); id != 0 {
 			live[id] = struct{}{}

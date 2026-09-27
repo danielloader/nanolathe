@@ -17,7 +17,14 @@ func decodeMP3(source io.ReadSeeker, sampleRate int) (io.ReadCloser, error) {
 	if sampleRate <= 0 {
 		return nil, errors.New("invalid music sample rate")
 	}
-	decoded, err := mp3.DecodeF32(source)
+	// The decoder is handed the source as a plain reader. Given a seeker it
+	// walks every frame of the file before returning, to learn a length this
+	// adapter never reads (duration comes from EOF, below); a soundtrack took
+	// some ten milliseconds of that on the host's presentation pump at every
+	// track change, which is where music opens (audio.Service.ServiceMusic).
+	// As a stream it reads only as far as the first frame, which still rejects
+	// a file that is not MP3 before any device player exists.
+	decoded, err := mp3.DecodeF32(struct{ io.Reader }{source})
 	if err != nil {
 		return nil, fmt.Errorf("decode MP3: %w", err)
 	}

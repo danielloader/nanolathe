@@ -142,7 +142,7 @@ func (p *pointPlane) resetFrame() {
 			if p.img != nil {
 				p.img.Deallocate()
 			}
-			p.img = ebiten.NewImage(pointPlaneWidth, h)
+			p.img = ebiten.NewImageWithOptions(image.Rect(0, 0, pointPlaneWidth, h), perFrameUpload)
 			p.buf = make([]byte, pointPlaneWidth*h*4)
 			p.w, p.h = pointPlaneWidth, h
 		}

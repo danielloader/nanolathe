@@ -1452,6 +1452,13 @@ type Buffer struct {
 // the host observes each publication in order after joining the writer.
 const concurrentBufferSlots = 8
 
+// MaxBufferSlots is the most slots a Buffer's writer ever rotates through: two
+// by default, all of them once SetConcurrentReaders widens the rotation.
+// Publication-side caches kept per slot size themselves by it, so the widened
+// rotation of the asynchronous window finds each slot's own entry instead of
+// evicting one on every write.
+const MaxBufferSlots = concurrentBufferSlots
+
 // NewBuffer constructs a two-slot buffer and reserves the requested top-level
 // capacities in both slots. With no argument, the zero-value capacities are
 // used; callers may call Frame.Reserve before the first write.

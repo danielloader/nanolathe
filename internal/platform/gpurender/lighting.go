@@ -577,8 +577,7 @@ func packBattleLight(rgb [3]float32) float32 {
 // use the wrapping composition key; the doubled raster changes XY only. The
 // centroid and the evaluation are separate so a retained lane can keep the
 // one and repeat the other (model_retain.go) through the same arithmetic.
-func (r *Renderer) modelFaceLight(f *drawlist.ModelFace) float32 {
-	d := &r.modelDirect
+func (d *modelPlaceCtx) modelFaceLight(f *drawlist.ModelFace) float32 {
 	if d.lightSources.count == 0 || f.Normal == [3]float32{} || len(f.Vertices) == 0 {
 		return 0
 	}
@@ -600,7 +599,7 @@ func modelFaceCentre(f *drawlist.ModelFace) (x, y, h float32) {
 
 // lightAt packs the subject's chosen sources' irradiance at a raster-local
 // centroid (x, y) and relative height h for a face of normal n.
-func (d *modelDirectLane) lightAt(x, y, h float32, n [3]float32) float32 {
+func (d *modelPlaceCtx) lightAt(x, y, h float32, n [3]float32) float32 {
 	return packBattleLight(d.lightSources.irradiance(d.lightX+x*d.lightScale, d.lightY+y*d.lightScale, d.lightHeight+h, n, false))
 }
 

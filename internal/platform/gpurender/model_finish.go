@@ -6,11 +6,11 @@ import "github.com/nanolathe-gg/nanolathe/internal/drawlist"
 // float bitcast. The low 16 bits retain index/glint, followed by two material
 // bits and three response bits. All corners receive the same integer (21 bits
 // maximum). Coefficients are reviewed artistic choices (GPU design §29).
-func (r *Renderer) modelFinishColor(f *drawlist.ModelFace, base float32) float32 {
+func (r *Renderer) modelFinishColor(d *modelPlaceCtx, f *drawlist.ModelFace, base float32) float32 {
 	if !r.materialsEnabled || f.Material == drawlist.ModelMaterialDefault || f.Material > drawlist.ModelMaterialPaint {
 		return base
 	}
-	r.modelStats.MaterialFaces++
+	d.stats.MaterialFaces++
 	response := uint32(min(max(f.Normal[0]*-0.35+f.Normal[1]*-0.15+f.Normal[2]*0.9246621, 0), 1)*7 + 0.5)
 	return base + float32(uint32(f.Material)+response*4)*65536
 }

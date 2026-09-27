@@ -101,20 +101,12 @@ type modelRetainStore struct {
 	free       *modelRetained
 	// switches are the finish switches the entries were captured under.
 	metalGlint, materials bool
-	// capture is the entry the cold append is filling, or nil; quadBase and
-	// vertBase are where its parameter block and vertices begin, and stats
-	// the accounting before the append.
-	capture  *modelRetained
-	quadBase int
-	vertBase int
-	stats    ModelStats
 	// The body index (the file comment's warm path): its own bounded LRU
-	// keyed on (Body, Lane), and the entry the cold append is recording.
+	// keyed on (Body, Lane).
 	bodies             map[modelBodyKey]*modelRetainedBody
 	bodyHead, bodyTail *modelRetainedBody
 	bodyCount          int
 	bodyFree           *modelRetainedBody
-	body               *modelRetainedBody
 }
 
 // modelBodyKey names one retained object's lane across its revisions.
@@ -272,8 +264,14 @@ func (e *modelRetained) slotFor(ss *drawlist.ModelGeometry) image.Rectangle {
 // gets no entry — the replay cannot rebuild the placement-bound reflection
 // batch — but keeps its body: the warm append runs per face and reflects
 // each one as the cold append does. The third result says the packet is one
-// the body index serves at all, so a cold append records it.
-func (r *Renderer) retainedEntry(g *drawlist.ModelGeometry, keyDelta int32, group *drawlist.ModelGeometry, reflecting bool) (e *modelRetained, body *modelRetainedBody, keyed bool) {
+// the body index serves at all, so a cold append records it. solo is set for
+// a carried child's second, solo composition.
+//
+// Every store operation a frame makes is made here and in acquireBody, on the
+// placing goroutine and in the order the sequential lane appends its packets,
+// so the LRU order and the evictions are the same however the appends run
+// (model_place.go).
+func (r *Renderer) retainedEntry(g *drawlist.ModelGeometry, keyDelta int32, group *drawlist.ModelGeometry, solo, reflecting bool) (e *modelRetained, body *modelRetainedBody, keyed bool) {
 	d := &r.modelDirect
 	s := &r.modelStats
 	switch {
@@ -286,7 +284,7 @@ func (r *Renderer) retainedEntry(g *drawlist.ModelGeometry, keyDelta int32, grou
 			s.DirectColdNoKeyLive++
 		}
 		return nil, nil, false
-	case d.soloPass || keyDelta != 0 || group != nil:
+	case solo || keyDelta != 0 || group != nil:
 		s.DirectColdGroup++
 		return nil, nil, false
 	}
@@ -351,7 +349,7 @@ func (s *modelRetainStore) clear() {
 		s.releaseBody(b)
 		b = next
 	}
-	s.bodyHead, s.bodyTail, s.bodyCount, s.body = nil, nil, 0, nil
+	s.bodyHead, s.bodyTail, s.bodyCount = nil, nil, 0
 	if s.bodies == nil {
 		s.bodies = make(map[modelBodyKey]*modelRetainedBody)
 	} else {
@@ -373,10 +371,11 @@ func (s *modelRetainStore) lookupBody(key drawlist.ModelCacheKey) *modelRetained
 	return b
 }
 
-// beginBody arms the store to record the cold cached-lane append that
-// follows into key's body entry, inserting one (evicting the least recently
-// used when the index is full) or emptying the one it has.
-func (s *modelRetainStore) beginBody(key drawlist.ModelCacheKey, doubled bool) {
+// acquireBody is the body entry a cold cached-lane append of key records
+// into (recordBody), the one the index holds, most recently used, or a new
+// one inserted in its place, evicting the least recently used when the index
+// is full. It changes the index and nothing in the entry.
+func (s *modelRetainStore) acquireBody(key drawlist.ModelCacheKey) *modelRetainedBody {
 	b := s.lookupBody(key)
 	if b == nil {
 		if s.bodies == nil {
@@ -401,17 +400,24 @@ func (s *modelRetainStore) beginBody(key drawlist.ModelCacheKey, doubled bool) {
 		s.pushFrontBody(b)
 		s.bodyCount++
 	}
+	return b
+}
+
+// recordBody arms the context to record the cold cached-lane append that
+// follows into body entry b (acquireBody), emptying it first: an entry being
+// recorded never answers a warm lookup until endBody.
+func (d *modelPlaceCtx) recordBody(b *modelRetainedBody, doubled bool) {
 	b.doubled, b.page, b.ready = doubled, nil, false
 	b.faces = b.faces[:0]
-	s.body = b
+	d.body = b
 }
 
 // endBody closes the recording; the entry answers warm lookups from now on.
-func (s *modelRetainStore) endBody() {
-	if b := s.body; b != nil {
+func (d *modelPlaceCtx) endBody() {
+	if b := d.body; b != nil {
 		b.ready = true
 	}
-	s.body = nil
+	d.body = nil
 }
 
 // releaseBody resets a body entry and puts its storage on the free list.
@@ -522,24 +528,27 @@ func (s *modelRetainStore) pushFront(e *modelRetained) {
 	}
 }
 
-// beginCapture arms the store to record the cold append that follows.
-func (s *modelRetainStore) beginCapture(e *modelRetained, quadBase, vertBase int, stats ModelStats) {
+// beginCapture arms the context to record the cold append that follows into
+// e: where its parameter block and vertices begin in the context's batch, and
+// the accounting the entry keeps, as it stood before the append.
+func (d *modelPlaceCtx) beginCapture(e *modelRetained) {
 	e.captured = false
 	e.segs, e.recs = e.segs[:0], e.recs[:0]
-	s.capture, s.quadBase, s.vertBase, s.stats = e, quadBase, vertBase, stats
+	d.capture, d.quadBase, d.vertBase = e, d.params.count, len(d.verts)
+	d.culledAt, d.materialAt = d.stats.DirectCulled, d.stats.MaterialFaces
 }
 
 // captureFace records one face the cold append just packed: its texture
 // binding (a new segment when it changes), its corner count, its parameter
 // index within the block, and its light centroid.
-func (s *modelRetainStore) captureFace(f *drawlist.ModelFace, img *ebiten.Image, n, quad int) {
-	e := s.capture
+func (d *modelPlaceCtx) captureFace(f *drawlist.ModelFace, img *ebiten.Image, n, quad int) {
+	e := d.capture
 	if len(e.segs) == 0 || e.segs[len(e.segs)-1].img != img {
 		e.segs = append(e.segs, modelRetainedSeg{img: img, f0: int32(len(e.recs))})
 	}
 	rec := modelRetainedFace{n: int32(n), normal: f.Normal}
 	if quad != 0 {
-		rec.quad = int32(quad - s.quadBase)
+		rec.quad = int32(quad - d.quadBase)
 	}
 	if f.Normal != ([3]float32{}) {
 		rec.cx, rec.cy, rec.h = modelFaceCentre(f)
@@ -554,10 +563,14 @@ func (s *modelRetainStore) captureFace(f *drawlist.ModelFace, img *ebiten.Image,
 // frame-relative form and marks it replayable. A capture the replay could not
 // reproduce exactly — the parameter image filled up during it, or a segment
 // larger than a run — is abandoned, and the key stays primed for another try.
-func (s *modelRetainStore) finishCapture(d *modelDirectLane, g *drawlist.ModelGeometry, doubled bool, ox, oy float32, stats ModelStats) {
-	e := s.capture
-	s.capture = nil
-	src := d.verts[s.vertBase:]
+// Nothing the entry keeps is an index into the batch or the parameter image:
+// the vertices are frame-relative, a face's parameter index is relative to
+// the block and the verdict entry is cleared, so an entry captured on one
+// context replays on any other.
+func (d *modelPlaceCtx) finishCapture(g *drawlist.ModelGeometry, doubled bool, ox, oy float32) {
+	e := d.capture
+	d.capture = nil
+	src := d.verts[d.vertBase:]
 	// A face the image refused a quad is packed linearly, which a replay
 	// with room would not reproduce; once no quad fits, one may have been
 	// refused, so the capture is abandoned.
@@ -582,10 +595,10 @@ func (s *modelRetainStore) finishCapture(d *modelDirectLane, g *drawlist.ModelGe
 	if vi != len(e.verts) {
 		return
 	}
-	e.quads = d.params.count - s.quadBase
-	e.params = append(e.params[:0], d.params.buf[s.quadBase*modelQuadBytes:d.params.count*modelQuadBytes]...)
-	e.culled = stats.DirectCulled - s.stats.DirectCulled
-	e.material = stats.MaterialFaces - s.stats.MaterialFaces
+	e.quads = d.params.count - d.quadBase
+	e.params = append(e.params[:0], d.params.buf[d.quadBase*modelQuadBytes:d.params.count*modelQuadBytes]...)
+	e.culled = d.stats.DirectCulled - d.culledAt
+	e.material = d.stats.MaterialFaces - d.materialAt
 	e.faces = len(g.Faces)
 	e.width, e.height, e.originX, e.originY = g.Width, g.Height, g.OriginX, g.OriginY
 	e.hasSupersample, e.doubled = g.Supersample != nil, doubled
@@ -602,13 +615,12 @@ func (s *modelRetainStore) finishCapture(d *modelDirectLane, g *drawlist.ModelGe
 // face's battle light. The caller has checked that the block fits. g is the
 // packet being replayed, read only for the accounting of the per-frame lanes
 // the caller appends after the lane.
-func (r *Renderer) replayRetained(e *modelRetained, g *drawlist.ModelGeometry, ox, oy float32, entry int, shadow bool) {
-	d := &r.modelDirect
+func (r *Renderer) replayRetained(d *modelPlaceCtx, e *modelRetained, g *drawlist.ModelGeometry, ox, oy float32, entry int, shadow bool) {
 	if len(g.LiveFaces) != 0 || g.Supersample != nil && len(g.Supersample.LiveFaces) != 0 {
-		r.modelStats.DirectRetainedLive++
+		d.stats.DirectRetainedLive++
 	}
 	if len(g.Outline) != 0 {
-		r.modelStats.DirectRetainedOutline++
+		d.stats.DirectRetainedOutline++
 	}
 	first := 0
 	if e.quads > 0 {
@@ -630,7 +642,7 @@ func (r *Renderer) replayRetained(e *modelRetained, g *drawlist.ModelGeometry, o
 			if lit && rec.normal != ([3]float32{}) {
 				lighting = d.lightAt(rec.cx, rec.cy, rec.h, rec.normal)
 				if lighting > 0 {
-					r.modelStats.LitModelFaces++
+					d.stats.LitModelFaces++
 				}
 			}
 			quad := float32(0)
@@ -654,8 +666,8 @@ func (r *Renderer) replayRetained(e *modelRetained, g *drawlist.ModelGeometry, o
 			vi += n
 		}
 	}
-	r.modelStats.DirectFaces += len(e.recs)
-	r.modelStats.DirectCulled += e.culled
-	r.modelStats.MaterialFaces += e.material
-	r.modelStats.DirectRetained++
+	d.stats.DirectFaces += len(e.recs)
+	d.stats.DirectCulled += e.culled
+	d.stats.MaterialFaces += e.material
+	d.stats.DirectRetained++
 }

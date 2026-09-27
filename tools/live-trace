@@ -1,0 +1,16 @@
+#!/bin/sh
+# Time the ordinary window loop of a --map battle; retail assets and a display
+# required. Output directory must be new. See docs/BATTLE_BENCHMARK.md
+# "Live window trace". Example:
+#   tools/live-trace --map "Town & Country" --live-scene=field:534 --live-trace=/tmp/lt-field --fps 120
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# Only the build is bounded and serialized with the benchmarks. The trace
+# itself runs with the process's ordinary runtime settings, which is what it
+# measures; the binary takes the benchmark lock for the battle.
+GOMAXPROCS=2 NANOLATHE_TEST_P=2 tools/host-run go build -trimpath -p=2 -o "$work/nanolathe" ./cmd/nanolathe
+"$work/nanolathe" "$@"

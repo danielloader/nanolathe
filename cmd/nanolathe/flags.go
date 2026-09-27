@@ -79,6 +79,21 @@ type Options struct {
 	BenchmarkFrames    int
 	BenchmarkTPS       int
 	BenchmarkPreTicks  int
+	// BenchmarkScale scales the coastal scene's mobile rosters; zero or one is
+	// the fixture as documented. BenchmarkCaptureCopies stages a capture more
+	// than once.
+	BenchmarkScale         float64
+	BenchmarkCaptureCopies int
+	// LiveTrace names a new directory for the live window's frame trace;
+	// LiveSeconds ends that run, LiveScene stages a scene into its battle, and
+	// LiveProfileFrom/LiveExecTrace place a CPU profile and a Go execution trace
+	// (docs/BATTLE_BENCHMARK.md "Live window trace").
+	LiveTrace          string
+	LiveSeconds        float64
+	LiveScene          string
+	LiveProfileFrom    float64
+	LiveExecTrace      float64
+	LiveFlight         bool
 	Root               string   // first content root; default save parent for programmatic callers
 	Roots              []string // ordered content roots; empty enables host discovery
 	ListInstalls       bool     // print resolved installation roots without mounting content
@@ -234,6 +249,14 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	set.IntVar(&opts.BenchmarkFrames, "benchmark-frames", 180, "measured battle benchmark frames after two seconds of renderer warmup")
 	set.IntVar(&opts.BenchmarkPreTicks, "benchmark-pre-ticks", 300, "simulation ticks before opening the battle benchmark window (30 ticks per second)")
 	set.IntVar(&opts.BenchmarkTPS, "benchmark-tps", 30, "battle benchmark presentation rate: 30, 60 or 120 FPS, with 30 simulation ticks per second")
+	set.Float64Var(&opts.BenchmarkScale, "benchmark-scale", 1, "scale the coastal benchmark scene's mobile rosters (1 = the documented fixture)")
+	set.IntVar(&opts.BenchmarkCaptureCopies, "benchmark-capture-copies", 1, "stage a --benchmark-capture bundle this many times, each copy offset by five cells (1..4)")
+	set.StringVar(&opts.LiveTrace, "live-trace", "", "time the ordinary window loop of a --map battle into this NEW directory (docs/BATTLE_BENCHMARK.md)")
+	set.Float64Var(&opts.LiveSeconds, "live-seconds", 30, "end a --live-trace run after this many seconds of battle presentation (0 = until closed)")
+	set.StringVar(&opts.LiveScene, "live-scene", "", "stage a --live-trace battle: coastal[:scale], field[:army] or capture:<dir>[:copies]")
+	set.Float64Var(&opts.LiveProfileFrom, "live-profile-from", -1, "start a CPU profile this many seconds into a --live-trace run (negative = none)")
+	set.Float64Var(&opts.LiveExecTrace, "live-exec-trace", 0, "with --live-profile-from, also record this many seconds of Go execution trace")
+	set.BoolVar(&opts.LiveFlight, "live-flight", false, "keep a Go execution trace flight recorder during --live-trace and write flight-<frame>.trace around frame spikes")
 	set.StringVar(&opts.ShotSize, "shot-size", "", "surface size \"WxH\" for --shot, one of the display modes (default 640x480)")
 	set.StringVar(&opts.ShotDebris, "shot-debris", "", "prototype: kill a cluster of units and write one modern PNG per tick to this directory")
 	set.StringVar(&opts.ShotDebrisUnit, "shot-debris-unit", "armstump", "unit the --shot-debris capture blows up")
@@ -425,6 +448,27 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 		if opts.ShotSize == "" {
 			opts.ShotSize = "1920x1080"
 		}
+	}
+	if opts.LiveTrace != "" || opts.LiveScene != "" {
+		if opts.LiveTrace == "" || opts.Map == "" || opts.Mission != "" || opts.LoadSave != "" || opts.Headless || opts.Shot != "" || opts.BattleBenchmark != "" || opts.Film != "" {
+			return opts, fmt.Errorf("nanolathe: --live-trace requires a windowed --map battle, and --live-scene requires --live-trace")
+		}
+		scene, err := parseLiveScene(opts.LiveScene)
+		if err != nil {
+			return opts, err
+		}
+		if scene.Kind == "capture" && !opts.Survival {
+			return opts, fmt.Errorf("nanolathe: a capture live scene requires --survival and --map")
+		}
+		if opts.LiveFlight && opts.LiveExecTrace > 0 {
+			return opts, fmt.Errorf("nanolathe: --live-flight cannot be combined with --live-exec-trace")
+		}
+		if opts.Seed < 0 && scene.Kind != "" {
+			opts.Seed = 7
+		}
+	}
+	if opts.BenchmarkCaptureCopies < 1 || opts.BenchmarkCaptureCopies > 4 {
+		return opts, fmt.Errorf("nanolathe: benchmark capture copies must be 1..4")
 	}
 	if opts.BenchmarkCapture != "" && opts.BattleBenchmark == "" {
 		return opts, fmt.Errorf("nanolathe: --benchmark-capture requires --battle-benchmark")

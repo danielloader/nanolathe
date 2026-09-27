@@ -44,11 +44,17 @@ func TestDecodeInstalledMP3(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer file.Close()
-		reader, err := decodeMP3(file, rate)
+		counted := &countingSource{File: file}
+		reader, err := decodeMP3(counted, rate)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer reader.Close()
+		// Opening reads as far as the first frame, not the whole file: music
+		// opens on the host's presentation pump.
+		if counted.n > 64<<10 {
+			t.Fatalf("decoder open read %d bytes of the source", counted.n)
+		}
 		// Deliberately unaligned reads exercise the frame-to-byte adapter.
 		var prefix [44100*8 + 3]byte
 		n, err := io.ReadFull(reader, prefix[:])
@@ -92,4 +98,16 @@ func TestDecodeInstalledMP3(t *testing.T) {
 	if delta := lengths[1] - 2*lengths[0]; delta < -8 || delta > 8 {
 		t.Fatalf("output rate did not preserve duration: byte lengths %v", lengths)
 	}
+}
+
+// countingSource counts the bytes read through it and keeps the file's Seek.
+type countingSource struct {
+	*os.File
+	n int64
+}
+
+func (c *countingSource) Read(p []byte) (int, error) {
+	n, err := c.File.Read(p)
+	c.n += int64(n)
+	return n, err
 }

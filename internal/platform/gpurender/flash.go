@@ -128,7 +128,7 @@ func (a *flashDiscAtlas) alloc(w, h int) (int, int, bool) {
 		return 0, 0, false
 	}
 	if a.img == nil {
-		a.img = ebiten.NewImage(flashAtlasWidth, flashAtlasHeight)
+		a.img = ebiten.NewImageWithOptions(image.Rect(0, 0, flashAtlasWidth, flashAtlasHeight), perFrameUpload)
 		a.buf = make([]byte, flashAtlasWidth*flashAtlasHeight*4)
 	}
 	if a.shelfH == 0 || a.shelfX+need > flashAtlasWidth || tall > a.shelfH {

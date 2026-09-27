@@ -318,7 +318,7 @@ func (q *modelQuadParams) upload() {
 			q.img.Deallocate()
 		}
 		q.rows = ceilTo(rows, modelQuadGrowRows)
-		q.img = ebiten.NewImage(modelQuadParamWidth, q.rows)
+		q.img = ebiten.NewImageWithOptions(image.Rect(0, 0, modelQuadParamWidth, q.rows), perFrameUpload)
 	}
 	// The sub-image lives only for this upload, so it comes from the recyclable
 	// pool instead of the image's own sub-image cache, which would otherwise
@@ -328,6 +328,18 @@ func (q *modelQuadParams) upload() {
 	sub.WritePixels(q.buf[:need])
 	sub.Recycle()
 }
+
+// perFrameUpload creates the images the executor rewrites from the CPU every
+// frame or every few — the parameter image, the flash disc atlas, the lit point
+// plane and the fog grid — as textures of their own. A managed image lives in
+// a region of Ebitengine's shared texture atlas, which in a battle grows to
+// hundreds of megabytes holding every sprite, terrain and texture page; each
+// upload then blits into that one texture, which the frame's sprite passes
+// all sample. On its own texture the upload touches nothing else. Measured in
+// the live window at 1,600 units, the parameter image's 2.4 MB per frame took
+// the render thread over 2 ms half as often (docs/BATTLE_BENCHMARK.md "Live
+// window trace").
+var perFrameUpload = &ebiten.NewImageOptions{Unmanaged: true}
 
 // ceilTo rounds v up to a multiple of a.
 func ceilTo(v, a int) int { return (v + a - 1) / a * a }

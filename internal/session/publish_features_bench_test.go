@@ -94,14 +94,26 @@ func TestFeaturePublicationOrderedSnapshot(t *testing.T) {
 	}
 }
 
+// Both rotations must settle: the asynchronous window widens the buffer to
+// every slot (docs/DESIGN_GPU_RENDERER.md §13.13), and a per-slot cache sized
+// for two evicted a binding on every write there, rebuilding every view.
 func TestFeaturePublicationSteadyStateAllocations(t *testing.T) {
-	s := featurePublicationFixture(t, 128)
-	for tick := uint32(1); tick <= 3; tick++ {
-		s.publishSnapshot(tick)
-	}
-	tick := uint32(4)
-	if got := testing.AllocsPerRun(20, func() { s.publishSnapshot(tick); tick++ }); got != 0 {
-		t.Fatalf("feature-only steady-state publication allocated %v times", got)
+	for _, concurrent := range []bool{false, true} {
+		s := featurePublicationFixture(t, 128)
+		if concurrent {
+			s.Snapshot.SetConcurrentReaders()
+		}
+		tick := uint32(1)
+		for ; tick <= 2*frame.MaxBufferSlots; tick++ {
+			s.publishSnapshot(tick)
+		}
+		if got := testing.AllocsPerRun(20, func() { s.publishSnapshot(tick); tick++ }); got != 0 {
+			t.Fatalf("concurrent=%v: feature-only steady-state publication allocated %v times", concurrent, got)
+		}
+		cache := s.featureCacheFor(s.Snapshot.BeginWrite())
+		if n := s.publishFeatures(s.Snapshot.BeginWrite(), s.ensurePublicationState()); n != 0 || len(cache.inputs) != 128 {
+			t.Fatalf("concurrent=%v: unchanged features rebuilt %d views (cache %d inputs), want 0", concurrent, n, len(cache.inputs))
+		}
 	}
 }
 

@@ -1895,6 +1895,24 @@ before the split, and every Draw still reaches the update-ledger tail. Opt-in
 `--stats` counts world recordings and reuses; F11's renderer metadata retains
 pipeline and paused-world counters regardless of that setting.
 
+**Measured and rejected (live window, 1,600 units, 120 FPS cap; 2026-09-26).**
+Timed with the live window trace (docs/BATTLE_BENCHMARK.md "Live window
+trace"); keep these out unless something below them changes:
+
+- *Placing the model lane on the pipeline goroutine.* Running the renderer's
+  CPU placement (§22) right after the pre-record, so Execute only submitted,
+  cut Execute from 4.2 to 1.75 ms but put record and placement (5.4 ms, p90
+  6.6) in series inside the loop: Execute N must finish before record N+1
+  starts, and Execute N+1 needs both. The cycle grew past 8.33 ms and late
+  frames rose from 6-17 to 60-82 a minute. Placement is instead parallelized
+  inside Execute (§22).
+- *A smaller §13.9 record pool.* Six or four participants instead of NumCPU
+  lengthened the pre-record and its joins and lowered the on-time share.
+- *A wider fraction tolerance after a hitch.* Two nominal intervals instead of
+  one removed most synchronous re-records after a late frame (16 to 3 in three
+  minutes) but did not reduce late frames; the re-record is rarely what makes
+  the following frame late.
+
 ### 13.11 Flash quads and same-stream phases
 
 Two changes, the first exact and the second an Enhanced-only approximation the
@@ -4147,6 +4165,152 @@ its own clip. The preview's list opens with its clear and background fill, so
 both executors compose over the same background, and `--shot-renderer=both`
 keeps the classic structure supersample so the Enhanced classic image is the
 like-for-like reference.
+
+#### Placement workers
+
+Placement — every subject's regions, its faces fan-triangulated into the batch
+and its parameter entries — was the executor's largest CPU term after the
+retained store: about 3.3 ms a frame at the 1,600-unit Town & Country field at
+zoom 0.75 in the live window. Most of it is per-face arithmetic that depends on
+its own subject alone, so the lane places a frame on a pool of workers whenever
+it can prove the result is the sequential lane's, byte for byte
+(`model_place.go`, `model_place_pool.go`).
+
+**The split.** A frame's placement is a list of jobs — a subject with its group,
+or one shadow — each allocated (`allocSubjectJob`, `allocShadowJob`), then each
+of its packets **decided** and **filled**. Deciding is the ordered work: the
+retained store's and the body index's lookups, inserts, evictions and LRU
+order, a key's priming, the append path (replay, capture or plain append), the
+warm body and the body a cold append records, and every texture the appends
+will reach, resolved through the texture page in the sequential lane's order
+together with the page each lane finds (a cold lane can open a new texture page
+part-way, and that page decides which faces are standalone). Filling is the
+rest, into a placement context (`modelPlaceCtx`): the batch, the parameter
+entries, and the per-subject state an append carries from face to face — the
+key delta, the lights, the solo pass, the outline plan, the capture and
+body-recording slots, the doubled lane's slot box. The lane's own context is the
+frame's batch; filling a job into it, deciding inline, is the sequential lane.
+
+**The pipeline.** A frame goes to the pool only when a pre-check proves its
+appends cannot interact:
+
+- no two keyed top-level packets share a `(Body, Lane)`, so each store entry
+  and body entry a job writes is its own;
+- at most 1,024 keyed packets (`modelRetainBodyCap`): touched entries move to
+  the front of their LRU, so an insert that evicts never evicts one this frame
+  reads or writes;
+- the frame's parameter slots — per non-shadow packet one verdict entry, two
+  slots for every face of the larger raster and one key entry per outline ring
+  — fit the image with two to spare, so every capacity test an append makes
+  passes wherever it runs, and a context's slot numbers differ from the batch's
+  only by a shift;
+- at least 32 jobs, a timing floor.
+
+The placing goroutine then wakes the pool and runs the pre-pass, allocating and
+deciding the jobs in the sequential order and publishing each as it is decided;
+the participants fill published jobs as they appear, claimed from a shared
+cursor, each into its own context, so the fill runs beside the pre-pass. A
+sequential layout lays the jobs' output end to end in job order, joining a job's
+first run to the batch's last exactly where `colourRun` would, and the pool
+scatters each job into the frame's batch while the placing goroutine appends
+the recorded face reflections in job order. A frame is one dispatch. A frame
+the pre-check rejects is placed sequentially. A frame whose batch exceeds half
+of `schedRunVertexLimit` (about four times the heaviest measured) is filled
+again, sequentially, from the same decisions: below that bound no run can reach
+the limit (a retained segment is at most half of it), so a run's joins depend
+on its images and page alone.
+
+**What the scatter rewrites.** A context's parameter slots are one-based over
+its own entries, and a job's slot s is the frame's s − q0 + q. The lanes that
+name a slot take that shift and nothing else does: a vertex's verdict entry in
+`Custom2`, of either sign; `ColorB` of a mapped face (modes 2, 3, 5 and 6, live
+or not) and of an outline ring's primitive (mode 7 with `ColorB` above one
+half) — the shaders' own tests — and a recorded reflection's quad entry. A
+joined first run's indices move by the vertices between the run's first vertex
+and the job's. Every slot is an integer far below 2²⁴, so the float sums are
+exact. Parameter bytes carry no slot, and a retained entry keeps none
+(`finishCapture` stores the block-relative index and clears the verdict entry),
+so an entry captured on one context replays on any other.
+
+**Reflections.** The water reflection batch is ordered — its runs join the last
+one and its vertex cap depends on every reflection before — so a worker records
+each reflected face's call (the face, its landing on the atlas, its centroid,
+its quad entry and page, the reflecting subject, its region, a construction
+child's group region and its key delta) instead of appending it, and the
+placing goroutine appends the records in job order, each quad entry shifted
+with its job: the sequential lane's calls with the sequential lane's arguments.
+
+**The worker contract.** A fill reads the recorded list, its packet's decision
+and the renderer's read-only state — the lighting sources, the finish
+switches, the table atlas, `walkOutlines` — and writes only its own context,
+the store entry and body entry its job owns, and, in the scatter, disjoint
+ranges of the batch. It resolves no texture and reads no texture page (both
+come with the decision), and makes no Ebitengine call. A context counts only
+`modelPlaceStats`, the counters an append may touch, so a counter added without
+a place there does not compile rather than being lost from the participants'
+sum. Anything an append would read that depends on an earlier subject — the
+packer, the store, the texture page, the reflection batch — must be decided in
+the pre-pass or recorded and replayed in order, or the pre-check must exclude
+it. The differential test runs under the race detector.
+
+**The pool.** One participant per `GOMAXPROCS` up to six, the placing
+goroutine one of them and the rest parked on one-slot wake channels between
+frames — the recorder's unit pool (§13.9). The cap is measured: the pre-pass
+publishes the jobs, so participants beyond what keeps up with it only wait,
+yielding, and at 1,600 units six placed as fast as twelve (1.29 against 1.26 ms
+at 0.75×) for about a quarter of a core less, while four fell behind (1.58 ms). Tallest-first placement order puts the largest
+jobs first. Every participant's context is emptied before the wakes, so a
+participant woken too late to claim a job writes nothing the placing goroutine
+reads. The pool belongs to the `Renderer` and is started on the first frame
+placed in parallel. A cleanup stops it when the renderer is collected, which
+works because an idle pool holds no reference back to it, so a host that drops
+a renderer, or a test that makes hundreds, leaks no goroutine.
+
+**A latent defect, reproduced.** `colourRun` stamps a run with the packer's page
+once the job's regions are all allocated, not with the page of the region its
+faces land in. A construction group whose group region fits the first page while
+a child's region opens the second draws the carrier's faces into the second
+page at the first page's coordinates, while its commit samples the first. That
+can happen in the 2× view with a factory building at the page boundary.
+Placement reproduces it byte for byte: `TestModelPlaceRunPageFollowsThePacker`
+locks it, and the skipped `TestModelPlaceRunPageIsTheRegionPage` states the
+correct behaviour. Fixing it moves pixels and needs its own visual review.
+
+**Verification.** `TestModelPlaceGoldenHash` hashes the lane's whole output —
+batch, runs, parameter bytes, regions, merges, accounting, the store and body
+index in LRU order with their contents, the reflection batch and the fallback's
+triangles — over an eight-frame scenario that takes every path the lane has,
+with a coverage check that fails when an edit to the scenario stops taking one.
+The hash was committed on the sequential lane before the split, is the same on
+arm64 and amd64, and has not moved since. `TestModelPlaceParallelMatchesSequential`
+places the scenario on pools of one, two, four and sixteen participants, claiming
+jobs as they are published and in a shuffled order, and compares every frame's
+output with the sequential lane's; removing any one of the scatter's shifts or
+joins fails it. The guard tests cover each pre-check refusal and the vertex
+refill, and a flooded scenario fills the reflection batch to its cap part-way
+through a parallel frame. `battle.png` is byte-identical to the sequential
+lane's at both zoom levels of the coastal scene, every frame of which is now
+placed in parallel, and at the 1,600-unit Moon Quartet capture.
+
+**Measured.** In the live window (`--live-trace`, Town & Country
+`--live-scene=field:534`, about 1,600 units, 120 fps cap, an M3 Pro with
+`GOMAXPROCS` 12), alternating two 40-second runs of each build against the
+sequential lane:
+
+| zoom | `place` sequential | `place` parallel | fps | presented within 5% of refresh |
+|---|---|---|---|---|
+| 0.75 | 3.50, 3.65 ms | 1.32, 1.32 ms | 95.7 → 117.4, 95.5 → 117.6 | 72.6 → 81.5%, 72.7 → 78.1% |
+| 1 | 2.95, 2.96 ms | 1.05, 1.05 ms | 113.1 → 119.9, 112.2 → 119.9 | 73.0 → 99.4%, 72.8 → 99.1% |
+
+`execute` fell from 5.1 to 3.4 ms at 1× and from 6.3 to 4.1 ms at 0.75. At 0.75
+the pre-pass takes about two thirds of the placement (0.8–1.2 ms in instrumented
+runs), the fill finishing after it about 0.05 ms, the layout 0.01 ms and the
+scatter about 0.3 ms. The pre-pass is now the floor: most of it is the store
+lookups and the warm bodies' topology proof (`modelRetainedBody.matches`), which
+are ordered and so stay on the placing goroutine.
+Frames under the 32-job floor (the empty opening seconds) stay sequential. In the
+coastal battle benchmark every frame is placed in parallel, at both zoom
+levels.
 
 ### 22.3 Verification
 

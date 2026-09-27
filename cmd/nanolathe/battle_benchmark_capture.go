@@ -36,6 +36,8 @@ type captureBenchmarkScene struct {
 	SourceWidth   int32         `json:"source_width"`
 	SourceHeight  int32         `json:"source_height"`
 	Owners        [4]int        `json:"owners"`
+	Copies        int           `json:"copies,omitempty"`
+	SkippedCopies int           `json:"skipped_copy_units,omitempty"`
 	Factories     []*units.Unit `json:"-"`
 }
 
@@ -144,73 +146,86 @@ func stageCaptureBenchmark(opts Options, s *session.Session) (*captureBenchmarkS
 		CapturedTick: manifest.Metadata.AuthoritativeTick, CapturedUnits: len(rows),
 		CameraX: client.Camera.X, CameraZ: client.Camera.Z,
 		SourceWidth: client.Camera.ViewW, SourceHeight: client.Camera.ViewH,
+		Copies: max(opts.BenchmarkCaptureCopies, 1),
 	}
 	for _, u := range s.Units.Iter() {
 		if u != nil && u.Alive {
 			scene.StartingUnits++
 		}
 	}
-	bySlot := make(map[int]*units.Unit, len(rows))
-	for _, row := range rows {
-		if int(row.Unit.Owner) >= s.Skirmish.NumPlayers {
-			return nil, fmt.Errorf("nanolathe: benchmark capture owner out of range: logical path %d, providers searched [survival setup], expected owner below %d", row.Unit.Owner, s.Skirmish.NumPlayers)
-		}
-		def, ok := s.Catalog.Unit(row.Unit.DefinitionKey)
-		if !ok {
-			return nil, fmt.Errorf("nanolathe: benchmark capture unit missing: logical path %s, providers searched [catalog], expected an authored unit definition", row.Unit.DefinitionKey)
-		}
-		h, err := s.Units.CreateWithMoverMode(def, row.Unit.Owner, numeric.Fixed(row.Unit.X), numeric.Fixed(row.Unit.Y), numeric.Fixed(row.Unit.Z), row.Unit.Move.Mode)
-		if err != nil {
-			return nil, fmt.Errorf("nanolathe: benchmark create %s at slot %d: %w", row.Unit.DefinitionKey, row.Unit.Slot, err)
-		}
-		u := s.Units.Unit(h)
-		u.Move.Heading = row.Unit.Move.Heading
-		s.Movement.EnsureUnit(u)
-		s.BindStagedOrderQueue(u)
-		scene.StagedUnits++
-		if row.Unit.Health > 0 && row.Unit.Health <= u.MaxHealth {
-			u.Health = row.Unit.Health
-		}
-		if _, exists := bySlot[row.Unit.Slot]; exists {
-			return nil, fmt.Errorf("nanolathe: duplicate benchmark capture slot: logical path %d, providers searched [units.jsonl], expected unique slots", row.Unit.Slot)
-		}
-		bySlot[row.Unit.Slot] = u
-		if int(row.Unit.Owner) < len(scene.Owners) {
-			scene.Owners[row.Unit.Owner]++
-		}
-	}
-	for _, row := range rows {
-		u := bySlot[row.Unit.Slot]
-		if u == nil {
-			continue
-		}
-		for _, source := range row.Orders.Queue.Primary {
-			id := orders.ID(source.DescriptorID)
-			name := orders.DescriptorFor(id).Name
-			if name == "BuildingBuild" && opts.BenchmarkFactories && source.BuildProduct != "" {
-				count := source.BuildCount
-				if count < 1 {
-					count = 1
-				}
-				if err := construction.QueueFactoryBuild(u, source.BuildProduct, count, s.Catalog); err == nil {
-					scene.OrdersIssued++
-					scene.Factories = append(scene.Factories, u)
+	// Copies stage the capture more than once to scale a measurement past
+	// the recorded unit count, each copy shifted by five terrain cells per
+	// copy; orders are remapped within their own copy. A later copy's unit
+	// that cannot be created where it lands is skipped, not fatal.
+	copies := max(opts.BenchmarkCaptureCopies, 1)
+	for c := range copies {
+		offset := numeric.Fixed(int64(c) * 80 << 16)
+		bySlot := make(map[int]*units.Unit, len(rows))
+		for _, row := range rows {
+			if int(row.Unit.Owner) >= s.Skirmish.NumPlayers {
+				return nil, fmt.Errorf("nanolathe: benchmark capture owner out of range: logical path %d, providers searched [survival setup], expected owner below %d", row.Unit.Owner, s.Skirmish.NumPlayers)
+			}
+			def, ok := s.Catalog.Unit(row.Unit.DefinitionKey)
+			if !ok {
+				return nil, fmt.Errorf("nanolathe: benchmark capture unit missing: logical path %s, providers searched [catalog], expected an authored unit definition", row.Unit.DefinitionKey)
+			}
+			h, err := s.Units.CreateWithMoverMode(def, row.Unit.Owner, numeric.Fixed(row.Unit.X)+offset, numeric.Fixed(row.Unit.Y), numeric.Fixed(row.Unit.Z)+offset, row.Unit.Move.Mode)
+			if err != nil {
+				if c > 0 {
+					scene.SkippedCopies++
 					continue
 				}
+				return nil, fmt.Errorf("nanolathe: benchmark create %s at slot %d: %w", row.Unit.DefinitionKey, row.Unit.Slot, err)
 			}
-			if !captureBenchmarkSimpleOrder(name) {
-				scene.OrdersOmitted++
+			u := s.Units.Unit(h)
+			u.Move.Heading = row.Unit.Move.Heading
+			s.Movement.EnsureUnit(u)
+			s.BindStagedOrderQueue(u)
+			scene.StagedUnits++
+			if row.Unit.Health > 0 && row.Unit.Health <= u.MaxHealth {
+				u.Health = row.Unit.Health
+			}
+			if _, exists := bySlot[row.Unit.Slot]; exists {
+				return nil, fmt.Errorf("nanolathe: duplicate benchmark capture slot: logical path %d, providers searched [units.jsonl], expected unique slots", row.Unit.Slot)
+			}
+			bySlot[row.Unit.Slot] = u
+			if int(row.Unit.Owner) < len(scene.Owners) {
+				scene.Owners[row.Unit.Owner]++
+			}
+		}
+		for _, row := range rows {
+			u := bySlot[row.Unit.Slot]
+			if u == nil {
 				continue
 			}
-			var target pool.Handle
-			if source.Target != 0 {
-				if peer := bySlot[int(source.Target)]; peer != nil {
-					target = peer.Handle
+			for _, source := range row.Orders.Queue.Primary {
+				id := orders.ID(source.DescriptorID)
+				name := orders.DescriptorFor(id).Name
+				if name == "BuildingBuild" && opts.BenchmarkFactories && source.BuildProduct != "" {
+					count := source.BuildCount
+					if count < 1 {
+						count = 1
+					}
+					if err := construction.QueueFactoryBuild(u, source.BuildProduct, count, s.Catalog); err == nil {
+						scene.OrdersIssued++
+						scene.Factories = append(scene.Factories, u)
+						continue
+					}
 				}
+				if !captureBenchmarkSimpleOrder(name) {
+					scene.OrdersOmitted++
+					continue
+				}
+				var target pool.Handle
+				if source.Target != 0 {
+					if peer := bySlot[int(source.Target)]; peer != nil {
+						target = peer.Handle
+					}
+				}
+				n := orders.NewNodeForOrder(id, target, numeric.Fixed(source.GoalX)+offset, numeric.Fixed(source.GoalY), numeric.Fixed(source.GoalZ)+offset, s.Clock.GlobalTick, u.Handle, true)
+				orders.QueueForUnit(u).Push(id, n)
+				scene.OrdersIssued++
 			}
-			n := orders.NewNodeForOrder(id, target, numeric.Fixed(source.GoalX), numeric.Fixed(source.GoalY), numeric.Fixed(source.GoalZ), s.Clock.GlobalTick, u.Handle, true)
-			orders.QueueForUnit(u).Push(id, n)
-			scene.OrdersIssued++
 		}
 	}
 	fmt.Printf("capture scene=%s captured_units=%d starting_units=%d orders=%d omitted=%d camera=%d,%d\n", scene.CaptureID, scene.CapturedUnits, scene.StartingUnits, scene.OrdersIssued, scene.OrdersOmitted, scene.CameraX, scene.CameraZ)

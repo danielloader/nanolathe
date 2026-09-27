@@ -3,6 +3,7 @@ package gpurender
 import (
 	"bytes"
 	"fmt"
+	"image"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/formats"
@@ -472,7 +473,7 @@ func (f *fogPass) uploadGrid(region fogRegion) bool {
 		return false
 	}
 	if f.grid == nil || f.gridW != imgW || f.gridH != imgH {
-		f.grid = ebiten.NewImage(imgW, imgH)
+		f.grid = ebiten.NewImageWithOptions(image.Rect(0, 0, imgW, imgH), perFrameUpload)
 		f.gridW, f.gridH = imgW, imgH
 		f.gridSent = f.gridSent[:0]
 	}

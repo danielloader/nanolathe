@@ -1,6 +1,8 @@
 package gpurender
 
 import (
+	"time"
+
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
@@ -25,6 +27,10 @@ import (
 // compiles as an ordinary destination command over the visible fog region, its
 // read copy taken by the scheduler at submission (§13.3).
 type Renderer struct {
+	// stageTiming turns on the per-stage Execute timer; stageTimes holds the
+	// last Execute's stages (StageTimes).
+	stageTiming bool
+	stageTimes  StageTimes
 	// effects is the last player selection SetEffects applied (§30). Every
 	// per-family switch below is set from it and from nothing else.
 	effects          drawlist.Effects
@@ -157,6 +163,12 @@ type Renderer struct {
 	// model path: faces triangulated from the packet's projected corners onto a
 	// per-frame atlas page, then commits resolved onto the composite (§22).
 	modelDirect modelDirectLane
+	// placePool is the lane's placement pool, started on the first frame
+	// placed in parallel and stopped when the renderer is collected
+	// (model_place_pool.go), and placeWorkers its participant count, zero for
+	// the default (one per GOMAXPROCS, at most modelPlaceParticipants).
+	placePool    *modelPlacePool
+	placeWorkers int
 }
 
 // surfaceUpload is one indexed-surface upload slot: the scene atlas region its
@@ -319,13 +331,17 @@ func (r *Renderer) Execute(list *drawlist.List, w, h int) *ebiten.Image {
 	// subject and shadow of the frame, an attached-unit group in ONE region, is
 	// rasterized onto the lane's atlas pages in two passes over one vertex batch
 	// before Replay commits any of them (§22).
+	stage := r.stageClock()
 	r.prepareBattleLighting(list)
 	r.reflections.resetFrame()
 	r.prepareBlastDistortion(list)
 	r.prepareTreeHeat(list)
+	stage.mark(&r.stageTimes.Prepare)
 	r.prepareModelDirect(list)
+	stage.mark(&r.stageTimes.Model)
 	r.prepareProjectileReflections(list)
 	r.prepareWaterBed(list)
+	stage.mark(&r.stageTimes.Prepare)
 	defer func() {
 		clear(r.water.bedSprites)
 		r.water.bedSprites = r.water.bedSprites[:0]
@@ -337,8 +353,58 @@ func (r *Renderer) Execute(list *drawlist.List, w, h int) *ebiten.Image {
 	}
 	// A list without an Expand marker still leaves no compiled work behind.
 	r.submitSchedule()
+	stage.mark(&r.stageTimes.Replay)
 	r.modelStats.DeviceDraws = r.frameDraws
 	return r.surfaces[0]
+}
+
+// StageTimes is the most recent Execute's wall time by stage, measured only
+// while SetStageTiming is on: the CPU prepare passes, the model lane (placement
+// and its device passes), and Replay with the final submission. Diagnostic
+// only (docs/BATTLE_BENCHMARK.md "Live window trace").
+type StageTimes struct {
+	Prepare, Model, Replay time.Duration
+	// ModelPlace is the model lane's CPU placement, within Model.
+	ModelPlace time.Duration
+}
+
+// SetStageTiming turns the per-stage Execute timer on or off.
+func (r *Renderer) SetStageTiming(on bool) {
+	if r != nil {
+		r.stageTiming = on
+	}
+}
+
+// StageTimes reports the most recent Execute's stage times.
+func (r *Renderer) StageTimes() StageTimes {
+	if r == nil {
+		return StageTimes{}
+	}
+	return r.stageTimes
+}
+
+// stageClock is a cheap lap timer that reads the clock only while timing is on.
+type stageClock struct {
+	on   bool
+	last time.Time
+}
+
+func (r *Renderer) stageClock() stageClock {
+	r.stageTimes = StageTimes{}
+	if !r.stageTiming {
+		return stageClock{}
+	}
+	return stageClock{on: true, last: time.Now()}
+}
+
+// mark adds the time since the previous lap to *d.
+func (c *stageClock) mark(d *time.Duration) {
+	if !c.on {
+		return
+	}
+	now := time.Now()
+	*d += now.Sub(c.last)
+	c.last = now
 }
 
 // DeviceDraws reports the device draws the most recent Execute issued. It is

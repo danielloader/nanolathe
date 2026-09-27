@@ -200,6 +200,27 @@ func (c *Client) NoteSimulationTime(d time.Duration) {
 	}
 }
 
+// NoteSimulationJoin records one join of a simulation batch for the live
+// frame trace: how long the host waited for it and the batch's own wall time.
+func (c *Client) NoteSimulationJoin(wait, batch time.Duration) {
+	if c != nil {
+		c.simulationJoinWait += int64(wait)
+		c.simulationJoinBatch += int64(batch)
+		c.simulationJoins++
+	}
+}
+
+// TakeSimulationJoin returns the joins noted since the last call and resets
+// them.
+func (c *Client) TakeSimulationJoin() (wait, batch time.Duration, joins int) {
+	if c == nil {
+		return 0, 0, 0
+	}
+	wait, batch, joins = time.Duration(c.simulationJoinWait), time.Duration(c.simulationJoinBatch), c.simulationJoins
+	c.simulationJoinWait, c.simulationJoinBatch, c.simulationJoins = 0, 0, 0
+	return wait, batch, joins
+}
+
 // TakeSimulationTime returns the simulation time noted since the last call and
 // resets it.
 func (c *Client) TakeSimulationTime() time.Duration {

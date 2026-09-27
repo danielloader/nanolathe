@@ -64,8 +64,7 @@ const modelOutlineMaxError = 1 << 23
 
 // planOutline records the append of every outline ring of g, in ring order,
 // and returns their range in the lane's ring list.
-func (r *Renderer) planOutline(g *drawlist.ModelGeometry) (start, end int32) {
-	d := &r.modelDirect
+func (r *Renderer) planOutline(d *modelPlaceCtx, g *drawlist.ModelGeometry) (start, end int32) {
 	start = int32(len(d.outline))
 	for i := range g.Outline {
 		f := &g.Outline[i]
@@ -75,9 +74,9 @@ func (r *Renderer) planOutline(g *drawlist.ModelGeometry) (start, end int32) {
 		if len(f.Vertices) < 3 {
 			continue
 		}
-		ring, ok := r.describeOutlineRing(g, f)
+		ring, ok := r.describeOutlineRing(d, g, f)
 		if !ok {
-			ring = modelOutlineRing{faces: r.prepareOutlineRing(g, f), walked: true}
+			ring = modelOutlineRing{faces: d.prep.prepareOutlineRing(g, f), walked: true}
 		}
 		d.outline = append(d.outline, ring)
 	}
@@ -86,7 +85,7 @@ func (r *Renderer) planOutline(g *drawlist.ModelGeometry) (start, end int32) {
 
 // describeOutlineRing gives a ring of three or four corners its key entry and
 // box, or reports false when the device cannot draw it exactly.
-func (r *Renderer) describeOutlineRing(g *drawlist.ModelGeometry, f *drawlist.ModelFace) (modelOutlineRing, bool) {
+func (r *Renderer) describeOutlineRing(d *modelPlaceCtx, g *drawlist.ModelGeometry, f *drawlist.ModelFace) (modelOutlineRing, bool) {
 	v := f.Vertices
 	if len(v) > 4 || r.modelDirect.walkOutlines {
 		return modelOutlineRing{}, false
@@ -113,7 +112,7 @@ func (r *Renderer) describeOutlineRing(g *drawlist.ModelGeometry, f *drawlist.Mo
 	if !ok || !quad.keysExact() {
 		return modelOutlineRing{}, false
 	}
-	entry := r.modelDirect.params.addKeyEntry(&quad)
+	entry := d.params.addKeyEntry(&quad)
 	if entry == 0 {
 		return modelOutlineRing{}, false
 	}
@@ -206,21 +205,20 @@ func gcd64(a, b int64) int64 {
 // walks the rows of the 1× image after the anti-alias resolve
 // [03 R-COMP-01 §3]. A carried child's solo image reuses the rings its group
 // composition planned an instant earlier, entries included.
-func (r *Renderer) appendOutline(g *drawlist.ModelGeometry, ox, oy float32, entry int) {
-	d := &r.modelDirect
+func (r *Renderer) appendOutline(d *modelPlaceCtx, g *drawlist.ModelGeometry, ox, oy float32, entry int) {
 	if !d.soloPass || d.soloOutlineFor != g {
-		d.soloOutline[0], d.soloOutline[1] = r.planOutline(g)
+		d.soloOutline[0], d.soloOutline[1] = r.planOutline(d, g)
 		d.soloOutlineFor = g
 	}
 	for i := d.soloOutline[0]; i < d.soloOutline[1]; i++ {
 		ring := &d.outline[i]
 		switch {
 		case ring.entry != 0:
-			r.appendOutlineRing(ring, ox, oy, entry)
+			r.appendOutlineRing(d, ring, ox, oy, entry)
 		case ring.walked:
-			r.modelStats.DirectOutlineWalked++
+			d.stats.DirectOutlineWalked++
 			for _, f := range ring.faces {
-				r.appendDirectGPUFace(f, ox, oy, 2, entry)
+				r.appendDirectGPUFace(d, f, ox, oy, 2, entry)
 			}
 		}
 	}
@@ -230,9 +228,8 @@ func (r *Renderer) appendOutline(g *drawlist.ModelGeometry, ox, oy float32, entr
 // unbiased, so it covers exactly the texels of the box's native pixels. The
 // colour lanes carry what the entry does not: the key entry's index, the flat
 // colour, the group delta and the native origin.
-func (r *Renderer) appendOutlineRing(ring *modelOutlineRing, ox, oy float32, entry int) {
-	d := &r.modelDirect
-	run := d.colourRun([2]*ebiten.Image{r.texturePage(), r.tables.atlas}, 4)
+func (r *Renderer) appendOutlineRing(d *modelPlaceCtx, ring *modelOutlineRing, ox, oy float32, entry int) {
+	run := d.colourRun([2]*ebiten.Image{d.texturePage(r), r.tables.atlas}, 4)
 	base := uint32(len(d.verts)) - uint32(run.vOff)
 	x0, y0 := ox+2*float32(ring.x0), oy+2*float32(ring.y0)
 	x1, y1 := ox+2*float32(ring.x1), oy+2*float32(ring.y1)
@@ -246,9 +243,9 @@ func (r *Renderer) appendOutlineRing(ring *modelOutlineRing, ox, oy float32, ent
 	d.idx = append(d.idx, base, base+1, base+2, base, base+2, base+3)
 	run.vLen += 4
 	run.iLen += 6
-	r.modelStats.DirectFaces++
-	r.modelStats.DirectOutlineRings++
-	r.modelStats.DirectOutlineTexels += 4 * int(ring.x1-ring.x0) * int(ring.y1-ring.y0)
+	d.stats.DirectFaces++
+	d.stats.DirectOutlineRings++
+	d.stats.DirectOutlineTexels += 4 * int(ring.x1-ring.x0) * int(ring.y1-ring.y0)
 }
 
 // modelOutlineSource is the fragment side of an outline ring, shared by the key

@@ -73,6 +73,12 @@ type Client struct {
 	workerThreadSetup func()
 	// simulationTime accumulates NoteSimulationTime for the frame graph.
 	simulationTime int64 // nanoseconds
+	// pruneLive is pruneCachedModelBodies's live-unit set, kept between
+	// records so its storage is reused.
+	pruneLive map[uint64]struct{}
+	// simulationJoin* accumulate NoteSimulationJoin for the live frame trace.
+	simulationJoinWait, simulationJoinBatch int64 // nanoseconds
+	simulationJoins                         int
 	// frameTiming is presentation-only instrumentation for the +fps overlay.
 	// The window adapter changes it only after joining any pre-record worker.
 	frameTiming         bool

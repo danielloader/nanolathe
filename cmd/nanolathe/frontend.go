@@ -92,6 +92,8 @@ type menuAssets struct {
 // kept in ui.Panel in retail_menu.go and is reset whenever retail
 // opens a new .GUI panel.
 type gameShell struct {
+	// liveTrace is the --live-trace frame trace for the window, nil otherwise.
+	liveTrace           *ebitenapp.FrameTraceOptions
 	intro               *introPlayback
 	startupMoviePending bool
 	movieQueue          []string

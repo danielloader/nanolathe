@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -16,6 +17,9 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
+
+// errCoastalSlotFull reports a scaled scene's slot with no free footprint.
+var errCoastalSlotFull = errors.New("coastal benchmark slot full")
 
 // These are authored benchmark composition choices, not gameplay rules.
 var coastalLandRoster = [][]string{
@@ -58,6 +62,8 @@ type coastalBenchmarkScene struct {
 	AirPerSide       int           `json:"air_per_side"`
 	BuildingsPerSide int           `json:"buildings_per_side"`
 	WaterBuildings   [][]string    `json:"water_buildings"`
+	Scale            float64       `json:"scale,omitempty"`
+	Skipped          int           `json:"skipped_slots,omitempty"`
 	Factories        []*units.Unit `json:"-"`
 }
 
@@ -65,7 +71,19 @@ func stageCoastalBenchmark(opts Options, s *session.Session) (*coastalBenchmarkS
 	if !strings.EqualFold(opts.Map, "expanded confluence") {
 		return nil, fmt.Errorf("nanolathe: benchmark map mismatch: logical path %s, providers searched [fixture], expected Expanded Confluence", opts.Map)
 	}
-	scene := &coastalBenchmarkScene{X: 7296, Z: 10592, LandPerSide: 120, NavalPerSide: 24, AirPerSide: 16, BuildingsPerSide: 20, WaterBuildings: coastalWaterBuildings}
+	scale := opts.BenchmarkScale
+	if scale <= 0 {
+		scale = 1
+	}
+	scene := &coastalBenchmarkScene{X: 7296, Z: 10592, LandPerSide: 120, NavalPerSide: 24, AirPerSide: 16, BuildingsPerSide: 20, WaterBuildings: coastalWaterBuildings, Scale: scale}
+	if scale != 1 {
+		// A scaled scene deepens the same formations: extra land rows extend
+		// inland, extra naval rows further out to sea. Slots that find no free
+		// footprint are skipped and counted rather than failing the run.
+		scene.LandPerSide = int(float64(scene.LandPerSide)*scale + 0.5)
+		scene.NavalPerSide = int(float64(scene.NavalPerSide)*scale + 0.5)
+		scene.AirPerSide = int(float64(scene.AirPerSide)*scale + 0.5)
+	}
 	cx, cz := scene.X, scene.Z
 	type box struct{ x0, z0, x1, z1 int32 }
 	var reserved []box
@@ -85,15 +103,19 @@ func stageCoastalBenchmark(opts Options, s *session.Session) (*coastalBenchmarkS
 			best := int64(1 << 62)
 			var chosen box
 			var siteHeight int32
-			for dz := int32(-192); dz <= 192; dz += 16 {
-				for dx := int32(-192); dx <= 192; dx += 16 {
+			reach := int32(192)
+			if scale != 1 {
+				reach = 384
+			}
+			for dz := -reach; dz <= reach; dz += 16 {
+				for dx := -reach; dx <= reach; dx += 16 {
 					px, pz := numeric.Fixed(x+dx)<<16, numeric.Fixed(z+dz)<<16
 					ax, az := world.PlacementAnchor(px, pz, fw, fd)
 					px, pz = world.PlacementCenter(ax, az, fw, fd)
 					if (side == 0 && px >= numeric.Fixed(cx-32)<<16) || (side == 1 && px <= numeric.Fixed(cx+32)<<16) {
 						continue
 					}
-					if pz < numeric.Fixed(cz-624)<<16 || pz > numeric.Fixed(cz+544)<<16 {
+					if scale == 1 && (pz < numeric.Fixed(cz-624)<<16 || pz > numeric.Fixed(cz+544)<<16) {
 						continue
 					}
 					candidate := box{ax, az, ax + fw, az + fd}
@@ -120,6 +142,9 @@ func stageCoastalBenchmark(opts Options, s *session.Session) (*coastalBenchmarkS
 				}
 			}
 			if !found {
+				if scale != 1 {
+					return nil, errCoastalSlotFull
+				}
 				return nil, fmt.Errorf("nanolathe: coastal benchmark placement failed: logical path %s at %d,%d, providers searched [map], expected a free authored footprint", name, x, z)
 			}
 			reserved = append(reserved, chosen)
@@ -178,14 +203,16 @@ func stageCoastalBenchmark(opts Options, s *session.Session) (*coastalBenchmarkS
 			}
 		}
 	}
+	land, naval := scene.LandPerSide, scene.NavalPerSide
+	mobiles := land + naval + scene.AirPerSide
 	for side := 0; side < 2; side++ {
 		facing := int32(side*2 - 1)
-		for i := 0; i < 160; i++ {
+		for i := 0; i < mobiles; i++ {
 			name := coastalLandRoster[side][i%12]
 			x, z := cx+facing*(96+int32(i%12)*48), cz-32+int32(i/12)*48
 			switch {
-			case i >= 144:
-				j := int32(i - 144)
+			case i >= land+naval:
+				j := int32(i - land - naval)
 				name = coastalAirRoster[side][j%4]
 				x, z = cx+facing*(200+(j*97)%500), cz-400+(j*67)%760
 				// Half the flight is already on its return leg over the opposing
@@ -193,12 +220,19 @@ func stageCoastalBenchmark(opts Options, s *session.Session) (*coastalBenchmarkS
 				if j%2 == 0 {
 					x = cx - facing*(180+(j*97)%450)
 				}
-			case i >= 120:
-				j := int32(i - 120)
+			case i >= land:
+				j := int32(i - land)
 				name = coastalSeaRoster[side][j%6]
 				x, z = cx+facing*(160+j%6*88), cz-544+j/6*64
+				if j >= 24 {
+					x, z = cx+facing*(160+j%6*88), cz-544-((j-24)/6+1)*64
+				}
 			}
 			u, err := create(name, side, x, z)
+			if err == errCoastalSlotFull {
+				scene.Skipped++
+				continue
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -212,7 +246,7 @@ func stageCoastalBenchmark(opts Options, s *session.Session) (*coastalBenchmarkS
 			filmOrder(s, u, 9, numeric.Fixed(goalX)<<16, u.Z)
 		}
 	}
-	fmt.Printf("coastal center=%d,%d mobiles_per_side=160 buildings_per_side=20\n", cx, cz)
+	fmt.Printf("coastal center=%d,%d mobiles_per_side=%d buildings_per_side=20 scale=%g skipped=%d\n", cx, cz, mobiles, scale, scene.Skipped)
 	return scene, nil
 }
 

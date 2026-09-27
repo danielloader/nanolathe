@@ -14,14 +14,14 @@ func TestModelMaterialControlsAndPacking(t *testing.T) {
 	r := &Renderer{}
 	f := drawlist.ModelFace{Normal: [3]float32{-0.35, -0.15, 0.9246621}, Material: drawlist.ModelMaterialMetal}
 	base := metalGlintColor(90, 0.8)
-	if r.modelFinishColor(&f, base) != base {
+	if r.modelFinishColor(r.laneCtx(), &f, base) != base {
 		t.Fatal("disabled materials changed glint")
 	}
 	r.setMaterials(true)
 	for material := uint8(0); material <= 3; material++ {
 		f.Material = material
 		for low := 0; low < 65536; low++ {
-			packed := int(r.modelFinishColor(&f, float32(low)))
+			packed := int(r.modelFinishColor(r.laneCtx(), &f, float32(low)))
 			if packed%65536 != low {
 				t.Fatalf("material %d corrupted palette/glint %d", material, low)
 			}
@@ -35,7 +35,7 @@ func TestModelMaterialControlsAndPacking(t *testing.T) {
 		}
 	}
 	f.Material, f.Normal = drawlist.ModelMaterialMetal, [3]float32{0, 0, -1}
-	if int(r.modelFinishColor(&f, base))/65536 != int(f.Material) {
+	if int(r.modelFinishColor(r.laneCtx(), &f, base))/65536 != int(f.Material) {
 		t.Fatal("downward normal retained the overhead response")
 	}
 }

@@ -39,10 +39,14 @@ type featureViewInputs struct {
 }
 
 // featurePublicationCache remembers, per committed-frame slot, the inputs each
-// retained FeatureView element was built from. The frame buffer alternates
-// between two slots and Frame.Reset keeps feature element storage, so the
-// element at index i of a slot is the view this cache built there two
-// publications ago; when its inputs are unchanged, nothing is written.
+// retained FeatureView element was built from. The frame buffer rotates through
+// its slots — two by default, all frame.MaxBufferSlots of them under the
+// asynchronous window — and Frame.Reset keeps feature element storage, so the
+// element at index i of a slot is the view this cache built there one rotation
+// ago; when its inputs are unchanged, nothing is written. There is one cache
+// per slot the rotation can reach: with fewer, the widened rotation evicted a
+// binding on every publication, rebuilt every view and reallocated the whole
+// input table each tick.
 //
 // The cache is presentation-side bookkeeping: it reads simulation state and
 // writes only the frame, draws nothing and changes no authoritative field [I6].
@@ -66,8 +70,8 @@ func (s *Session) featureCacheFor(published *frame.Frame) *featurePublicationCac
 			return &s.featurePubCaches[i]
 		}
 	}
-	// A third distinct frame means the buffer was replaced; the oldest
-	// binding is rebuilt from nothing.
+	// More distinct frames than slots means the buffer was replaced; the
+	// first binding is rebuilt from nothing.
 	c := &s.featurePubCaches[0]
 	*c = featurePublicationCache{frame: published}
 	return c

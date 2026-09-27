@@ -13,8 +13,10 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	contentprofiles "github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/headless"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
+	"github.com/nanolathe-gg/nanolathe/internal/platform/benchlock"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/ebitenapp"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/render"
@@ -350,9 +352,26 @@ func runBattleView(launch, opts Options, cs *contentSet) error {
 		defer running.Close()
 	}
 	shell, cl := view.shell, view.cl
-	shell.settingsWritable = true
+	shell.settingsWritable = opts.LiveTrace == ""
 	defer shell.teardownBattle(cl)
-	return ebitenapp.Run(cl, rendererMode(shell.opts), shell.windowOptions())
+	options := shell.windowOptions()
+	if shell.liveTrace != nil {
+		// A live trace is a measurement: it takes the benchmark lock so it never
+		// runs beside another benchmark, and leaves the settings file alone.
+		path, err := benchlock.Path()
+		if err != nil {
+			return fmt.Errorf("nanolathe: locate benchmark lock: %w", err)
+		}
+		lock, err := benchlock.Acquire(path, func() {
+			fmt.Fprintf(os.Stderr, "nanolathe: live trace waiting for lock %s\n", path)
+		})
+		if err != nil {
+			return fmt.Errorf("nanolathe: acquire benchmark lock %s: %w", path, err)
+		}
+		defer lock.Close()
+		options.FrameTrace = shell.liveTrace
+	}
+	return ebitenapp.Run(cl, rendererMode(shell.opts), options)
 }
 
 // newDirectBattleView skips menu navigation, but retains the same shell owner
@@ -361,11 +380,20 @@ func runBattleView(launch, opts Options, cs *contentSet) error {
 func newDirectBattleView(opts Options, cs *contentSet) (*gameShell, *client.Client, error) {
 	saved := loadedSettings()
 	opts.Gameplay = startupGameplay(opts, saved.Gameplay)
-	request, err := directMapBattleRequest(opts, cs, newBattleSeedSource(opts))
+	scene, err := parseLiveScene(opts.LiveScene)
 	if err != nil {
 		return nil, nil, err
 	}
-	authoritative, err := composeAuthoritativeBattle(request)
+	var authoritative headless.FreshBattle
+	if scene.Kind == "field" {
+		authoritative, err = composeLiveFieldBattle(opts, cs, scene)
+	} else {
+		var request freshBattleRequest
+		request, err = directMapBattleRequest(opts, cs, newBattleSeedSource(opts))
+		if err == nil {
+			authoritative, err = composeAuthoritativeBattle(request)
+		}
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -433,6 +461,15 @@ func newDirectBattleView(opts Options, cs *contentSet) (*gameShell, *client.Clie
 	shell.pendingDetail = detailArtFor(shell.opts, cs, sess.World, nil)
 	if err := shell.enterBattle(sess, sess.Catalog); err != nil {
 		return nil, nil, err
+	}
+	if opts.LiveTrace != "" {
+		meta := map[string]any{}
+		if scene.Kind != "" {
+			if meta, err = stageLiveScene(opts, shell, scene); err != nil {
+				return nil, nil, err
+			}
+		}
+		shell.liveTrace = liveTraceOptions(opts, shell, meta)
 	}
 	entered = true
 	return shell, cl, nil

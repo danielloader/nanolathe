@@ -141,6 +141,8 @@ type app struct {
 	// fpsPasses is the device passes the last presented frame issued
 	// (gpurender.ModelStats.Passes), shown while the overlay is visible.
 	fpsPasses int
+	// trace is the opt-in live frame trace (frame_trace.go); nil when off.
+	trace *frameTrace
 }
 
 // RunOptions are the window's host-side settings, none of which the client or
@@ -177,6 +179,8 @@ type RunOptions struct {
 	// FullscreenChanged persists an observed platform change, including native
 	// window controls. It runs on the game loop, never on a simulation tick.
 	FullscreenChanged func(bool)
+	// FrameTrace enables the live window's frame trace; nil leaves it off.
+	FrameTrace *FrameTraceOptions
 }
 
 // Update refreshes input once per display frame. The separate host clock runs
@@ -185,6 +189,10 @@ type RunOptions struct {
 // Modern may defer a host body to the Draw tail, preserving the record/submit
 // pipeline (§13.10). Its sample is queued until that body actually runs.
 func (a *app) Update() error {
+	a.trace.beginUpdate()
+	if a.trace != nil && a.trace.started {
+		defer func() { a.trace.row.updEnd = a.trace.now() }()
+	}
 	if !a.loopThreadRaised {
 		RaiseCurrentThread()
 		a.loopThreadRaised = true
@@ -193,7 +201,7 @@ func (a *app) Update() error {
 		a.c.JoinPreRecord()
 		return err
 	}
-	if a.exitPending {
+	if a.exitPending || a.trace.expired() {
 		a.c.JoinPreRecord()
 		return a.terminate()
 	}
@@ -207,6 +215,9 @@ func (a *app) Update() error {
 		a.inputPollTime += time.Since(pollStart)
 	}
 	steps := a.hostClock.advance(time.Now())
+	if a.trace != nil {
+		a.trace.row.steps = steps
+	}
 	if steps == 0 {
 		return nil
 	}
@@ -224,6 +235,9 @@ func (a *app) Update() error {
 		for range a.ledger.call(a.mode == RendererModern && a.gpu != nil) {
 			if a.exitPending {
 				break
+			}
+			if a.trace != nil {
+				a.trace.row.updBodies++
 			}
 			a.updateBody()
 		}
@@ -264,6 +278,13 @@ func (a *app) updateBody() {
 	applyInput(a.c.Input(), sample)
 	a.c.SetFocused(ebiten.IsFocused())
 	a.stepClient()
+	if a.trace != nil {
+		wait, batch, joins := a.c.TakeSimulationJoin()
+		a.trace.row.simWait += int64(wait / time.Microsecond)
+		a.trace.row.simBatch += int64(batch / time.Microsecond)
+		a.trace.row.simJoins += joins
+		a.trace.sampleCensus(a.gpu.ModelStats())
+	}
 	a.syncRendererSources()
 	a.syncWindowSize()
 	a.syncPointerCapture()
@@ -281,6 +302,7 @@ func (a *app) updateBody() {
 // terminate ends the run: the pointer goes back to the window system and the
 // pipeline prints its final readout when statistics were requested.
 func (a *app) terminate() error {
+	a.trace.close()
 	a.c.SetPointerCaptured(false)
 	a.syncPointerCapture()
 	a.cursorClip.release()
@@ -426,7 +448,14 @@ func (a *app) Draw(screen *ebiten.Image) {
 	if showFPS {
 		drawStarted = arrived
 	}
+	if a.trace != nil && a.trace.started {
+		a.trace.row.drawStart = a.trace.now()
+		defer func() { a.trace.row.drawEnd = a.trace.now() }()
+	}
 	a.beginDraw()
+	if a.trace != nil {
+		a.trace.row.join1 = a.trace.since(arrived)
+	}
 	a.c.SetFrameTiming(showFPS)
 	width, height := a.c.Size()
 	// Enhanced presents on every Draw — that is the whole of the refresh-rate
@@ -435,6 +464,9 @@ func (a *app) Draw(screen *ebiten.Image) {
 	if a.mode == RendererModern {
 		if !a.presentDue(arrived) {
 			return
+		}
+		if a.trace != nil {
+			a.trace.row.due = true
 		}
 		if showFPS && a.fpsCounter.target != a.presentInterval {
 			// A live cap change starts a new history with one budget.
@@ -477,11 +509,19 @@ func (a *app) drawModern(screen *ebiten.Image, width, height int, showFPS bool) 
 		// modern loading callback. Prepare once before their first battle draw.
 		a.prepareBattlePresentation()
 	}
+	a.trace.begin()
 	// The pipeline's second barrier: this Draw is about to settle fractions,
 	// drain audio and either consume or replace the pre-recorded list, and none
 	// of that may overlap the record still running (§13.10).
+	var joinStarted time.Time
+	if a.trace != nil {
+		joinStarted = time.Now()
+	}
 	a.c.JoinPreRecord()
 	now := time.Now()
+	if a.trace != nil {
+		a.trace.row.join2 = int64(now.Sub(joinStarted) / time.Microsecond)
+	}
 	period := a.pipe.observeDraw(now, a.presentInterval)
 	// How far this Draw is through the current Update, in updates: the camera's
 	// own fraction (§13.5). Before the first Update there is nothing to measure
@@ -525,6 +565,10 @@ func (a *app) drawModern(screen *ebiten.Image, width, height int, showFPS bool) 
 		record, submit = pausedRecord, pausedSubmit
 	} else {
 		tolerance := fractionTolerance(a.pipe.tolerancePeriod(a.presentInterval, ebiten.ActualFPS()))
+		if a.trace != nil {
+			a.trace.row.armed = a.pipe.armed
+			a.trace.row.preNanos = a.c.PreRecordNanos()
+		}
 		list, hit := a.c.TakePreRecord(a.c.PresentationDigest(), tolerance)
 		switch {
 		case hit:
@@ -537,12 +581,16 @@ func (a *app) drawModern(screen *ebiten.Image, width, height int, showFPS bool) 
 		a.pipe.armed = false
 		if !hit {
 			var started time.Time
-			if showFPS {
+			if showFPS || a.trace != nil {
 				started = time.Now()
 			}
 			list = a.c.RecordModernFrame()
 			if showFPS {
 				record = time.Since(started)
+			}
+			if a.trace != nil {
+				a.trace.row.sync = true
+				a.trace.row.record = a.trace.since(started)
 			}
 		} else if showFPS {
 			record = time.Duration(a.c.PreRecordNanos())
@@ -560,18 +608,33 @@ func (a *app) drawModern(screen *ebiten.Image, width, height int, showFPS bool) 
 		x, y := ebiten.CursorPosition()
 		a.c.PositionPresentationCursor(list, x, y)
 		var submitStarted time.Time
-		if showFPS {
+		if showFPS || a.trace != nil {
 			submitStarted = time.Now()
 		}
+		a.gpu.SetStageTiming(a.trace != nil)
 		img := a.gpu.Execute(list, width, height)
 		if showFPS {
 			submit = time.Since(submitStarted)
 			a.fpsPasses = a.gpu.ModelStats().Passes
 		}
+		var blitStarted time.Time
+		if a.trace != nil {
+			blitStarted = time.Now()
+			a.trace.row.hit = hit
+			a.trace.row.execute = int64(blitStarted.Sub(submitStarted) / time.Microsecond)
+			stats := a.gpu.ModelStats()
+			a.trace.row.passes, a.trace.row.vertices, a.trace.row.subs = stats.Passes, stats.SubmittedVertices, stats.DirectSubjects
+			st := a.gpu.StageTimes()
+			a.trace.row.xPrepare, a.trace.row.xModel = int64(st.Prepare/time.Microsecond), int64(st.Model/time.Microsecond)
+			a.trace.row.xPlace, a.trace.row.xReplay = int64(st.ModelPlace/time.Microsecond), int64(st.Replay/time.Microsecond)
+		}
 		if img != nil {
 			a.c.CommitStrategicPresentation()
 			screen.DrawImage(img, &ebiten.DrawImageOptions{})
 			a.c.MarkArrivalPresented()
+		}
+		if a.trace != nil {
+			a.trace.row.blit = a.trace.since(blitStarted)
 		}
 	}
 	// The overlay is drawn after the GPU surface and outside the recorded list:
@@ -586,6 +649,10 @@ func (a *app) drawModern(screen *ebiten.Image, width, height int, showFPS bool) 
 	a.reportPipelinePeriodically()
 	sampledAt := now
 	if a.ledger.tail() {
+		var bodyStarted time.Time
+		if a.trace != nil {
+			bodyStarted = time.Now()
+		}
 		// The host step scheduled before this Draw. Running it here,
 		// after Execute rather than before the Draw, is what lets the launch
 		// below happen after the last client write of the period instead of
@@ -594,6 +661,9 @@ func (a *app) drawModern(screen *ebiten.Image, width, height int, showFPS bool) 
 		// for this host step exactly once.
 		a.updateBody()
 		sampledAt = time.Now()
+		if a.trace != nil {
+			a.trace.row.body = int64(sampledAt.Sub(bodyStarted) / time.Microsecond)
+		}
 		// This frame has already been presented; the body may have released a
 		// tick, so the prediction below needs a base taken after it. It is the
 		// next frame's sample, not a second one for this frame — the fraction
@@ -603,7 +673,14 @@ func (a *app) drawModern(screen *ebiten.Image, width, height int, showFPS bool) 
 	// The next Draw sits one present period after this one began; the tick
 	// fraction was sampled at sampledAt, which is later than this Draw's start
 	// when an update body ran in between.
+	var launchStarted time.Time
+	if a.trace != nil {
+		launchStarted = time.Now()
+	}
 	a.launchPreRecord(now, sampledAt, period, tick16)
+	if a.trace != nil {
+		a.trace.row.launch = a.trace.since(launchStarted)
+	}
 	a.pipe.observeTick(sampledAt, tick16)
 	return blend, record, submit
 }
@@ -927,7 +1004,12 @@ func Run(c *client.Client, mode RendererMode, options RunOptions) error {
 		// This is platform work, not retail behaviour — see Backend.WarmUp.
 		be.WarmUp()
 	}
-	game := &app{c: c, mode: mode, options: options, fullscreen: options.Fullscreen}
+	trace, err := newFrameTrace(options.FrameTrace)
+	if err != nil {
+		return err
+	}
+	defer trace.close()
+	game := &app{c: c, mode: mode, options: options, fullscreen: options.Fullscreen, trace: trace}
 	game.c.SetBattlePresentationPreparer(game.prepareBattlePresentation)
 	defer game.c.SetBattlePresentationPreparer(nil)
 	game.c.SetDebugDeviceCapture(game.writeDebugDeviceCapture)

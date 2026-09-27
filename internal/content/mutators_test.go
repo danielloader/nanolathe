@@ -17,16 +17,25 @@ import (
 // override, one whose authored default is outside the unsigned 16-bit store,
 // and one with no damage at all. Their areas of effect span the direct-hit
 // bound: the gun's 16 is a direct hit, the death blast's 400 is a large
-// splash, and an unlinked shell's 30 is the smallest stock splash.
+// splash, and an unlinked shell's 30 is the smallest stock splash. The units
+// carry the production shapes Income distinguishes — a commander-like surplus
+// over upkeep, a self-powered unit, a solar-like negative energyuse, wind and
+// tidal generators and a negative energymake — and an indestructible metal
+// deposit sits among the features. One ground unit and one flying unit
+// carry movement values for Unit speed.
 func mutatorFixture(t *testing.T) *Catalog {
 	t.Helper()
 	units := map[string]*UnitDef{
 		"armbuilder": {UnitName: "ARMBUILDER", WorkerTime: 300, BuildCostMetal: 150, BuildCostEnergy: 1200, BuildTime: 4000, MaxDamage: 800, HealTime: 20, Corpse: "armbuilder_dead",
-			SightDistance: 300, RadarDistance: 1000, SonarDistance: 0, RadarDistanceJam: 200, SonarDistanceJam: 0, Weapon1: "gun", ExplodeAs: "blast"},
+			SightDistance: 300, RadarDistance: 1000, SonarDistance: 0, RadarDistanceJam: 200, SonarDistanceJam: 0, Weapon1: "gun", ExplodeAs: "blast",
+			EnergyMake: 25, EnergyUse: 1, MetalMake: 0.3, MakesMetal: 1,
+			MaxVelocity: 1 << 16, Acceleration: 1000, BrakeRate: 3000, TurnRate: 500, MoveRate1: 2 << 16, MoveRate2: 2 << 16},
 		"armtwin": {UnitName: "ARMTWIN", WorkerTime: 0, BuildCostMetal: 0, BuildCostEnergy: 7, BuildTime: 100, MaxDamage: 50, Corpse: " ARMBUILDER_DEAD ",
-			SightDistance: -5, SonarDistance: 3, SonarDistanceJam: 7, Weapon1: "gun"},
-		"corloop":  {UnitName: "CORLOOP", WorkerTime: 1, BuildCostMetal: 3, BuildCostEnergy: 5, BuildTime: 10, MaxDamage: 10, Corpse: "loop_a", SightDistance: 1, SelfDestructAs: "dud"},
-		"corplain": {UnitName: "CORPLAIN", WorkerTime: 65, BuildCostMetal: 1, BuildCostEnergy: 1, BuildTime: 10, MaxDamage: 10},
+			SightDistance: -5, SonarDistance: 3, SonarDistanceJam: 7, Weapon1: "gun",
+			EnergyMake: 5, EnergyUse: 5, ExtractsMetal: 0.001},
+		"corloop": {UnitName: "CORLOOP", WorkerTime: 1, BuildCostMetal: 3, BuildCostEnergy: 5, BuildTime: 10, MaxDamage: 10, Corpse: "loop_a", SightDistance: 1, SelfDestructAs: "dud", EnergyUse: -20,
+			CanFly: true, MaxVelocity: 600000, Acceleration: 20000, BrakeRate: 100000, TurnRate: 40000, MoveRate1: 900000},
+		"corplain": {UnitName: "CORPLAIN", WorkerTime: 65, BuildCostMetal: 1, BuildCostEnergy: 1, BuildTime: 10, MaxDamage: 10, WindGenerator: 30, TidalGenerator: 1, EnergyMake: -2},
 	}
 	for key, u := range units {
 		u.CanonicalKey = key
@@ -39,6 +48,7 @@ func mutatorFixture(t *testing.T) *Catalog {
 		"loop_b":          {Metal: 9, Energy: 2, FeatureDead: "loop_a"},
 		"tree":            {Energy: 250, FeatureBurnt: "tree_burnt"},
 		"tree_burnt":      {Metal: 30, Energy: 30},
+		"deposit":         {Metal: 250, Indestructible: true},
 	}
 	for key, f := range features {
 		f.CanonicalKey = key
@@ -48,10 +58,10 @@ func mutatorFixture(t *testing.T) *Catalog {
 		t.Fatal(err)
 	}
 	weapons := map[string]*WeaponDef{
-		"gun":   {ID: 1, DamageDefault: 45, Damage: map[string]int32{"ARMBUILDER": 90, "corloop": -3, "CorLoop": 7}, AreaOfEffect: 16},
+		"gun":   {ID: 1, DamageDefault: 45, Damage: map[string]int32{"ARMBUILDER": 90, "corloop": -3, "CorLoop": 7}, AreaOfEffect: 16, ReloadTime: 45},
 		"blast": {ID: 2, DamageDefault: 70000, AreaOfEffect: 400},
 		"dud":   {ID: 3},
-		"shell": {ID: 4, DamageDefault: 20, AreaOfEffect: 30},
+		"shell": {ID: 4, DamageDefault: 20, AreaOfEffect: 30, ReloadTime: 5},
 	}
 	for key, w := range weapons {
 		w.CanonicalKey = key
@@ -100,7 +110,7 @@ func featureValue(f *FeatureDef) FeatureDef {
 func TestZeroMutatorsLeaveTheCloneIdentical(t *testing.T) {
 	base := mutatorFixture(t)
 	one := Factor{1, 1}
-	for _, m := range []Mutators{{}, {BuildSpeed: one, BuildCost: one, Health: one, Damage: one, Sight: one, Radar: one}} {
+	for _, m := range []Mutators{{}, {BuildSpeed: one, BuildCost: one, Health: one, Damage: one, Sight: one, Radar: one, Income: one, Salvage: one, FireRate: one, UnitSpeed: one}} {
 		want, got := base.Clone(), base.Clone()
 		if err := got.ApplyMutators(m); err != nil {
 			t.Fatalf("ApplyMutators(%+v): %v", m, err)
@@ -121,8 +131,10 @@ func TestZeroMutatorsLeaveTheCloneIdentical(t *testing.T) {
 // costs and corpse-chain feature pools (P2); health moves MaxDamage; damage
 // moves each weapon's default and overrides; area of effect moves each splash
 // weapon's AreaOfEffect; sight moves SightDistance; radar moves the four
-// sensor and jamming distances (P3). Per-definition hashes stay
-// the authored identities (§6.6).
+// sensor and jamming distances (P3); income moves the production fields;
+// salvage moves every destructible feature's pools; fire rate moves each
+// weapon's ReloadTime by the inverse factor; unit speed moves the motion
+// fields. Per-definition hashes stay the authored identities (§6.6).
 func TestEachMutatorChangesExactlyItsFields(t *testing.T) {
 	base := mutatorFixture(t)
 	pristine := base.Clone()
@@ -155,6 +167,33 @@ func TestEachMutatorChangesExactlyItsFields(t *testing.T) {
 		{key: "areaOfEffect", weapon: func(w *WeaponDef) {
 			if w.AreaOfEffect > 16 {
 				w.AreaOfEffect = scaleI(w.AreaOfEffect, math.MaxUint16)
+			}
+		}},
+		{key: "income", unit: func(u *UnitDef) {
+			u.EnergyMake = k.scaleSurplus(u.EnergyMake, u.EnergyUse)
+			if u.EnergyUse < 0 {
+				u.EnergyUse = -k.scaleStoredFloat(-u.EnergyUse)
+			}
+			u.MetalMake, u.ExtractsMetal = k.scaleStoredFloat(u.MetalMake), k.scaleStoredFloat(u.ExtractsMetal)
+			u.WindGenerator, u.TidalGenerator = k.scaleStoredFloat(u.WindGenerator), k.scaleStoredFloat(u.TidalGenerator)
+		}},
+		{key: "salvage", feature: func(key string, f *FeatureDef) {
+			if !f.Indestructible {
+				f.Metal, f.Energy = scaleI(f.Metal, math.MaxUint16), scaleI(f.Energy, math.MaxUint16)
+			}
+		}},
+		{key: "fireRate", weapon: func(w *WeaponDef) {
+			w.ReloadTime = int32(k.inverse().scale(int64(w.ReloadTime), math.MaxUint16))
+		}},
+		{key: "unitSpeed", unit: func(u *UnitDef) {
+			brake := int64(4)
+			if u.CanFly {
+				brake = 2
+			}
+			u.MaxVelocity, u.MoveRate1, u.MoveRate2 = 2*u.MaxVelocity, 2*u.MoveRate1, 2*u.MoveRate2
+			u.Acceleration, u.BrakeRate = 4*u.Acceleration, int32(brake*int64(u.BrakeRate))
+			if u.TurnRate > 0 {
+				u.TurnRate = int32(min(2*int64(u.TurnRate), math.MaxUint16))
 			}
 		}},
 		{key: "sight", unit: func(u *UnitDef) { u.SightDistance = scaleI(u.SightDistance, math.MaxInt16) }},
@@ -269,6 +308,187 @@ func TestAreaOfEffectKeepsTheDirectHitBound(t *testing.T) {
 	}
 	if c.Weapons["gun"].AreaOfEffect != 16 {
 		t.Fatal("a direct-hit weapon gained splash")
+	}
+}
+
+// TestIncomeScalesProductionBeyondUpkeep locks Income's shapes on the
+// fixture: a surplus over upkeep scales and the upkeep does not (25 made for 1
+// used becomes 1 + k·24), a self-powered unit (5 for 5) is untouched, the
+// solar-style negative energyuse is production and scales with its sign kept
+// [05 R-ECO-01 §2], the metal, extraction, wind and tidal producers scale,
+// and makesmetal, positive upkeep and a negative energymake are left alone.
+// Each scaled value starts from its single-precision store and is rounded
+// once to single [02 R-KEYS-01 §5]: 0.3 at ×0.75 is the single nearest
+// 0.22500001, where one double multiply narrowed afterwards would give the
+// single below it, nearest 0.22499999.
+func TestIncomeScalesProductionBeyondUpkeep(t *testing.T) {
+	for _, tc := range []struct {
+		k              Factor
+		surplus, solar float64
+		metal          float32
+		wind, tidal    float64
+	}{
+		{Factor{2, 1}, 49, -40, 0.6, 60, 2},
+		{Factor{3, 4}, 19, -15, 0.22500001, 22.5, 0.75},
+		{Factor{1, 4}, 7, -5, 0.075, 7.5, 0.25},
+	} {
+		c := mutatorFixture(t).Clone()
+		if err := c.ApplyMutators(Mutators{Income: tc.k}); err != nil {
+			t.Fatal(err)
+		}
+		com, twin, solar, gen := c.Units["armbuilder"], c.Units["armtwin"], c.Units["corloop"], c.Units["corplain"]
+		if com.EnergyMake != tc.surplus || com.EnergyUse != 1 || com.MakesMetal != 1 {
+			t.Errorf("×%s: surplus unit make %v use %v makesmetal %d, want %v, 1 and 1", tc.k, com.EnergyMake, com.EnergyUse, com.MakesMetal, tc.surplus)
+		}
+		if got := float32(com.MetalMake); got != tc.metal || float64(got) != com.MetalMake {
+			t.Errorf("×%s: metalmake 0.3 = %v, want exactly the single %v", tc.k, com.MetalMake, tc.metal)
+		}
+		if twin.EnergyMake != 5 || twin.EnergyUse != 5 {
+			t.Errorf("×%s: self-powered unit = make %v use %v, want 5 and 5", tc.k, twin.EnergyMake, twin.EnergyUse)
+		}
+		if want := float64(float32(float64(float32(0.001)) * tc.k.float())); twin.ExtractsMetal != want {
+			t.Errorf("×%s: extractsmetal = %v, want %v", tc.k, twin.ExtractsMetal, want)
+		}
+		if solar.EnergyUse != tc.solar || solar.EnergyMake != 0 {
+			t.Errorf("×%s: solar energyuse %v make %v, want %v and 0", tc.k, solar.EnergyUse, solar.EnergyMake, tc.solar)
+		}
+		if gen.WindGenerator != tc.wind || gen.TidalGenerator != tc.tidal || gen.EnergyMake != -2 {
+			t.Errorf("×%s: wind %v tidal %v make %v, want %v, %v and an untouched -2", tc.k, gen.WindGenerator, gen.TidalGenerator, gen.EnergyMake, tc.wind, tc.tidal)
+		}
+	}
+	for _, tc := range []struct {
+		name             string
+		made, used, want float64
+	}{
+		{"no upkeep is plain scaling", 1200, 0, 4800},
+		{"negative upkeep is not upkeep", 3, -20, 12},
+		{"make below upkeep", 2, 5, 2},
+		{"NaN stays", math.NaN(), 0, math.NaN()},
+		{"single ceiling", math.MaxFloat32, 0, math.MaxFloat32},
+	} {
+		got := (Factor{4, 1}).scaleSurplus(tc.made, tc.used)
+		if got != tc.want && !(math.IsNaN(got) && math.IsNaN(tc.want)) {
+			t.Errorf("%s: surplus ×4 of make %v use %v = %v, want %v", tc.name, tc.made, tc.used, got, tc.want)
+		}
+	}
+}
+
+// TestSalvageScalesEveryDestructibleFeature: Salvage reaches every feature
+// that is not indestructible — corpse chains and map features alike — and a
+// corpse-chain feature takes Build cost and Salvage as one product rounded
+// once: 45 at 0.5·0.5 is 11, where two roundings would give 12. An
+// indestructible metal deposit is left alone at every factor, because the
+// deposit pass keeps only the low byte of its metal [05 R-FEAT-01 §7].
+func TestSalvageScalesEveryDestructibleFeature(t *testing.T) {
+	c := mutatorFixture(t).Clone()
+	if err := c.ApplyMutators(Mutators{BuildCost: Factor{1, 2}, Salvage: Factor{1, 2}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		key           string
+		metal, energy int32
+	}{
+		{"armbuilder_dead", 23, 0}, // 90/4 = 22.5 rounds half up
+		{"armbuilder_heap", 11, 1}, // one rounding of 45/4 and 3/4
+		{"loop_a", 2, 1},           // the minimum of one
+		{"loop_b", 2, 1},
+		{"tree", 0, 125},       // map-only: Salvage alone
+		{"tree_burnt", 15, 15}, // FeatureBurnt is not the corpse chain
+		{"deposit", 250, 0},    // indestructible
+	} {
+		f := c.Features[tc.key]
+		if f.Metal != tc.metal || f.Energy != tc.energy {
+			t.Errorf("%s = metal %d energy %d, want %d/%d", tc.key, f.Metal, f.Energy, tc.metal, tc.energy)
+		}
+	}
+	c = mutatorFixture(t).Clone()
+	if err := c.ApplyMutators(Mutators{Salvage: Factor{4, 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if d, tree := c.Features["deposit"], c.Features["tree"]; d.Metal != 250 || tree.Energy != 1000 {
+		t.Fatalf("salvage ×4: deposit %d tree %d, want an untouched 250 and 1000", d.Metal, tree.Energy)
+	}
+	if got := (Factor{4, 1}).times(Factor{4, 1}); got != (Factor{16, 1}) || (Factor{}).times(Factor{1, 4}) != (Factor{1, 4}) {
+		t.Fatal("factor products must be exact and treat the zero value as the identity")
+	}
+}
+
+// TestFireRateDividesReloadTime: Fire rate k scales each weapon's stored
+// reload by 1/k with the Build speed rounding, never creates a zero reload
+// (a stockpile weapon would build free rounds [06 R-WPN-05 §2]), leaves a zero
+// reload alone and saturates at the unsigned 16-bit store [06 §4.2].
+func TestFireRateDividesReloadTime(t *testing.T) {
+	for _, tc := range []struct {
+		k                Factor
+		gun, shell, dead int32
+	}{
+		{Factor{2, 1}, 23, 3, 0},   // 22.5 and 2.5 round half up
+		{Factor{4, 1}, 11, 1, 0},   // 5/4 rounds down to one
+		{Factor{1, 4}, 180, 20, 0}, // slower
+	} {
+		c := mutatorFixture(t).Clone()
+		if err := c.ApplyMutators(Mutators{FireRate: tc.k}); err != nil {
+			t.Fatal(err)
+		}
+		if gun, shell, blast := c.Weapons["gun"], c.Weapons["shell"], c.Weapons["blast"]; gun.ReloadTime != tc.gun || shell.ReloadTime != tc.shell || blast.ReloadTime != tc.dead {
+			t.Errorf("fire rate ×%s: reloads %d/%d/%d, want %d/%d/%d", tc.k, gun.ReloadTime, shell.ReloadTime, blast.ReloadTime, tc.gun, tc.shell, tc.dead)
+		}
+		if c.Units["armbuilder"].Weapon1Def != c.Weapons["gun"] {
+			t.Fatal("unit weapon links left the clone")
+		}
+	}
+	c := &Catalog{Weapons: map[string]*WeaponDef{"slow": {ReloadTime: 20000}, "one": {ReloadTime: 1}}}
+	if err := c.ApplyMutators(Mutators{FireRate: Factor{1, 4}}); err != nil {
+		t.Fatal(err)
+	}
+	if c.Weapons["slow"].ReloadTime != math.MaxUint16 || c.Weapons["one"].ReloadTime != 4 {
+		t.Fatalf("reloads = %d/%d, want the 16-bit ceiling and 4", c.Weapons["slow"].ReloadTime, c.Weapons["one"].ReloadTime)
+	}
+}
+
+// TestUnitSpeedKeepsThePathShape: Unit speed k scales velocity, turn rate and
+// the movement-rate thresholds by k and acceleration by k², so the ground
+// mover's turning distance |err|·speed/turnrate and braking distance
+// speed²/(2·brakerate) are unchanged [04 R-MOV-01 §4]; brakerate scales by k²
+// on the ground and by k for a unit that flies, whose integrator compares
+// speed with brakerate directly [04 §10.1]. Turn rate saturates at its
+// unsigned 16-bit store, and ×0.25 rounds k² = 1/16 once, half up.
+func TestUnitSpeedKeepsThePathShape(t *testing.T) {
+	for _, tc := range []struct {
+		k                                   Factor
+		groundV, groundA, groundB, groundW  int32
+		airV, airA, airB, airW, airMoveRate int32
+	}{
+		{Factor{2, 1}, 131072, 4000, 12000, 1000, 1200000, 80000, 200000, 65535, 1800000},
+		{Factor{1, 4}, 16384, 63, 188, 125, 150000, 1250, 25000, 10000, 225000},
+		{Factor{3, 2}, 98304, 2250, 6750, 750, 900000, 45000, 150000, 60000, 1350000},
+	} {
+		c := mutatorFixture(t).Clone()
+		if err := c.ApplyMutators(Mutators{UnitSpeed: tc.k}); err != nil {
+			t.Fatal(err)
+		}
+		g, a := c.Units["armbuilder"], c.Units["corloop"]
+		if g.MaxVelocity != tc.groundV || g.Acceleration != tc.groundA || g.BrakeRate != tc.groundB || g.TurnRate != tc.groundW || g.MoveRate1 != 2*tc.groundV {
+			t.Errorf("×%s ground: v %d a %d b %d w %d moverate %d, want %d %d %d %d %d", tc.k, g.MaxVelocity, g.Acceleration, g.BrakeRate, g.TurnRate, g.MoveRate1, tc.groundV, tc.groundA, tc.groundB, tc.groundW, 2*tc.groundV)
+		}
+		if a.MaxVelocity != tc.airV || a.Acceleration != tc.airA || a.BrakeRate != tc.airB || a.TurnRate != tc.airW || a.MoveRate1 != tc.airMoveRate || a.MoveRate2 != 0 {
+			t.Errorf("×%s air: v %d a %d b %d w %d moverate %d/%d, want %d %d %d %d %d/0", tc.k, a.MaxVelocity, a.Acceleration, a.BrakeRate, a.TurnRate, a.MoveRate1, a.MoveRate2, tc.airV, tc.airA, tc.airB, tc.airW, tc.airMoveRate)
+		}
+	}
+	// The ground braking distance is the same at every exact step.
+	stop := func(u *UnitDef) int64 {
+		v := int64(u.MaxVelocity)
+		return ((v * v) >> 16 << 16) / (2 * int64(u.BrakeRate))
+	}
+	base := mutatorFixture(t).Units["armbuilder"]
+	for _, k := range []Factor{{2, 1}, {4, 1}, {1, 2}} {
+		c := mutatorFixture(t).Clone()
+		if err := c.ApplyMutators(Mutators{UnitSpeed: k}); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := stop(c.Units["armbuilder"]), stop(base); got != want {
+			t.Errorf("×%s: braking distance %d, want the unscaled %d", k, got, want)
+		}
 	}
 }
 
@@ -548,10 +768,10 @@ func TestMutatorCatalogDescribesTheClosedSet(t *testing.T) {
 			t.Fatalf("%s description %q is not one sentence", info.Key, info.Description)
 		}
 	}
-	if got := strings.Join(keys, ","); got != "buildSpeed,buildCost,health,damage,areaOfEffect,sight,radar" {
+	if got := strings.Join(keys, ","); got != "buildSpeed,buildCost,income,salvage,health,damage,areaOfEffect,fireRate,unitSpeed,sight,radar" {
 		t.Fatalf("catalog order = %s", got)
 	}
-	if got := strings.Join(groups, ","); got != "Economy,Economy,Combat,Combat,Combat,Vision,Vision" {
+	if got := strings.Join(groups, ","); got != "Economy,Economy,Economy,Economy,Combat,Combat,Combat,Combat,Movement,Vision,Vision" {
 		t.Fatalf("catalog groups = %s", got)
 	}
 	infos[0].Label = "changed"

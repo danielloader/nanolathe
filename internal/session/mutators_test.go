@@ -1,9 +1,11 @@
 package session
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/clock"
+	"github.com/nanolathe-gg/nanolathe/internal/combat"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
@@ -83,11 +85,10 @@ func strictHelpBuildCatalog(workerTime, buildTime int32) *content.Catalog {
 	return cat
 }
 
-// strictHelpBuild runs one helper-driven construction under Strict 3.1 on the
-// given catalog, using the assisted-completion fixture's scene, and reports
-// the number of ticks on which the frame's remaining fraction fell and what
-// the owner paid in total once settlement has caught up.
-func strictHelpBuild(t *testing.T, cat *content.Catalog) (workTicks int, metal, energy float32) {
+// newStrictMutatorScene binds a Strict 3.1 session on the minimal terrain for
+// the mutator relationship tests: every player exists as a human with 1,000 of
+// each resource in 2,000 of storage.
+func newStrictMutatorScene(t *testing.T, cat *content.Catalog) *Session {
 	t.Helper()
 	s := &Session{Gameplay: gameplay.Strict31, Catalog: cat, World: minimalTerrain(), Mission: syntheticMission(), LocalOwner: 0}
 	w, err := newSlicedWorld(cat)
@@ -112,6 +113,17 @@ func strictHelpBuild(t *testing.T, cat *content.Catalog) (workTicks int, metal, 
 	if s.Rules.Name != StrictRuleSetName {
 		t.Fatalf("scene bound %q, want Strict 3.1", s.Rules.Name)
 	}
+	return s
+}
+
+// strictHelpBuild runs one helper-driven construction under Strict 3.1 on the
+// given catalog, using the assisted-completion fixture's scene, and reports
+// the number of ticks on which the frame's remaining fraction fell and what
+// the owner paid in total once settlement has caught up.
+func strictHelpBuild(t *testing.T, cat *content.Catalog) (workTicks int, metal, energy float32) {
+	t.Helper()
+	s := newStrictMutatorScene(t, cat)
+	w := s.Units
 	conDef, prodDef := cat.Units["mutatorcon"], cat.Units["mutatorprod"]
 	hHelper, err := w.Create(conDef, 0, world.CellToWorld(10), 0, world.CellToWorld(8))
 	if err != nil {
@@ -192,6 +204,157 @@ func TestStrictBuildSpeedScalesConstructionAtEqualCost(t *testing.T) {
 				t.Fatalf("workertime %d buildtime %d at ×%s: %d work ticks billing %v metal %v energy, want %d ticks and the authored 32 and 64",
 					tc.workerTime, tc.buildTime, run.speed, ticks, metal, energy, run.visits)
 			}
+		}
+	}
+}
+
+// TestStrictIncomeScalesSettlementProduction is Income's relationship under
+// Strict 3.1: a generator with no upkeep and a solar-style negative energyuse
+// each produce k times as much per settlement pass [05 R-ECO-01 §2], while a
+// self-powered unit (5 made for 5 used) stays exactly neutral, because only a
+// surplus over upkeep scales.
+func TestStrictIncomeScalesSettlementProduction(t *testing.T) {
+	for _, run := range []struct {
+		income   content.Factor
+		produced float32
+	}{
+		{content.Factor{}, 45},
+		{content.Factor{Num: 2, Den: 1}, 85},
+		{content.Factor{Num: 1, Den: 4}, 15},
+	} {
+		cat := minimalCatalogForStrict()
+		mk := func(name string, f func(*content.UnitDef)) {
+			d := &content.UnitDef{UnitName: name, ObjectName: name, MaxDamage: 100, Limit: -1, SightDistance: 64,
+				FootprintX: 1, FootprintZ: 1, BuildTime: 10, OnOffable: true, ActivateWhenBuilt: true,
+				MetalStorage: 2000, EnergyStorage: 5000}
+			f(d)
+			d.CanonicalKey = content.CanonicalKey(name)
+			cat.Units[d.CanonicalKey] = d
+		}
+		mk("mutfusion", func(d *content.UnitDef) { d.EnergyMake = 20 })
+		mk("mutsolar", func(d *content.UnitDef) { d.EnergyUse = -20 })
+		mk("mutradar", func(d *content.UnitDef) { d.EnergyMake, d.EnergyUse = 5, 5 })
+		installFixtureCOB(cat)
+		cat, err := applyEntryMutators(cat, content.Mutators{Income: run.income})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := newStrictMutatorScene(t, cat)
+		for i, name := range []string{"mutfusion", "mutsolar", "mutradar"} {
+			h, err := s.Units.Create(cat.Units[name], 0, world.CellToWorld(int32(4+3*i)), 0, world.CellToWorld(8))
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.Units.Unit(h).SetActivationEdge(true)
+		}
+		// Settlement runs once every 30 ticks [05 "Authoritative settlement
+		// order"]; the second pass sees every unit complete and activated.
+		for tick := uint32(1); tick <= 61; tick++ {
+			s.Clock.GlobalTick = tick
+			s.stepAuthoritativePhases(tick)
+		}
+		p := s.Econ.Players[0]
+		if p.PassProduced[economy.Energy] != run.produced || p.PassConsumed[economy.Energy] != 5 {
+			t.Fatalf("income ×%s: a pass produced %v and consumed %v energy, want %v and the authored 5",
+				run.income, p.PassProduced[economy.Energy], p.PassConsumed[economy.Energy], run.produced)
+		}
+	}
+}
+
+// TestStrictUnitSpeedShortensAStraightMove is Unit speed's relationship under
+// Strict 3.1: a ground unit moving 24 cells in a straight line arrives in
+// about 1/k of the ticks, because velocity scales by k while acceleration and
+// braking scale by k², keeping the distances they cover [04 R-MOV-01 §4].
+func TestStrictUnitSpeedShortensAStraightMove(t *testing.T) {
+	arrival := func(speed content.Factor) int {
+		cat := minimalCatalogForStrict()
+		d := &content.UnitDef{UnitName: "mutwalker", ObjectName: "mutwalker", MaxDamage: 100, Limit: -1,
+			SightDistance: 64, MovementClass: "testmove", FootprintX: 1, FootprintZ: 1, BMCode: 1, CanMove: true,
+			MaxVelocity: 1 << 16, Acceleration: 1 << 12, BrakeRate: 1 << 13, TurnRate: 1000}
+		d.CanonicalKey = content.CanonicalKey(d.UnitName)
+		cat.Units[d.CanonicalKey] = d
+		installFixtureCOB(cat)
+		cat, err := applyEntryMutators(cat, content.Mutators{UnitSpeed: speed})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := newStrictMutatorScene(t, cat)
+		h, err := s.Units.Create(cat.Units["mutwalker"], 0, world.CellToWorld(3), 0, world.CellToWorld(16))
+		if err != nil {
+			t.Fatal(err)
+		}
+		u := s.Units.Unit(h)
+		s.Movement.BindWorld(s.Units)
+		s.Movement.EnsureUnit(u)
+		id := orders.Lookup("Move_Ground")
+		q := orders.QueueForUnit(u)
+		q.Push(id, orders.NewMoveNode(id, world.CellToWorld(27), world.CellToWorld(16), 0, h, false))
+		for tick := uint32(1); tick <= 1200; tick++ {
+			s.Clock.GlobalTick = tick
+			s.stepAuthoritativePhases(tick)
+			if q.LenPrimary() == 0 {
+				return int(tick)
+			}
+		}
+		t.Fatalf("unit speed ×%s: the move never finished; unit at cell %d,%d", speed, world.WorldToCell(u.X), world.WorldToCell(u.Z))
+		return 0
+	}
+	base := arrival(content.Factor{})
+	for _, run := range []struct {
+		speed content.Factor
+		k     float64
+	}{
+		{content.Factor{Num: 2, Den: 1}, 2},
+		{content.Factor{Num: 4, Den: 1}, 4},
+		{content.Factor{Num: 1, Den: 2}, 0.5},
+	} {
+		got := arrival(run.speed)
+		ratio := float64(base) / float64(got)
+		t.Logf("unit speed ×%s: %d ticks against %d (%.2f×)", run.speed, got, base, ratio)
+		if ratio < 0.85*run.k || ratio > 1.15*run.k {
+			t.Fatalf("unit speed ×%s: the move took %d ticks against %d, a %.2f× speed-up, want about %v×", run.speed, got, base, ratio, run.k)
+		}
+	}
+}
+
+// TestFireRateStockpilesAtEqualCost is Fire rate's stockpile relationship: a
+// round advances five progress per visit up to reloadtime and bills cost in
+// proportion to progress [06 §11.1], so under Fire rate k the same round
+// completes in 1/k of the ticks and bills exactly the authored per-shot cost.
+func TestFireRateStockpilesAtEqualCost(t *testing.T) {
+	cat := &content.Catalog{Weapons: map[string]*content.WeaponDef{
+		"mutnuke": {Name: "mutnuke", ReloadTime: 3600, Stockpile: true, EnergyPerShot: 180000, MetalPerShot: 1500},
+	}}
+	for _, run := range []struct {
+		rate  content.Factor
+		ticks uint32
+	}{
+		{content.Factor{}, 3600},
+		{content.Factor{Num: 2, Den: 1}, 1800},
+		{content.Factor{Num: 4, Den: 1}, 900},
+		{content.Factor{Num: 3, Den: 4}, 4800},
+	} {
+		mutated, err := applyEntryMutators(cat, content.Mutators{FireRate: run.rate})
+		if err != nil {
+			t.Fatal(err)
+		}
+		weapon := mutated.Weapons["mutnuke"]
+		slot := &combat.Slot{Weapon: weapon}
+		entry := &combat.StockpileEntry{Weapon: weapon, Count: 1}
+		var energy, metal float64
+		visit, completed := uint32(0), uint32(0)
+		for slot.Ammo == 0 && visit < 20000 {
+			completed = visit
+			visit, _, _ = combat.TickStockpile(entry, slot, visit, func(e, m float32) bool {
+				energy += float64(e)
+				metal += float64(m)
+				return true
+			})
+		}
+		// Visits fall every five ticks from zero, the last at reload − 5.
+		if slot.Ammo != 1 || energy != 180000 || metal != 1500 || completed != run.ticks-5 {
+			t.Fatalf("fire rate ×%s: ammo %d completed at tick %d billing %v energy %v metal, want one round at tick %d billing 180000 and 1500",
+				run.rate, slot.Ammo, completed, energy, metal, run.ticks-5)
 		}
 	}
 }
@@ -292,14 +455,17 @@ func TestEntrySitesApplyMutatorsInStrict(t *testing.T) {
 //
 // It also checks that at ×4 no maxdamage or weapon damage passes 32,767, the
 // signed 16-bit live health and packet amount they reach [04 §4.4][06 §9.2],
-// and logs how many stock records the cap saturates.
+// and logs how many stock records the cap saturates; that Unit speed ×4 keeps
+// every aircraft's flight decay positive [04 §10.1]; and that no metal deposit
+// is scaled [05 R-FEAT-01 §7].
 //
 // Skipped without retail assets.
 func TestStockCatalogUnderExtremeSteps(t *testing.T) {
 	f := loadRetailFixture(t)
 	slowest, top := content.MutatorSteps[0], content.MutatorSteps[len(content.MutatorSteps)-1]
 	every := func(k content.Factor) content.Mutators {
-		return content.Mutators{BuildSpeed: k, BuildCost: k, Health: k, Damage: k, Sight: k, Radar: k}
+		return content.Mutators{BuildSpeed: k, BuildCost: k, Health: k, Damage: k, AreaOfEffect: k, Sight: k, Radar: k,
+			Income: k, Salvage: k, FireRate: k, UnitSpeed: k}
 	}
 	if err := f.cat.Clone().ApplyMutators(every(slowest)); err != nil {
 		t.Fatalf("stock catalog refused %s: %v", slowest, err)
@@ -367,4 +533,28 @@ func TestStockCatalogUnderExtremeSteps(t *testing.T) {
 		}
 	}
 	t.Logf("at ×%s the 32,767 cap saturates %d stock units' maxdamage and %d stock weapons' damage", top, cappedUnits, cappedWeapons)
+
+	// Unit speed: the flight integrator's per-tick decay is
+	// 1 − (acceleration << 16)/maxvelocity [04 §10.1], and acceleration grows
+	// by k² against velocity's k, so the decay must stay positive at ×4.
+	for _, u := range high.UnitRecords() {
+		if u.CanFly && u.MaxVelocity > 0 {
+			if loss := (int64(u.Acceleration) << 16) / int64(u.MaxVelocity); loss >= 1<<16 {
+				t.Fatalf("%s flight decay loss %d at unit speed ×%s leaves no speed", u.UnitName, loss, top)
+			}
+		}
+	}
+	// Neither Salvage nor Build cost reaches a stock metal deposit, whose metal
+	// the deposit pass keeps as a byte [05 R-FEAT-01 §7]: Salvage skips every
+	// indestructible definition, and no stock corpse chain holds one.
+	featureKeys := make([]string, 0, len(f.cat.Features))
+	for key := range f.cat.Features {
+		featureKeys = append(featureKeys, key)
+	}
+	sort.Strings(featureKeys)
+	for _, key := range featureKeys {
+		if before, after := f.cat.Features[key], high.Features[key]; before.Indestructible && after.Metal != before.Metal {
+			t.Fatalf("deposit %s metal %d became %d at ×%s", key, before.Metal, after.Metal, top)
+		}
+	}
 }

@@ -535,6 +535,10 @@ type Mutators struct {
 	AreaOfEffect Factor // shown as "Blast size"
 	Sight        Factor
 	Radar        Factor
+	Income       Factor
+	Salvage      Factor
+	FireRate     Factor // shown as "Fire rate"
+	UnitSpeed    Factor // shown as "Unit speed"
 }
 
 func (m Mutators) IsZero() bool
@@ -574,11 +578,24 @@ the store domain retail gives it ([02 R-KEYS-01 §5]). For a value `v`:
   65,535 for feature `metal`/`energy`; 32,767 for the sight, radar, sonar
   and jamming distances; 32,767 for `maxdamage` and weapon damage, because
   live health and a carried hit are signed 16-bit values downstream
-  ([04 §4.4], [06 §9.2]); 65,535 for weapon `areaofeffect`; 2³¹−1 for
-  `buildtime`. The maximum is the narrowest
+  ([04 §4.4], [06 §9.2]); 65,535 for weapon `areaofeffect` and
+  `reloadtime` and for unit `turnrate`; 2³¹−1 for `buildtime` and for the
+  16.16 `maxvelocity`, `acceleration`, `brakerate`, `moverate1` and
+  `moverate2`. The maximum is the narrowest
   store the value reaches, not only its FBI or TDF store.
   Unit costs are multiplied as integers and then stored as `float32`, which is
   exact below 2²⁴.
+- The floating production keys Income scales are stored by retail as single
+  floats ([02 R-KEYS-01 §5], [05 R-PROD-01 §1]); the compiler keeps the
+  authored double, and consumers narrow it. A positive value becomes
+  `float32(float64(float32(v))·k)`: the stored single times the step, which
+  a double holds exactly, rounded once to single. It saturates at the largest
+  single, and NaN and `v ≤ 0` are unchanged. The one exception is Income's
+  negative-`energyuse` arm (§6.5).
+- Where two mutators scale one field (Build cost and Salvage on a corpse-chain
+  feature), or one scales a field by k² (Unit speed), the field is scaled once
+  by the exact product. Every step's numerator and denominator is at most 4,
+  so a product's are at most 16; the product is never a stored factor.
 
 Saturating rather than wrapping is deliberate. Retail wraps an out-of-range
 *authored* integer when it stores it, and content that authors one keeps the
@@ -608,6 +625,10 @@ product exact.
 | Blast size | every weapon's `AreaOfEffect` above 16, from its stored unsigned 16-bit value, never scaled below 17 | every blast reaches k× as far | A projectile that meets a unit with an area of 16 or less damages that unit alone and skips the area sweep ([06 §9.1]), and Modern's reliable direct-fire class uses the same bound, so a direct-hit weapon is left alone and a splash weapon never scales into that class: a laser gains no splash, and the smallest stock splash (30) floors at 17 at ×0.25 instead of becoming a direct hit. Death, self-destruct, burn and meteor weapons are included. The radius is the area halved and the falloff reads distance over radius, so a recipient at the same fraction of the radius takes the same share ([06 §9.3]). The broad phase visits about k² times the cells ([06 §9.3]); the stock largest area, 950, is 3,800 at ×4. The sweep remembers twenty units and processes a unit met again after that ([06 §9.3]), so a wider blast re-hits large multi-cell units sooner. Interceptors catch within k× the distance, because their catch test uses the same field ([06 R-WPN-05 §10]). The kamikaze pulse ring and the area-of-effect range ring widen with it ([04 R-SPEC-01 §1], [07 R-P0-11 §3]). Explosion art is not scaled. |
 | Sight | unit `SightDistance` | k× sight | Both sight lookups clamp at their table's last entry, so large factors saturate for long-sighted units ([03 §3.2]). The ranges that read `sightdistance` widen with it: the fire-at-will opportunity scan and hold-position leash ([04 R-STANCE-01 §3], [04 R-STANCE-01 §4]) and the patrol and VTOL work scans ([04 R-ORD-01 §4], [04 R-ORD-01 §7]). |
 | Radar | unit `RadarDistance`, `SonarDistance`, `RadarDistanceJam`, `SonarDistanceJam` by the same factor | k× radar and sonar | All four are plain search radii, so detection and jamming stay in proportion ([03 R-VIS-01 §5]). The emitter's height bonus is not scaled ([03 R-VIS-01 §4]); `mincloakdistance` is left alone. |
+| Income | unit `MetalMake`, `ExtractsMetal`, `WindGenerator`, `TidalGenerator`; the magnitude of a negative `EnergyUse`; and `EnergyMake`'s surplus over a positive `EnergyUse`: with `sm`, `se` the stored singles, `sm > se` becomes `float32(se + float64((sm − se)·k))` (the conversion keeps the product from fusing into the sum) | every unit produces k× what it makes beyond its own upkeep while that upkeep is charged | Each settlement contribution is the field times something the mutator leaves alone — the wind scalar, the tidal strength, the footprint's metal sum — so output scales by k ([05 R-ECO-01 §2], [05 R-PROD-01 §3], [05 R-PROD-01 §4], [05 R-PROD-01 §6]). A negative `energyuse` is not a malformed value here: it is the production arm the stock solar collectors author (−20), whose negation is added to production, so its magnitude scales and its sign and arm are kept ([05 R-ECO-01 §2]). 126 stock units author `energymake` equal to `energyuse` (radar and sonar towers, jammers, most mobile units); scaling `energymake` alone would make them net drains below ×1 and generators above it, so only the surplus scales: a fusion plant makes exactly k×, a self-powered radar stays neutral while its upkeep is charged, CORCOM's 25 for an upkeep of 1 becomes 1 + 24k, and ARMCOM, with no upkeep, makes 25k. Positive `energyuse`, `makesmetal`, storage and costs are unchanged: a metal maker keeps its authored conversion ([05 R-PROD-01 §5]), and more energy runs more makers. Upkeep is charged only while a building is activated or a mobile unit is activated or moving, and `energymake` is paid whenever the unit is complete ([05 R-ECO-01 §2]), so a switched-off radar or a parked mobile unit keeps its unscaled make at every factor. Storage fills sooner and production beyond it is wasted at the settlement clamp ([05 R-ECO-01 §6]). The computer players' difficulty discount multiplies each contribution and composes with Income ([05 R-ECO-01 §3]). An extractor samples its rate at creation ([05 R-PROD-01 §6]), and a save carries it. The HUD rates are settlement values and show the scaled output. The Classic AI's class vector clamps `energymake` at 30 ([08 R-P0-05 §5]), and the Modern AI's integer summaries round small scaled values. |
+| Salvage | feature `Metal`, `Energy` of every definition that is not `indestructible`: wrecks, heaps, rocks and trees, whether a map, a mission or a death places them. A corpse-chain feature takes Build cost × Salvage, rounded once | reclaim pays k× | Map features resolve to catalog definitions when the terrain loads, after battle entry has applied the mutators, so one transform reaches every placement. The deposit pass writes the low byte of an indestructible definition's `metal` into the extraction grid ([05 R-FEAT-01 §7]); scaling it would wrap that byte (250 × 2 is 244), so deposits are excluded. No stock indestructible definition is reclaimable. Feature reclaim counts down `trunc(15 + (energy + metal)/2)` work at a fixed rate and pays the whole pool on the removing visit ([05 R-WORK-01 §5]), so a builder earns at about the same rate for about k× as long. Repair patrol's reclaim scan ranks by value and admits a metal feature only when it fits under storage, inclusively ([05 R-FEAT-01 §6], [04 R-ORD-01 §4]), so large pools are passed over sooner when storage is nearly full. The HUD footer shows the scaled pools ([07 R-HUD-03 §3]). The computer players' discount applies to the payout ([05 R-ECO-01 §3]). Resurrection reads no pool ([05 R-WORK-01 §7]). The largest stock pool, 40,100, saturates at 65,535 from ×2. |
+| Fire rate | every weapon's `ReloadTime`, from its stored unsigned 16-bit value, scaled by the **inverse** factor as Build speed scales `buildtime` | every weapon fires k× as often | The slot fires when its countdown reaches zero ([06 §4.2]), at most once per tick per slot, so short stock reloads round unevenly at ×4 (5 ticks becomes 1). Zero stays zero and the minimum of one never creates a free round ([06 R-WPN-05 §2]). `energypershot` and `metalpershot` are billed per shot, so drain grows k-fold at the same cost per shot ([06 §4.2]). A stockpile round advances five progress per visit up to `reloadtime` and bills in proportion to progress, so nukes and anti-nukes build rounds in 1/k of the time at the same total cost, demanding k× per visit ([06 §11.1]); the stock 3,600–5,400-tick rounds (2–3 minutes) take 30–45 s at ×4. `burstrate` spaces shots within a burst on its own schedule and is untouched; a burst longer than the scaled reload overlaps the next ([06 §4.3]). The veteran reload is an integer percentage of `reloadtime`, so the bonus flattens at the smallest reloads ([06 §4.2]). `SetMaxReloadTime` hands scripts the scaled value ([06 R-WPN-05 §3]). Weapons with no reload — meteor, burn and death weapons — are unaffected. The Classic AI does not read reload; the Modern AI's damage-rate estimates scale. |
+| Unit speed | unit `MaxVelocity`, `TurnRate` (from its stored unsigned 16-bit value), `MoveRate1` and `MoveRate2` by k; `Acceleration` by k²; `BrakeRate` by k² for a unit that does not fly and by k for one that does | every unit moves and turns k× as fast along paths of the same shape | The mover chooses the ground or flight integrator on the definition's `canfly` bit alone ([04 R-MOV-01 §1]). The ground mover accelerates only while the lookahead is beyond twice its turning distance `|err|·speed/turnrate` and the point two ahead is beyond its braking distance `speed²/(2·brakerate)` ([04 R-MOV-01 §4]); both are unchanged, as is the distance to reach top speed, and the time to reach it is 1/k. The flight integrator compares horizontal speed with `brakerate` itself and turns the excess toward the heading, so there `brakerate` is a speed ([04 §10.1]); the loss term `acceleration/maxvelocity` of its decay grows k-fold, and so do the approach speed `sqrt(2·a·d)` and the terminal speed. The movement-rate tiers compare speed with the two thresholds, so a unit changes tier at the same fraction of its speed ([04 R-MOV-01 §6]). No COB port sets a speed ([04 R-COB-03 §1]). Fixed distances do not scale — the waypoint capture radius, the lookahead, the air service radii — so a unit whose step outgrows the capture radius can pass a waypoint and loop back to it, and the collision validator tests only the proposed rectangle ([04 R-COLL-01 §1]); the maintainer accepts overshoot at high factors (P18). Tick cadences (repath, air order deadlines) and weapons — projectile speed, turret turn rate — are unchanged, so fast units outrun more fire. `cruisealt` and the bank and pitch gains are untouched. The Modern AI's absolute speed thresholds (fast, scout) see the scaled speeds. |
 
 **Known hazards.** The unit-reclaim pulse forms a 32-bit product of
 `workertime`, a kill factor, `maxdamage` and 15, which retail lets overflow
@@ -617,7 +638,14 @@ overflows from 70 kills instead of 75. The abandoned-frame decay forms the 32-bi
 ([05 R-WORK-01 §9]); at Build speed ×0.25 the largest stock `buildtime` gives
 164,673,432, well inside the range. An interceptor's catch test squares its
 unhalved area as a signed 32-bit product, which wraps from 46,341
-([06 R-WPN-05 §10]); the stock interceptors author 96, 384 at ×4. Mutators do not guard downstream
+([06 R-WPN-05 §10]); the stock interceptors author 96, 384 at ×4. Unit speed ×k multiplies the flight
+integrator's decay loss `acceleration/maxvelocity` by k ([04 §10.1]); the loss
+would reach the whole speed at a ratio of 1/k, and the stock largest ratio,
+0.042, keeps it below 0.17 at ×4. Salvage skips indestructible definitions
+because the deposit pass keeps only the low byte of their metal
+([05 R-FEAT-01 §7]), but Build cost, older, still scales an indestructible
+corpse-chain definition; no stock definition is both, so only mod content can
+reach that wrap. Mutators do not guard downstream
 products, because the retail arithmetic stays retail.
 
 **Derived values.** `ApplyMutators` must recompute any compile-time value
@@ -811,7 +839,7 @@ windows is a possible follow-up, not a need.
 **The Mutators dialog.** *Change...* opens a modal over the screen built
 from the mutator catalogue (`content.MutatorCatalog`), so a new mutator needs
 no layout work: a scrolling list with a heading row per group (Economy,
-Combat, Vision), each row showing the mutator and its factor; the
+Combat, Movement, Vision), each row showing the mutator and its factor; the
 selected mutator's description beneath; *Raise*, *Lower*, *Default* and
 *Reset all* in the right-hand column; *OK* keeps the changes for the screen's
 *Apply*, and *Cancel* restores the set the dialog opened with.
@@ -894,6 +922,8 @@ dependencies.
 | Zero mutators leave the clone deep-equal with an equal `Hash`; each mutator changes exactly its fields; rounding, minimum-one, saturation and `v ≤ 0` boundaries; the hash is independent of field order | `content` |
 | Mutators reach fresh skirmish, mission entry and restore; all six fingerprint locks unchanged | `session`, `headless` |
 | Under Strict 3.1 with Build speed ×2, a fixed construction finishes in half the ticks and bills the same total resources (a relationship, not a census) | `session` |
+| Under Strict 3.1, Income scales a generator's and a solar collector's settlement production k-fold and leaves a self-powered unit neutral; Unit speed shortens a straight move to about 1/k of the ticks; Fire rate builds a stockpile round in 1/k of the ticks at the authored cost (relationships) | `session.TestStrictIncomeScalesSettlementProduction`, `session.TestStrictUnitSpeedShortensAStraightMove`, `session.TestFireRateStockpilesAtEqualCost` |
+| At the extreme steps on the stock catalog: no aircraft's flight decay reaches zero under Unit speed, and no metal deposit is scaled | `session.TestStockCatalogUnderExtremeSteps` (retail tier) |
 | Sidecar round trip; a load without one behaves as today; a load restores rule set, Community sources and entry table, unit limit and mutators, and selects the recorded mod and mutators (P6); bank bytes unchanged | `save.TestSidecarRoundTripsEveryModSpelling`, `save.TestSidecarRefusesAnotherSchemaAndMalformedFiles`, `main.TestSaveSidecarRestoresTheRecordedSelection` (retail tier) |
 | A save made under another installed mod reloads onto it and then restores; one whose mod is not installed is refused, naming it | `main.TestLoadingAnotherModsSaveSwitchesToItFirst`, `main.TestSaveSidecarRestoresTheRecordedSelection` (retail tier) |
 | The reclaim-pulse product at the maximum step for the stock catalog (§6.5) | `content`, retail tier |
@@ -939,6 +969,10 @@ that a save selects its mutators as well as its mod.
 | P12 | Manifest path, extraction caps and data directory location, open to change later | §4.1, §5.1, §5.3 |
 | P13 | The load dialog shows the sidecar line | §8.4 |
 | P14 | Blast size (areaofeffect) leaves a weapon with an area of 16 or less alone and never scales a larger area below 17, so direct-hit weapons stay direct-hit (added 2026-09-23 at the maintainer's request) | §6.5 |
+| P15 | Income scales production only: the surplus of `energymake` over a positive `energyuse`, the other producing keys and the solar arm; upkeep, `makesmetal`, storage and costs stay (added 2026-09-26 at the maintainer's request) | §6.5 |
+| P16 | Salvage scales every destructible feature's pools, map features included, and composes with Build cost as one product; metal deposits are excluded (added 2026-09-26) | §6.5 |
+| P17 | Fire rate scales `reloadtime` inversely and leaves `burstrate` alone (added 2026-09-26) | §6.5 |
+| P18 | Unit speed keeps paths' shape (velocity and turn rate k, acceleration k², braking k² on the ground and k in the air); overshoot at high factors is accepted, since mutators are for fun (added 2026-09-26) | §6.5 |
 
 ## 13. Work units
 
@@ -967,7 +1001,10 @@ fingerprint. Units 1–8 are implemented.
    dialog with its progress.
 8. **nanolathe.gg content.** The manifest, the cleaned zips and the merge
    check tool for multi-package mods (§5.5).
-9. **Follow-ups.** Manifest signatures (§5.4); fuzz targets for the exposed
+9. **Second mutator set.** Income, Salvage, Fire rate and Unit speed (P15–P18),
+   their boundary tests in `content` and relationship tests in `session`.
+   Implemented.
+10. **Follow-ups.** Manifest signatures (§5.4); fuzz targets for the exposed
    readers, recommended before the catalogue is advertised widely;
    `minimumEngine` once releases are stamped.
 
@@ -984,6 +1021,10 @@ fingerprint. Units 1–8 are implemented.
 | Resurrection | [05 R-WORK-01 §7] |
 | Abandoned-frame decay | [05 R-WORK-01 §9] |
 | Malformed build numbers | [05 R-WORK-01 §11] |
+| Production keys, their single store and the settlement gather (Income) | [05 R-PROD-01 §1], [05 R-ECO-01 §2] |
+| Deposits seed the metal byte (Salvage's exclusion) | [05 R-FEAT-01 §7] |
+| Reload countdown, per-shot cost, bursts and the stockpile queue (Fire rate) | [06 §4.2], [06 §4.3], [06 §11.1] |
+| Ground and flight integrators (Unit speed) | [04 R-MOV-01 §4], [04 §10.1] |
 | Sight-shape and terrain-ray quantization | [03 §3.2] |
 | Configured unit-limit carry on load | [08 R-SESS-01 §9] |
 | The loading screen | [07 "The loading screen"] |

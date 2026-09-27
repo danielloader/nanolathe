@@ -115,7 +115,15 @@ func TestModsScreenCapture(t *testing.T) {
 		press("damage", "MUTLOWER", 1)
 		press("radar", "MUTRAISE", 3)
 		press("areaOfEffect", "MUTRAISE", 2)
+		press("income", "MUTRAISE", 2)
+		press("salvage", "MUTRAISE", 3)
+		press("fireRate", "MUTRAISE", 1)
+		press("unitSpeed", "MUTRAISE", 2)
 		capture("mutators-all")
+		for _, key := range []string{"buildSpeed", "buildCost", "areaOfEffect", "income", "salvage", "fireRate"} {
+			press(key, "MUTRAISE", 0)
+			capture("mutators-" + key)
+		}
 	}
 	shell.activateModsGadget("LOAD")
 	capture("mods")

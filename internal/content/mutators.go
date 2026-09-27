@@ -182,6 +182,24 @@ type Mutators struct {
 	// Radar scales unit radardistance and sonardistance, and the two jamming
 	// distances by the same factor (P3).
 	Radar Factor
+	// Income multiplies what every unit produces beyond its own upkeep:
+	// energymake's surplus over a positive energyuse, metalmake,
+	// extractsmetal, windgenerator, tidalgenerator and the negative-energyuse
+	// production arm. Upkeep, storage, makesmetal and costs are left alone.
+	Income Factor
+	// Salvage scales the metal and energy of every feature definition that is
+	// not indestructible: wrecks, heaps, rocks and trees. A corpse-chain
+	// feature takes Build cost and Salvage as one product.
+	Salvage Factor
+	// FireRate makes every weapon fire k× as often by scaling its reloadtime
+	// by the inverse factor 1/k, as Build speed does buildtime. Cost per shot
+	// is unchanged.
+	FireRate Factor
+	// UnitSpeed makes every unit move and turn k× as fast along the same
+	// paths: maxvelocity, turnrate and the two movement-rate thresholds by k,
+	// acceleration by k², and brakerate by k² on the ground and by k in the
+	// air, where the flight integrator reads it as a speed.
+	UnitSpeed Factor
 }
 
 // MutatorInfo describes one mutator for a front end, so a screen builds its
@@ -203,10 +221,14 @@ type mutatorField struct {
 // (docs/DESIGN_MODS_MUTATORS.md §6.5).
 var mutatorFields = []mutatorField{
 	{MutatorInfo{"buildSpeed", "Build speed", "Economy", "Divides every unit's build time; total cost is unchanged."}, func(m *Mutators) *Factor { return &m.BuildSpeed }},
-	{MutatorInfo{"buildCost", "Build cost", "Economy", "Multiplies every unit's metal and energy cost and the value of its wreck."}, func(m *Mutators) *Factor { return &m.BuildCost }},
+	{MutatorInfo{"buildCost", "Build cost", "Economy", "Multiplies unit costs and the value of their wrecks."}, func(m *Mutators) *Factor { return &m.BuildCost }},
+	{MutatorInfo{"income", "Income", "Economy", "Multiplies production beyond each unit's upkeep."}, func(m *Mutators) *Factor { return &m.Income }},
+	{MutatorInfo{"salvage", "Salvage", "Economy", "Multiplies the value of wrecks, rocks and trees."}, func(m *Mutators) *Factor { return &m.Salvage }},
 	{MutatorInfo{"health", "Health", "Combat", "Multiplies every unit's hit points."}, func(m *Mutators) *Factor { return &m.Health }},
 	{MutatorInfo{"damage", "Damage", "Combat", "Multiplies the damage of every weapon and explosion."}, func(m *Mutators) *Factor { return &m.Damage }},
 	{MutatorInfo{"areaOfEffect", "Blast size", "Combat", "Multiplies every blast radius; direct hits are unchanged."}, func(m *Mutators) *Factor { return &m.AreaOfEffect }},
+	{MutatorInfo{"fireRate", "Fire rate", "Combat", "Divides every reload time; cost per shot is unchanged."}, func(m *Mutators) *Factor { return &m.FireRate }},
+	{MutatorInfo{"unitSpeed", "Unit speed", "Movement", "Multiplies how fast every unit moves and turns."}, func(m *Mutators) *Factor { return &m.UnitSpeed }},
 	{MutatorInfo{"sight", "Sight", "Vision", "Multiplies every unit's line of sight."}, func(m *Mutators) *Factor { return &m.Sight }},
 	{MutatorInfo{"radar", "Radar", "Vision", "Multiplies radar, sonar and jamming ranges."}, func(m *Mutators) *Factor { return &m.Radar }},
 }
@@ -220,8 +242,9 @@ var mutatorFieldsByKey = func() []mutatorField {
 }()
 
 // MutatorCatalog returns the descriptors in the design table's order, grouped:
-// Economy (build speed, build cost), Combat (health, damage, blast size),
-// Vision (sight, radar). The slice is a copy.
+// Economy (build speed, build cost, income, salvage), Combat (health, damage,
+// blast size, fire rate), Movement (unit speed), Vision (sight, radar). The
+// slice is a copy.
 func MutatorCatalog() []MutatorInfo {
 	out := make([]MutatorInfo, len(mutatorFields))
 	for i, field := range mutatorFields {
@@ -366,9 +389,10 @@ func (m Mutators) describe(label func(Factor) string) []string {
 // whenever any mutator's transform changes meaning, so that a record written
 // under the old transform can never be taken for the new one. Tag 2: Build
 // speed divides buildtime instead of multiplying workertime, and the Health,
-// Damage, Sight and Radar mutators exist. Adding Blast size (areaOfEffect)
-// later did not change the meaning of any existing set string, since no
-// string written before it names that key, so the tag stayed 2.
+// Damage, Sight and Radar mutators exist. Adding Blast size (areaOfEffect),
+// and later Income, Salvage, Fire rate and Unit speed, did not change the
+// meaning of any existing set string, since no string written before them
+// names their keys, so the tag stayed 2.
 const mutatorIdentityTag = "mutators/2"
 
 // Digest is a stable identity of the set: a hash of mutatorIdentityTag and the
@@ -420,6 +444,15 @@ const (
 	// areaofeffect is an unsigned 16-bit store, and every blast reader
 	// zero-extends it [02 R-KEYS-01 §5][06 §9.3].
 	mutatorAreaLimit = math.MaxUint16
+	// reloadtime is an unsigned 16-bit store that every reader zero-extends
+	// [02 "Weapon record"][06 §4.2][06 R-WPN-05 §2].
+	mutatorReloadLimit = math.MaxUint16
+	// maxvelocity, acceleration, brakerate and the two movement-rate
+	// thresholds are 32-bit 16.16 stores [02 R-KEYS-01 §5].
+	mutatorMotionLimit = math.MaxInt32
+	// turnrate is an unsigned 16-bit store that every reader zero-extends
+	// [02 R-KEYS-01 §5][04 R-MOV-01 §1].
+	mutatorTurnRateLimit = math.MaxUint16
 	// A projectile that meets a unit with areaofeffect at or below 16 damages
 	// that unit alone and skips the area sweep [06 §9.1]; Modern's reliable
 	// direct-fire class uses the same bound. The Area of effect mutator keeps
@@ -542,9 +575,109 @@ const (
 //     field and widen with it [04 R-SPEC-01 §1][07 R-P0-11 §3]. Explosion art is
 //     not scaled.
 //
-// No compile-time value is derived from any mutated field, so nothing else is
-// recomputed: the unit, weapon and feature compilers assign them and only fold
-// them into per-definition hashes, which stay identities of the authored
+// Income scales each unit's production in the single-precision store retail
+// keeps these keys in [02 R-KEYS-01 §5][05 R-PROD-01 §1] (scaleStoredFloat):
+// metalmake, extractsmetal, windgenerator, tidalgenerator, the magnitude of a
+// negative energyuse, and energymake's surplus over a positive energyuse
+// (scaleSurplus). Every settlement contribution is the field times something
+// the mutator leaves alone, so output scales by k [05 R-ECO-01 §2].
+//
+//   - A negative energyuse is not a malformed value here but the production
+//     arm the stock solar collectors author (−20): its negation is added to
+//     production [05 R-ECO-01 §2]. Scaling the magnitude keeps the sign and the
+//     arm.
+//   - 126 stock units author energymake equal to energyuse, paying for their
+//     own radar, jammer or movement upkeep. Scaling energymake alone would turn
+//     them into net drains below ×1 and into generators above it, so only the
+//     surplus scales: a fusion plant (no upkeep) makes exactly k times as much,
+//     and a self-powered radar stays neutral while its upkeep is charged. The
+//     upkeep is charged only while a building is activated or a mobile unit is
+//     activated or moving, and energymake is paid whenever the unit is
+//     complete [05 R-ECO-01 §2], so a switched-off radar or a parked mobile
+//     unit keeps its unscaled make at every factor.
+//   - Positive energyuse, makesmetal, storage and costs are unchanged. A metal
+//     maker keeps its authored conversion [05 R-PROD-01 §5]; more energy runs
+//     more makers. Storage fills sooner, and production beyond it is wasted at
+//     the settlement clamp [05 R-ECO-01 §6].
+//   - The computer players' difficulty discount multiplies each contribution
+//     and so composes with Income [05 R-ECO-01 §3]. An extractor samples its
+//     rate at creation [05 R-PROD-01 §6], and a save carries that rate.
+//
+// Salvage scales the Metal and Energy of every feature definition that is not
+// indestructible, with the Build cost limits; a corpse-chain feature takes the
+// product of Build cost and Salvage, rounded once (times). Map features
+// resolve to these definitions when the terrain loads, after battle entry has
+// applied the mutators.
+//
+//   - The deposit pass writes the low byte of an indestructible definition's
+//     metal into the extraction grid [05 R-FEAT-01 §7]; scaling it would wrap
+//     that byte (250×2 is 244), so indestructible definitions are left alone.
+//     No stock indestructible definition is reclaimable.
+//   - Feature reclaim counts down trunc(15 + (energy+metal)/2) work at a fixed
+//     rate and pays the whole pool on the removing visit
+//     [05 R-WORK-01 §5], so a builder earns at about the same rate for about k
+//     times as long.
+//   - The pools are read at payout, by repair patrol's reclaim scan and its
+//     inclusive fits-under-storage test [05 R-FEAT-01 §6][04 R-ORD-01 §4], so
+//     a larger pool is passed over sooner when storage is nearly full, and by
+//     the HUD footer [07 R-HUD-03 §3]. Resurrection reads no pool
+//     [05 R-WORK-01 §7].
+//
+// Fire rate k scales every weapon's ReloadTime by the inverse factor, from its
+// stored unsigned 16-bit value, saturating at that store; zero stays zero,
+// and the minimum of one means the mutator never creates a free reload
+// [06 R-WPN-05 §2]. The slot fires when its countdown reaches zero
+// [06 §4.2], so a weapon fires about k times as often, up to once per tick per
+// slot; short stock reloads round unevenly at ×4 (5 ticks becomes 1).
+//
+//   - energypershot and metalpershot are billed per shot [06 §4.2], so a
+//     weapon's drain grows k-fold at the same cost per shot.
+//   - A stockpile round advances five progress per visit up to reloadtime and
+//     bills cost in proportion to progress [06 §11.1], so rounds finish in
+//     about 1/k of the time at the same total cost, demanding k times as much
+//     per visit.
+//   - burstrate spaces the shots within one burst on its own schedule
+//     [06 §4.3] and is left alone; a burst longer than the scaled reload
+//     overlaps the next.
+//   - The veteran reload is a percentage of reloadtime in integers [06 §4.2],
+//     so the bonus flattens at the smallest reloads. SetMaxReloadTime hands
+//     scripts the scaled value [06 R-WPN-05 §3].
+//
+// Unit speed k scales every unit's MaxVelocity, TurnRate and the MoveRate1
+// and MoveRate2 thresholds by k, and Acceleration by k² (the exact product
+// k·k, rounded once). BrakeRate scales by k² for a unit that does not fly and
+// by k for one that does; the mover chooses the ground or flight integrator
+// on the definition's canfly bit alone [04 R-MOV-01 §1]. Motion then plays k
+// times as fast along paths of the same shape:
+//
+//   - The ground mover accelerates only while the lookahead target is beyond
+//     twice its turning distance |err|·speed/turnrate and the point two ahead
+//     is beyond its braking distance speed²/(2·brakerate)
+//     [04 R-MOV-01 §4]. Both distances are unchanged, as is the distance to
+//     reach top speed, speed²/(2·acceleration); the time to reach it is 1/k.
+//   - The flight integrator compares horizontal speed with brakerate itself
+//     and turns the excess toward the heading [04 §10.1], so brakerate is a
+//     speed there and scales by k. The loss term acceleration/maxvelocity of
+//     its decay grows k-fold, and so does its approach speed sqrt(2·a·d), so
+//     the terminal speed and every approach are k times as fast.
+//     The decay reaches zero when acceleration/maxvelocity reaches 1/k; the
+//     stock largest ratio is 0.042, so ×4 keeps it above 0.83.
+//   - The movement-rate tiers compare speed with the two thresholds
+//     [04 R-MOV-01 §6], so a unit changes tier at the same fraction of its
+//     speed. No COB port can set a speed [04 R-COB-03 §1].
+//   - Fixed distances do not scale: the waypoint capture radius, the
+//     lookahead and the air service radii. A unit whose step outgrows the
+//     capture radius can pass a waypoint and loop back to it, and the
+//     collision validator tests only the proposed rectangle
+//     [04 R-COLL-01 §1]. Tick cadences (repath, air order deadlines) and every
+//     weapon's speed and turn rate are unchanged, so fast units outrun more
+//     fire. cruisealt and the bank and pitch gains are left alone.
+//
+// The only compile-time values derived from a mutated field are the moverate1
+// and moverate2 defaults, twice maxvelocity; Unit speed scales them by the
+// same k, so they stay twice the scaled velocity to within one 16.16 unit.
+// Nothing else is recomputed: the unit, weapon and feature compilers assign
+// the mutated fields and only fold them into per-definition hashes, which stay identities of the authored
 // records (§6.6); the LOS tables and sight shapes are compiled from their own
 // files. With a zero set nothing changes, Hash included. Otherwise Hash
 // becomes a hash of the base Hash and Digest — that is, of the identity tag,
@@ -589,11 +722,57 @@ func (c *Catalog) ApplyMutators(m Mutators) error {
 			u.RadarDistanceJam = int32(m.Radar.scale(int64(u.RadarDistanceJam), mutatorDistanceLimit))
 			u.SonarDistanceJam = int32(m.Radar.scale(int64(u.SonarDistanceJam), mutatorDistanceLimit))
 		}
+		if !m.UnitSpeed.IsIdentity() {
+			k := m.UnitSpeed
+			squared := k.times(k)
+			brake := squared
+			if u.CanFly {
+				brake = k
+			}
+			u.MaxVelocity = int32(k.scale(int64(u.MaxVelocity), mutatorMotionLimit))
+			u.Acceleration = int32(squared.scale(int64(u.Acceleration), mutatorMotionLimit))
+			u.BrakeRate = int32(brake.scale(int64(u.BrakeRate), mutatorMotionLimit))
+			u.MoveRate1 = int32(k.scale(int64(u.MoveRate1), mutatorMotionLimit))
+			u.MoveRate2 = int32(k.scale(int64(u.MoveRate2), mutatorMotionLimit))
+			if stored := int64(uint16(u.TurnRate)); stored > 0 {
+				u.TurnRate = int32(k.scale(stored, mutatorTurnRateLimit))
+			}
+		}
 	}
-	if !m.BuildCost.IsIdentity() {
-		for _, f := range c.corpseChainFeatures(units) {
-			f.Metal = int32(m.BuildCost.scale(int64(f.Metal), mutatorFeaturePoolLimit))
-			f.Energy = int32(m.BuildCost.scale(int64(f.Energy), mutatorFeaturePoolLimit))
+	if !m.Income.IsIdentity() {
+		for _, u := range units {
+			// The surplus reads the authored upkeep, which Income leaves alone.
+			u.EnergyMake = m.Income.scaleSurplus(u.EnergyMake, u.EnergyUse)
+			if u.EnergyUse < 0 {
+				u.EnergyUse = -m.Income.scaleStoredFloat(-u.EnergyUse)
+			}
+			u.MetalMake = m.Income.scaleStoredFloat(u.MetalMake)
+			u.ExtractsMetal = m.Income.scaleStoredFloat(u.ExtractsMetal)
+			u.WindGenerator = m.Income.scaleStoredFloat(u.WindGenerator)
+			u.TidalGenerator = m.Income.scaleStoredFloat(u.TidalGenerator)
+		}
+	}
+	if !m.BuildCost.IsIdentity() || !m.Salvage.IsIdentity() {
+		var chain map[*FeatureDef]bool
+		if !m.BuildCost.IsIdentity() {
+			chain = make(map[*FeatureDef]bool)
+			for _, f := range c.corpseChainFeatures(units) {
+				chain[f] = true
+			}
+		}
+		for _, f := range c.mutatorFeatures() {
+			k := Factor{1, 1}
+			if chain[f] {
+				k = m.BuildCost
+			}
+			if !f.Indestructible {
+				k = k.times(m.Salvage)
+			}
+			if k.IsIdentity() {
+				continue
+			}
+			f.Metal = int32(k.scale(int64(f.Metal), mutatorFeaturePoolLimit))
+			f.Energy = int32(k.scale(int64(f.Energy), mutatorFeaturePoolLimit))
 		}
 	}
 	if !m.Damage.IsIdentity() {
@@ -616,6 +795,15 @@ func (c *Catalog) ApplyMutators(m Mutators) error {
 	if !m.AreaOfEffect.IsIdentity() {
 		for _, w := range c.mutatorWeapons() {
 			w.AreaOfEffect = m.AreaOfEffect.scaleArea(w.AreaOfEffect)
+		}
+	}
+	if !m.FireRate.IsIdentity() {
+		for _, w := range c.mutatorWeapons() {
+			// The reload starts from its stored unsigned 16-bit value, which is
+			// what every reader sees [06 §4.2].
+			if stored := int64(uint16(w.ReloadTime)); stored > 0 {
+				w.ReloadTime = int32(m.FireRate.inverse().scale(stored, mutatorReloadLimit))
+			}
 		}
 	}
 	// The mutated identity composes the base identity with the set's digest,
@@ -642,6 +830,79 @@ func (c *Catalog) mutatorWeapons() []*WeaponDef {
 		}
 	}
 	return out
+}
+
+// times is the product of two factors, each normalized from the zero value to
+// 1/1 first. It is exact: every step's numerator and denominator is at most
+// four, so the product's are at most sixteen. The product is off the step
+// list and is never stored in a Mutators; it only composes two mutators that
+// scale the same field, so the field is rounded once.
+func (f Factor) times(g Factor) Factor {
+	if f.IsIdentity() {
+		f = Factor{1, 1}
+	}
+	if g.IsIdentity() {
+		g = Factor{1, 1}
+	}
+	return Factor{Num: f.Num * g.Num, Den: f.Den * g.Den}
+}
+
+// float is the factor as a float64. Every step is a whole number of quarters,
+// so the value is exact.
+func (f Factor) float() float64 {
+	if f.IsIdentity() {
+		return 1
+	}
+	return float64(f.Num) / float64(f.Den)
+}
+
+// scaleStoredFloat scales a floating unit value in the single-precision store
+// retail keeps it in [02 R-KEYS-01 §5][05 R-PROD-01 §1]: the stored single
+// times k, rounded once to single, and kept in the definition's float64 field
+// the way the compiler keeps an authored value (INVARIANTS I2). A single's
+// 24-bit significand times a quarter step fits a double exactly, so the one
+// rounding is the narrowing, and every consumer that narrows the field sees
+// the same value as one that reads it whole. A value that is not positive,
+// NaN included, is returned untouched; a product beyond the single range
+// saturates at the largest single, so the mutator never creates an infinity.
+func (f Factor) scaleStoredFloat(v float64) float64 {
+	if !(v > 0) || f.IsIdentity() {
+		return v
+	}
+	return narrowScaled(float64(float32(v)) * f.float())
+}
+
+// scaleSurplus scales what energymake produces beyond the same unit's positive
+// energyuse, leaving the part that pays for its own upkeep alone: with s_m and
+// s_e the stored singles, s_m > s_e becomes s_e + k·(s_m − s_e), rounded once
+// to single. The difference and product are formed in doubles, and the
+// explicit conversion of the product keeps it from being fused into the sum,
+// so the result is the same on every platform. A unit whose energymake does
+// not exceed its upkeep — the self-powered radars, jammers and mobile units
+// that author the two equal — is returned untouched, as is a value that is not
+// positive; with no positive upkeep the rule is scaleStoredFloat's.
+func (f Factor) scaleSurplus(produced, upkeep float64) float64 {
+	if !(produced > 0) || f.IsIdentity() {
+		return produced
+	}
+	storedMake, storedUse := float64(float32(produced)), 0.0
+	if upkeep > 0 {
+		storedUse = float64(float32(upkeep))
+	}
+	if !(storedMake > storedUse) {
+		return produced
+	}
+	surplus := float64((storedMake - storedUse) * f.float())
+	return narrowScaled(storedUse + surplus)
+}
+
+// narrowScaled rounds a scaled double to the single store, saturating at the
+// largest finite single.
+func narrowScaled(v float64) float64 {
+	if v > math.MaxFloat32 {
+		return math.MaxFloat32
+	}
+	return float64(float32(v))
 }
 
 // scaleArea scales a stored areaofeffect, keeping it on its side of the
@@ -696,6 +957,27 @@ func (c *Catalog) mutatorUnits() []*UnitDef {
 		if u := c.Units[key]; u != nil && !seen[u] {
 			seen[u] = true
 			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// mutatorFeatures returns every feature definition once, in sorted
+// catalog-name order (I1). Map-placed features resolve into this map when the
+// terrain loads, after battle entry has applied the mutators, so wrecks, rocks
+// and trees are all here.
+func (c *Catalog) mutatorFeatures() []*FeatureDef {
+	keys := make([]string, 0, len(c.Features))
+	for key := range c.Features {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	seen := make(map[*FeatureDef]bool, len(keys))
+	out := make([]*FeatureDef, 0, len(keys))
+	for _, key := range keys {
+		if f := c.Features[key]; f != nil && !seen[f] {
+			seen[f] = true
+			out = append(out, f)
 		}
 	}
 	return out

@@ -5150,15 +5150,17 @@ data, and the difference is what a player sees:
   pools. Feature reclaim in stock content is therefore never a plain removal:
   it is a replacement, and an implementation that only clears the grid loses
   the scorch.
-* 134 definitions carry a positive `energy` and no metal; 902 carry a positive
-  `metal` and no energy. The split is by kind, not by chance: **the vegetation
-  (`features/trees`, `features/acid`, the plant groups) pays ENERGY and the
-  wreckage (`*_dead`, and the metal deposits) pays METAL.** `tree1` is
-  `metal 0, energy 250, damage 0, reclaimable 1, blocking 1, height 40,
-  featurereclamate smudge01, filename trees`; `armaap_dead` is
+* 131 definitions carry a positive `energy` and no metal; 899 carry a positive
+  `metal` and no energy; three pay both. The split is by kind, not by chance:
+  **the vegetation (`features/trees`, `features/acid`, the plant groups) pays
+  ENERGY and the wreckage (`*_dead`, and the metal deposits) pays METAL.**
+  `tree1` is `metal 0, energy 250, damage 0, reclaimable 1, blocking 1,
+  height 40, featurereclamate smudge01, filename trees`; `armaap_dead` is
   `metal 1768, energy 0, damage 1680, reclaimable 1, blocking 1, height 20,
   featurereclamate smudge01`, with no `filename` because it is a 3D wreck.
-  No shipped definition pays both.
+  The three exceptions are the lush trees `lush07`, `lush08` and `lush09`
+  (`features/lush/trees.tdf`), each `metal 50, energy 150`, reclaimable and
+  in no corpse chain; the payout of §5 pays both pools on the removing visit.
 * `damage` is unrelated to the countdown, and the data says so plainly:
   `tree1` has `damage 0` and still takes `trunc(15 + 250/2) = 140` work, i.e.
   seventy visits and 140 ticks; a damage-threshold reading would have made

@@ -23,24 +23,30 @@ type fpsSample struct {
 	submit   time.Duration
 }
 
-// fpsCounter records completed modern presentations, excluding cap-skipped
-// Draw callbacks (DESIGN_GPU_RENDERER §13.5). The bounded history serves both
-// a 30-second spike graph and a 500 ms median for the live readouts.
+// fpsCounter records presented modern frames, excluding cap-skipped Draw
+// callbacks (DESIGN_GPU_RENDERER §13.5). A frame is timed by the refresh it
+// belongs to — its Draw's arrival — not by when that Draw returned: the work
+// inside a Draw varies from frame to frame (a host step in its tail, a
+// synchronous record), and timing completions made that variation look like
+// late frames although every one reached the display on its refresh. The
+// bounded history serves both a 30-second spike graph and a 500 ms median for
+// the live readouts.
 type fpsCounter struct {
 	target      time.Duration
-	completed   time.Time
+	presented   time.Time
 	history     []fpsSample
 	next        int
 	count       int
 	liveScratch [6][]time.Duration
 }
 
+// observe records one presented frame whose Draw arrived at now.
 func (c *fpsCounter) observe(now time.Time, draw, sim, blend, record, submit time.Duration) {
-	if c.completed.IsZero() {
-		c.completed = now
+	if c.presented.IsZero() {
+		c.presented = now
 		return
 	}
-	if interval := now.Sub(c.completed); interval > 0 {
+	if interval := now.Sub(c.presented); interval > 0 {
 		if c.history == nil {
 			c.history = make([]fpsSample, fpsHistoryCapacity)
 		}
@@ -50,7 +56,7 @@ func (c *fpsCounter) observe(now time.Time, draw, sim, blend, record, submit tim
 			c.count++
 		}
 	}
-	c.completed = now
+	c.presented = now
 }
 
 type fpsLiveSummary struct {
@@ -126,8 +132,9 @@ type fpsGraphSummary struct {
 }
 
 // graph groups samples by elapsed time, retaining each phase's worst duration
-// in a pixel column so a brief stall stays visible for 30 seconds.
-func (c *fpsCounter) graph(now time.Time, target time.Duration, columns []fpsGraphColumn) fpsGraphSummary {
+// in a pixel column so a brief stall stays visible for 30 seconds. A frame
+// whose interval exceeds lateAfter is counted late; zero counts none.
+func (c *fpsCounter) graph(now time.Time, lateAfter time.Duration, columns []fpsGraphColumn) fpsGraphSummary {
 	var summary fpsGraphSummary
 	for i := 0; i < c.count; i++ {
 		index := (c.next - 1 - i + len(c.history)) % len(c.history)
@@ -161,7 +168,7 @@ func (c *fpsCounter) graph(now time.Time, target time.Duration, columns []fpsGra
 		if sample.submit > summary.peakSubmit {
 			summary.peakSubmit = sample.submit
 		}
-		if target > 0 && sample.interval > target+time.Millisecond {
+		if lateAfter > 0 && sample.interval > lateAfter {
 			summary.late++
 		}
 		column := len(columns) - 1 - int(age.Nanoseconds()*int64(len(columns))/fpsHistoryDuration.Nanoseconds())

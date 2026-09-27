@@ -14,14 +14,14 @@ func TestFPSLiveMedianSmoothsShortSpikes(t *testing.T) {
 		if frame == 11 {
 			interval = 40 * time.Millisecond
 		}
-		counter.observe(counter.completed.Add(interval), 4*time.Millisecond, time.Millisecond, time.Millisecond, 2*time.Millisecond, time.Millisecond)
+		counter.observe(counter.presented.Add(interval), 4*time.Millisecond, time.Millisecond, time.Millisecond, 2*time.Millisecond, time.Millisecond)
 	}
-	live := counter.live(counter.completed)
+	live := counter.live(counter.presented)
 	if live.frames != 20 || live.interval != 16*time.Millisecond || live.draw != 4*time.Millisecond {
 		t.Fatalf("500 ms medians = %+v", live)
 	}
 	var columns [10]fpsGraphColumn
-	if peak := counter.graph(counter.completed, 16*time.Millisecond, columns[:]).peakInterval; peak != 40*time.Millisecond {
+	if peak := counter.graph(counter.presented, 16*time.Millisecond, columns[:]).peakInterval; peak != 40*time.Millisecond {
 		t.Fatalf("smoothing hid graph peak: %s", peak)
 	}
 }
@@ -73,6 +73,9 @@ func TestFPSGraphRetainsRecentStallsAndBoundedHistory(t *testing.T) {
 	}
 }
 
+// A frame is late when it missed a refresh: at a 60 cap on a 120 Hz display
+// the threshold is 16.7 ms plus half of 8.3 ms, so arrival jitter of a
+// millisecond or two is on time and the 30 ms interval is the one late frame.
 func TestFPSGraphCountsLateFramesWithoutLosingShortSpikes(t *testing.T) {
 	var counter fpsCounter
 	start := time.Unix(1, 0)
@@ -81,8 +84,9 @@ func TestFPSGraphCountsLateFramesWithoutLosingShortSpikes(t *testing.T) {
 	counter.observe(start.Add(35*time.Millisecond), 4*time.Millisecond, 0, 0, 0, 0)
 	counter.observe(start.Add(65*time.Millisecond), 9*time.Millisecond, 0, 0, 0, 0)
 	var columns [10]fpsGraphColumn
-	summary := counter.graph(start.Add(65*time.Millisecond), 16*time.Millisecond, columns[:])
-	if summary.frames != 3 || summary.late != 2 || summary.peakInterval != 30*time.Millisecond {
+	lateAfter := time.Second/60 + time.Second/240
+	summary := counter.graph(start.Add(65*time.Millisecond), lateAfter, columns[:])
+	if summary.frames != 3 || summary.late != 1 || summary.peakInterval != 30*time.Millisecond {
 		t.Fatalf("late count and spike peak = %+v", summary)
 	}
 	if columns[len(columns)-1].interval != 30*time.Millisecond || columns[len(columns)-1].draw != 9*time.Millisecond {

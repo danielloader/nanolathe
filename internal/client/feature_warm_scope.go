@@ -1,6 +1,9 @@
 package client
 
-import "github.com/nanolathe-gg/nanolathe/internal/content"
+import (
+	"github.com/nanolathe-gg/nanolathe/formats"
+	"github.com/nanolathe-gg/nanolathe/internal/content"
+)
 
 // WarmBattleFeatureSequences prepares feature pixels for every definition the
 // composed battle can admit. admitted includes the terrain table after mission
@@ -16,6 +19,7 @@ func (c *Client) WarmBattleFeatureSequences(cat *content.Catalog, admitted []*co
 		return
 	}
 	defs := battleFeatureDefinitions(cat, admitted)
+	c.battleAdmittedFeatures = admitted
 	// Whole-catalog event warming could incidentally load a bank used here
 	// only for rest art. Keep every reachable rest/shadow bank ready too, so
 	// narrowing the event set cannot move those decodes into Draw.
@@ -73,4 +77,47 @@ func battleFeatureDefinitions(cat *content.Catalog, admitted []*content.FeatureD
 		}
 	}
 	return defs
+}
+
+// BattleSpriteFrames lists, each once, the rest and shadow frames at the
+// current view scale of every feature definition the battle's terrain admits,
+// for the executor to place at the loading boundary (DESIGN_GPU_RENDERER
+// §14.8). Placed lazily instead, the first sight of a stretch of map — a camera
+// jump — placed and uploaded dozens of sprites inside one frame. Event
+// sequences (burning, dying, reclaim) and unit corpses appear a few at a time
+// during play and are left to first use: across the catalog they are most of
+// the art, 61 megapixels on one stock map against 2 for the map's own rest
+// frames. Presentation only [I6].
+func (c *Client) BattleSpriteFrames() []*formats.GAFFrame {
+	if c == nil {
+		return nil
+	}
+	var out []*formats.GAFFrame
+	seen := make(map[*formats.GAFFrame]bool)
+	for _, def := range c.battleAdmittedFeatures {
+		if def == nil || def.Filename == "" {
+			continue
+		}
+		gaf, err := c.featureGAFFor(def.Filename)
+		if err != nil || gaf == nil {
+			continue
+		}
+		for _, seq := range [...]string{def.SeqName, def.SeqNameShad} {
+			if seq == "" {
+				continue
+			}
+			entry, ok := gaf.Find(seq)
+			if !ok || entry == nil {
+				continue
+			}
+			for _, ref := range entry.Frames {
+				f := c.viewFrame(ref.Frame)
+				if f != nil && !seen[f] {
+					seen[f] = true
+					out = append(out, f)
+				}
+			}
+		}
+	}
+	return out
 }

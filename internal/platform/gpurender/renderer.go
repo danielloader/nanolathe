@@ -311,6 +311,7 @@ func (r *Renderer) Execute(list *drawlist.List, w, h int) *ebiten.Image {
 	r.scene.transient.clock++
 	defer r.scene.transient.trim(transientFrameBytes, 0, false, func(img *ebiten.Image) { img.Deallocate() })
 	r.modelStats = ModelStats{}
+	r.scene.beginFrameUploads()
 	r.submissionFrame++
 	defer func() {
 		if r.modelStats.SubmittedVertices > r.peakSubmissionStats.SubmittedVertices {

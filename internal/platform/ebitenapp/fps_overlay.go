@@ -33,9 +33,21 @@ func (a *app) drawFPSOverlay(screen *ebiten.Image, screenWidth int) {
 		a.fpsGraphPixels = make([]byte, 4*fpsOverlayWidth*fpsOverlayHeight)
 	}
 	var columns [fpsPlotRight - fpsPlotLeft]fpsGraphColumn
-	target := a.presentInterval
+	// The interval the window presents at is the cap or the display's refresh,
+	// the longer. A frame is late when it missed a refresh: its interval
+	// exceeds that by half a refresh, the rule the live trace report uses
+	// (docs/BATTLE_BENCHMARK.md "Live window trace").
+	target := max(a.presentInterval, a.refreshPeriod)
+	lateAfter := time.Duration(0)
+	if target > 0 {
+		refresh := a.refreshPeriod
+		if refresh <= 0 {
+			refresh = target
+		}
+		lateAfter = target + refresh/2
+	}
 	now := time.Now()
-	summary := a.fpsCounter.graph(now, target, columns[:])
+	summary := a.fpsCounter.graph(now, lateAfter, columns[:])
 	live := a.fpsCounter.live(now)
 	lanes := [...]fpsLane{
 		{"Frame", live.interval, summary.peakInterval, [3]byte{72, 170, 245}, func(c fpsGraphColumn) time.Duration { return c.interval }},
@@ -45,7 +57,7 @@ func (a *app) drawFPSOverlay(screen *ebiten.Image, screenWidth int) {
 		{"Record", live.record, summary.peakRecord, [3]byte{185, 130, 230}, func(c fpsGraphColumn) time.Duration { return c.record }},
 		{"Submit", live.submit, summary.peakSubmit, [3]byte{70, 207, 205}, func(c fpsGraphColumn) time.Duration { return c.submit }},
 	}
-	paintFPSGraph(a.fpsGraphPixels, columns[:], lanes[:], target)
+	paintFPSGraph(a.fpsGraphPixels, columns[:], lanes[:], target, lateAfter)
 	a.fpsGraph.WritePixels(a.fpsGraphPixels)
 	x := max(0, screenWidth-fpsOverlayWidth-6)
 	op := &ebiten.DrawImageOptions{}
@@ -57,8 +69,10 @@ func (a *app) drawFPSOverlay(screen *ebiten.Image, screenWidth int) {
 		fps = fmt.Sprintf("FPS %.0f", float64(time.Second)/float64(live.interval))
 	}
 	capLabel := "display (uncapped)"
-	if target > 0 {
-		capLabel = fmt.Sprintf("cap %.1f ms", ms(target))
+	if a.presentInterval > 0 {
+		capLabel = fmt.Sprintf("cap %.1f ms", ms(a.presentInterval))
+	} else if target > 0 {
+		capLabel = fmt.Sprintf("display %.1f ms", ms(target))
 	}
 	ebitenutil.DebugPrintAt(screen, fps+" (500ms med)   "+capLabel, x+7, 8)
 	if live.frames == 0 {
@@ -78,7 +92,7 @@ func (a *app) drawFPSOverlay(screen *ebiten.Image, screenWidth int) {
 	}
 	lateLabel := fmt.Sprintf("30s: %d frames", summary.frames)
 	if target > 0 {
-		lateLabel = fmt.Sprintf("30s: %d/%d late (>cap+1ms)", summary.late, summary.frames)
+		lateLabel = fmt.Sprintf("30s: %d/%d late (missed refresh)", summary.late, summary.frames)
 	}
 	// The frame's render passes: past about 80 in flight the Metal driver
 	// stops scheduling until the GPU drains, and the present waits
@@ -100,8 +114,9 @@ func ms(d time.Duration) float64 { return float64(d) / float64(time.Millisecond)
 // paintFPSGraph draws six separate lanes on one fixed bitmap, avoiding one
 // GPU call per sample. The lanes are not stacked: async recording and host
 // simulation may overlap Draw work. Each pixel column keeps a peak in its
-// 30-second time slice; a cap line is shown at half height when one is set.
-func paintFPSGraph(pixels []byte, columns []fpsGraphColumn, lanes []fpsLane, target time.Duration) {
+// 30-second time slice; the target interval's line is shown at half height,
+// and a frame interval past lateAfter — a missed refresh — is drawn orange.
+func paintFPSGraph(pixels []byte, columns []fpsGraphColumn, lanes []fpsLane, target, lateAfter time.Duration) {
 	for i := 0; i < len(pixels); i += 4 {
 		pixels[i], pixels[i+1], pixels[i+2], pixels[i+3] = 13, 20, 28, 255
 	}
@@ -126,7 +141,7 @@ func paintFPSGraph(pixels []byte, columns []fpsGraphColumn, lanes []fpsLane, tar
 			x := fpsPlotLeft + i
 			y := fpsGraphY(value, scale, top, bottom)
 			color := lane.color
-			if index == 0 && target > 0 && value > target+time.Millisecond {
+			if index == 0 && lateAfter > 0 && value > lateAfter {
 				color = [3]byte{245, 133, 58}
 			}
 			for row := y; row <= bottom; row++ {

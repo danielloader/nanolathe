@@ -1091,6 +1091,7 @@ func (g *gameShell) commitBattleCandidate(battle *battleSession) {
 	// windows were built before this point; failed loads never reach it
 	// [07 R-WGT-01 §3].
 	g.quickKeyPreclearDisabled = true
+	battle.prepareFirstUseArt()
 }
 
 // returnFromBattle is the retail MAINMENU confirmation outcome: discard the

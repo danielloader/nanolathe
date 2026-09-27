@@ -32,6 +32,10 @@ func TestBattleEntryDirectAndMenuCompositionMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The menu route commits the battle, and the commit loads the viewing
+	// side's build pages ahead of first use (battle_first_use.go). The fixture
+	// composes without committing, so it is prepared the same way here.
+	direct.prepareFirstUseArt()
 	detachBattleAudio(directClient, directSession)
 
 	menuSession, menuCatalog, err := newBattleSession(opts, cs)

@@ -269,6 +269,9 @@ def report(directory, skip, late_rows):
             key += "+refresh change"
         if not b.get("focused", 1):
             key += "+unfocused"
+        atlas = max((r.get("atlas_union_kb", 0) for r in rows if a["frame"] <= r["frame"] <= b["frame"]), default=0)
+        if atlas >= 1024:
+            key += f"+atlas upload {atlas / 1024:.0f} MiB"
         causes[key] = causes.get(key, 0) + 1
         detail.append((x, a, key, agg))
     if causes:
@@ -276,6 +279,11 @@ def report(directory, skip, late_rows):
     for x, a, key, agg in sorted(detail, key=lambda t: -t[0])[:late_rows]:
         parts = "  ".join(f"{k} {v:.1f}" for k, v in agg.items() if v >= 0.3)
         print(f"    {x:6.1f} ms at {a['draw_start'] / 1e6:6.2f} s frame {a['frame']}: {key}; {parts}")
+    if "atlas_uploads" in rows[0]:
+        uploading = [r for r in presented if r["atlas_uploads"]]
+        if uploading:
+            print(f"  scene atlas uploads in {len(uploading)} frames, {sum(r['atlas_uploads'] for r in uploading)} sprites;"
+                  f" largest page region {max(r['atlas_union_kb'] for r in uploading)} KiB")
     slow = [s for line in census for s in ((line.get("census") or {}).get("slow_sim") or [])]
     if slow:
         print(f"  simulation batches over 16 ms: {len(slow)} ({60.0 * len(slow) / span:.1f}/min), max {max(s['ms'] for s in slow):.1f} ms")

@@ -3317,6 +3317,18 @@ geometry) and `megamap_picture.go` (terrain picture),
 `battle_placement.go`, `battle_selection.go` and `battle_cursor.go` carry
 one-line hooks.
 
+**Loading at battle entry — Nanolathe host policy.** The icon bank is built
+when the battle is committed, if the Megamap overview is selected then, and
+the viewing side's numbered build pages (`<unit><N>.GUI` for every page its
+builders author, with their page art) are loaded into the side rail's caches
+at the same point (`cmd/nanolathe/battle_first_use.go`). Built on first use,
+the frame waited for them: a traced game froze 88 ms on the first Tab and
+7-9 ms on each builder's first menu. Entry already spends a long frame
+composing the battle, and the two take about 70 ms and 40 ms there. Nothing
+else changes: the caches, their contents and every later lookup are those of
+first use. The Megamap switched on mid-battle, and pages of a captured
+builder of another side, still load on first use.
+
 ### 3.16 Optional victory cue
 
 **Policy.** A host presentation preference modelled on ProTA 4.8's renderer,

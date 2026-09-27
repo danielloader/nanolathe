@@ -132,7 +132,7 @@ type app struct {
 	// loopThreadRaised records that the game loop goroutine has pinned and
 	// raised its thread (thread_priority_darwin.go).
 	loopThreadRaised bool
-	// fpsCounter measures completed modern presentations, including paused
+	// fpsCounter measures presented modern frames, including paused
 	// foreground redraws, rather than Ebitengine's uncapped Draw callbacks.
 	fpsCounter fpsCounter
 	// fpsSim accumulates client/authoritative step wall time until the next
@@ -487,7 +487,7 @@ func (a *app) Draw(screen *ebiten.Image) {
 		blend, record, submit := a.drawModern(screen, width, height, showFPS)
 		if showFPS {
 			completed := time.Now()
-			a.fpsCounter.observe(completed, completed.Sub(drawStarted), a.fpsSim, blend, record, submit)
+			a.fpsCounter.observe(arrived, completed.Sub(drawStarted), a.fpsSim, blend, record, submit)
 			a.fpsSim = 0
 		}
 		return
@@ -642,6 +642,7 @@ func (a *app) drawModern(screen *ebiten.Image, width, height int, showFPS bool) 
 			a.trace.row.execute = int64(blitStarted.Sub(submitStarted) / time.Microsecond)
 			stats := a.gpu.ModelStats()
 			a.trace.row.passes, a.trace.row.vertices, a.trace.row.subs = stats.Passes, stats.SubmittedVertices, stats.DirectSubjects
+			a.trace.row.atlasUploads, a.trace.row.atlasUnionKB = a.gpu.AtlasUploads()
 			st := a.gpu.StageTimes()
 			a.trace.row.xPrepare, a.trace.row.xModel = int64(st.Prepare/time.Microsecond), int64(st.Model/time.Microsecond)
 			a.trace.row.xPlace, a.trace.row.xReplay = int64(st.ModelPlace/time.Microsecond), int64(st.Replay/time.Microsecond)

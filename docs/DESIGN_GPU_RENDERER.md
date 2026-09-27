@@ -291,10 +291,12 @@ Public API:
   paused path: copy a retained world composite in, then execute a
   foreground-only list over it (§13.10 "Paused world reuse").
 * `(*Renderer).PrepareTerrain(drawlist.Terrain)` prepares the native and detail
-  terrain atlas keys during loading (§14.8), without replaying a frame.
+  terrain atlas keys during loading (§14.8), without replaying a frame, and
+  `PrepareSprites([]*formats.GAFFrame)` places the battle's feature rest art
+  in the scene atlas at the same boundary.
 * `(*Renderer).SetEffects`, `SetGlow`, `ResetSources`, and the diagnostics
-  `DeviceDraws`, `ModelStats`, `FogContentError`, `DebugSnapshot`,
-  `DebugLastFrame`.
+  `DeviceDraws`, `ModelStats`, `AtlasUploads`, `FogContentError`,
+  `DebugSnapshot`, `DebugLastFrame`.
 * Resource caches keyed by pointer identity: tile atlases per (tile set, detail
   set, scale), GAF frame atlases filled on first use, FNT glyph atlases, the 3DO
   texture atlas with its LOGOS frames.
@@ -1422,10 +1424,15 @@ command-line settings independently of saved window preferences.
 **FPS counter and frame graph — Nanolathe host presentation policy.** `+fps`
 toggles a diagnostic overlay at the upper-right of the modern battle surface.
 It starts off and retains its state across battles in the same process, without
-changing saved settings. Its FPS number comes from the median completed-frame
+changing saved settings. Its FPS number comes from the median presented-frame
 interval over the most recent 500 ms, so cap-skipped Draw callbacks do not
-inflate it and an isolated stall does not make the readout flicker.
-The graph retains up to 30 seconds of completed-frame intervals and phase
+inflate it and an isolated stall does not make the readout flicker. A
+presented frame is timed by the refresh it belongs to, its Draw's arrival,
+not by when its Draw returned: the work inside a Draw varies (a host step in
+its tail, a synchronous record), and timing completions counted that variation
+as late frames — in one traced game 426 of 433 such "late" frames reached the
+display on their refresh.
+The graph retains up to 30 seconds of presented-frame intervals and phase
 durations in a fixed 8,192-sample ring (30 seconds through 273 FPS; faster
 displays retain a shorter span). Its six aligned lanes show frame cadence,
 whole Draw callback time, client/authoritative step time, committed-frame
@@ -1437,8 +1444,10 @@ so brief spikes stay visible at their approximate time. Lane labels show a
 recent sample; Sim, Blend, Record and Submit medians include only frames where
 that phase ran. With no such phase sample in 500 ms its live value is zero.
 The graph, peak and late count remain unsmoothed. Cadence bars turn orange when
-an interval exceeds the requested cap by more than 1 ms. The overlay reports
-how many intervals did so, the 30-second cadence peak and its amount over cap,
+a frame missed a refresh: its interval exceeds the interval the window
+presents at (the cap or the display refresh, the longer) by half a refresh,
+the rule the live trace report uses. The overlay reports how many intervals
+did so, the 30-second cadence peak and its amount over the target,
 and the render passes the last presented frame issued (`ModelStats.Passes`):
 on the development machine's Metal driver a frame past about 80 passes makes
 the windowed present wait for the GPU, so that number is watched against the
@@ -1526,6 +1535,25 @@ makes the fraction monotonic inside a tick: an Update that releases nothing
 saturates it and holds the pose, where reading the wall clock's own phase slid
 every blended pose back toward the previous tick for a whole Update and then
 jumped two ticks forward.
+
+**Budget sample — Nanolathe host policy.** Holding the pose is still a
+visible hitch when it happens often. The host steps at 30 Hz of wall time and
+reads the budget's scaled timebase, a 30 Hz count of the same milliseconds, at
+whatever phase the two clocks have; near a unit boundary a millisecond of
+jitter decides whether a step reads the old unit or the new one, so a raw
+sample released no tick on one step and two on the next. The presentation
+then held the pose for a tick and skipped the next: in 2 of 3 traced 30 s
+battles, every few seconds while the phases stayed close, at 60 and at 120
+FPS alike, with every frame on time. On the wall clock the controller
+therefore locks the sample to the host step (`BattleController.stepScaled`):
+each step reads one unit past the last; a step that finds the raw timebase
+behind the lock holds it, and one that finds it two or more units ahead — the
+first step, or a stall longer than the host clock replays — takes the raw
+value. The budget's arithmetic, carry and 0..5 clamp [01 §4.2] are untouched;
+only the phase of the sample moves, by less than one unit, and its long-run
+rate is the host clock's, which is the wall clock's. Shots, films, replays and
+tests inject their own millisecond source and read it raw. The live trace's
+`released` column counts the ticks each step released.
 
 **Camera.** The camera moves in the 30 Hz step, so Enhanced blends it too: the
 client samples the precise camera origin and zoom at the end of every `Step`,
@@ -2573,8 +2601,24 @@ never zooms. Its padded RGBA8 cells cost 66×66×4 bytes per detail tile, plus
 unused cells at the end of each page; native remains 34×34×4 per tile. Device
 allocation can add overhead beyond these source-image extents. Loading takes
 longer; sustained rendering executes the same cached atlas path. Dynamic model
-scratch, newly visible sprites and other first-use resources remain demand
-allocated; this change does not promise every first-view cost is eliminated.
+scratch and other first-use resources remain demand allocated; this change
+does not promise every first-view cost is eliminated.
+
+The same hook places the feature sprites a first sight of the map would draw.
+`BattleSpriteFrames` lists, each once, every frame of the rest and shadow
+sequences of the feature definitions the battle's terrain admits, resolved at
+the current view scale exactly as the recorder resolves them, and
+`Renderer.PrepareSprites` places them through the ordinary `sceneFrameFor`
+cache. Placed on first use, a camera jump onto unseen ground packed and
+uploaded dozens of sprites in one frame: a traced game spent 6 ms in Replay
+there, and the render thread then blocked 43 ms in one texture upload.
+Ebitengine sends one frame's writes to an image through a single staging
+texture of their bounding box, so a burst scattered down a page costs the
+region it spans; `Renderer.AtlasUploads` reports a frame's atlas uploads and
+the largest such region for the live trace. Event sequences (burning, dying,
+reclaim), unit corpses and the other view scale stay on first use: across a
+catalog they are most of the art (61 megapixels on Town & Country against 2
+for its rest frames, which place in about 8 ms) and appear a few at a time.
 
 Verification checks exact cache identity with and without a provider, zero
 allocation on the warm detail lookup, retirement of both scales, classic's

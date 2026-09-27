@@ -60,6 +60,12 @@ type BattleController struct {
 	millis            clock.MillisSource
 	cursorScaled      int32
 	cursorScaledValid bool
+	// stepLocked says the budget's sample is locked to the host step
+	// (stepScaled): on for the wall clock, off for an injected source.
+	// lockedScaled is the last locked sample.
+	stepLocked   bool
+	lockedScaled int32
+	lockedValid  bool
 }
 
 // NewBattleController constructs the production controller. An optional
@@ -80,7 +86,45 @@ func NewBattleController(b *battleSession, sources ...clock.MillisSource) *Battl
 	if b != nil {
 		b.millisSource = source
 	}
-	return &BattleController{battle: b, millis: source}
+	_, wall := source.(*monotonicMillisSource)
+	return &BattleController{battle: b, millis: source, stepLocked: wall}
+}
+
+// stepScaled is the scaled time a host step's tick budget reads [01 §4.1].
+//
+// The host steps at 30 Hz of wall time and the scaled timebase is a 30 Hz
+// count of the same milliseconds, so a step reads the timebase at whatever
+// phase the two happen to have. Near a unit boundary a millisecond of timing
+// jitter decides whether a step reads the old unit or the new one: sampled raw,
+// one step released no tick and the next two, and the presentation froze for
+// a tick and then skipped one — seen in 2 of 3 traced 30 s battles, every few
+// seconds while the phases stayed close (DESIGN_GPU_RENDERER §13.5).
+//
+// On the wall clock the sample is therefore locked to the host step: each step
+// reads one unit past the last. A step that finds the raw timebase still
+// behind the last sample holds it, and one that finds the raw timebase two or
+// more units ahead — the first step, or a stall longer than the host clock
+// replays — takes the raw value. The budget's arithmetic, carry and clamp are
+// untouched; only the phase of the sample moves, by less than a unit, and its
+// rate is the wall clock's because the host clock's is. An injected source
+// (shots, films, replays, tests) is read raw.
+func (c *BattleController) stepScaled(raw int32) int32 {
+	if !c.stepLocked {
+		return raw
+	}
+	if !c.lockedValid {
+		c.lockedScaled, c.lockedValid = raw, true
+		return raw
+	}
+	next := c.lockedScaled + 1
+	switch {
+	case raw-c.lockedScaled >= 2:
+		next = raw
+	case raw < c.lockedScaled:
+		next = c.lockedScaled
+	}
+	c.lockedScaled = next
+	return next
 }
 
 // Step feeds one logical input frame through the production battle decision
@@ -158,13 +202,14 @@ func (c *BattleController) Step(frame BattleInputFrame, cl *client.Client) {
 	} else {
 		c.cursorScaledValid = false
 	}
+	budget := c.stepScaled(scaled)
 	if c.battle.sim != nil {
-		released := c.battle.prepareSimulationStep(scaled)
+		released := c.battle.prepareSimulationStep(budget)
 		if cl != nil {
 			cl.NoteTicksReleased(released)
 		}
 		return
 	}
-	c.battle.sess.Step(scaled)
+	c.battle.sess.Step(budget)
 	c.battle.noteTickTiming()
 }

@@ -83,6 +83,40 @@ type sceneAtlas struct {
 
 	uploadBuf []byte
 	padBuf    []byte
+
+	// frameUploads and frameUnion count the uploads since the last Execute
+	// began and each page's bounding box of them, for AtlasUploads.
+	frameUploads int
+	frameUnion   []image.Rectangle
+}
+
+// AtlasUploads reports the most recent Execute's scene atlas uploads: how many
+// sprites were placed on pages, and the largest region, in KiB of RGBA8, that
+// the uploads to one page spanned. Ebitengine sends one frame's writes to an
+// image through a single staging texture of their bounding box, so uploads
+// scattered down a page cost the region they span, not the sprites' own bytes.
+// Diagnostic only (docs/BATTLE_BENCHMARK.md "Live window trace").
+func (r *Renderer) AtlasUploads() (uploads, unionKB int) {
+	if r == nil {
+		return 0, 0
+	}
+	return r.scene.frameUploads, r.scene.frameUnionKB()
+}
+
+// beginFrameUploads starts a frame's upload accounting.
+func (a *sceneAtlas) beginFrameUploads() {
+	a.frameUploads = 0
+	clear(a.frameUnion)
+}
+
+// frameUnionKB is the largest per-page upload bounding box this frame, in KiB
+// of RGBA8.
+func (a *sceneAtlas) frameUnionKB() int {
+	largest := 0
+	for _, r := range a.frameUnion {
+		largest = max(largest, r.Dx()*r.Dy()*4/1024)
+	}
+	return largest
 }
 
 // pageImage returns the texture backing an entry's page, or nil for an entry
@@ -187,6 +221,11 @@ func (a *sceneAtlas) upload(e sceneEntry, buf []byte) {
 	}
 	r := image.Rect(int(e.x)-pad, int(e.y)-pad, int(e.x)+w+pad, int(e.y)+h+pad)
 	img.SubImage(r).(*ebiten.Image).WritePixels(dst)
+	a.frameUploads++
+	if int(e.page) >= len(a.frameUnion) {
+		a.frameUnion = append(a.frameUnion, make([]image.Rectangle, int(e.page)+1-len(a.frameUnion))...)
+	}
+	a.frameUnion[e.page] = a.frameUnion[e.page].Union(r)
 }
 
 // padScratch is upload's own reusable buffer, separate from scratch so an

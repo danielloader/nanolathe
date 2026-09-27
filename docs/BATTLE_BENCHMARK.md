@@ -459,6 +459,10 @@ since the first battle Draw; spans are microseconds:
   the player sees (DESIGN_GPU_RENDERER §13.10). `bodies` counts the host steps
   run so far, the camera's samples, and `cam_x100`/`cam_z100` are the blended
   camera origin in hundredths of a world pixel.
+- `atlas_uploads`, `atlas_union_kb`: sprites the Execute placed on scene atlas
+  pages and the largest region, in KiB, those uploads spanned on one page —
+  the size of the staging texture Ebitengine sends them through
+  (DESIGN_GPU_RENDERER §14.8).
 
 The time from one Draw's return to the next Update is Ebitengine's flush and
 present plus the wait for the next display-link callback; the report calls it

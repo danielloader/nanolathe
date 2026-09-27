@@ -391,6 +391,10 @@ type Client struct {
 	// an authoritative phase, so it is warmed up front and never loads on a
 	// visit; feature_sequence.go owns the contract.
 	featureSeqs map[string]*featureSequenceInfo
+	// battleAdmittedFeatures are the definitions the current battle's terrain
+	// admits, as WarmBattleFeatureSequences received them; BattleSpriteFrames
+	// lists their rest art.
+	battleAdmittedFeatures []*content.FeatureDef
 	// featureAnim holds the per-DEFINITION rest cursors of the animating
 	// features, keyed by the lower-case "filename|seqname" that names the
 	// definition's sequence. Retail initialises one cursor per definition, not

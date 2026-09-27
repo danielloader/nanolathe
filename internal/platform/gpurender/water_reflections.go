@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
@@ -297,21 +299,7 @@ func (r *Renderer) drawWaterReflections(c drawlist.Terrain) {
 	if spare := deviceVertexClass(len(s.transformed)) - len(s.transformed); cap(s.transformed)-len(s.transformed) < spare {
 		s.transformed = slices.Grow(s.transformed, spare)
 	}
-	for i := range s.transformed {
-		v := &s.transformed[i]
-		// Displace only the reflected mesh, retaining its original atlas samples.
-		// Shared corners move together; boats receive a small baseline wobble.
-		// Height ramp and wave are Enhanced art choices (GPU design §26.6).
-		if v.Custom3 <= 0 {
-			amount := max(0, min((v.Custom0/scale-64)/96, 1))
-			amount = max(.35, amount*amount*(3-2*amount))
-			x, y := float32(c.OriginX)+v.DstX/scale, float32(c.OriginY)+v.DstY/scale
-			wave := math.Sin(float64(y*.65+time*1.7)) + .35*math.Sin(float64(x*.11-y*.31-time*1.1))
-			v.DstX += float32(wave) * 3 * amount * scale
-		}
-		v.DstX = r.sched.txx(v.DstX)
-		v.DstY = r.sched.txy(v.DstY)
-	}
+	r.waveReflections(s.transformed, c, scale, time)
 	effective := r.sched.txf(scale)
 	w, h := min(int(c.DstW), r.clipW()), min(int(c.DstH), r.clipH())
 	ox, oy := r.sched.inverseOrigin(float32(c.OriginX), float32(c.OriginY), effective)
@@ -661,3 +649,53 @@ func Fragment(dst vec4,src vec2,color vec4,custom vec4) vec4 {
  return c*(.25*coverage)
 }
 `
+
+// The wave pass is split across goroutines from reflectionWaveFloor vertices,
+// in at most reflectionWaveWorkers contiguous parts. Each vertex's arithmetic
+// reads only its own vertex and values fixed for the frame, so the parts give
+// exactly the single loop's vertices. A water-heavy battle reflects 10-20
+// thousand vertices a frame, two float64 sines each, which was a third of a
+// millisecond on the game goroutine.
+const (
+	reflectionWaveFloor   = 4096
+	reflectionWaveWorkers = 4
+)
+
+// waveReflections displaces the reflected mesh by the water's wave and maps
+// it into the frame's surface.
+func (r *Renderer) waveReflections(vs []ebiten.Vertex, c drawlist.Terrain, scale, time float32) {
+	sched := &r.sched
+	wave := func(vs []ebiten.Vertex) {
+		for i := range vs {
+			v := &vs[i]
+			// Displace only the reflected mesh, retaining its original atlas samples.
+			// Shared corners move together; boats receive a small baseline wobble.
+			// Height ramp and wave are Enhanced art choices (GPU design §26.6).
+			if v.Custom3 <= 0 {
+				amount := max(0, min((v.Custom0/scale-64)/96, 1))
+				amount = max(.35, amount*amount*(3-2*amount))
+				x, y := float32(c.OriginX)+v.DstX/scale, float32(c.OriginY)+v.DstY/scale
+				wave := math.Sin(float64(y*.65+time*1.7)) + .35*math.Sin(float64(x*.11-y*.31-time*1.1))
+				v.DstX += float32(wave) * 3 * amount * scale
+			}
+			v.DstX = sched.txx(v.DstX)
+			v.DstY = sched.txy(v.DstY)
+		}
+	}
+	parts := min(reflectionWaveWorkers, runtime.GOMAXPROCS(0))
+	if len(vs) < reflectionWaveFloor || parts < 2 {
+		wave(vs)
+		return
+	}
+	size := (len(vs) + parts - 1) / parts
+	var wg sync.WaitGroup
+	for lo := size; lo < len(vs); lo += size {
+		wg.Add(1)
+		go func(part []ebiten.Vertex) {
+			defer wg.Done()
+			wave(part)
+		}(vs[lo:min(lo+size, len(vs))])
+	}
+	wave(vs[:size])
+	wg.Wait()
+}

@@ -341,5 +341,21 @@ func (q *modelQuadParams) upload() {
 // window trace").
 var perFrameUpload = &ebiten.NewImageOptions{Unmanaged: true}
 
+// newRendererImage creates one of the renderer's own images — atlas pages,
+// tables, surfaces and the like — as a texture of its own, like perFrameUpload.
+// A managed image lives at an origin inside one of Ebitengine's shared
+// textures, and Ebitengine moves it between them as the frame's draws use its
+// neighbours as sources. The scene shader reads its sources at positions
+// interpolated in that shared texture and floors them, so at a fractional
+// world scale an image's origin rounded its texel fetches: the same frame drew
+// sub-texel differently when a draw elsewhere in the frame, or a different
+// grouping of runs, moved an image or changed the image a run bound. On its
+// own texture every image's origin is zero, so the fetch depends on the
+// command alone (docs/DESIGN_GPU_RENDERER.md §22, "Page passes beside
+// Replay").
+func newRendererImage(w, h int) *ebiten.Image {
+	return ebiten.NewImageWithOptions(image.Rect(0, 0, w, h), &ebiten.NewImageOptions{Unmanaged: true})
+}
+
 // ceilTo rounds v up to a multiple of a.
 func ceilTo(v, a int) int { return (v + a - 1) / a * a }

@@ -108,6 +108,27 @@ const (
 	// sceneOpUnderwaterCommit is the underwater refraction's model commit
 	// (underwater.go, §26.5): the page in source 2, the water mask in source 3.
 	sceneOpUnderwaterCommit = 12
+	// sceneOpModelDirectShadow commits one model lane shadow from the lane's
+	// 2× colour pages, the shadow's bound in source 3 and the body's in
+	// source 2: the four silhouette texels under the pixel are resolved by
+	// coverage and composited as the ALP half-colour fragment, skipping a
+	// pixel whose body block (Custom0/1 texels away, inside the body bounds
+	// in Color) is wholly covered — the slot stage's punch on the lane's
+	// planes (§22).
+	//
+	// Both shadow commits are ALP families that sample the model pages, and
+	// live in this shader for sceneOpTint's reason: their blend is
+	// source-over, so they share the opaque runs around them instead of
+	// opening a phase against every body drawn over them (§11.2 "The
+	// scheduler").
+	sceneOpModelDirectShadow = 13
+	// sceneOpModelSilhouetteShadow commits a Digger or mobile shadow from the
+	// body's own pages, the colour in source 3 and, when Custom2 carries a
+	// clip key, the key page in source 2: the four body texels under the pixel
+	// are the silhouette, a texel at or below the clip key in Custom2 is
+	// erased, and the fragment is the ALP half-colour of index 0 at that
+	// coverage [03 R-REN-03D §1, §4] (§22).
+	sceneOpModelSilhouetteShadow = 14
 )
 
 // The destination shader's op selector, carried in Custom3.
@@ -149,21 +170,6 @@ const (
 	// tested and runs the same comparison; the colour lanes carry the row's scale
 	// split like destOpTable's (§13.11).
 	destOpHalo = 6
-	// destOpModelDirectShadow commits one model lane shadow from the lane's
-	// 2× colour pages, the shadow's bound in source 3 and the body's in
-	// source 2: the four silhouette texels under the pixel are resolved by
-	// coverage and composited as the ALP half-colour fragment, skipping a
-	// pixel whose body block (Custom0/1 texels away, inside the body bounds
-	// in Color) is wholly covered — the slot stage's punch on the lane's
-	// planes (§22).
-	destOpModelDirectShadow = 7
-	// destOpModelSilhouetteShadow commits a Digger or mobile shadow from the
-	// body's own pages, the colour in source 3 and, when Custom2 carries a
-	// clip key, the key page in source 2: the
-	// four body texels under the pixel are the silhouette, a texel at or
-	// below the clip key in Custom2 is erased, and the fragment is the ALP
-	// half-colour of index 0 at that coverage [03 R-REN-03D §1, §4] (§22).
-	destOpModelSilhouetteShadow = 8
 )
 
 // The composite's blends (docs/DESIGN_GPU_RENDERER.md §13.3 "Blend classes").
@@ -235,7 +241,8 @@ func rowScaleLanes(k float32) (low, high float32) {
 
 // scene2DShaderSource is the one opaque pass. Source 0 is the scene atlas page
 // (index in red, opacity flag in green), source 1 the table atlas, source 2 the
-// model slot page, source 3 the terrain tile atlas. An op samples only the slots
+// model slot page, source 3 the terrain tile atlas, or for a model shadow
+// commit the shadow's or the body's model page. An op samples only the slots
 // its family needs; unused slots are bound to the table atlas so no sampler is
 // ever unbound.
 //
@@ -369,6 +376,54 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 			opacity = 0.5
 		}
 		return vec4(sum/4.0, cover/4.0)*opacity
+	} else if op == ` + fmt.Sprint(sceneOpModelDirectShadow) + ` {
+		rel := srcPos - imageSrc0Origin()
+		b := floor(rel/2.0) * 2.0
+		sum := vec3(0.0)
+		cover := 0.0
+		body := 0.0
+		bb := b + custom.xy
+		inside := bb.x >= color.r && bb.y >= color.g && bb.x < color.b && bb.y < color.a
+		for j := 0; j < 2; j++ {
+			for i := 0; i < 2; i++ {
+				o := vec2(float(i)+0.5, float(j)+0.5)
+				c := imageSrc3AtFromSrc0Pos(imageSrc0Origin() + b + o)
+				if c.a > 0.5 {
+					sum += c.rgb
+					cover += 1.0
+				}
+				if inside && imageSrc2AtFromSrc0Pos(imageSrc0Origin()+bb+o).a > 0.5 {
+					body += 1.0
+				}
+			}
+		}
+		if cover == 0.0 || body >= 4.0 {
+			return vec4(0.0)
+		}
+		return vec4(sum/4.0*0.5, cover/4.0*0.5)
+	} else if op == ` + fmt.Sprint(sceneOpModelSilhouetteShadow) + ` {
+		rel := srcPos - imageSrc0Origin()
+		b := floor(rel/2.0) * 2.0
+		cover := 0.0
+		for j := 0; j < 2; j++ {
+			for i := 0; i < 2; i++ {
+				o := vec2(float(i)+0.5, float(j)+0.5)
+				if imageSrc3AtFromSrc0Pos(imageSrc0Origin()+b+o).a <= 0.5 {
+					continue
+				}
+				if custom.z > 0.5 {
+					key := floor(imageSrc2AtFromSrc0Pos(imageSrc0Origin()+b+o).r*255.0 + 0.5)
+					if key <= custom.z {
+						continue
+					}
+				}
+				cover += 1.0
+			}
+		}
+		if cover == 0.0 {
+			return vec4(0.0)
+		}
+		return vec4(palAt(0.0)*cover/4.0*0.5, cover/4.0*0.5)
 	} else if op == ` + fmt.Sprint(sceneOpUnderwaterCommit) + ` {
 		return underwaterCommit(srcPos, color, custom)
 	} else if op == ` + fmt.Sprint(sceneOpCopyColor) + ` {
@@ -403,17 +458,18 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 }
 
 // sceneDestShaderSource is the one destination-compositing pass. Source 0 is the
-// scene atlas page (or, for a shadow commit, the model body page), source 1 the
-// table atlas and source 3 the model shadow page. Nothing here samples the
-// destination: the remaining ALP families hand the device a premultiplied
-// half-colour fragment and the row families hand it a scale, and the blend does
-// the arithmetic the tables were generated from [03 §4.3.4](§13.2, §13.3).
+// scene atlas page, the lit point plane or the explosion disc atlas, and source
+// 1 the table atlas. Nothing here samples the destination: the strategic marker
+// hands the device a premultiplied colour fragment and the row families hand it
+// a scale, and the blend does the arithmetic the tables were generated from
+// [03 §4.3.4](§13.2, §13.3).
 //
-// The ALP STRIP and feature blit is no longer one of them: its blend is
-// source-over, which is the opaque families' blend, so it evaluates in the scene
-// shader as sceneOpTint and shares their runs and their stream. What is left
-// here either scales the destination — a different blend — or composites a
-// source the scene shader has no reason to carry.
+// The ALP STRIP and feature blit and the model shadow commits are no longer
+// here: their blend is source-over, which is the opaque families' blend, so they
+// evaluate in the scene shader (sceneOpTint, sceneOpModelDirectShadow,
+// sceneOpModelSilhouetteShadow) and share their runs and their stream. What is
+// left here either scales the destination — a different blend — or is the
+// strategic marker's fragment.
 //
 // Commands in one batch either have disjoint rectangles or share a blend
 // stream, and a command that must observe one of another stream is a phase
@@ -443,32 +499,6 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 		t := imageSrc0At(srcPos)
 		n := floor(t.r*255.0+0.5)*65536.0 + floor(t.g*255.0+0.5)*256.0 + floor(t.b*255.0+0.5)
 		return vec4(1.0, 1.0, 1.0, n/8388608.0)
-	}
-	if op == ` + fmt.Sprint(destOpModelDirectShadow) + ` {
-		rel := srcPos - imageSrc0Origin()
-		b := floor(rel/2.0) * 2.0
-		sum := vec3(0.0)
-		cover := 0.0
-		body := 0.0
-		bb := b + custom.xy
-		inside := bb.x >= color.r && bb.y >= color.g && bb.x < color.b && bb.y < color.a
-		for j := 0; j < 2; j++ {
-			for i := 0; i < 2; i++ {
-				o := vec2(float(i)+0.5, float(j)+0.5)
-				c := imageSrc3AtFromSrc0Pos(imageSrc0Origin() + b + o)
-				if c.a > 0.5 {
-					sum += c.rgb
-					cover += 1.0
-				}
-				if inside && imageSrc2AtFromSrc0Pos(imageSrc0Origin()+bb+o).a > 0.5 {
-					body += 1.0
-				}
-			}
-		}
-		if cover == 0.0 || body >= 4.0 {
-			return vec4(0.0)
-		}
-		return vec4(sum/4.0*0.5, cover/4.0*0.5)
 	}
 	if op == ` + fmt.Sprint(destOpHalo) + ` {
 		// The flat ground halo. custom.xy is the fragment's own offset from the
@@ -502,30 +532,6 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 		cov := 1.0 - smoothstep(0.6, 1.0, d)
 		k := 1.0 - (1.0-color.r)*cov
 		return vec4(k, k, k, 0.0)
-	}
-	if op == ` + fmt.Sprint(destOpModelSilhouetteShadow) + ` {
-		rel := srcPos - imageSrc0Origin()
-		b := floor(rel/2.0) * 2.0
-		cover := 0.0
-		for j := 0; j < 2; j++ {
-			for i := 0; i < 2; i++ {
-				o := vec2(float(i)+0.5, float(j)+0.5)
-				if imageSrc3AtFromSrc0Pos(imageSrc0Origin()+b+o).a <= 0.5 {
-					continue
-				}
-				if custom.z > 0.5 {
-					key := floor(imageSrc2AtFromSrc0Pos(imageSrc0Origin()+b+o).r*255.0 + 0.5)
-					if key <= custom.z {
-						continue
-					}
-				}
-				cover += 1.0
-			}
-		}
-		if cover == 0.0 {
-			return vec4(0.0)
-		}
-		return vec4(palAt(0.0)*cover/4.0*0.5, cover/4.0*0.5)
 	}
 	// destOpTable, the one op left: the row families carry their scale k, already
 	// split by the CPU into the part the colour factor can express and the part

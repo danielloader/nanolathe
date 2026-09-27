@@ -112,3 +112,32 @@ func TestBeamMapsEachStrokeAfterRawSecondaryGate(t *testing.T) {
 		t.Fatalf("raw zero secondary became stroke: %d", n)
 	}
 }
+
+// The dispatch loop finds each record's view through a handle index. It must
+// name the first view carrying the handle in snapshot order, as a walk of the
+// snapshot does, including when a handle repeats, and the zero view for a
+// handle the snapshot does not carry [I1].
+func TestProjectileViewAtIsTheFirstViewInSnapshotOrder(t *testing.T) {
+	views := []frame.ProjectileView{
+		{Handle: 5, WeaponID: 1}, {Handle: 9, WeaponID: 2}, {Handle: 5, WeaponID: 3}, {Handle: 0, WeaponID: 4}, {Handle: 700, WeaponID: 5},
+	}
+	c := &Client{}
+	c.indexProjectileViews(views)
+	for handle := uint16(0); handle <= 800; handle++ {
+		var want frame.ProjectileView
+		for _, v := range views {
+			if uint16(v.Handle) == handle {
+				want = v
+				break
+			}
+		}
+		if got := c.projectileViewAt(views, handle); got != want {
+			t.Fatalf("handle %d: got weapon %d, want %d", handle, got.WeaponID, want.WeaponID)
+		}
+	}
+	// A later, smaller snapshot must not see the earlier one's entries.
+	c.indexProjectileViews(views[:1])
+	if got := c.projectileViewAt(views[:1], 700); got.WeaponID != 0 {
+		t.Fatalf("handle 700 after re-indexing one view: got weapon %d, want none", got.WeaponID)
+	}
+}

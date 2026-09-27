@@ -28,13 +28,17 @@ type reflectionRun struct {
 }
 
 type waterReflections struct {
-	disabled           bool
-	active             *drawlist.ModelGeometry
-	region             modelDirectRegion
-	verts, transformed []ebiten.Vertex
-	indices            []uint32
-	softTiles          []bool
-	runs               []reflectionRun
+	disabled bool
+	// pending is set while a compiled reflection pass's device draws wait
+	// for flushWaterReflections; pendingSoften says whether it has the
+	// softening plane.
+	pending, pendingSoften bool
+	active                 *drawlist.ModelGeometry
+	region                 modelDirectRegion
+	verts, transformed     []ebiten.Vertex
+	indices                []uint32
+	softTiles              []bool
+	runs                   []reflectionRun
 	// softVerts, softIndices and softRuns are the metadata pass's subset of
 	// the mesh: only triangles the softening filter can read (softenSubset).
 	softVerts                                      []ebiten.Vertex
@@ -77,7 +81,7 @@ func (s *waterReflections) sourceOptions(scale, ox, oy, invScale, time float32) 
 func (r *Renderer) setWaterReflections(on bool) { r.reflections.disabled = !on }
 
 func (s *waterReflections) resetFrame() {
-	s.active = nil
+	s.active, s.pending = nil, false
 	s.verts, s.indices, s.runs = s.verts[:0], s.indices[:0], s.runs[:0]
 }
 
@@ -285,13 +289,15 @@ func (r *Renderer) drawWaterReflections(c drawlist.Terrain) {
 	if s.disabled || st.disabled || !c.Water.Enabled || st.mask == nil || !st.visibleWater(c) || len(s.verts) == 0 || s.sourceShader == nil || s.resolveShader == nil || s.softResolveShader == nil {
 		return
 	}
+	// A second water pass in one frame draws after the first's pending draws,
+	// the order the two passes' device work always had.
+	r.flushWaterReflections()
 	if s.source == nil || s.source.Bounds().Dx() != r.w || s.source.Bounds().Dy() != r.h {
 		if s.source != nil {
 			s.source.Deallocate()
 		}
 		s.source = ebiten.NewImageWithOptions(image.Rect(0, 0, r.w, r.h), &ebiten.NewImageOptions{Unmanaged: true})
 	}
-	s.source.Clear()
 	scale := float32(c.Scale.Float())
 	time := (float32(c.Water.Tick) + float32(c.Water.Fraction16)/65536) / 30
 	s.transformed = append(s.transformed[:0], s.verts...)
@@ -313,53 +319,10 @@ func (r *Renderer) drawWaterReflections(c drawlist.Terrain) {
 			}
 			s.height = ebiten.NewImageWithOptions(s.source.Bounds(), &ebiten.NewImageOptions{Unmanaged: true})
 		}
-		s.height.Clear()
-	}
-	targets := [2]*ebiten.Image{s.source, nil}
-	if soften {
-		targets[1] = s.height
 		s.softenSubset(w, h, scale, effective, c.Water.Energy, r.sched.txx(0), r.sched.txy(0))
 	}
-	op := s.sourceOptions(scale, ox, oy, 1/effective, time)
-	for metadata, target := range targets {
-		if target == nil {
-			continue
-		}
-		s.metadata[0] = float32(metadata)
-		runs, verts, indices := s.runs, s.transformed, s.indices
-		if metadata == 1 {
-			runs, verts, indices = s.softRuns, s.softVerts, s.softIndices
-		}
-		for _, run := range runs {
-			var imgs [4]*ebiten.Image
-			if run.page >= 0 {
-				pg := &r.modelDirect.pages[run.page]
-				imgs = [4]*ebiten.Image{pg.colour, pg.key, nil, r.modelDirect.params.img}
-				if run.occlusionPage >= 0 {
-					imgs[2] = r.modelDirect.pages[run.occlusionPage].key
-				}
-			} else {
-				imgs[0] = r.placeholderImage()
-				imgs[1] = r.tables.atlas
-				if run.scenePage >= 0 {
-					imgs[0] = r.scene.pageImage(sceneEntry{page: run.scenePage, ok: true})
-				}
-			}
-			if imgs[0] == nil {
-				continue
-			}
-			for i := range imgs {
-				if imgs[i] == nil {
-					imgs[i] = r.placeholderImage()
-				}
-			}
-			op.Images = imgs
-			r.beginPass(target)
-			target.DrawTrianglesShader32(deviceVertexSpan(verts, run.first, run.count), indices[run.firstIndex:run.firstIndex+run.indexCount], s.sourceShader, op)
-			r.frameDraws++
-			r.recordSubmission(run.count, run.indexCount)
-		}
-	}
+	s.sourceOptions(scale, ox, oy, 1/effective, time)
+	s.pending, s.pendingSoften = true, soften
 	r.modelStats.ReflectionVertices = len(s.verts)
 	images := [4]*ebiten.Image{s.source, st.mask}
 	if soften {
@@ -409,6 +372,69 @@ func (r *Renderer) drawWaterReflections(c drawlist.Terrain) {
 }
 
 const reflectionSoftTile = 64
+
+// flushWaterReflections issues the device draws of the reflection pass
+// drawWaterReflections compiled: the two planes cleared, then every
+// reflected face drawn into them. They sample the model pages and the
+// parameter image, so they wait for the frame's page passes, which run beside
+// Replay (prepareModelDirect); and they are issued before the scheduled batch
+// whose resolve reads the planes, because submitSchedule flushes them before
+// it draws anything. Deferring them from the terrain pass to that point is
+// what lets a water battle's Replay compile overlap the page passes.
+func (r *Renderer) flushWaterReflections() {
+	s := &r.reflections
+	if !s.pending {
+		return
+	}
+	s.pending = false
+	r.joinModelPages()
+	s.source.Clear()
+	targets := [2]*ebiten.Image{s.source, nil}
+	if s.pendingSoften {
+		s.height.Clear()
+		targets[1] = s.height
+	}
+	op := &s.sourceOpts
+	for metadata, target := range targets {
+		if target == nil {
+			continue
+		}
+		s.metadata[0] = float32(metadata)
+		runs, verts, indices := s.runs, s.transformed, s.indices
+		if metadata == 1 {
+			runs, verts, indices = s.softRuns, s.softVerts, s.softIndices
+		}
+		for _, run := range runs {
+			var imgs [4]*ebiten.Image
+			if run.page >= 0 {
+				pg := &r.modelDirect.pages[run.page]
+				imgs = [4]*ebiten.Image{pg.colour, pg.key, nil, r.modelDirect.params.img}
+				if run.occlusionPage >= 0 {
+					imgs[2] = r.modelDirect.pages[run.occlusionPage].key
+				}
+			} else {
+				imgs[0] = r.placeholderImage()
+				imgs[1] = r.tables.atlas
+				if run.scenePage >= 0 {
+					imgs[0] = r.scene.pageImage(sceneEntry{page: run.scenePage, ok: true})
+				}
+			}
+			if imgs[0] == nil {
+				continue
+			}
+			for i := range imgs {
+				if imgs[i] == nil {
+					imgs[i] = r.placeholderImage()
+				}
+			}
+			op.Images = imgs
+			r.beginPass(target)
+			target.DrawTrianglesShader32(r.spans.span(target, verts, run.first, run.count), indices[run.firstIndex:run.firstIndex+run.indexCount], s.sourceShader, op)
+			r.frameDraws++
+			r.recordSubmission(run.count, run.indexCount)
+		}
+	}
+}
 
 // Bound the expensive filter by elevated triangles, including its full gather
 // footprint and water displacement. Geometry bounds only cull shader work;

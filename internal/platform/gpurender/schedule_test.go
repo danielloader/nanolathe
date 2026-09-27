@@ -373,6 +373,33 @@ func TestSchedulerForgottenCellOwnerStillConstrains(t *testing.T) {
 	}
 }
 
+// A draw hands Ebitengine exactly its own vertices once its destination has
+// taken a slice at least that long, and the rounded class only when it passes
+// that mark; a mark is per destination, and a draw never gets fewer vertices
+// than its own.
+func TestDeviceSpansRoundOnlyPastTheMark(t *testing.T) {
+	verts := make([]ebiten.Vertex, 5000, 8000)
+	a, b := &ebiten.Image{}, &ebiten.Image{}
+	var m deviceSpans
+	if got := len(m.span(a, verts, 0, 1000)); got != deviceVertexClass(1000) {
+		t.Fatalf("first draw handed %d vertices, want the class %d", got, deviceVertexClass(1000))
+	}
+	for _, n := range []int{1000, 990, 1, deviceVertexClass(1000)} {
+		if got := len(m.span(a, verts, 0, n)); got != n {
+			t.Fatalf("a %d-vertex draw under the mark handed %d vertices, want exactly %d", n, got, n)
+		}
+	}
+	if got := len(m.span(b, verts, 0, 990)); got != deviceVertexClass(990) {
+		t.Fatalf("another destination's first draw handed %d vertices, want its own class %d", got, deviceVertexClass(990))
+	}
+	if got, n := len(m.span(a, verts, 0, 3000)), 3000; got != deviceVertexClass(n) {
+		t.Fatalf("a draw past the mark handed %d vertices, want the class %d", got, deviceVertexClass(n))
+	}
+	if got := len(m.span(a, verts, 4000, 3000)); got != 3000 {
+		t.Fatalf("a draw under the new mark handed %d vertices, want exactly 3000", got)
+	}
+}
+
 // A device draw's vertex slice is rounded up to a size class so Ebitengine's
 // per-destination conversion buffer is not reallocated for every few vertices a
 // growing batch adds; the class never exceeds the storage's capacity and adds

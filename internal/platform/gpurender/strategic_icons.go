@@ -58,7 +58,7 @@ func (r *Renderer) markerImage(a *drawlist.MarkerAtlas) *ebiten.Image {
 	if !validMarkerAtlas(a) {
 		return nil
 	}
-	c.image = ebiten.NewImage(a.Width, a.Height)
+	c.image = newRendererImage(a.Width, a.Height)
 	// Raw mask channels intentionally are not premultiplied colors. WritePixels
 	// preserves their bytes; only the fragment below turns them into color.
 	c.image.WritePixels(a.Pixels)

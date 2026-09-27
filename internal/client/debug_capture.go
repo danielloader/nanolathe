@@ -106,6 +106,7 @@ func (c *Client) DebugSnapshot() map[string]any {
 	d["selection_drag"] = c.selectionDrag
 	workers := [][]DebugStorage{}
 	if c.recordPool != nil {
+		workers = append(workers, debugModelScratch(&c.recordPool.self.clone.modelScratch))
 		for _, w := range c.recordPool.workers {
 			workers = append(workers, debugModelScratch(&w.clone.modelScratch))
 		}

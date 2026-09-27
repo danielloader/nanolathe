@@ -77,32 +77,35 @@ type modelGroupMergeLane struct {
 	idx       []uint32
 }
 
-// mergeModelGroups runs after every atlas page is ready, so the two members
+// mergeModelGroupsInto runs after every atlas page is ready, so the two members
 // may occupy different pages. Children join in recorded order; equality admits
 // the later child. Their isolated rasters already carry the shifted key and
 // both their own verdicts and the carrier's clip, as in the ordinary lane.
-func (r *Renderer) mergeModelGroups() {
+//
+// It charges a, the page work's own accounting, since it runs beside Replay
+// with the page passes (drawModelPages).
+func (r *Renderer) mergeModelGroupsInto(a *deviceAcct) {
 	m := &r.modelDirect.groups
 	m.planWaves()
 	if len(m.slots) != 0 {
 		m.ensureScratch()
-		passes := r.modelStats.Passes
+		passes := a.stats.Passes
 		for i, first := range m.waves {
 			end := len(m.slots)
 			if i+1 < len(m.waves) {
 				end = m.waves[i+1]
 			}
-			r.drawModelGroupWave(m.slots[first:end])
+			r.drawModelGroupWave(a, m.slots[first:end])
 		}
-		r.modelStats.DirectPasses += r.modelStats.Passes - passes
+		a.stats.DirectPasses += a.stats.Passes - passes
 	}
 	for i := range m.slots {
-		r.modelStats.DirectGroupMerges++
-		r.modelStats.DirectGroupPixels += m.slots[i].w * m.slots[i].h
+		a.stats.DirectGroupMerges++
+		a.stats.DirectGroupPixels += m.slots[i].w * m.slots[i].h
 	}
 	if m.colour != nil {
 		b := m.colour.Bounds()
-		r.modelStats.DirectGroupScratchBytes = b.Dx() * b.Dy() * 8
+		a.stats.DirectGroupScratchBytes = b.Dx() * b.Dy() * 8
 	}
 }
 
@@ -183,7 +186,7 @@ func (m *modelGroupMergeLane) ensureScratch() {
 // run of consecutive merges reading the same two pages, then copies the slots
 // back in merge order, one draw per page and plane. Only a merge whose key has
 // a later reader writes the key plane.
-func (r *Renderer) drawModelGroupWave(wave []modelGroupSlot) {
+func (r *Renderer) drawModelGroupWave(a *deviceAcct, wave []modelGroupSlot) {
 	d := &r.modelDirect
 	m := &d.groups
 	if m.opts.Uniforms == nil {
@@ -202,7 +205,7 @@ func (r *Renderer) drawModelGroupWave(wave []modelGroupSlot) {
 				continue
 			}
 			if len(m.idx) != 0 && (s.parentPage != parentPage || s.childPage != childPage) {
-				r.evaluateModelGroupRun(dst, parentPage, childPage)
+				r.evaluateModelGroupRun(a, dst, parentPage, childPage)
 			}
 			parentPage, childPage = s.parentPage, s.childPage
 			// The fragment reads the parent's and the child's texels at its
@@ -218,7 +221,7 @@ func (r *Renderer) drawModelGroupWave(wave []modelGroupSlot) {
 			m.idx = append(m.idx, base, base+1, base+2, base, base+2, base+3)
 		}
 		if len(m.idx) != 0 {
-			r.evaluateModelGroupRun(dst, parentPage, childPage)
+			r.evaluateModelGroupRun(a, dst, parentPage, childPage)
 		}
 	}
 	for p := range d.pages {
@@ -247,24 +250,22 @@ func (r *Renderer) drawModelGroupWave(wave []modelGroupSlot) {
 			if len(m.idx) == 0 {
 				continue
 			}
-			r.beginPass(dst)
+			a.beginPass(dst)
 			dst.DrawTriangles32(m.verts, m.idx, src, &m.copy)
-			r.recordSubmission(len(m.verts), len(m.idx))
-			r.frameDraws++
+			a.submitted(len(m.verts), len(m.idx))
 		}
 	}
 }
 
 // evaluateModelGroupRun draws the pending slots of one pair of pages into dst.
-func (r *Renderer) evaluateModelGroupRun(dst *ebiten.Image, parentPage, childPage int32) {
+func (r *Renderer) evaluateModelGroupRun(a *deviceAcct, dst *ebiten.Image, parentPage, childPage int32) {
 	d := &r.modelDirect
 	m := &d.groups
 	pg, cg := &d.pages[parentPage], &d.pages[childPage]
 	m.opts.Images = [4]*ebiten.Image{pg.colour, pg.key, cg.colour, cg.key}
-	r.beginPass(dst)
+	a.beginPass(dst)
 	dst.DrawTrianglesShader32(m.verts, m.idx, m.shader, &m.opts)
-	r.recordSubmission(len(m.verts), len(m.idx))
-	r.frameDraws++
+	a.submitted(len(m.verts), len(m.idx))
 	m.verts, m.idx = m.verts[:0], m.idx[:0]
 }
 

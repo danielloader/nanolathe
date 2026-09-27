@@ -322,7 +322,7 @@ func (r *Renderer) prepareWater(c drawlist.Terrain) {
 	if w == 0 || h == 0 {
 		return
 	}
-	st.mask = ebiten.NewImage(w, h)
+	st.mask = newRendererImage(w, h)
 	st.mask.WritePixels(pixels)
 }
 

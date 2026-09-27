@@ -317,7 +317,10 @@ commands into phases wherever that is order-preserving (C-G3). The families
 whose result depends on what is already there — `Tinted`, `Lit`, `LitRect`,
 `ShadeRect`, the model shadow commit, the trail marks, the lit discs and the fog
 composite — are device blends rather than destination reads since §13.3, but the
-order they impose is the same, so the placement rules are unchanged. Two
+order they impose is the same, so the placement rules are unchanged. Those whose
+blend is source-over — `Tinted` and the model shadow commits — evaluate in the
+opaque scene shader and ride the opaque class, so they share runs with the
+writes around them in record order (§13.3). Two
 overlapping smoke puffs blend one after the other, exactly as the byte writers
 do `[03 R-COMP-01 §2]` `[03 R-FX-02 §3]`.
 
@@ -969,10 +972,10 @@ carries `BlitTinted` and the translucent feature body and shadow: they
 composite, but under source-over, which is the blend an opaque write already
 draws with, so evaluating them in this shader is what lets a tinted sprite share
 a device run with the opaque writes around it instead of opening a phase against
-them. The remaining destination-compositing families (`FillLitRect`,
-`FillShadeRect`, `PointLit`, the trail marks, the lit discs, the model shadow
-commits, the strategic marker layer) draw with one
-destination shader (`sceneDest`) whose custom attributes select the table and
+them. The model shadow commits join it for the same reason (§13.3). The
+remaining destination-compositing families (`FillLitRect`, `FillShadeRect`,
+`PointLit`, the trail marks, the lit discs, the strategic marker layer) draw with
+one destination shader (`sceneDest`) whose custom attributes select the table and
 row. Every parameter rides the vertex, and the aircraft shadow layer's
 `AircraftWater` is the **one** uniform on a per-frame draw in the executor: its
 four operands are frame constants and its custom lanes were spent on the
@@ -1282,10 +1285,22 @@ end.
   premultiplied fragment `(PAL[src]/2, 1/2)`. A shadow commit keeps its body
   punch in the shader so overlapping silhouette faces of one subject darken
   once; overlapping shadows of different subjects darken twice, as the byte
-  writers do [03 R-REN-03D §4–§5]. Source-over is also the opaque blend, so the
-  first two — the ones that need no source of their own beyond the scene atlas —
-  ride the OPAQUE stream and the scene shader (§11.2); the others keep shaders
-  of their own and stay in the destination class.
+  writers do [03 R-REN-03D §4–§5]. Source-over is also the opaque blend, so all
+  three ride the OPAQUE stream and the scene shader (§11.2): a shadow commit
+  reads the model pages the body commit already binds. Until 2026-09-26 the
+  shadow commits kept the destination shader, and every body drawn over a
+  shadow opened a phase: a 1,600-unit battle compiled 34 phases and 89 device
+  draws, and a coastal battle 37 and 113, where they now compile 8 and 24, and
+  11 and 47, and the render thread's offscreen draw work fell from 1.31 to
+  0.84 ms a frame. At rest scales the composite is byte-identical. At a
+  fractional world scale a commit's texel fetch then still depended on the
+  origin of whichever image the run bound in slot 0, so the move shifted a
+  sub-texel rounding in 150 pixels of one unit of a 0.75× Ashap Plateau frame;
+  the renderer's images are now unmanaged, at origin zero, so run grouping no
+  longer reaches a fetch (§22 "Page passes beside Replay"). The other ALP
+  families that bind a shader of their own — the strategic
+  marker layer, the aircraft shadow, the scorch marks and the water reflection
+  resolve — stay in the destination class.
 * *Row families* — `FillLitRect`, `FillShadeRect`, `PointLit`, the lit discs and
   the trail marks — scale the destination: LHT row r by `1 + r/30`, SHD row r by
   `0.06875·r`. One blend serves both: source factor destination-colour,
@@ -1331,7 +1346,8 @@ therefore one render pass, except where fog takes its copy.
 
 **Blend classes.** `schedOpaque` draws with source-over: alpha 1 or 0 for an
 opaque write, and the ALP half-colour fragment for the tinted strip and feature
-blit, which is the same blend and so the same class and the same run.
+blit and the model shadow commits, which is the same blend and so the same class
+and the same run.
 `schedDest` splits into source-over (the ALP families that bind their own
 shader) and scale (row families); the fog run binds its own shader and read
 slot.
@@ -1656,6 +1672,14 @@ indexed by that unit's position in the committed unit slice. Participants take
 jobs from a shared cursor, because per-unit cost varies by an order of magnitude
 and a shared cursor balances better than a fixed stripe.
 
+**The blend rides the same pool.** The interpolated view of §13.5 blends every
+unit of the battle, not only the ones in view, and each unit's blend reads its
+own two views and writes its own slot and piece buffer. The recorder lends the
+pool to the blend (`forEach`, 64-unit chunks from a shared cursor, sequential
+below 256 units), so the 0.35–0.45 ms it took on the recording goroutine at
+450–1,600 units is spread across the participants; the result is the
+sequential blend's exactly, and a steady-state pooled blend allocates nothing.
+
 *Stage two* is the unchanged sequential walk. It visits the buckets in exactly
 the order [03 R-RAST-01 §7] fixes and appends the Model commands from those
 slots. **Nothing is read from a slot until stage two reaches that unit's place in
@@ -1668,7 +1692,11 @@ that does not belong to the subject in hand is rebuilt inline rather than used.
 client that shares every immutable and read-only field with it and owns its own
 model scratch arena, so two workers never receive the same borrowed slot; the
 arena is carried across the per-frame refresh, so a steady-state frame still
-allocates nothing per unit. Writes a worker makes to its own copy are dropped,
+allocates nothing per unit. The recording goroutine drains through a copy of its
+own as well, so the recording client is not written from the first wake to the
+last worker's return, and each worker takes its copy after its wake, in
+parallel: the recording goroutine used to make all of them before the first
+wake, about 0.15 ms of a 1,600-unit frame spent before any worker could start. Writes a worker makes to its own copy are dropped,
 which is safe only because stage one is a pure function of the committed frame
 and of cache entries that already exist: every orientation and cached-body map
 entry a job can reach is created on the recording goroutine **before** stage one
@@ -1912,6 +1940,20 @@ trace"); keep these out unless something below them changes:
   one removed most synchronous re-records after a late frame (16 to 3 in three
   minutes) but did not reduce late frames; the re-record is rarely what makes
   the following frame late.
+
+**What bounds the loop now (2026-09-26).** At 1,600 units the game goroutine's
+`Execute` is about 4 ms and the pre-record about 3.2 ms, and the pre-record may
+only start once `Execute` has consumed the list it would overwrite: the two run
+in series around the render thread's flush, so a frame whose recording or
+execution grows by a millisecond with the content in view is late. Running the
+pre-record beside `Execute` needs the list, its arenas and every retained
+store's rebased faces double-buffered, and the post-`Execute` host calls moved
+behind the join; that is the next structural step. The pre-record's own largest
+item is stage one (§13.9): about 11 ms of CPU a frame across ~7.5 effective
+participants on a six-performance-core machine, most of it re-projecting the
+cached lanes of units whose interpolated heading, pitch or bank moved since the
+last presented frame (240 to 450 a frame in a 1,600-unit battle once the armies
+meet).
 
 ### 13.11 Flash quads and same-stream phases
 
@@ -4266,15 +4308,57 @@ placed in parallel. A cleanup stops it when the renderer is collected, which
 works because an idle pool holds no reference back to it, so a host that drops
 a renderer, or a test that makes hundreds, leaks no goroutine.
 
-**A latent defect, reproduced.** `colourRun` stamps a run with the packer's page
-once the job's regions are all allocated, not with the page of the region its
-faces land in. A construction group whose group region fits the first page while
-a child's region opens the second draws the carrier's faces into the second
-page at the first page's coordinates, while its commit samples the first. That
-can happen in the 2× view with a factory building at the page boundary.
-Placement reproduces it byte for byte: `TestModelPlaceRunPageFollowsThePacker`
-locks it, and the skipped `TestModelPlaceRunPageIsTheRegionPage` states the
-correct behaviour. Fixing it moves pixels and needs its own visual review.
+**Runs follow their region's page.** A run is stamped with the page of the
+region its packet's faces land in (`fillJob`), the page its commit samples. A
+construction group's separate child region can open a page after its group
+region was placed on the one before, so one job's runs can change page between
+packets. Until 2026-09-26 a job's runs took the packer's page once all of its
+regions were allocated: such a group drew its carrier into the second page at
+the first page's coordinates while its commit sampled a cleared region of the
+first, and the factory vanished for that frame. Parallel placement reproduced
+it byte for byte before the fix. `TestModelPlaceRunPageIsTheRegionPage` locks
+both paths, and the device fixture `checkFactoryPageTurnDevicePixels` draws a
+factory building a revealed product alone and straddling the page turn and
+requires the same composite (the old stamping drops the factory's plate).
+
+**Page passes beside Replay.** The two page passes hand Ebitengine every vertex
+of the frame's batch twice, and converting and copying those vertices was the
+largest single cost of a battle frame's `Execute` (about 1.2 ms of 4 on the
+coastal battle, 2 ms at 0.75× with 1,600 units). Once placement returns, they
+run on a goroutine of their own, with the group merges after them, while the
+executing goroutine compiles `Replay` (`prepareModelDirect`,
+`drawModelPages`). Their device accounting goes to a `deviceAcct` of their
+own and is added to the frame's when they are joined. Every reader of what they
+draw joins them first (`joinModelPages`): a scheduled batch that binds a page
+(the body, shadow, underwater and aircraft-shadow commits), the atlas fallback,
+which rebuilds its faces in the lane's batch, the water reflection draws, the
+debug snapshot, source retirement and the end of `Execute`. Ebitengine then has
+the passes enqueued before any command that reads them, which is the order the
+sequential lane gave it, so the composite is the same; the device fixture
+`checkModelPagesConcurrentDevicePixels` draws a frame both ways and compares
+pixels and accounting, and the race detector passes over the fixtures and over
+live coastal and Survival battles. The water reflection draws, which sample
+the pages and the parameter image, are compiled at the terrain pass but issued
+when the schedule is next submitted (`flushWaterReflections`), before any batch
+that resolves them, so a water battle's compile overlaps the passes too.
+`Execute` fell by about 0.3 ms in both battles (3.95 to 3.64 ms at 0.75×,
+4.03 to 3.74 on the coast).
+
+Running device calls from two goroutines exposed a dependency the sequential
+executor had hidden. A managed Ebitengine image lives at an origin inside a
+shared texture, and Ebitengine moves it when a draw into one of its
+neighbours finds that texture already read this frame; the scene shader reads
+its sources at positions interpolated in that shared texture and floors them.
+So at a fractional world scale the ORDER of unrelated device calls rounded
+texel fetches differently — interleaving the passes with `Replay` moved about
+9,000 pixels of a 0.75× frame, and moving the model shadow commits into the
+opaque runs above had moved 150 by changing which image a run bound in slot 0.
+Every image the renderer owns is now unmanaged (`newRendererImage`), at origin
+zero on a texture of its own, so a fetch depends on its command alone: rest
+scales are byte-identical, a 0.75× frame moved once by sub-texel roundings
+(93% of the changed pixels within 8 levels), and the concurrent and inline
+page passes now give the same pixels at every scale. Ebitengine issued the same
+63–64 commands and 31 render passes a frame on the coastal battle either way.
 
 **Verification.** `TestModelPlaceGoldenHash` hashes the lane's whole output —
 batch, runs, parameter bytes, regions, merges, accounting, the store and body

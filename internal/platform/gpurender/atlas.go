@@ -151,7 +151,7 @@ func (a *sceneAtlas) ensurePage(e sceneEntry) *ebiten.Image {
 	}
 	p := a.pages[e.page]
 	if p.img == nil {
-		p.img = ebiten.NewImage(p.w, p.h)
+		p.img = newRendererImage(p.w, p.h)
 	}
 	return p.img
 }

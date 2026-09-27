@@ -1,6 +1,7 @@
 package gpurender
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -108,6 +109,122 @@ func checkFactoryRevealDevicePixels() error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// checkFactoryPageTurnDevicePixels draws a factory building a revealed product
+// twice: alone, and after an off-screen filler that leaves the first atlas
+// page room for the factory's group region but not for its product's own
+// region, so the group's allocations turn the page. The composite must be the
+// same: every face draws into the page of its own region, the one its commit
+// samples, whichever page that is.
+func checkFactoryPageTurnDevicePixels() error {
+	pal := fixturePalette()
+	const w, h = 96, 48
+	r, err := NewChecked(&pal, w, h)
+	if err != nil {
+		return err
+	}
+	for _, doubled := range []bool{false, true} {
+		plate := directSubject(8, 8, 74, 26, directFace(0, 0, 72, 24, 200, 12, 12), directFace(40, 0, 48, 24, 210, 80, 80))
+		child := directSubject(8, 8, 66, 26, directFace(0, 0, 8, 24, 100, 5, 5), directFace(8, 0, 40, 24, 100, 20, 40), directFace(40, 0, 64, 24, 120, 20, 20))
+		child.Reveal = &drawlist.ModelReveal{Floor: 10, Line: 30, Below: -1, Band: 250, Above: -2}
+		if doubled {
+			ss := *child
+			ss.Scale, ss.Width, ss.Height = 2, child.Width*2, child.Height*2
+			ss.Faces = make([]drawlist.ModelFace, len(child.Faces))
+			for i, f := range child.Faces {
+				ss.Faces[i] = f
+				ss.Faces[i].Vertices = append([]drawlist.ModelVertex(nil), f.Vertices...)
+				for j := range ss.Faces[i].Vertices {
+					ss.Faces[i].Vertices[j].X *= 2
+					ss.Faces[i].Vertices[j].Y *= 2
+				}
+			}
+			child.Supersample, child.Reveal = &ss, nil
+		}
+		plate.Children = []drawlist.ModelChild{{Geometry: child, KeyDelta: 10}}
+		var pix [2][]byte
+		for turn := range 2 {
+			var list drawlist.List
+			list.RecordClear()
+			list.RecordFill(drawlist.Fill{Rect: drawlist.Rect{W: w, H: h}, Index: 7, Style: drawlist.FillSolid})
+			if turn == 1 {
+				// A 3,884 × 4,084 region: the factory's 152-texel-wide region
+				// fits beside it, its product's 136 more do not, and no shelf
+				// fits below it.
+				list.RecordModel(drawlist.Model{Geometry: directSubject(0, -2100, 1940, 2040, directFace(0, 0, 1936, 2036, 100, 10, 10))})
+			}
+			list.RecordModel(drawlist.Model{Geometry: plate})
+			list.RecordExpand()
+			img := r.Execute(&list, w, h)
+			if img == nil {
+				return fmt.Errorf("factory page turn fixture returned no image")
+			}
+			d := &r.modelDirect
+			if group, product := d.regions[plate], d.regions[child]; turn == 1 && (group.page != 0 || product.page != 1) {
+				return fmt.Errorf("factory page turn (doubled=%v): the group region is on page %d and the product's on %d, want 0 and 1", doubled, group.page, product.page)
+			}
+			pix[turn] = make([]byte, w*h*4)
+			img.ReadPixels(pix[turn])
+		}
+		for i := 0; i < len(pix[0]); i += 4 {
+			if !bytes.Equal(pix[0][i:i+4], pix[1][i:i+4]) {
+				return fmt.Errorf("factory page turn (doubled=%v) pixel (%d,%d): %v after the page turn, %v alone", doubled, i/4%w, i/4/w, pix[1][i:i+4], pix[0][i:i+4])
+			}
+		}
+	}
+	return nil
+}
+
+// checkModelPagesConcurrentDevicePixels draws one frame with the model lane's
+// page passes run beside Replay and again with them run inline, and requires
+// the same composite and the same device accounting: the concurrent path only
+// moves when the passes are issued, never what they draw or what reads them
+// (prepareModelDirect). The frame has a construction group whose product's
+// region turns the atlas page, so the group merges and both pages take part.
+func checkModelPagesConcurrentDevicePixels() error {
+	pal := fixturePalette()
+	const w, h = 96, 48
+	var pix [2][]byte
+	var stats [2]ModelStats
+	for inline := range 2 {
+		r, err := NewChecked(&pal, w, h)
+		if err != nil {
+			return err
+		}
+		r.modelDirect.pagesInline = inline == 1
+		plate := directSubject(8, 8, 74, 26, directFace(0, 0, 72, 24, 200, 12, 12), directFace(40, 0, 48, 24, 210, 80, 80))
+		child := directSubject(8, 8, 66, 26, directFace(0, 0, 8, 24, 100, 5, 5), directFace(8, 0, 40, 24, 100, 20, 40), directFace(40, 0, 64, 24, 120, 20, 20))
+		child.Reveal = &drawlist.ModelReveal{Floor: 10, Line: 30, Below: -1, Band: 250, Above: -2}
+		plate.Children = []drawlist.ModelChild{{Geometry: child, KeyDelta: 10}}
+		var list drawlist.List
+		list.RecordClear()
+		list.RecordFill(drawlist.Fill{Rect: drawlist.Rect{W: w, H: h}, Index: 7, Style: drawlist.FillSolid})
+		list.RecordModel(drawlist.Model{Geometry: directSubject(0, -2100, 1940, 2040, directFace(0, 0, 1936, 2036, 100, 10, 10))})
+		list.RecordModel(drawlist.Model{Geometry: plate})
+		list.RecordModel(drawlist.Model{Geometry: directSubject(60, 30, 26, 14, directFace(0, 0, 24, 12, 150, 30, 30))})
+		list.RecordExpand()
+		img := r.Execute(&list, w, h)
+		if img == nil {
+			return fmt.Errorf("concurrent page passes fixture returned no image")
+		}
+		if r.modelDirect.pagesPending {
+			return fmt.Errorf("Execute returned with the page passes still pending (inline=%v)", inline == 1)
+		}
+		pix[inline] = make([]byte, w*h*4)
+		img.ReadPixels(pix[inline])
+		stats[inline] = r.ModelStats()
+	}
+	if !bytes.Equal(pix[0], pix[1]) {
+		return fmt.Errorf("concurrent page passes drew a different composite from inline ones")
+	}
+	c, i := stats[0], stats[1]
+	if c.DirectPasses != i.DirectPasses || c.SubmittedVertices != i.SubmittedVertices || c.DeviceDraws != i.DeviceDraws ||
+		c.DirectGroupMerges != i.DirectGroupMerges || c.DirectPages != 2 {
+		return fmt.Errorf("concurrent page passes accounting passes=%d vertices=%d draws=%d merges=%d pages=%d, inline passes=%d vertices=%d draws=%d merges=%d",
+			c.DirectPasses, c.SubmittedVertices, c.DeviceDraws, c.DirectGroupMerges, c.DirectPages, i.DirectPasses, i.SubmittedVertices, i.DeviceDraws, i.DirectGroupMerges)
 	}
 	return nil
 }

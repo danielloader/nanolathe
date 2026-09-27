@@ -558,7 +558,7 @@ func (f *fogPass) ensureAtlas(gray, black [4]*formats.GAFEntry, scale camera.Vie
 			}
 		}
 	}
-	f.atlas = ebiten.NewImage(atlasW, atlasH)
+	f.atlas = newRendererImage(atlasW, atlasH)
 	f.atlas.WritePixels(buf)
 }
 

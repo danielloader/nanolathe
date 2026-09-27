@@ -42,8 +42,8 @@ import (
 // quantized (the battle light, the finish response) or integer-valued, and the
 // two agree; either way the hash must not move under a refactor of placement.
 var modelPlaceGolden = map[string]string{
-	"arm64": "d020813010a7a7d407a1527f1490acbefee39fbb56b3a74ed8e52712931f6726",
-	"amd64": "d020813010a7a7d407a1527f1490acbefee39fbb56b3a74ed8e52712931f6726",
+	"arm64": "c2b955b99edd09bbf4e10852725da5793556830b4d9cf432a5ca847caabe5939",
+	"amd64": "c2b955b99edd09bbf4e10852725da5793556830b4d9cf432a5ca847caabe5939",
 }
 
 // modelPlaceFrames is the scenario's frame count.
@@ -846,7 +846,7 @@ func fallbackDigest(r *Renderer) []byte {
 // would carry them.
 func (r *Renderer) appendPacket(g *drawlist.ModelGeometry, region modelDirectRegion, shadow bool, keyDelta int32, group *drawlist.ModelGeometry) {
 	c := r.laneCtx()
-	c.runPage = r.modelDirect.page
+	c.runPage = region.page
 	p := modelPlacePacket{g: g, region: region, shadow: shadow, keyDelta: keyDelta, group: group, solo: c.soloPass, groupReflection: c.groupReflection}
 	r.appendPlaced(c, &p)
 	c.flushStats(&r.modelStats)

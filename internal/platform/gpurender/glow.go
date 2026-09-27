@@ -613,7 +613,7 @@ func (r *Renderer) resolveGlow() {
 		}
 		g.shaderOpts.Blend = ebiten.BlendLighter
 		r.recordSubmission(len(run.verts), len(run.idx))
-		g.source.DrawTrianglesShader32(deviceVertexSpan(run.verts, 0, len(run.verts)), run.idx, g.sourceShader, &g.shaderOpts)
+		g.source.DrawTrianglesShader32(r.spans.span(g.source, run.verts, 0, len(run.verts)), run.idx, g.sourceShader, &g.shaderOpts)
 		r.frameDraws++
 	}
 

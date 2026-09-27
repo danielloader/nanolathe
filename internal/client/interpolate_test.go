@@ -281,6 +281,60 @@ func TestSteadyStateBlendAllocatesNothing(t *testing.T) {
 	}
 }
 
+// The modern recorder blends a battle's units over its worker pool
+// (docs/DESIGN_GPU_RENDERER.md §13.9). Each unit blends from its own two views,
+// so the pool's result is the sequential blend's exactly — including units that
+// snap, units with hidden pieces and units that exist on one tick only — and a
+// steady-state pooled blend allocates nothing.
+func TestPooledUnitBlendMatchesSequential(t *testing.T) {
+	const n = 700
+	prev, cur := &frame.Frame{Tick: 1}, &frame.Frame{Tick: 2}
+	for i := 0; i < n; i++ {
+		pieces := func(off int64) []frame.PieceView {
+			return []frame.PieceView{{Tx: wu(off), RotY: uint16(off * 300)}, {Tz: wu(-off), Hidden: i%7 == 0}, {RotX: uint16(i)}}
+		}
+		p := frame.UnitView{Slot: pool.Handle(i + 1), InstanceID: uint64(i + 1), DefID: 7, Owner: 1, X: wu(int64(i)), Z: wu(10), Heading: uint16(i * 97), Pieces: pieces(1)}
+		c := p
+		c.X, c.Heading, c.Pieces = wu(int64(i)+3), uint16(i*97+400), pieces(2)
+		if i%11 == 0 {
+			c.X = wu(int64(i) + 5000) // beyond the snap bound
+		}
+		if i%13 != 0 {
+			prev.Units = append(prev.Units, p)
+		}
+		cur.Units = append(cur.Units, c)
+	}
+	var seq interpolator
+	want := append([]frame.UnitView(nil), seq.blend(prev, cur, int64(fractionOne)/3).Units...)
+	for i := range want {
+		want[i].Pieces = append([]frame.PieceView(nil), want[i].Pieces...)
+	}
+	p := newRecordPool(6)
+	defer p.close()
+	var par interpolator
+	par.each = p.forEachFn
+	for range 2 {
+		got := par.blend(prev, cur, int64(fractionOne)/3).Units
+		if len(got) != len(want) {
+			t.Fatalf("pooled blend: %d units, want %d", len(got), len(want))
+		}
+		for i := range want {
+			g, w := got[i], want[i]
+			if g.X != w.X || g.Z != w.Z || g.Heading != w.Heading || len(g.Pieces) != len(w.Pieces) {
+				t.Fatalf("unit %d: pooled blend X=%d heading=%d, sequential X=%d heading=%d", i, g.X, g.Heading, w.X, w.Heading)
+			}
+			for j := range w.Pieces {
+				if g.Pieces[j] != w.Pieces[j] {
+					t.Fatalf("unit %d piece %d: pooled %+v, sequential %+v", i, j, g.Pieces[j], w.Pieces[j])
+				}
+			}
+		}
+	}
+	if allocs := testing.AllocsPerRun(10, func() { par.blend(prev, cur, int64(fractionOne)/3) }); allocs != 0 {
+		t.Fatalf("steady-state pooled blend allocated %v times per frame, want 0", allocs)
+	}
+}
+
 // The fraction setter clamps into [0, 1) in the 16.16 domain: the clock's
 // float32 carry can round to exactly one [01 §4.2], and a fraction of one would
 // show the next tick's pose a tick early.

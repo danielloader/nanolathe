@@ -116,7 +116,7 @@ func (r *Renderer) transientFrameFor(f *formats.GAFFrame) sceneEntry {
 				buf[dst+3] = 255
 			}
 		}
-		s.image = ebiten.NewImage(pw, ph)
+		s.image = newRendererImage(pw, ph)
 		s.image.WritePixels(buf)
 	}
 	// Reserved pages name transient slots; persistent shelf-packed pages keep

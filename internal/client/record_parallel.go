@@ -57,6 +57,23 @@ type recordPool struct {
 	quit    chan struct{}
 	done    sync.WaitGroup
 
+	// self is the recording goroutine's own stage-one participant, and src
+	// the recording client every participant copies at a wake. Draining
+	// through a clone of its own leaves the recording client untouched for
+	// the whole of stage one, so each worker copies it after its wake, in
+	// parallel, instead of the recording goroutine copying it once per worker
+	// before the first wake goes out.
+	self recordWorker
+	src  *Client
+	// task, when set, is the job a wake runs instead of stage one: taskN
+	// indices in chunks of taskChunk, taken from the shared cursor
+	// (forEach).
+	task      func(lo, hi int)
+	taskN     int
+	taskChunk int
+	// forEachFn is forEach bound once, so lending it allocates nothing.
+	forEachFn func(n, chunk int, fn func(lo, hi int))
+
 	// closeOnce guards the quit close so a second shutdown is a no-op rather
 	// than a panic, and exited is released by each worker as it returns, so
 	// close can prove the goroutines are gone before it drops their clones.
@@ -83,6 +100,7 @@ func newRecordPool(n int) *recordPool {
 	// array and the bucket-order consumption are unchanged, which is what the
 	// determinism test compares an N-worker frame against.
 	p := &recordPool{quit: make(chan struct{})}
+	p.forEachFn = p.forEach
 	for i := 0; i < n-1; i++ {
 		w := &recordWorker{}
 		// One slot of buffer so the recording goroutine never blocks handing
@@ -105,7 +123,12 @@ func (p *recordPool) serve(w *recordWorker, wake chan struct{}) {
 		case <-p.quit:
 			return
 		case <-wake:
-			p.drain(&w.clone)
+			if p.task != nil {
+				p.runTask()
+			} else {
+				w.refresh(p.src)
+				p.drain(&w.clone)
+			}
 			p.done.Done()
 		}
 	}
@@ -133,7 +156,52 @@ func (p *recordPool) close() {
 	})
 	p.exited.Wait()
 	p.workers, p.wake = nil, nil
+	p.self, p.src = recordWorker{}, nil
 	p.jobs, p.units, p.pairs = nil, nil, nil
+}
+
+// refresh points a participant's clone at this frame's recording client. The
+// worker's own arena is carried across the refresh: the recording client's
+// scratch slices must not be shared, and the arena's grown capacity is what
+// keeps a steady-state frame allocation-free.
+func (w *recordWorker) refresh(c *Client) {
+	arena := w.clone.modelScratch
+	w.clone = *c
+	w.clone.modelScratch = arena
+	w.clone.modelScratch.reset()
+	w.clone.modelScratch.active = true
+	// A worker never records. Stage two owns the list, and a command
+	// appended to a clone's copy would be silently dropped rather than
+	// racing, so the field is cleared to make that a nil-safe no-op.
+	w.clone.recordPool = nil
+	w.clone.parallelRecord = false
+	w.clone.pendingPair = nil
+}
+
+// forEach runs fn over [0, n) in chunks of chunk on every participant, the
+// calling goroutine included, and returns once all of it has run. Chunks are
+// taken from the shared cursor, so fn must treat each index independently of
+// which participant runs it and of the order they run in.
+func (p *recordPool) forEach(n, chunk int, fn func(lo, hi int)) {
+	p.task, p.taskN, p.taskChunk = fn, n, chunk
+	p.cursor.Store(0)
+	p.done.Add(len(p.wake))
+	for _, wake := range p.wake {
+		wake <- struct{}{}
+	}
+	p.runTask()
+	p.done.Wait()
+	p.task = nil
+}
+
+func (p *recordPool) runTask() {
+	for {
+		lo := int(p.cursor.Add(1)-1) * p.taskChunk
+		if lo < 0 || lo >= p.taskN {
+			return
+		}
+		p.task(lo, min(lo+p.taskChunk, p.taskN))
+	}
 }
 
 // drain takes job indices until the list is exhausted. Each job writes only its
@@ -260,29 +328,19 @@ func (c *Client) prepareUnitGeometry(units []frame.UnitView, jobs []int32) {
 		return
 	}
 
-	for _, w := range p.workers {
-		// Carry the worker's own arena across the refresh: the recording
-		// client's scratch slices must not be shared, and the worker's grown
-		// capacity is what keeps a steady-state frame allocation-free.
-		arena := w.clone.modelScratch
-		w.clone = *c
-		w.clone.modelScratch = arena
-		w.clone.modelScratch.reset()
-		w.clone.modelScratch.active = true
-		// A worker never records. Stage two owns the list, and a command
-		// appended to a clone's copy would be silently dropped rather than
-		// racing, so the field is cleared to make that a nil-safe no-op.
-		w.clone.recordPool = nil
-		w.clone.parallelRecord = false
-		w.clone.pendingPair = nil
-	}
+	// The recording goroutine drains through its own clone, so nothing
+	// writes the recording client until every participant has finished: the
+	// workers copy it after their wake.
+	p.self.refresh(c)
+	p.src = c
 	p.cursor.Store(0)
 	p.done.Add(len(p.wake))
 	for _, wake := range p.wake {
 		wake <- struct{}{}
 	}
-	p.drain(c)
+	p.drain(&p.self.clone)
 	p.done.Wait()
+	p.src = nil
 }
 
 // takeUnitGeometry hands stage two the slot for one unit, or nil when the unit

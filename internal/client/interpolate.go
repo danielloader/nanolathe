@@ -161,7 +161,14 @@ func (c *Client) presentationFrame() *frame.Frame {
 	if c.presentationPaused && c.interp.pausedValid && c.interp.pausedInputs == key {
 		return &c.interp.view
 	}
+	// The modern recorder blends the units over its §13.9 pool. The pool
+	// belongs to the recording pass, so it is lent only inside one.
+	c.interp.each = nil
+	if p := c.recordPool; c.parallelRecord && p != nil && len(p.wake) > 0 {
+		c.interp.each = p.forEachFn
+	}
 	blended := c.interp.blend(prev, cur, fraction)
+	c.interp.each = nil
 	c.interp.pausedInputs, c.interp.pausedValid = key, c.presentationPaused
 	// The effect strip buckets are keyed by frame pointer and committed tick,
 	// and they hold copies of the views. The blended frame keeps both across the
@@ -325,7 +332,25 @@ type interpolator struct {
 	unitAt   []int32
 	projAt   map[uint64]int32
 	effectAt map[effectKey]int32
+
+	// each, when set, runs the unit blend over the recorder's §13.9 pool
+	// (presentationFrame); blendPrev, blendCur and blendF16 are the pair the
+	// running blend reads, and blendRangeFn the unit range method, bound once
+	// so a frame hands the pool no new closure.
+	each                func(n, chunk int, fn func(lo, hi int))
+	blendPrev, blendCur *frame.Frame
+	blendF16            int64
+	blendRangeFn        func(lo, hi int)
 }
+
+// Units below parallelBlendFloor blend on the recording goroutine: waking the
+// pool costs more than it saves. A chunk of parallelBlendChunk units keeps the
+// shared cursor's traffic small next to the work. Both are timing thresholds,
+// not behavioural ones: every unit blends from its own two views alone.
+const (
+	parallelBlendFloor = 256
+	parallelBlendChunk = 64
+)
 
 // effectKey is the effect identity of §13.5: the presentation identity when it
 // is nonzero, and otherwise the record identity, its admission sequence and its
@@ -370,7 +395,29 @@ func (in *interpolator) blendUnits(prev, cur *frame.Frame, f16 int64) []frame.Un
 		}
 	}
 	in.units = growSlice(in.units, len(cur.Units))
-	for i := range cur.Units {
+	// Every unit's piece buffer slot exists before any unit blends, so a unit
+	// writes only its own two slots and the units may blend in any order, on
+	// any participant.
+	for len(in.pieces) < len(cur.Units) {
+		in.pieces = append(in.pieces, nil)
+	}
+	in.blendPrev, in.blendCur, in.blendF16 = prev, cur, f16
+	if in.each == nil || len(cur.Units) < parallelBlendFloor {
+		in.blendUnitRange(0, len(cur.Units))
+	} else {
+		if in.blendRangeFn == nil {
+			in.blendRangeFn = in.blendUnitRange
+		}
+		in.each(len(cur.Units), parallelBlendChunk, in.blendRangeFn)
+	}
+	in.blendPrev, in.blendCur = nil, nil
+	return in.units
+}
+
+// blendUnitRange blends units [lo, hi) of the pair blendUnits installed.
+func (in *interpolator) blendUnitRange(lo, hi int) {
+	prev, cur, f16 := in.blendPrev, in.blendCur, in.blendF16
+	for i := lo; i < hi; i++ {
 		u := cur.Units[i]
 		p := in.previousUnit(prev, u)
 		if p != nil {
@@ -384,7 +431,6 @@ func (in *interpolator) blendUnits(prev, cur *frame.Frame, f16 int64) []frame.Un
 		}
 		in.units[i] = u
 	}
-	return in.units
 }
 
 // previousUnit is the unit continuity rule of §13.5. InstanceID must agree

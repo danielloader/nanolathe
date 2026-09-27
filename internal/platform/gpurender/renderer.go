@@ -169,6 +169,8 @@ type Renderer struct {
 	// the default (one per GOMAXPROCS, at most modelPlaceParticipants).
 	placePool    *modelPlacePool
 	placeWorkers int
+	// spans is the device draws' vertex-slice marks (schedule.go).
+	spans deviceSpans
 }
 
 // surfaceUpload is one indexed-surface upload slot: the scene atlas region its
@@ -284,8 +286,8 @@ func (r *Renderer) ensureSize(w, h int) {
 	if r.surfaces[0] != nil && r.w == w && r.h == h {
 		return
 	}
-	r.surfaces[0] = ebiten.NewImage(w, h)
-	r.surfaces[1] = ebiten.NewImage(w, h)
+	r.surfaces[0] = newRendererImage(w, h)
+	r.surfaces[1] = newRendererImage(w, h)
 	r.w, r.h = w, h
 	r.sched.resetFrame(w, h)
 }
@@ -338,6 +340,7 @@ func (r *Renderer) Execute(list *drawlist.List, w, h int) *ebiten.Image {
 	r.prepareTreeHeat(list)
 	stage.mark(&r.stageTimes.Prepare)
 	r.prepareModelDirect(list)
+	defer r.joinModelPages()
 	stage.mark(&r.stageTimes.Model)
 	r.prepareProjectileReflections(list)
 	r.prepareWaterBed(list)
@@ -353,15 +356,19 @@ func (r *Renderer) Execute(list *drawlist.List, w, h int) *ebiten.Image {
 	}
 	// A list without an Expand marker still leaves no compiled work behind.
 	r.submitSchedule()
+	r.flushWaterReflections()
+	r.joinModelPages()
 	stage.mark(&r.stageTimes.Replay)
 	r.modelStats.DeviceDraws = r.frameDraws
 	return r.surfaces[0]
 }
 
 // StageTimes is the most recent Execute's wall time by stage, measured only
-// while SetStageTiming is on: the CPU prepare passes, the model lane (placement
-// and its device passes), and Replay with the final submission. Diagnostic
-// only (docs/BATTLE_BENCHMARK.md "Live window trace").
+// while SetStageTiming is on: the CPU prepare passes, the model lane's
+// placement and the start of its device passes, and Replay with the final
+// submission — including any wait for those passes, which run beside it
+// (prepareModelDirect). Diagnostic only (docs/BATTLE_BENCHMARK.md "Live window
+// trace").
 type StageTimes struct {
 	Prepare, Model, Replay time.Duration
 	// ModelPlace is the model lane's CPU placement, within Model.

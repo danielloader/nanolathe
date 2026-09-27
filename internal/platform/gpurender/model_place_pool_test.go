@@ -248,15 +248,14 @@ func TestModelPlacePoolStops(t *testing.T) {
 	}
 }
 
-// The sequential lane stamps a job's runs with the packer's page once all of
-// the job's regions are allocated (colourRun), not with the page of the
-// region the faces land in. A construction group whose group region fits the
-// first page but whose child's region opens the second therefore draws the
-// carrier's faces into the second page at the first page's coordinates,
-// while its commit samples the first. Placement reproduces that byte for
-// byte, in parallel too; this locks it so a fix is a deliberate change of its
-// own, with its own visual review, rather than a side effect.
-func TestModelPlaceRunPageFollowsThePacker(t *testing.T) {
+// A run draws into the page of the region its faces land in, which is the
+// page its commit samples. A construction group whose group region fits the
+// first page while its child's separate region opens the second has runs on
+// both: the carrier's on the first, the child's on the second, sequential and
+// parallel alike. Stamping the job's runs with the packer's page once all its
+// regions were allocated drew the carrier into the second page at the first
+// page's coordinates, and its commit sampled a cleared region.
+func TestModelPlaceRunPageIsTheRegionPage(t *testing.T) {
 	skipAfterDeviceLoop(t)
 	for _, parallel := range []bool{false, true} {
 		r := newParallelPlaceRenderer(t, 4)
@@ -275,30 +274,11 @@ func TestModelPlaceRunPageFollowsThePacker(t *testing.T) {
 		if !region.ok || !child.ok || region.page != 0 || child.page != 1 {
 			t.Fatalf("parallel=%v: the group region is on page %d and its child's on page %d, want 0 and 1", parallel, region.page, child.page)
 		}
-		carrier := d.runs[len(d.runs)-2]
-		if carrier.page != 1 {
-			t.Fatalf("parallel=%v: the carrier's run is on page %d; the lane's runs follow the packer's page, 1", parallel, carrier.page)
+		carrier, product := d.runs[len(d.runs)-2], d.runs[len(d.runs)-1]
+		if carrier.page != region.page || product.page != child.page {
+			t.Fatalf("parallel=%v: the carrier's run is on page %d and the product's on %d, want their regions' pages %d and %d",
+				parallel, carrier.page, product.page, region.page, child.page)
 		}
-	}
-}
-
-// TestModelPlaceRunPageIsTheRegionPage is the correct behaviour the latent
-// defect above departs from: a run draws into its region's page. It is
-// skipped while the defect stands, and passes once it is fixed, at which
-// point TestModelPlaceRunPageFollowsThePacker must be revised with it.
-func TestModelPlaceRunPageIsTheRegionPage(t *testing.T) {
-	skipAfterDeviceLoop(t)
-	r := newPlaceRenderer(t)
-	d := &r.modelDirect
-	yard, _ := placePageTurnGroup()
-	var list drawlist.List
-	for i := 0; i < 3; i++ {
-		list.RecordModel(drawlist.Model{Geometry: placeBody(placeBodyOpts{faces: 4, w: 1000, h: 1000, ax: 0, ay: 0, seed: 90 + i})})
-	}
-	list.RecordModel(drawlist.Model{Geometry: yard})
-	r.placeModelDirectFrame(&list)
-	if got, want := d.runs[len(d.runs)-2].page, d.regions[yard].page; got != want {
-		t.Skipf("known defect: a construction group whose allocations turn the atlas page draws its carrier into page %d, its region's page is %d (docs/DESIGN_GPU_RENDERER.md §22, \"Placement workers\")", got, want)
 	}
 }
 

@@ -253,7 +253,7 @@ func checkModelGroupMergeWaves() error {
 	for frame := range 2 {
 		r.modelStats, r.lastDest = ModelStats{}, nil
 		d.groups.merges = append(d.groups.merges[:0], merges...)
-		r.mergeModelGroups()
+		mergeModelGroupsNow(r)
 		merged, pixels, err := referenceModelGroupMerges(&colour, &key, size, merges)
 		if err != nil {
 			return err
@@ -340,4 +340,13 @@ func TestModelGroupMergeWaves(t *testing.T) {
 			}
 		}
 	}
+}
+
+// mergeModelGroupsNow merges the lane's groups on the calling goroutine and
+// charges the work to the frame, as a join of the page work would.
+func mergeModelGroupsNow(r *Renderer) {
+	a := deviceAcct{lastDest: r.lastDest}
+	r.mergeModelGroupsInto(&a)
+	r.chargeDevice(&a)
+	r.lastDest = a.lastDest
 }

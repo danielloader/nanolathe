@@ -48,8 +48,9 @@ func (c *Client) DrawProjectileViews(current []frame.ProjectileView, now uint32,
 	stats.Aborted = aborted
 	// A rejected lens stops later records; earlier writes survive [03 §5.4].
 	stats.Dispatched = len(draws)
+	c.indexProjectileViews(current)
 	for _, d := range draws {
-		view := projectileViewByHandle(current, d.Handle)
+		view := c.projectileViewAt(current, d.Handle)
 		if view.Handle == 0 {
 			stats.Skipped++
 			continue
@@ -156,18 +157,34 @@ func (c *Client) drawProjectileShadow(shadow *formats.GAFFrame, v frame.Projecti
 	return true
 }
 
-func projectileViewByHandle(views []frame.ProjectileView, handle uint16) frame.ProjectileView {
-	v, _ := projectileViewByHandleOK(views, handle)
-	return v
+// indexProjectileViews indexes views by handle for projectileViewAt: each
+// handle names the FIRST view that carries it in snapshot order, which is the
+// view a walk of the snapshot finds [I1]. A battle frame looks up every
+// dispatched record, and walking the whole snapshot for each one made the pass
+// quadratic in the projectile count.
+func (c *Client) indexProjectileViews(views []frame.ProjectileView) {
+	n := 0
+	for i := range views {
+		n = max(n, int(uint16(views[i].Handle))+1)
+	}
+	at := resizeScratch(c.projectileAt, n)
+	clear(at)
+	for i := len(views) - 1; i >= 0; i-- {
+		at[uint16(views[i].Handle)] = int32(i) + 1
+	}
+	c.projectileAt = at
 }
 
-func projectileViewByHandleOK(views []frame.ProjectileView, handle uint16) (frame.ProjectileView, bool) {
-	for _, v := range views { // snapshot order is stable; no map dependence [I1]
-		if uint16(v.Handle) == handle {
-			return v, true
+// projectileViewAt returns the first view of views carrying handle, or the
+// zero view when none does, through the index indexProjectileViews built over
+// the same views.
+func (c *Client) projectileViewAt(views []frame.ProjectileView, handle uint16) frame.ProjectileView {
+	if int(handle) < len(c.projectileAt) {
+		if i := c.projectileAt[handle]; i > 0 {
+			return views[i-1]
 		}
 	}
-	return frame.ProjectileView{}, false
+	return frame.ProjectileView{}
 }
 
 func (c *Client) drawProjectileBeam(d render.ProjectileDraw, v frame.ProjectileView) int {

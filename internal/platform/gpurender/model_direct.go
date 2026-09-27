@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -187,6 +188,18 @@ type modelDirectLane struct {
 	keyShader, colourShader *ebiten.Shader
 	groups                  modelGroupMergeLane
 	shaderErr               error
+
+	// The page passes and the group merges run beside Replay on a goroutine
+	// of their own (prepareModelDirect): pagesPending is set while they may
+	// still be running, pagesDone is their completion and pageAcct the
+	// device accounting they charge, added to the frame's when they are
+	// joined (joinModelPages).
+	pagesPending bool
+	pagesDone    sync.WaitGroup
+	pageAcct     deviceAcct
+	// pagesInline runs them on the executing goroutine instead, joined at
+	// once: the reference the concurrent path is compared against.
+	pagesInline bool
 
 	order []modelDirectFace
 
@@ -410,15 +423,88 @@ func modelFrameLanes(ox, oy float32) (fx, fy int, fits bool) {
 }
 
 // prepareModelDirect runs before Replay: it places every eligible subject and
-// shadow on the atlas, builds the batch, and draws both planes of every page
-// used, so Replay only compiles the commit quads (§22).
+// shadow on the atlas, builds the batch, and starts the device work that draws
+// both planes of every page used and merges the frame's construction groups
+// (drawModelPages), so Replay only compiles the commit quads (§22).
+//
+// That device work runs on a goroutine of its own while the executing one
+// compiles Replay: the vertices Ebitengine converts and copies for the two
+// page passes are the largest single cost of a battle frame's Execute, and
+// Replay's compile issues no device call that reads what they draw until a
+// batch binds a page. Every such reader joins it first (joinModelPages): a
+// scheduled batch that binds a page, the water reflection draws, the atlas
+// fallback, which rewrites the batch the passes read, and the end of Execute.
+// Ebitengine enqueues the passes before any command that reads them, so the
+// device sees the order the sequential lane gave it.
 func (r *Renderer) prepareModelDirect(l *drawlist.List) {
 	if !r.placeModelDirectFrame(l) {
 		return
 	}
 	d := &r.modelDirect
-	d.params.upload()
+	// Everything the executing goroutine may bind while the passes run exists
+	// before they start: the pages, and the placeholder the empty slots take.
 	fill := r.placeholderImage()
+	for p := range d.pages {
+		if d.pages[p].usedRows != 0 {
+			d.ensurePage(int32(p))
+		}
+	}
+	a := &d.pageAcct
+	a.stats, a.draws, a.lastDest = ModelStats{}, 0, r.lastDest
+	d.pagesPending = true
+	if d.pagesInline {
+		r.drawModelPages(fill)
+		r.joinModelPages()
+		return
+	}
+	d.pagesDone.Add(1)
+	go r.runModelPages(fill)
+}
+
+func (r *Renderer) runModelPages(fill *ebiten.Image) {
+	defer r.modelDirect.pagesDone.Done()
+	r.drawModelPages(fill)
+}
+
+// joinModelPages waits for the frame's page passes and group merges and
+// charges their device work to the frame. It is a no-op once joined.
+func (r *Renderer) joinModelPages() {
+	d := &r.modelDirect
+	if !d.pagesPending {
+		return
+	}
+	d.pagesDone.Wait()
+	d.pagesPending = false
+	r.chargeDevice(&d.pageAcct)
+	if d.pagesInline {
+		r.lastDest = d.pageAcct.lastDest
+	}
+}
+
+// bindsModelPage reports whether any of imgs is a plane of a model page: a
+// draw that must follow the frame's page passes.
+func (d *modelDirectLane) bindsModelPage(imgs *[4]*ebiten.Image) bool {
+	for _, img := range imgs {
+		if img == nil {
+			continue
+		}
+		for p := range d.pages {
+			if img == d.pages[p].colour || img == d.pages[p].key {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// drawModelPages draws both planes of every page used, then merges the
+// frame's construction groups, charging pageAcct. It touches only the lane's
+// batch, parameter image, pages and merge scratch, which Replay's compile does
+// not write before it joins.
+func (r *Renderer) drawModelPages(fill *ebiten.Image) {
+	d := &r.modelDirect
+	a := &d.pageAcct
+	d.params.upload()
 	params := d.params.img
 	if params == nil {
 		params = fill
@@ -428,14 +514,13 @@ func (r *Renderer) prepareModelDirect(l *drawlist.List) {
 		if pg.usedRows == 0 {
 			continue
 		}
-		d.ensurePage(int32(p))
 		used := image.Rect(0, 0, modelDirectAtlasW, int(pg.usedRows))
 		// The key plane: every face's key under a max blend, so a texel holds
 		// the highest key drawn there. The runs are the colour batch's own —
 		// the key shader reads positions, the key lane and, for a mapped face,
 		// the parameter image — so the vertices are built once. Shadow faces
 		// write keys nobody reads; their regions are their own.
-		r.beginPass(pg.key)
+		a.beginPass(pg.key)
 		pg.key.SubImage(used).(*ebiten.Image).Clear()
 		d.opts.Images = [4]*ebiten.Image{fill, fill, fill, params}
 		d.opts.Blend = ebiten.Blend{
@@ -448,14 +533,13 @@ func (r *Renderer) prepareModelDirect(l *drawlist.List) {
 			if run.iLen == 0 || int(run.page) != p {
 				continue
 			}
-			r.recordSubmission(int(run.vLen), int(run.iLen))
-			pg.key.DrawTrianglesShader32(deviceVertexSpan(d.verts, int(run.vOff), int(run.vLen)), d.idx[run.iOff:run.iOff+run.iLen], d.keyShader, &d.opts)
-			r.frameDraws++
+			a.submitted(int(run.vLen), int(run.iLen))
+			pg.key.DrawTrianglesShader32(a.spans.span(pg.key, d.verts, int(run.vOff), int(run.vLen)), d.idx[run.iOff:run.iOff+run.iLen], d.keyShader, &d.opts)
 		}
 		// The colour plane: faces that pass the key test, at their texel, with
 		// the reveal and clipping verdicts applied; shadow silhouettes in their
 		// index.
-		r.beginPass(pg.colour)
+		a.beginPass(pg.colour)
 		pg.colour.SubImage(used).(*ebiten.Image).Clear()
 		// Every colour fragment is opaque or discarded, so a copy blend stores
 		// exactly what source-over did, and keeps the submerged marker's alpha
@@ -472,13 +556,55 @@ func (r *Renderer) prepareModelDirect(l *drawlist.List) {
 					d.opts.Images[j] = fill
 				}
 			}
-			r.recordSubmission(int(run.vLen), int(run.iLen))
-			pg.colour.DrawTrianglesShader32(deviceVertexSpan(d.verts, int(run.vOff), int(run.vLen)), d.idx[run.iOff:run.iOff+run.iLen], d.colourShader, &d.opts)
-			r.frameDraws++
+			a.submitted(int(run.vLen), int(run.iLen))
+			pg.colour.DrawTrianglesShader32(a.spans.span(pg.colour, d.verts, int(run.vOff), int(run.vLen)), d.idx[run.iOff:run.iOff+run.iLen], d.colourShader, &d.opts)
 		}
-		r.modelStats.DirectPasses += 2
+		a.stats.DirectPasses += 2
 	}
-	r.mergeModelGroups()
+	r.mergeModelGroupsInto(a)
+}
+
+// deviceAcct is the device accounting a stretch of device calls charges when
+// it runs apart from the frame's own: the destination switches, the
+// submissions and the draws, and the page counters of ModelStats, added to the
+// frame's by chargeDevice.
+type deviceAcct struct {
+	stats    ModelStats
+	lastDest *ebiten.Image
+	draws    int
+	spans    deviceSpans
+}
+
+func (a *deviceAcct) beginPass(dst *ebiten.Image) {
+	if dst == nil || dst == a.lastDest {
+		return
+	}
+	a.lastDest = dst
+	a.stats.Passes++
+}
+
+// submitted counts one device draw of vertices and indices.
+func (a *deviceAcct) submitted(vertices, indices int) {
+	a.stats.SubmittedVertices += vertices
+	a.stats.SubmittedIndices += indices
+	a.stats.MaxSubmissionVertices = max(a.stats.MaxSubmissionVertices, vertices)
+	a.draws++
+}
+
+// chargeDevice adds a's accounting to the frame's.
+func (r *Renderer) chargeDevice(a *deviceAcct) {
+	s, t := &r.modelStats, &a.stats
+	s.Passes += t.Passes
+	s.SubmittedVertices += t.SubmittedVertices
+	s.SubmittedIndices += t.SubmittedIndices
+	s.MaxSubmissionVertices = max(s.MaxSubmissionVertices, t.MaxSubmissionVertices)
+	s.DirectPasses += t.DirectPasses
+	s.DirectGroupMerges += t.DirectGroupMerges
+	s.DirectGroupPixels += t.DirectGroupPixels
+	if t.DirectGroupScratchBytes != 0 {
+		s.DirectGroupScratchBytes = t.DirectGroupScratchBytes
+	}
+	r.frameDraws += a.draws
 }
 
 // placeModelDirectFrame is the lane's CPU placement for one frame: every
@@ -610,7 +736,7 @@ func (d *modelDirectLane) assignGroupRegions(g *drawlist.ModelGeometry) modelDir
 		}
 		// The solo image is the same 2× region every subject gets: both shadow
 		// commits resolve the four texels under a pixel and count their share
-		// (destOpModelSilhouetteShadow, destOpModelDirectShadow), so a 1× image
+		// (sceneOpModelSilhouetteShadow, sceneOpModelDirectShadow), so a 1× image
 		// would be read as though it were doubled.
 		solo, _ := d.allocRegion(cb)
 		d.solo[cg] = solo
@@ -675,9 +801,6 @@ func (r *Renderer) placeModelDirectShadow(sg *drawlist.ModelGeometry) {
 // omitted a shadow it could not place, and the second result is false.
 // Construction groups finish each child in isolation before merging its
 // visible pixels (model_group.go).
-//
-// The job's page is the packer's page once all of the job's regions are
-// allocated: the page its runs are stamped with (colourRun).
 func (r *Renderer) allocSubjectJob(g *drawlist.ModelGeometry) (modelPlaceJob, bool) {
 	d := &r.modelDirect
 	region := d.assignGroupRegions(g)
@@ -723,7 +846,7 @@ func (r *Renderer) allocSubjectJob(g *drawlist.ModelGeometry) (modelPlaceJob, bo
 		// water reflections, and for every earlier child's admission.
 		d.groups.merges[len(d.groups.merges)-1].key = false
 	}
-	return modelPlaceJob{page: d.page, p0: p0, p1: int32(len(d.packets))}, true
+	return modelPlaceJob{p0: p0, p1: int32(len(d.packets))}, true
 }
 
 // allocShadowJob allocates one shadow packet's region and queues its append as
@@ -743,7 +866,7 @@ func (r *Renderer) allocShadowJob(sg *drawlist.ModelGeometry) (modelPlaceJob, bo
 	r.modelStats.DirectShadows++
 	p0 := int32(len(d.packets))
 	d.packets = append(d.packets, modelPlacePacket{g: sg, region: region, shadow: true})
-	return modelPlaceJob{page: d.page, p0: p0, p1: p0 + 1}, true
+	return modelPlaceJob{p0: p0, p1: p0 + 1}, true
 }
 
 // allocRegion places a region for a world rectangle: twice its size plus the
@@ -907,21 +1030,16 @@ func modelFaceTexFor(f *drawlist.ModelFace, slot modelTextureSlot) modelFaceTex 
 	return t
 }
 
-// colourRun returns the open colour run for imgs on the job's page, opening
+// colourRun returns the open colour run for imgs on the packet's page, opening
 // one when the last run binds something else, draws into another page or
 // cannot take need more vertices. Only the runs of the context's current job
 // are open to it (runBase): a worker's earlier job's runs are another part of
 // the frame's batch.
 //
-// The page is the packer's page once the job's regions are all allocated
-// (modelPlaceJob), not the page of the region a face lands in. The two differ
-// when a job's own allocations turn the page — a construction group whose
-// group region fits the first page and whose child region opens the second —
-// and the group's faces are then drawn into the later page at the earlier
-// page's coordinates while its commit samples the earlier page. That is how
-// the sequential lane has always stamped its runs, and placement keeps it
-// byte for byte (docs/DESIGN_GPU_RENDERER.md §22, "Placement workers"; the
-// defect is locked by TestModelPlaceRunPageFollowsThePacker).
+// The page is the page of the region the packet's faces land in (fillJob),
+// which is the page its commit samples. A construction group's separate child
+// region can open a page after its group region was placed on the one before,
+// so one job's runs can change page between packets.
 func (d *modelPlaceCtx) colourRun(imgs [2]*ebiten.Image, need int) *modelDirectRun {
 	if n := len(d.runs); n > d.runBase {
 		run := &d.runs[n-1]
@@ -1240,20 +1358,25 @@ func (r *Renderer) commitModelDirect(g *drawlist.ModelGeometry) {
 		[4]float32{g.WreckEmission[0], g.WreckEmission[1], g.WreckEmission[2], 0}, [4]float32{cloak, 0, 0, sceneOpModelDirectCommit})
 }
 
-// commitModelDirectShadow compiles one subject's shadow commit: a
-// destination command over the shadow's clipped world rectangle whose fragment
-// resolves the silhouette from the shadow's page (source 3) and punches the
-// body's wholly covered blocks read from the body's page (source 2)
-// (destOpModelDirectShadow). The body image is the subject's own — a carried
+// commitModelDirectShadow compiles one subject's shadow commit: a command
+// over the shadow's clipped world rectangle whose fragment resolves the
+// silhouette from the shadow's page (source 3) and punches the body's wholly
+// covered blocks read from the body's page (source 2)
+// (sceneOpModelDirectShadow). The body image is the subject's own — a carried
 // child's solo region, not the group's texels — so the punch tests the
 // subject's coverage and nothing else. A shadow without a region is omitted, as
 // the slot stage omitted one it could not place.
+//
+// The commit composites the ALP half-colour under source-over, the opaque
+// class's own blend, so it is compiled into the opaque batch: it shares a run
+// with the bodies and sprites around it in record order, and a body drawn over
+// it no longer opens a phase (§11.2 "The scheduler").
 func (r *Renderer) commitModelDirectShadow(g *drawlist.ModelGeometry) {
 	d := &r.modelDirect
 	sg := g.Shadow
 	shadow, ok := d.regions[sg]
 	body, bok := d.shadowSource(g)
-	if !ok || !shadow.ok || !bok || r.sceneDest == nil {
+	if !ok || !shadow.ok || !bok || r.scene2D == nil {
 		r.modelStats.ShadowsOmitted++
 		return
 	}
@@ -1264,7 +1387,7 @@ func (r *Renderer) commitModelDirectShadow(g *drawlist.ModelGeometry) {
 		r.modelStats.Shadows++
 		return
 	}
-	if !r.sched.begin(schedDest, x0, y0, x1, y1, [4]*ebiten.Image{1: r.tables.atlas, 2: d.pages[body.page].colour, 3: d.pages[shadow.page].colour}) {
+	if !r.sched.begin(schedOpaque, x0, y0, x1, y1, [4]*ebiten.Image{1: r.tables.atlas, 2: d.pages[body.page].colour, 3: d.pages[shadow.page].colour}) {
 		return
 	}
 	// A pixel's shadow block is the region origin plus twice its offset from
@@ -1274,20 +1397,21 @@ func (r *Renderer) commitModelDirectShadow(g *drawlist.ModelGeometry) {
 	sy0 := float32(shadow.y) + 2*float32(y0-sb.Min.Y)
 	kx := float32(body.x-shadow.x) + 2*float32(sb.Min.X-bb.Min.X)
 	ky := float32(body.y-shadow.y) + 2*float32(sb.Min.Y-bb.Min.Y)
-	r.sched.quad(schedDest,
+	r.sched.quad(schedOpaque,
 		float32(x0), float32(y0), float32(x1), float32(y1),
 		sx0, sy0, sx0+2*float32(x1-x0), sy0+2*float32(y1-y0),
 		[4]float32{float32(body.x), float32(body.y), float32(body.x) + 2*float32(bb.Dx()), float32(body.y) + 2*float32(bb.Dy())},
-		[4]float32{kx, ky, 0, destOpModelDirectShadow})
+		[4]float32{kx, ky, 0, sceneOpModelDirectShadow})
 	r.modelStats.Shadows++
 }
 
 // commitModelSilhouetteShadow compiles a Digger or mobile subject's shadow:
-// a destination command over the body's box at the shadow's placement whose
+// an opaque-class command, like the projected shadow's, over the body's box at
+// the shadow's placement whose
 // fragment resolves the body's own colour texels as the silhouette, erased at
 // and below the packet's clip key read from the body's key page (slot 2, bound
 // only when a clip applies), and
-// composites the ALP half-colour of index 0 (destOpModelSilhouetteShadow)
+// composites the ALP half-colour of index 0 (sceneOpModelSilhouetteShadow)
 // [03 R-REN-03D §1, §4]. The body's region is the source, so the shadow costs
 // no region and no faces of its own; a body without a region (the fallback)
 // casts none. For a carried child that source is the child's solo region: the
@@ -1298,7 +1422,7 @@ func (r *Renderer) commitModelSilhouetteShadow(g *drawlist.ModelGeometry) {
 	d := &r.modelDirect
 	sg := g.Shadow
 	body, bok := d.shadowSource(g)
-	if !bok || r.sceneDest == nil {
+	if !bok || r.scene2D == nil {
 		r.modelStats.ShadowsOmitted++
 		return
 	}
@@ -1323,7 +1447,7 @@ func (r *Renderer) commitModelSilhouetteShadow(g *drawlist.ModelGeometry) {
 	if sg.SilhouetteClip != 0 {
 		slot2 = pg.key
 	}
-	if !r.sched.begin(schedDest, x0, y0, x1, y1, [4]*ebiten.Image{1: r.tables.atlas, 2: slot2, 3: pg.colour}) {
+	if !r.sched.begin(schedOpaque, x0, y0, x1, y1, [4]*ebiten.Image{1: r.tables.atlas, 2: slot2, 3: pg.colour}) {
 		return
 	}
 	// The shadow's local space is the body's: a pixel's block is the body's
@@ -1333,10 +1457,10 @@ func (r *Renderer) commitModelSilhouetteShadow(g *drawlist.ModelGeometry) {
 	ry := body.y + 2*int32(wb.Min.Y-body.bounds.Min.Y)
 	sx0 := float32(rx) + 2*float32(x0-sb.Min.X)
 	sy0 := float32(ry) + 2*float32(y0-sb.Min.Y)
-	r.sched.quad(schedDest,
+	r.sched.quad(schedOpaque,
 		float32(x0), float32(y0), float32(x1), float32(y1),
 		sx0, sy0, sx0+2*float32(x1-x0), sy0+2*float32(y1-y0),
-		[4]float32{}, [4]float32{0, 0, float32(sg.SilhouetteClip), destOpModelSilhouetteShadow})
+		[4]float32{}, [4]float32{0, 0, float32(sg.SilhouetteClip), sceneOpModelSilhouetteShadow})
 	r.modelStats.Shadows++
 	r.modelStats.Silhouettes++
 }
@@ -1365,6 +1489,9 @@ func (r *Renderer) commitModelSilhouetteShadow(g *drawlist.ModelGeometry) {
 // A frame reaches here only when both atlas pages are full, which neither
 // battle view does (§22.2).
 func (r *Renderer) drawModelDirectFallback(g *drawlist.ModelGeometry) {
+	// The fallback builds its faces in the lane's batch, which the page
+	// passes may still be reading.
+	r.joinModelPages()
 	d := &r.modelDirect
 	b := modelGroupBounds(g)
 	x0, y0 := max(b.Min.X, 0), max(b.Min.Y, 0)

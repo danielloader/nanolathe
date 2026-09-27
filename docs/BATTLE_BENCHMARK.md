@@ -415,7 +415,9 @@ since the first battle Draw; spans are microseconds:
   and the synchronous record's time when it was not; `pre_us` is the consumed
   pre-record's time on its goroutine.
 - `execute` (gpurender Execute) with its stages `x_prepare`, `x_model`
-  (`x_place` of it is the model lane's CPU placement) and `x_replay`;
+  (`x_place` of it is the model lane's CPU placement) and `x_replay`; the
+  model lane's page passes run beside Replay, so their time is in `x_replay`
+  only where Replay had to wait for them;
   `blit` is the screen copy.
 - `body`: the host step run in the Draw's tail, with `sim_wait` the time it
   waited to join the simulation batch, `sim_batch` that batch's own time on

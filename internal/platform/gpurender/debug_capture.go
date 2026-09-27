@@ -42,6 +42,7 @@ func (r *Renderer) DebugSnapshot() map[string]any {
 	if r == nil {
 		return nil
 	}
+	r.joinModelPages()
 	storage := []debugStorage{debugArena("strips", &r.modelPrep.strips), debugArena("vertices", &r.modelPrep.vertices), debugSlice("model_lane_vertices", r.modelDirect.verts), debugSlice("model_lane_indices", r.modelDirect.idx), debugSlice("model_lane_runs", r.modelDirect.runs), debugSlice("scheduler_phases", r.sched.phases), debugSlice("scheduler_owners", r.sched.owners), debugSlice("scheduler_cells", r.sched.cells), debugSlice("scheduler_point_phase", r.sched.pointPhase), debugSlice("scene_upload", r.scene.uploadBuf), debugSlice("scene_padding", r.scene.padBuf)}
 	for _, bucket := range r.sched.vertPool {
 		for _, v := range bucket {

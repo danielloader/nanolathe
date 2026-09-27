@@ -45,7 +45,7 @@ func (r *Renderer) modelTextureFor(f *formats.GAFFrame) modelTextureSlot {
 		a.row = 0
 	}
 	if a.page == nil || a.y+h+2 > 2048 {
-		a.page = ebiten.NewImage(2048, 2048)
+		a.page = newRendererImage(2048, 2048)
 		a.x = 0
 		a.y = 0
 		a.row = 0

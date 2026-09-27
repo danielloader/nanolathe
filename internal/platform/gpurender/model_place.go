@@ -33,8 +33,9 @@ type modelPlaceCtx struct {
 	verts  []ebiten.Vertex
 	idx    []uint32
 	params modelQuadParams
-	// runPage is the atlas page colourRun stamps a run with (the job's), and
-	// runBase the first run the job being filled may extend.
+	// runPage is the atlas page colourRun stamps a run with — the region
+	// page of the packet being filled — and runBase the first run the job
+	// being filled may extend.
 	runPage int32
 	runBase int
 
@@ -214,11 +215,9 @@ type modelPlacePacket struct {
 	cachedSlots, liveSlots []modelTextureSlot
 }
 
-// modelPlaceJob is one job: a subject with its group, or one shadow. page is
-// the packer's page once the job's regions are allocated, the page its runs
-// are stamped with; p0 and p1 bound its packets.
+// modelPlaceJob is one job: a subject with its group, or one shadow. p0 and
+// p1 bound its packets.
 type modelPlaceJob struct {
-	page   int32
 	p0, p1 int32
 	// The pool's fill (model_place_pool.go): the participant whose context
 	// holds the job's output, and the output's spans there — vertices,
@@ -233,10 +232,13 @@ type modelPlaceJob struct {
 	delta    int32
 }
 
-// fillJob appends a job's packets, in order, into context d.
+// fillJob appends a job's packets, in order, into context d. Each packet's
+// faces draw into the page its own region is on: a construction group's
+// separate child region can open a page after its group region was placed on
+// the one before.
 func (r *Renderer) fillJob(d *modelPlaceCtx, job *modelPlaceJob, packets []modelPlacePacket) {
-	d.runPage = job.page
 	for i := job.p0; i < job.p1; i++ {
+		d.runPage = packets[i].region.page
 		r.appendPlaced(d, &packets[i])
 	}
 }

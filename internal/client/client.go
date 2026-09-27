@@ -109,7 +109,10 @@ type Client struct {
 	// projectileDraws retains the projectile dispatch list across frames; it
 	// is rewound and rewritten by every DrawProjectileViews call.
 	projectileDraws []presentationrender.ProjectileDraw
-	opts            Options
+	// projectileAt indexes the dispatched snapshot by handle for the same pass
+	// (projectileViewAt), one-based, retained across frames.
+	projectileAt []int32
+	opts         Options
 
 	// exitRequested lets authored in-game GUI actions terminate the same
 	// Ebitengine loop as closing the window. It is presentation state only.

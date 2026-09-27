@@ -233,7 +233,7 @@ func buildTileAtlas(t *world.Terrain, detail [][drawlist.DetailTilePixels]byte, 
 			}
 			padTileCell(buf, atlasW, gx, gy, side)
 		}
-		img := ebiten.NewImage(atlasW, atlasH)
+		img := newRendererImage(atlasW, atlasH)
 		img.WritePixels(buf)
 		a.pages[page] = img
 	}

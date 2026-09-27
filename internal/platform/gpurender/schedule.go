@@ -140,12 +140,12 @@ const (
 const (
 	schedStreamNone = iota
 	// schedStreamALP is the premultiplied half-colour fragment under source-over
-	// for the commands that still bind a shader of their own: the model shadow
-	// commits, the strategic marker layer, the aircraft shadow, the scorch marks
-	// and the water reflection resolve [03 §4.3.4](§13.3 "Blend classes"). The
-	// tinted strip and feature blit shares this arithmetic but rides the OPAQUE
-	// stream, because it shares the opaque shader as well and one run is better
-	// than one stream.
+	// for the commands that still bind a shader of their own: the strategic
+	// marker layer, the aircraft shadow, the scorch marks and the water
+	// reflection resolve [03 §4.3.4](§13.3 "Blend classes"). The tinted strip and
+	// feature blit and the model shadow commits share this arithmetic but ride
+	// the OPAQUE stream, because they share the opaque shader as well and one
+	// run is better than one stream.
 	schedStreamALP
 	// schedStreamRow is the row families' scale blend: FillLitRect, FillShadeRect,
 	// the lit point batch, the trail marks and the lit discs of §13.11
@@ -1061,6 +1061,9 @@ func (s *scheduler) quadCorners(class int, xs, ys [4]float32, col [4]float32, cu
 // read the pixels they rewrite, so drawBatch copies the phase's destination
 // rectangle into the read surface just before that run draws.
 func (r *Renderer) submitSchedule() {
+	// The reflection planes a compiled water pass reads are drawn before any
+	// batch that could resolve them (flushWaterReflections).
+	r.flushWaterReflections()
 	s := &r.sched
 	if r.surfaces[0] == nil || s.nphase == 0 {
 		s.resetSegment()
@@ -1104,6 +1107,10 @@ func (r *Renderer) drawBatch(dst *ebiten.Image, p *schedPhase, class int) {
 		if run.iLen == 0 {
 			continue
 		}
+		if r.modelDirect.pagesPending && r.modelDirect.bindsModelPage(&run.imgs) {
+			// A model commit reads what the page passes draw (prepareModelDirect).
+			r.joinModelPages()
+		}
 		shader := run.shader
 		if shader == nil {
 			shader = def
@@ -1134,7 +1141,7 @@ func (r *Renderer) drawBatch(dst *ebiten.Image, p *schedPhase, class int) {
 		r.modelStats.Vertices += int(run.vLen)
 		r.recordSubmission(int(run.vLen), int(run.iLen))
 		dst.DrawTrianglesShader32(
-			deviceVertexSpan(b.verts, int(run.vOff), int(run.vLen)),
+			r.spans.span(dst, b.verts, int(run.vOff), int(run.vLen)),
 			b.idx[run.iOff:run.iOff+run.iLen],
 			shader, &r.sceneOpts)
 		r.frameDraws++
@@ -1160,6 +1167,35 @@ func deviceVertexSpan(verts []ebiten.Vertex, first, count int) []ebiten.Vertex {
 		n = count
 	}
 	return verts[first : first+n : first+n]
+}
+
+// deviceSpans remembers, per destination image, the longest vertex slice a
+// draw has handed Ebitengine: a lower bound on that image's conversion buffer.
+// A draw that fits under it cannot reallocate the buffer, so it hands exactly
+// its own vertices; only a draw past it takes deviceVertexSpan's rounded class.
+// The class's extra vertices are converted and copied to the device like any
+// other, so rounding every draw cost a battle frame thousands of vertices of
+// Ebitengine's per-vertex work for a reallocation the mark already rules out.
+// Forgetting a mark only costs one rounded draw, so the table is bounded by
+// clearing it.
+type deviceSpans map[*ebiten.Image]int
+
+// deviceSpanImages bounds deviceSpans; a frame draws into far fewer.
+const deviceSpanImages = 64
+
+func (m *deviceSpans) span(dst *ebiten.Image, verts []ebiten.Vertex, first, count int) []ebiten.Vertex {
+	if *m == nil {
+		*m = make(deviceSpans)
+	}
+	if count <= (*m)[dst] {
+		return verts[first : first+count : first+count]
+	}
+	if len(*m) >= deviceSpanImages {
+		clear(*m)
+	}
+	v := deviceVertexSpan(verts, first, count)
+	(*m)[dst] = len(v)
+	return v
 }
 
 // deviceVertexClass rounds n up to a multiple of an eighth of its leading
@@ -1221,7 +1257,7 @@ func (r *Renderer) placeholderImage() *ebiten.Image {
 		return r.tables.atlas
 	}
 	if r.placeholder == nil {
-		r.placeholder = ebiten.NewImage(1, 1)
+		r.placeholder = newRendererImage(1, 1)
 	}
 	return r.placeholder
 }

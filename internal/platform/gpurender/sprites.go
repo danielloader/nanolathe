@@ -59,7 +59,7 @@ func buildGAFFrameImage(f *formats.GAFFrame) *ebiten.Image {
 		}
 		buf[i*4+3] = 255
 	}
-	img := ebiten.NewImage(fw, fh)
+	img := newRendererImage(fw, fh)
 	img.WritePixels(buf)
 	return img
 }

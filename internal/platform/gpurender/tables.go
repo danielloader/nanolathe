@@ -101,7 +101,7 @@ func uploadTableAtlas(pal *palette.Tables) *ebiten.Image {
 			put(col, tableRowLHT+row, pal.Light[row*256+col], 0, 0)
 		}
 	}
-	img := ebiten.NewImage(tableAtlasW, tableAtlasH)
+	img := newRendererImage(tableAtlasW, tableAtlasH)
 	img.WritePixels(buf)
 	return img
 }

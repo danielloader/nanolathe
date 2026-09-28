@@ -76,6 +76,9 @@ type app struct {
 	// cursorClip keeps the pointer on the presented canvas in fullscreen
 	// (presentedCursorRect); a no-op on hosts without a native clip.
 	cursorClip nativeCursorClip
+	// cursorMode is the mode last set on the window. The adapter is its only
+	// writer, so it stands in for querying the main thread every step.
+	cursorMode ebiten.CursorModeType
 	// presentPending is set by the 30 Hz update and consumed by Draw. Draw can
 	// still be called at the monitor's refresh rate, so the retained-screen
 	// mode configured by Run lets those extra calls leave the frame untouched.
@@ -272,6 +275,9 @@ func (a *app) updateBody() {
 	copy(a.hostSamples, a.hostSamples[1:])
 	a.hostSamples[len(a.hostSamples)-1] = sampledInput{}
 	a.hostSamples = a.hostSamples[:len(a.hostSamples)-1]
+	if a.trace != nil {
+		a.trace.pointerX, a.trace.pointerY = sample.x, sample.y
+	}
 	if a.scrollPointScale > 0 {
 		sample.panX *= a.scrollPointScale
 		sample.panY *= a.scrollPointScale
@@ -280,9 +286,12 @@ func (a *app) updateBody() {
 		ebiten.SetFullscreen(!ebiten.IsFullscreen())
 	}
 	a.observeFullscreen(ebiten.IsFullscreen())
-	a.fullscreenPresentation.update(a.fullscreen, ebiten.IsFocused())
+	// Each window query is a round trip to the main thread, which a loaded
+	// host can hold for milliseconds; ask once per step.
+	focused := ebiten.IsFocused()
+	a.fullscreenPresentation.update(a.fullscreen, focused)
 	applyInput(a.c.Input(), sample)
-	a.c.SetFocused(ebiten.IsFocused())
+	a.c.SetFocused(focused)
 	a.c.SetHostStepDue(sample.due)
 	a.stepClient()
 	if a.trace != nil {
@@ -424,8 +433,9 @@ func (a *app) syncPointerCapture() {
 	if a.c.PointerCaptured() {
 		want = ebiten.CursorModeCaptured
 	}
-	if ebiten.CursorMode() != want {
+	if a.cursorMode != want {
 		ebiten.SetCursorMode(want)
+		a.cursorMode = want
 	}
 }
 
@@ -472,7 +482,7 @@ func (a *app) Draw(screen *ebiten.Image) {
 	if a.mode == RendererModern {
 		due := a.presentDue(arrived)
 		if a.trace != nil {
-			a.trace.markDraw(a.refreshPeriod, a.presentInterval, ebiten.IsFocused())
+			a.trace.markDraw(a.refreshPeriod, a.presentInterval, a.c.IsFocused())
 		}
 		if !due {
 			return
@@ -1067,6 +1077,7 @@ func Run(c *client.Client, mode RendererMode, options RunOptions) error {
 	// A software cursor is installed, so hide the window system's pointer and
 	// leave the drawn one as the only visible pointer [07 §8].
 	ebiten.SetCursorMode(ebiten.CursorModeHidden)
+	game.cursorMode = ebiten.CursorModeHidden
 	// Draw remains VSync-driven even when TPS is lower. Retain the screen so
 	// calls between updates can skip composition, upload, and drawing without
 	// clearing the last presented frame.

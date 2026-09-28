@@ -466,6 +466,11 @@ since the first battle Draw; spans are microseconds:
   pages and the largest region, in KiB, those uploads spanned on one page —
   the size of the staging texture Ebitengine sends them through
   (DESIGN_GPU_RENDERER §14.8).
+- `ptr_x`, `ptr_y`: the logical pointer the latest host step applied.
+  `ptr_exits` and `ptr_enters` count the native pointer leaving and entering
+  the window's content since the previous row. Only macOS reports them; there
+  fullscreen leaves a band above the content on a display with a camera
+  housing, and the pointer can leave through it. Elsewhere they stay zero.
 
 The time from one Draw's return to the next Update is Ebitengine's flush and
 present plus the wait for the next display-link callback; the report calls it

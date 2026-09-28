@@ -34,3 +34,27 @@ func TestFullscreenPresentationRestoresWindowedPolicyOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestWithheldPointerExitWaitsOnlyInTheBandAboveTheContent(t *testing.T) {
+	// A 1512×982-point screen whose fullscreen content stops 32 points below
+	// its top edge (AppKit's origin is bottom left).
+	screen := nsRect{X: 0, Y: 0, W: 1512, H: 982}
+	content := nsRect{X: 0, Y: 0, W: 1512, H: 950}
+	band := nsPoint{X: 700, Y: 960}
+	for _, c := range []struct {
+		name       string
+		fullscreen bool
+		at         nsPoint
+		want       heldExitAction
+	}{
+		{"in the band", true, band, keepExit},
+		{"back over the content", true, nsPoint{X: 700, Y: 500}, dropExit},
+		{"on another display", true, nsPoint{X: 700, Y: 1200}, deliverExit},
+		{"fullscreen ended", false, band, deliverExit},
+		{"fullscreen ended over the window", false, nsPoint{X: 700, Y: 500}, dropExit},
+	} {
+		if got := settleExit(c.fullscreen, content, screen, c.at); got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+}

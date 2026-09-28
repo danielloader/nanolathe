@@ -338,8 +338,9 @@ On Windows the adapter confines the pointer to exactly the device pixels that
 report a logical canvas coordinate (`presentedCursorRect`) while the window is
 fullscreen, focused and not in drag-scroll capture, reconciling the clip every
 host step and releasing it on focus loss, in windowed mode and at shutdown.
-Windowed play is never confined. Other hosts are unconfined pending a manual
-check on macOS and X11 (`cursor_clip_other.go`). Keypad Enter is folded into
+Windowed play is never confined. Other hosts are unconfined
+(`cursor_clip_other.go`): macOS live traces show the pointer reaching the bars,
+and leaving the window above the content (below), and X11 is unchecked. Keypad Enter is folded into
 the one Enter identity by the adapter, so it opens chat, commits a text edit
 and toggles fullscreen with Alt exactly as the main Enter does.
 On macOS, focused fullscreen hides the menu bar and Dock completely so moving
@@ -353,6 +354,22 @@ switching, Space gestures and Force Quit remain enabled. Alt+Enter also exits
 fullscreen entered with the green window button in the current Ebitengine
 backend, providing a keyboard exit when the rollover controls are hidden.
 The native bridge is excluded from VM guests, whose host owns window policy.
+
+On a display with a camera housing, native fullscreen places the content
+below a band the menu bar would occupy, so edge-scrolling up carries the
+pointer out of the window (issue #14). On that exit the Cocoa backend unhides
+the system pointer, and the unhide stalls presentation. In a fullscreen
+capture that repeatedly pushed the pointer through the band, 8 of the backend's
+unhides were followed within 70 ms by 32–60 ms waits for a drawable; with the
+exits withheld, 14 crossings produced no frame over 27 ms. The band itself costs
+nothing. While the window is focused and fullscreen, an AppKit local monitor
+therefore withholds exits from the backend's content view, and the system
+pointer stays hidden in the band as it already is over the letterbox bars.
+The adapter settles a withheld exit on the main thread each host step. It is
+dropped once the pointer is back over the content, and delivered, so the
+system pointer appears, once the pointer leaves the window's screen or
+fullscreen ends. The same monitor counts the content view's crossings for the
+live trace (`ptr_exits`, `ptr_enters`, [BATTLE_BENCHMARK](BATTLE_BENCHMARK.md)).
 
 AppKit contract: [NSApplicationPresentationOptions](https://developer.apple.com/documentation/appkit/nsapplication/presentationoptions-swift.struct?language=objc).
 Manual macOS verification confirmed suppression at the top edge and continued

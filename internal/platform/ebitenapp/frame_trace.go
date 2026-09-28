@@ -85,6 +85,9 @@ type frameTrace struct {
 	flights    int
 	lastFlight time.Duration
 	lastDraw   int64
+	// pointerX and pointerY are the logical pointer the latest host step
+	// applied; every row repeats them until the next step.
+	pointerX, pointerY int32
 }
 
 type frameRow struct {
@@ -145,7 +148,7 @@ func newFrameTrace(opts *FrameTraceOptions) (*frameTrace, error) {
 			{Name: "/sched/pauses/total/gc:seconds"},
 			{Name: "/gc/heap/live:bytes"},
 		}}
-	fmt.Fprintln(t.w, "frame,upd_start,upd_end,steps,upd_bodies,draw_start,draw_end,due,hit,armed,sync,join1,join2,record,execute,blit,body,sim_wait,sim_batch,sim_joins,launch,passes,vertices,subjects,gc_cycles,alloc_bytes,gc_cpu_us,gc_pause_us,heap_live,x_prepare,x_model,x_place,x_replay,pre_us,released,battle,focused,refresh_us,cap_us,bodies,tick_prev,tick,tick16,cam16,cam_x100,cam_z100,atlas_uploads,atlas_union_kb")
+	fmt.Fprintln(t.w, "frame,upd_start,upd_end,steps,upd_bodies,draw_start,draw_end,due,hit,armed,sync,join1,join2,record,execute,blit,body,sim_wait,sim_batch,sim_joins,launch,passes,vertices,subjects,gc_cycles,alloc_bytes,gc_cpu_us,gc_pause_us,heap_live,x_prepare,x_model,x_place,x_replay,pre_us,released,battle,focused,refresh_us,cap_us,bodies,tick_prev,tick,tick16,cam16,cam_x100,cam_z100,atlas_uploads,atlas_union_kb,ptr_x,ptr_y,ptr_exits,ptr_enters")
 	return t, nil
 }
 
@@ -197,6 +200,7 @@ func (t *frameTrace) begin() {
 	t.started = true
 	t.origin = time.Now()
 	t.row = frameRow{}
+	nativePointerCrossings.take()
 	if t.opts.Flight && t.opts.ExecTraceSeconds <= 0 {
 		t.flight = trace.NewFlightRecorder(trace.FlightRecorderConfig{MinAge: 3 * time.Second, MaxBytes: 96 << 20})
 		if t.flight.Start() != nil {
@@ -330,14 +334,16 @@ func (t *frameTrace) flushRow() {
 			}
 		}
 	}
-	fmt.Fprintf(t.w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", t.rows,
+	exits, enters := nativePointerCrossings.take()
+	fmt.Fprintf(t.w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", t.rows,
 		r.updStart, r.updEnd, r.steps, r.updBodies, r.drawStart, r.drawEnd, b(r.due), b(r.hit), b(r.armed), b(r.sync),
 		r.join1, r.join2, r.record, r.execute, r.blit, r.body, r.simWait, r.simBatch, r.simJoins, r.launch,
 		r.passes, r.vertices, r.subs,
 		t.samples[0].Value.Uint64(), t.samples[1].Value.Uint64(),
 		int64(t.samples[2].Value.Float64()*1e6), int64(pauses*1e6), t.samples[4].Value.Uint64(),
 		r.xPrepare, r.xModel, r.xPlace, r.xReplay, r.preNanos/1000, r.released,
-		b(r.battle), b(r.focused), r.refresh, r.capUS, r.bodies, r.tickPrev, r.tick, r.tick16, r.cam16, r.camX100, r.camZ100, r.atlasUploads, r.atlasUnionKB)
+		b(r.battle), b(r.focused), r.refresh, r.capUS, r.bodies, r.tickPrev, r.tick, r.tick16, r.cam16, r.camX100, r.camZ100, r.atlasUploads, r.atlasUnionKB,
+		t.pointerX, t.pointerY, exits, enters)
 	t.rows++
 	if t.rows%256 == 0 {
 		t.w.Flush()

@@ -43,9 +43,10 @@ func TestModelMaterialExplicitArtAndPacket(t *testing.T) {
 // restore and answer for a table that is no longer installed.
 func restoreMaterialTable(t *testing.T) {
 	t.Helper()
-	before := materialTable.Load()
+	before, glint := materialTable.Load(), glintTable.Load()
 	t.Cleanup(func() {
 		materialTable.Store(before)
+		glintTable.Store(glint)
 		materialGeneration.Add(1)
 	})
 }
@@ -95,7 +96,7 @@ func TestTextureReferenceCachesMaterialAnnotation(t *testing.T) {
 // applies comes from the authored file, so a name missing from it is a
 // regression in the data, not in the code.
 func TestEmbeddedMaterialTableCoversTheAuthoredClassification(t *testing.T) {
-	table, _, err := parseContentTable(embeddedMaterialTDF)
+	table, glint, _, err := parseContentTable(embeddedMaterialTDF)
 	if err != nil {
 		t.Fatalf("embedded material annotation does not parse: %v", err)
 	}
@@ -113,6 +114,11 @@ func TestEmbeddedMaterialTableCoversTheAuthoredClassification(t *testing.T) {
 	}
 	if len(table) != len(metal)+len(paint) {
 		t.Fatalf("embedded table annotates %d textures, want %d", len(table), len(metal)+len(paint))
+	}
+	// The embedded [glint] section exists, so every load resets the glint
+	// table, and it is empty, so every texture keeps the tuned glint.
+	if glint == nil || len(glint) != 0 {
+		t.Fatalf("embedded glint table = %v, want present and empty", glint)
 	}
 }
 
@@ -316,5 +322,67 @@ func TestMaterialOverrideEffectsSection(t *testing.T) {
 	}
 	if _, n, _ := cl.GlowFamilies(); n != 100 {
 		t.Fatalf("a rejected override changed the nanolathe family to %d", n)
+	}
+}
+
+// The [glint] section sets a texture's glint strength independently of its
+// finish (DESIGN_GPU_RENDERER §23.7). Unlisted art and 100 keep the tuned
+// glint (encoding zero); values clamp to 0..200; a file without [glint] keeps
+// the table in force; a non-number rejects the whole file; and a resolved
+// reference's cached encoding follows an install.
+func TestMaterialOverrideGlintSection(t *testing.T) {
+	restoreMaterialTable(t)
+	restoreGlowFamilies(t)
+	c := testModelTextureClient()
+	ref, _ := c.resolveModelTexture("ColorsLt")
+	if modelTextureGlint("colorslt") != 0 || ref.glintAnnotation("ColorsLt") != 0 {
+		t.Fatal("the embedded table changed a texture's glint")
+	}
+
+	authored := []byte("[glint]\n\t{\n\tCOLORSLT=0;\n\tcolorsmd=40;\n\tcolorsdk=250;\n\tcolordk2=100;\n\tmetal3a=-5;\n\t}\n")
+	if err := SetMaterialTable("test", authored, "test"); err != nil {
+		t.Fatalf("a [glint]-only override was rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		want  uint8
+		scale float32
+	}{{"colorslt", 1, 0}, {"ColorsMd", 41, 0.4}, {"colorsdk", GlintMax + 1, 2}, {"colordk2", 0, 1}, {"metal3a", 1, 0}, {"camob3", 0, 1}} {
+		if got := modelTextureGlint(tc.name); got != tc.want {
+			t.Fatalf("%s glint encoding = %d, want %d", tc.name, got, tc.want)
+		}
+		if got := (&drawlist.ModelFace{Glint: tc.want}).GlintScale(); got != tc.scale {
+			t.Fatalf("%s glint scale = %v, want %v", tc.name, got, tc.scale)
+		}
+	}
+	if ref.glintAnnotation("ColorsLt") != 1 {
+		t.Fatal("a cached glint encoding survived the install")
+	}
+	if modelTextureMaterial("colorslt") != drawlist.ModelMaterialMetal {
+		t.Fatal("a [glint]-only override dropped the finish table in force")
+	}
+
+	// The glint reaches the face packet and its clone.
+	p := newScreenPoly(4)
+	p.glint = 41
+	g := modelGeometryPacketAt([]screenPoly{p}, 1, 1, 0, 0, 0, 0, 1, true, drawlist.ModelFallbackNone)
+	if g.Faces[0].Glint != 41 || g.Clone().Faces[0].Glint != 41 {
+		t.Fatal("packet or clone lost the glint")
+	}
+
+	// A file without [glint] keeps the glint table in force.
+	if err := SetMaterialTable("test", []byte("[materials]\n\t{\n\tmysheet=metal;\n\t}\n"), "test"); err != nil {
+		t.Fatal(err)
+	}
+	if modelTextureGlint("colorslt") != 1 {
+		t.Fatal("an override without [glint] dropped the glint table in force")
+	}
+
+	err := SetMaterialTable(MaterialTablePath, []byte("[glint]\n\t{\n\tcolorslt=dull;\n\t}\n"), "pack")
+	if err == nil || !strings.Contains(err.Error(), "not a whole percentage") {
+		t.Fatalf("a non-number glint was not rejected: %v", err)
+	}
+	if modelTextureGlint("colorslt") != 1 {
+		t.Fatal("a broken override changed the glint table in force")
 	}
 }

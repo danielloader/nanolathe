@@ -10,15 +10,24 @@
 // directly -- one section, one assignment per texture, last-write-wins on a
 // repeated spelling [fmt tdf "Duplicate keys"].
 //
-// Values: metal | paint. Any other value, and any texture absent from this
-// file, keeps the default shading.
+// Values: metal | paint. Any other value (default, say), and any texture
+// absent from this file, keeps the default shading.
 //
 // Names are matched case-insensitively, like every TDF key.
+//
+// [glint] sets the metallic glint of a texture: the small directional
+// highlight every Enhanced unit face catches (docs/DESIGN_GPU_RENDERER.md
+// §23.7), as a whole percentage of the tuned look, 0..200. 0 turns it off for
+// that texture; a texture absent from [glint] keeps 100. It is independent of
+// the texture's [materials] finish: colorslt=metal with colorslt=0 here keeps
+// the brushed-steel finish without the glint, and colorslt=default with
+// colorslt=100 keeps the glint without the finish.
 //
 // An installed override replaces this whole table: a remaster pack or loose
 // gamedata directory supplying the logical path nanolathe/materials.tdf is
 // used instead of the embedded copy. An override without a [materials]
-// section keeps this table and sets only its [effects].
+// section keeps this file's [materials], and one without a [glint] section
+// keeps this file's [glint].
 //
 // [effects] sets the strength of each family of Enhanced light as a whole
 // percentage of the tuned look, 0..200 (docs/DESIGN_GPU_RENDERER.md §19.4):
@@ -87,6 +96,14 @@
 	bluenoise2=paint;
 	bluenoise3=paint;
 	bluenoise4=paint;
+	}
+
+[glint]
+	{
+	// Every texture keeps the tuned glint. For example, to take the glint
+	// off the team-colour panels:
+	//   colorslt=0;
+	//   colorsmd=0;
 	}
 
 [effects]

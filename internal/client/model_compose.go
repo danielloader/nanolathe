@@ -326,6 +326,7 @@ func (c *Client) collectDrawPolysLaneProjected(draw *presentationrender.UnitDraw
 				poly.normal = modelLightingNormal(piece.WorldVertices, pr.VertexIndices)
 				if kind == modelCursorUnit && texFrame != nil {
 					poly.material = ref.materialAnnotation(pr.TextureName)
+					poly.glint = ref.glintAnnotation(pr.TextureName)
 				}
 			}
 			// The live-piece invocation is the separate unshaded renderer entry.
@@ -437,7 +438,7 @@ func (c *Client) resolveModelTexture(name string) (texRef, bool) {
 	// face (DESIGN_GPU_RENDERER §29.1).
 	key := c.modelNameKey(name)
 	ref, ok := resolveTextureRef(c.texIndex, c.logoIndex, key)
-	ref.material, ref.materialGen = materialForKey(key)
+	ref.material, ref.glint, ref.materialGen = materialForKey(key)
 	return ref, ok
 }
 

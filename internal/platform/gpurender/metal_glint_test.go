@@ -70,3 +70,14 @@ func checkMetalGlintDevicePixels() error {
 	}
 	return nil
 }
+
+// A per-texture strength above 100% must not spill the glint weight into the
+// material bits packed above it (GPU design §23.7, §29.1).
+func TestMetalGlintColorClampsTheWeight(t *testing.T) {
+	if got, want := metalGlintColor(90, 1.7), metalGlintColor(90, 1); got != want {
+		t.Fatalf("over-strength glint packed %v, want %v", got, want)
+	}
+	if got, want := metalGlintColor(90, -0.2), metalGlintColor(90, 0); got != want {
+		t.Fatalf("negative glint packed %v, want %v", got, want)
+	}
+}

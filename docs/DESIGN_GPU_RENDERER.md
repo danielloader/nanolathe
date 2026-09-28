@@ -4922,7 +4922,19 @@ one and keeps the original coverage. These are tunable artistic choices, not
 authored metalness or roughness — neutral painted panels can look metallic too,
 and there is no shadow occlusion or map-specific sun direction. No passes,
 textures, uniforms, normal buffers or per-frame allocations are added. The
-player's **Finish** switch (§30) is its only control.
+player's **Finish** switch (§30) turns it on or off everywhere.
+
+Content controls it by texture name: the `[glint]` section of the annotation
+file of §29.1 sets a textured unit face's glint as a whole percentage of the
+tuned weight, 0..200, clamped; an absent texture, untextured faces and
+features keep 100. `ModelFace.Glint` carries it, resolved at texture bind with
+the finish class and invalidated by the same generation; zero is the tuned
+glint and otherwise `Glint-1` is the percentage, so a zero value keeps today's
+look. The executor multiplies the face's weight by it and clamps the product
+to one before packing, so a strength above 100% saturates rather than
+spilling into the material bits. The glint is independent of the finish
+class: a pack may keep a texture's metal finish and remove its glint, or the
+reverse. The embedded `[glint]` section is empty.
 
 ## 24. (retired)
 
@@ -5502,6 +5514,11 @@ case; one that cannot be read is reported in the standard diagnostic shape and
 leaves the embedded table in force, because presentation art never fails a load.
 The retail executable carries no material classification for model textures, and
 nothing here reaches authoritative state.
+
+The same file carries each texture's glint strength in a `[glint]` section of
+whole percentages (§23.7). Like `[materials]`, a `[glint]` section replaces
+the glint table whole and a file without one keeps it; the embedded file
+carries an empty section, so every load starts from the tuned glint.
 
 The same file carries a content pack's effect strengths: an `[effects]` section
 of `weapons=`, `nanolathe=`, `ground=`, `footprints=` and `tracks=` whole percentages, 0..200, default 100

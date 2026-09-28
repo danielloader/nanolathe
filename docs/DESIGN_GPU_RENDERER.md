@@ -1508,14 +1508,19 @@ Enhanced's. The price is in latency, from a frame's beginning to the display:
 | 120 FPS | 24 ms | 41 ms |
 | 60 FPS | 25 ms | 33 ms |
 
-At 120 FPS a composited frame is still not safe. A present made by about
-0.4 ms after a refresh is taken for the display at once, and one made later
-waits a refresh. Ebitengine presents a fraction of a millisecond after the
-refresh it was given a drawable for, close to that boundary: while presents
-came 0.2 ms after the refresh every frame was shown, and in one run they came
-0.9 ms after it for twelve seconds of thirty, in which a quarter of the
-frames were replaced before they were shown. At 60 and 30 FPS the same
-boundary moves a frame by a refresh and replaces none.
+The composited route depends on the window server composing at the
+display's rate, which it does not always do. In one 120 FPS run it composed
+about 93 times a second for twelve seconds of thirty while the loop presented
+120, and a quarter of the frames were replaced before they were shown; six
+other composited runs at 120 FPS whose loop was on time lost none. The
+presents of that stretch came 0.9 ms after the refresh where they usually
+come 0.2 ms after it, but a present that late is not what loses a frame:
+handed their drawables 1.5 ms after the refresh, the frames of later runs
+were all shown, and at the refresh they would have been shown at. What
+occupied the window server is not in the trace, which profiles the game
+alone; a trace of every process over such a stretch would show it. Neither
+route helps a loop that other work on the host has starved: with another
+session's tests running, frames were late at the loop itself.
 
 A display of 60 refreshes a second keeps the direct route. With the panel
 set to 60, on the same host in ordinary use, the direct route showed no

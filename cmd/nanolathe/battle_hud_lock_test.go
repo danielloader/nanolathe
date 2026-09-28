@@ -4,6 +4,8 @@ import (
 	"slices"
 	"testing"
 
+	contentprofiles "github.com/nanolathe-gg/nanolathe/internal/content/profiles"
+	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 )
 
@@ -61,5 +63,18 @@ func TestSidebarPageStarts(t *testing.T) {
 	}
 	if got := sidebarPageStarts(cells, 3, true); !slices.Equal(got, []int{0, 3, 4, 7}) {
 		t.Fatalf("locked starts %v", got)
+	}
+}
+
+// The running content's lock is the mod's metadata value, else its content
+// profile's (interface design §3.3 "Build page lock").
+func TestContentBuildMenuPageSize(t *testing.T) {
+	cs := &contentSet{presentation: contentprofiles.Presentation{BuildMenuPageSize: 12}}
+	if got := cs.buildMenuPageSize(); got != 12 {
+		t.Fatalf("profile lock without a mod = %d, want 12", got)
+	}
+	cs.mod = &modlibrary.Mod{Metadata: modlibrary.Metadata{BuildMenuPageSize: 6}}
+	if got := cs.buildMenuPageSize(); got != 6 {
+		t.Fatalf("mod lock = %d, want the mod's 6 over the profile's 12", got)
 	}
 }

@@ -194,6 +194,7 @@ func TestAuthoredProfileRejectsShapesNoLoaderCouldUse(t *testing.T) {
 		{name: "unknown field", body: `{"name":"x","limits":{},"directories":{}}`, want: "reading content profile failed"},
 		{name: "nested directory", body: `{"name":"x","layout":{"units":"mod/units"}}`, want: "not a single directory"},
 		{name: "empty row", body: `{"name":"x","layout":{"units":""}}`, want: "row is empty"},
+		{name: "negative page size", body: `{"name":"x","presentation":{"build_menu_page_size":-1}}`, want: "build_menu_page_size -1 is negative"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(dir, tt.name+".json")

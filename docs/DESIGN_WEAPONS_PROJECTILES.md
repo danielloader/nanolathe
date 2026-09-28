@@ -360,12 +360,12 @@ Automatic maintenance keeps its existing per-player scan budget and registry
 cadence. It still requires Fire at Will, a completed armed unit and an enabled
 autonomous slot. Explicitly released/bound slots and ground targets are not
 retargeted by this maintenance. Modern scans every contact in the selected
-registry query, refreshes liveness, alliance and current visibility, and retains
-the existing medium, range and trajectory gates. It admits factories and other
-opportunities regardless of `shootme` or human/computer controller, provided the
-weapon can cause positive effective damage. Both controllers exclude dropped
-and command-fire weapons from automatic maintenance; an explicit command still
-uses the ordinary firing pipeline. Paralyzer immunity and existing stun reject
+registry query, refreshes liveness, alliance and current contact knowledge
+(below), and retains the existing medium, range and trajectory gates. It admits
+factories and other opportunities regardless of `shootme` or human/computer
+controller, provided the weapon can cause positive effective damage. Both
+controllers exclude dropped and command-fire weapons from automatic
+maintenance; an explicit command still uses the ordinary firing pipeline. Paralyzer immunity and existing stun reject
 paralyzer targets. Compiled bad-target categories remain a scoring preference.
 An immobile unit whose weapon slot holds the attacker recorded by damage keeps
 that target while the attacker is unseen, subject to the existing autonomous
@@ -376,6 +376,30 @@ finish firing. Once visible, the slot returns to Modern threat ranking. Mobile
 units retain Modern's observed-danger response. This uses the existing damage
 link and adds no target memory, RNG draw or resource effect. Strict retains its
 retail order and slot response [08 R-AI-01 §11].
+
+**Targeting Facility fallback.** The selected query is the retail one,
+secondary fallback included: when the primary query inside the filter radius
+is empty and one of the scanning player's own complete, activated
+`istargetingupgrade` units holds the gate open, the population is the
+secondary list [06 §3.1][04 R-SPEC-01 §8]. The rebuild filed that list from
+the seen bit, which the sensor phase writes from the local viewing player's
+radar coverage, line of sight and own units on that player's settlement
+cadence [03 R-VIS-01 §4][03 R-SENSOR-01]. Current knowledge is therefore
+direct sight for a primary candidate and the candidate's current seen bit —
+the test that filed it — for a secondary one. Direct sight fails every
+radar-only entry, so applying it to both populations silently cancelled the
+facility under Modern (issue #36). Strict acquires from the secondary list as
+the last rebuild left it, up to thirty ticks stale; Modern also refuses an
+entry whose seen bit a later sensor pass has cleared, the same refusal of a
+vanished contact that the primary refresh makes. A nonempty primary query
+still suppresses the fallback, and Modern adds no sensor model of its own.
+The seen bit is the viewer's, not the shooter owner's: as in Strict, a
+computer player with an active facility falls back to every one of the
+human's units inside the query radius, because pass 1 marks the viewer's own
+units [06 §3.1]. That is the retail population, not a Modern departure.
+`TargetQuery.FromSecondary` carries the population's origin to the rule; only
+the service's one secondary materialization sets it, and Strict ignores it.
+The refresh reads no RNG and changes no resource.
 
 Threat is derived from enabled authored weapons, never unit names or a tower
 list. An enemy receives a base score of 1. A completed, unstunned enemy with an
@@ -525,11 +549,17 @@ threat replacement, stable ties and switching margin, nearby-ally attacks,
 explicit bindings, current visibility, acquisition versus launch coverage,
 finishing shots and soft overage, miss release, compaction, allocation identity,
 veterancy, phase/expiry limits, mode/load behavior, unarmed and missed-shot
-danger, friendly exclusions, resources and Strict RNG bypass. The existing
-acquisition draw-vector tests remain unchanged. Repository integration and
-retail-content gates plus simulation-cost and classic/modern live battle
-benchmarks apply; Modern fingerprints and battle census may intentionally
-change, while Strict fingerprints must not.
+danger, friendly exclusions, resources and Strict RNG bypass.
+`targeting_upgrade_test.go` locks, under both rule sets, that an out-of-sight
+radar contact in weapon range is acquired only behind the owner's active
+targeting upgrade, that Strict still takes an entry whose seen bit was cleared
+after the rebuild, and that Modern refuses it.
+`issue36_targeting_facility_retail_test.go` repeats the gate on the authored
+CORTARG, CORRAD and CORHLT through ordinary autonomous maintenance under both
+rule sets. The existing acquisition draw-vector tests remain unchanged.
+Repository integration and retail-content gates plus simulation-cost and
+classic/modern live battle benchmarks apply; Modern fingerprints and battle
+census may intentionally change, while Strict fingerprints must not.
 
 ### 2.4 Aiming
 

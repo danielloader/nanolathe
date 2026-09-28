@@ -931,10 +931,12 @@ func (s *Service) acquireTargetForSlotRange(u *units.Unit, slot *units.Slot, idx
 	// [06 §3.2 "The option bit of check 2"][07 R-CAM-01 §6]. Nanolathe has no
 	// `+shootall` typed command; when one is added it writes a session flag
 	// that arrives here.
+	fromSecondary := false
 	if len(candidates) == 0 && acq.HasUpgrade {
 		candidates = s.secondaryCandidates(u, w, seaLevel, vis, econ, catalog, acq.FilterRange)
+		fromSecondary = true
 	}
-	s.targetQuery = TargetQuery{Candidates: candidates, Acquisition: acq, Shooter: u, Slot: slot, Index: idx, World: w, Terrain: terrain, Visibility: vis, Economy: econ, Catalog: catalog}
+	s.targetQuery = TargetQuery{Candidates: candidates, Acquisition: acq, Shooter: u, Slot: slot, Index: idx, World: w, Terrain: terrain, Visibility: vis, Economy: econ, Catalog: catalog, FromSecondary: fromSecondary}
 	return s.rules().SelectTarget(s, &s.targetQuery)
 }
 

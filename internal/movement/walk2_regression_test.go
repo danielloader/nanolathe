@@ -158,6 +158,17 @@ func TestGroundRouteAcceptanceGates(t *testing.T) {
 		}
 	})
 
+	// Step 6's age test is the unsigned `last <= tick − 10`, so before tick
+	// ten the subtraction wraps and every stamp is cleared; the ten-tick
+	// boundary itself is TestGoalReplacementPreservesRecentPollTick's.
+	t.Run("last-request age wraps before tick ten", func(t *testing.T) {
+		route := &Route{LastRequestTick: 3}
+		installGroundGoal(route, unit, goal, goalX, 0, true, true, 7, 5)
+		if route.LastRequestTick != 0 {
+			t.Fatalf("install at tick 5 kept last-request tick 3 as %d, want 0", route.LastRequestTick)
+		}
+	})
+
 	t.Run("rectangle far-edge goal point", func(t *testing.T) {
 		route := &Route{}
 		rect := path.RectPerimeterGoal(path.Rect{Min: path.Cell{X: 20, Z: 4}, Max: path.Cell{X: 24, Z: 8}})

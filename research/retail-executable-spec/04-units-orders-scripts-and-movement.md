@@ -1174,7 +1174,7 @@ the composition is the following.
    two stale points it still holds (both point-count gates need three), and
    its synthetic straight line is suppressed by the completion flag
    ([R-PATH-01 §8] step 5.3) — and zeroes the follower's last-request tick
-   when it is more than 10 ticks old, so the scheduler admits the request at
+   when it is at least 10 ticks old, so the scheduler admits the request at
    its next visit. That request repeats item 3's empty arm. No retry counter
    exists (the census above); the completion flag is never cleared for the
    life of the record (bounded negative: no writer clears that bit of an
@@ -3454,9 +3454,10 @@ owner's mover: **a unit without a mover (a building) is a no-op** — nothing is
 released, nothing installed, and a handle the installer already built is
 simply abandoned. Otherwise, in order: (1) if the record holds a payload,
 hand the mover's controller a **null goal** — for the ground follower that is
-steps 1–4 of the route-acceptance rule of [R-PATH-01 §8] (cancel the
+steps 1–4 and 6 of the route-acceptance rule of [R-PATH-01 §8] (cancel the
 in-flight search, OR `0x80` into the pending word of the record that owned
-the previous payload, clear has-waypoint, clear wants-repath); for a flight
+the previous payload, clear has-waypoint, clear wants-repath, then the
+last-request age test and the dirty flag); for a flight
 block it is the `0x80` raise and the null store — then virtually delete the
 payload object and clear the record's payload field; (2) if a new object was
 given, clear pending bits `0x20`–`0x200`, hand the controller the new object
@@ -10680,14 +10681,15 @@ object is installed, the follower does, in order:
 2. If a goal object was already installed, OR `0x80` into its order record's
    pending word (release).
 3. Clear **has-waypoint**; adopt the new goal object.
-4. If the new object is null, also clear **wants-repath** and stop.
+4. If the new object is null, also clear **wants-repath** and go to step 6.
 5. Otherwise **set wants-repath**, then try three acceptance gates in order:
    1. **Terminal-cell test.** If the follower holds **three or more** points,
       quantize the last stored point to a cell (arithmetic shift right by 4 on
       each signed 16-bit coordinate) and ask the goal's *does this cell satisfy
-      the goal* predicate. If yes: clear wants-repath, set has-waypoint, done.
+      the goal* predicate. If yes: clear wants-repath, set has-waypoint, and go
+      to step 6.
    2. **Half-distance test.** Ask the goal for its goal point; if it declines,
-      stop. If the follower holds three or more points, compute
+      go to step 6. If the follower holds three or more points, compute
       `dU = trunc(hypot(unitX − goalX, unitZ − goalZ))` on the unit's 16.16
       position and `dP = trunc(hypot((lastPoint.x << 16) − goalX,
       (lastPoint.z << 16) − goalZ))`, both as `hypot` in double precision on
@@ -10702,9 +10704,13 @@ object is installed, the follower does, in order:
       (`>> 16`) — set the count to 2, and set has-waypoint. So a rejected route
       does not leave the unit idle; it leaves it walking a straight line at the
       goal.
-6. Finally, if the follower's last-request tick is more than 10 ticks old, zero
-   it (so the 60-tick repath throttle does not delay the next request), and set
-   the dirty flag.
+6. Finally — on every path, the null goal and each early exit above included —
+   if the follower's last-request tick is **at least** 10 ticks old, zero it
+   (so the 60-tick repath throttle does not delay the next request), and set
+   the dirty flag. The test is the unsigned comparison `lastRequestTick <=
+   currentTick − 10`: a stamp exactly ten ticks old is zeroed and one nine
+   ticks old is kept, and before tick 10 the subtraction wraps, so every stamp
+   is zeroed.
 
 Both point-count gates require **three or more** stored points; a one- or
 two-point route skips straight to the synthetic fallback, which would rewrite

@@ -2357,7 +2357,7 @@ func (s *System) ActivateMove(u *units.Unit, head *orders.Node) bool {
 	// mobile-build rectangle included [04 R-PATH-01 §8][04 R-PATH-01 §13]:
 	// the synthetic straight line gives the mover something to walk while
 	// the asynchronous search runs, and step 6 zeroes a last-request tick
-	// more than ten ticks old so the 60-tick throttle does not hold back
+	// at least ten ticks old so the 60-tick throttle does not hold back
 	// the new goal's request. Mobile builds used to skip it, a leftover of
 	// the struck point-candidate design, so a builder stood still until the
 	// search published and, when it had polled within the last 60 ticks,
@@ -3124,7 +3124,10 @@ func acceptGroundRoute(route *Route, u *units.Unit, goal path.Goal, goalX, goalZ
 		route.Active = false
 	}
 
-	if tick-route.LastRequestTick > 10 {
+	// Step 6 is an unsigned `last <= tick − 10`: a stamp at least ten ticks
+	// old is cleared, and before tick ten the subtraction wraps, so every
+	// stamp is [04 R-PATH-01 §8].
+	if route.LastRequestTick <= tick-10 {
 		route.LastRequestTick = 0
 	}
 	route.Dirty = true

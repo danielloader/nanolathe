@@ -10,7 +10,7 @@ import (
 // acceptance rule on the mobile-build approach [04 R-PATH-01 §8]
 // [04 R-PATH-01 §13]. Installing the rectangle goal hands the builder the
 // synthetic straight line at the rectangle's goal point, so it starts walking
-// while the asynchronous search runs, and zeroes a last-request tick more than
+// while the asynchronous search runs, and zeroes a last-request tick at least
 // ten ticks old, so a builder that polled recently is not held back by the
 // 60-tick repath throttle.
 //
@@ -36,7 +36,7 @@ func TestBuildWalkStartsWithoutWaitingForTheSearch(t *testing.T) {
 				t.Fatalf("installing the approach goal left the route active=%v count=%d, want the synthetic two-point line", route.Active, route.Count)
 			}
 			if route.LastRequestTick != 0 {
-				t.Fatalf("installing the approach goal kept last-request tick %d, want it zeroed once more than ten ticks old", route.LastRequestTick)
+				t.Fatalf("installing the approach goal kept last-request tick %d, want it zeroed once at least ten ticks old", route.LastRequestTick)
 			}
 		}
 		beforeX, beforeZ := builder.X, builder.Z

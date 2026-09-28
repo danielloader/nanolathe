@@ -254,4 +254,13 @@ func TestMegamapUnitSlotsRebuildWhenFrameSlotIsReused(t *testing.T) {
 	if u, ok := megamapUnitView(f, slots, pool.Handle(430)); !ok || u.Slot != 430 {
 		t.Fatalf("slot 430 = %v, %v; want the unit in slot 430", u, ok)
 	}
+
+	// A same-tick republication keeps the pointer and the tick, so the cached
+	// index survives; the lookup itself must still refuse an entry past the
+	// shorter list.
+	f.Units = f.Units[:428]
+	slots = b.megamapUnitSlots(f)
+	if u, ok := megamapUnitView(f, slots, pool.Handle(430)); ok {
+		t.Fatalf("slot 430 resolved to %+v after a same-tick republication dropped it", *u)
+	}
 }

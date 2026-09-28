@@ -64,8 +64,10 @@ value in `~/.config/nanolathe/settings.json` (or
 full path). Accepted limits are 20..3276. Either override beats the feature
 table, and CLI takes precedence over the saved value. The CLI value is not
 saved, and the settings file only records a `unitLimit` you wrote yourself.
-Settings files from earlier builds recorded `"unitLimit": 1000` automatically;
-remove that line to get the table's limit back. This also
+Earlier builds wrote a `unitLimit` into the settings file on their own
+(usually `1000`, sometimes a one-off `--unit-limit` or a loaded save's limit),
+and it now counts as your choice: remove that line to get the table's limit
+back. This also
 works with direct `--map`, `--headless`, and `nanolathe-headless`. Campaign
 missions retain their authored unit limits.
 

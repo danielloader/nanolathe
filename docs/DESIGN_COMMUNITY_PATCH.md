@@ -206,6 +206,15 @@ override earlier ones field by field; an absent field means "keep":
 4. **The command line.** `--gameplay-feature name=value`, repeatable, for
    probes and benchmarks.
 
+The configured unit limit ([DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md))
+joins sources 3 and 4 through `settings.UnitLimitSources`: a saved top-level
+`unitLimit` fills `gameplayFeatures.unitLimit` when the player's block names
+none, and `--unit-limit` is the last command-line layer. A limit the player
+chose therefore beats the table of every earlier source (CP-LIM-2, §4.1). A
+source that names a `table` still starts again from that table, discarding
+every earlier source, so `--gameplay-feature table=…` without `--unit-limit`
+returns to the table's limit.
+
 Under **Strict 3.1 every source is ignored** and the table is zero: the
 retail baseline cannot be configured, which is the whole point of having it.
 The composer reports the resolved table's digest beside `rules` in the

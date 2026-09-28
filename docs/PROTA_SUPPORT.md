@@ -42,7 +42,8 @@ follows the pinned current source
 ([extension reference](../research/extensions/prota-engine.md#current-source-profile-is-a-separate-target));
 Modern adds Nanolathe's documented Modern policies on top. The table sets the
 unit limit to 1500, which the loading screen shows as *Unit limit 1500 (set by …)*,
-naming the source.
+naming the source; a limit the player chose (`--unit-limit` or a saved
+`unitLimit`) replaces it.
 
 The `prota` content profile also turns on nine switches for the historical 4.8
 package's engine changes

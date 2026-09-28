@@ -139,7 +139,6 @@ mod:
   "contentProfile": "prota",
   "minimumGameplay": "community-3.9",
   "controls": "community",
-  "buildMenuPageSize": 12,
   "requires": ["<logical path the base install must supply>"]
 }
 ```
@@ -150,7 +149,8 @@ mod:
   the mod root. Omitted means detection, exactly as today.
 - `minimumGameplay` is a reserved word; omitted means none.
 - `controls` names a controls preset (§4.3); omitted means none.
-- `buildMenuPageSize` locks the Modern expanded sidebar to at most that many
+- `buildMenuPageSize` (optional, not shown above; no hosted mod sets it)
+  locks the Modern expanded sidebar to at most that many
   build products per page, keeping a mod's hand-placed paging; omitted or zero
   keeps auto-flow, and a negative value is refused. A content profile carries
   the same lock as `presentation.build_menu_page_size`, which a mod naming

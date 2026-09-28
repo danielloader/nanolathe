@@ -17,28 +17,53 @@ type host struct {
 	registryRoots, registrySteam    []string
 }
 
-// Resolve preserves explicit root order and otherwise uses NANOLATHE_TA_ROOT
-// or discovers installations in likely host locations. Discovery recognizes a
-// totala1.hpi file; archive validation remains the mount layer's responsibility.
-// It searches all candidates, in deterministic order, without a recursive disk
-// scan: registered and standard installations first, nearby portable copies
-// next, and ~/TotalAnnihilation last. Arbitrarily relocated installations still
-// require --root.
+// Resolve returns the content roots to mount. Explicit roots keep their order;
+// otherwise a nonempty NANOLATHE_TA_ROOT selects one root, then the game folder
+// remembered by the source installer (when this executable is one of its
+// release builds), then the first installation discovery finds. Discovery never
+// overlays several detected installations: independent installs, such as a
+// retail copy beside a mod distribution that ships its own totala1.hpi, would
+// otherwise shadow each other archive by archive. Use --root to choose another
+// installation or to layer roots deliberately.
 func Resolve(explicit []string) ([]string, error) {
 	// Overrides must not depend on probing the host (including its registry).
-	if len(explicit) > 0 {
-		return explicitRoots(explicit)
+	if roots, ok, err := overrides(explicit, os.Getenv); ok {
+		return roots, err
 	}
-	if root := os.Getenv("NANOLATHE_TA_ROOT"); root != "" {
-		return explicitRoots([]string{root})
+	return resolve(nil, currentHost())
+}
+
+// Candidates keeps explicit and environment precedence and otherwise lists
+// every detected installation in discovery order, for installer selection
+// (--list-installs). It does not consult the installer's remembered folder: an
+// installer asks for candidates precisely when that folder is unusable.
+func Candidates(explicit []string) ([]string, error) {
+	if roots, ok, err := overrides(explicit, os.Getenv); ok {
+		return roots, err
 	}
+	return candidates(nil, currentHost())
+}
+
+func currentHost() host {
 	home, _ := os.UserHomeDir()
 	cwd, _ := os.Getwd()
 	executable, _ := os.Executable()
 	roots, steam := registryLocations()
 	h := host{home: home, cwd: cwd, executable: executable, platform: runtime.GOOS, getenv: os.Getenv, registryRoots: roots, registrySteam: steam}
 	h.systemRoots = systemLocations()
-	return resolve(nil, h)
+	return h
+}
+
+func overrides(explicit []string, getenv func(string) string) ([]string, bool, error) {
+	if len(explicit) > 0 {
+		roots, err := explicitRoots(explicit)
+		return roots, true, err
+	}
+	if root := getenv("NANOLATHE_TA_ROOT"); root != "" {
+		roots, err := explicitRoots([]string{root})
+		return roots, true, err
+	}
+	return nil, false, nil
 }
 
 func explicitRoots(roots []string) ([]string, error) {
@@ -50,13 +75,85 @@ func explicitRoots(roots []string) ([]string, error) {
 	return append([]string(nil), roots...), nil
 }
 
+// resolve is Resolve over an injected host.
 func resolve(explicit []string, h host) ([]string, error) {
-	if len(explicit) > 0 {
-		return explicitRoots(explicit)
+	if roots, ok, err := overrides(explicit, h.getenv); ok {
+		return roots, err
 	}
-	if root := h.getenv("NANOLATHE_TA_ROOT"); root != "" {
-		return explicitRoots([]string{root})
+	if root := installerRoot(h); root != "" {
+		return []string{root}, nil
 	}
+	roots, err := discover(h)
+	if err != nil {
+		return nil, err
+	}
+	return roots[:1], nil
+}
+
+// candidates is Candidates over an injected host.
+func candidates(explicit []string, h host) ([]string, error) {
+	if roots, ok, err := overrides(explicit, h.getenv); ok {
+		return roots, err
+	}
+	return discover(h)
+}
+
+// installerRoot returns the game folder the source installer's launcher
+// validated and remembered, when the executable is one of that installer's
+// builds (tools/installer/README.md "Files and shortcuts"): the installation
+// directory holds releases/<release>/nanolathe[.exe], a Unix current link to
+// the selected release, and the remembered folder in root.txt on Windows or
+// game-root elsewhere. Launching that executable directly must choose the same
+// data as the shortcut does. A missing, relative or stale entry is ignored, so
+// discovery proceeds as for any other build.
+func installerRoot(h host) string {
+	if h.executable == "" {
+		return ""
+	}
+	name := "game-root"
+	if h.platform == "windows" {
+		name = "root.txt"
+	}
+	executables := []string{h.executable}
+	if resolved, err := filepath.EvalSymlinks(h.executable); err == nil && resolved != h.executable {
+		executables = append(executables, resolved)
+	}
+	for _, executable := range executables {
+		release := filepath.Dir(executable)
+		parent := filepath.Dir(release)
+		var bases []string
+		if strings.EqualFold(filepath.Base(parent), "releases") {
+			bases = append(bases, filepath.Dir(parent))
+		}
+		if filepath.Base(release) == "current" {
+			bases = append(bases, parent)
+		}
+		for _, base := range bases {
+			data, err := os.ReadFile(filepath.Join(base, name))
+			if err != nil {
+				continue
+			}
+			root := strings.TrimPrefix(string(data), "\ufeff")
+			root = strings.TrimRight(root, "\r\n")
+			if strings.ContainsAny(root, "\r\n") || !filepath.IsAbs(root) {
+				continue
+			}
+			d := discovery{platform: h.platform, seen: make(map[string]bool), steamSeen: make(map[string]bool)}
+			d.game(root)
+			if len(d.roots) == 1 {
+				return d.roots[0]
+			}
+		}
+	}
+	return ""
+}
+
+// discover searches all candidates, in deterministic order, without a
+// recursive disk scan: registered and standard installations first, nearby
+// portable copies next, and ~/TotalAnnihilation last. Discovery recognizes a
+// totala1.hpi file; archive validation remains the mount layer's
+// responsibility. Arbitrarily relocated installations still require --root.
+func discover(h host) ([]string, error) {
 	d := discovery{platform: h.platform, seen: make(map[string]bool), steamSeen: make(map[string]bool)}
 	for _, root := range h.registryRoots {
 		d.game(root)

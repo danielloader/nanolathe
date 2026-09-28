@@ -1007,8 +1007,8 @@ func (g *gameShell) refreshModsPanel() {
 	retailGreyGadget(p.Window, "MUTRESET", len(active) == 0)
 	// A mod's recommended settings are offered only when switching to a mod
 	// that names a preset, and taken back only when switching from one to
-	// content that names none (§4.3, P10); the button toggles whether Apply
-	// writes them.
+	// content that names none while a row still holds the preset's value
+	// (§4.3, P10); the button toggles whether Apply writes them.
 	preset, restore := g.switchControlsPreset(selected)
 	offer := preset != "" && !sameMod(selected, g.cs.mod)
 	p.SetActive("PRESET", offer)

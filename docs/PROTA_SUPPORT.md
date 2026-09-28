@@ -84,6 +84,15 @@ ordinary option you can change later
 - **Audio:** 3D sound, 128 voices, and random music.
 - **Skirmish:** all ten player rows shown.
 
+Switching from ProTA back to the original game, or to a mod that recommends
+no settings, offers to put them back: the Mods & Mutators screen's toggle
+reads **Restore default settings**, and **Apply** returns every setting still
+at ProTA's value to its default, keeping any you have changed since; the
+skirmish rows and the megamap's own preferences stay as they are. It is not
+shown if you kept your own settings. The overview alone is the **Tab:
+Megamap** button on Options → Orders; setting it back to **Tab: Options**
+gives the wheel back to zoom and Tab back to the options.
+
 ## Controls
 
 With **Idle keys** on (Options → Orders):

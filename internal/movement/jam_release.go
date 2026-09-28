@@ -216,7 +216,7 @@ func (s *System) noteJamRelease(u *units.Unit, coll *CollisionState, blocked boo
 	// rule above then ends it at the first commit clear of every friend. A
 	// goal a parked friend already holds is crowded arrival's to finish, so
 	// it never starts one there.
-	if st.run >= jamAfter && tick >= st.cooldown && (s.jamReleaseEndOK(u, route, x, z) || s.insideFriend(u, coll) || friendBlocked && !s.goalHeldByParkedFriend(u, coll)) {
+	if st.run >= jamAfter && tick >= st.cooldown && (s.jamReleaseEndOK(u, route, x, z) || s.wedgedInFriend(u, coll) || friendBlocked && !s.goalHeldByParkedFriend(u, coll)) {
 		st.run = 0
 		st.until = tick + lifetime
 		st.limit = tick + 2*lifetime
@@ -342,6 +342,29 @@ func (s *System) overlapsOccupant(coll *CollisionState, occ int) bool {
 // insideFriend reports whether a friendly ground unit holds a cell of u's
 // committed footprint — the overlap a release leaves behind.
 func (s *System) insideFriend(u *units.Unit, coll *CollisionState) bool {
+	return s.friendHoldsFootprint(u, coll, false)
+}
+
+// wedgedInFriend is the near-destination start's "stands inside a friend"
+// case. At a work site whose stand region a parked friend holds, only a
+// parked friend counts: an overlap with a moving friend is an allied
+// pass-through in progress, which separates by itself, and a release started
+// from it would carry the unit through the builders already working at the
+// site, which the work-site rule withholds (DESIGN_MOVEMENT_PATH "Modern jam
+// release", "Work sites").
+func (s *System) wedgedInFriend(u *units.Unit, coll *CollisionState) bool {
+	if !s.insideFriend(u, coll) {
+		return false
+	}
+	if held, shaped := s.workStandHeld(u); shaped && held {
+		return s.friendHoldsFootprint(u, coll, true)
+	}
+	return true
+}
+
+// friendHoldsFootprint reports whether a friendly ground unit — with parked,
+// only one with no active route — holds a cell of u's committed footprint.
+func (s *System) friendHoldsFootprint(u *units.Unit, coll *CollisionState, parked bool) bool {
 	if s.Grid == nil {
 		return false
 	}
@@ -349,7 +372,14 @@ func (s *System) insideFriend(u *units.Unit, coll *CollisionState) bool {
 	a := coll.CachedAnchor
 	for z := a.Z; z < a.Z+fz; z++ {
 		for x := a.X; x < a.X+fx; x++ {
-			if occ, held := s.Grid.OccupantAt(Cell{X: x, Z: z}); held && occ > 0 && occ != int(u.Handle) {
+			c := Cell{X: x, Z: z}
+			if parked {
+				if s.parkedFriendAt(u, c) {
+					return true
+				}
+				continue
+			}
+			if occ, held := s.Grid.OccupantAt(c); held && occ > 0 && occ != int(u.Handle) {
 				if _, ok := s.friendlyMover(u, occ); ok {
 					return true
 				}

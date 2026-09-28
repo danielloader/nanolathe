@@ -2280,7 +2280,12 @@ Community inherits it.
    accepts: the follower halts an arriving assister on the first committed
    anchor the start predicate accepts `[04 R-MOV-03 §2]`, and because the two
    bands use different stored radii that anchor can lie a cell outside the
-   zero band `[04 R-PATH-01 §9]`.
+   zero band `[04 R-PATH-01 §9]`. At such a held site the inside-a-friend
+   start counts only a parked friend (`System.wedgedInFriend`): an arriving
+   builder that an allied pass-through leaves inside a *moving* friend while
+   it waits behind a worker is not wedged — the pass-through separates by
+   itself — and a release started then would carry it straight into the
+   worker. A builder wedged inside a parked friend is still released.
    A builder already working at the site is therefore never passed through by
    a second one arriving. The jammed builder keeps ordinary collision and
    repath: it reaches a free stand cell, or on an empty route its row's own
@@ -2393,6 +2398,25 @@ the runs traced — and then differ by the battle's own spread; over the seven
 seeds the buddies' units at 24,000 ticks moved by between −3.4% and 0% per
 map and AI.
 
+Counting only a parked friend in the inside-a-friend start at a held site
+was measured on the nine-builder retail scene with its first order swept
+over ticks 1–600. Before it, 12 of those orders (at ticks 67–85, where the
+walks start straight after the path-request throttle) had an assister,
+jammed behind a builder at the site, released the moment an arriving friend
+passed through it head-on, walk into that builder and stand inside it for
+21–22 ticks; with it, none does, and every overlap left in the 600 runs is
+allied pass-through between two arriving builders. Making the end rule see
+the cell a released unit took from the friend it walked into, without this
+start rule, lengthened those four scenes' overlaps with a worker to 245–256
+ticks and left a pair overlapping at completion: the longer release carried
+the assister further through the builders at the site. On the 136-scene
+probe above the start rule lowered overlap ticks before the follow-up from
+4,849 to 3,714 and pairs overlapping at it from 17 to 12. Every fingerprint
+lock holds, and units created at 12,000, 18,000 and 24,000 ticks are
+unchanged in all 138 headless runs compared (Modern skirmishes on three maps
+with seeds 1–3 and Survival with two buddies on two maps with seeds 1–7,
+Classic and Modern computer players); 137 are bit-identical.
+
 **Boundaries.** Aircraft, carried units, structures and units with no
 movement head never count jammed ticks. A unit released while its order ends
 stays released until its window closes, and friendly movers may pass through
@@ -2430,12 +2454,16 @@ friend keeps queuing; a route-less unit inside a friend is released; Strict
 releases neither), `TestStaticPassableSeesThroughMobilesOnly`
 (kept movers wall their anchors); for work sites, `TestJamRelease` (a jammed
 builder is never released into a builder at the site, an assister in the
-zero band or one resting on the arrival band outside it; a friend short of
-the site and one in an attack chase's band are still passed; Strict never
-releases) and `path.TestStandBoundsHoldEveryRestingCell`; in the retail tier,
-`session.TestModernBuildersAtASharedSiteNeverStandInsideEachOther` (nine
-construction kbots on one collector: no two overlap while building, and each
-takes its next build on the tick after completion) and
+zero band or one resting on the arrival band outside it; one standing
+inside a moving friend at a held site is not released, one inside a parked
+friend is, and near a point goal the moving friend still frees it; a friend
+short of the site and one in an attack chase's band are still passed; Strict
+never releases) and `path.TestStandBoundsHoldEveryRestingCell`; in the retail
+tier, `session.TestModernBuildersAtASharedSiteNeverStandInsideEachOther`
+(nine construction kbots on one collector, the first order issued on eight
+ticks before, through and after the path-request throttle's window: no
+builder stands inside one already working at the site, none is left inside
+another at completion, and each takes its next build on the tick after) and
 `TestStrictBuildersAtASharedSiteNeverOverlap`; the Strict, Community and
 Modern `headless` fingerprint locks, including the long Modern Ashap end tick
 (`tools/check-retail --full`).

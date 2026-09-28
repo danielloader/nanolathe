@@ -381,12 +381,17 @@ func (c *Client) resolveEffectFrame(view frame.EffectView, frameIndex int32) (*f
 // indexed framebuffer, so LHT cannot brighten unit/effect/HUD pixels by
 // accident.  Tile-level authored coverage beyond map bounds is not published
 // by Terrain and remains TODO rather than guessed.
+//
+// A record pixel names the map pixel the record step's floor inverse gives it
+// (DESIGN_GPU_RENDERER §14.1): the pixel itself at 1x, and the one under its
+// 2x2 block at the detail step, where the lit discs are recorded magnified.
 func (c *Client) terrainScreenCoverage(x, y int) bool {
 	if c == nil || c.terrain == nil || c.cam == nil || c.terrain.CellW <= 0 || c.terrain.CellH <= 0 {
 		return false
 	}
-	mapX := int64(x) + int64(c.cam.X)
-	mapZ := int64(y) + int64(c.cam.Z)
+	s := c.viewScale()
+	mapX := int64(s.Inverse(int32(x))) + int64(c.cam.X)
+	mapZ := int64(s.Inverse(int32(y))) + int64(c.cam.Z)
 	return mapX >= 0 && mapZ >= 0 && mapX < int64(c.terrain.CellW)*16 && mapZ < int64(c.terrain.CellH)*16
 }
 

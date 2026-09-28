@@ -358,16 +358,24 @@ func visibleExplosionSource(v frame.EffectView, cur *frame.Frame) bool {
 // The lit-disc families need it in that form: the modern executor draws one
 // clipped quad rather than testing a predicate per pixel
 // (docs/DESIGN_GPU_RENDERER.md §13.11). A test locks the two readings against
-// each other.
+// each other at both record steps.
+//
+// The rectangle is in RECORD pixels, the space the discs are recorded in, so the
+// map's extent and the camera origin go through the record step's projection
+// (DESIGN_GPU_RENDERER §14.1). Measured in world pixels instead, as it was, the
+// rectangle's far edges sat at half their distance from the origin at the detail
+// step, and every disc past that line was clipped away: a straight cut through
+// explosion light whenever a 2x view looked at the right or bottom of the map.
 func (c *Client) terrainScreenRect() drawlist.Rect {
 	if c == nil || c.terrain == nil || c.cam == nil || c.terrain.CellW <= 0 || c.terrain.CellH <= 0 {
 		return drawlist.Rect{}
 	}
+	s := c.viewScale()
 	return drawlist.Rect{
-		X: -c.cam.X,
-		Y: -c.cam.Z,
-		W: int32(c.terrain.CellW) * 16,
-		H: int32(c.terrain.CellH) * 16,
+		X: s.Project(-c.cam.X),
+		Y: s.Project(-c.cam.Z),
+		W: s.Project(int32(c.terrain.CellW) * 16),
+		H: s.Project(int32(c.terrain.CellH) * 16),
 	}
 }
 

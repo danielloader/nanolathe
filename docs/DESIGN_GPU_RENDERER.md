@@ -2038,7 +2038,14 @@ Each disc is one command instead:
   `FlashTransparentRow` outside the disc, the screen anchor, the view scale and
   the **gate as a rectangle** — what `terrainScreenCoverage` already is: two
   independent half-open range tests against the map, so the admitted set is the
-  map rectangle in screen space and no executor needs a callback.
+  map rectangle in screen space and no executor needs a callback. Both readings
+  are in RECORD pixels: the camera origin and the map's extent go through the
+  record step's projection (§14.1), so at the detail step a map pixel is a 2×2
+  block. Measured in world pixels, as the gate first was, its far edges sat
+  halfway to the map's right and bottom edges, and every disc past that line
+  was clipped — a straight cut through explosion light in a 2× view of that
+  part of the map. A test locks both readings to the camera's projection at
+  both record steps.
 * `drawlist.Halo` carries the centre, the radius already taken through the view
   scale, the LHT row and the same rectangle.
 

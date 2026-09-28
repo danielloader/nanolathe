@@ -409,7 +409,7 @@ func (p *pathProvider) Poll(player int) (path.Request, path.PollResult) {
 		// The request's target and committed start are read at the positive
 		// follower poll, never retained from its earlier staging visit [04
 		// R-PATH-01 §4][04 R-PATH-01 §6].
-		start, goal, _, ok := p.system.pathCellsForOrder(u, binding.order)
+		start, goal, ok := p.system.pathCellsForOrder(u, binding.order)
 		if !ok {
 			p.dropRequest(player, h)
 			return path.Request{}, path.PollVisited
@@ -2345,7 +2345,7 @@ func (s *System) ActivateMove(u *units.Unit, head *orders.Node) bool {
 		s.bindArrivalHandle(u, head)
 		return true
 	}
-	start, goal, selectedPoint, _ := s.pathCellsForOrder(u, head)
+	start, goal, _ := s.pathCellsForOrder(u, head)
 	// Path search is aimed at the goal handle, so a replan after a dynamic
 	// block re-paths to the same point the mover was already steering at —
 	// for a build order that is the selected perimeter candidate, not the
@@ -2353,7 +2353,16 @@ func (s *System) ActivateMove(u *units.Unit, head *orders.Node) bool {
 	fx, fz := s.pathFootprint(u)
 	goalObj := s.goalForOrderWithFootprint(u, goal, head, fx, fz)
 	s.bindRectSteeringGoal(u, head, goalObj, fx, fz)
-	if route := handleRow(s.Routes, u.Handle); route != nil && !selectedPoint {
+	// Every ground goal goes through the installer's acceptance rule, the
+	// mobile-build rectangle included [04 R-PATH-01 §8][04 R-PATH-01 §13]:
+	// the synthetic straight line gives the mover something to walk while
+	// the asynchronous search runs, and step 6 zeroes a last-request tick
+	// more than ten ticks old so the 60-tick throttle does not hold back
+	// the new goal's request. Mobile builds used to skip it, a leftover of
+	// the struck point-candidate design, so a builder stood still until the
+	// search published and, when it had polled within the last 60 ticks,
+	// for up to two seconds more.
+	if route := handleRow(s.Routes, u.Handle); route != nil {
 		goalPointX, goalPointZ, haveGoalPoint := groundGoalPoint(goalObj, u, fx, fz)
 		installGroundGoal(route, u, goalObj, goalPointX, goalPointZ, haveGoalPoint, allowSyntheticFor(head), s.staticObstacleRevision(), s.tick)
 	}
@@ -2402,7 +2411,7 @@ func (s *System) bindRectSteeringGoal(u *units.Unit, head *orders.Node, goalObj 
 	}
 }
 
-func (s *System) pathCellsForOrder(u *units.Unit, head *orders.Node) (start, goal path.Cell, selectedPoint, ok bool) {
+func (s *System) pathCellsForOrder(u *units.Unit, head *orders.Node) (start, goal path.Cell, ok bool) {
 	goalX, goalZ, ok := s.moveGoalFor(u.Handle, head)
 	name := orders.DescriptorFor(head.ID).Name
 	if name == "MobileBuild" || name == "VTOL_MobileBuild" {
@@ -2410,10 +2419,10 @@ func (s *System) pathCellsForOrder(u *units.Unit, head *orders.Node) (start, goa
 		// domain, but every admitted request copies the mover's cached committed
 		// cell as its start [04 R-PATH-01 §4 step 1].
 		return s.pathStartCell(u),
-			path.Cell{X: world.WorldToCell(goalX), Z: world.WorldToCell(goalZ)}, true, ok
+			path.Cell{X: world.WorldToCell(goalX), Z: world.WorldToCell(goalZ)}, ok
 	}
 	fx, fz := s.pathFootprint(u)
-	return s.pathStartCell(u), path.Cell{X: goalCellForWorld(goalX, fx), Z: goalCellForWorld(goalZ, fz)}, false, ok
+	return s.pathStartCell(u), path.Cell{X: goalCellForWorld(goalX, fx), Z: goalCellForWorld(goalZ, fz)}, ok
 }
 
 func usableActiveRoute(u *units.Unit, route *Route) bool {
@@ -2445,14 +2454,14 @@ func (s *System) ReplanMove(u *units.Unit, head *orders.Node) bool {
 	}
 	token := s.nextActivation
 	handleRow(s.activeOrders, u.Handle).token = token
-	start, goal, selectedPoint, _ := s.pathCellsForOrder(u, head)
+	start, goal, _ := s.pathCellsForOrder(u, head)
 	// Path search is aimed at the goal handle, so a refresh re-paths to the
 	// same point the mover was already steering at — for a build order that is
 	// the selected perimeter candidate, not the site centre [04 §8.3][04 §7.4].
 	fx, fz := s.pathFootprint(u)
 	goalObj := s.goalForOrderWithFootprint(u, goal, head, fx, fz)
 	s.bindRectSteeringGoal(u, head, goalObj, fx, fz)
-	if route := handleRow(s.Routes, u.Handle); route != nil && !selectedPoint {
+	if route := handleRow(s.Routes, u.Handle); route != nil {
 		goalPointX, goalPointZ, haveGoalPoint := groundGoalPoint(goalObj, u, fx, fz)
 		installGroundGoal(route, u, goalObj, goalPointX, goalPointZ, haveGoalPoint, allowSyntheticFor(head), s.staticObstacleRevision(), s.tick)
 	}
@@ -2571,7 +2580,7 @@ func (s *System) serviceGroundFollower(u *units.Unit, head *orders.Node, route *
 	if binding == nil || binding.order != head {
 		return arrived
 	}
-	start, goal, _, ok := s.pathCellsForOrder(u, head)
+	start, goal, ok := s.pathCellsForOrder(u, head)
 	if !ok {
 		return arrived
 	}

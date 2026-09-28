@@ -53,9 +53,10 @@ func runMobileApproachControllerCase(t *testing.T, controller uint8) mobileAppro
 	startX, startY, startZ := builder.X, builder.Y, builder.Z
 
 	// Phase 2 construction submits the request before movement integration.
-	// With no published route yet, that same tick's movement visit must not
-	// change the transform; phase 5 publishes the route afterwards [01 §4.4]
-	// [04 §7.3].
+	// Installing the rectangle goal runs the goal installer's acceptance rule,
+	// whose synthetic straight line gives the builder something to walk while
+	// the asynchronous search runs [04 R-PATH-01 §8][04 R-PATH-01 §13]; phase 5
+	// replaces it with the search's publication [01 §4.4][04 §7.3].
 	pumpApproach(svc, builder, 0)
 	if node.Target != 0 {
 		t.Fatalf("controller %d allocated product %d before approach completed", controller, node.Target)
@@ -90,15 +91,8 @@ func runMobileApproachControllerCase(t *testing.T, controller uint8) mobileAppro
 	if !moveGoalBound {
 		t.Fatalf("controller %d did not bind the selected approach as the mover goal", controller)
 	}
-	if route := svc.Movement.Routes[builder.Handle]; route != nil && route.Active {
-		t.Fatalf("controller %d route was active before the phase-5 publication boundary", controller)
-	}
-	svc.Movement.BeginTick(0)
-	firstMovement := svc.Movement.StepUnit(builder.Handle, 0)
-	svc.Movement.EndTick(0)
-	if firstMovement.Moved || builder.X != startX || builder.Y != startY || builder.Z != startZ {
-		t.Fatalf("controller %d moved before route publication: start=(%d,%d,%d) got=(%d,%d,%d)", controller,
-			startX, startY, startZ, builder.X, builder.Y, builder.Z)
+	if route := svc.Movement.Routes[builder.Handle]; route == nil || !route.Active || route.Count != 2 {
+		t.Fatalf("controller %d approach has no synthetic two-point route before the phase-5 publication boundary: %+v", controller, route)
 	}
 	svc.Movement.Scheduler.Tick(60)
 	route := svc.Movement.Routes[builder.Handle]

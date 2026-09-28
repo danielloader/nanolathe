@@ -214,8 +214,9 @@ func TestLoadMaterialTableFromMountedContent(t *testing.T) {
 }
 
 // Every load starts from the embedded table (docs/DESIGN_MODS_MUTATORS.md
-// §4.4): content whose override has no [materials] section, or whose override
-// cannot be read, must not inherit the previous content's texture table.
+// §4.4): content whose override has no [materials] or [glint] section, or
+// whose override cannot be read, must not inherit the previous content's
+// texture or glint table.
 func TestLoadMaterialTableResetsBeforeEachOverride(t *testing.T) {
 	restoreMaterialTable(t)
 	restoreGlowFamilies(t)
@@ -235,7 +236,7 @@ func TestLoadMaterialTableResetsBeforeEachOverride(t *testing.T) {
 		t.Cleanup(func() { _ = fs.Close() })
 		return fs
 	}
-	previous := mount("[materials]\n\t{\n\tmysheet=metal;\n\t}\n")
+	previous := mount("[materials]\n\t{\n\tmysheet=metal;\n\t}\n[glint]\n\t{\n\tcolorslt=0;\n\t}\n")
 	effectsOnly := mount("[effects]\n\t{\n\tweapons=40;\n\t}\n")
 	unreadable := mount("this is not a TDF document")
 	var cl *Client
@@ -245,7 +246,7 @@ func TestLoadMaterialTableResetsBeforeEachOverride(t *testing.T) {
 		wantErr bool
 		weapons int
 	}{{"effects only", effectsOnly, false, 40}, {"unreadable", unreadable, true, GlowFamilyDefault}} {
-		if err := LoadMaterialTable(previous); err != nil || modelTextureMaterial("mysheet") != drawlist.ModelMaterialMetal {
+		if err := LoadMaterialTable(previous); err != nil || modelTextureMaterial("mysheet") != drawlist.ModelMaterialMetal || modelTextureGlint("colorslt") != 1 {
 			t.Fatalf("the previous content's override was not installed: %v", err)
 		}
 		if err := LoadMaterialTable(next.fs); (err != nil) != next.wantErr {
@@ -253,6 +254,9 @@ func TestLoadMaterialTableResetsBeforeEachOverride(t *testing.T) {
 		}
 		if modelTextureMaterial("corsea6d") != drawlist.ModelMaterialMetal || modelTextureMaterial("mysheet") != drawlist.ModelMaterialDefault {
 			t.Fatalf("%s: the previous content's texture table survived the load", next.name)
+		}
+		if modelTextureGlint("colorslt") != 0 {
+			t.Fatalf("%s: the previous content's glint table survived the load", next.name)
 		}
 		if w, _, _ := cl.GlowFamilies(); w != next.weapons {
 			t.Fatalf("%s: weapons family %d, want %d", next.name, w, next.weapons)

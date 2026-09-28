@@ -3947,9 +3947,10 @@ and take the pack's value alone. The renderer's zero value is every family at
 `internal/client` parses the section beside `[materials]` when it installs the
 file (`SetMaterialTable`) and holds the result with the texture table; hosts
 read it through `Client.GlowFamilies()`. An override without `[materials]`
-keeps the texture table in force and sets only the families; one without
-`[effects]` restores every family to 100; one with neither section, or a family
-value that is not a whole number, is reported and changes nothing. Unknown keys
+keeps the texture table in force and sets only the families (and any
+`[glint]` strengths, §23.7); one without `[effects]` restores every family to
+100; one with none of the three sections, or a family value that is not a
+whole number, is reported and changes nothing. Unknown keys
 are ignored so a later family does not make an older build reject the file.
 
 The host carries it the way it carries the switch: `Client.SetGlowStrength` /
@@ -5522,9 +5523,10 @@ carries an empty section, so every load starts from the tuned glint.
 
 The same file carries a content pack's effect strengths: an `[effects]` section
 of `weapons=`, `nanolathe=`, `ground=`, `footprints=` and `tracks=` whole percentages, 0..200, default 100
-(§19.4). A file may carry either section alone: one without `[materials]`
-keeps the texture table in force, and one without `[effects]` keeps every
-family at 100.
+(§19.4). A file may carry any of the three sections alone: one without
+`[materials]` keeps the texture table in force, one without `[glint]` keeps
+the glint table in force, and one without `[effects]` keeps every family at
+100.
 
 `ModelFace.Material` carries the annotation, resolved **once at texture bind**
 rather than per face: `resolveModelTexture` stamps the annotation and the

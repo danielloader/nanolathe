@@ -299,6 +299,9 @@ func loiterGoal(pad *units.Unit, bearing uint16, radius int32) (numeric.Fixed, n
 	return pad.X - ox, pad.Z - oz
 }
 
+// quarterTurn is the loiter bearing's step per leg [04 R-AIR-01 §6].
+const quarterTurn = uint16(0x4000)
+
 // requireLoiterLeg checks the installed leg: the loiter point for bearing b,
 // arrival radius 128, no altitude setter, the bearing a quarter turn on, the
 // retail wake set plus the claim retry, and Param2 untouched.
@@ -309,7 +312,7 @@ func requireLoiterLeg(t *testing.T, s *System, u *units.Unit, n *orders.Node, pa
 	if !m.IsMarker || m.Goal.X != x || m.Goal.Z != z || m.ArrivalRadius != 0x80 || m.Flags&airMarkerExplicitAlt != 0 {
 		t.Fatalf("leg at bearing %#x radius %d: marker %+v", b, radius, m)
 	}
-	if uint16(n.Param1) != b+0x4000 || n.Phase != 1 || n.DynamicGate != 0xE9 || n.Param2 != 0 {
+	if uint16(n.Param1) != b+quarterTurn || n.Phase != 1 || n.DynamicGate != 0xE9 || n.Param2 != 0 {
 		t.Fatalf("leg at bearing %#x: record %+v", b, *n)
 	}
 }
@@ -344,7 +347,7 @@ func TestModernRepairWaitersFlyTheRetailLoiter(t *testing.T) {
 	u.SlotAt(0).Weapon = &content.WeaponDef{Range: 370}
 	for turn := uint16(1); turn <= 4; turn++ {
 		s.legVTOLLanding(u, n, 0xA0, 32+uint32(turn))
-		requireLoiterLeg(t, s, u, n, pad, bearing+turn*0x4000, 370)
+		requireLoiterLeg(t, s, u, n, pad, bearing+turn*quarterTurn, 370)
 	}
 	if q.Binding().SimRNG.Draws() != draws {
 		t.Fatal("loitering consumed randomness")

@@ -1,6 +1,8 @@
 package movement
 
 import (
+	"github.com/nanolathe-gg/nanolathe/internal/orders"
+	"github.com/nanolathe-gg/nanolathe/internal/path"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
@@ -231,31 +233,107 @@ func (s *System) noteJamRelease(u *units.Unit, coll *CollisionState, blocked boo
 }
 
 // goalHeldByParkedFriend reports whether a friendly ground unit with no active
-// route holds a cell of u's goal footprint — the crowded destination that
-// Modern crowded arrival finishes where the unit stands
-// (DESIGN_MOVEMENT_PATH "Modern crowded arrival").
+// route already stands where u is going — the crowded destination that no
+// release may carry u into. For an ordinary point goal that is a cell of u's
+// goal footprint, which Modern crowded arrival finishes where the unit stands
+// (DESIGN_MOVEMENT_PATH "Modern crowded arrival"). For a work approach's
+// shaped goal it is a cell of the goal's stand region: the grown rectangle a
+// build or reclaim approach arrives on, or the band an assist or repair
+// approach arrives in. A builder already working there is parked beside the
+// site, far from the rectangle's anchor point, so the point test alone never
+// saw it and a jammed second builder was released straight through it.
 func (s *System) goalHeldByParkedFriend(u *units.Unit, coll *CollisionState) bool {
+	if s.Grid == nil {
+		return false
+	}
+	if goal := s.shapedMoveGoal(u); goal != nil {
+		return s.shapedGoalHeldByParkedFriend(u, goal)
+	}
 	gx, gz, ok := s.moveGoalForUnit(u)
-	if !ok || s.Grid == nil {
+	if !ok {
 		return false
 	}
 	fx, fz := int32(max(coll.FootPrintX, 1)), int32(max(coll.FootPrintZ, 1))
 	ax, az := goalCellForWorld(gx, fx), goalCellForWorld(gz, fz)
 	for z := az; z < az+fz; z++ {
 		for x := ax; x < ax+fx; x++ {
-			occ, held := s.Grid.OccupantAt(Cell{X: x, Z: z})
-			if !held || occ <= 0 || occ == int(u.Handle) {
-				continue
-			}
-			if _, friendly := s.friendlyMover(u, occ); !friendly {
-				continue
-			}
-			if r := handleRow(s.Routes, pool.Handle(occ)); r == nil || !r.Active || r.Count < 2 {
+			if s.parkedFriendAt(u, Cell{X: x, Z: z}) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// shapedMoveGoal returns the annulus or rectangle payload bound to u's
+// current head, or nil for a point goal or no goal.
+func (s *System) shapedMoveGoal(u *units.Unit) path.Goal {
+	q := orders.QueueForUnit(u)
+	if q == nil {
+		return nil
+	}
+	goal := s.moveGoalPayload(u.Handle, q.Head())
+	if goal == nil {
+		return nil
+	}
+	if k := path.DescribeGoal(goal).Kind; k != goalTraceAnnulus && k != goalTraceRect {
+		return nil
+	}
+	return goal
+}
+
+// The path package's goal-trace kinds for the two shaped ground goals.
+const (
+	goalTraceAnnulus = 2
+	goalTraceRect    = 3
+)
+
+// shapedGoalHeldByParkedFriend reports whether a parked friend holds a cell of
+// the shaped goal's stand region. The rectangle's region is the whole grown
+// rectangle, border included: a unit of any footprint standing flush against
+// the target holds at least one of its cells. The annulus's region is the
+// band its heuristic reads zero in, bounded by the outer radius over the
+// octile's eighteen-per-cell major axis.
+func (s *System) shapedGoalHeldByParkedFriend(u *units.Unit, goal path.Goal) bool {
+	d := path.DescribeGoal(goal)
+	var r path.Rect
+	switch d.Kind {
+	case goalTraceRect:
+		r = d.Rect
+	case goalTraceAnnulus:
+		reach := max(d.B, 0) / 18
+		r = path.Rect{
+			Min: path.Cell{X: d.Center.X - reach, Z: d.Center.Z - reach},
+			Max: path.Cell{X: d.Center.X + reach, Z: d.Center.Z + reach},
+		}
+	default:
+		return false
+	}
+	for z := r.Min.Z; z <= r.Max.Z; z++ {
+		for x := r.Min.X; x <= r.Max.X; x++ {
+			if d.Kind == goalTraceAnnulus && goal.H(path.Cell{X: x, Z: z}) != 0 {
+				continue
+			}
+			if s.parkedFriendAt(u, Cell{X: x, Z: z}) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parkedFriendAt reports whether cell c is held by a friendly ground unit of
+// u's with no active route.
+func (s *System) parkedFriendAt(u *units.Unit, c Cell) bool {
+	occ, held := s.Grid.OccupantAt(c)
+	if !held || occ <= 0 || occ == int(u.Handle) {
+		return false
+	}
+	if _, friendly := s.friendlyMover(u, occ); !friendly {
+		return false
+	}
+	r := handleRow(s.Routes, pool.Handle(occ))
+	return r == nil || !r.Active || r.Count < 2
 }
 
 // overlapsOccupant reports whether occupant occ holds a cell of the committed

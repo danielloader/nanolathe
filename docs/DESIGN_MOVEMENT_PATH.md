@@ -2259,7 +2259,15 @@ Community inherits it.
    rejected by a friendly mover that is not a same-way mover and no parked
    friend (a friendly ground unit with no active route) holds the unit's goal
    footprint — that destination is [crowded arrival](#modern-crowded-arrival)'s
-   to finish — or when the unit already stands inside a friend; the end rule below then closes it at
+   to finish — or when the unit already stands inside a friend. For a work
+   approach's shaped goal the held test reads the goal's whole stand region
+   instead of the footprint at its anchor point: every cell of a build or
+   reclaim approach's grown rectangle, border included, and every cell an
+   assist or repair approach's annulus heuristic reads zero on. A builder
+   already working flush against the site is therefore never passed through
+   by a second one arriving (issue #31); the jammed builder keeps ordinary
+   collision and repath, and the work order's own reach test and failure arm
+   decide what it does next; the end rule below then closes it at
    the first commit clear of every friend, so near the destination a release
    lasts only while the unit passes through the friend in its way. This is
    what frees two units that wedge each other beside their goals at the edge

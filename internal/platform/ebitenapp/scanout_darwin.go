@@ -11,15 +11,14 @@ import (
 // (DESIGN_GPU_RENDERER §13.5 "Composited fullscreen").
 //
 // The display scans out an opaque fullscreen window directly, from a queue
-// with no refresh to spare when every refresh carries a frame, and anything
-// that disturbs the window server then shows frames a refresh late
-// (framePacer). A window the window server composites is shown from a longer
-// queue that absorbs the same disturbances, two refreshes later. The window
-// server composites a window whose layer is not declared opaque, so the
-// declaration is withdrawn while the window is fullscreen and its frames are
-// crowded, and restored otherwise: windowed play is composited anyway, and
-// the direct route is the quicker one wherever the pacer keeps refreshes
-// free.
+// so short that anything that disturbs the window server shows frames a
+// refresh late (framePacer). A window the window server composites is shown
+// from a longer queue that absorbs the same disturbances, a refresh or two
+// later. The window server composites a window whose layer is not declared
+// opaque, so the declaration is withdrawn while the window is fullscreen on
+// a fast display and restored otherwise: windowed play is composited anyway,
+// and on a display of 60 refreshes a second the direct route showed no frame
+// late and is a refresh quicker.
 //
 // A layer that is not opaque is blended over the window behind it. Ebitengine
 // clears the screen to transparent black, which an opaque layer shows as

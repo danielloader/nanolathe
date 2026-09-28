@@ -2,8 +2,8 @@ package ebitenapp
 
 // scanoutSettle is how many host steps in a row must ask for the other route
 // before the window is given it, about an eighth of a second. A fullscreen
-// transition and a display measured again can each ask for a route for a
-// step or two, and changing the window's route is not free.
+// transition can report either state for a step or two, and changing the
+// window's route is not free.
 const scanoutSettle = 4
 
 // scanoutRoute is the route a window has, direct or composited, and how long

@@ -480,10 +480,10 @@ since the first battle Draw; spans are microseconds:
   presented one, and `refresh_us` is the display's period as its link
   reports it, not a measurement of Draw arrivals.
 - `composited`: 1 while the fullscreen window was on the composited route
-  (DESIGN_GPU_RENDERER §13.5 "Composited fullscreen"), which adds two
-  refreshes between a present and the display that no other column shows.
-  It is zero in a window, under a paced cap, on hosts other than macOS and
-  with `--live-unpaced`.
+  (DESIGN_GPU_RENDERER §13.5 "Composited fullscreen"), which adds a refresh
+  or two between a present and the display that no other column shows. It
+  is zero in a window, on a display slower than 100 refreshes a second, on
+  hosts other than macOS and with `--live-unpaced`.
 
 The time from one Draw's return to the next Update is Ebitengine's flush and
 present plus the wait for the next display-link callback; the report calls it

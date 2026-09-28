@@ -119,7 +119,7 @@ type app struct {
 	beganAt  time.Time
 	paceHeld time.Duration
 	paceLead int
-	// scanout composites the fullscreen window while its frames are crowded
+	// scanout composites the window while it is fullscreen on a fast display
 	// (nativeScanout); a no-op on hosts that choose the route themselves.
 	scanout nativeScanout
 	// pipe is the record/submit pipeline's host state
@@ -304,7 +304,7 @@ func (a *app) updateBody() {
 	// host can hold for milliseconds; ask once per step.
 	focused := ebiten.IsFocused()
 	a.fullscreenPresentation.update(a.fullscreen, focused)
-	a.scanout.update(a.fullscreen && a.mode == RendererModern && a.pacer.crowded())
+	a.scanout.update(a.fullscreen && a.pacer.fastDisplay())
 	applyInput(a.c.Input(), sample)
 	a.c.SetFocused(focused)
 	a.c.SetHostStepDue(sample.due)

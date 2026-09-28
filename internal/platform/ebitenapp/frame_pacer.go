@@ -101,15 +101,12 @@ const (
 	// overrun before frames begin a refresh earlier.
 	pacerWorkWindow = 64
 	pacerWorkLong   = 4
-	// pacerCrowdedCeiling is the longest refresh period of a display whose
-	// fullscreen window is composited when every refresh carries a frame.
-	// The composited route costs two refreshes of latency, which was
-	// measured, and accepted, on a display of 120 refreshes a second.
-	// TODO(question): whether a fullscreen window on a display of 60
-	// refreshes a second shows frames late in the same way, and what the
-	// composited route costs there, is unmeasured; a Metal System Trace of
-	// fullscreen play on such a display would settle both.
-	pacerCrowdedCeiling = time.Second / 100
+	// pacerFastDisplay is the longest refresh period of a display whose
+	// fullscreen window is composited (nativeScanout). At 120 refreshes a
+	// second the direct route showed frames late and the composited one did
+	// not; at 60 the direct route showed none late, and the composited one
+	// only cost a refresh more. Nothing between the two was measured.
+	pacerFastDisplay = time.Second / 100
 )
 
 // setInterval is nil-safe, as are refreshPeriod and awaitFrame: a host with
@@ -246,20 +243,17 @@ func (p *framePacer) measure(target time.Duration) {
 	}
 }
 
-// crowded reports whether the window presents on every refresh of a fast
-// display: the cap leaves the pacer no refresh to keep back, so a fullscreen
-// window's presentation queue has none to spare (nativeScanout).
-func (p *framePacer) crowded() bool {
+// fastDisplay reports whether the display the link reports for refreshes
+// fast enough for a fullscreen window on it to be composited (nativeScanout).
+// It is false until the display has been measured, and where there is no
+// link to measure it by.
+func (p *framePacer) fastDisplay() bool {
 	if p == nil {
 		return false
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.display == 0 || p.display > pacerCrowdedCeiling {
-		return false
-	}
-	interval := min(time.Duration(p.interval.Load()), pacerIntervalCeiling)
-	return interval-interval/8 <= p.display
+	return p.display != 0 && p.display <= pacerFastDisplay
 }
 
 // returned is Ebitengine returning the slot it was last passed: the frame

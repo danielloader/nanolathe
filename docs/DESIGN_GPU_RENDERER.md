@@ -1539,7 +1539,11 @@ before every Draw on every platform. Ebitengine owns window coordinates,
 letterboxing, DPI, capture and VM input injection; no native cursor bridge is
 needed. Original retains its 30 Hz cursor. The cursor's shape and animation, hover, orders,
 placement previews and camera continue using the ordinary host step; the fresh
-position never publishes command input or consumes RNG. The GAF hotspot remains
+position never publishes command input or consumes RNG. The build placement
+reticle is the one cursor left at its recorded host-step position: the
+footprint ghost recorded beside it was snapped from that pointer, so moving
+only the reticle would separate the two by up to a couple of cells while the
+mouse sweeps. The GAF hotspot remains
 authored [07 §8]. Capture keeps the pointer hidden; the release frame preserves
 its saved restore point [07 R-CAM-01 §11]. F11 reads the submitted GPU image,
 cursor included. This removes the 30 Hz positional sampling limit;

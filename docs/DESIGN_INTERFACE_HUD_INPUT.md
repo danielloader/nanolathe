@@ -1401,7 +1401,11 @@ keeps its animation phase. Shape selection is the four-step chooser of §2.5
 placement is armed, `cursorfindsite` is drawn with its artwork centred on the
 pointer used for site picking. The retail GAF offset puts that one reticle
 down-right of the pointer; this display choice changes neither the chosen
-cursor shape nor the site, click or order. The green/red footprint border keeps
+cursor shape nor the site, click or order. Modern's late cursor positioning
+(DESIGN_GPU_RENDERER, "Pointer latency") skips this reticle, so it stays on the
+same host-step pointer the ghost was snapped from and the two move together.
+At rest the reticle may still sit up to half a cell from the footprint centre:
+that is the retail round-to-nearest site snap [07 §9], not an offset. The green/red footprint border keeps
 its retail validity colour and cell-aligned rectangle. The default preview is
 the building's pulsing nanoframe wireframe, using the committed tick and the
 construction colour ramp [03 §5.2]. The preview pauses with the committed

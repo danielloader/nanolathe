@@ -8,10 +8,12 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/render"
 )
 
-// The placement reticle is anchored on the picked build point even when the
-// presentation pointer arrives after recording. The stock GAF offset would
-// move its visible centre down-right [03 R-FX-01 §5].
-func TestPlacementReticleCenteredAfterLatePosition(t *testing.T) {
+// The placement reticle is centred on the picked build point, and late
+// presentation positioning does not move it: the footprint ghost in the same
+// recording was snapped from that host-step pointer, so a fresher pointer
+// would pull the reticle off the ghost while the mouse moves. The stock GAF
+// offset would also move its visible centre down-right [03 R-FX-01 §5].
+func TestPlacementReticleStaysOnPickedPointAfterLatePosition(t *testing.T) {
 	c, err := New(Options{Width: 80, Height: 70})
 	if err != nil {
 		t.Fatal(err)
@@ -33,11 +35,11 @@ func TestPlacementReticleCenteredAfterLatePosition(t *testing.T) {
 	c.drawCursor()
 	c.PositionPresentationCursor(&c.list, 40, 35)
 	c.replayForTest()
-	if got := c.indexed[35*c.width+40]; got != 99 {
-		t.Fatalf("late positioned reticle centre = %d, want 99", got)
+	if got := c.indexed[30*c.width+30]; got != 99 {
+		t.Fatalf("reticle centre at picked pointer = %d, want 99", got)
 	}
-	if got := c.indexed[30*c.width+30]; got != 0 {
-		t.Fatalf("reticle remained at old pointer: %d", got)
+	if got := c.indexed[35*c.width+40]; got != 0 {
+		t.Fatalf("reticle followed the late pointer away from the ghost: %d", got)
 	}
 }
 

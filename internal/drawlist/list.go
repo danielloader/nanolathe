@@ -576,7 +576,8 @@ type Cursor struct {
 	Frame      *formats.GAFFrame
 	HotX, HotY int32
 	// CenterOnPointer is Nanolathe's host presentation choice for the build
-	// placement reticle. Late positioning must preserve the same anchor.
+	// placement reticle. That reticle stays on the host-step pointer that
+	// picked the recorded ghost, so late positioning leaves it where recorded.
 	CenterOnPointer bool
 }
 
@@ -804,15 +805,17 @@ func (l *List) RecordCursor(c Cursor) {
 // position while preserving their resolved art and authored hotspot [07 §8].
 // The window calls this after joining its recorder and before replay; it does
 // not alter picking, other commands, or the client's published pointer sample.
+//
+// The build placement reticle is the exception and keeps its recorded origin.
+// The footprint ghost drawn beside it was snapped from the host-step pointer
+// in the same recording, and a fresher pointer would pull the reticle away
+// from that ghost by however far the mouse moved since — up to a couple of
+// cells during an ordinary sweep. Reticle and ghost must move together.
 func (l *List) PositionCursor(x, y int) {
 	for i := range l.cursor {
 		cu := &l.cursor[i]
-		if cu.Frame != nil {
+		if cu.Frame != nil && !cu.CenterOnPointer {
 			hx, hy := render.CursorHotspot(cu.Frame, x, y)
-			if cu.CenterOnPointer {
-				hx = x - (int(cu.Frame.Width)-1)/2
-				hy = y - (int(cu.Frame.Height)-1)/2
-			}
 			cu.HotX, cu.HotY = int32(hx), int32(hy)
 		}
 	}

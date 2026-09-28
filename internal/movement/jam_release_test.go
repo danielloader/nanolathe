@@ -34,7 +34,16 @@ type jamCase struct {
 	assist   bool
 	outer    int32
 	row      string
+	// wedge, when nonzero, registers a third friend on the mover's own cell
+	// before the mover, so the mover stands inside it from the first tick:
+	// wedgeMoving gives that friend an active route, wedgeParked none.
+	wedge int
 }
+
+const (
+	wedgeMoving = 1
+	wedgeParked = 2
+)
 
 func runJamCase(t *testing.T, c jamCase, ticks uint32) (freed uint32, sys *System) {
 	t.Helper()
@@ -86,10 +95,19 @@ func setupJamCase(t *testing.T, c jamCase) (*System, pool.Handle, pool.Handle, f
 	if err != nil {
 		t.Fatal(err)
 	}
+	var wedge pool.Handle
+	if c.wedge != 0 {
+		if wedge, err = w.Create(def, 0, world.CellToWorld(moverCell), 0, row); err != nil {
+			t.Fatal(err)
+		}
+	}
 	sys.BindWorld(w)
 	// The blocker registers first, so a mover placed inside it overlaps an
 	// incumbent that keeps its cells, as a wedge does.
 	sys.EnsureUnit(w.Unit(b))
+	if wedge != 0 {
+		sys.EnsureUnit(w.Unit(wedge))
+	}
 	sys.EnsureUnit(w.Unit(a))
 	rowZ := int32(row.Raw() >> 16)
 	name := "Move_Ground"
@@ -131,6 +149,9 @@ func setupJamCase(t *testing.T, c jamCase) (*System, pool.Handle, pool.Handle, f
 		}
 		if c.blockerRoute {
 			handleRow(sys.Routes, b).PublishAtRevision([]Point{{X: 7*16 + 8, Z: rowZ}, {X: 30*16 + 8, Z: rowZ}}, sys.staticObstacleRevision())
+		}
+		if c.wedge == wedgeMoving {
+			handleRow(sys.Routes, wedge).PublishAtRevision([]Point{{X: moverCell*16 + 8, Z: rowZ}, {X: 8, Z: rowZ}}, sys.staticObstacleRevision())
 		}
 		if !c.routeless {
 			ax := handleRow(sys.Collisions, a).X >> 16
@@ -175,6 +196,14 @@ func TestJamRelease(t *testing.T) {
 		// passing a friend parked in the band.
 		{"modern releases past a friend in an attack band", jamCase{rules: &ModernRules{}, moverEndCell: 7, siteCell: 9, assist: true, row: "Attack_Chase"}, modernJamReleaseAfter + 1},
 		{"strict never releases at a site", jamCase{rules: StrictRules{}, moverEndCell: 9, siteCell: 8}, 0},
+		// A builder jammed at a held site while a moving friend passes
+		// through it is not wedged: the pass-through separates by itself, and
+		// a release would carry it into the builder at the site. Inside a
+		// parked friend it is wedged, and a release takes it out.
+		{"modern never releases out of a moving friend at a held site", jamCase{rules: &ModernRules{}, moverEndCell: 9, siteCell: 8, wedge: wedgeMoving}, 0},
+		{"modern releases out of a parked friend at a held site", jamCase{rules: &ModernRules{}, moverEndCell: 9, siteCell: 8, wedge: wedgeParked}, modernJamReleaseAfter + 1},
+		{"modern releases out of a moving friend near a point goal", jamCase{rules: &ModernRules{}, moverEndCell: 9, wedge: wedgeMoving}, modernJamReleaseAfter + 1},
+		{"strict never releases out of a friend at a site", jamCase{rules: StrictRules{}, moverEndCell: 9, siteCell: 8, wedge: wedgeParked}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			freed, sys := runJamCase(t, tc.c, ticks)

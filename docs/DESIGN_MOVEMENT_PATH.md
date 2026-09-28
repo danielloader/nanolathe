@@ -2280,7 +2280,12 @@ Community inherits it.
    accepts: the follower halts an arriving assister on the first committed
    anchor the start predicate accepts `[04 R-MOV-03 §2]`, and because the two
    bands use different stored radii that anchor can lie a cell outside the
-   zero band `[04 R-PATH-01 §9]`.
+   zero band `[04 R-PATH-01 §9]`. At such a held site the inside-a-friend
+   start counts only a parked friend (`System.wedgedInFriend`): an arriving
+   builder that an allied pass-through leaves inside a *moving* friend while
+   it waits behind a worker is not wedged — the pass-through separates by
+   itself — and a release started then would carry it straight into the
+   worker. A builder wedged inside a parked friend is still released.
    A builder already working at the site is therefore never passed through by
    a second one arriving. The jammed builder keeps ordinary collision and
    repath: it reaches a free stand cell, or on an empty route its row's own
@@ -2430,12 +2435,16 @@ friend keeps queuing; a route-less unit inside a friend is released; Strict
 releases neither), `TestStaticPassableSeesThroughMobilesOnly`
 (kept movers wall their anchors); for work sites, `TestJamRelease` (a jammed
 builder is never released into a builder at the site, an assister in the
-zero band or one resting on the arrival band outside it; a friend short of
-the site and one in an attack chase's band are still passed; Strict never
-releases) and `path.TestStandBoundsHoldEveryRestingCell`; in the retail tier,
-`session.TestModernBuildersAtASharedSiteNeverStandInsideEachOther` (nine
-construction kbots on one collector: no two overlap while building, and each
-takes its next build on the tick after completion) and
+zero band or one resting on the arrival band outside it; one standing
+inside a moving friend at a held site is not released, one inside a parked
+friend is, and near a point goal the moving friend still frees it; a friend
+short of the site and one in an attack chase's band are still passed; Strict
+never releases) and `path.TestStandBoundsHoldEveryRestingCell`; in the retail
+tier, `session.TestModernBuildersAtASharedSiteNeverStandInsideEachOther`
+(nine construction kbots on one collector, the first order issued on eight
+ticks before, through and after the path-request throttle's window: no
+builder stands inside one already working at the site, none is left inside
+another at completion, and each takes its next build on the tick after) and
 `TestStrictBuildersAtASharedSiteNeverOverlap`; the Strict, Community and
 Modern `headless` fingerprint locks, including the long Modern Ashap end tick
 (`tools/check-retail --full`).

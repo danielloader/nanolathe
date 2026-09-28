@@ -361,7 +361,16 @@ cadence. It still requires Fire at Will, a completed armed unit and an enabled
 autonomous slot. Explicitly released/bound slots and ground targets are not
 retargeted by this maintenance. Modern scans every contact in the selected
 registry query, refreshes liveness, alliance and current visibility, and retains
-the existing medium, range and trajectory gates. It admits factories and other
+the existing medium, range and trajectory gates. The selected query includes the
+retail targeting-upgrade fallback unchanged: when the visible scan is empty and
+the scanning player's own active `istargetingupgrade` unit holds the gate open,
+the population is the secondary list [06 §3.1][04 R-SPEC-01 §8]. For that
+population the knowledge refresh is the candidate's current seen bit — the
+same test that filed it — rather than direct sight, so the Targeting Facility
+lets Modern turrets fire on radar contacts exactly as Strict does, while a
+contact lost since the rebuild is still refused (Strict reads the stale list
+unchanged). Requiring direct sight there cancelled the facility under Modern
+(issue #36). It admits factories and other
 opportunities regardless of `shootme` or human/computer controller, provided the
 weapon can cause positive effective damage. Both controllers exclude dropped
 and command-fire weapons from automatic maintenance; an explicit command still
@@ -525,7 +534,10 @@ threat replacement, stable ties and switching margin, nearby-ally attacks,
 explicit bindings, current visibility, acquisition versus launch coverage,
 finishing shots and soft overage, miss release, compaction, allocation identity,
 veterancy, phase/expiry limits, mode/load behavior, unarmed and missed-shot
-danger, friendly exclusions, resources and Strict RNG bypass. The existing
+danger, friendly exclusions, resources and Strict RNG bypass.
+`targeting_upgrade_test.go` locks, under both rule sets, that an out-of-sight
+radar contact in weapon range is acquired only behind the owner's active
+targeting upgrade, and that Modern refuses a contact lost since the rebuild. The existing
 acquisition draw-vector tests remain unchanged. Repository integration and
 retail-content gates plus simulation-cost and classic/modern live battle
 benchmarks apply; Modern fingerprints and battle census may intentionally

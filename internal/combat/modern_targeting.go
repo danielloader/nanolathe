@@ -22,6 +22,10 @@ type TargetQuery struct {
 	Visibility  *visibility.Service
 	Economy     *economy.Service
 	Catalog     *content.Catalog
+	// FromSecondary reports that Candidates came from the registry's
+	// secondary (seen-bit) list: the visible scan was empty and the scanning
+	// player's targeting-upgrade gate was open [06 §3.1][04 R-SPEC-01 §8].
+	FromSecondary bool
 }
 
 // All tuning in this file is Nanolathe Modern policy, documented in
@@ -404,7 +408,12 @@ func (*ModernRules) SelectTarget(s *Service, q *TargetQuery) (pool.Handle, bool)
 		if q.Visibility == nil && s.Visibility != nil {
 			visible = s.Visibility(visibility.PlayerID(q.Shooter.Owner), visibilityTarget(target, target.Flags))
 		}
-		if !visible {
+		// A secondary-list population exists only behind an open targeting
+		// upgrade, and its membership test is the candidate's seen bit
+		// [06 §3.1][04 R-SPEC-01 §8]. The recheck for it is that same bit,
+		// read now: requiring direct sight here would silently cancel the
+		// Targeting Facility under Modern (issue #36).
+		if !visible && !(q.FromSecondary && target.Flags&visibility.SeenBit != 0) {
 			continue
 		}
 		incoming, shot := s.candidateCoverage(q, target)

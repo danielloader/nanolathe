@@ -686,11 +686,20 @@ behaviour.
   per player instead of retail's 250, configurable without a UI gadget via
   top-level JSON `unitLimit` or `--unit-limit`. Both desktop entry (including
   direct `--map`, captures and `--headless`) and the displayless command accept
-  the override. Precedence is explicit CLI, saved setting, default. Existing
-  stored choices are preserved; normal menu settings writes retain the active
-  configured value. Settings clamp to 20..3276; CLI values outside that range
-  are rejected. Ten player slices at 3276 fit positive signed 16-bit occupancy
-  identities (movement's `occupancyWord` rejects larger IDs). This replaces only
+  the override. Precedence is explicit CLI, saved setting, a feature table's
+  `UnitLimit` (outside Strict 3.1; DESIGN_COMMUNITY_PATCH §4.1), default. The
+  file records only a limit the player wrote: an absent key is no choice, the
+  default is never written for the player, and settings writes return the
+  file's own value, so neither a CLI limit nor a restored save's limit is
+  ever saved. Earlier builds wrote the live configured word back (usually the
+  default, sometimes a CLI or restored limit); such a file keeps that value as
+  a choice (no backward compatibility is kept for it). A player's own
+  `gameplayFeatures.unitLimit` beats the saved `unitLimit`, and a
+  `--gameplay-feature unitLimit=` beats both but not `--unit-limit`
+  (DESIGN_COMMUNITY_PATCH §3.2). Settings clamp to 20..3276; CLI values
+  outside that range are rejected. Ten player slices at 3276 fit positive
+  signed 16-bit occupancy identities (movement's `occupancyWord` rejects
+  larger IDs). This replaces only
   the configured default/range in `[08 R-SKIR-01 §6]`; campaign OTA `maxunits`
   retains its own source; Modern save-limit selection is documented in
   DESIGN_SESSIONS_AI_SAVE "Modern save unit limits". The simulation

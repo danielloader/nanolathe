@@ -206,6 +206,15 @@ override earlier ones field by field; an absent field means "keep":
 4. **The command line.** `--gameplay-feature name=value`, repeatable, for
    probes and benchmarks.
 
+The configured unit limit ([DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md))
+joins sources 3 and 4 through `settings.UnitLimitSources`: a saved top-level
+`unitLimit` fills `gameplayFeatures.unitLimit` when the player's block names
+none, and `--unit-limit` is the last command-line layer. A limit the player
+chose therefore beats the table of every earlier source (CP-LIM-2, §4.1). A
+source that names a `table` still starts again from that table, discarding
+every earlier source, so `--gameplay-feature table=…` without `--unit-limit`
+returns to the table's limit.
+
 Under **Strict 3.1 every source is ignored** and the table is zero: the
 retail baseline cannot be configured, which is the whole point of having it.
 The composer reports the resolved table's digest beside `rules` in the
@@ -273,7 +282,7 @@ them.
 |---|---|---|---|---|
 | CP-LIM-1 pools (B) | session composition parameter → `pool` capacities | projectiles 300, the retail explosion and debris caps `[06 §5.1]` `[01 §6.1]` | 3000 / 3000 / 1000 per the table; allocation above the cap still silently fails, as retail does | same as Community |
 | CP-LIM-2 `AISearchMapEntries` (B) | movement scheduler parameter (`path` step allowance, today a literal 1333 `[04 R-PATH-01 §10]`) | 1333 | the table's `PathStepAllowance`, 66650 in every shipped table | same |
-| CP-LIM-2 `UnitLimit` (B) | the existing configured unit limit ([DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md)) | the setting | the setting, unless the table names a limit, capped at Nanolathe's 3276 | same |
+| CP-LIM-2 `UnitLimit` (B) | the existing configured unit limit ([DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md)) | the setting | the table's limit, capped at Nanolathe's 3276, unless the player chose one (`--unit-limit`, or a saved `unitLimit`), which is layered over every table (`settings.UnitLimitSources`) | same |
 | CP-LIM-2 `UnitType`, `SfxLimit`, composite buffer | content profile `limits` / renderer | already expressed by `limits.units`; effects and composite sizes are Nanolathe host sizing | — |
 | CP-LIM-3, CP-LIM-4, CP-LIM-5 | — | not applicable: Nanolathe's build-menu and download compilers have no fixed-size copy to overrun; display minimums are host policy | — |
 

@@ -889,10 +889,10 @@ line:
 
 1. `<mod> <version> · <gameplay> · Unit limit <n>`, with *Total
    Annihilation* when there is no mod. `<n>` is the limit the battle enters
-   with: when a Community feature table sets one it overrides the player's
-   `unitLimit` (DESIGN_COMMUNITY_PATCH §3.2), and the field then names the
-   source, as in *Unit limit 1500 (set by ProTA)*. Strict 3.1 ignores the
-   table and shows the setting;
+   with: when the player chose none (no saved `unitLimit` or `--unit-limit`),
+   a Community feature table's limit applies (DESIGN_COMMUNITY_PATCH §3.2),
+   and the field then names the source, as in *Unit limit 1500 (set by
+   ProTA)*. Strict 3.1 ignores the table and shows the setting;
 2. `Mutators: Build speed ×2, Health ×1.5`, omitted when there are none;
 3. any warning from §7.3.
 

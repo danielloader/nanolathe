@@ -69,7 +69,9 @@ The launcher validates and explicitly selects one content root. Several detected
 installations require a selection; they are not automatically overlaid. Missing
 or moved data triggers selection again. Mac app launches use a native picker;
 Terminal/Linux launches can prompt in the terminal; Windows offers a folder
-picker. `--check-install` validates startup mounts and required products, not
+picker. Starting the installed `nanolathe` executable directly, without the
+shortcut, also uses the remembered folder while it still holds game data.
+`--check-install` validates startup mounts and required products, not
 every asset in the game. A later content error is recorded in the game log.
 
 Existing retail saves and manual-build settings are not moved or overwritten.

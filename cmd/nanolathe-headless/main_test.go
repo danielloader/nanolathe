@@ -118,20 +118,30 @@ func TestRepeatedRootFlags(t *testing.T) {
 	}
 }
 
+// TestParseUnitLimit also locks issue #30 on the displayless command: the
+// chosen limit reaches the feature sources, where it beats the Modern table's
+// 1500, and the benchmark's workload never picks up the saved choice.
 func TestParseUnitLimit(t *testing.T) {
 	isolateHostFiles(t)
 	stored := settings.Defaults()
-	stored.UnitLimit = 1500
+	stored.UnitLimit = 700
 	if err := stored.Save(); err != nil {
 		t.Fatal(err)
 	}
+	resolved := func(features community.Overrides, overrides []community.Overrides) int {
+		f, err := session.ResolveCommunity(gameplay.Modern, session.CommunitySources{Player: features, CommandLine: overrides})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f.UnitLimit
+	}
 	for _, tc := range []struct {
-		args        []string
-		want, bench int
+		args                           []string
+		want, bench, entry, benchEntry int
 	}{
-		{nil, 1500, headless.SimBenchDefaultUnitLimit},
-		{[]string{"--unit-limit", "2000"}, 2000, 2000},
-		{[]string{"--sim-benchmark", "/tmp/unused-benchmark"}, 0, headless.SimBenchDefaultUnitLimit},
+		{nil, 700, headless.SimBenchDefaultUnitLimit, 700, 1500},
+		{[]string{"--unit-limit", "2000"}, 2000, 2000, 2000, 2000},
+		{[]string{"--sim-benchmark", "/tmp/unused-benchmark"}, 0, headless.SimBenchDefaultUnitLimit, 1500, 1500},
 	} {
 		req, _, _, bench, err := parse(tc.args, io.Discard)
 		if err != nil {
@@ -139,6 +149,9 @@ func TestParseUnitLimit(t *testing.T) {
 		}
 		if req.UnitLimit != tc.want || bench.UnitLimit != tc.bench {
 			t.Fatalf("limits = %d/%d, want %d/%d", req.UnitLimit, bench.UnitLimit, tc.want, tc.bench)
+		}
+		if got, gotBench := resolved(req.GameplayFeatures, req.GameplayOverrides), resolved(bench.GameplayFeatures, bench.GameplayOverrides); got != tc.entry || gotBench != tc.benchEntry {
+			t.Fatalf("%v: resolved Modern limits = %d/%d, want %d/%d", tc.args, got, gotBench, tc.entry, tc.benchEntry)
 		}
 	}
 	for _, value := range []string{"-1", "0", "19", "3277"} {

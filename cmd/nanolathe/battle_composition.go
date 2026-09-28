@@ -29,14 +29,14 @@ func directMapBattleRequest(opts Options, cs *contentSet, source BattleSeedSourc
 		cfg := session.SurvivalSkirmishConfig(opts.Map, opts.SurvivalBuddies, session.SurvivalOptions{
 			Pace: pace, NoAir: opts.SurvivalNoAir, NoNaval: opts.SurvivalNoNaval,
 		})
-		cfg.UnitLimit = loadedSettings().UnitLimit
+		cfg.UnitLimit = loadedSettings().ConfiguredUnitLimit()
 		if err := applyCommandLineComputerAI(&cfg, opts.ComputerAI); err != nil {
 			return freshBattleRequest{}, err
 		}
 		return skirmishBattleRequest(opts, cs, cfg, headless.ScenarioSurvival, nil, source)
 	}
 	cfg := session.DirectSkirmishConfig(opts.Map)
-	cfg.UnitLimit = loadedSettings().UnitLimit
+	cfg.UnitLimit = loadedSettings().ConfiguredUnitLimit()
 	if err := applyCommandLineComputerAI(&cfg, opts.ComputerAI); err != nil {
 		return freshBattleRequest{}, err
 	}

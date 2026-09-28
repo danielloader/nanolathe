@@ -105,18 +105,23 @@ func TestCommunityBuildSnapCentersAndHonorsBypasses(t *testing.T) {
 	def := &content.UnitDef{ExtractsMetal: 1, FootprintX: 1, FootprintZ: 1}
 	cursorX, cursorZ := numeric.FixedFromInt(10*16), numeric.FixedFromInt(10*16)
 
-	x, z := b.communityBuildSnap(def, 10, 10, 1, 1, 0, cursorX, cursorZ)
-	if x != 11 || z != 10 {
-		t.Fatalf("centred mex snap = (%d,%d), want (11,10)", x, z)
+	x, z, preview := b.communityBuildSnap(def, 10, 10, 1, 1, 0, cursorX, cursorZ)
+	if x != 11 || z != 10 || !preview {
+		t.Fatalf("centred mex snap = (%d,%d,%v), want (11,10,true)", x, z, preview)
+	}
+	// The preview owns an extractor already centred over its deposit even
+	// though the snap moves nothing (community patch engine CP-CON-6).
+	if x, z, preview = b.communityBuildSnap(def, 11, 10, 1, 1, 0, numeric.FixedFromInt(11*16), cursorZ); x != 11 || z != 10 || !preview {
+		t.Fatalf("unmoved mex snap = (%d,%d,%v), want (11,10,true)", x, z, preview)
 	}
 	b.communityPlacement.overrideHeld = true
-	if x, z = b.communityBuildSnap(def, 10, 10, 1, 1, 0, cursorX, cursorZ); x != 10 || z != 10 {
-		t.Fatalf("override snap = (%d,%d), want raw (10,10)", x, z)
+	if x, z, preview = b.communityBuildSnap(def, 10, 10, 1, 1, 0, cursorX, cursorZ); x != 10 || z != 10 || preview {
+		t.Fatalf("override snap = (%d,%d,%v), want raw (10,10,false)", x, z, preview)
 	}
 	b.communityPlacement.overrideHeld = false
 	b.sess.Community = community.Features{}
-	if x, z = b.communityBuildSnap(def, 10, 10, 1, 1, 0, cursorX, cursorZ); x != 10 || z != 10 {
-		t.Fatalf("Strict snap = (%d,%d), want raw (10,10)", x, z)
+	if x, z, preview = b.communityBuildSnap(def, 10, 10, 1, 1, 0, cursorX, cursorZ); x != 10 || z != 10 || preview {
+		t.Fatalf("Strict snap = (%d,%d,%v), want raw (10,10,false)", x, z, preview)
 	}
 }
 

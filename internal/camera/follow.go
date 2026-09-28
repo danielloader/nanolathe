@@ -109,3 +109,57 @@ func (c *Camera) StepLatchedGlide() {
 		}
 	}
 }
+
+// Shake finishes one phase-10 pass after the follow step: an idle camera's
+// step back toward the origin its shake started from, this pass's shake
+// displacement, and the final clamp [07 R-CAM-01 §10][01 §4.4.1].
+//
+// Retail's shake moves only the current origin, never the desired one, and
+// every phase-10 pass steps the current origin toward the desired origin
+// whether or not a follow target is selected, so each jolt is pulled back at
+// the bounded half-step rate and the view ends where it started. This build
+// keeps no live desired origin for an idle, untracked camera — the scroll pass
+// and the other host writers move the current origin alone — so without an
+// anchor the jolts would sum into a permanent random walk, and a large or
+// repeated shake (a commander's death blast) could leave the view screens away
+// (issue #34).
+//
+// The origin a shake starts from stands in for that desired origin, and only
+// while nothing else owns the desired origin or moves the view:
+//
+//   - A tracked follow or a glide in flight keeps its own desired origin; the
+//     shake is damped toward that target instead, and a return starts afresh
+//     once the camera is idle again.
+//   - A host writer that moved the view since the last pass — the scroll pass,
+//     a drag, a minimap or megamap jump, a bookmark recall, a zoom — ends the
+//     return where it put the view, as retail's jump writers copy the current
+//     origin into the desired origin [07 R-CAM-01 §12]. The next jolt returns
+//     there. Without this the next pass would pull the view back toward where
+//     the player had just moved it from.
+//
+// The start origin persists between shakes, so the half-step's one-pixel stall
+// never becomes the next shake's starting point and nothing accumulates per
+// jolt. The clamp runs on every pass, as retail's does, so the return cannot
+// carry the view past a bound that a zoom moved under it.
+func (c *Camera) Shake(dx, dz int32) {
+	if c == nil {
+		return
+	}
+	f := &c.Follow
+	idle := f.latched == 0 && !f.latchedGliding
+	if !idle || c.X != f.shakeLeft.X || c.Z != f.shakeLeft.Z {
+		f.shakeReturning = false
+	}
+	switch {
+	case f.shakeReturning:
+		c.X = stepAxis(c.X, f.shakeRest.X)
+		c.Z = stepAxis(c.Z, f.shakeRest.Z)
+	case idle && (dx != 0 || dz != 0):
+		f.shakeRest = Origin{X: c.X, Z: c.Z}
+		f.shakeReturning = true
+	}
+	c.X += dx
+	c.Z += dz
+	c.Clamp()
+	f.shakeLeft = Origin{X: c.X, Z: c.Z}
+}

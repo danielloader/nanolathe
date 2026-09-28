@@ -306,6 +306,29 @@ F5..F8 `[07 R-CAM-01 §12]` `[07 R-CAM-01 §14]`. The `n` and F3 glide
 writers preserve the tracked object; its next follow pass can replace the
 desired origin written by the glide `[07 R-CAM-01 §12]`.
 
+**Shake and its return** (`follow.go`). `Camera.Shake` finishes each completed
+sub-tick's camera pass after the follow step: it adds that sub-tick's share of
+the session's published shake offset to the current origin and ends with the
+camera clamp, as retail's phase 10 does on every pass. Retail's shake never
+writes the desired origin, and its current-to-desired step runs on every pass
+whether or not a follow point is selected, so a shaken camera settles back to
+within the half-step's one-pixel stall of where it was `[07 §10]`
+`[07 R-CAM-01 §10]` `[03 §5.6]`. This build keeps no live desired origin for an
+idle, untracked camera — the scroll pass and the other host writers move the
+current origin alone — so when the first jolt arrives with nothing tracked and
+no glide in flight, `Shake` records the pre-jolt origin as the return target
+and steps back toward it on later passes at the same bounded half-step. The
+target persists between shakes, so the stall never becomes the next shake's
+start and nothing creeps per jolt. A tracked follow or a glide in flight owns
+the desired origin instead and damps the jitter toward its own target. Any
+host writer that moves the view between passes — scroll, middle or Ctrl-right
+drag, trackpad pan, minimap or megamap jump, bookmark recall, zoom — ends the
+return where it put the view, which is what retail's jump writers do by
+copying the current origin into the desired origin `[07 R-CAM-01 §12]`; the
+zoom and the non-retail pans follow the same rule so the return never pulls
+the view back toward where the player moved it from. It is presentation state
+only; the session's shake draws and published offsets are unchanged `[I6]`.
+
 **The minimap** (`minimap.go`). `LayoutMinimap` is the letterbox: the longer map
 dimension occupies `MinimapLongSide = 126` pixels, the other is scaled by
 integer division, and the unused axis is centred by truncating the half

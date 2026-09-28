@@ -7699,7 +7699,8 @@ the scroll setting or host raw delta. Its semantic target selection priority
 is: an active in-flight camera move (whose remaining count is consumed when
 selected), then the followed projectile, then the valid tracked object. An
 invalid tracked object clears tracking; with no selected target, phase 10 does
-not recompute or step a follow target. The selected target is converted to a
+not recompute the desired origin, but it still steps the current origin toward
+the desired origin it already holds (below). The selected target is converted to a
 desired camera origin by subtracting half the viewport span (and applying the
 ground object's half-height shear on the vertical axis), then the desired
 origin is clamped to the map's normal camera range before stepping. [01 §4.4]
@@ -7798,7 +7799,11 @@ pixel short. An axis whose current origin **differs from** its desired origin
 marks the camera/view state dirty and clears the terrain/mapping view-cache
 bit — the compare is against the desired value and happens before the
 magnitude is computed, so the `|d| = 1` case where the half-step rounds to
-zero and the origin does not move still marks it dirty. The phase-10
+zero and the origin does not move still marks it dirty. The step runs on
+**every** pass, whether or not a point was selected: with no hold, followed
+projectile or tracked object the pass skips only the desired-origin
+calculation and clamp, and steps toward the desired origin the last writer
+left. The phase-10
 order is target selection (including in-flight-count consumption), desired
 origin calculation and clamp, current-origin step, shake consumption, then
 the final current-origin clamp and view invalidation. [01 §4.4][03 §5.6]
@@ -7813,7 +7818,11 @@ first computes `s = trunc(amplitude * remaining / duration)`, then consumes
 one CRT value as `trunc(rand * s / 0x8000) - trunc(s / 2)`; the two axis draws
 occur before remaining is decremented. An invocation entering with no positive
 counter only clears the inactive state and performs no draws. The final camera
-clamp therefore also clamps a shaken origin. [01 §4.4.1]
+clamp therefore also clamps a shaken origin. Because the next pass steps the
+current origin back toward the unchanged desired origin, a jolt is not a
+lasting displacement: an idle camera, whose desired origin is where its last
+jump or scroll left it ([R-CAM-01 §12]), settles back to within the step's
+one-pixel stall of that origin once the shake ends [03 §5.6]. [01 §4.4.1]
 
 Retail evidence does not establish a keyboard/edge “target” that is advanced
 by phase 10. A sample-once/hold-through-the-next-pump seam is a valid

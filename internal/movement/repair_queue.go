@@ -206,6 +206,12 @@ func (s *System) legQueuedRepairLanding(u *units.Unit, n *orders.Node, satisfied
 	if !entry.reserved {
 		// A deadline, independent of arrival, retries an occupied or lost pad.
 		// The landing remains the head, keeping suspended battle orders inert.
+		// Reaching the station advances the circuit a quarter turn, so waiting
+		// aircraft orbit the base instead of hanging still; Param2 is otherwise
+		// unused by the landing and persists with it.
+		if entry.holding && airPlanarDistance(u.X, u.Z, entry.post.X, entry.post.Z) <= repairHoldSpace<<16 {
+			n.Param2 = (n.Param2 + 1) & 3
+		}
 		entry.post = s.repairHoldingPoint(entry)
 		entry.holding = true
 		m := s.newPointMarker(u, entry.post)
@@ -252,6 +258,9 @@ func (s *System) repairHoldingPoint(e *repairLanding) Vec3 {
 	for i := range points {
 		radius := int64(repairHoldRadius + repairHoldSpace*(ordinal/8+i/8))
 		d := directions[(i+ordinal)%len(directions)]
+		for turn := e.node.Param2 & 3; turn > 0; turn-- {
+			d.x, d.z = -d.z, d.x
+		}
 		p := Vec3{X: centre.X + numeric.Fixed(d.x*radius<<16), Y: centre.Y, Z: centre.Z + numeric.Fixed(d.z*radius<<16)}
 		if s.Terrain != nil {
 			margin := numeric.Fixed(repairHoldSpace << 16)

@@ -891,6 +891,15 @@ promise of safety at a besieged base or a global flight-path search. If every
 station is blocked, hold the current position and reconsider on the next
 deadline. Unarmed patients use the same holding geometry.
 
+Waiters circle rather than hang still (issue 32, user-chosen 2026-09-28). When
+a retry finds the aircraft within 64 world units of its station, the landing
+record's second parameter advances one quarter turn (modulo four) and every
+candidate direction is rotated by that many quarter turns before the search
+above, so an unobstructed waiter orbits the base one station per arrival, as
+the retail phase-1 loiter does [04 R-AIR-01 §6]. Scoring, crowding and blocked
+stations still decide among the rotated candidates. The counter persists with
+the order's ordinary parameters and makes no RNG draw.
+
 If a base dies, is carried, changes allegiance or becomes unavailable, choose
 the nearest eligible live base, with the ordinary unit order breaking equal
 distances. Full bases remain eligible: fullness never causes queue hopping.
@@ -925,6 +934,7 @@ pre-save FIFO order is not retained. No pad script query runs during restore.
 
 **Verification.** `movement.TestModernRepairQueueReservesAuthoredPiecesInOrder`
 locks exclusivity, FIFO, unarmed holding, no healing while waiting and RNG;
+`TestModernRepairHoldingCirclesTheBase` locks the quarter-turn circuit;
 `TestRepairQueueStrictBypassAndSwitches` locks the retail collision and draw
 behavior and both switch directions. The queue lifecycle, visible-threat and
 restore tests cover cancellation, suspension, identity reuse, lost bases,

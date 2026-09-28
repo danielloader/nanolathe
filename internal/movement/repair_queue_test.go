@@ -294,3 +294,37 @@ func TestModernRepairQueueLoadedTransportBypassesReservations(t *testing.T) {
 		t.Fatal("loaded transport did not retain ordinary cargo landing")
 	}
 }
+
+// TestModernRepairHoldingCirclesTheBase locks issue 32's fix: a waiter that has
+// reached its station moves a quarter turn around the base at its next retry,
+// while one still en route keeps its station. Neither draws randomness.
+func TestModernRepairHoldingCirclesTheBase(t *testing.T) {
+	s, _, pad, planes := repairQueueFixture(t, 3)
+	for _, u := range planes {
+		enterRepairQueue(s, u, 1)
+	}
+	u, e := planes[2], s.repairLandings[2]
+	first := e.post
+	s.legVTOLLanding(u, e.node, 0, 31)
+	if e.post != first {
+		t.Fatal("a waiter still en route abandoned its holding station")
+	}
+	u.X, u.Z = first.X, first.Z
+	s.legVTOLLanding(u, e.node, 0, 61)
+	second := e.post
+	ax, az := int64(first.X-pad.X)>>16, int64(first.Z-pad.Z)>>16
+	bx, bz := int64(second.X-pad.X)>>16, int64(second.Z-pad.Z)>>16
+	if second == first || ax*bx+az*bz != 0 || ax*ax+az*az != bx*bx+bz*bz {
+		t.Fatalf("holding did not advance a quarter turn about the base: %+v then %+v", first, second)
+	}
+	for turn := 0; turn < 3; turn++ {
+		u.X, u.Z = e.post.X, e.post.Z
+		s.legVTOLLanding(u, e.node, 0, uint32(91+30*turn))
+	}
+	if e.post != first {
+		t.Fatal("four quarter turns did not close the circuit")
+	}
+	if orders.QueueForUnit(u).Binding().SimRNG.Draws() != 0 {
+		t.Fatal("circling consumed randomness")
+	}
+}

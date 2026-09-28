@@ -9,7 +9,9 @@ import (
 // Every battle entry, including a restored battle, reloads the host's feature
 // settings. The retail save has no community configuration (design §3.2).
 func communitySources(opts Options, cs *contentSet) session.CommunitySources {
-	sources := session.CommunitySources{Player: loadedSettings().GameplayFeatures, CommandLine: opts.GameplayOverrides}
+	saved := loadedSettings()
+	player, commandLine := settings.UnitLimitSources(saved.GameplayFeatures, opts.GameplayOverrides, opts.UnitLimit, saved.UnitLimit)
+	sources := session.CommunitySources{Player: player, CommandLine: commandLine}
 	if cs != nil {
 		sources.Content = cs.gameplayFeatures
 	}

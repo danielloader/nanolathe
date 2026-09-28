@@ -98,7 +98,8 @@ commander:
 its commander: 1,006 initial units including the idle human commander. The
 accepted range is 250..1000, and the army plus its commander must fit the
 **resolved** per-player unit limit. Larger Strict fixtures therefore need a
-larger `--unit-limit`; Community and Modern follow their resolved feature table.
+larger `--unit-limit`; Community and Modern follow their resolved feature table
+unless `--unit-limit` is given, which is layered over it.
 All sizes retain the fifty buildings. Mobile roles scale in the table order:
 for each cumulative default count, take `count × (army size − 50) / 200` with
 integer truncation, then subtract the preceding quota. This assigns every
@@ -147,10 +148,12 @@ on an empty ledger. The passive human starts with 1000 of each resource.
 The configured unit setting is 400. Strict uses that setting; Community and
 Modern use the resolved feature table
 ([DESIGN_COMMUNITY_PATCH §3](DESIGN_COMMUNITY_PATCH.md#3-the-feature-table)),
-whose mainline unit limit is 1500. The effective limit sizes the unit pool at
+whose mainline unit limit is 1500. The benchmark never reads the saved
+`unitLimit`. The effective limit sizes the unit pool at
 `limit × 10 + 1` records and is recorded in the scene. Use the same effective
-limit when comparing revisions; `--gameplay-feature=unitLimit=400` selects the
-400-unit layout under Community or Modern.
+limit when comparing revisions; `--unit-limit=400` (or
+`--gameplay-feature=unitLimit=400`) selects the 400-unit layout under
+Community or Modern.
 
 ## The window
 

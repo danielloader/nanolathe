@@ -8019,13 +8019,29 @@ Three consequences matter:
 3. The jitter is added **in place into the global camera origin** — the same
    integers every renderer subtracts to get screen coordinates. There is no
    separate render-time offset. So the world, fog, selection rectangle, and
-   cursor mapping all shake together; and **the displacement is permanent**:
-   when a shake ends, the camera rests at a random-walk offset from where it
-   started and nothing restores it.
+   cursor mapping all shake together. The jitter goes into the **current**
+   origin only; the desired origin is never written by the shake.
+
+**The displacement is not permanent (Established, direct instruction read).**
+Every phase-10 pass steps the current origin toward the desired origin before
+the shake consumes its draws, and that step runs whether or not the pass
+selected a follow point: with no hold, followed projectile or tracked object,
+the pass skips only the desired-origin computation and falls through to the
+same bounded half-step ([07 §10]). An idle camera's desired origin is where
+its last writer left it — the scroll pass, the minimap and drag-scroll jumps,
+bookmark recall and battle-start placement all copy the current origin into
+it ([07 R-CAM-01 §12]). So each jolt is pulled back at the ordinary step rate
+on the next pass, the jitter stays centred on the desired origin while the
+shake runs, and when it ends the camera settles back to within the step's
+one-pixel stall of where it was. A tracked unit's or glide's desired origin
+damps it the same way. A scroll during a shake does keep that frame's jitter:
+the scroll pass copies the shaken current origin into the desired origin.
+(An earlier revision of this section read the step as belonging to follow
+only and called the displacement a permanent random walk; the phase-10
+routine's no-target branch contradicts that.)
 
 The camera clamp that runs immediately afterwards holds both axes inside the
-map, so shake cannot push the view off-map, and the follow camera's
-glide-halfway-to-target behavior damps it while tracking a unit.
+map, so shake cannot push the view off-map.
 
 ### 5.6.1 CRD-006 follow-camera producer census [R-CRD-006 §2]
 

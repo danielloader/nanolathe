@@ -164,6 +164,38 @@ const (
 	MaxUnitLimit     = 3276 // ten player slices must fit positive signed 16-bit occupancy IDs.
 )
 
+// ConfiguredUnitLimit is the configured word battle entry starts from: the
+// player's stored choice, or DefaultUnitLimit when there is none.
+func (s Settings) ConfiguredUnitLimit() int {
+	if s.UnitLimit == 0 {
+		return DefaultUnitLimit
+	}
+	return s.UnitLimit
+}
+
+// UnitLimitSources layers the player's own unit-limit choice onto the feature
+// sources a battle resolves, so a limit the player chose beats the one every
+// feature table names (DESIGN_COMMUNITY_PATCH §4.1, CP-LIM-2). A command-line
+// limit is always a choice and becomes the last command-line layer. A saved
+// limit is any nonzero stored value, since the file records only a limit the
+// player set (Settings.UnitLimit); it fills the player layer only where the
+// player's own `gameplayFeatures` names no limit. With neither, the table's
+// limit stays in force. Strict ignores every layer, so there the configured
+// limit is used as before. The inputs are not modified.
+func UnitLimitSources(player community.Overrides, commandLine []community.Overrides, commandLineLimit, savedLimit int) (community.Overrides, []community.Overrides) {
+	if commandLineLimit != 0 {
+		limit := commandLineLimit
+		layered := make([]community.Overrides, len(commandLine), len(commandLine)+1)
+		copy(layered, commandLine)
+		return player, append(layered, community.Overrides{UnitLimit: &limit})
+	}
+	if savedLimit != 0 && player.UnitLimit == nil {
+		limit := savedLimit
+		player.UnitLimit = &limit
+	}
+	return player, commandLine
+}
+
 // The audio option values the `SOUND` and `MUSIC` options pages write
 // [03 R-AUD-01 §2][03 R-AUD-01 §4]. Retail packs the first five into one
 // sound-flags byte and keeps the rest as separate registry values; they stay
@@ -461,7 +493,12 @@ type Settings struct {
 	// the unit pool at skirmish battle entry [05 R-SHARE-01 §7]. No screen
 	// edits it — retail's skirmish lobby has no gadget for it — so it reaches
 	// the session unchanged from whatever the file holds.
-	UnitLimit int `json:"unitLimit"`
+	//
+	// Zero means the player chose none: the file omits the key, battle entry
+	// takes a feature table's limit where one applies and DefaultUnitLimit
+	// otherwise (ConfiguredUnitLimit, UnitLimitSources). The default is never
+	// written back, so a stored value is always the player's own choice.
+	UnitLimit int `json:"unitLimit,omitempty"`
 	// Display is the `DisplaymodeWidth`/`DisplaymodeHeight` pair and the six
 	// visual option values the `VISUALS` page writes [07 R-FE-01 §6].
 	Display Display `json:"display"`
@@ -843,7 +880,7 @@ func StoreDamageBars(on bool) error {
 // start positions, commander death continues, all terrain visible, LOS off,
 // elevation ignored — so a loader may not treat a zero as an absent value.
 func Defaults() Settings {
-	s := Settings{Version: FileVersion, Difficulty: DefaultDifficulty, ScrollSpeed: DefaultScrollSpeed, DamageBars: DefaultDamageBars, UnitLimit: DefaultUnitLimit,
+	s := Settings{Version: FileVersion, Difficulty: DefaultDifficulty, ScrollSpeed: DefaultScrollSpeed, DamageBars: DefaultDamageBars,
 		GameSpeed: DefaultGameSpeed, InterfaceType: DefaultInterfaceType, SwitchAlt: DefaultSwitchAlt, Clock: DefaultClock}
 	s.Gameplay = gameplay.Modern
 	s.BuilderOptions = DefaultBuilderOptions()
@@ -955,11 +992,9 @@ func (s *Settings) Normalize() {
 		s.ScrollSpeed = DefaultScrollSpeed
 	}
 	// Nanolathe's configured range is wider than retail's startup clamp
-	// [08 R-SKIR-01 §6]; see DESIGN_CONTENT_VFS §5. Zero means absent.
-	if s.UnitLimit == 0 {
-		s.UnitLimit = DefaultUnitLimit
-	}
-	if s.UnitLimit < MinUnitLimit {
+	// [08 R-SKIR-01 §6]; see DESIGN_CONTENT_VFS §5. Zero means no choice and
+	// stays zero.
+	if s.UnitLimit != 0 && s.UnitLimit < MinUnitLimit {
 		s.UnitLimit = MinUnitLimit
 	}
 	if s.UnitLimit > MaxUnitLimit {

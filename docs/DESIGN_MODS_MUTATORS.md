@@ -230,9 +230,9 @@ mod:
   | `presentation.communityCounters` | Options → HUD | 1 | 0 |
   | `presentation.reloadBars` | Options → HUD | 1 | 0 |
   | `presentation.veteranLabels` | Options → HUD | 1 | 0 |
-  | `presentation.groupNumbers` | Options → HUD | 1 | 0 |
+  | `presentation.groupNumbers` | Options → HUD | 1 | 1 |
   | `presentation.weatherReport` (wind and tide readout) | Options → HUD | 1 | 0 |
-  | `presentation.overview` | settings file | 1 (Megamap) | 0 (Zoom) |
+  | `presentation.overview` | Options → Orders (*Tab: Options* / *Tab: Megamap*) | 1 (Megamap) | 0 (Zoom) |
   | `presentation.megamapWheel`, `megamapWheelMove`, `megamapFlash` | settings file | 1 each | unchanged |
   | `presentation.megamapDoubleClickMove` | settings file | 0 | unchanged |
   | `presentation.megamapRadarMinimum`, `megamapSonarMinimum`, `megamapSonarJamMinimum`, `megamapAntiNukeMinimum` (four rows) | settings file | 0 each | unchanged |
@@ -245,6 +245,11 @@ mod:
   | `audio.cdMode` | Options → Music | 2 (Random) | 4 (Custom) |
   | `skirmish.numPlayers` (skirmish rows shown, `NumSkirmishPlayers`) | the `*III`…`*X` selector | 10 | unchanged |
 
+  Each `retail` value is also the setting's default in a fresh settings
+  file, which a test locks. Group digits are drawn by retail
+  [03 R-FX-01 §6] and the option only suppresses them
+  ([DESIGN_INTERFACE_HUD_INPUT §3.14](DESIGN_INTERFACE_HUD_INPUT.md#314-optional-community-unit-labels)),
+  so both columns turn them on.
   3D sound is the positional placement the audio device already implements
   (DESIGN_PRESENTATION_CLIENT §2.6). 128 voices exceeds the mixer's 32 tracked
   slots, so no sound is cut off for the voice limit, which is ProTA's
@@ -303,7 +308,23 @@ mod:
   preset the same way. Either answer, and either way of offering, records the
   mod id — `profile:<name>` for a profile without a mod — in the settings
   key `controlsOffered`, so it is not asked again. Later changes by the
-  player stick, and switching back does not restore anything automatically.
+  player stick.
+
+  Switching away is offered the same way, never done automatically. When
+  the Mods & Mutators screen switches from content that names a preset to
+  content that names none (the original game, or a mod without one), and at
+  least one row still holds a value the leaving preset writes that differs
+  from its `retail` value, the same toggle reads *Restore default settings*,
+  *Yes* by default; *Apply* then returns each such row to its `retail`
+  value. A row the player changed since, and a row the `retail` preset
+  leaves alone, keep their values. A player who kept their own settings when
+  the preset was offered, or has since changed every row it wrote, is not
+  offered a restore. The comparison is by value: a row the player happened
+  to set to the preset's value themselves is restored with the rest.
+  Without this, a player who took ProTA's settings kept its megamap
+  overview, so the wheel no longer zoomed and Tab no longer opened the menu,
+  in every mod after it (issue #19). A switch to a mod with its own preset
+  offers that preset instead.
 - **A missing mod at start.** If the saved mod's directory has gone, its base
   requirements (§4.2) are unmet, or it fails to open, build or bind, the game
   starts with no mod and the main menu shows one message naming the mod and
@@ -875,10 +896,10 @@ line:
 
 1. `<mod> <version> · <gameplay> · Unit limit <n>`, with *Total
    Annihilation* when there is no mod. `<n>` is the limit the battle enters
-   with: when a Community feature table sets one it overrides the player's
-   `unitLimit` (DESIGN_COMMUNITY_PATCH §3.2), and the field then names the
-   source, as in *Unit limit 1500 (set by ProTA)*. Strict 3.1 ignores the
-   table and shows the setting;
+   with: when the player chose none (no saved `unitLimit` or `--unit-limit`),
+   a Community feature table's limit applies (DESIGN_COMMUNITY_PATCH §3.2),
+   and the field then names the source, as in *Unit limit 1500 (set by
+   ProTA)*. Strict 3.1 ignores the table and shows the setting;
 2. `Mutators: Build speed ×2, Health ×1.5`, omitted when there are none;
 3. any warning from §7.3.
 
@@ -925,6 +946,7 @@ dependencies.
 | A mod without `controls` or `minimumGameplay` takes its content profile's; metadata wins; ProTA recommends controls and a minimum, Escalation a minimum only | `modlibrary.TestLocalPackageTakesItsProfileRecommendations`, `profiles.TestProfileRecommendations` |
 | Preset contents, and the retail preset keeping skirmish rows; the offer key and its once-only record | `main.TestCommunityControlsPresetContents`, `main.TestRetailControlsPresetKeepsSkirmishRows`, `main.TestControlsOfferIsRememberedPerMod` |
 | A local ProTA package is offered its preset on the Mods & Mutators screen and once on the main menu after `--mod`; the loading line names the effective unit limit | `main.TestProTARecommendedSettingsAreOfferedOnce` (retail tier) |
+| Switching from a preset's content to content with none offers the restore only when a row still holds the preset's value; it returns those rows to `retail`, which is each setting's default, and keeps the player's later changes; a switch to ProTA and back through two reloads leaves the settings file at the defaults | `main.TestRestoreControlsPresetUndoesOnlyThePresetsRows`, `main.TestRetailPresetColumnIsTheDefaults`, `main.TestSwitchControlsPresetOffersRestoreOnlyWhenLeaving`, `main.TestModsHotReloadSwitchesContent` (retail tier, `NANOLATHE_MOD_ROOTS_PROTA`) |
 | SHA-256 and size mismatch, truncated download, resume, off-origin redirect refused, offline cache shown | `modfetch` against `httptest` |
 | Zero mutators leave the clone deep-equal with an equal `Hash`; each mutator changes exactly its fields; rounding, minimum-one, saturation and `v ≤ 0` boundaries; the hash is independent of field order | `content` |
 | Mutators reach fresh skirmish, mission entry and restore; all six fingerprint locks unchanged | `session`, `headless` |

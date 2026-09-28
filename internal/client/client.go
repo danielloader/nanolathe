@@ -262,8 +262,12 @@ type Client struct {
 	fnt                       *formats.FNT
 	// messageFNT is the primary COMIX face selected by the later message pass;
 	// the group-digit walk retains the side font in fnt [07 R-HUD-03 §14.4]
-	// [03 R-FX-01 §6A].
-	messageFNT    *formats.FNT
+	// [03 R-FX-01 §6A]. It sets the column's line height and is what the text
+	// draws with only while messageGAF is nil.
+	messageFNT *formats.FNT
+	// messageGAF is the window's current GAF-font slot (hattfont12 in battle),
+	// which the column's text pen prefers over the FNT [03 R-FONT-01 §6].
+	messageGAF    *formats.GAFEntry
 	developer     DeveloperOptions
 	developerFont *formats.FNT
 	developerScan modelTarget
@@ -773,12 +777,17 @@ func (c *Client) PaletteTables() *palette.Tables {
 
 // SetFNT installs the shared software font used by typed UI stages [03 §7.1].
 // Standalone callers share it with messages; battle adoption then overrides
-// the message face with SetMessageFNT. Clearing it also clears that binding.
-func (c *Client) SetFNT(fnt *formats.FNT) { c.fnt, c.messageFNT = fnt, fnt }
+// the message face with SetMessageFNT and SetMessageGAFFont. Any call also
+// clears the message GAF font, so a standalone caller draws with the FNT.
+func (c *Client) SetFNT(fnt *formats.FNT) { c.fnt, c.messageFNT, c.messageGAF = fnt, fnt, nil }
 
 // SetMessageFNT installs the primary font for the message column without
 // changing the side-font group digits [07 R-HUD-03 §14.4][03 R-FX-01 §6A].
 func (c *Client) SetMessageFNT(fnt *formats.FNT) { c.messageFNT = fnt }
+
+// SetMessageGAFFont installs the GAF font the message column's text pen
+// draws with. Nil leaves the pen on its FNT fallback [03 R-FONT-01 §6].
+func (c *Client) SetMessageGAFFont(font *formats.GAFEntry) { c.messageGAF = font }
 
 // SetSnapshot repoints presentation at another published buffer — used when
 // the shell transitions from front-end menus into a live battle session [I6].

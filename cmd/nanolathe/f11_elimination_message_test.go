@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/audio"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
@@ -14,8 +15,10 @@ import (
 
 type eliminationMessageCollector struct {
 	drawlist.Sink
-	text   string
-	glyphs []drawlist.Glyphs
+	// first is the GAF frame of the line's first character; glyphs keeps its
+	// keyed blits so the caller can find the one at the text pen.
+	first  *formats.GAFFrame
+	glyphs []drawlist.Sprite
 	logos  []drawlist.Sprite
 }
 
@@ -25,12 +28,11 @@ func (s *eliminationMessageCollector) Sprite(v drawlist.Sprite) {
 	if v.Kind == drawlist.BlitScaled && v.Dst.X == 138 && v.Dst.Y == 52 {
 		s.logos = append(s.logos, v)
 	}
-}
-func (s *eliminationMessageCollector) Glyphs(v drawlist.Glyphs) {
-	if v.Text == s.text {
+	if v.Kind == drawlist.BlitKeyed && v.Frame == s.first {
 		s.glyphs = append(s.glyphs, v)
 	}
 }
+func (s *eliminationMessageCollector) Glyphs(drawlist.Glyphs)   {}
 func (s *eliminationMessageCollector) Fill(drawlist.Fill)       {}
 func (s *eliminationMessageCollector) Line(drawlist.Line)       {}
 func (s *eliminationMessageCollector) Points(drawlist.Points)   {}
@@ -115,18 +117,34 @@ func TestThreePlayerEliminationMessageRetail(t *testing.T) {
 	if err != nil || arrival == nil {
 		t.Fatalf("MessageArrived sample unavailable: %v", err)
 	}
+	// The text goes through the GAF pen in hattfont12, so the line's first
+	// glyph is a keyed blit of its frame at the text pen less the frame's
+	// offsets [07 R-HUD-03 §14.4][03 R-FONT-01 §6].
+	first := retailGAFGlyph(b.hud.modalFont, line.Text[0])
+	if first == nil {
+		t.Fatalf("hattfont12 has no glyph for %q", line.Text[:1])
+	}
 	for i := 0; i < 3; i++ {
 		cl.TickAudio()
 		snap := cl.ComposeFrameSnapshot()
-		got := &eliminationMessageCollector{text: line.Text}
+		got := &eliminationMessageCollector{first: first}
 		snap.List.Replay(got)
 		wantLogo := b.hud.sideLogoFrame(sess.Snapshot.Current().Players[1].Logo)
-		if wantLogo == nil || len(got.logos) != 1 || got.logos[0].Frame != wantLogo || len(got.glyphs) != 1 {
-			t.Fatalf("elimination composition: logos=%d glyphs=%d loadedLogo=%v", len(got.logos), len(got.glyphs), wantLogo != nil)
+		if wantLogo == nil || len(got.logos) != 1 || got.logos[0].Frame != wantLogo {
+			t.Fatalf("elimination composition: logos=%d loadedLogo=%v", len(got.logos), wantLogo != nil)
 		}
 		a := int32(float64(b.hud.primaryFont.Height) * 0.8)
-		if got.logos[0].Dst != (drawlist.Rect{X: 138, Y: 52, W: a + 1, H: a + 1}) || got.glyphs[0].X != int32(138.0+1.5*float64(a)) || got.glyphs[0].Y != 52 {
-			t.Fatalf("elimination geometry: logo=%+v glyph=%+v", got.logos[0].Dst, got.glyphs[0])
+		penX := int32(138.0 + 1.5*float64(a))
+		wantX := penX - int32(first.XOffset)
+		wantY := 52 - (int32(first.YOffset) - int32(retailGAFBaselineHeight(b.hud.modalFont)))
+		atPen := 0
+		for _, g := range got.glyphs {
+			if g.X == wantX && g.Y == wantY {
+				atPen++
+			}
+		}
+		if got.logos[0].Dst != (drawlist.Rect{X: 138, Y: 52, W: a + 1, H: a + 1}) || atPen != 1 {
+			t.Fatalf("elimination geometry: logo=%+v, %d first-glyph blits at (%d,%d) among %d", got.logos[0].Dst, atPen, wantX, wantY, len(got.glyphs))
 		}
 	}
 	plays := 0

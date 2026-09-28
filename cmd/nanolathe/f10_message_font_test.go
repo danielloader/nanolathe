@@ -50,3 +50,36 @@ func TestBattleMessageColumnUsesPrimaryFont(t *testing.T) {
 		t.Errorf("console-spaced second line pixel = %d, want no glyph", got)
 	}
 }
+
+// Established: battle adoption also binds GAF-font slot 0 (hattfont12), so the
+// column's text draws authored glyph bytes while COMIX still spaces the lines
+// [07 R-HUD-03 §14.4][03 R-FONT-01 §6].
+func TestBattleMessageColumnUsesGAFFontSlot(t *testing.T) {
+	t.Setenv(settings.EnvPath, filepath.Join(t.TempDir(), "settings.json"))
+	primary := &formats.FNT{Height: 3}
+	primary.Glyphs['A'] = &formats.FNTGlyph{Width: 1, Height: 1, Bits: []byte{0x80}}
+	gaf := &formats.GAFEntry{Frames: make([]formats.GAFFrameRef, 256)}
+	gaf.Frames['A'].Frame = &formats.GAFFrame{Width: 1, Height: 1, Pixels: []byte{66}, Transparent: []bool{false}}
+	b := &battleSession{
+		sess: &session.Session{Snapshot: frame.NewBuffer()},
+		hud:  &retailBattleHUD{primaryFont: primary, console: &formats.FNT{Height: 7}, modalFont: gaf},
+	}
+	b.sess.Snapshot.BeginWrite()
+	if err := b.sess.Snapshot.Publish(1); err != nil {
+		t.Fatal(err)
+	}
+	c, err := client.New(client.Options{Width: 160, Height: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installBattleClient(c, b)
+	c.SetUIStage(nil)
+	c.MessageRing().Append("A", 1, 0, 10, 0)
+	c.MessageRing().Append("A", 1, 0, 10, 0)
+	snap := c.ComposeFrameSnapshot()
+	for _, y := range []int{52, 52 + int(primary.Height)} {
+		if got := snap.Indexed[y*snap.Width+138]; got != 66 {
+			t.Errorf("message pixel at (138,%d) = %d, want the GAF glyph byte", y, got)
+		}
+	}
+}

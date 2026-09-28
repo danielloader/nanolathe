@@ -48,12 +48,18 @@ func (c *Client) MessageRing() *frame.MessageRing {
 }
 
 // drawMessageLines is the master-composer message column. Unit captions use
-// the no-speaker sentinel, so they draw directly at x=138 with dcb[15]; the
-// same consumer also handles chat and announcement lines [07 R-HUD-03
-// §14.4]. Each line installs its own colour-map entry immediately before its
-// text call — entry 10 for the record F3 last jumped to, entry 15 for every
-// other line — so the highlight cannot leak onto a following line
-// [07 R-CAM-01 §14].
+// the no-speaker sentinel, so they draw directly at x=138; the same consumer
+// also handles chat and announcement lines [07 R-HUD-03 §14.4].
+//
+// The composer selects the primary COMIX FNT, and its glyph height spaces the
+// lines and sizes the logo, but the text itself goes through the GAF-font pen
+// with no width limit and mode 0. With the window's GAF slot holding
+// hattfont12, as it does in battle, the glyph bytes are copied as authored —
+// the outlined face — and the per-line foreground is never read. Only a null
+// slot reaches the FNT drawer, where each line installs its own colour-map
+// entry immediately before its text call — entry 10 for the record F3 last
+// jumped to, entry 15 for every other line — so the highlight cannot leak
+// onto a following line [03 R-FONT-01 §6][07 R-CAM-01 §14].
 func (c *Client) drawMessageLines() {
 	if c == nil || c.messageFNT == nil {
 		return
@@ -69,6 +75,10 @@ func (c *Client) drawMessageLines() {
 			c.UIBlitFrameScaled(c.messageLogo(line.SpeakerSlot), 138, y, a+1, a+1)
 			x = int(138.0 + 1.5*float64(a))
 		}
+		if c.messageGAF != nil {
+			c.drawMessageGAFText(line.Text, x, y)
+			continue
+		}
 		// Resolve the semantic colour before recording: both executors consume
 		// physical palette indices [03 §4.3]. The run retains the primary
 		// COMIX font, its line spacing and an unbounded width for deferred replay
@@ -80,5 +90,33 @@ func (c *Client) drawMessageLines() {
 			Y:     int32(y),
 			Color: c.paletteIndex(line.LogicalColor()),
 		})
+	}
+}
+
+// drawMessageGAFText is the GAF-font pen with no width limit and mode 0.
+// Control bytes and bytes without a frame neither draw nor advance; a space
+// advances without drawing; every other glyph is blitted with its frame
+// XOffset and its capital-I-normalized YOffset subtracted from the pen, then
+// advances by its frame width [03 R-FONT-01 §6][07 §4].
+func (c *Client) drawMessageGAFText(text string, x, y int) {
+	glyph := func(code byte) *formats.GAFFrame {
+		if code < 0x20 || int(code) >= len(c.messageGAF.Frames) {
+			return nil
+		}
+		return c.messageGAF.Frames[code].Frame
+	}
+	baseline := 0
+	if f := glyph('I'); f != nil {
+		baseline = int(f.Height)
+	}
+	for i := 0; i < len(text) && text[i] != 0; i++ {
+		f := glyph(text[i])
+		if f == nil {
+			continue
+		}
+		if text[i] != ' ' {
+			c.UIBlit(f, x-int(f.XOffset), y-(int(f.YOffset)-baseline))
+		}
+		x += int(f.Width)
 	}
 }

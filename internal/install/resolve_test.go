@@ -59,12 +59,12 @@ func TestDiscoveryCollectsRootsAndDeduplicatesAliases(t *testing.T) {
 	if err := os.Symlink(first, h.cwd); err != nil {
 		t.Logf("symlink alias unavailable on this host: %v", err)
 	}
-	got, err := resolve(nil, h)
+	got, err := candidates(nil, h)
 	want := []string{first, second}
 	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("resolve = %v, %v; want %v", got, err, want)
+		t.Fatalf("candidates = %v, %v; want %v", got, err, want)
 	}
-	again, err := resolve(nil, h)
+	again, err := candidates(nil, h)
 	if err != nil || !reflect.DeepEqual(got, again) {
 		t.Fatalf("unstable result: %v, %v", again, err)
 	}
@@ -83,10 +83,10 @@ func TestDiscoverySteamCustomLibraryAndProton(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(steam, "steamapps/libraryfolders.vdf"), []byte(config), 0644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := resolve(nil, h)
+	got, err := candidates(nil, h)
 	want := []string{first, second, third, portable, home}
 	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("resolve = %v, %v; want %v", got, err, want)
+		t.Fatalf("candidates = %v, %v; want %v", got, err, want)
 	}
 }
 
@@ -101,9 +101,9 @@ func TestDiscoveryWineAndCrossOver(t *testing.T) {
 	}
 	first := marker(t, filepath.Join(h.home, "Library/Application Support/CrossOver/Bottles/TA/drive_c/GOG Games/Total Annihilation"), "totala1.hpi")
 	second := marker(t, filepath.Join(wine, "drive_c/Program Files (x86)/CAVEDOG/TOTALA"), "totala1.hpi")
-	got, err := resolve(nil, h)
+	got, err := candidates(nil, h)
 	if err != nil || !reflect.DeepEqual(got, []string{first, second}) {
-		t.Fatalf("resolve = %v, %v", got, err)
+		t.Fatalf("candidates = %v, %v", got, err)
 	}
 }
 
@@ -126,9 +126,9 @@ func TestDiscoveryMacAppWrappers(t *testing.T) {
 						applications = filepath.Join(h.home, "Applications")
 					}
 					root := marker(t, filepath.Join(applications, layout), "ToTaLa1.HpI")
-					got, err := resolve(nil, h)
+					got, err := candidates(nil, h)
 					if err != nil || !reflect.DeepEqual(got, []string{root}) {
-						t.Fatalf("resolve = %v, %v; want %v", got, err, root)
+						t.Fatalf("candidates = %v, %v; want %v", got, err, root)
 					}
 				})
 			}
@@ -149,9 +149,9 @@ func TestDiscoveryMacAppAliasesAndPrecedence(t *testing.T) {
 	portable := marker(t, h.cwd, "totala1.hpi")
 	want := []string{first, second, portable}
 	for range 2 {
-		got, err := resolve(nil, h)
+		got, err := candidates(nil, h)
 		if err != nil || !reflect.DeepEqual(got, want) {
-			t.Fatalf("resolve = %v, %v; want %v", got, err, want)
+			t.Fatalf("candidates = %v, %v; want %v", got, err, want)
 		}
 	}
 }
@@ -171,9 +171,9 @@ func TestDiscoveryMacAppSearchIsBounded(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(applications, "Empty.app/drive_c/TotalA/totala1.hpi"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	got, err := resolve(nil, h)
+	got, err := candidates(nil, h)
 	if got != nil || err == nil {
-		t.Fatalf("resolve = %v, %v; want no installation", got, err)
+		t.Fatalf("candidates = %v, %v; want no installation", got, err)
 	}
 }
 
@@ -185,9 +185,9 @@ func TestDiscoveryDoesNotRecurseAndExplainsMissingInstall(t *testing.T) {
 	if err := os.MkdirAll(fake, 0755); err != nil {
 		t.Fatal(err)
 	}
-	got, err := resolve(nil, h)
+	got, err := candidates(nil, h)
 	if got != nil || err == nil {
-		t.Fatalf("resolve = %v, %v", got, err)
+		t.Fatalf("candidates = %v, %v", got, err)
 	}
 	for _, text := range []string{"--root", "providers searched", filepath.Join(h.home, "TotalAnnihilation")} {
 		if !strings.Contains(err.Error(), text) {
@@ -224,7 +224,7 @@ func TestSteamMetadataAcceptsBothFormsAndRejectsTruncation(t *testing.T) {
 func TestMissingHomeDoesNotAddRelativeHomeSearches(t *testing.T) {
 	h := fixtureHost(t, "linux")
 	h.home = ""
-	_, err := resolve(nil, h)
+	_, err := candidates(nil, h)
 	if err == nil {
 		t.Fatal("missing installation succeeded")
 	}
@@ -244,8 +244,113 @@ func TestWindowsNativeHintsUseTheSameMarkerCheck(t *testing.T) {
 	registry := marker(t, filepath.Join(t.TempDir(), "registered copy"), "totala1.hpi")
 	standard := marker(t, filepath.Join(drive, "GOG Games", "custom name"), "totala1.hpi")
 	h.registryRoots = []string{registry, filepath.Join(t.TempDir(), "unrelated game")}
-	got, err := resolve(nil, h)
+	got, err := candidates(nil, h)
 	if err != nil || !reflect.DeepEqual(got, []string{registry, standard}) {
-		t.Fatalf("resolve = %v, %v", got, err)
+		t.Fatalf("candidates = %v, %v", got, err)
+	}
+}
+
+// fakeInstaller lays out the source installer's directory around a release
+// build (tools/installer/README.md "Files and shortcuts") and returns the
+// executable path. rememberedName is root.txt on Windows, game-root elsewhere.
+func fakeInstaller(t *testing.T, h *host, rememberedName, remembered string) string {
+	t.Helper()
+	base := filepath.Join(t.TempDir(), "Nanolathe")
+	release := filepath.Join(base, "releases", "alpha-fixture")
+	if err := os.MkdirAll(release, 0755); err != nil {
+		t.Fatal(err)
+	}
+	h.executable = filepath.Join(release, "nanolathe.exe")
+	if err := os.WriteFile(h.executable, nil, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, rememberedName), []byte(remembered), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return base
+}
+
+// Issue #24: a Steam copy and a separately installed mod distribution that
+// ships its own totala1.hpi were both detected and overlaid, so the later one
+// shadowed the installation the launcher had selected. Discovery now mounts
+// one installation, and a directly launched installed build uses the folder
+// the launcher remembered even when discovery would prefer another.
+func TestResolveMountsOneRootAndHonoursInstallerChoice(t *testing.T) {
+	h := fixtureHost(t, "windows")
+	drive := t.TempDir()
+	h.systemRoots = []string{drive}
+	steam := filepath.Join(t.TempDir(), "Steam")
+	h.registrySteam = []string{steam}
+	chosen := marker(t, filepath.Join(steam, "steamapps/common/Total Annihilation"), "totala1.hpi")
+	// A renamed folder is still found by the one-level collection scan.
+	other := marker(t, filepath.Join(drive, "Games", "ter"), "TOTALA1.HPI")
+	registered := marker(t, filepath.Join(t.TempDir(), "mod install"), "totala1.hpi")
+	h.registryRoots = []string{registered}
+
+	all, err := candidates(nil, h)
+	if want := []string{registered, chosen, other}; err != nil || !reflect.DeepEqual(all, want) {
+		t.Fatalf("candidates = %v, %v; want %v", all, err, want)
+	}
+	got, err := resolve(nil, h)
+	if err != nil || !reflect.DeepEqual(got, []string{registered}) {
+		t.Fatalf("discovery without a remembered folder = %v, %v; want only the first candidate", got, err)
+	}
+
+	fakeInstaller(t, &h, "root.txt", "\ufeff"+chosen)
+	got, err = resolve(nil, h)
+	if err != nil || !reflect.DeepEqual(got, []string{chosen}) {
+		t.Fatalf("installed build = %v, %v; want the remembered %s", got, err, chosen)
+	}
+	// Listing for the installer's own selection is unaffected by the memory.
+	if all, err = candidates(nil, h); err != nil || len(all) != 3 {
+		t.Fatalf("candidates with a remembered folder = %v, %v", all, err)
+	}
+	// Explicit and environment overrides still outrank the remembered folder.
+	if got, err = resolve([]string{other}, h); err != nil || !reflect.DeepEqual(got, []string{other}) {
+		t.Fatalf("explicit = %v, %v", got, err)
+	}
+	h.getenv = func(key string) string {
+		if key == "NANOLATHE_TA_ROOT" {
+			return other
+		}
+		return ""
+	}
+	if got, err = resolve(nil, h); err != nil || !reflect.DeepEqual(got, []string{other}) {
+		t.Fatalf("environment = %v, %v", got, err)
+	}
+}
+
+func TestInstallerRootIgnoresUnusableMemory(t *testing.T) {
+	h := fixtureHost(t, "linux")
+	found := marker(t, filepath.Join(h.home, "TotalAnnihilation"), "totala1.hpi")
+	empty := t.TempDir()
+	for _, remembered := range []string{"", "relative/folder\n", empty + "\n", filepath.Join(empty, "moved") + "\n", found + "\n" + empty + "\n"} {
+		fakeInstaller(t, &h, "game-root", remembered)
+		got, err := resolve(nil, h)
+		if err != nil || !reflect.DeepEqual(got, []string{found}) {
+			t.Fatalf("remembered %q = %v, %v; want discovery %v", remembered, got, err, found)
+		}
+	}
+	// The Unix entry point runs the release through the base's current link.
+	chosen := marker(t, filepath.Join(t.TempDir(), "chosen"), "totala1.hpi")
+	base := fakeInstaller(t, &h, "game-root", chosen+"\n")
+	current := filepath.Join(base, "current")
+	if err := os.Symlink(filepath.Dir(h.executable), current); err != nil {
+		t.Skipf("symlink unavailable on this host: %v", err)
+	}
+	// Make the release directory itself unrecognisable, so only the link is.
+	h.executable = filepath.Join(current, "nanolathe")
+	if err := os.Rename(filepath.Join(base, "releases"), filepath.Join(base, "builds")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, "builds", "alpha-fixture"), current); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolve(nil, h)
+	if err != nil || !reflect.DeepEqual(got, []string{chosen}) {
+		t.Fatalf("current link = %v, %v; want %v", got, err, chosen)
 	}
 }

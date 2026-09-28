@@ -1011,10 +1011,18 @@ unless the host selects an exact `--save-dir` (§5 of DESIGN_SESSIONS_AI_SAVE).
 
 `internal/install.Resolve` owns host discovery, outside simulation and retail
 evidence. Explicit flags win, then a nonempty `NANOLATHE_TA_ROOT` selects one
-root. Otherwise bounded searches find likely installed copies, require a
-case-insensitive `totala1.hpi` file, deduplicate physical locations, and return
-all matches in deterministic order. Missing candidates are skipped; an empty
-result reports searched paths and requests `--root`. Detection is a candidate
+root. Next, when the executable is a source-installer release build
+(`<installation>/releases/<release>/`, or reached through the Unix `current`
+link), the game folder the installer's launcher validated and remembered
+(`root.txt` on Windows, `game-root` elsewhere; tools/installer/README.md
+"Files and shortcuts") is the one root, provided it is an absolute path that
+still holds `totala1.hpi`; otherwise it is ignored. Launching the installed
+executable directly therefore uses the same data as its shortcut (issue #24).
+Otherwise bounded searches find likely installed copies, require a
+case-insensitive `totala1.hpi` file, deduplicate physical locations, and order
+all matches deterministically; the first match is the one root mounted, and
+`internal/install.Candidates` returns the whole list. Missing candidates are
+skipped; an empty result reports searched paths and requests `--root`. Detection is a candidate
 check: normal VFS mounting and required-product checks still validate the data.
 No whole-disk recursive scan is performed, and arbitrary custom directories
 remain selectable through `--root`. Windows-style custom Steam library paths
@@ -1026,9 +1034,11 @@ locations first, including Steam libraries, GOG game collections, and known
 Wine prefixes. It then checks the launch and executable directories (including
 nearby named game folders), and finally `~/TotalAnnihilation`, which remains a
 convenient place for macOS and Linux users to put their data. Directory children
-are visited lexically; Steam libraries follow their metadata order. All detected
-roots participate, and later matches override earlier ones. Use explicit roots
-to select one installation or control the order yourself.
+are visited lexically; Steam libraries follow their metadata order. Detected
+installations are never overlaid: two independent copies (for example a Steam
+install beside a mod distribution that ships its own `totala1.hpi`, possibly in
+a renamed folder) would otherwise shadow each other archive by archive. Use
+explicit roots to select another installation or to layer roots deliberately.
 
 | Host | Additional locations searched |
 |---|---|
@@ -1048,18 +1058,19 @@ physical-directory deduplication, and explicit-root precedence still apply.
 
 
 **Installer diagnostics (Nanolathe host policy).** `nanolathe --list-installs`
-prints the resolved roots, one per stdout line, without a profile banner,
-content mounting, or game startup. It retains explicit `--root`, environment,
-and discovery precedence described above. Success exits zero; discovery failure
-exits one with its searched-path diagnostic on stderr. Selected roots are
-candidates; listing does not establish that they contain usable game data.
+prints the explicit or environment roots, or else every discovered
+candidate (`install.Candidates`), one per stdout line, without a profile banner,
+content mounting, or game startup. It ignores the installer's remembered
+folder, which an installer only lists candidates to replace. Success exits
+zero; discovery failure exits one with its searched-path diagnostic on stderr.
+Selected roots are candidates; listing does not establish that they contain usable game data.
 `--check-install` applies the existing `openContent` mount and startup-product
 validation, closes the mounts, and exits zero on success or one with a stderr
 diagnostic on failure. It emits no profile banner and opens no game window or
 audio device. These diagnostics are mutually exclusive and reject game,
 capture, and benchmark modes. An installer selects a single listed root and
-passes it explicitly to validation and launch; ordinary callers retain the
-existing multiple-root discovery and overlay policy.
+passes it explicitly to validation and launch; ordinary callers mount the
+single root `Resolve` selects.
 
 Host limits and compatibility boundaries are recorded under [I11]:
 

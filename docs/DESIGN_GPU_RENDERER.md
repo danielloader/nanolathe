@@ -1390,11 +1390,19 @@ per display frame (`SyncWithFPS`), refreshing its portable input snapshot before
 Draw. Update only polls and buffers input until a separate 30 Hz host step is
 due. The follow-camera glide [07 R-CAM-01 §12], scroll pass [07 §10], client
 step and sub-tick budget [01 §4.2] retain their existing host cadence. The host
-accumulator initializes once before the first Draw, rounds elapsed time to the
-nearest 30 Hz step with a signed remainder, and limits catch-up to five steps
-per frame, retaining the previous window scheduler's jitter/stall policy. It
-does not select simulation ticks or consume RNG; the session still owns that
-budget. Original presents only after a host step; Enhanced may present on every
+accumulator initializes once before the first Draw, carries a signed remainder
+against the ideal 30 Hz instants so the long-run rate is exact, and limits
+catch-up to five steps per frame, retaining the previous window scheduler's
+jitter/stall policy. Each step lands on an Update, one per refresh, and the
+choice has hysteresis (`hostClock`): a step takes the Update that keeps the
+cadence — every second at 60 Hz, every fourth at 120 Hz — while that is
+within three quarters of a refresh of its ideal instant, and moves by one
+Update only past that. Rounding each step to the nearest Update instead let a
+step whose ideal instant sat near the midpoint of two Updates follow the
+jitter: two steps a refresh apart, then a gap a refresh too long, repeatedly
+while the phases stayed close, and the world and camera blends paced by the
+step jumped and held at each pair. It does not select simulation ticks or
+consume RNG; the session still owns that budget. Original presents only after a host step; Enhanced may present on every
 Draw. `--fps N` caps how often Enhanced presents: a Draw that arrives
 sooner than the cap's interval (less an eighth of it, the vsync jitter
 allowance) returns without recording and the retained screen keeps the last
@@ -1534,7 +1542,10 @@ last returned unpaused, so the blend is frozen. Measuring from the fire is what
 makes the fraction monotonic inside a tick: an Update that releases nothing
 saturates it and holds the pose, where reading the wall clock's own phase slid
 every blended pose back toward the previous tick for a whole Update and then
-jumped two ticks forward.
+jumped two ticks forward. The modern window, which runs the simulation on its
+own goroutine, takes the fraction together with the pair it presents from one
+presentation clock instead (§13.13 "Presentation"), which reduces to this rule
+at the nominal speed.
 
 **Budget sample — Nanolathe host policy.** Holding the pose is still a
 visible hitch when it happens often. The host steps at 30 Hz of wall time and
@@ -2260,23 +2271,54 @@ drains, digests and records a modern frame as the window's Draw does, beside
 the running batch in the asynchronous run, so under `-race` the test is the
 shared-state check below.
 
-**Presentation — Nanolathe host policy.** A presented frame shows the tick
-before the last released one, but never a tick the host has not yet joined.
-At 1x the two agree: the tick the simulation finished while it computes the
-next, one tick behind the synchronous view. When a pump releases several ticks
-(2x, or catch-up after a stall) presentation stays on the newest joined tick
-until the next join, a pump behind rather than a tick. Everything the join
-applies is therefore in place before a publication is drawn, and a pre-recorded
-pass and the Draw that consumes it name the same pair (§13.10). The blend
-fraction of §13.5 is paced from the release stamp rather than from when the
-batch finished. Because the name is held at the tick before the last release,
-pumps that release nothing (slow speeds) and a pause leave the blended pose
-where it was; a command applied at the paused-input boundary republishes the
-committed tick, and that republication is presented at once, unblended
-(DESIGN_INTERFACE_HUD_INPUT §3.12). Should a named tick ever have left the
-buffer, the newest publication is presented unblended rather than waited for.
-Unit motion therefore reaches the screen a pump later; the camera, cursor,
-selection box and interface are presentation state and do not move.
+**Presentation — Nanolathe host policy.** The window presents one continuous
+world time `T`, in ticks, that trails the tick budget's own clock by a lag
+(`cmd/nanolathe/battle_present.go`):
+
+    T(t) = F + carry + (t − t_F) × rate − lag
+
+`F + carry` is the global tick after the last prepared host step's release plus
+the budget's remainder [01 §4.2], rebased at every step so a speed change takes
+effect from the step it does; `t_F` is that step's host time, read below the
+millisecond; `rate` is 30 × the effective speed ticks per second. A frame shows
+the tick after `floor(T)` blended from the one before it at `T`'s fraction, and
+never a tick the host has not joined: a late host step holds the newest joined
+tick until its join. One call (`Options.PresentationTick`) names the pair and
+the fraction together, so both always describe the same instant.
+
+The lag is the smallest that keeps `T` at or below the newest joined tick.
+A step joins the batch the previous step released, so during a step that
+released K ticks the newest presentable tick is `F − K`, while the budget clock
+runs from `F + carry` to `F + carry + k`, `k` being the ticks it accrues per step
+(active ÷ 10). That holds when `lag ≥ 2k +` the carry the previous step kept,
+and a speed's carries are multiples of gcd(active, 10) ÷ 10, so
+`lag = 2k + 1 − gcd(active, 10) ÷ 10`: two ticks at 1x, with no carry — the pair
+the window has always presented, the tick before the last release blended at
+the §13.5 fraction — and four at 2x. Measured from one tick instead, as the
+blend was until 2026-09-26, a step that released two ticks presented only the
+second: at 2x the world eased across the older tick in half a step, held for the
+other half and leapt the tick it never showed, a third of a tick and then one
+and two-thirds, frame after frame (every speed above 1x did a version of it; a
+traced 2x battle measured 229 world motion errors over 8 ms a minute, and 22
+with the clock, the rest at late presents).
+
+A speed-up that needs a longer lag holds the presented world still until the
+clock reaches it again (the clock never presents earlier than the last Draw
+did), a hold of the added lag — 33 ms from 1x to 2x — rather than replayed
+ticks; a slow-down eases the lag back at three ticks a second instead of
+skipping ticks. A pause returns the last presented sample, so the blended pose
+stays where it was; a command applied at the paused-input boundary republishes
+the committed tick, and that republication is presented at once, unblended
+(DESIGN_INTERFACE_HUD_INPUT §3.12). A terminal publication is presented at once
+after its join. A pre-record samples the same clock at the instant it predicts
+(`StartPreRecordAt`), so the pair it pins is the one the next Draw names even
+when the named tick moves on between the two, as it does part way through a
+step above 1x (§13.10). Should a named tick ever have left the buffer, the
+newest publication is presented unblended rather than waited for. Everything
+the join applies is therefore in place before a publication is drawn. Unit
+motion reaches the screen `lag` ticks behind the budget — two host steps at 1x
+and 2x, a little more at speeds between; the camera, cursor, selection box and
+interface are presentation state and do not move.
 
 **The committed buffer.** `frame.Buffer` widens from two slots to an eight-slot
 rotation (`SetConcurrentReaders`). A reader beside the writer pins what it

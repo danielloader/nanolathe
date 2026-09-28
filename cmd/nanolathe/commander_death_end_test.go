@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
@@ -196,7 +197,7 @@ func TestCommanderKillReachesThePostBattleScreen(t *testing.T) {
 	var b *battleSession
 	var cl *client.Client
 	cl, err = client.New(client.Options{Width: 800, Height: 600, Buffer: &frame.Buffer{},
-		PresentationTick: func() (uint32, bool) { return b.presentationTick() },
+		PresentationTick: func(ahead time.Duration) (uint32, float32, bool) { return b.presentationAt(ahead) },
 		JoinSimulation:   func() { b.stopSimulation(cl) },
 	})
 	if err != nil {

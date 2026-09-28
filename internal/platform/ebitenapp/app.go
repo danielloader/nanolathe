@@ -739,8 +739,11 @@ func (a *app) syncRendererSources() {
 // can process F10, so entering this Draw as modern is not sufficient.
 func (a *app) launchPreRecord(now, sampledAt time.Time, period time.Duration, tick16 int32) {
 	if a.mode == RendererModern && !a.exitPending && !a.c.PresentationPaused() && period > 0 {
-		if nextTick16, nextCamera16, ok := a.pipe.predictNext(now.Add(period), sampledAt, a.updatedAt, tick16); ok {
-			a.c.StartPreRecord(nextTick16, nextCamera16, true)
+		nextAt := now.Add(period)
+		if nextTick16, nextCamera16, ok := a.pipe.predictNext(nextAt, sampledAt, a.updatedAt, tick16); ok {
+			// A battle's presentation clock is sampled at the predicted instant
+			// itself and supersedes the extrapolated fraction (§13.5, §13.13).
+			a.c.StartPreRecordAt(time.Until(nextAt), nextTick16, nextCamera16, true)
 			a.pipe.armed = true
 			a.pipe.launchPeriod = period
 		}

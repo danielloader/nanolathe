@@ -4,6 +4,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
@@ -54,7 +55,7 @@ func TestAsynchronousSimulationMatchesSynchronous(t *testing.T) {
 		cl, err = client.New(client.Options{
 			Buffer: sess.Snapshot, Width: 640, Height: 480,
 			Step:             func(delta float64) { b.viewerStep(delta, cl) },
-			PresentationTick: func() (uint32, bool) { return b.presentationTick() },
+			PresentationTick: func(ahead time.Duration) (uint32, float32, bool) { return b.presentationAt(ahead) },
 			JoinSimulation:   func() { b.stopSimulation(cl) },
 		})
 		if err != nil {

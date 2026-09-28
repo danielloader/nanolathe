@@ -177,6 +177,22 @@ func (a *sceneAtlas) allocate(w, h int) sceneEntry {
 	return sceneEntry{page: int32(len(a.pages) - 1), x: pad, y: pad, w: int32(w), h: int32(h), ok: true}
 }
 
+// allocateOwn reserves a w×h region with its border on a page of its own, for
+// a source that is written again and again: a re-uploaded Surface (the
+// minimap, the megamap, a map picture). Ebitengine sends one frame's writes to
+// an image through a single staging texture of their bounding box, so on a
+// shared page a minimap rewritten every tick and a sprite placed at the far end
+// of the same page cost the whole span between them — measured at 11 MiB in one
+// frame, and a missed refresh. On its own page the rewrite spans only itself.
+func (a *sceneAtlas) allocateOwn(w, h int) sceneEntry {
+	if w <= 0 || h <= 0 {
+		return sceneEntry{}
+	}
+	const pad = sceneAtlasPad
+	a.pages = append(a.pages, &scenePage{w: w + 2*pad, h: h + 2*pad})
+	return sceneEntry{page: int32(len(a.pages) - 1), x: pad, y: pad, w: int32(w), h: int32(h), ok: true}
+}
+
 // ensurePage allocates an entry's texture on first upload. Pages are created
 // lazily so a renderer built before a graphics device exists allocates nothing.
 func (a *sceneAtlas) ensurePage(e sceneEntry) *ebiten.Image {

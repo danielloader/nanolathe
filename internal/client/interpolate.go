@@ -124,11 +124,20 @@ func (c *Client) producerTickFraction() int32 {
 // fraction itself, so from the first call the recording pass stops reading the
 // producer. A client that never uses the pipeline — classic, `--shot`, tests —
 // never calls it and resolves from the producer inside the record as before.
+//
+// Under the asynchronous simulation the host names the fraction with the pair
+// it pins (Options.PresentationTick), so the fraction is that pin's rather than
+// a second sample: the two are one instant even when the named tick moves
+// between frames, as it does whenever a host step releases more than one tick.
 func (c *Client) ResolveTickFraction() int32 {
 	if c == nil {
 		return 0
 	}
 	c.pre.hostFraction = true
+	if !c.tickFractionSet && c.pin.fractionSet && c.pin.buf != nil && c.pin.buf == c.buffer {
+		c.tickFraction16 = c.pin.fraction16
+		return c.tickFraction16
+	}
 	return c.producerTickFraction()
 }
 

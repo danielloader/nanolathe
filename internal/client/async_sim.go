@@ -29,10 +29,14 @@ import (
 // before.
 
 // framePin is the committed pair the current presentation pass reads, and the
-// buffer that holds it.
+// buffer that holds it. fraction16 is the blend fraction the host named with
+// the pair, when it named one (fractionSet): ResolveTickFraction and a
+// pre-record then read it instead of sampling the producer a second time.
 type framePin struct {
-	buf       *frame.Buffer
-	cur, prev *frame.Frame
+	buf         *frame.Buffer
+	cur, prev   *frame.Frame
+	fraction16  int32
+	fractionSet bool
 }
 
 // SetAsyncSimulation tells the client whether the session publishes from
@@ -64,19 +68,28 @@ func (c *Client) AsyncSimulation() bool { return c != nil && c.asyncSim }
 // frame reads, replacing the previous pin. It is a no-op unless the
 // asynchronous simulation is on.
 //
-// The pair is the one Options.PresentationTick names. When that tick is not
-// held by the buffer — not yet published by a catch-up batch, or the producer
-// declines — the newest publication is pinned; for a named tick that is not
-// available it is pinned alone, so the pass presents it unblended rather than
-// blending toward a tick it cannot see.
-func (c *Client) PinPresentation() {
+// The pair is the one Options.PresentationTick names for now. When that tick
+// is not held by the buffer — not yet published by a catch-up batch, or the
+// producer declines — the newest publication is pinned; for a named tick that
+// is not available it is pinned alone, so the pass presents it unblended rather
+// than blending toward a tick it cannot see.
+func (c *Client) PinPresentation() { c.pinPresentation(0) }
+
+// pinPresentation pins the pair the host names for the instant ahead of now:
+// zero for the Draw about to present, the predicted present instant for a
+// pre-record (StartPreRecordAt).
+func (c *Client) pinPresentation(ahead time.Duration) {
 	if c == nil || !c.asyncSim || c.buffer == nil {
 		return
 	}
 	next := framePin{buf: c.buffer}
 	target, named := uint32(0), false
 	if c.opts.PresentationTick != nil {
-		target, named = c.opts.PresentationTick()
+		var fraction float32
+		target, fraction, named = c.opts.PresentationTick(ahead)
+		if named {
+			next.fraction16, next.fractionSet = clampFraction16(fraction), true
+		}
 	}
 	found := false
 	if named {

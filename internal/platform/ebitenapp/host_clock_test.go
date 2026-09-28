@@ -61,3 +61,43 @@ func TestHostCadenceAndDeferredBodiesStayBalanced(t *testing.T) {
 		t.Fatalf("issued %d, ran %d, pending %d", issued, bodies, owed)
 	}
 }
+
+// A step whose ideal instant falls near the midpoint between two refreshes
+// keeps landing on the same Update through refresh jitter, where rounding to
+// the nearest Update moved it back and forth: two steps one refresh apart, then
+// a gap of three (hostClock).
+func TestHostCadenceHoldsItsPhaseThroughJitter(t *testing.T) {
+	for _, hz := range []int{60, 120} {
+		for _, phase := range []time.Duration{0, 4 * time.Millisecond, 8 * time.Millisecond, 12 * time.Millisecond} {
+			var clock hostClock
+			start := time.Unix(1, 0)
+			refresh := time.Second / time.Duration(hz)
+			// A refresh a few ppm fast, so the step phase drifts across every
+			// alignment, plus ±1.5 ms of arrival jitter.
+			clock.advance(start.Add(-phase))
+			var stepsAt []int
+			frames := hz * 60
+			for frame := 1; frame <= frames; frame++ {
+				jitter := time.Duration((frame*7919)%31-15) * 100 * time.Microsecond
+				at := start.Add(time.Duration(frame)*refresh*99995/100000 + jitter)
+				for range clock.advance(at) {
+					stepsAt = append(stepsAt, frame)
+				}
+			}
+			cadence := hz / 30
+			irregular := 0
+			for i := 1; i < len(stepsAt); i++ {
+				if stepsAt[i]-stepsAt[i-1] != cadence {
+					irregular++
+				}
+			}
+			// 60 s at a 50 ppm drift moves the phase 3 ms: at most one slip.
+			if irregular > 2 {
+				t.Errorf("%d Hz, phase %v: %d irregular step intervals in a minute", hz, phase, irregular)
+			}
+			if got, want := len(stepsAt), 1800; got < want-2 || got > want+1 {
+				t.Errorf("%d Hz, phase %v: %d steps in a minute, want %d", hz, phase, got, want)
+			}
+		}
+	}
+}

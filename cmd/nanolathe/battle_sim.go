@@ -134,6 +134,8 @@ func (b *battleSession) syncSimulationMode(cl *client.Client) {
 			r.traceSimulation(b.sess)
 		}
 		b.sim = r
+		// The presentation clock starts again at the first prepared step.
+		b.present = presentClock{}
 		b.sess.BindMessageRetirement(r.noteRetire)
 		// The pre-existing release stamp was taken after a synchronous step;
 		// the next prepared pump restamps it at release.
@@ -251,6 +253,7 @@ func (b *battleSession) prepareSimulationStep(scaled int32) int {
 	}
 	b.simPaused = b.sess.Clock.Paused
 	b.simActive = b.sess.Clock.Active
+	b.notePresentStep(b.presentMillis(), float64(b.sess.Clock.GlobalTick)+float64(plan.Ticks())+float64(b.sess.Clock.Carry), b.simActive)
 	if !plan.Runs() {
 		return plan.Ticks()
 	}
@@ -264,33 +267,4 @@ func (b *battleSession) prepareSimulationStep(scaled int32) int {
 	}
 	b.sim.pending = &simRun{sess: b.sess, plan: plan, timing: b.sim.timing}
 	return plan.Ticks()
-}
-
-// presentationTick names the committed tick the modern window presents under
-// the asynchronous simulation: the one before the last released tick, but
-// never one the host has not joined yet. At 1x the two agree; when a pump
-// releases several ticks (2x, or catch-up after a stall) presentation stays on
-// the newest joined tick until the next join. Holding the tick before the last
-// release also keeps the name steady through pumps that release nothing (slow
-// speeds) and through a pause, so neither moves the blended pose.
-//
-// A command applied at the paused-input boundary republishes the committed
-// tick; that republication is presented at once, and unblended, because the
-// buffer pairs no previous frame with a publication that repeats its tick.
-// A terminal publication also presents at once after its join: no later tick
-// will release the delay, and both the end title and ENDMSN must see the same
-// frozen result as the host's post-battle controller [07 §11][08 R-CAMP-01 §6].
-func (b *battleSession) presentationTick() (uint32, bool) {
-	if b == nil || b.sim == nil || !b.sim.observedValid {
-		return 0, false
-	}
-	r := b.sim
-	tick := r.observedTick
-	if r.republished || r.terminal {
-		return tick, true
-	}
-	if b.tickFiredValid && b.tickFiredTick > 0 && b.tickFiredTick-1 < tick {
-		tick = b.tickFiredTick - 1
-	}
-	return tick, true
 }

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/audio"
@@ -41,11 +42,15 @@ type Options struct {
 	TickFraction func() float32
 
 	// PresentationTick names the committed tick an Enhanced frame presents
-	// while the session publishes from another goroutine
-	// (docs/DESIGN_GPU_RENDERER.md §13.13). It is read on the game goroutine
-	// when a pair is pinned; false, or a nil producer, presents the newest
-	// publication. The synchronous path never reads it.
-	PresentationTick func() (tick uint32, ok bool)
+	// while the session publishes from another goroutine, and the blend
+	// fraction toward it, both for the instant ahead of now
+	// (docs/DESIGN_GPU_RENDERER.md §13.5, §13.13). One call settles the pair
+	// and the fraction together, so the two always describe the same instant
+	// even when the named tick moves between two presented frames. It is read
+	// on the game goroutine when a pair is pinned; false, or a nil producer,
+	// presents the newest publication and leaves the fraction to TickFraction.
+	// The synchronous path never reads it.
+	PresentationTick func(ahead time.Duration) (tick uint32, fraction float32, ok bool)
 
 	// JoinSimulation returns the session to the synchronous path: it joins the
 	// asynchronous simulation goroutine and stops it. SetAsyncSimulation(false)

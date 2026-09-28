@@ -414,7 +414,10 @@ tools/live-trace-report --late 10 /tmp/lt-field1600
   seed); `:2` doubles it.
 
 The camera is pointed at the staged battle. Without `--live-scene` the run is
-the ordinary direct `--map` battle.
+the ordinary direct `--map` battle. `--live-speed N` runs it at game speed `N`
+(1..20, 10 normal, 20 double), as the speed keys would set it; the report's
+world motion follows the speed, so it measures the presentation clock of
+DESIGN_GPU_RENDERER §13.13 at speeds other than 1x.
 
 `DIR` receives `frames.csv`, one row per Ebitengine frame (an Update call and
 the Draw after it); `census.jsonl`, one line a second with unit, projectile and

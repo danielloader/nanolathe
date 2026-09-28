@@ -438,7 +438,10 @@ func (r *Renderer) uploadSurface(sf drawlist.Surface) sceneEntry {
 		entry.entry = sceneEntry{}
 	}
 	if !entry.entry.ok {
-		entry.entry = r.scene.allocate(srcW, srcH)
+		// A page of its own: a surface is rewritten whenever its bytes change,
+		// and on a shared page each rewrite would be merged with any sprite
+		// placed on that page in the same frame (allocateOwn).
+		entry.entry = r.scene.allocateOwn(srcW, srcH)
 		if !entry.entry.ok {
 			return sceneEntry{}
 		}

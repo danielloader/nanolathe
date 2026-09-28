@@ -415,11 +415,11 @@ func runGameShell(launch, opts Options, cs *contentSet) error {
 			}
 			return host.shell.battle.tickFraction()
 		},
-		PresentationTick: func() (uint32, bool) {
+		PresentationTick: func(ahead time.Duration) (uint32, float32, bool) {
 			if host.shell.battle == nil {
-				return 0, false
+				return 0, 0, false
 			}
-			return host.shell.battle.presentationTick()
+			return host.shell.battle.presentationAt(ahead)
 		},
 		JoinSimulation: func() {
 			if host.shell.battle != nil {

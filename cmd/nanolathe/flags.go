@@ -85,12 +85,14 @@ type Options struct {
 	BenchmarkScale         float64
 	BenchmarkCaptureCopies int
 	// LiveTrace names a new directory for the live window's frame trace;
-	// LiveSeconds ends that run, LiveScene stages a scene into its battle, and
-	// LiveProfileFrom/LiveExecTrace place a CPU profile and a Go execution trace
-	// (docs/BATTLE_BENCHMARK.md "Live window trace").
+	// LiveSeconds ends that run, LiveScene stages a scene into its battle,
+	// LiveSpeed sets its game speed, and LiveProfileFrom/LiveExecTrace place a
+	// CPU profile and a Go execution trace (docs/BATTLE_BENCHMARK.md "Live
+	// window trace").
 	LiveTrace          string
 	LiveSeconds        float64
 	LiveScene          string
+	LiveSpeed          int
 	LiveProfileFrom    float64
 	LiveExecTrace      float64
 	LiveFlight         bool
@@ -254,6 +256,7 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	set.StringVar(&opts.LiveTrace, "live-trace", "", "time the ordinary window loop — play from the menus, or a --map battle — into this NEW directory (docs/BATTLE_BENCHMARK.md)")
 	set.Float64Var(&opts.LiveSeconds, "live-seconds", 30, "end a --live-trace run after this many seconds of battle presentation (0 = until closed; menu play defaults to 0)")
 	set.StringVar(&opts.LiveScene, "live-scene", "", "stage a --live-trace battle: coastal[:scale], field[:army] or capture:<dir>[:copies]")
+	set.IntVar(&opts.LiveSpeed, "live-speed", 0, "run a --live-trace --map battle at this game speed, 1..20 where 10 is normal (0 = unchanged)")
 	set.Float64Var(&opts.LiveProfileFrom, "live-profile-from", -1, "start a CPU profile this many seconds into a --live-trace run (negative = none)")
 	set.Float64Var(&opts.LiveExecTrace, "live-exec-trace", 0, "with --live-profile-from, also record this many seconds of Go execution trace")
 	set.BoolVar(&opts.LiveFlight, "live-flight", false, "keep a Go execution trace flight recorder during --live-trace and write flight-<frame>.trace around frame spikes")
@@ -466,6 +469,9 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 		}
 		if scene.Kind == "capture" && !opts.Survival {
 			return opts, fmt.Errorf("nanolathe: a capture live scene requires --survival and --map")
+		}
+		if opts.LiveSpeed != 0 && (opts.Map == "" || opts.LiveSpeed < 1 || opts.LiveSpeed > 20) {
+			return opts, fmt.Errorf("nanolathe: --live-speed takes 1..20 and requires --live-trace and --map")
 		}
 		if opts.LiveFlight && opts.LiveExecTrace > 0 {
 			return opts, fmt.Errorf("nanolathe: --live-flight cannot be combined with --live-exec-trace")

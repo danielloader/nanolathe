@@ -266,6 +266,16 @@ func (c *Client) PresentationDigest() PresentationInputs {
 // A pre-record already in flight is joined and discarded first, so a caller
 // that launches twice without consuming cannot leave two records racing.
 func (c *Client) StartPreRecord(tickFraction16, cameraFraction16 int32, cameraFractionSet bool) {
+	c.StartPreRecordAt(0, tickFraction16, cameraFraction16, cameraFractionSet)
+}
+
+// StartPreRecordAt is StartPreRecord for the frame presented ahead of now.
+// Under the asynchronous simulation the pair is pinned for that instant, and
+// when the host names a fraction with it (Options.PresentationTick) that
+// fraction replaces tickFraction16: the host's presentation clock, sampled at
+// the predicted instant, is the prediction, including the named tick moving on
+// between this Draw and the next (§13.5, §13.13).
+func (c *Client) StartPreRecordAt(ahead time.Duration, tickFraction16, cameraFraction16 int32, cameraFractionSet bool) {
 	if c == nil {
 		return
 	}
@@ -293,7 +303,10 @@ func (c *Client) StartPreRecord(tickFraction16, cameraFraction16 int32, cameraFr
 	// Under the asynchronous simulation the pair the worker records is pinned
 	// here, on the game goroutine, so the digest below and the record name the
 	// same publication however far the simulation runs ahead (§13.13).
-	c.PinPresentation()
+	c.pinPresentation(ahead)
+	if !c.tickFractionSet && c.pin.fractionSet && c.pin.buf != nil && c.pin.buf == c.buffer {
+		c.tickFraction16 = c.pin.fraction16
+	}
 	c.savePresentationCRT()
 	c.pre.recorded = c.PresentationDigest()
 	// Prediction is pure: retries and discards leave the retained pair alone.

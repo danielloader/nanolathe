@@ -77,6 +77,9 @@ type battleSession struct {
 	sim       *battleSim
 	simPaused bool
 	simActive int32
+	// present is the asynchronous window's presentation clock
+	// (battle_present.go).
+	present presentClock
 
 	// surfaceW/surfaceH is the negotiated presentation surface the pointer and
 	// the world viewport are measured against. The interface art is authored in
@@ -401,6 +404,12 @@ func newDirectBattleView(opts Options, cs *contentSet) (*gameShell, *client.Clie
 	if err != nil {
 		return nil, nil, err
 	}
+	if opts.LiveSpeed != 0 {
+		// The same relative request the speed keys make [07 §11].
+		sess := authoritative.Session
+		speed, _ := sess.AdjustSpeed(0)
+		sess.AdjustSpeed(opts.LiveSpeed - int(speed))
+	}
 	shell, err := newGameShell(opts, cs)
 	if err != nil {
 		return nil, nil, err
@@ -433,11 +442,11 @@ func newDirectBattleView(opts Options, cs *contentSet) (*gameShell, *client.Clie
 			}
 			return shell.battle.tickFraction()
 		},
-		PresentationTick: func() (uint32, bool) {
+		PresentationTick: func(ahead time.Duration) (uint32, float32, bool) {
 			if shell.battle == nil {
-				return 0, false
+				return 0, 0, false
 			}
-			return shell.battle.presentationTick()
+			return shell.battle.presentationAt(ahead)
 		},
 		JoinSimulation: func() {
 			if shell.battle != nil {

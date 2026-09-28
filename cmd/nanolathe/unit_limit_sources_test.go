@@ -19,7 +19,8 @@ func TestConfiguredUnitLimitReachesBattleEntry(t *testing.T) {
 		saved, cli int
 		want       int
 	}{
-		{name: "modern default keeps table", mode: gameplay.Modern, saved: settings.DefaultUnitLimit, want: 1500},
+		{name: "modern unset keeps table", mode: gameplay.Modern, want: 1500},
+		{name: "modern saved default is a choice", mode: gameplay.Modern, saved: settings.DefaultUnitLimit, want: settings.DefaultUnitLimit},
 		{name: "modern saved", mode: gameplay.Modern, saved: 500, want: 500},
 		{name: "modern command line", mode: gameplay.Modern, saved: 500, cli: 2000, want: 2000},
 		{name: "community saved", mode: gameplay.Community39, saved: 500, want: 500},

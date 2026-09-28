@@ -62,9 +62,10 @@ or whatever a mod's table names). Override with
 value in `~/.config/nanolathe/settings.json` (or
 `$XDG_CONFIG_HOME/nanolathe/settings.json`; `NANOLATHE_SETTINGS` overrides the
 full path). Accepted limits are 20..3276. Either override beats the feature
-table; CLI takes precedence over the saved value, and a saved value of exactly
-1000 counts as the default. An existing saved choice remains in effect until
-changed. This also
+table, and CLI takes precedence over the saved value. The CLI value is not
+saved, and the settings file only records a `unitLimit` you wrote yourself.
+Settings files from earlier builds recorded `"unitLimit": 1000` automatically;
+remove that line to get the table's limit back. This also
 works with direct `--map`, `--headless`, and `nanolathe-headless`. Campaign
 missions retain their authored unit limits.
 

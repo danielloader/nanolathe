@@ -319,7 +319,7 @@ func parse(args []string, output io.Writer) (headless.Request, string, profileOp
 		request.GameplayFeatures, request.GameplayOverrides = settings.UnitLimitSources(request.GameplayFeatures, request.GameplayOverrides, unitLimit, 0)
 		bench.GameplayFeatures, bench.GameplayOverrides = settings.UnitLimitSources(bench.GameplayFeatures, bench.GameplayOverrides, unitLimit, 0)
 	} else if bench.OutputDir == "" {
-		request.UnitLimit = storedFeatures.UnitLimit
+		request.UnitLimit = storedFeatures.ConfiguredUnitLimit()
 		request.GameplayFeatures, request.GameplayOverrides = settings.UnitLimitSources(request.GameplayFeatures, request.GameplayOverrides, 0, storedFeatures.UnitLimit)
 	}
 	if ticks < 0 || uint64(ticks) > uint64(^uint32(0)) {

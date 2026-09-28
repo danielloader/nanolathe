@@ -84,8 +84,10 @@ func TestUnitLimitCLIAndConfigPrecedence(t *testing.T) {
 		shell := &gameShell{opts: opts, maps: []string{opts.Map}}
 		shell.setup = newSkirmishMenuConfig(opts.Map)
 		shell.applySettings(stored)
-		if shell.setup.UnitLimit != want || shell.captureSettings().UnitLimit != want {
-			t.Fatalf("shell/captured limit = %d/%d, want %d", shell.setup.UnitLimit, shell.captureSettings().UnitLimit, want)
+		// The file keeps the saved choice: a one-off --unit-limit is not
+		// recorded as one.
+		if shell.setup.UnitLimit != want || shell.captureSettings().UnitLimit != 1500 {
+			t.Fatalf("shell/captured limit = %d/%d, want %d/1500", shell.setup.UnitLimit, shell.captureSettings().UnitLimit, want)
 		}
 		req, err := directMapBattleRequest(opts, testContentSet(vfs.New()), nil)
 		if err != nil {

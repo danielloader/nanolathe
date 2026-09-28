@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/community"
@@ -13,11 +14,11 @@ import (
 // Nanolathe raises the missing value and upper bound by user request
 // (DESIGN_CONTENT_VFS §5); settings still clamp once at startup.
 func TestUnitLimitDefaultAndClamp(t *testing.T) {
-	if got := Defaults().UnitLimit; got != DefaultUnitLimit {
-		t.Fatalf("Defaults().UnitLimit = %d, want %d", got, DefaultUnitLimit)
+	if got := Defaults(); got.UnitLimit != 0 || got.ConfiguredUnitLimit() != DefaultUnitLimit {
+		t.Fatalf("Defaults() UnitLimit/configured = %d/%d, want 0/%d", got.UnitLimit, got.ConfiguredUnitLimit(), DefaultUnitLimit)
 	}
 	for _, tc := range []struct{ in, want int }{
-		{0, DefaultUnitLimit},
+		{0, 0},
 		{-1, MinUnitLimit},
 		{19, MinUnitLimit},
 		{20, 20},
@@ -39,7 +40,8 @@ func TestUnitLimitDefaultAndClamp(t *testing.T) {
 
 // TestUnitLimitSurvivesRoundTrip proves the value reaches the session rather
 // than being reset on every save: a stored limit is written, read back
-// unchanged, and a file that omits the key still gets the default.
+// unchanged, and a file that omits the key records no choice and configures
+// the default. The default is never written for the player.
 func TestUnitLimitSurvivesRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	s := Defaults()
@@ -69,8 +71,15 @@ func TestUnitLimitSurvivesRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFrom(bare): %v", err)
 	}
-	if got.UnitLimit != DefaultUnitLimit {
-		t.Fatalf("absent key UnitLimit = %d, want %d", got.UnitLimit, DefaultUnitLimit)
+	if got.UnitLimit != 0 || got.ConfiguredUnitLimit() != DefaultUnitLimit {
+		t.Fatalf("absent key UnitLimit/configured = %d/%d, want 0/%d", got.UnitLimit, got.ConfiguredUnitLimit(), DefaultUnitLimit)
+	}
+	untouched := filepath.Join(t.TempDir(), "untouched.json")
+	if err := Defaults().SaveTo(untouched); err != nil {
+		t.Fatalf("SaveTo(untouched): %v", err)
+	}
+	if raw, err := os.ReadFile(untouched); err != nil || strings.Contains(string(raw), "unitLimit") {
+		t.Fatalf("untouched settings wrote a unit limit (err %v)", err)
 	}
 }
 
@@ -86,7 +95,8 @@ func TestUnitLimitSourcesBeatFeatureTable(t *testing.T) {
 		cli, saved int
 		want       int
 	}{
-		{name: "untouched default keeps the table", saved: DefaultUnitLimit, want: 1500},
+		{name: "no choice keeps the table", want: 1500},
+		{name: "saved default is a choice", saved: DefaultUnitLimit, want: DefaultUnitLimit},
 		{name: "saved choice", saved: 500, want: 500},
 		{name: "command line beats saved", cli: 2000, saved: 500, want: 2000},
 		{name: "command line equal to the default", cli: DefaultUnitLimit, saved: 500, want: DefaultUnitLimit},

@@ -244,7 +244,9 @@ Immediately before replay, it places only the recorded cursor at Ebitengine's
 latest logical pointer position, preserving its authored hotspot [07 §8].
 This removes the deferred step's extra frame of positional latency while
 leaving cursor shape, hover, placement, orders and camera on the 30 Hz host
-cadence. Ebitengine's cursor snapshot refreshes every display frame. The
+cadence. Ebitengine's cursor snapshot refreshes every display frame. A cursor
+recorded with the build placement ghost is the exception: it keeps its recorded
+position so it stays on the ghost (DESIGN_GPU_RENDERER, "Pointer latency"). The
 capture-release restore point takes precedence over this newer sample, and
 captured cursors remain hidden [07 R-CAM-01 §11]. Original and `--shot` retain
 their existing composition. The submitted image captured by F11 includes the

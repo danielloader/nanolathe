@@ -576,9 +576,13 @@ type Cursor struct {
 	Frame      *formats.GAFFrame
 	HotX, HotY int32
 	// CenterOnPointer is Nanolathe's host presentation choice for the build
-	// placement reticle. That reticle stays on the host-step pointer that
-	// picked the recorded ghost, so late positioning leaves it where recorded.
+	// placement reticle. Late positioning must preserve the same anchor.
 	CenterOnPointer bool
+	// Pinned keeps the cursor at its recorded origin through late
+	// positioning. It is set when the build placement ghost was recorded in
+	// the same list: that ghost was snapped from the host-step pointer, so
+	// the cursor drawn with it must stay on that pointer too.
+	Pinned bool
 }
 
 // family identifies the command struct one ordering tag points at. It is
@@ -806,18 +810,22 @@ func (l *List) RecordCursor(c Cursor) {
 // The window calls this after joining its recorder and before replay; it does
 // not alter picking, other commands, or the client's published pointer sample.
 //
-// The build placement reticle is the exception and keeps its recorded origin.
-// The footprint ghost drawn beside it was snapped from the host-step pointer
-// in the same recording, and a fresher pointer would pull the reticle away
-// from that ghost by however far the mouse moved since — up to a couple of
-// cells during an ordinary sweep. Reticle and ghost must move together.
+// A pinned cursor keeps its recorded origin. It was recorded beside the build
+// placement ghost, which was snapped from the host-step pointer; a fresher
+// pointer would pull the cursor ahead of that ghost by however far the mouse
+// moved since — up to a couple of cells during an ordinary sweep.
 func (l *List) PositionCursor(x, y int) {
 	for i := range l.cursor {
 		cu := &l.cursor[i]
-		if cu.Frame != nil && !cu.CenterOnPointer {
-			hx, hy := render.CursorHotspot(cu.Frame, x, y)
-			cu.HotX, cu.HotY = int32(hx), int32(hy)
+		if cu.Frame == nil || cu.Pinned {
+			continue
 		}
+		hx, hy := render.CursorHotspot(cu.Frame, x, y)
+		if cu.CenterOnPointer {
+			hx = x - (int(cu.Frame.Width)-1)/2
+			hy = y - (int(cu.Frame.Height)-1)/2
+		}
+		cu.HotX, cu.HotY = int32(hx), int32(hy)
 	}
 }
 

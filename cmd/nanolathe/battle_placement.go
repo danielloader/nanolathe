@@ -269,6 +269,11 @@ func (b *battleSession) drawBuildGhost(c *client.Client) {
 	if !b.overWorld(b.battleState().Input.PointerX, b.battleState().Input.PointerY) {
 		return
 	}
+	// The ghost was snapped from the host-step pointer, so the cursor drawn with
+	// it stays there too: Modern late positioning would otherwise carry the
+	// cursor ahead of the ghost while the mouse sweeps (DESIGN_INTERFACE_HUD_INPUT,
+	// placement feedback).
+	c.PinCursorToRecord()
 	l, t, r, btm := b.placementRect()
 	col := c.GUIColor(hud.GhostColorIllegal)
 	if b.battleState().Input.BuildOK {

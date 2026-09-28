@@ -2347,9 +2347,9 @@ func (s *System) ActivateMove(u *units.Unit, head *orders.Node) bool {
 	}
 	start, goal, _ := s.pathCellsForOrder(u, head)
 	// Path search is aimed at the goal handle, so a replan after a dynamic
-	// block re-paths to the same point the mover was already steering at —
-	// for a build order that is the selected perimeter candidate, not the
-	// site centre [04 §8.3][04 §7.4].
+	// block re-paths to the same goal the mover was already steering at —
+	// for a build order that is the bound rectangle payload, whose border is
+	// the whole candidate set, not the site centre [04 §8.3][04 R-PATH-01 §13].
 	fx, fz := s.pathFootprint(u)
 	goalObj := s.goalForOrderWithFootprint(u, goal, head, fx, fz)
 	s.bindRectSteeringGoal(u, head, goalObj, fx, fz)
@@ -2398,7 +2398,7 @@ func allowSyntheticFor(head *orders.Node) bool {
 // origin, not a cell the mover is supposed to stand on [04 R-ORD-01 §2]
 // [04 R-FAC-02 §4]. Binding the perimeter point the follower already steers by
 // keeps the steering target, the distance threshold and the arrival test on one
-// cell, exactly as the build-order bind does for its selected candidate.
+// cell; the build and work approaches' rectangles are bound the same way.
 func (s *System) bindRectSteeringGoal(u *units.Unit, head *orders.Node, goalObj path.Goal, fx, fz int32) {
 	if s == nil || u == nil || head == nil || goalObj == nil {
 		return
@@ -2415,9 +2415,10 @@ func (s *System) pathCellsForOrder(u *units.Unit, head *orders.Node) (start, goa
 	goalX, goalZ, ok := s.moveGoalFor(u.Handle, head)
 	name := orders.DescriptorFor(head.ID).Name
 	if name == "MobileBuild" || name == "VTOL_MobileBuild" {
-		// The selected approach remains in the construction producer's whole-cell
-		// domain, but every admitted request copies the mover's cached committed
-		// cell as its start [04 R-PATH-01 §4 step 1].
+		// A build goal's cell is the whole cell of its bound goal-handle point;
+		// the search itself is aimed at the bound rectangle payload
+		// [04 R-PATH-01 §13]. Every admitted request copies the mover's cached
+		// committed cell as its start [04 R-PATH-01 §4 step 1].
 		return s.pathStartCell(u),
 			path.Cell{X: world.WorldToCell(goalX), Z: world.WorldToCell(goalZ)}, ok
 	}
@@ -2456,8 +2457,8 @@ func (s *System) ReplanMove(u *units.Unit, head *orders.Node) bool {
 	handleRow(s.activeOrders, u.Handle).token = token
 	start, goal, _ := s.pathCellsForOrder(u, head)
 	// Path search is aimed at the goal handle, so a refresh re-paths to the
-	// same point the mover was already steering at — for a build order that is
-	// the selected perimeter candidate, not the site centre [04 §8.3][04 §7.4].
+	// same goal the mover was already steering at — for a build order that is
+	// the bound rectangle payload, not the site centre [04 §8.3][04 R-PATH-01 §13].
 	fx, fz := s.pathFootprint(u)
 	goalObj := s.goalForOrderWithFootprint(u, goal, head, fx, fz)
 	s.bindRectSteeringGoal(u, head, goalObj, fx, fz)

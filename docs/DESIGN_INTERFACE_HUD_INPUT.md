@@ -306,6 +306,29 @@ F5..F8 `[07 R-CAM-01 §12]` `[07 R-CAM-01 §14]`. The `n` and F3 glide
 writers preserve the tracked object; its next follow pass can replace the
 desired origin written by the glide `[07 R-CAM-01 §12]`.
 
+**Shake and its return** (`follow.go`). `Camera.Shake` finishes each completed
+sub-tick's camera pass after the follow step: it adds that sub-tick's share of
+the session's published shake offset to the current origin and ends with the
+camera clamp, as retail's phase 10 does on every pass. Retail's shake never
+writes the desired origin, and its current-to-desired step runs on every pass
+whether or not a follow point is selected, so a shaken camera settles back to
+within the half-step's one-pixel stall of where it was `[07 §10]`
+`[07 R-CAM-01 §10]` `[03 §5.6]`. This build keeps no live desired origin for an
+idle, untracked camera — the scroll pass and the other host writers move the
+current origin alone — so when the first jolt arrives with nothing tracked and
+no glide in flight, `Shake` records the pre-jolt origin as the return target
+and steps back toward it on later passes at the same bounded half-step. The
+target persists between shakes, so the stall never becomes the next shake's
+start and nothing creeps per jolt. A tracked follow or a glide in flight owns
+the desired origin instead and damps the jitter toward its own target. Any
+host writer that moves the view between passes — scroll, middle or Ctrl-right
+drag, trackpad pan, minimap or megamap jump, bookmark recall, zoom — ends the
+return where it put the view, which is what retail's jump writers do by
+copying the current origin into the desired origin `[07 R-CAM-01 §12]`; the
+zoom and the non-retail pans follow the same rule so the return never pulls
+the view back toward where the player moved it from. It is presentation state
+only; the session's shake draws and published offsets are unchanged `[I6]`.
+
 **The minimap** (`minimap.go`). `LayoutMinimap` is the letterbox: the longer map
 dimension occupies `MinimapLongSide = 126` pixels, the other is scaled by
 integer division, and the unused axis is centred by truncating the half
@@ -2123,7 +2146,13 @@ payload and variable geometry remain an explicit code/research Unknown
 
 ENDMSN delegates its populated mission list and scrollbar to these same
 frontend painters, preserving mark bytes, selection and scroll state. Initial
-selection uses the fill-time scroll limit. Its outcome title reuses the loaded
+selection uses the fill-time scroll limit. Result player names are the
+appended labels of `[08 R-CAMP-01 §7]`, drawn by `drawResultName` over each
+colour logo with the label painter's GAF branch: the small `hattfont11` face
+through the lit GAF pen (`drawRetailGAFTextLit`) at the label's colour word,
+light-table row 15, so they read lighter than the mode-0 bar numbers. Only a
+missing `hattfont11` reaches the COMIX FNT fallback; the metric that fallback
+centres by carries a `TODO(question)`. Its outcome title reuses the loaded
 `igvictory`/`igdefeat` frames at `(W/2, 28)` with ordinary authored offsets
 `[08 R-CAMP-01 §8]`. The selector applies retail's watcher test: `igvictory`
 only when the result was won and the local slot is not watching, otherwise
@@ -3264,12 +3293,12 @@ therefore not a setting (ProTA sets it to 0, unlimited). In order:
    truncated) centred on the projection of the pointer's world point with the
    half-height shear, moved back inside the image at an edge; entry 10 over a
    valid site, entry 4 over a refused one. The shipped row-building mode draws
-   each queued row position instead (valid 240, or 234 under an unidentified
-   engine condition, refused 214). Nanolathe has no row-building mode over the
-   megamap — the Modern command drag cannot start there — so no row ghost is
-   drawn; the `TODO(question)` in `drawMegamapOverlay` records that a row
-   ghost added later would use 240, the colour tied to no unidentified
-   condition.
+   each queued row position instead (valid 234, or 240 while the
+   construction-kickout selector is in its clearance state, refused 214
+   [community patch engine CP-CON-6]). Nanolathe has no row-building mode
+   over the megamap — the Modern command drag cannot start there — so no row
+   ghost is drawn; one added later would take the same three physical
+   entries by the same clearance test as the viewport preview.
 9. *Queued orders*, only while Shift is physically held
    (`drawMegamapQueuedOrders`). The walk covers the local player's units in
    slot order, in play and not death-marked. *Focus* units are the hovered
@@ -3818,15 +3847,27 @@ All mutable terrain and feature reads occur through a read-only session query;
 the host owns only the deterministic scan and command substitution
 [community patch engine CP-CON-6][I6].
 
-When construction kickout is enabled, the shared placement rectangle uses
-the patch's custom preview palette: physical index 234 for a clear accepted
+When construction kickout is enabled, the placement rectangle follows the
+patch's two drawers. `communityBuildSnap` reports when the patch's click-snap
+preview owns the site — an extractor centred over a deposit found within the
+snap radius, moved or not, or a geothermal the snap moved — and
+`BuildInputState.BuildSnapPreview` carries that verdict to the drawer. Such a
+site uses the preview's physical palette entries: 234 for a clear accepted
 site, 240 for an accepted site needing own-unit clearance, and 214 for a
-rejected site. This applies to both snapped and ordinary cursor placement.
-The indices bypass `GUIColor`; the patch's internal clear/clearance selector
-is not a GUIPAL field. Without kickout the retail logical legal/illegal
-colours remain in use. Regression checks exercise all three community states,
-the retail bypass, and a snapped Coast to Coast mex with the installed palette
-[community patch engine CP-CON-6].
+rejected site; these indices bypass `GUIColor`, and 240 is black in the
+stock palette (yellow only under a mod palette such as ProTA's), exactly as
+the patch draws it. Every other site is the engine ghost, whose index retail
+forms as the illegal entry 4 plus an offset masked in by the site-valid bit
+[07 §9]: GUI entry 10 for a clear site, 4 for a rejected one, and entry 14
+(yellow, physical 194 in the stock install) for a site accepted only because
+the player's own units occupy it, the patch's clearance offset
+(`hud.GhostColorClearance`). The ordinary ghost previously used physical 240
+too and drew black over own units (issue #33). Without kickout the retail
+logical legal/illegal colours remain in use whatever the clearance and
+preview flags hold. Regression checks exercise all six community states,
+the retail bypass, the resolved RGB of each under the installed palette,
+the unmoved-extractor preview, and a snapped Coast to Coast mex with the
+installed palette [community patch engine CP-CON-1, CP-CON-6].
 
 The authored instructions mention Shift+Q/E alternation and using `v` before a
 patrol route, but neither the pinned source nor those instructions settle a

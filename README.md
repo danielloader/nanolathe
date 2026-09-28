@@ -44,8 +44,10 @@ With no `--root`, Nanolathe searches registered and standard installation
 locations first, including GOG, Steam libraries, and Wine installations. It also
 checks nearby game folders and finally `~/TotalAnnihilation` (a convenient
 location for manually placed data on macOS and Linux).
-It mounts all detected installations in a deterministic order. A custom
-installation can be selected explicitly:
+It mounts only the first installation found in that order; detected
+installations are never overlaid. A build installed by the source installer
+and started directly uses the game folder its launcher remembered instead.
+A custom installation can be selected explicitly:
 
 ```sh
 ./nanolathe --root "/path/to/Total Annihilation"
@@ -55,12 +57,19 @@ The installed launcher selects one root explicitly and supplies its own
 `--save-dir`. Manual launches preserve the root policy above and save beside
 the game installation unless `--save-dir "/path/to/saves"` is supplied.
 
-Skirmishes default to **1000 units per player**. Override with
+Skirmishes default to **1000 units per player** under Strict 3.1 and to the
+gameplay feature table's limit otherwise (**1500** in Modern and Community 3.9,
+or whatever a mod's table names). Override with
 `./nanolathe --unit-limit 2000`, or set the top-level `"unitLimit": 2000`
 value in `~/.config/nanolathe/settings.json` (or
 `$XDG_CONFIG_HOME/nanolathe/settings.json`; `NANOLATHE_SETTINGS` overrides the
-full path). Accepted limits are 20..3276. CLI takes precedence over the saved
-value; an existing saved choice remains in effect until changed. This also
+full path). Accepted limits are 20..3276. Either override beats the feature
+table, and CLI takes precedence over the saved value. The CLI value is not
+saved, and the settings file only records a `unitLimit` you wrote yourself.
+Earlier builds wrote a `unitLimit` into the settings file on their own
+(usually `1000`, sometimes a one-off `--unit-limit` or a loaded save's limit),
+and it now counts as your choice: remove that line to get the table's limit
+back. This also
 works with direct `--map`, `--headless`, and `nanolathe-headless`. Campaign
 missions retain their authored unit limits.
 

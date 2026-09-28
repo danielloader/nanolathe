@@ -216,7 +216,7 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	set.StringVar(&opts.SurvivalPace, "survival-pace", "normal", "Survival wave pace: normal, relaxed or relentless")
 	set.BoolVar(&opts.SurvivalNoAir, "survival-no-air", false, "Survival: no air waves")
 	set.BoolVar(&opts.SurvivalNoNaval, "survival-no-naval", false, "Survival: no naval waves")
-	set.IntVar(&opts.UnitLimit, "unit-limit", 0, "per-player skirmish unit setting (20..3276); omitted uses saved unitLimit or 1000; gameplay feature table may override it")
+	set.IntVar(&opts.UnitLimit, "unit-limit", 0, "per-player skirmish unit setting (20..3276); beats a gameplay feature table's limit; omitted uses the saved unitLimit, else the table's limit, else 1000; never saved")
 	set.Int64Var(&opts.Seed, "seed", -1, "battle RNG seed for both streams; negative derives a pair from the clock")
 	set.BoolVar(&opts.Headless, "headless", false, "run a skirmish or mission without opening a window")
 	set.IntVar(&opts.Ticks, "ticks", 0, "headless authoritative tick limit (0 = until result or 18000 ticks)")

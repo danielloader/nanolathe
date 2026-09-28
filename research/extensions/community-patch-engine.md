@@ -1117,9 +1117,21 @@ permission applies only while the prepared order is a build, and a one-byte
 enable is written into the engine's placement test so it reaches that branch
 at all. The placement preview's colour selector resets to the clear-site
 state at the start of every placement test and changes to the clearance
-state when a square is accepted only because own units occupy it. These
-selector values are not GUI palette indices; the custom snap preview maps
-them to green and yellow explicitly (CP-CON-6). The engine's
+state when a square is accepted only because own units occupy it. The
+selector is the one-byte immediate legal offset of the engine ghost's colour
+arithmetic — the source's own note calls it the rectangle colour's AND
+immediate — and its two values are 6 (clear, labelled green) and 10
+(clearance, labelled yellow). They are not GUI palette indices themselves:
+GUI entry 6 is red in the stock install. **Established — the engine ghost's
+clearance colour is GUI entry 14.** Retail forms the ghost's index as the
+illegal entry 4 plus the offset masked in by the site-valid bit, `4 + 6 =
+10` legal and 4 illegal, then resolves it through the GUIPAL-to-display map
+[07 §9]. With the patch's clearance value the legal sum is `4 + 10 = 14`,
+whose GUIPAL source `(255,255,85)` resolves in the stock install to physical
+194, `(247,227,103)` [03 R-MM-01 §1] — the yellow the author names and
+players report (issue #33); a rejected site stays entry 4. The custom snap
+preview reads the same selector but maps it to physical entries instead
+(CP-CON-6). The engine's
 "target area blocked" wait limit is patched to 20 at the mobile and VTOL
 sites (**Established** by matching the two replacement operands to the retail
 mobile and VTOL blocked-site branches: each compares the current visit count
@@ -1393,11 +1405,34 @@ have produced; nothing in order execution is changed. Source: `tahook.cpp`,
 
 **Established — snapped preview colours.** At the pinned revision,
 `tahook.cpp`'s `VisualizeMexSnapPreview` reruns the build-spot test at the
-snapped position. A rejected site draws with physical palette index 214
-(red). An accepted site draws with physical index 234 (green), or 240
-(yellow) when the construction-kickout test admitted own-unit occupants.
-These indices bypass the GUI logical-to-physical map. The patch's internal
-clear/clearance selector must not itself be treated as a GUI colour field.
+snapped position. A rejected site draws with physical palette index 214. An
+accepted site draws with physical index 234, or 240 when the
+construction-kickout selector (CP-CON-1) is in its clearance state because
+own-unit occupants were admitted. These indices bypass the GUI
+logical-to-physical map. The patch's internal clear/clearance selector must
+not itself be treated as a GUI colour field. The row-building drawers
+(`VisualizeRow` and its megamap form) choose among the same three physical
+entries by the same selector test, so 234 is the ordinary valid row colour
+and 240 the clearance one. **Established — what those entries look like**
+(authored palettes, stock 3.1 install and the ProTA 4.8 archive): 234 is
+`(51,191,43)` and 214 `(127,7,0)` in the stock `PALETTE.PAL`, which the
+Escalation package does not replace; 240 is **black** `(0,0,0)` there, so
+the source's "yellow" label holds only under a mod palette — ProTA's
+override makes 240 `(255,239,0)`. The engine ghost's entries 10 / 14 / 4
+resolve identically under both palettes.
+
+**Established — when the preview owns the ghost.** The mouse-move handler
+clears the preview flag, then, with click snapping allowed and a build
+prepared: for an extractor it searches the snap radius and sets the flag
+whenever a deposit was found and the foot is centred over it — either the
+snap target already equals the engine's own build position, or a tighter
+follow-up search of radius `max(footX, footY)` moves it no further — so a
+mex sitting exactly on its deposit is drawn by the preview although nothing
+moved (the source notes this suppresses a one-frame flash of the engine
+rectangle at a stale position); for a geothermal (a yard byte with the high
+bit) it sets the flag only when the search moved the site. The engine's own
+ghost is switched off while the flag is set and back on otherwise, so every
+other site keeps the engine ghost and its CP-CON-1 colours.
 
 ### 5.7 Environment, visibility and climate
 

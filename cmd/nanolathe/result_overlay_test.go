@@ -12,6 +12,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/mission"
+	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
 	"github.com/nanolathe-gg/nanolathe/vfs"
@@ -26,6 +27,66 @@ func (s resultOverlayStage) DrawUI(c *client.Client, presented client.UIFrame) {
 	if presented.Committed != nil {
 		s.hud.drawResultOverlay(c, s.battle, presented.Committed.Result, localSlotWatching(presented.Committed))
 	}
+}
+
+// resultNameStage keeps the bright player-colour surface visible behind the
+// authored small-font pixels [08 R-CAMP-01 §7].
+type resultNameStage struct {
+	hud  *retailBattleHUD
+	view frame.ResultView
+}
+
+func (s resultNameStage) DrawUI(c *client.Client, _ client.UIFrame) {
+	c.UIFillRect(16, 93, 91, 21, 13)
+	s.hud.drawResultStats(c, nil, s.view)
+}
+
+// Established: a player name is an appended label that the label painter
+// draws through the GAF pen in slot 1 (hattfont11) with the label's colour
+// word 15 as the light-table row, so the compressed glyph bytes — face and
+// outline alike — are remapped through LHT row 15. The pen sits at
+// `x + trunc(90/2) - trunc(tw/2)`, which puts an odd-width name one pixel
+// right of `trunc((90 - tw)/2)`, and at the row's y plus
+// `trunc((20 - metric)/2)`. With slot 1 null the FNT fallback draws in raw
+// palette index 15, not a GUI map entry [08 R-CAMP-01 §7][03 R-FONT-01 §6].
+func TestResultPlayerNameIsLitSmallGAFLabel(t *testing.T) {
+	pal := &palette.Tables{}
+	pal.Light[resultNameColor*256+1], pal.Light[resultNameColor*256+66] = 2, 246
+	render := func(h *retailBattleHUD) client.ComposedFrameSnapshot {
+		t.Helper()
+		c, err := client.New(client.Options{Width: 128, Height: 128})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.SetFNT(&formats.FNT{Height: 1})
+		view := frame.ResultView{Ended: true, Kind: "defeat", Scores: []frame.ResultScore{{Name: "A"}}}
+		c.SetUIStage(resultNameStage{hud: h, view: view})
+		return c.ComposeFrameSnapshot()
+	}
+	check := func(shot client.ComposedFrameSnapshot, y int, want map[int]byte) {
+		t.Helper()
+		for x, v := range want {
+			if got := shot.Indexed[y*shot.Width+x]; got != v {
+				t.Errorf("result name pixel (%d,%d) = %d, want %d", x, y, got, v)
+			}
+		}
+	}
+
+	font := &formats.GAFEntry{Frames: make([]formats.GAFFrameRef, 256)}
+	font.Frames['I'].Frame = &formats.GAFFrame{Width: 1, Height: 3}
+	font.Frames['A'].Frame = &formats.GAFFrame{
+		Width: 3, Height: 1, YOffset: 3, Compressed: 1,
+		Pixels: []byte{1, 66, 1}, Transparent: []bool{false, false, false},
+	}
+	// Metric 3+2: pen y = 93 + trunc(15/2) = 100. Width 3: pen x = 16 + 45 - 1.
+	shot := render(&retailBattleHUD{modalFontSmall: font, pal: pal})
+	check(shot, 100, map[int]byte{59: 13, 60: 2, 61: 246, 62: 2, 63: 13})
+
+	fnt := &formats.FNT{Height: 3}
+	fnt.Glyphs['A'] = &formats.FNTGlyph{Width: 3, Height: 3, Bits: []byte{0xff, 0x80}}
+	// Height 3: pen y = 93 + trunc(17/2) = 101, same pen x.
+	shot = render(&retailBattleHUD{primaryFont: fnt, pal: pal})
+	check(shot, 101, map[int]byte{59: 13, 60: 15, 62: 15, 63: 13})
 }
 
 func TestResultTitleFrameUsesExplicitAuthoredOutcome(t *testing.T) {

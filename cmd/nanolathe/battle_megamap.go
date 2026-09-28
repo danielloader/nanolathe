@@ -52,6 +52,7 @@ type battleMegamap struct {
 	icons               *client.MegamapIconBank
 	slotScratch         []int
 	slotScratchForFrame *frame.Frame
+	slotScratchTick     uint32
 }
 
 // megamapOptions is the resolved presentation block.
@@ -283,9 +284,11 @@ func (b *battleSession) megamapPickTarget(f *frame.Frame, x, y int32) (pool.Hand
 }
 
 // megamapUnitSlots indexes the committed units by pool slot, rebuilt once per
-// published frame.
+// published frame. The frame buffer reuses its slots, so the same pointer
+// returns holding a later tick's units; the cache is keyed on the pointer and
+// the tick together, as the client's other per-frame caches are.
 func (b *battleSession) megamapUnitSlots(f *frame.Frame) []int {
-	if b.megamap.slotScratchForFrame == f && f != nil {
+	if f != nil && b.megamap.slotScratchForFrame == f && b.megamap.slotScratchTick == f.Tick {
 		return b.megamap.slotScratch
 	}
 	largest := 0
@@ -304,15 +307,23 @@ func (b *battleSession) megamapUnitSlots(f *frame.Frame) []int {
 			slots[int(f.Units[i].Slot)] = i + 1
 		}
 	}
-	b.megamap.slotScratch, b.megamap.slotScratchForFrame = slots, f
+	b.megamap.slotScratch, b.megamap.slotScratchForFrame, b.megamap.slotScratchTick = slots, f, f.Tick
 	return slots
 }
 
+// megamapUnitView resolves h through the slot index. An index can still be
+// stale when the paused-input boundary republishes the same tick into a slot
+// the cache last saw (frame.Buffer.Republish), so the entry is checked against
+// the frame's own unit list rather than trusted.
 func megamapUnitView(f *frame.Frame, slots []int, h pool.Handle) (*frame.UnitView, bool) {
 	if h == 0 || int(h) >= len(slots) || slots[int(h)] == 0 {
 		return nil, false
 	}
-	return &f.Units[slots[int(h)]-1], true
+	i := slots[int(h)] - 1
+	if i >= len(f.Units) || f.Units[i].Slot != h {
+		return nil, false
+	}
+	return &f.Units[i], true
 }
 
 // megamapIdentified is the LOS helper's identification: own units, and units

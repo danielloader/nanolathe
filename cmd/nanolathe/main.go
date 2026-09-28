@@ -116,7 +116,7 @@ func run(opts Options, out, errOut *os.File) error {
 			if len(explicit) == 0 && opts.Root != "" {
 				explicit = []string{opts.Root}
 			}
-			roots, err := install.Resolve(explicit)
+			roots, err := install.Candidates(explicit)
 			if err != nil {
 				return err
 			}

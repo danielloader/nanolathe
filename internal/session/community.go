@@ -31,7 +31,34 @@ func resolveCommunity(set RuleSet, sources CommunitySources) (community.Features
 	all = append(all, sources.Content...)
 	all = append(all, set.Features, sources.Player)
 	all = append(all, sources.CommandLine...)
-	return community.Resolve(set.Base == gameplay.Strict31, all...)
+	f, err := community.Resolve(set.Base == gameplay.Strict31, all...)
+	if err != nil {
+		return community.Features{}, err
+	}
+	f.UnitLimit = namedUnitLimit(all)
+	return f, nil
+}
+
+// namedUnitLimit is the unit limit a source names explicitly, zero when none
+// does. A build table's own `UnitLimit` is the patch's shipped *preference*
+// default (research/extensions/community-patch-engine.md CP-LIM-2), and the
+// player's configured limit is Nanolathe's form of that preference
+// (DESIGN_CONTENT_VFS §5), so a table name alone never replaces it: without
+// this, the mainline table's 1500 overrode every configured `unitLimit` and
+// `--unit-limit` in Modern and Community 3.9. A later table selection resets
+// the answer, as it resets every other field, and zero keeps meaning "the
+// configured setting" (DESIGN_COMMUNITY_PATCH §4.1 CP-LIM-2).
+func namedUnitLimit(sources []community.Overrides) int {
+	limit := 0
+	for _, o := range sources {
+		if o.Table != "" {
+			limit = 0
+		}
+		if o.UnitLimit != nil {
+			limit = *o.UnitLimit
+		}
+	}
+	return limit
 }
 
 // projectCommunity copies each owner's inputs beside its already bound rules.

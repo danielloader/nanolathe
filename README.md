@@ -62,7 +62,11 @@ value in `~/.config/nanolathe/settings.json` (or
 full path). Accepted limits are 20..3276. CLI takes precedence over the saved
 value; an existing saved choice remains in effect until changed. This also
 works with direct `--map`, `--headless`, and `nanolathe-headless`. Campaign
-missions retain their authored unit limits.
+missions retain their authored unit limits. A mod whose content profile names
+its own limit (ProTA and TA Zero 1500, Escalation 1000) uses that instead, as
+the loading screen shows; override it with
+`--gameplay-feature unitLimit=2000` or `"gameplayFeatures": {"unitLimit": 2000}`
+in the same settings file.
 
 Downloaded mods live in `$XDG_DATA_HOME/nanolathe/mods` (default
 `~/.local/share/nanolathe/mods`). Automatically remastered map tiles and feature

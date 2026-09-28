@@ -55,12 +55,13 @@ func TestParseRejectsDifficultyOutsideTheVocabulary(t *testing.T) {
 
 // TestHeadlessSkirmishTakesTheDefaultUnitLimit checks the one thing this
 // command can get wrong about the unit pool: it composes a skirmish with no
-// persisted preferences at all, so Modern must take the mainline Community
-// limit while Strict 3.1 retains the established missing-value limit. In both
+// persisted preferences at all, so every mode takes Nanolathe's configured
+// default: the mainline Community table's shipped 1500 is a preference default
+// that the configured limit replaces, not a limit it names
+// [DESIGN_CONTENT_VFS §5][DESIGN_COMMUNITY_PATCH §4.1 CP-LIM-2]. In both
 // cases the pool has `limit × 10 + 1` records, `limit` per slot
-// [05 R-SHARE-01 §7][08 R-SKIR-01 §6][DESIGN_COMMUNITY_PATCH §4.1], and is
-// not sized from the catalog's definition count. Skipped when the retail
-// install is absent.
+// [05 R-SHARE-01 §7][08 R-SKIR-01 §6], and is not sized from the catalog's
+// definition count. Skipped when the retail install is absent.
 func TestHeadlessSkirmishTakesTheDefaultUnitLimit(t *testing.T) {
 	root := testsupport.RetailRoot(t)
 	fs := vfs.New()
@@ -69,16 +70,15 @@ func TestHeadlessSkirmishTakesTheDefaultUnitLimit(t *testing.T) {
 	}
 	defer fs.Close()
 
-	mainline, err := community.Table(community.Mainline)
-	if err != nil {
-		t.Fatal(err)
+	if mainline, err := community.Table(community.Mainline); err != nil || mainline.UnitLimit == session.SkirmishDefaultUnitLimit {
+		t.Fatalf("mainline table limit %d (%v) must differ from the configured default for this test to tell them apart", mainline.UnitLimit, err)
 	}
 	for _, tc := range []struct {
 		name string
 		mode gameplay.Mode
 		want int
 	}{
-		{name: "DefaultModern", want: mainline.UnitLimit},
+		{name: "DefaultModern", want: session.SkirmishDefaultUnitLimit},
 		{name: "Strict31", mode: gameplay.Strict31, want: session.SkirmishDefaultUnitLimit},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

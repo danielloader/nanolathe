@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/vfs"
@@ -119,5 +120,25 @@ func TestUnitLimitCLIRejectsOutOfRange(t *testing.T) {
 	}
 	if settings.DefaultUnitLimit != 1000 || session.SkirmishDefaultUnitLimit != settings.DefaultUnitLimit {
 		t.Fatal("unit-limit defaults disagree")
+	}
+}
+
+// TestConfiguredUnitLimitIsEffectiveWithoutAMod is issue #30: with no mod, the
+// mainline build table's shipped 1500 replaced `--unit-limit` and the saved
+// `unitLimit` in every mode but Strict 3.1. The loading line shows the limit
+// battle entry resolves from the same inputs.
+func TestConfiguredUnitLimitIsEffectiveWithoutAMod(t *testing.T) {
+	t.Setenv(settings.EnvPath, filepath.Join(t.TempDir(), "settings.json"))
+	opts, err := parseFlags([]string{"--unit-limit", "500"}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []gameplay.Mode{gameplay.Modern, gameplay.Community39, gameplay.Strict31} {
+		shell := &gameShell{opts: opts, gameplay: mode}
+		shell.setup = newSkirmishMenuConfig("Anteer Straight")
+		shell.applySettings(settings.Defaults())
+		if limit, source := shell.effectiveUnitLimit(); limit != 500 || source != "" {
+			t.Fatalf("%s: effective unit limit = %d set by %q, want the configured 500", mode, limit, source)
+		}
 	}
 }

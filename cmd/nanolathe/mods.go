@@ -1572,9 +1572,10 @@ func (g *gameShell) loadingSelectionLines() []string {
 }
 
 // effectiveUnitLimit is the per-player unit limit a skirmish entered now
-// would use, resolved from the same inputs battle entry resolves: a
-// Community feature table that sets one overrides the player's setting
-// (DESIGN_COMMUNITY_PATCH §3.2), and Strict 3.1 ignores every table. source
+// would use, resolved from the same inputs battle entry resolves: a limit a
+// mod profile or a feature override names replaces the player's setting,
+// a build table's shipped default does not (DESIGN_COMMUNITY_PATCH §4.1
+// CP-LIM-2), and Strict 3.1 ignores every table. source
 // names what overrode the setting, "" when nothing did.
 func (g *gameShell) effectiveUnitLimit() (limit int, source string) {
 	limit = g.setup.UnitLimit

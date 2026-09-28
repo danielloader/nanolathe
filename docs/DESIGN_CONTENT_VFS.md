@@ -686,7 +686,10 @@ behaviour.
   per player instead of retail's 250, configurable without a UI gadget via
   top-level JSON `unitLimit` or `--unit-limit`. Both desktop entry (including
   direct `--map`, captures and `--headless`) and the displayless command accept
-  the override. Precedence is explicit CLI, saved setting, default. Existing
+  the override. Precedence is explicit CLI, saved setting, default, in every
+  gameplay mode; a Community build table's shipped 1500 does not replace it,
+  and only a limit a mod profile or feature override names does
+  (DESIGN_COMMUNITY_PATCH §4.1 CP-LIM-2). Existing
   stored choices are preserved; normal menu settings writes retain the active
   configured value. Settings clamp to 20..3276; CLI values outside that range
   are rejected. Ten player slices at 3276 fit positive signed 16-bit occupancy

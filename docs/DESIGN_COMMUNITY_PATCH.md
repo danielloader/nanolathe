@@ -273,7 +273,7 @@ them.
 |---|---|---|---|---|
 | CP-LIM-1 pools (B) | session composition parameter → `pool` capacities | projectiles 300, the retail explosion and debris caps `[06 §5.1]` `[01 §6.1]` | 3000 / 3000 / 1000 per the table; allocation above the cap still silently fails, as retail does | same as Community |
 | CP-LIM-2 `AISearchMapEntries` (B) | movement scheduler parameter (`path` step allowance, today a literal 1333 `[04 R-PATH-01 §10]`) | 1333 | the table's `PathStepAllowance`, 66650 in every shipped table | same |
-| CP-LIM-2 `UnitLimit` (B) | the existing configured unit limit ([DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md)) | the setting | the setting, unless the table names a limit, capped at Nanolathe's 3276 | same |
+| CP-LIM-2 `UnitLimit` (B) | the existing configured unit limit ([DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md)) | the setting | the setting, unless a source names a limit (a content profile's `unit_limit` or `gameplay.unitLimit`, settings `gameplayFeatures`, `--gameplay-feature`), capped at Nanolathe's 3276. A build table's own `UnitLimit` (1500 in every shipped table) is the patch's shipped *preference* default, which the configured setting is Nanolathe's form of, so selecting a table never names a limit and the resolved field stays 0 | same |
 | CP-LIM-2 `UnitType`, `SfxLimit`, composite buffer | content profile `limits` / renderer | already expressed by `limits.units`; effects and composite sizes are Nanolathe host sizing | — |
 | CP-LIM-3, CP-LIM-4, CP-LIM-5 | — | not applicable: Nanolathe's build-menu and download compilers have no fixed-size copy to overrun; display minimums are host policy | — |
 

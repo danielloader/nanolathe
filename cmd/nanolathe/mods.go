@@ -273,6 +273,10 @@ type contentReloadRequest struct {
 	// offered is the mod whose preset the switch offered, accepted or not;
 	// the main menu does not offer it again (§4.3).
 	offered string
+	// restoreControls is the running content's preset whose rows return to
+	// their retail defaults, when the switch leaves it for content that
+	// recommends none (§4.3); "" for none.
+	restoreControls string
 	// loadSave is a save to load once the new content is bound: a game saved
 	// under another mod switches to it first (§7.3 step 2).
 	loadSave string
@@ -379,6 +383,9 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 	// shell from here.
 	if request.controls != "" {
 		shell.applyControlsPreset(request.controls)
+	}
+	if request.restoreControls != "" {
+		shell.restoreControlsPreset(request.restoreControls)
 	}
 	shell.markControlsOffered(request.offered)
 	shell.saveSettings()
@@ -999,13 +1006,20 @@ func (g *gameShell) refreshModsPanel() {
 	}
 	retailGreyGadget(p.Window, "MUTRESET", len(active) == 0)
 	// A mod's recommended settings are offered only when switching to a mod
-	// that names a preset (§4.3, P10); the button toggles whether Apply
-	// writes them.
-	offer := selected != nil && selected.Controls != "" && !sameMod(selected, g.cs.mod)
+	// that names a preset, and taken back only when switching from one to
+	// content that names none while a row still holds the preset's value
+	// (§4.3, P10); the button toggles whether Apply writes them.
+	preset, restore := g.switchControlsPreset(selected)
+	offer := preset != "" && !sameMod(selected, g.cs.mod)
 	p.SetActive("PRESET", offer)
 	p.SetActive("PRESETLABEL", offer)
 	if offer {
 		p.SetText("PRESET", presetToggleText(modsUI.usePreset))
+		label := "Use recommended settings"
+		if restore {
+			label = "Restore default settings"
+		}
+		p.SetText("PRESETLABEL", label)
 	}
 	running := sameMod(selected, g.cs.mod)
 	// A mod whose base requirements are unmet is listed but not selectable.
@@ -1040,6 +1054,9 @@ func (g *gameShell) applyModsScreen() {
 		return
 	}
 	request := contentReloadRequest{selector: "none", mutators: modsUI.mutators}
+	if preset, restore := g.switchControlsPreset(target); restore && modsUI.usePreset {
+		request.restoreControls = preset
+	}
 	if target != nil {
 		request.selector = modSelectorOf(target.ID, target.Version)
 		request.mod = settings.ModSelection{ID: target.ID, Version: target.Version}

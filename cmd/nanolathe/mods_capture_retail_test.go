@@ -152,8 +152,11 @@ func TestModsScreenCapture(t *testing.T) {
 // TestModsHotReloadSwitchesContent applies a mod from the Mods & Mutators
 // screen and steps the window loop once: the host must swap in a fresh shell
 // mounted on the base install plus that mod, then switch back to the original
-// game the same way (docs/DESIGN_MODS_MUTATORS.md §4.4). It needs a
-// ProTA package directory in NANOLATHE_MOD_ROOTS_PROTA.
+// game the same way (docs/DESIGN_MODS_MUTATORS.md §4.4). Taking ProTA's
+// recommended settings on the way in and the offered restore on the way out
+// leaves the settings file with the zoom overview again, so the wheel zooms
+// and Tab opens the menu (§4.3, issue #19). It needs a ProTA package
+// directory in NANOLATHE_MOD_ROOTS_PROTA.
 func TestModsHotReloadSwitchesContent(t *testing.T) {
 	prota := os.Getenv("NANOLATHE_MOD_ROOTS_PROTA")
 	if prota == "" {
@@ -188,13 +191,22 @@ func TestModsHotReloadSwitchesContent(t *testing.T) {
 	if err := bindShellContent(shell, cl); err != nil {
 		t.Fatal(err)
 	}
-	switchTo := func(row int) {
+	switchTo := func(row int, label string) {
 		t.Helper()
 		before := host.shell
 		if err := before.openModsScreen(); err != nil {
 			t.Fatal(err)
 		}
 		before.selectModsRow(row)
+		// The toggle is offered, Yes by default, under a caption that fits
+		// its gadget in the front-end font.
+		caption := modsPanel.TextOf("PRESETLABEL")
+		if !modsPanel.ActiveOf("PRESET") || modsPanel.TextOf("PRESET") != "Yes" || caption != label {
+			t.Fatalf("row %d: preset toggle active %v reading %q, caption %q; want Yes, %q", row, modsPanel.ActiveOf("PRESET"), modsPanel.TextOf("PRESET"), caption, label)
+		}
+		if w, room := before.retailTextWidth(caption), modsPanel.Window.Gadgets[modsPanel.Index("PRESETLABEL")].Rect.W; w > int(room) {
+			t.Fatalf("caption %q is %d pixels wide in a %d-pixel label", caption, w, room)
+		}
 		before.applyModsScreen()
 		if pendingContentReload == nil {
 			t.Fatal("applying a different mod requested no reload")
@@ -207,9 +219,12 @@ func TestModsHotReloadSwitchesContent(t *testing.T) {
 			t.Fatal("the old shell's Mods screen survived the reload")
 		}
 	}
-	switchTo(1)
+	switchTo(1, "Use recommended settings")
 	if host.shell.cs.mod == nil || host.shell.cs.profile != "prota" {
 		t.Fatalf("after switching to ProTA: mod %v, profile %q", host.shell.cs.mod, host.shell.cs.profile)
+	}
+	if host.shell.presentation.Overview != settings.OverviewMegamap {
+		t.Fatal("ProTA's recommended settings did not select the megamap overview")
 	}
 	if dir := os.Getenv("NANOLATHE_MODS_CAPTURE"); dir != "" {
 		img := cl.ComposeFrame()
@@ -217,9 +232,16 @@ func TestModsHotReloadSwitchesContent(t *testing.T) {
 		_ = png.Encode(f, img)
 		f.Close()
 	}
-	switchTo(0)
+	switchTo(0, "Restore default settings")
 	if host.shell.cs.mod != nil || host.shell.cs.profile != "retail" {
 		t.Fatalf("after switching back: mod %v, profile %q", host.shell.cs.mod, host.shell.cs.profile)
+	}
+	stored, err := settings.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := stored.Presentation; p.Overview != settings.OverviewZoom || stored.SwitchAlt != settings.DefaultSwitchAlt || p.GroupNumbers != settings.DefaultPresentation().GroupNumbers || stored.Audio.SoundMode != settings.DefaultSoundMode {
+		t.Fatalf("after the restore the settings file holds overview %d, switchAlt %d, group digits %d, sound mode %d; want the defaults", p.Overview, stored.SwitchAlt, p.GroupNumbers, stored.Audio.SoundMode)
 	}
 }
 

@@ -101,6 +101,9 @@ batch of 20, and stockpile buttons keep their ordinary counts.
 **Keep mine** preserves the current settings. Existing installations can use
 **Options → Orders**, choose **Select: Zero** and **100 batch: On**, then
 **OK**; an already accepted preset is not silently reapplied.
+Switching from Zero to the original game, or to a mod that recommends no
+settings, offers **Restore default settings** for the rows still at Zero's
+values, as for [ProTA](PROTA_SUPPORT.md#recommended-settings).
 Selection predicates and modifier
 precedence are the explicit host policies in
 [the interface design](DESIGN_INTERFACE_HUD_INPUT.md#313-optional-community-selection-controls),

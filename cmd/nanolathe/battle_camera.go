@@ -173,8 +173,10 @@ func localCommanderUnit(sess *session.Session) (*units.Unit, bool) {
 }
 
 // applyPublishedCamera consumes each completed sub-tick once, before another
-// sub-tick can replace it. BigBrother repicks before follow, then the cumulative
-// phase-10 shake delta is applied [04 R-MOV-03 §1][07 R-CAM-01 §12][I6].
+// sub-tick can replace it. BigBrother repicks before follow, then Camera.Shake
+// finishes the pass: an idle camera's return toward where its shake started,
+// the cumulative phase-10 shake delta, and the final clamp
+// [04 R-MOV-03 §1][07 R-CAM-01 §10][07 R-CAM-01 §12][I6].
 func (b *battleSession) applyPublishedCamera(cur *frame.Frame) {
 	if b == nil || b.cam == nil || cur == nil {
 		return

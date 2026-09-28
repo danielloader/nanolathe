@@ -110,53 +110,56 @@ func (c *Camera) StepLatchedGlide() {
 	}
 }
 
-// Shake applies one phase-10 shake displacement to the current origin, after
-// the follow step, and clamps the result [07 R-CAM-01 §10][01 §4.4.1].
+// Shake finishes one phase-10 pass after the follow step: an idle camera's
+// step back toward the origin its shake started from, this pass's shake
+// displacement, and the final clamp [07 R-CAM-01 §10][01 §4.4.1].
 //
-// Retail's shake moves only the current origin and never the desired one, and
-// phase 10 steps the current origin toward the desired origin on every pass,
-// so each jolt is pulled back at the bounded half-step rate and the view ends
-// where it started. This build keeps no live desired origin for an idle,
-// untracked camera: the scroll pass writes the current origin alone and a
-// glide is armed only when a writer asks for one. Without an anchor the jolts
-// would be a permanent random walk, and a large or repeated shake (a
-// commander's death blast) could leave the view screens away (issue #34).
-// So when nothing is tracked and no glide is in flight, the pre-shake origin
-// becomes the desired origin — the value retail's desired origin holds for a
-// settled camera — and the glide step returns the view to it. A tracked
-// follow and a glide already in flight keep their own desired origin, which
-// the shake does not change.
+// Retail's shake moves only the current origin, never the desired one, and
+// every phase-10 pass steps the current origin toward the desired origin
+// whether or not a follow target is selected, so each jolt is pulled back at
+// the bounded half-step rate and the view ends where it started. This build
+// keeps no live desired origin for an idle, untracked camera — the scroll pass
+// and the other host writers move the current origin alone — so without an
+// anchor the jolts would sum into a permanent random walk, and a large or
+// repeated shake (a commander's death blast) could leave the view screens away
+// (issue #34).
 //
-// The half-step stalls one pixel short of its target, so a return glide can
-// end one pixel away from the rest origin while the shake is still running.
-// A desired origin within that pixel is kept rather than replaced, so repeated
-// jolts cannot walk the rest origin away a pixel at a time.
+// The origin a shake starts from stands in for that desired origin, and only
+// while nothing else owns the desired origin or moves the view:
+//
+//   - A tracked follow or a glide in flight keeps its own desired origin; the
+//     shake is damped toward that target instead, and a return starts afresh
+//     once the camera is idle again.
+//   - A host writer that moved the view since the last pass — the scroll pass,
+//     a drag, a minimap or megamap jump, a bookmark recall, a zoom — ends the
+//     return where it put the view, as retail's jump writers copy the current
+//     origin into the desired origin [07 R-CAM-01 §12]. The next jolt returns
+//     there. Without this the next pass would pull the view back toward where
+//     the player had just moved it from.
+//
+// The start origin persists between shakes, so the half-step's one-pixel stall
+// never becomes the next shake's starting point and nothing accumulates per
+// jolt. The clamp runs on every pass, as retail's does, so the return cannot
+// carry the view past a bound that a zoom moved under it.
 func (c *Camera) Shake(dx, dz int32) {
-	if c == nil || (dx == 0 && dz == 0) {
+	if c == nil {
 		return
 	}
-	if c.Follow.latched == 0 {
-		rest := Origin{X: c.X, Z: c.Z}
-		if withinOnePixel(c.Follow.Desired, rest) {
-			rest = c.Follow.Desired
-		}
-		if !c.Follow.latchedGliding {
-			c.Follow.latchedDesired = rest
-			c.Follow.latchedGliding = true
-			if !c.Follow.Gliding {
-				c.Follow.Desired = rest
-				c.Follow.Gliding = true
-			}
-		}
+	f := &c.Follow
+	idle := f.latched == 0 && !f.latchedGliding
+	if !idle || c.X != f.shakeLeft.X || c.Z != f.shakeLeft.Z {
+		f.shakeReturning = false
+	}
+	switch {
+	case f.shakeReturning:
+		c.X = stepAxis(c.X, f.shakeRest.X)
+		c.Z = stepAxis(c.Z, f.shakeRest.Z)
+	case idle && (dx != 0 || dz != 0):
+		f.shakeRest = Origin{X: c.X, Z: c.Z}
+		f.shakeReturning = true
 	}
 	c.X += dx
 	c.Z += dz
 	c.Clamp()
-}
-
-// withinOnePixel reports whether two origins differ by at most the one-pixel
-// stall of the phase-10 half-step on each axis.
-func withinOnePixel(a, b Origin) bool {
-	dx, dz := int64(a.X)-int64(b.X), int64(a.Z)-int64(b.Z)
-	return dx >= -1 && dx <= 1 && dz >= -1 && dz <= 1
+	f.shakeLeft = Origin{X: c.X, Z: c.Z}
 }

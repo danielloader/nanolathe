@@ -59,3 +59,23 @@ func TestBuildMarkerSelectionColors(t *testing.T) {
 		t.Errorf("unselected colors %d/%d want %d/%d [07 §9]", uns[0].Color, uns[4].Color, MarkerOuterUnselected, MarkerInnerUnselected)
 	}
 }
+
+// The ghost's colour choice is one verdict: refused sites draw entry 4 whatever
+// the clearance flag says, and only a valid site that CP-CON-1 admitted over
+// own units takes the yellow entry 14 [07 §9] (community-patch-engine
+// "CP-CON-1", Supported inference).
+func TestGhostColorSelection(t *testing.T) {
+	for _, tc := range []struct {
+		valid, clear bool
+		want         uint8
+	}{
+		{true, false, 10},
+		{true, true, 14},
+		{false, false, 4},
+		{false, true, 4},
+	} {
+		if got := GhostColor(tc.valid, tc.clear); got != tc.want {
+			t.Errorf("GhostColor(valid=%v, clear=%v) = %d, want %d", tc.valid, tc.clear, got, tc.want)
+		}
+	}
+}

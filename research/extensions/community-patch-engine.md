@@ -1117,9 +1117,26 @@ permission applies only while the prepared order is a build, and a one-byte
 enable is written into the engine's placement test so it reaches that branch
 at all. The placement preview's colour selector resets to the clear-site
 state at the start of every placement test and changes to the clearance
-state when a square is accepted only because own units occupy it. These
-selector values are not GUI palette indices; the custom snap preview maps
-them to green and yellow explicitly (CP-CON-6). The engine's
+state when a square is accepted only because own units occupy it. The
+selector is a one-byte operand inside the engine's own placement-ghost colour
+choice: the patch resets it to 6, the retail value, and writes 10 for the
+clearance state. Neither value is itself a GUI palette index — GUI entry 6 is
+the sixteen-colour set's brown. The patch's own snap and row rectangles test
+the byte and draw raw palette indices instead: 234 (green) while it holds 6,
+240 (yellow) otherwise, 214 (red) for a refused site (CP-CON-6).
+
+**Supported inference — the ordinary ghost's clearance colour.** Retail draws
+the ghost in logical entry 10 over a valid site and 4 over a refused one
+[07 §9]. The only reading that makes the retail operand 6 produce entry 10 is
+an offset added to the refused entry, so the patch's 10 produces entry 14,
+whose GUI source colour is bright yellow `(255,255,85)` [03 R-MM-01 §1]. That
+matches the author's "Preview build square to yellow if requires unit
+kickout" and the user report (Nanolathe issue #33) that the ProTA and
+Escalation ghost turns yellow over the player's own units. A direct index
+reading would draw every retail valid site in GUI entry 6, brown, and is
+excluded. What would settle it: a capture of the patched ghost over an own
+unit, compared against logical entry 14's physical colour, or a clean-room
+statement of the engine's colour arithmetic in [07 §9]. The engine's
 "target area blocked" wait limit is patched to 20 at the mobile and VTOL
 sites (**Established** by matching the two replacement operands to the retail
 mobile and VTOL blocked-site branches: each compares the current visit count

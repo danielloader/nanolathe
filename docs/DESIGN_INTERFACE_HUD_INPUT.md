@@ -3260,12 +3260,11 @@ therefore not a setting (ProTA sets it to 0, unlimited). In order:
    truncated) centred on the projection of the pointer's world point with the
    half-height shear, moved back inside the image at an edge; entry 10 over a
    valid site, entry 4 over a refused one. The shipped row-building mode draws
-   each queued row position instead (valid 240, or 234 under an unidentified
-   engine condition, refused 214). Nanolathe has no row-building mode over the
-   megamap — the Modern command drag cannot start there — so no row ghost is
-   drawn; the `TODO(question)` in `drawMegamapOverlay` records that a row
-   ghost added later would use 240, the colour tied to no unidentified
-   condition.
+   each queued row position instead in raw palette indices: valid 234, or 240
+   when construction kickout admitted the position over own units, refused
+   214 [community patch engine CP-CON-1]. Nanolathe has no row-building mode
+   over the megamap — the Modern command drag cannot start there — so no row
+   ghost is drawn.
 9. *Queued orders*, only while Shift is physically held
    (`drawMegamapQueuedOrders`). The walk covers the local player's units in
    slot order, in play and not death-marked. *Focus* units are the hovered
@@ -3814,15 +3813,22 @@ All mutable terrain and feature reads occur through a read-only session query;
 the host owns only the deterministic scan and command substitution
 [community patch engine CP-CON-6][I6].
 
-When construction kickout is enabled, the shared placement rectangle uses
-the patch's custom preview palette: physical index 234 for a clear accepted
-site, 240 for an accepted site needing own-unit clearance, and 214 for a
-rejected site. This applies to both snapped and ordinary cursor placement.
-The indices bypass `GUIColor`; the patch's internal clear/clearance selector
-is not a GUIPAL field. Without kickout the retail logical legal/illegal
-colours remain in use. Regression checks exercise all three community states,
-the retail bypass, and a snapped Coast to Coast mex with the installed palette
-[community patch engine CP-CON-6].
+The shared placement rectangle is the engine's own ghost in every profile,
+so its colour is always a logical entry resolved through `GUIColor` [07 §9]:
+entry 10 for a clear accepted site, 4 for a rejected one, and — only when
+construction kickout admitted the site over the ordering player's own units —
+entry 14, the sixteen-colour set's bright yellow. The patch reaches that
+yellow by changing the operand of the engine's valid-branch colour choice, not
+by drawing the ghost itself; the operand is an offset onto the refused entry,
+so its retail value 6 gives 10 and the patch's 10 gives 14 [community patch
+engine CP-CON-1] (Supported inference). The raw palette indices 234/240/214
+belong to the patch's separately drawn snap and row rectangles; Nanolathe has
+no separate snap rectangle — its one ghost moves to the snapped cell — so it
+draws none of them. Painting raw 240 on the ghost rendered the clearance
+state black (issue #33). Regression checks exercise the colour choice, all
+three community states through the GUI map, the retail bypass, and a snapped
+Coast to Coast mex with the installed palette [community patch engine
+CP-CON-6].
 
 The authored instructions mention Shift+Q/E alternation and using `v` before a
 patrol route, but neither the pinned source nor those instructions settle a

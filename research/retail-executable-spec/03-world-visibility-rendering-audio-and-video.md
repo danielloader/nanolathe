@@ -1931,10 +1931,13 @@ inset where a minimum exceeds a maximum writes no inner frame. The solid
 frame writer is clipped against the active inclusive world-surface clip.
 
 The palette argument is already a physical indexed-pixel value. The outer
-frame selects logical map entry 15 and the inner frame always selects entry 0;
-the 6/4 pair replaces the outer entry only while the armed latch is MOBILEBUILD
-— entry 6 when **bit 6 of the pointer-flags byte** is set, entry 4 when it is
-clear [07 R-P0-11 §1 "The drawing."][07 §6 "Frame composition passes"]. That
+frame selects logical map entry 15 and the inner frame entry 0; the 10/4
+pair replaces the outer entry only while the armed latch is MOBILEBUILD —
+entry 10 when **bit 6 of the pointer-flags byte** is set, entry 4 when it is
+clear — and the inner frame then repeats the outer entry
+[07 R-P0-11 §1 "The drawing."][07 §6 "Frame composition passes"]. (An earlier
+reading named entry 6 here, contradicting both cited sections; GUI entry 6 is
+the sixteen-colour set's brown.) That
 bit is the site-valid bit of [07 R-CAM-01 §14] step 1, whose one writer is the
 in-view placement preview and whose clearer is the world rebuild; it is not
 bit `0x40` of the latch-flags word, which carries immediate-versus-special
@@ -5198,7 +5201,7 @@ radar rect anyway, because `cameraX ≤ PlayRight − viewWidth`. The colour is
 `[03 §4.3]`, whose GUIPAL source is `(255,255,85)` and which resolves in the
 stock install to physical index 194, `(247,227,103)`. That is the pale yellow a
 retail screen shot shows around the visible area, and it is a different entry
-from the crosshair's entry 15 (white) and from the drag rectangle's 6/4/15
+from the crosshair's entry 15 (white) and from the drag rectangle's 10/4/15
 family `[07 §6]`.
 
 Note that entry 14 is shared with the minimap's 1×1 projectile dot (§3.9 layer
@@ -8153,7 +8156,7 @@ branch was read at the instruction level).
 composer's post-fog rectangle pair is the **box-selection outline of
 [R-SEL-02A]**: its two world endpoints are the drag corners, its gate is the
 drag-active bit of the selection mode word, its outer colour is logical
-entry 15 (6 or 4 while the armed latch is MOBILEBUILD) and its inner colour
+entry 15 (10 or 4 while the armed latch is MOBILEBUILD) and its inner colour
 entry 0. Nothing about it reads a mover, a medium, a wake state, or the sea
 level. The per-unit status bit the composer tests in Pass A and Pass B
 ([R-RAST-01 §7]) is the **selected** bit — the same bit `Ctrl+A` select-all

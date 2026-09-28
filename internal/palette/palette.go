@@ -134,7 +134,7 @@ func Load(fs vfs.FSOps) (*Tables, error) {
 //   - the HUD health primitive's dcb[10]/dcb[14]/dcb[12] thresholds and its
 //     dcb[0] outer rectangle, and the resource text colours dcb[15] (normal),
 //     dcb[10] (production) and dcb[12] (consumption) [07 §6];
-//   - the drag-selection rectangle (outer entry 6 or 4 under a MOBILEBUILD
+//   - the drag-selection rectangle (outer entry 10 or 4 under a MOBILEBUILD
 //     latch, else 15; inner entry 0) and the minimap viewport cross's entry 15
 //     [07 §6];
 //   - the selected-unit footprint quad, logical entry 10 — "the physical byte

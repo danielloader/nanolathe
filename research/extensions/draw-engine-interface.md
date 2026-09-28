@@ -614,8 +614,11 @@ through the logical-to-physical map; `Megamap*Color` does not apply here.
    set and entry 4 when it is clear. While the extension's row-building mode
    is active, the overlay instead draws each queued row position's
    footprint, each checked by the retail preview. Valid positions use raw
-   palette index 240, or 234 under an engine code-byte condition this audit
-   did not identify, and invalid ones 214.
+   palette index 234, or 240 when the construction-kickout feature admitted
+   the position over the player's own units, and invalid ones 214. The
+   condition is the ghost-colour operand that feature rewrites
+   ([community-patch-engine "CP-CON-1"]): the source tests it for its retail
+   value and draws 234 on a match, 240 otherwise.
 3. **Queued orders**, only while Shift is physically held (an asynchronous
    key-state read, as in retail's overlay [07 R-P0-11 §3]). The walk covers
    the **local** player's units in slot order that are in play and not
@@ -812,8 +815,6 @@ differs across the inspected builds. Two placements worth keeping straight:
   "Build placement from the megamap".
 - **Unknown — ProTA 4.8 click snapping on the megamap.** Whether the mex- and
   wreck-snap handler finds and places snapped sites from the megamap's point.
-- **Unknown — the row-building ghost's alternate valid colour.** Which
-  engine code-byte condition selects palette index 234 instead of 240.
 - **Unknown — local marker distribution.** How a marker created locally is
   announced to peers.
 - **Unknown — older Escalation/Zero `CTRL+S` and cycle rules.** ProTA 4.8 is

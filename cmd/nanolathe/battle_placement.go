@@ -269,22 +269,15 @@ func (b *battleSession) drawBuildGhost(c *client.Client) {
 		return
 	}
 	l, t, r, btm := b.placementRect()
-	col := c.GUIColor(hud.GhostColorIllegal)
-	if b.battleState().Input.BuildOK {
-		col = c.GUIColor(hud.GhostColorLegal)
-	}
-	if b.sess != nil && b.sess.Community.ConstructionKickout {
-		// The patch's custom preview uses physical palette entries, not
-		// GUIPAL fields (community patch engine CP-CON-6). Its clear-site
-		// selector is not GUI colour 6, which is red in the retail assets.
-		col = 214 // Rejected.
-		if b.battleState().Input.BuildOK {
-			col = 234 // Clear.
-			if b.battleState().Input.BuildNeedsClear {
-				col = 240 // Accepted with own-unit clearance.
-			}
-		}
-	}
+	// The ghost is the engine's own rectangle in every profile, so its colour
+	// is always a logical entry resolved through the GUI map [07 §9]. CP-CON-1
+	// does not repaint it with raw palette indices; it only moves the valid
+	// entry from 10 (green) to 14 (yellow) while own units occupy the site
+	// (community-patch-engine "CP-CON-1"). The raw 234/240/214 triple belongs
+	// to the patch's own snap and row rectangles; painting raw 240 here drew
+	// the clearance state black.
+	in := &b.battleState().Input
+	col := c.GUIColor(hud.GhostColor(in.BuildOK, in.BuildNeedsClear))
 	// Retail's adjacent strokes make one solid two-pixel border [07 §9].
 	// Scale that entire border, not just the separation between its strokes:
 	// ViewScale stores half steps, so casting it to pixels creates a gap even

@@ -10,18 +10,22 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 )
 
-// The patch's preview colours are physical palette entries, not GUI colour
-// fields (community patch engine CP-CON-6). In particular the installed GUI
-// colour 6 is red; treating the clear-site selector as that index hid valid sites.
-func TestBuildGhostCommunityColorsBypassGUIMapping(t *testing.T) {
+// The ordinary placement ghost always resolves a logical entry through the GUI
+// map [07 §9]. CP-CON-1 moves only the valid entry, from 10 to 14, while own
+// units occupy the site (community-patch-engine "CP-CON-1", Supported
+// inference). The patch's raw 234/240/214 indices belong to its separate snap
+// and row rectangles; drawing raw 240 here painted the clearance state black
+// instead of yellow (issue #33). The selector's retail operand, 6, is not a
+// logical entry either: GUI entry 6 is brown.
+func TestBuildGhostColorsResolveThroughGUIMap(t *testing.T) {
 	for _, tc := range []struct {
 		name                  string
 		kickout, valid, clear bool
 		want                  uint8
 	}{
-		{"clear", true, true, false, 234},
-		{"needs clearance", true, true, true, 240},
-		{"rejected", true, false, false, 214},
+		{"clear", true, true, false, 17},
+		{"needs clearance", true, true, true, 23},
+		{"rejected", true, false, false, 19},
 		{"retail clear", false, true, false, 17},
 		{"retail rejected", false, false, false, 19},
 	} {
@@ -34,6 +38,7 @@ func TestBuildGhostCommunityColorsBypassGUIMapping(t *testing.T) {
 			pal.Logical[10] = 17
 			pal.Logical[4] = 19
 			pal.Logical[6] = 21
+			pal.Logical[14] = 23
 			cl.SetPalette(pal)
 			b := &battleSession{sess: &session.Session{Community: community.Features{ConstructionKickout: tc.kickout}}, cam: &camera.Camera{ViewW: 640, ViewH: 480}}
 			state := b.battleState()

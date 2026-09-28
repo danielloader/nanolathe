@@ -59,15 +59,13 @@ func (b *battleSession) drawMegamapOverlay(cur *frame.Frame, lens camera.Megamap
 	// of the pointer's world point, with the half-height shear, in entry 10
 	// over a valid site and entry 4 over a refused one.
 	//
-	// TODO(question): the shipped build's row-building mode draws each queued
-	// row position instead, valid positions in raw palette index 240 — or 234
-	// under an engine code-byte condition the audit did not identify — and
-	// refused ones in 214. Nanolathe has no row-building mode over the
-	// megamap (the Modern command drag cannot start there), so no row ghost is
-	// drawn; one added later would draw valid positions in 240, the one colour
-	// the research ties to no unidentified condition. A trace of that
-	// condition would settle 234 [draw-engine-interface "Selection and order
-	// overlay"].
+	// The shipped build's row-building mode draws each queued row position
+	// instead, in raw palette indices: valid positions 234, or 240 when
+	// construction kickout admitted the position over own units, and refused
+	// ones 214 [draw-engine-interface "Selection and order overlay"]
+	// [community-patch-engine "CP-CON-1"]. Nanolathe has no row-building mode
+	// over the megamap (the Modern command drag cannot start there), so no row
+	// ghost is drawn.
 	if g := key.ghost; g.shown {
 		if wx, wy, wz, ok := b.megamapCursorWorld(g.x, g.y); ok {
 			cx, cy := lens.Project(int32(wx>>16), int32(wy>>16), int32(wz>>16))

@@ -33,6 +33,31 @@ const (
 	GhostColorIllegal = 4
 )
 
+// GhostColorClearance is the placement ghost's logical color when a site is
+// legal only because the ordering player's own units stand on it, under the
+// community patch's build-under-own-units feature (CP-CON-1). The patch leaves
+// the ghost to the engine and only rewrites the valid branch of its color
+// choice, which lands four entries further along the GUI map: the
+// sixteen-color set's bright yellow instead of its bright green
+// (community-patch-engine "CP-CON-1", Supported inference). Retail never
+// reaches it: without CP-CON-1 an occupied site is refused and draws
+// GhostColorIllegal.
+const GhostColorClearance = 14
+
+// GhostColor returns the placement ghost's logical color for one site verdict
+// [07 §9]. needsClear is read only for a valid site, and only CP-CON-1's
+// own-unit admission ever sets it.
+func GhostColor(valid, needsClear bool) uint8 {
+	switch {
+	case !valid:
+		return GhostColorIllegal
+	case needsClear:
+		return GhostColorClearance
+	default:
+		return GhostColorLegal
+	}
+}
+
 // BuildMarkerSegments returns the eight lines retail draws for one queued build
 // order whose footprint projects to the screen rectangle (left, top, right,
 // bottom) [07 §9].

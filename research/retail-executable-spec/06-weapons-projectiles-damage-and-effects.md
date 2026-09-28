@@ -285,8 +285,10 @@ squared as a plain 32-bit signed multiply of the authored integer.
 
 **Established fact (secondary-list identity):** The runtime bit that puts a
 hostile unit on the secondary list is the
-**seen** bit of the unit status word, and it is recomputed every tick by the
-sensor bookkeeping phase from the **viewing** player's point of view only —
+**seen** bit of the unit status word, and it is recomputed by the sensor
+bookkeeping phase — once per due entry of the viewing player's 30-tick
+settlement deadline, not on every tick `[03 R-SENSOR-01]` — from the
+**viewing** player's point of view only —
 the local human's slot except in an observer session, which the two must not
 be collapsed into one `[03 R-VIS-01 §4]`. That phase is **five** ordered
 passes `[03 R-VIS-01 §4]`; four of them write the seen bit: pass 1 clears it
@@ -303,9 +305,13 @@ So the secondary list is exactly *"hostile units
 the local observer can currently see or detect"*. Three consequences are
 contracts:
 
-1. it is **radar-like** because radar coverage is one of its four producers,
-   but it is not a radar list — allied units, sonar contacts and plain
-   line-of-sight all set the same bit;
+1. it is **radar-like** because radar coverage is one of its producers, but
+   it is not a radar list — the viewing player's own (and allied-with-sharing)
+   units and plain line of sight set the same bit. Sonar contact does not:
+   the sonar arm of the contact callback writes only the separate sonar bit,
+   so a fully submerged hull reaches the list only through line of sight
+   `[03 R-VIS-01 §5]`. Nor is it a memory of earlier sightings: a unit
+   leaves the list at the first rebuild after a sensor pass stops marking it;
 2. `radardistancejam` **does** have an authoritative effect: it clears the same
    bit and therefore removes the candidate from every side's secondary list
    until the line-of-sight pass or an allied-vision pass sets the bit again
@@ -315,7 +321,12 @@ contracts:
 3. because the phase evaluates one observer, every side's secondary list is
    computed from the **local** player's sensors. In single player that is the
    human's view, and a computer opponent's fallback acquisition therefore
-   inherits it. **Unknown:** whether any second producer of that bit exists
+   inherits it. That view includes the human's own units, which pass 1 marks
+   on every pass and which are hostile to a computer player not allied with
+   the human, so such a computer player whose secondary-list gate is open
+   falls back to every one of the human's units inside the query radius,
+   seen by the computer or not.
+   **Unknown:** whether any second producer of that bit exists
    outside the recovered sensor phase; *decider:* static trace over the
    unrecovered regions.
 

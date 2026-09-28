@@ -246,6 +246,17 @@ func (g *gameShell) captureSettings() settings.Settings {
 	return s
 }
 
+// adoptLiveSettings starts a replacement shell (a content reload) from the
+// running shell's live preferences. The configured unit-limit word is carried
+// on its own: captureSettings returns only the file's own choice, while the
+// live word may also hold a --unit-limit or a restored save's limit, which
+// stays in force for the rest of the process [08 R-SESS-01 §9].
+func (g *gameShell) adoptLiveSettings(old *gameShell) {
+	g.applySettings(old.captureSettings())
+	g.setup.UnitLimit = old.setup.UnitLimit
+	g.settingsWritable = old.settingsWritable
+}
+
 // saveSettings writes the whole block back. A failed write is reported and
 // otherwise ignored: losing the preferences must never interrupt a game.
 func (g *gameShell) saveSettings() {

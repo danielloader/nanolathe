@@ -356,8 +356,7 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 	// The new shell starts from the running shell's live preferences, which
 	// the settings file may not hold yet, and then takes the pending
 	// selection.
-	shell.applySettings(old.captureSettings())
-	shell.settingsWritable = old.settingsWritable
+	shell.adoptLiveSettings(old)
 	// The window belongs to the process, not to the content: the new shell
 	// takes over the running shell's window state, which the window adapter
 	// polls through the host from the next update.
@@ -1573,9 +1572,10 @@ func (g *gameShell) loadingSelectionLines() []string {
 
 // effectiveUnitLimit is the per-player unit limit a skirmish entered now
 // would use, resolved from the same inputs battle entry resolves: a
-// Community feature table that sets one overrides the player's setting
-// (DESIGN_COMMUNITY_PATCH §3.2), and Strict 3.1 ignores every table. source
-// names what overrode the setting, "" when nothing did.
+// Community feature table's limit applies unless the player chose one, which
+// communitySources layers over every table (DESIGN_COMMUNITY_PATCH §3.2,
+// §4.1), and Strict 3.1 ignores every table. source names what overrode the
+// configured word, "" when nothing did.
 func (g *gameShell) effectiveUnitLimit() (limit int, source string) {
 	limit = g.setup.UnitLimit
 	features, err := session.ResolveCommunity(g.gameplay, communitySources(g.opts, g.cs))

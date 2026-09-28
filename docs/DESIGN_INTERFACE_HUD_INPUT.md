@@ -1007,12 +1007,17 @@ recomputes from the live clock every frame it is drawn and is not ring-backed
 `[07 R-HUD-04 §4]`.
 
 `installBattleClient` binds the HUD's primary COMIX FNT for this column through
-`SetMessageFNT`; `SetFNT` retains the side console for group digits
+`SetMessageFNT` and GAF-font slot 0 (`hattfont12`, the HUD's `modalFont`)
+through `SetMessageGAFFont`; `SetFNT` retains the side console for group digits
 `[03 R-FX-01 §6A]`, and the HUD passes its own font operands explicitly. The
-column advances by the COMIX glyph height. Each line resolves logical colour
-15 (ordinary) or 10 (the F3 destination) through the active palette map before
-recording its glyph command, so classic and modern share the same foreground
-`[07 R-HUD-03 §14.4]` `[07 "Retail palette contract"]` `[03 §4.3]`.
+column advances by the COMIX glyph height, but its text goes through the GAF
+pen: each glyph frame is a plain keyed blit of its authored bytes, so the lines
+keep `hattfont12`'s outlined face on any terrain and the F3 destination looks
+like every other line `[07 R-HUD-03 §14.4]` `[03 R-FONT-01 §6]`. Only with
+`hattfont12.gaf` missing does a line fall back to COMIX, resolving logical
+colour 15 (ordinary) or 10 (the F3 destination) through the active palette map
+before recording its glyph command, so classic and modern share the same
+foreground `[07 "Retail palette contract"]` `[03 §4.3]`.
 
 Successful battle installation clears the ring's producer/display cursors,
 including on save load, so captions and source handles from an earlier battle

@@ -680,9 +680,11 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 	cl.SetCamera(b.cam)
 	cl.SetPalette(b.hud.pal)
 	cl.SetFNT(b.hud.console)
-	// The later message column selects COMIX; group digits retain the side
-	// console face [07 R-HUD-03 §14.4][03 R-FX-01 §6A].
+	// The later message column selects COMIX for its line height and draws
+	// its text with GAF-font slot 0, hattfont12; group digits retain the side
+	// console face [07 R-HUD-03 §14.4][03 R-FONT-01 §6][03 R-FX-01 §6A].
 	cl.SetMessageFNT(b.hud.primaryFont)
+	cl.SetMessageGAFFont(b.hud.modalFont)
 	cl.SetDeveloperFont(b.hud.developerFont)
 	b.syncDeveloperView()
 	cl.SetMessageLogos(b.hud.logos)

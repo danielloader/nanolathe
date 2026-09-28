@@ -8525,7 +8525,7 @@ handle. Its callers, by the handle they pass:
 | a per-gadget FNT | the GUI label, button, list and text-input painters, the shared select-font-by-gadget helper and its callers (the text-input focus paths, the text-region wrapper, the message box) | the FNT of the **font record** (kind 7) the gadget's `fontnumber` selects from the same window — the n-th kind-7 record counting from 0, so `fontnumber` 0 is the window's first record (the walk is below); that record's FNT is loaded at GUI parse from the window's font directory plus the record's `filename` through the same raw file loader (missing file → null handle → the setter ignores it and the previously active font stays) |
 | the local player's **side font** (`font=` of `sidedata.tdf`, [02 §6], one handle per side record) | the battle frame composer (twice) and the unit-panel painter | every HUD number and string drawn with the FNT drawer in battle — resource counters, `FRATE`, the unit-panel readout, the group digit of [R-FX-01 §6] |
 | `SMLFONT` | the developer terrain pass inside the frame composer (two sites) | mode 1's `G` markers on acceptable path-search terminal cells, and mode 3's decimal per-cell metal values (§3.12); neither is a minimap label |
-| `COMIX` directly | the main-menu screen and the front-end state machine; in battle, the frame composer's diagnostic overlay, the unit-state and unit-builder probes, the unit panel's debug readout, and the status footer | `FRATE`, `Release`, `MODE`, `Game Time` and the profile labels; the probe dumps; the footer, which then draws through the GAF-font path of §6 |
+| `COMIX` directly | the main-menu screen and the front-end state machine; in battle, the frame composer's diagnostic overlay, the unit-state and unit-builder probes, the unit panel's debug readout, the status footer, and the message column | `FRATE`, `Release`, `MODE`, `Game Time` and the profile labels; the probe dumps; the footer and the message column, which then draw through the GAF-font path of §6 (the column also takes its line height from COMIX, [07 R-HUD-03 §14.4]) |
 
 **The per-gadget font walk (Established).** The four gadget painters that
 draw text — label, button, listbox and text input — each open with the same
@@ -8552,8 +8552,9 @@ label authors 0, so its caption is `smlfont` through the FNT drawer.
 
 **Which routine draws which family (Established).** Battle HUD text goes
 through the FNT drawer directly with the side font, except the diagnostic
-overlay and probes above (`COMIX`) and the status footer (GAF-font path with
-`COMIX` as its fallback). Shell text goes through
+overlay and probes above (`COMIX`), and the status footer and the message
+column (GAF-font path with `COMIX` as its fallback). In a stock install that
+path draws the message column in `hattfont12`, not COMIX. Shell text goes through
 the GAF-font trio of §6, which prefers the window's GAF font and falls back
 to the active FNT only when that slot is null; of the gadget painters, only
 the label painter uses the FNT drawer directly, and only for a label whose

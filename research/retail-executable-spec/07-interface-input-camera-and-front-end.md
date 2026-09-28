@@ -5118,11 +5118,13 @@ with screen height.
    decrementing with a wrap to 29 and stopping early if it reaches the display
    index. Lines are then drawn forward from that index up to, but not
    including, the producer.
-2. The primary UI font (`fonts/COMIX`, [03 R-FONT-01 §5]) is selected; let `h`
-   be that font's glyph height.
+2. The primary UI font (`fonts/COMIX`, [03 R-FONT-01 §5]) is made the active
+   FNT; let `h` be that font's glyph height (14 in the stock file). The text
+   is **not** drawn with it unless the GAF-font slot is null (step 6).
 3. The first line is drawn at `y = 52`; each drawn line advances `y` by `h`.
-4. The ordinary foreground is `dcb[15]`; the F3 destination uses `dcb[10]`
-   by the flag rule below.
+4. The FNT foreground is set to `dcb[15]`, or `dcb[10]` for the F3
+   destination by the flag rule below, with the skip colour 254 as the
+   background. Only the FNT fallback of step 6 reads it.
 5. A line whose speaker slot is not the sentinel first stamps that player's
    owner logo — the same primitive that draws `LOGO2` ([R-HUD-03 §2]), keyed by
    the owner's lobby colour index — stretched into the square
@@ -5130,18 +5132,35 @@ with screen height.
    starts at `x = trunc(138.0 + 1.5 × a)`, the multiply and the add done in
    doubles and truncated toward zero. A line carrying the sentinel — every unit
    caption, and every chat line — draws no logo and starts at `x = 138`.
-6. The text goes through the shared glyph drawer with an **unbounded** maximum
-   width and no outline colour, so a long line is bounded only by the
-   destination surface.
+6. The text goes through the **GAF-font pen** of [03 R-FONT-01 §6] with an
+   **unbounded** maximum width (`−1`) and mode 0, so a long line is bounded
+   only by the destination surface. The pen draws with the window's current
+   GAF-font slot. That is slot 0, `anims/hattfont12.gaf`, because every
+   painter that switches to slot 1 restores slot 0 when it finishes. That
+   includes the list and label painters and the slide strip drawn earlier in
+   the same frame ([03 R-FONT-01 §5], [R-HUD-04 §4]). Mode 0 copies each
+   glyph frame's bytes as authored. That gives the stock font's light khaki
+   face (palette index 66) and its dark outline, and the FNT foreground of
+   step 4 is never read. Only
+   a null slot, meaning a missing `hattfont12.gaf`, sends the line to the FNT
+   drawer, which uses COMIX in the step-4 colour with the width limit dropped.
+   A retail screenshot of the column confirms the GAF face: each drawn line's
+   ink width matches the `hattfont12` glyph widths, not COMIX's, and the text
+   is khaki with a dark outline, not a flat colour. The earlier reading of this
+   call as "the shared glyph drawer … no outline colour" mistook the pen's
+   width and mode arguments for an FNT outline parameter.
 
-**Established — the second colour marks the F3 destination.** The drawer
-uses `dcb[10]` when bit 5 of the entry's class byte is set and `dcb[15]`
-otherwise. F3 clears bit 5 across the ring, then sets it on the live-source
-message it chooses; its separate bit-4 visited marker controls cycling. The
-append operation's low-nibble write preserves both upper bits. The complete
-writer/reader chain is [R-CAM-01 §14], which supersedes the earlier negative
-writer census. Ring initialization is not a prerequisite for this branch's
-reachability.
+**Established — the second colour marks the F3 destination on the FNT
+fallback only.** The drawer installs `dcb[10]` when bit 5 of the entry's class
+byte is set and `dcb[15]` otherwise. F3 clears bit 5 across the ring, then
+sets it on the live-source message it chooses; its separate bit-4 visited
+marker controls cycling. The append operation's low-nibble write preserves
+both upper bits. The complete writer/reader chain is [R-CAM-01 §14], which
+supersedes the earlier negative writer census. Ring initialization is not a
+prerequisite for this branch's reachability. Because the pen ignores the FNT
+foreground while a GAF font is loaded (step 6), the two colours differ on
+screen only when `hattfont12.gaf` is missing. In a stock install the F3
+destination line looks like every other line.
 
 **Established — the class filter, and the `screenchat` polarity.** The drawer
 selects on a presenter-mode word. Process init sets that word to 3 and nothing
@@ -5188,8 +5207,9 @@ the ring is why the string can be produced and still never be seen.
    `textlines` is 0, and evicting the oldest visible line if the ring is at
    `textlines − 1` (§14.3).
 6. The master composer draws the last `textlines − 1` ring lines as a
-   left-aligned column at `x = 138`, first line at `y = 52`, one font height
-   apart, in `dcb[15]`, filtered by class as above (§14.4).
+   left-aligned column at `x = 138`, first line at `y = 52`, one COMIX glyph
+   height apart, in the `hattfont12` GAF font (`dcb[15]` in COMIX only when
+   that font is missing), filtered by class as above (§14.4).
 7. The line ages out `(textscroll + 1) × 30` ticks after it was stored.
 
 **Unknown — what a mission scripting layer can put in this ring.** None of the
@@ -8347,7 +8367,11 @@ column, so the highlight cannot leak onto the following line. The same walk
 carries the `screenchat` class filter and the speaker-sentinel test that
 decides the line's `x` (138 for sentinel 10, otherwise a logo-width offset), so
 one routine owns colour, filter and pen together. Nothing else in the recovered
-image reads the bit.
+image reads the bit. The pair is the FNT drawer's colour, and the column's
+text goes through the GAF-font pen, which reads it only on its null-slot
+fallback ([R-HUD-03 §14.4] step 6). The highlight is therefore visible only
+when `hattfont12.gaf` is missing. With the stock font the jumped-to line is
+drawn in the same authored glyph colours as every other line.
 
 **Established — F4 pins the score panel open and arms the kill/loss
 flash.** Interface-flags bit `0x80` has exactly two readers: the score

@@ -412,13 +412,16 @@ retain the four rate latches `[05 R-ECO-01 §1, §6]` `[07 R-HUD-03 §4]`.
 The client exports detached display deadlines for the host's save projection;
 neither presentation nor that overlay mutates live economy state [I6].
 
-Battle adoption binds the primary COMIX FNT with `SetMessageFNT`, preserving
-the side font installed by `SetFNT` for group digits `[03 R-FX-01 §6A]`.
-`SetFNT(nil)` clears both bindings on teardown. The message column's glyph
-commands use that font's height for line spacing and resolve each logical
-foreground through `paletteIndex` before recording. Both executors therefore
-receive physical palette indices; the indexed surface needs no further GUI
-colour lookup `[07 R-HUD-03 §14.4]` `[03 §4.3]`.
+Battle adoption binds the primary COMIX FNT with `SetMessageFNT` and the
+`hattfont12` GAF font with `SetMessageGAFFont`, preserving the side font
+installed by `SetFNT` for group digits `[03 R-FX-01 §6A]`. `SetFNT` resets the
+message bindings to its own FNT with no GAF font, so `SetFNT(nil)` clears them
+on teardown. The message column uses the FNT's height for line spacing. With a
+GAF font bound, each glyph is recorded as a plain keyed sprite of its authored
+frame. Without one, the column records FNT glyph commands and resolves each
+logical foreground through `paletteIndex` first. Both executors therefore
+receive physical palette indices, and the indexed surface needs no further GUI
+colour lookup `[07 R-HUD-03 §14.4]` `[03 R-FONT-01 §6]` `[03 §4.3]`.
 
 Battle adoption also binds the HUD's loaded LOGOS bank with
 `SetMessageLogos`. Real-speaker lines select `32xlogos` by the current committed

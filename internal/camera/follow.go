@@ -109,3 +109,54 @@ func (c *Camera) StepLatchedGlide() {
 		}
 	}
 }
+
+// Shake applies one phase-10 shake displacement to the current origin, after
+// the follow step, and clamps the result [07 R-CAM-01 §10][01 §4.4.1].
+//
+// Retail's shake moves only the current origin and never the desired one, and
+// phase 10 steps the current origin toward the desired origin on every pass,
+// so each jolt is pulled back at the bounded half-step rate and the view ends
+// where it started. This build keeps no live desired origin for an idle,
+// untracked camera: the scroll pass writes the current origin alone and a
+// glide is armed only when a writer asks for one. Without an anchor the jolts
+// would be a permanent random walk, and a large or repeated shake (a
+// commander's death blast) could leave the view screens away (issue #34).
+// So when nothing is tracked and no glide is in flight, the pre-shake origin
+// becomes the desired origin — the value retail's desired origin holds for a
+// settled camera — and the glide step returns the view to it. A tracked
+// follow and a glide already in flight keep their own desired origin, which
+// the shake does not change.
+//
+// The half-step stalls one pixel short of its target, so a return glide can
+// end one pixel away from the rest origin while the shake is still running.
+// A desired origin within that pixel is kept rather than replaced, so repeated
+// jolts cannot walk the rest origin away a pixel at a time.
+func (c *Camera) Shake(dx, dz int32) {
+	if c == nil || (dx == 0 && dz == 0) {
+		return
+	}
+	if c.Follow.latched == 0 {
+		rest := Origin{X: c.X, Z: c.Z}
+		if withinOnePixel(c.Follow.Desired, rest) {
+			rest = c.Follow.Desired
+		}
+		if !c.Follow.latchedGliding {
+			c.Follow.latchedDesired = rest
+			c.Follow.latchedGliding = true
+			if !c.Follow.Gliding {
+				c.Follow.Desired = rest
+				c.Follow.Gliding = true
+			}
+		}
+	}
+	c.X += dx
+	c.Z += dz
+	c.Clamp()
+}
+
+// withinOnePixel reports whether two origins differ by at most the one-pixel
+// stall of the phase-10 half-step on each axis.
+func withinOnePixel(a, b Origin) bool {
+	dx, dz := int64(a.X)-int64(b.X), int64(a.Z)-int64(b.Z)
+	return dx >= -1 && dx <= 1 && dz >= -1 && dz <= 1
+}

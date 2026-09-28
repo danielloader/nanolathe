@@ -199,9 +199,7 @@ func (b *battleSession) applyPublishedCamera(cur *frame.Frame) {
 	b.applyFollowCamera(cur)
 	dx := cur.ShakeOffsetX - b.appliedShakeX
 	dy := cur.ShakeOffsetY - b.appliedShakeY
-	if dx != 0 || dy != 0 {
-		b.cam.Pan(dx, dy)
-	}
+	b.cam.Shake(dx, dy)
 	b.appliedShakeX, b.appliedShakeY = cur.ShakeOffsetX, cur.ShakeOffsetY
 }
 

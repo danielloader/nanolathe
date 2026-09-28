@@ -406,6 +406,15 @@ A campaign file is an ordinary text file whose top level contains contiguous mis
 
 The campaign front end consumes titles, descriptions, difficulty choices, planet identifiers, briefing and narration names, panorama, rotation, glamour, and sound media, mission ordering and availability, and completion state. The front end presents both a campaign list and a mission list.
 
+**Unknown — root-level example descriptor.** The reference install has an
+`Example.tdf` at its root that names `Example.ufo`, whose mission map and
+zero-byte use-only file are available through the VFS. A manual retail play
+test on 2026-09-27 reached and completed its vehicle-plant mission, while the
+catalog enumeration traced below asks for `camps/*.tdf` and the current
+reference mount has no `camps/Example.tdf`. This does not establish that
+retail scans root TDFs. Inspect the tested retail install's campaign-file
+location and trace any loose-file alias before changing the catalog scope.
+
 ### Planet and briefing selection — Established with supported inference [P0-05]
 
 Planet values select parallel tables for briefing keys, panorama art, and rotation animation, each table holding the same number of entries and indexed by the same planet comparison. A special lunar branch rewrites the briefing selection when a display flag is set. The briefing controller opens a briefing panel, hides and shows specific interface groups, populates text, and fetches panorama and planet imagery through the same graphic lookup used elsewhere.
@@ -1096,12 +1105,18 @@ else:
      `2 ← losType & 1`, `0 ← mapping & 1`, `1 ← lineofsight & 1` from the
      mission-global words ([R-SKIR-01 §4], [03 R-VIS-01 §1]); then the
      **unit-restriction loader** runs: it opens resource-path slot 6
-     (`UseOnlyUnits`, [02 R-MAP-01 §1]); when the file exists it clears the
+     (`UseOnlyUnits`, [02 R-MAP-01 §1]); when the file opens as a nonempty TDF it clears the
      *available* bit of every catalog definition except the `None` sentinel
      at index 0 — index 1 upward, every real definition — then sets it
      again for every definition whose `unitname` matches a `[name]` section
      of the file (case-insensitive compare, first matching record per
-     section). A missing file leaves every definition available. The
+     section). A missing or zero-byte file leaves every definition available:
+     the TDF reader returns no tree for a file whose byte length is zero, and
+     the restriction loader skips the clear-and-restore work when it gets no
+     tree. This boundary is **Established** by the reader and loader control
+     flow; the reference install's `Example.ufo` contains a zero-byte
+     `camps/useonly/example.tdf` for the vehicle-plant mission. A nonempty
+     TDF that parses with no named sections takes the clear-everything arm. The
      available bit is the *compatible* flag of [02 R-CAT-01 §4] (bit 23 of
      the first definition-flags word), the same one the unit allocator
      tests ([05 R-SHARE-01 §8]); the loop's counter starts at 2 but its

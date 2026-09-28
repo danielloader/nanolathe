@@ -1206,7 +1206,8 @@ mission-critical flags are parsed and unread: retain them, act on none
 **C8 — the use-only route is live.** The `UseOnlyUnits` key is read at OTA load
 and routed through the resource resolver into the campaign use-only area, where
 it restricts the catalog the battle runs on `[08 "Mission placement record"]`
-`[08 R-ENTRY-01 §2]`.
+`[08 R-ENTRY-01 §2]`. A zero-byte use-only file yields no TDF tree and leaves
+the catalog intact; the installed Example mission relies on this boundary.
 
 **C9 — `InitialMission` runs once.** After every mission unit exists, on the
 loading path, for a campaign mission and for a between-missions restore. It

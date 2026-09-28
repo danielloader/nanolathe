@@ -50,6 +50,10 @@ func Discover(fs vfs.FSOps) ([]Campaign, error) {
 	retailOrder := false
 	var entries []vfs.EntryInfo
 	var err error
+	// TODO(question): retail can show the installed EXAMPLE mission, while this
+	// reference mount has its descriptor at the install root, outside camps/.
+	// Settle whether retail aliases that loose file into camps/ or the tested
+	// retail installation places a second copy there before extending discovery.
 	if ordered, ok := fs.(interface {
 		RetailReadDir(string) ([]vfs.EntryInfo, error)
 	}); ok {

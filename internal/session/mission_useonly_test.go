@@ -23,6 +23,9 @@ func TestUseOnlyRestrictionAtBattleEntry(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "camps", "useonly", "two.tdf"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "camps", "useonly", "empty.tdf"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	fs := vfs.New()
 	if err := fs.MountDirectory(root, 10); err != nil {
 		t.Fatalf("mount: %v", err)
@@ -71,6 +74,15 @@ func TestUseOnlyRestrictionAtBattleEntry(t *testing.T) {
 	}
 	if same != base || len(same.Units) != whole {
 		t.Fatalf("a missing restriction file must leave the catalog whole and unwrapped, got %d definitions", len(same.Units))
+	}
+	// A zero-byte file also yields no TDF tree in retail. The shipped Example
+	// mission uses one, so it must leave the build catalog available.
+	if _, err := fs.Stat("camps/useonly/empty.tdf"); err != nil {
+		t.Fatal(err)
+	}
+	zero, err := applyUseOnlyRestriction(fs, base, "camps/useonly/empty.tdf")
+	if err != nil || zero != base {
+		t.Fatalf("zero-byte restriction must leave the catalog untouched: err=%v", err)
 	}
 	// No authored UseOnlyUnits key routes to an empty path and never touches
 	// the VFS.

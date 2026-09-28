@@ -186,6 +186,11 @@ func LoadUseOnlyNames(fs vfs.FSOps, path string) ([]string, bool, error) {
 		// creatable [08 R-ENTRY-01 §2 step 4].
 		return nil, false, nil
 	}
+	// Retail's TDF reader returns no tree for a zero-byte file, so battle
+	// entry does not clear the catalog's available bits [08 R-ENTRY-01 §2].
+	if len(data) == 0 {
+		return nil, false, nil
+	}
 	doc, err := formats.ParseTDF(data)
 	if err != nil {
 		return nil, false, fmt.Errorf("nanolathe: unit-restriction file parse failed: logical path %s, providers searched [vfs], expected TDF sections naming allowed units: %w", path, err)

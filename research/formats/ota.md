@@ -192,9 +192,13 @@ mount plan yields 277 physical OTA entries but 275 winning logical OTA
 paths. Counting the winning bytes once per path gives 163 authored
 `AllUnitsKilled` keys, all with value `1`. Of 176 winning maps containing
 an `Easy`, `Medium` or `Hard` schema, 146 author the key and 30 omit it.
-The 13 winning campaign TDFs contain 175 sequential mission references to
-175 distinct maps; 145 of those maps author the key. The additional
-difficulty-schema map is `maps/example.ota`, which no campaign references.
+The 13 winning `camps/*.tdf` campaign TDFs contain 175 sequential mission
+references to 175 distinct maps; 145 of those maps author the key. The
+additional difficulty-schema map is `maps/example.ota`, which none of those
+13 campaigns references. The install's root-level `Example.tdf` names the
+`Example.ufo` mission; retail menu reachability of that descriptor has been
+observed manually, while its discovery route is not established by this
+census [08 "Campaign discovery"].
 Thus the inherited 163 count describes the whole winning map set, while
 176 counts difficulty-schema maps; the former claim that all 176 authored
 the key is withdrawn. Neither physical-entry totals nor difficulty-schema

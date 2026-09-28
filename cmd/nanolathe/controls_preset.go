@@ -225,10 +225,16 @@ func (r controlsPresetRow) valueText(value int) string {
 	return strconv.Itoa(value)
 }
 
+// knownControlsPreset reports whether name is one of the presets.
+func knownControlsPreset(name string) bool {
+	return name == controlsPresetCommunity || name == controlsPresetRetail || name == controlsPresetZero
+}
+
 // applyControlsPreset writes a named assignment of existing host options
-// once (§4.3, P10). Later changes by the player stick; nothing restores them.
+// once (§4.3, P10). Later changes by the player stick; only a switch away
+// from the content offers them back (restoreControlsPreset).
 func (g *gameShell) applyControlsPreset(name string) {
-	if name != controlsPresetCommunity && name != controlsPresetRetail && name != controlsPresetZero {
+	if !knownControlsPreset(name) {
 		return
 	}
 	for _, row := range controlsPresetRows {
@@ -236,6 +242,29 @@ func (g *gameShell) applyControlsPreset(name string) {
 			row.set(g, value)
 		}
 	}
+	g.finishControlsPreset()
+}
+
+// restoreControlsPreset undoes a preset when the player switches from the
+// content that recommends it to content that recommends none (§4.3): each
+// row still holding the value the preset writes returns to its retail
+// default. A row the player has since changed stays theirs, and a row the
+// retail preset leaves alone stays as it is.
+func (g *gameShell) restoreControlsPreset(from string) {
+	if !knownControlsPreset(from) || from == controlsPresetRetail {
+		return
+	}
+	for _, row := range controlsPresetRows {
+		value, retail := row.presetValue(from), row.retail
+		if value != presetUnchanged && retail != presetUnchanged && row.get(g) == value {
+			row.set(g, retail)
+		}
+	}
+	g.finishControlsPreset()
+}
+
+// finishControlsPreset brings the live audio in line with rows a preset wrote.
+func (g *gameShell) finishControlsPreset() {
 	g.audioPrefs.Normalize()
 	g.applyRetailAudioOptions()
 	if g.audioOwner != nil && g.audioOwner.Music != nil {
@@ -265,6 +294,32 @@ func (g *gameShell) controlsPresetOffer() (preset, key, name string) {
 		return "", "", ""
 	}
 	return g.cs.profileControls, "profile:" + g.cs.profile, "The " + g.cs.profile + " content"
+}
+
+// runningControlsPreset is the preset the running content recommends: the
+// mod's, else the content profile's when no mod is mounted.
+func (g *gameShell) runningControlsPreset() string {
+	if g == nil || g.cs == nil {
+		return ""
+	}
+	if g.cs.mod != nil {
+		return g.cs.mod.Controls
+	}
+	return g.cs.profileControls
+}
+
+// switchControlsPreset is what a switch to target offers on the Mods &
+// Mutators screen (§4.3): the target's own preset, or, when the target
+// recommends none and the running content recommends one other than retail,
+// that preset to undo (restore). A switch that offers neither returns "".
+func (g *gameShell) switchControlsPreset(target *modlibrary.Mod) (preset string, restore bool) {
+	if target != nil && target.Controls != "" {
+		return target.Controls, false
+	}
+	if running := g.runningControlsPreset(); running != "" && running != controlsPresetRetail {
+		return running, true
+	}
+	return "", false
 }
 
 // markControlsOffered records an offer, answered either way.

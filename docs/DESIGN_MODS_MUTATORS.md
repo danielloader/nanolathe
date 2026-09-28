@@ -296,7 +296,19 @@ mod:
   preset the same way. Either answer, and either way of offering, records the
   mod id — `profile:<name>` for a profile without a mod — in the settings
   key `controlsOffered`, so it is not asked again. Later changes by the
-  player stick, and switching back does not restore anything automatically.
+  player stick.
+
+  Switching away is offered the same way, never done automatically. When
+  the Mods & Mutators screen switches from content whose preset is not
+  `retail` to content that names none (the original game, or a mod without
+  one), the same toggle reads *Restore default settings*, *Yes* by default;
+  *Apply* then returns each row that still holds the leaving preset's value
+  to its `retail` value. A row the player changed since, and a row the
+  `retail` preset leaves alone, keep their values. Without this, a player
+  who took ProTA's settings kept its megamap overview, so the wheel no
+  longer zoomed and Tab no longer opened the menu, in every mod after it
+  (issue #19). A switch to a mod with its own preset offers that preset
+  instead.
 - **A missing mod at start.** If the saved mod's directory has gone, its base
   requirements (§4.2) are unmet, or it fails to open, build or bind, the game
   starts with no mod and the main menu shows one message naming the mod and

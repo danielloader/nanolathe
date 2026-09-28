@@ -295,3 +295,65 @@ func TestStrategicIconDiscoveryOrder(t *testing.T) {
 		t.Fatalf("explicit preference = %v/%v", icons, err)
 	}
 }
+
+// TestRestoreControlsPresetUndoesOnlyThePresetsRows: leaving ProTA for
+// content with no preset returns the rows ProTA still holds to their retail
+// defaults, so the wheel zooms and Tab opens the menu again (issue #19). A row
+// the player changed after applying it, and a row the retail preset leaves
+// alone, stay.
+func TestRestoreControlsPresetUndoesOnlyThePresetsRows(t *testing.T) {
+	g := presetTestShell(t)
+	g.applyControlsPreset(controlsPresetCommunity)
+	g.audioPrefs.CDMode = 3 // the player's own choice after the preset
+	g.restoreControlsPreset(controlsPresetCommunity)
+	p := g.presentation
+	if p.Overview != settings.OverviewZoom {
+		t.Errorf("overview = %d, want the zoom overview", p.Overview)
+	}
+	if p.CommunitySelection != 0 || p.GroupNumbers != 0 || p.VeteranLabels != 0 || boolInt(g.switchAlt) != settings.DefaultSwitchAlt || boolInt(g.clockVisible) != settings.DefaultClock || p.PlayerDotColors != settings.DefaultPlayerDotColors {
+		t.Error("a row the preset wrote kept its Community value")
+	}
+	if a := g.audioPrefs; a.SoundMode != settings.DefaultSoundMode || a.MixingBuffers != settings.DefaultMixingBuffers {
+		t.Errorf("audio = %+v, want the retail sound mode and voices", a)
+	}
+	if g.audioPrefs.CDMode != 3 {
+		t.Errorf("music mode = %d, want the player's 3", g.audioPrefs.CDMode)
+	}
+	if g.setup.NumPlayers != settings.MaxPlayers || p.MegamapWheel != 1 {
+		t.Error("the restore wrote a row the retail preset leaves alone")
+	}
+	before := g.presentation
+	g.restoreControlsPreset(controlsPresetRetail)
+	if g.presentation != before {
+		t.Error("restoring the retail preset changed a row")
+	}
+}
+
+// TestSwitchControlsPresetOffersRestoreOnlyWhenLeaving: the Mods & Mutators
+// screen offers a target's own preset, and the running preset's restore only
+// when the target recommends none.
+func TestSwitchControlsPresetOffersRestoreOnlyWhenLeaving(t *testing.T) {
+	prota := &modlibrary.Mod{Metadata: modlibrary.Metadata{ID: "prota", Controls: controlsPresetCommunity}}
+	plain := &modlibrary.Mod{Metadata: modlibrary.Metadata{ID: "plain"}}
+	zero := &modlibrary.Mod{Metadata: modlibrary.Metadata{ID: "zero", Controls: controlsPresetZero}}
+	for _, c := range []struct {
+		running *modlibrary.Mod
+		profile string
+		target  *modlibrary.Mod
+		preset  string
+		restore bool
+	}{
+		{running: prota, target: nil, preset: controlsPresetCommunity, restore: true},
+		{running: prota, target: plain, preset: controlsPresetCommunity, restore: true},
+		{running: prota, target: zero, preset: controlsPresetZero},
+		{running: nil, profile: controlsPresetCommunity, target: plain, preset: controlsPresetCommunity, restore: true},
+		{running: nil, target: prota, preset: controlsPresetCommunity},
+		{running: plain, target: nil},
+	} {
+		g := &gameShell{cs: &contentSet{mod: c.running, profileControls: c.profile}}
+		preset, restore := g.switchControlsPreset(c.target)
+		if preset != c.preset || restore != c.restore {
+			t.Errorf("running %v, target %v: got %q restore %v, want %q restore %v", c.running, c.target, preset, restore, c.preset, c.restore)
+		}
+	}
+}

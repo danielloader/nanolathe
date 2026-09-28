@@ -8189,8 +8189,34 @@ name none, so those counters are runtime/result data only.
 populated): for every display-array row in slot order, with `r` the running
 row number (starting 0) and `y = 93 + 20·r`: the gadget `PlayerColor%d` (`%d`
 = r) is created at (16, y, 91×21), its animation set to the logos GAF with
-frame = the slot's colour byte; the slot name is drawn beside it in the small
-font; then seven bar gadgets are created at `x` = 112 `Kills%d`, 186
+frame = the slot's colour byte. The slot name is then a label over it: the
+population makes GAF-font slot 1 (`hattfont11`) current, takes the line
+metric `m` (capital-I height plus two; the active FNT's height when the slot
+is null), appends a label through the append-label helper of
+[07 R-FE-02 §5] at `(16, y + trunc((20 − m) / 2))`, rewrites its attribute
+word to 2 (centre) and its width to 90, and makes slot 0 current again. The
+label keeps the helper's height 15, `colorf` 15 and `fontnumber` 0, and
+nothing zeroes that `colorf`: the window was built before the population
+ran, and the flash decay touches only buttons and picture boxes
+([07 R-WGT-01 §1]). `ENDMSN.GUI` authors no kind-7 font record, so the label
+painter's font walk selects the common font and the painter takes its GAF
+branch ([03 R-FONT-01 §6]): it makes slot 1 current itself, measures the
+name with that face, puts the pen at `x = 16 + 45 − trunc(tw / 2)` and the
+label's `y`, and draws one line with `maxW = 90` and `mode` = the label's
+`colorf`, 15. Every stock `hattfont11` glyph frame is compressed, so each
+glyph byte, outline and face alike, is remapped through row 15 of the light
+table: the names draw brighter than the mode-0 bar numbers beside them
+(face `(195,195,155)` → `(255,251,240)`, outline `(43,43,43)` → `(59,59,59)`
+under the stock palette). With slot 1 null the pen falls back to the FNT
+drawer with the common font `COMIX`, no width limit and raw palette index 15.
+Established (static trace of the population, the append helper and the label
+painter; `ENDMSN.GUI` and `hattfont11.gaf` asset census). A retail capture of
+the screen agrees: the names read clearly lighter than the bar digits drawn
+in the same face. **Unknown:** which FNT is active when the population runs on
+the skirmish results route, which sets `m` only when `hattfont11.gaf` is
+missing; no trace fixes the last FNT selection before it there.
+Then seven bar gadgets are created at
+`x` = 112 `Kills%d`, 186
 `Losses%d`, 260 `EProduced%d`, 334 `MProduced%d`, 408 `EWasted%d`, 482
 `MWasted%d`, 556 `Score%d`, each carrying the row's value, the column maximum,
 and a per-gadget float `max(1.0, value × 0.06666667)` (`value / 15`; it is
@@ -8223,7 +8249,7 @@ service body only while `current < target`, then advances once only when
 one unit after the sample; exact target equality leaves animation set, while a
 strictly overshooting candidate clears it. PlayerColor
 uses the source slot's colour frame from `textures/logos.gaf:32xlogos` in a
-stretched 91×21 surface, with the slot name centred in its 90×15 text area;
+stretched 91×21 surface, with the slot name the 90×15 centred label above;
 the compact result-row ordinal is not substituted for that source slot. The
 reveal deadline is strict, the inherited deadline is expired for the first
 Kills pass, and each subsequent group is ten presentation units later. In the

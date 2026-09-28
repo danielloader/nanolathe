@@ -1468,11 +1468,50 @@ of one, they begin a refresh later again.
 The loop is never held for a link that has stopped reporting, as a hidden
 window's does, nor while a slot already passed on is waiting for a frame.
 
-At a cap of the display's own rate every refresh carries content, nothing is
-kept back, and the late presents remain: 34 irregular intervals a second with
-the pointer moving at 120 FPS in the same battle. A layer the display cannot
-scan out directly is not affected, in a window or otherwise, at the price of
-two refreshes or more between a present and the display.
+**Composited fullscreen — Nanolathe host presentation policy (macOS).** At a
+cap of the display's own rate, or with none, every refresh carries content and
+the pacer has nothing to keep back. In the same fullscreen battle at 120 FPS
+on the 120 Hz panel, 15% of presents were shown late, and frames reached the
+display at the wrong interval 34 times a second with the pointer moving and
+13 with it still. A window the window server composites is shown from a
+longer queue, which absorbs the same disturbances: a present reaches the
+display four refreshes later instead of two.
+
+`nativeScanout` therefore chooses the composited route while the window is
+fullscreen, Enhanced is the executor and its frames are crowded: the cap's
+interval, less the same eighth, is no longer than the display's refresh
+period. The display scans out a fullscreen window directly only when its
+layer is declared opaque, so the declaration is withdrawn for that time and
+restored after it. Composited, no present was late, and the wrong intervals
+fell to 0.1 a second or none with the pointer moving and to about 0.4 with it
+still, most of those beside a frame the loop itself delivered late. The price
+is the two refreshes: 41 ms from a frame's beginning to the display, against
+24 ms. A heavy scene (1,600 units at 0.75x) held 119.4 FPS on the composited
+route. A route is changed once four host steps in a row have asked for it,
+since a fullscreen transition can ask for either for a step or two.
+
+A layer that is not opaque is blended over the window behind it, and
+Ebitengine clears the border around the game's picture to transparent black.
+The window's background colour is therefore black while the layer is blended,
+and its own again afterwards, so the border and the picture are the same on
+either route.
+
+The policy applies on a display of 100 refreshes a second or more. Whether a
+fullscreen window's frames are late on a display of 60, and what the
+composited route costs there, is unmeasured, and such a window keeps the
+direct route (`pacerCrowdedCeiling`). Windowed play is composited by the
+window server already. Before macOS 14, and with `--live-unpaced`, the window
+is left as Ebitengine made it.
+
+A paced cap keeps the direct route, which is the quicker and the less
+robust. On a quiet host its frames were not late; on a busier one, in four 60
+cap runs of the same battle, they reached the display at the wrong interval
+between 1 and 9 times a second, and in the two composited runs made beside
+them 0.9 times with the pointer still and 0.1 with it moving. At a 60 cap the
+composited route costs one refresh, 33 ms against 25 ms. Original presents on
+every refresh and keeps the direct route too: 31% of its presents were shown
+late with the pointer moving and none composited, and its content cadence is
+unmeasured on either route, since the live trace is Enhanced's.
 
 The default cap is 60 FPS. The Nanolathe options page offers 30 / 60 / 120 and
 previews changes immediately; OK persists them, Cancel restores the entry value.

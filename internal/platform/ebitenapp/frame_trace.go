@@ -56,9 +56,10 @@ type FrameTraceOptions struct {
 	Battle func() bool
 	// Metadata is written into summary.json unchanged.
 	Metadata map[string]any
-	// Unpaced leaves the display link unpaced, so the window presents on
-	// every refresh as Ebitengine does by itself: the other half of a
-	// comparison (DESIGN_GPU_RENDERER §13.5 "Present slots").
+	// Unpaced leaves the display link unpaced and the fullscreen window on
+	// the direct route, so the window presents as Ebitengine does by itself:
+	// the other half of a comparison (DESIGN_GPU_RENDERER §13.5 "Present
+	// slots", "Composited fullscreen").
 	Unpaced bool
 }
 
@@ -127,6 +128,9 @@ type frameRow struct {
 	// a frame it did not place, and how long it held the frame first.
 	paceLead int
 	paceHeld int64
+	// Whether the fullscreen window was on the composited route
+	// (nativeScanout).
+	composited bool
 }
 
 func newFrameTrace(opts *FrameTraceOptions) (*frameTrace, error) {
@@ -156,7 +160,7 @@ func newFrameTrace(opts *FrameTraceOptions) (*frameTrace, error) {
 			{Name: "/sched/pauses/total/gc:seconds"},
 			{Name: "/gc/heap/live:bytes"},
 		}}
-	fmt.Fprintln(t.w, "frame,upd_start,upd_end,steps,upd_bodies,draw_start,draw_end,due,hit,armed,sync,join1,join2,record,execute,blit,body,sim_wait,sim_batch,sim_joins,launch,passes,vertices,subjects,gc_cycles,alloc_bytes,gc_cpu_us,gc_pause_us,heap_live,x_prepare,x_model,x_place,x_replay,pre_us,released,battle,focused,refresh_us,cap_us,bodies,tick_prev,tick,tick16,cam16,cam_x100,cam_z100,atlas_uploads,atlas_union_kb,ptr_x,ptr_y,ptr_exits,ptr_enters,pace_lead,pace_held")
+	fmt.Fprintln(t.w, "frame,upd_start,upd_end,steps,upd_bodies,draw_start,draw_end,due,hit,armed,sync,join1,join2,record,execute,blit,body,sim_wait,sim_batch,sim_joins,launch,passes,vertices,subjects,gc_cycles,alloc_bytes,gc_cpu_us,gc_pause_us,heap_live,x_prepare,x_model,x_place,x_replay,pre_us,released,battle,focused,refresh_us,cap_us,bodies,tick_prev,tick,tick16,cam16,cam_x100,cam_z100,atlas_uploads,atlas_union_kb,ptr_x,ptr_y,ptr_exits,ptr_enters,pace_lead,pace_held,composited")
 	return t, nil
 }
 
@@ -343,7 +347,7 @@ func (t *frameTrace) flushRow() {
 		}
 	}
 	exits, enters := nativePointerCrossings.take()
-	fmt.Fprintf(t.w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", t.rows,
+	fmt.Fprintf(t.w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", t.rows,
 		r.updStart, r.updEnd, r.steps, r.updBodies, r.drawStart, r.drawEnd, b(r.due), b(r.hit), b(r.armed), b(r.sync),
 		r.join1, r.join2, r.record, r.execute, r.blit, r.body, r.simWait, r.simBatch, r.simJoins, r.launch,
 		r.passes, r.vertices, r.subs,
@@ -351,7 +355,7 @@ func (t *frameTrace) flushRow() {
 		int64(t.samples[2].Value.Float64()*1e6), int64(pauses*1e6), t.samples[4].Value.Uint64(),
 		r.xPrepare, r.xModel, r.xPlace, r.xReplay, r.preNanos/1000, r.released,
 		b(r.battle), b(r.focused), r.refresh, r.capUS, r.bodies, r.tickPrev, r.tick, r.tick16, r.cam16, r.camX100, r.camZ100, r.atlasUploads, r.atlasUnionKB,
-		t.pointerX, t.pointerY, exits, enters, r.paceLead, r.paceHeld)
+		t.pointerX, t.pointerY, exits, enters, r.paceLead, r.paceHeld, b(r.composited))
 	t.rows++
 	if t.rows%256 == 0 {
 		t.w.Flush()

@@ -479,6 +479,11 @@ since the first battle Draw; spans are microseconds:
   Ebitengine runs one frame for each presented frame, every row is a
   presented one, and `refresh_us` is the display's period as its link
   reports it, not a measurement of Draw arrivals.
+- `composited`: 1 while the fullscreen window was on the composited route
+  (DESIGN_GPU_RENDERER §13.5 "Composited fullscreen"), which adds two
+  refreshes between a present and the display that no other column shows.
+  It is zero in a window, under a paced cap, on hosts other than macOS and
+  with `--live-unpaced`.
 
 The time from one Draw's return to the next Update is Ebitengine's flush and
 present plus the wait for the next display-link callback; the report calls it
@@ -501,8 +506,9 @@ proof of cause: a late frame that coincides with nothing of ours in `frames.csv`
 (and one appears every ten to twenty seconds even in an empty skirmish) is
 the display link or the compositor.
 
-`--live-unpaced` leaves the display link unpaced for the run, so the window
-presents on every refresh: the other half of a comparison. A late present
+`--live-unpaced` leaves the display link unpaced for the run and a fullscreen
+window on the direct route, so the window presents on every refresh: the
+other half of a comparison. A late present
 that the window server causes is made on time and shown late, so neither
 trace sees it. What reaches the display, and when, is in a Metal System Trace
 of the same run (`xcrun xctrace record --template 'Metal System Trace'

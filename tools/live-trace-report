@@ -238,6 +238,9 @@ def report(directory, skip, late_rows):
             began = ", ".join(f"{lead} before its own {100.0 * n / len(placed):.1f}%" for lead, n in sorted(leads.items()))
             print(f"  present slots: {100.0 * len(placed) / len(presented):.1f}% of frames placed; began at the refresh {began};"
                   f" held {statistics.mean(ms(r['pace_held']) for r in placed):.2f} ms mean")
+        composited = sum(1 for r in presented if r.get("composited"))
+        if composited:
+            print(f"  composited fullscreen: {100.0 * composited / len(presented):.1f}% of frames, shown later than on the direct route")
         motion(presented, world_position, local_rates(presented, world_position), late_rows, "world", span)
         moving = [(a, b) for a, b in zip(presented, presented[1:]) if (a["cam_x100"], a["cam_z100"]) != (b["cam_x100"], b["cam_z100"])]
         print(f"  camera moving in {100.0 * len(moving) / max(1, len(presented) - 1):.1f}% of steps")

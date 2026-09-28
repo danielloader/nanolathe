@@ -119,6 +119,9 @@ type app struct {
 	beganAt  time.Time
 	paceHeld time.Duration
 	paceLead int
+	// scanout composites the fullscreen window while its frames are crowded
+	// (nativeScanout); a no-op on hosts that choose the route themselves.
+	scanout nativeScanout
 	// pipe is the record/submit pipeline's host state
 	// (docs/DESIGN_GPU_RENDERER.md §13.10). It is modern-only: the classic path
 	// never launches a pre-record and never joins one it did not launch.
@@ -207,6 +210,7 @@ func (a *app) Update() error {
 	a.trace.beginUpdate()
 	if a.trace != nil && a.trace.started {
 		a.trace.row.paceLead, a.trace.row.paceHeld = a.paceLead, int64(a.paceHeld/time.Microsecond)
+		a.trace.row.composited = a.scanout.composited()
 		defer func() { a.trace.row.updEnd = a.trace.now() }()
 	}
 	if !a.loopThreadRaised {
@@ -300,6 +304,7 @@ func (a *app) updateBody() {
 	// host can hold for milliseconds; ask once per step.
 	focused := ebiten.IsFocused()
 	a.fullscreenPresentation.update(a.fullscreen, focused)
+	a.scanout.update(a.fullscreen && a.mode == RendererModern && a.pacer.crowded())
 	applyInput(a.c.Input(), sample)
 	a.c.SetFocused(focused)
 	a.c.SetHostStepDue(sample.due)

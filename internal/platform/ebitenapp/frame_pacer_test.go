@@ -389,9 +389,76 @@ func TestFramePacerIgnoresAnImplausiblePeriod(t *testing.T) {
 }
 
 // A window with no pacer keeps its own cap.
+// A window's frames are crowded when every refresh of a fast display carries
+// one: the cap is no slower than the display. A display of 60 refreshes a
+// second is not treated so; what the composited route costs there is
+// unmeasured.
+func TestFramePacerFindsCrowdedFrames(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		cap  time.Duration
+		hz   int
+		want bool
+	}{
+		{"uncapped at 120 Hz", 0, 120, true},
+		{"120 cap at 120 Hz", time.Second / 120, 120, true},
+		{"144 cap at 120 Hz", time.Second / 144, 120, true},
+		{"60 cap at 120 Hz", time.Second / 60, 120, false},
+		{"30 cap at 120 Hz", time.Second / 30, 120, false},
+		{"uncapped at 60 Hz", 0, 60, false},
+		{"60 cap at 60 Hz", time.Second / 60, 60, false},
+	} {
+		l := newPacedLoop(c.hz, c.cap)
+		if l.p.crowded() {
+			t.Fatalf("%s: crowded before the display was measured", c.name)
+		}
+		for range 30 {
+			l.frame(3 * time.Millisecond)
+		}
+		if got := l.p.crowded(); got != c.want {
+			t.Fatalf("%s: crowded %v, want %v", c.name, got, c.want)
+		}
+		// The cap is the game's to change while it runs.
+		l.p.setInterval(time.Second / 60)
+		if l.p.crowded() {
+			t.Fatalf("%s: crowded under a 60 cap", c.name)
+		}
+	}
+}
+
+// The link misses refreshes while its thread is held, and a measurement that
+// starts again must not change the window's route and back.
+func TestFramePacerStaysCrowdedWhileTheDisplayIsMeasuredAgain(t *testing.T) {
+	var p framePacer
+	p.setInterval(time.Second / 120)
+	at, period := time.Unix(1000, 0), time.Second/120
+	target := time.Duration(0)
+	report := func(spacing time.Duration) {
+		target += spacing
+		p.refresh(at.Add(target), target)
+		p.returned()
+	}
+	for range 20 {
+		report(period)
+	}
+	if !p.crowded() {
+		t.Fatalf("frames at every refresh of a 120 Hz display are not crowded")
+	}
+	report(time.Second / 4)
+	if got := p.refreshPeriod(at.Add(target)); got != 0 || p.period != 0 {
+		t.Fatalf("the measurement did not start again: period %v", p.period)
+	}
+	if !p.crowded() {
+		t.Fatalf("a measurement that started again left the frames uncrowded")
+	}
+}
+
 func TestFramePacerIsOptional(t *testing.T) {
 	var p *framePacer
 	p.setInterval(time.Second / 60)
+	if p.crowded() {
+		t.Fatalf("no pacer reported crowded frames")
+	}
 	p.awaitFrame(time.Now, waitForRefresh)
 	if got := p.refreshPeriod(time.Now()); got != 0 {
 		t.Fatalf("no pacer reported a refresh period %v", got)

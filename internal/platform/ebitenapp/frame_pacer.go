@@ -45,6 +45,11 @@ type framePacer struct {
 	spacings   [pacerSpacings]time.Duration
 	spacing    int
 	lastTarget time.Duration
+	// display is the last period a full set of spacings gave. It outlives a
+	// measurement that starts again, and is not moved by the first spacings
+	// of the next, which can span refreshes the link missed: what is chosen
+	// from it does not change with every refresh the link misses.
+	display time.Duration
 	// lastSlot is the display time of the last refresh passed on and open
 	// that of the slot a frame may now begin for, both on the link's clock.
 	lastSlot, open time.Duration
@@ -96,6 +101,15 @@ const (
 	// overrun before frames begin a refresh earlier.
 	pacerWorkWindow = 64
 	pacerWorkLong   = 4
+	// pacerCrowdedCeiling is the longest refresh period of a display whose
+	// fullscreen window is composited when every refresh carries a frame.
+	// The composited route costs two refreshes of latency, which was
+	// measured, and accepted, on a display of 120 refreshes a second.
+	// TODO(question): whether a fullscreen window on a display of 60
+	// refreshes a second shows frames late in the same way, and what the
+	// composited route costs there, is unmeasured; a Metal System Trace of
+	// fullscreen play on such a display would settle both.
+	pacerCrowdedCeiling = time.Second / 100
 )
 
 // setInterval is nil-safe, as are refreshPeriod and awaitFrame: a host with
@@ -216,14 +230,36 @@ func (p *framePacer) measure(target time.Duration) {
 	p.spacings[p.spacing] = spacing
 	p.spacing = (p.spacing + 1) % len(p.spacings)
 	p.period = 0
+	settled := true
 	for _, s := range p.spacings {
-		if s > 0 && (p.period == 0 || s < p.period) {
+		if s == 0 {
+			settled = false
+		} else if p.period == 0 || s < p.period {
 			p.period = s
 		}
 	}
 	if p.period > pacerPeriodCeiling {
 		p.period = 0
 	}
+	if settled && p.period != 0 {
+		p.display = p.period
+	}
+}
+
+// crowded reports whether the window presents on every refresh of a fast
+// display: the cap leaves the pacer no refresh to keep back, so a fullscreen
+// window's presentation queue has none to spare (nativeScanout).
+func (p *framePacer) crowded() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.display == 0 || p.display > pacerCrowdedCeiling {
+		return false
+	}
+	interval := min(time.Duration(p.interval.Load()), pacerIntervalCeiling)
+	return interval-interval/8 <= p.display
 }
 
 // returned is Ebitengine returning the slot it was last passed: the frame

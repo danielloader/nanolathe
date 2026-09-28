@@ -261,7 +261,7 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	set.Float64Var(&opts.LiveProfileFrom, "live-profile-from", -1, "start a CPU profile this many seconds into a --live-trace run (negative = none)")
 	set.Float64Var(&opts.LiveExecTrace, "live-exec-trace", 0, "with --live-profile-from, also record this many seconds of Go execution trace")
 	set.BoolVar(&opts.LiveFlight, "live-flight", false, "keep a Go execution trace flight recorder during --live-trace and write flight-<frame>.trace around frame spikes")
-	set.BoolVar(&opts.LiveUnpaced, "live-unpaced", false, "with --live-trace, present on every display refresh instead of on the capped frames' own (macOS; for comparison)")
+	set.BoolVar(&opts.LiveUnpaced, "live-unpaced", false, "with --live-trace, present on every display refresh and scan a fullscreen window out directly, as Ebitengine does by itself (macOS; for comparison)")
 	set.StringVar(&opts.ShotSize, "shot-size", "", "surface size \"WxH\" for --shot, one of the display modes (default 640x480)")
 	set.StringVar(&opts.ShotDebris, "shot-debris", "", "prototype: kill a cluster of units and write one modern PNG per tick to this directory")
 	set.StringVar(&opts.ShotDebrisUnit, "shot-debris-unit", "armstump", "unit the --shot-debris capture blows up")

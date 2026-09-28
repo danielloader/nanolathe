@@ -59,6 +59,9 @@ func (m Mod) WithProfileDefaults(profile contentprofiles.Profile) Mod {
 	if m.MinimumGameplay == "" {
 		m.MinimumGameplay = profile.MinimumGameplay
 	}
+	if m.BuildMenuPageSize == 0 {
+		m.BuildMenuPageSize = profile.Presentation.BuildMenuPageSize
+	}
 	return m
 }
 

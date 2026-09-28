@@ -76,6 +76,9 @@ type Presentation struct {
 	TeamLogos              string `json:"team_logos,omitempty"`
 	ShowRanges             bool   `json:"show_ranges"`
 	PlacementWeaponRanges  *bool  `json:"placement_weapon_ranges,omitempty"`
+	// BuildMenuPageSize is the content set's build page lock, spelled and
+	// applied as mod metadata's buildMenuPageSize; the mod's own value wins.
+	BuildMenuPageSize int `json:"build_menu_page_size,omitempty"`
 }
 
 // Profile is one content set's load-time description.
@@ -138,6 +141,9 @@ func parse(data []byte, origin string) (Profile, error) {
 	profile.Name = strings.ToLower(strings.TrimSpace(profile.Name))
 	if profile.Name == "" {
 		return Profile{}, fmt.Errorf("nanolathe: content profile has no name: logical path %s, providers searched [%s], expected a named content profile", origin, origin)
+	}
+	if profile.Presentation.BuildMenuPageSize < 0 {
+		return Profile{}, fmt.Errorf("nanolathe: content profile build_menu_page_size %d is negative: logical path %s, providers searched [%s], expected a positive number of products per build page or omitted", profile.Presentation.BuildMenuPageSize, origin, origin)
 	}
 	switch profile.Controls {
 	case "", ControlsCommunity, ControlsRetail, ControlsZero:

@@ -234,6 +234,7 @@ func (h *retailBattleHUD) overflowSidebarWindow(b *battleSession, f *frame.Frame
 		}
 	}
 	p.starts = p.starts[:0]
+	p.cellStarts = nil
 	selected := 0
 	for i, part := range parts {
 		p.starts = append(p.starts, part.anchor)

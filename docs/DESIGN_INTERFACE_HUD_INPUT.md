@@ -1611,6 +1611,33 @@ and select every builder with authored product pages; testing only commanders or
 pre-transition windows masks retained shortcut differences. Classic and preference-Off use the existing layout tests. This is a
 host UI extension, not a promise to support arbitrary replacement command GUIs.
 
+#### Build page lock
+
+**Nanolathe host presentation policy**, added because mods that author a fixed
+number of products on each page (commonly twelve) place them deliberately, and
+auto-flow re-partitions them. A positive lock caps each expanded build page at
+that many logical cells, and a locked page also never spans two authored
+source pages, so a short authored page stays a page of its own rather than
+pulling the next page's products forward. Cells keep the ordering and
+normalized two-column geometry above; the lock changes only where pages break.
+Composites still count as one cell.
+
+The lock resolves in this order, first positive value winning:
+
+1. the player's `presentation.buildMenuPageSize` in the settings file, which has
+   no options row;
+2. the mounted mod's `buildMenuPageSize` metadata (DESIGN_MODS_MUTATORS §4.2);
+3. the content profile's `presentation.build_menu_page_size`, which a mod
+   without its own value inherits;
+4. none: auto-flow, the default, fills every complete row that fits.
+
+A lock larger than the rows that fit on the current surface does not shrink or
+split: the builder keeps the authored/fitted layout, which is the mod's own
+placement. Classic and Expanded sidebar Off ignore the lock. Page count is one
+Orders page plus the locked partitions; the pager, resize anchoring and reseed
+rules above are unchanged. `TestExpandedSidebarBuildPageLock` locks the
+precedence, the short-page break and the oversized fallback.
+
 #### Rail backdrop
 
 **Nanolathe host presentation policy.** Retail stamps the side's `PANELSIDE`

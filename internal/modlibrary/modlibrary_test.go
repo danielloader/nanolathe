@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	contentprofiles "github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
@@ -819,5 +820,25 @@ func TestContentValidator(t *testing.T) {
 		if got := (Mod{Metadata: meta, Dir: "/mods/sample/1.0"}).ContentProfileSelector(); got != want {
 			t.Errorf("ContentProfileSelector(%q) = %q, want %q", selector, got, want)
 		}
+	}
+}
+
+// A mod's build page lock is presentation metadata: negative is refused, and
+// an omitted value takes the content profile's while an authored one wins.
+func TestBuildMenuPageSizeMetadata(t *testing.T) {
+	meta := sampleMetadata()
+	meta.BuildMenuPageSize = -1
+	if err := meta.Validate(); err == nil {
+		t.Fatal("negative buildMenuPageSize validated")
+	}
+	var profile contentprofiles.Profile
+	profile.Presentation.BuildMenuPageSize = 12
+	if got := (Mod{Metadata: sampleMetadata()}).WithProfileDefaults(profile).BuildMenuPageSize; got != 12 {
+		t.Fatalf("omitted lock took %d, want the profile's 12", got)
+	}
+	meta = sampleMetadata()
+	meta.BuildMenuPageSize = 6
+	if got := (Mod{Metadata: meta}).WithProfileDefaults(profile).BuildMenuPageSize; got != 6 {
+		t.Fatalf("authored lock became %d, want 6", got)
 	}
 }

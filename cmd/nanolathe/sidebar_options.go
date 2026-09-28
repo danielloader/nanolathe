@@ -11,6 +11,19 @@ func (b *battleSession) expandedSidebarEnabled() bool {
 	return settings.DefaultPresentation().ExpandedSidebar != 0
 }
 
+// buildPageLock is the expanded sidebar's fixed build page size, or zero for
+// auto-flow. The player's settings file wins over the running mod, and the mod
+// over auto-flow (interface design §3.3 "Build page lock").
+func (b *battleSession) buildPageLock() int {
+	if b == nil {
+		return 0
+	}
+	if b.shell != nil && b.shell.presentation.BuildMenuPageSize > 0 {
+		return b.shell.presentation.BuildMenuPageSize
+	}
+	return max(b.modBuildPageSize, 0)
+}
+
 // expandedSidebarActive reports whether the flat Expanded sidebar layout is
 // selected: the Modern renderer with the preference on.
 func (b *battleSession) expandedSidebarActive() bool {

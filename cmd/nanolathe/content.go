@@ -68,6 +68,19 @@ type contentSet struct {
 	profileControls string
 }
 
+// buildMenuPageSize is the running content's build page lock: a mounted mod's
+// metadata, which already carries its profile's value when it names none,
+// else the content profile's own (interface design §3.3 "Build page lock").
+func (c *contentSet) buildMenuPageSize() int {
+	if c == nil {
+		return 0
+	}
+	if c.mod != nil && c.mod.BuildMenuPageSize > 0 {
+		return c.mod.BuildMenuPageSize
+	}
+	return c.presentation.BuildMenuPageSize
+}
+
 func (c *contentSet) Close() error {
 	if c.unmappedMount == nil {
 		return nil

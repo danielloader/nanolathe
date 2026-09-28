@@ -322,9 +322,18 @@ func (h *retailBattleHUD) sidebarProductsWindow(b *battleSession, f *frame.Frame
 	if capacity < 2 {
 		return nil
 	}
+	// A locked page that does not fit keeps the authored/fitted layout rather
+	// than splitting the mod's pages (§3.3 "Build page lock").
+	lock := b.buildPageLock()
+	if lock > 0 {
+		if lock > capacity {
+			return nil
+		}
+		capacity = lock
+	}
 	p := &h.sidebarPaging
 	reseed := !p.flat || p.definition != def || p.builder != f.CommandPage.Builder || !slices.Equal(p.selection, f.Selection.Handles) || p.authoredPage != int(f.CommandPage.Page) || p.authoredRemembered != buildButtonPage(f) || p.authoredCount != int(f.CommandPage.PageCount)
-	key := expandedSidebarKey{base: base, definition: def, width: int32(width), height: int32(height), page: int(f.CommandPage.Page), count: int(f.CommandPage.PageCount), remembered: buildButtonPage(f), localPage: p.state.Page, flat: true, transport: f.CommandPage.IsTransport, builder: f.CommandPage.Builder}
+	key := expandedSidebarKey{base: base, definition: def, width: int32(width), height: int32(height), page: int(f.CommandPage.Page), count: int(f.CommandPage.PageCount), remembered: buildButtonPage(f), localPage: p.state.Page, lock: lock, flat: true, transport: f.CommandPage.IsTransport, builder: f.CommandPage.Builder}
 	if !reseed && key == h.expandedSidebar.key && h.expandedSidebar.window != nil {
 		return h.expandedSidebar.window
 	}
@@ -355,13 +364,21 @@ func (h *retailBattleHUD) sidebarProductsWindow(b *battleSession, f *frame.Frame
 	}
 	p.capacity = capacity
 	p.starts = nil
-	p.state.Count = 1 + (len(c.cells)+capacity-1)/capacity
-	p.state.Remembered = 1 + p.anchor/capacity
+	p.cellStarts = sidebarPageStarts(c.cells, capacity, lock > 0)
+	p.state.Count = 1 + len(p.cellStarts)
+	p.state.Remembered = 1
+	for i, first := range p.cellStarts {
+		if first <= p.anchor {
+			p.state.Remembered = 1 + i
+		}
+	}
 	if p.state.Page != 0 {
 		p.state.Page = p.state.Remembered
 	}
-	start := (p.state.Remembered - 1) * capacity
-	end := min(start+capacity, len(c.cells))
+	start, end := p.cellStarts[p.state.Remembered-1], len(c.cells)
+	if p.state.Remembered < len(p.cellStarts) {
+		end = p.cellStarts[p.state.Remembered]
+	}
 	p.anchor = start
 	p.anchorSource = c.cells[start].products[0].source
 	// The same command panel remains visible on every local page.
@@ -441,4 +458,19 @@ func sidebarFittedArtRect(cell gui.Rect, art *formats.GAFFrame) gui.Rect {
 		w = max(1, int32(int64(h)*int64(art.Width)/int64(art.Height)))
 	}
 	return gui.Rect{X: cell.X + (cell.W-w)/2, Y: cell.Y + (cell.H-h)/2, W: w, H: h}
+}
+
+// sidebarPageStarts partitions the logical cells into local build pages and
+// returns each page's first cell. Auto-flow fills every page to capacity. A
+// locked page also never spans two source pages, so a mod that places a fixed
+// number of products on each authored page keeps that page membership even
+// where an authored page is short (interface design §3.3 "Build page lock").
+func sidebarPageStarts(cells []sidebarBuildCell, capacity int, locked bool) []int {
+	var starts []int
+	for i, cell := range cells {
+		if len(starts) == 0 || i-starts[len(starts)-1] >= capacity || locked && cell.page != cells[starts[len(starts)-1]].page {
+			starts = append(starts, i)
+		}
+	}
+	return starts
 }

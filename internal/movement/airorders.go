@@ -827,12 +827,7 @@ func (s *System) legPadLanding(u *units.Unit, n *orders.Node, satisfied uint32, 
 			n.Phase = 2
 			return 2
 		}
-		ox, oz := offsetAtBearing(uint16(n.Param1), numeric.Fixed(int64(firstWeaponRange(u))<<16))
-		m := s.newPointMarker(u, Vec3{X: pad.X - ox, Y: pad.Y, Z: pad.Z - oz})
-		m.setArrivalRadius(0x80)
-		s.installAirGoal(u, n, m)
-		n.DynamicGate = 0xE8
-		n.Param1 = uint32(uint16(n.Param1) + uint16(0x4000))
+		s.padLoiterLeg(u, n, Vec3{X: pad.X, Y: pad.Y, Z: pad.Z}, firstWeaponRange(u))
 		return 2
 	case 2:
 		m := s.newFollowPieceMarker(u, n.Target, airNoPiece)
@@ -897,7 +892,7 @@ func (s *System) legPadLanding(u *units.Unit, n *orders.Node, satisfied uint32, 
 			if reservation != nil && padRepairsLander(u, pad) {
 				// Leave through the ordinary move executor after SelfRepair,
 				// including when there was no suspended order to free the pad.
-				goal := s.repairHoldingPoint(reservation)
+				goal := s.repairDeparturePoint(reservation)
 				airSpawnAtHead(u, "VTOL_Move", 0, goal, tick)
 			}
 			if padRepairsLander(u, pad) {
@@ -914,6 +909,22 @@ func (s *System) legPadLanding(u *units.Unit, n *orders.Node, satisfied uint32, 
 	default:
 		return 7
 	}
+}
+
+// padLoiterLeg is `VTOL_Landing` phase 1's leg when no piece is free
+// [04 R-AIR-01 §6]: a point marker at the centre offset by the loiter bearing
+// in the record's scratch word, at the given radius, with horizontal arrival
+// radius 128. The gate is the movement outcomes plus target removal, so the
+// record re-runs when the marker is reached, and the bearing advances a quarter
+// turn for the next leg. The only random draw is phase 0's bearing. The Modern
+// repair-pad queue flies the same leg while it waits.
+func (s *System) padLoiterLeg(u *units.Unit, n *orders.Node, centre Vec3, radius int32) {
+	ox, oz := offsetAtBearing(uint16(n.Param1), numeric.Fixed(int64(radius)<<16))
+	m := s.newPointMarker(u, Vec3{X: centre.X - ox, Y: centre.Y, Z: centre.Z - oz})
+	m.setArrivalRadius(0x80)
+	s.installAirGoal(u, n, m)
+	n.DynamicGate = 0xE8
+	n.Param1 = uint32(uint16(n.Param1) + uint16(0x4000))
 }
 
 // padRepairsLander is `VTOL_Landing` phase 6's three-clause repair test

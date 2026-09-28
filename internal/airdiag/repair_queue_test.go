@@ -35,7 +35,8 @@ func TestModernAircraftRepairQueueDrains(t *testing.T) {
 		all := true
 		for i, u := range planes {
 			q := orders.QueueForUnit(u)
-			if n := q.Head(); n != nil && orders.DescriptorFor(n.ID).Name == "VTOL_Landing" && n.Phase == 1 && n.DynamicGate == 1 {
+			// A waiter flies the loiter leg: the retail wake set plus the claim retry.
+			if n := q.Head(); n != nil && orders.DescriptorFor(n.ID).Name == "VTOL_Landing" && n.Phase == 1 && n.DynamicGate == 0xE9 {
 				waited = true
 				if u.Health != u.Def.MaxDamage-20 || u.Attachment.Carrier != 0 {
 					t.Fatal("waiting healed or attached an aircraft")

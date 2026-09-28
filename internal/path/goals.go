@@ -321,6 +321,47 @@ func IsRectGoal(g Goal) (r Rect, ok bool) {
 	return Rect{}, false
 }
 
+// StandBounds returns, for the two shaped families, a rectangle holding every
+// cell whose heuristic reads zero and every cell the start predicate accepts
+// [04 R-PATH-01 §9]: the cells a mover approaching the goal comes to rest on.
+// For a rectangle that is the stored rectangle, whose border is both sets. For an annulus the two bands differ — the heuristic
+// clamps against the octile radii and arrival compares the separately stored
+// squared cell thresholds [04 §7.4] — so the square about the centre reaches
+// the farther of the zero band's outer edge, the octile outer radius over
+// eighteen per major-axis cell, and the arrival band's, the root of the squared
+// outer threshold. A point goal, an annulus with neither outer bound
+// non-negative, and any other family report false.
+// Nothing in the search reads it; it answers Nanolathe Modern jam release
+// (docs/DESIGN_MOVEMENT_PATH.md "Modern jam release").
+func StandBounds(goal Goal) (Rect, bool) {
+	switch g := goal.(type) {
+	case *rectGoal:
+		if g == nil {
+			return Rect{}, false
+		}
+		return g.rect, true
+	case *annulusGoal:
+		if g == nil {
+			return Rect{}, false
+		}
+		reach := int32(-1)
+		if g.outer >= 0 {
+			reach = g.outer / 18 // a zero heuristic needs 18·max <= oct <= outer
+		}
+		if g.outerSq >= 0 {
+			reach = max(reach, int32(numeric.ISqrt64(int64(g.outerSq))))
+		}
+		if reach < 0 {
+			return Rect{}, false
+		}
+		return Rect{
+			Min: Cell{X: g.center.X - reach, Z: g.center.Z - reach},
+			Max: Cell{X: g.center.X + reach, Z: g.center.Z + reach},
+		}, true
+	}
+	return Rect{}, false
+}
+
 // RetailGoalWords exposes the stored goal parameters in saved order. Radius
 // squares are independent live fields and must not be recomputed [08 R-SAVE-02 §10].
 func RetailGoalWords(goal Goal) (uint32, []uint32, bool) {

@@ -237,17 +237,16 @@ func (s *System) noteJamRelease(u *units.Unit, coll *CollisionState, blocked boo
 // release may carry u into. For an ordinary point goal that is a cell of u's
 // goal footprint, which Modern crowded arrival finishes where the unit stands
 // (DESIGN_MOVEMENT_PATH "Modern crowded arrival"). For a work approach's
-// shaped goal it is a cell of the goal's stand region: the grown rectangle a
-// build or reclaim approach arrives on, or the band an assist or repair
-// approach arrives in. A builder already working there is parked beside the
-// site, far from the rectangle's anchor point, so the point test alone never
-// saw it and a jammed second builder was released straight through it.
+// shaped goal it is a cell of the goal's stand region (workStandHeld). A
+// builder already working at a site stands beside it, away from the goal's
+// anchor point, so the point test alone never saw it and a jammed second
+// builder was released straight through it (issue #31).
 func (s *System) goalHeldByParkedFriend(u *units.Unit, coll *CollisionState) bool {
 	if s.Grid == nil {
 		return false
 	}
-	if goal := s.shapedMoveGoal(u); goal != nil {
-		return s.shapedGoalHeldByParkedFriend(u, goal)
+	if held, shaped := s.workStandHeld(u); shaped {
+		return held
 	}
 	gx, gz, ok := s.moveGoalForUnit(u)
 	if !ok {
@@ -265,61 +264,47 @@ func (s *System) goalHeldByParkedFriend(u *units.Unit, coll *CollisionState) boo
 	return false
 }
 
-// shapedMoveGoal returns the annulus or rectangle payload bound to u's
-// current head, or nil for a point goal or no goal.
-func (s *System) shapedMoveGoal(u *units.Unit) path.Goal {
+// workStandHeld reports, when u's head is a ground work approach with a bound
+// annulus or rectangle payload (shaped), whether a parked friend holds a cell
+// of that goal's stand region. The rectangle's region — mobile build, feature
+// and unit reclaim, resurrect, repair and capture — is the whole grown
+// rectangle, border and interior: a unit of any footprint standing flush
+// against the target holds at least one of its cells. The annulus's region —
+// the assist approach — is every cell of path.StandBounds that its heuristic
+// reads zero on or its start predicate accepts; the follower halts an arriving
+// assister on the first committed anchor the start predicate accepts
+// [04 R-MOV-03 §2], which can lie a cell outside the zero band because the two
+// bands use different stored radii [04 R-PATH-01 §9].
+// Other rows keep the point test: an attack chase's band and a park rectangle
+// are not work sites. The scan is bounded by the goal's own rectangle, reads
+// the occupancy grid once a cell, and allocates nothing.
+func (s *System) workStandHeld(u *units.Unit) (held, shaped bool) {
 	q := orders.QueueForUnit(u)
-	if q == nil {
-		return nil
+	if q == nil || q.Head() == nil {
+		return false, false
+	}
+	switch orders.DescriptorFor(q.Head().ID).Name {
+	case "MobileBuild", "HelpBuild", "Reclaim", "ReclaimUnit", "Resurrect", "RepairUnit", "Capture":
+	default:
+		return false, false
 	}
 	goal := s.moveGoalPayload(u.Handle, q.Head())
-	if goal == nil {
-		return nil
+	b, ok := path.StandBounds(goal)
+	if !ok {
+		return false, false
 	}
-	if k := path.DescribeGoal(goal).Kind; k != goalTraceAnnulus && k != goalTraceRect {
-		return nil
-	}
-	return goal
-}
-
-// The path package's goal-trace kinds for the two shaped ground goals.
-const (
-	goalTraceAnnulus = 2
-	goalTraceRect    = 3
-)
-
-// shapedGoalHeldByParkedFriend reports whether a parked friend holds a cell of
-// the shaped goal's stand region. The rectangle's region is the whole grown
-// rectangle, border included: a unit of any footprint standing flush against
-// the target holds at least one of its cells. The annulus's region is the
-// band its heuristic reads zero in, bounded by the outer radius over the
-// octile's eighteen-per-cell major axis.
-func (s *System) shapedGoalHeldByParkedFriend(u *units.Unit, goal path.Goal) bool {
-	d := path.DescribeGoal(goal)
-	var r path.Rect
-	switch d.Kind {
-	case goalTraceRect:
-		r = d.Rect
-	case goalTraceAnnulus:
-		reach := max(d.B, 0) / 18
-		r = path.Rect{
-			Min: path.Cell{X: d.Center.X - reach, Z: d.Center.Z - reach},
-			Max: path.Cell{X: d.Center.X + reach, Z: d.Center.Z + reach},
-		}
-	default:
-		return false
-	}
-	for z := r.Min.Z; z <= r.Max.Z; z++ {
-		for x := r.Min.X; x <= r.Max.X; x++ {
-			if d.Kind == goalTraceAnnulus && goal.H(path.Cell{X: x, Z: z}) != 0 {
+	_, rect := path.IsRectGoal(goal)
+	for z := b.Min.Z; z <= b.Max.Z; z++ {
+		for x := b.Min.X; x <= b.Max.X; x++ {
+			if !s.parkedFriendAt(u, Cell{X: x, Z: z}) {
 				continue
 			}
-			if s.parkedFriendAt(u, Cell{X: x, Z: z}) {
-				return true
+			if c := (path.Cell{X: x, Z: z}); rect || goal.H(c) == 0 || goal.StartSatisfied(c) {
+				return true, true
 			}
 		}
 	}
-	return false
+	return false, true
 }
 
 // parkedFriendAt reports whether cell c is held by a friendly ground unit of

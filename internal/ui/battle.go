@@ -130,12 +130,18 @@ type BattleInputState struct {
 	BuildFootZ      int32
 	BuildOK         bool
 	BuildNeedsClear bool
-	BuildMX         int32
-	BuildMY         int32
-	BuildCellX      int32
-	BuildCellZ      int32
-	BuildSiteH      int32
-	BuildSticky     bool
+	// BuildSnapPreview reports that the community click-snap preview owns
+	// the armed site: an extractor centred over a deposit found within the
+	// snap radius, or a geothermal the snap moved. The patch draws that site
+	// with its own physical preview colours and switches the engine's ghost
+	// off (community patch engine CP-CON-6).
+	BuildSnapPreview bool
+	BuildMX          int32
+	BuildMY          int32
+	BuildCellX       int32
+	BuildCellZ       int32
+	BuildSiteH       int32
+	BuildSticky      bool
 
 	ResultDismissed bool
 }
@@ -334,6 +340,7 @@ func (s *BattleState) ArmPlacement(product string, footX, footZ int32) {
 	s.Input.BuildFootX, s.Input.BuildFootZ = footX, footZ
 	s.Input.BuildOK = false
 	s.Input.BuildNeedsClear = false
+	s.Input.BuildSnapPreview = false
 	s.Input.BuildSticky = false
 	s.Input.Latch = input.LatchMobileBuild
 }
@@ -347,6 +354,7 @@ func (s *BattleState) ClearPlacement() {
 	s.Input.BuildFootX, s.Input.BuildFootZ = 0, 0
 	s.Input.BuildOK = false
 	s.Input.BuildNeedsClear = false
+	s.Input.BuildSnapPreview = false
 	s.Input.BuildMX, s.Input.BuildMY = 0, 0
 	s.Input.BuildCellX, s.Input.BuildCellZ = 0, 0
 	s.Input.BuildSiteH = 0

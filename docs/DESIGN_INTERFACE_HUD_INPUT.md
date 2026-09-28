@@ -3260,12 +3260,12 @@ therefore not a setting (ProTA sets it to 0, unlimited). In order:
    truncated) centred on the projection of the pointer's world point with the
    half-height shear, moved back inside the image at an edge; entry 10 over a
    valid site, entry 4 over a refused one. The shipped row-building mode draws
-   each queued row position instead (valid 240, or 234 under an unidentified
-   engine condition, refused 214). Nanolathe has no row-building mode over the
-   megamap — the Modern command drag cannot start there — so no row ghost is
-   drawn; the `TODO(question)` in `drawMegamapOverlay` records that a row
-   ghost added later would use 240, the colour tied to no unidentified
-   condition.
+   each queued row position instead (valid 234, or 240 while the
+   construction-kickout selector is in its clearance state, refused 214
+   [community patch engine CP-CON-6]). Nanolathe has no row-building mode
+   over the megamap — the Modern command drag cannot start there — so no row
+   ghost is drawn; one added later would take the same three physical
+   entries by the same clearance test as the viewport preview.
 9. *Queued orders*, only while Shift is physically held
    (`drawMegamapQueuedOrders`). The walk covers the local player's units in
    slot order, in play and not death-marked. *Focus* units are the hovered
@@ -3814,15 +3814,27 @@ All mutable terrain and feature reads occur through a read-only session query;
 the host owns only the deterministic scan and command substitution
 [community patch engine CP-CON-6][I6].
 
-When construction kickout is enabled, the shared placement rectangle uses
-the patch's custom preview palette: physical index 234 for a clear accepted
+When construction kickout is enabled, the placement rectangle follows the
+patch's two drawers. `communityBuildSnap` reports when the patch's click-snap
+preview owns the site — an extractor centred over a deposit found within the
+snap radius, moved or not, or a geothermal the snap moved — and
+`BuildInputState.BuildSnapPreview` carries that verdict to the drawer. Such a
+site uses the preview's physical palette entries: 234 for a clear accepted
 site, 240 for an accepted site needing own-unit clearance, and 214 for a
-rejected site. This applies to both snapped and ordinary cursor placement.
-The indices bypass `GUIColor`; the patch's internal clear/clearance selector
-is not a GUIPAL field. Without kickout the retail logical legal/illegal
-colours remain in use. Regression checks exercise all three community states,
-the retail bypass, and a snapped Coast to Coast mex with the installed palette
-[community patch engine CP-CON-6].
+rejected site; these indices bypass `GUIColor`, and 240 is black in the
+stock palette (yellow only under a mod palette such as ProTA's), exactly as
+the patch draws it. Every other site is the engine ghost, whose index retail
+forms as the illegal entry 4 plus an offset masked in by the site-valid bit
+[07 §9]: GUI entry 10 for a clear site, 4 for a rejected one, and entry 14
+(yellow, physical 194 in the stock install) for a site accepted only because
+the player's own units occupy it, the patch's clearance offset
+(`hud.GhostColorClearance`). The ordinary ghost previously used physical 240
+too and drew black over own units (issue #33). Without kickout the retail
+logical legal/illegal colours remain in use whatever the clearance and
+preview flags hold. Regression checks exercise all six community states,
+the retail bypass, the resolved RGB of each under the installed palette,
+the unmoved-extractor preview, and a snapped Coast to Coast mex with the
+installed palette [community patch engine CP-CON-1, CP-CON-6].
 
 The authored instructions mention Shift+Q/E alternation and using `v` before a
 patrol route, but neither the pinned source nor those instructions settle a

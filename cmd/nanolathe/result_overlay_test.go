@@ -28,6 +28,40 @@ func (s resultOverlayStage) DrawUI(c *client.Client, presented client.UIFrame) {
 	}
 }
 
+// resultNameStage keeps the bright player-colour surface visible behind the
+// authored small-font pixels [08 R-CAMP-01 §7].
+type resultNameStage struct {
+	hud  *retailBattleHUD
+	view frame.ResultView
+}
+
+func (s resultNameStage) DrawUI(c *client.Client, _ client.UIFrame) {
+	c.UIFillRect(16, 93, 91, 21, 13)
+	s.hud.drawResultStats(c, nil, s.view)
+}
+
+func TestResultPlayerNameUsesSmallOutlinedGAFFont(t *testing.T) {
+	font := &formats.GAFEntry{Frames: make([]formats.GAFFrameRef, 256)}
+	font.Frames['I'].Frame = &formats.GAFFrame{Width: 1, Height: 3}
+	font.Frames['A'].Frame = &formats.GAFFrame{
+		Width: 3, Height: 1, YOffset: 3,
+		Pixels: []byte{1, 15, 1}, Transparent: []bool{false, false, false},
+	}
+	h := &retailBattleHUD{modalFontSmall: font}
+	view := frame.ResultView{Ended: true, Kind: "defeat", Scores: []frame.ResultScore{{Name: "A"}}}
+	c, err := client.New(client.Options{Width: 128, Height: 128})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetUIStage(resultNameStage{hud: h, view: view})
+	shot := c.ComposeFrameSnapshot()
+	for _, pixel := range []struct{ x, want int }{{59, 1}, {60, 15}, {61, 1}, {62, 13}} {
+		if got := shot.Indexed[100*shot.Width+pixel.x]; got != byte(pixel.want) {
+			t.Fatalf("result name pixel (%d,100) = %d, want %d", pixel.x, got, pixel.want)
+		}
+	}
+}
+
 func TestResultTitleFrameUsesExplicitAuthoredOutcome(t *testing.T) {
 	h := &retailBattleHUD{
 		victoryFrame: &formats.GAFFrame{},

@@ -661,12 +661,23 @@ func (h *retailBattleHUD) drawResultStats(c *client.Client, b *battleSession, vi
 				}
 			}
 		}
-		if h.console != nil && row.Name != "" {
-			textWidth := client.MeasureText(h.console, row.Name)
-			fontMetric := int(h.console.Height)
-			x := int(playerColor.X) + (90-textWidth)/2
-			y := int(playerColor.Y) + (20-fontMetric)/2
-			c.UITextWidth(h.console, row.Name, x, y, 90, h.guiColor(15))
+		if row.Name != "" {
+			// The results builder selects GAF-font slot 1 around each player
+			// label, then restores slot 0. Its null-slot fallback uses the
+			// active frontend FNT [08 R-CAMP-01 §7][03 R-FONT-01 §6].
+			if h.modalFontSmall != nil {
+				textWidth := retailGAFTextWidth(h.modalFontSmall, row.Name)
+				fontMetric := retailGAFTextHeight(h.modalFontSmall)
+				x := int(playerColor.X) + (90-textWidth)/2
+				y := int(playerColor.Y) + (20-fontMetric)/2
+				drawRetailGAFText(c, h.modalFontSmall, row.Name, x, y, 90)
+			} else if h.primaryFont != nil {
+				textWidth := client.MeasureText(h.primaryFont, row.Name)
+				fontMetric := int(h.primaryFont.Height)
+				x := int(playerColor.X) + (90-textWidth)/2
+				y := int(playerColor.Y) + (20-fontMetric)/2
+				c.UITextWidth(h.primaryFont, row.Name, x, y, 90, h.guiColor(15))
+			}
 		}
 		for column := 0; column < len(resultBars); column++ {
 			if !h.resultState.active[column] {

@@ -8189,8 +8189,12 @@ name none, so those counters are runtime/result data only.
 populated): for every display-array row in slot order, with `r` the running
 row number (starting 0) and `y = 93 + 20·r`: the gadget `PlayerColor%d` (`%d`
 = r) is created at (16, y, 91×21), its animation set to the logos GAF with
-frame = the slot's colour byte; the slot name is drawn beside it in the small
-font; then seven bar gadgets are created at `x` = 112 `Kills%d`, 186
+frame = the slot's colour byte; the slot name is drawn over it with GAF
+font slot 1 (`hattfont11`), restored to slot 0 afterwards. The label is centred
+in the 90-pixel text width using that font's glyph widths and its capital-I
+height plus two for the vertical metric; a null GAF slot falls back to the
+active frontend FNT [03 R-FONT-01 §6]. Then seven bar gadgets are created at
+`x` = 112 `Kills%d`, 186
 `Losses%d`, 260 `EProduced%d`, 334 `MProduced%d`, 408 `EWasted%d`, 482
 `MWasted%d`, 556 `Score%d`, each carrying the row's value, the column maximum,
 and a per-gadget float `max(1.0, value × 0.06666667)` (`value / 15`; it is

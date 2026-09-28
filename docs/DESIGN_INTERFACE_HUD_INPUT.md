@@ -2114,7 +2114,10 @@ payload and variable geometry remain an explicit code/research Unknown
 
 ENDMSN delegates its populated mission list and scrollbar to these same
 frontend painters, preserving mark bytes, selection and scroll state. Initial
-selection uses the fill-time scroll limit. Its outcome title reuses the loaded
+selection uses the fill-time scroll limit. Result player names use the small
+`hattfont11` GAF face over each colour logo, centred with that face's metrics;
+only a missing GAF slot reaches the frontend FNT fallback
+`[08 R-CAMP-01 §7]`. Its outcome title reuses the loaded
 `igvictory`/`igdefeat` frames at `(W/2, 28)` with ordinary authored offsets
 `[08 R-CAMP-01 §8]`. The selector applies retail's watcher test: `igvictory`
 only when the result was won and the local slot is not watching, otherwise

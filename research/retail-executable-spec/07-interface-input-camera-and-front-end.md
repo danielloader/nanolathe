@@ -6860,6 +6860,23 @@ and dark red. The drag-selection rectangle shares this drawing path and takes
 pointer shape carries the same validity independently: `cursorfindsite` when
 legal, `cursortoofar` when not (§8).
 
+**Established — how the ghost's index is formed.** The drawer does not choose
+between two stored constants. While the armed latch is MOBILEBUILD it reads
+the site-valid bit (bit 6 of the flags byte, §6), spreads it into an all-ones
+or all-zero mask, ANDs that mask with a one-byte immediate legal offset of 6,
+and adds the illegal entry 4:
+
+```
+index = 4 + (siteValid ? 6 : 0)        → 10 legal, 4 illegal
+```
+
+The sum is then read through the GUIPAL-to-display map and both strokes take
+that one physical byte. The offset is an immediate operand of the drawer, so a
+different offset moves only the legal colour: an offset of 10 would make the
+legal ghost entry 14, GUIPAL `(255,255,85)`, and leave the illegal ghost at
+entry 4. Under any other latch the outer stroke is entry 15 and the inner
+stroke map entry 0, as above.
+
 *The click.* A left-click on a legal site walks the local player's unit range in
 pool order and issues an order to every selected unit whose definition is
 authored `builder` (capability bit 6) — MOBILEBUILD, or VTOL_MOBILEBUILD when

@@ -164,6 +164,30 @@ const (
 	MaxUnitLimit     = 3276 // ten player slices must fit positive signed 16-bit occupancy IDs.
 )
 
+// UnitLimitSources layers the player's own unit-limit choice onto the feature
+// sources a battle resolves, so a limit the player chose beats the one every
+// feature table names (DESIGN_COMMUNITY_PATCH §4.1, CP-LIM-2). A command-line
+// limit is always a choice and becomes the last command-line layer. A saved
+// limit counts as one only when it differs from DefaultUnitLimit: the file
+// records the default once the frontend has written it, so the default cannot
+// be told apart from an untouched setting and leaves the table's limit in
+// force. It fills the player layer only where the player's own
+// `gameplayFeatures` names no limit. Strict ignores every layer, so there the
+// configured limit is used as before. The inputs are not modified.
+func UnitLimitSources(player community.Overrides, commandLine []community.Overrides, commandLineLimit, savedLimit int) (community.Overrides, []community.Overrides) {
+	if commandLineLimit != 0 {
+		limit := commandLineLimit
+		layered := make([]community.Overrides, len(commandLine), len(commandLine)+1)
+		copy(layered, commandLine)
+		return player, append(layered, community.Overrides{UnitLimit: &limit})
+	}
+	if savedLimit != 0 && savedLimit != DefaultUnitLimit && player.UnitLimit == nil {
+		limit := savedLimit
+		player.UnitLimit = &limit
+	}
+	return player, commandLine
+}
+
 // The audio option values the `SOUND` and `MUSIC` options pages write
 // [03 R-AUD-01 §2][03 R-AUD-01 §4]. Retail packs the first five into one
 // sound-flags byte and keeps the rest as separate registry values; they stay

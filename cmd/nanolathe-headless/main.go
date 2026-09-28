@@ -229,7 +229,7 @@ func parse(args []string, output io.Writer) (headless.Request, string, profileOp
 	flags.IntVar(&bench.ArmySize, "sim-benchmark-army-size", headless.SimBenchDefaultArmySize, "placed units per computer army, excluding commander (250..1000; must fit the resolved unit limit)")
 	flags.Int64Var(&warmup, "warmup-ticks", int64(headless.SimBenchDefaultWarmupTicks), "unmeasured ticks run before the benchmark window opens")
 	flags.Int64Var(&measured, "benchmark-ticks", int64(headless.SimBenchDefaultMeasureTicks), "measured authoritative ticks in the benchmark window")
-	flags.IntVar(&unitLimit, "unit-limit", 0, "per-player skirmish unit setting (20..3276); gameplay feature table may override it (benchmark setting 400)")
+	flags.IntVar(&unitLimit, "unit-limit", 0, "per-player skirmish unit setting (20..3276); beats a gameplay feature table's limit (benchmark setting 400)")
 	flags.IntVar(&bench.CensusCount, "census-samples", headless.SimBenchDefaultCensusCount, "census samples taken across the benchmark window")
 	flags.BoolVar(&bench.PhaseTiming, "phase-timing", true, "attribute measured time to the twelve authoritative phases")
 	flags.BoolVar(&bench.ThreadTiming, "thread-cpu-timing", false, "diagnostic per-tick CPU samples on a pinned OS thread (clock overhead can materially affect results)")
@@ -310,12 +310,17 @@ func parse(args []string, output io.Writer) (headless.Request, string, profileOp
 	request.ContentProfile = contentProfile
 	bench.ContentProfile = contentProfile
 	bench.UnitLimit = headless.SimBenchDefaultUnitLimit
+	// A limit the player chose beats a feature table's, as on the desktop
+	// (settings.UnitLimitSources). The benchmark's own default of 400 is a
+	// workload setting, not a choice, so it adds no layer.
 	if unitLimitSet {
 		request.UnitLimit = unitLimit
 		bench.UnitLimit = unitLimit
+		request.GameplayFeatures, request.GameplayOverrides = settings.UnitLimitSources(request.GameplayFeatures, request.GameplayOverrides, unitLimit, 0)
+		bench.GameplayFeatures, bench.GameplayOverrides = settings.UnitLimitSources(bench.GameplayFeatures, bench.GameplayOverrides, unitLimit, 0)
 	} else if bench.OutputDir == "" {
-		stored, _ := settings.Load()
-		request.UnitLimit = stored.UnitLimit
+		request.UnitLimit = storedFeatures.UnitLimit
+		request.GameplayFeatures, request.GameplayOverrides = settings.UnitLimitSources(request.GameplayFeatures, request.GameplayOverrides, 0, storedFeatures.UnitLimit)
 	}
 	if ticks < 0 || uint64(ticks) > uint64(^uint32(0)) {
 		return request, reportPath, profiles, bench, fmt.Errorf("nanolathe: tick limit is outside the non-negative 32-bit battle boundary")

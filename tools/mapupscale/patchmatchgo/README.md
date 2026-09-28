@@ -123,9 +123,23 @@ second, so it replaced the model.
    dark band 3 luma brighter). The cost is that the ALP cycle is no longer
    exact: the output reduces to the retail map in 72-84% of pixels and to an
    adjacent palette entry in the rest (`cycle=` in the summary line).
+
+   An *orphan* parent, one with no blocks of its own, has no tone for the
+   direction test to compare against, and on a sparse palette its ALP
+   neighbours can be far apart. Admitting all of them scattered lava specks
+   over rock on the lava maps (GitHub #25): a mauve speck (palette 21) snaps
+   with a lava orange (200, 115 RGB away) whose 3,540 blocks won about 97% of
+   the count-weighted draws, and the tone term can only choose among what is
+   drawn (Red Hot Lava 79 specks, Lava Highground 87). An orphan therefore
+   borrows only its nearest ALP neighbour in palette RGB, and only when that
+   neighbour's squared distance is within the map's mean squared
+   adjacent-pixel distance (the `-seamzone` default); otherwise it assembles
+   flat, like the retail pixel doubled. Refusing orphans every stand-in is not
+   an option: palette 181 has no blocks yet covers 586k pixels of Expanded
+   Confluence's grass, which would turn into a flat 2x2 grid.
 6. **Assemble.** Each query pixel's matched block becomes its 2x2 output;
-   pixels whose parent has no example anywhere (0.03% on Great Divide)
-   become a uniform block of the parent.
+   pixels whose parent has no example anywhere and no stand-in (0.01% on
+   Great Divide, 0.005% on Red Hot Lava) become a uniform block of the parent.
 
 Everything is deterministic: seeds derive from tile and sample indices, and
 tiles are independent, so worker count does not change the result.

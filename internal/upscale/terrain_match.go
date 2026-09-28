@@ -4,7 +4,10 @@ package upscale
 // search, the parent relaxation pass and the cost summaries. See
 // tools/mapupscale/patchmatchgo/README.md.
 
-import "sync"
+import (
+	"math"
+	"sync"
+)
 
 func makeTileQueries(data terrainData, atlas tileAtlas, contributions []float32, workers int) tileQueries {
 	dimensions := featureDims
@@ -400,7 +403,17 @@ func patchMatch(queries tileQueries, db database, records []record, palette []by
 // can only reduce the bias, never add examples that are further off tone.
 // Random draws pick a stand-in parent with probability proportional to its
 // number of examples, as if the lists were merged.
-func relaxParents(db *database, records []record, alp, palette []byte, relax bool) {
+//
+// An orphan parent — one with no blocks of its own — has nothing to compare a
+// stand-in against (an empty mean reads as black, which every neighbour
+// beats), and on a sparse palette its ALP neighbours can be far apart: on the
+// lava maps a mauve rock speck snaps with a lava orange whose thousands of
+// blocks then win nearly every draw, scattering lava specks over rock. An
+// orphan therefore borrows only its nearest neighbour in palette RGB, and only
+// when that neighbour is no further from it than orphanLimit, the map's own
+// mean squared distance between adjacent pixels; otherwise it keeps no
+// stand-in and assembles as a uniform block of its own colour.
+func relaxParents(db *database, records []record, alp, palette []byte, relax bool, orphanLimit int32) {
 	var entries []int32
 	var offsets, counts [paletteSize]int32
 	var weights [paletteSize]uint32
@@ -426,14 +439,40 @@ func relaxParents(db *database, records []record, alp, palette []byte, relax boo
 		}
 		return total
 	}
+	snaps := func(parent, key int) bool {
+		blend := int(alp[parent*paletteSize+key])
+		return blend == parent || blend == key
+	}
+	paletteDistance := func(a, b int) int32 {
+		var total int32
+		for channel := range 3 {
+			d := int32(palette[3*a+channel]) - int32(palette[3*b+channel])
+			total += d * d
+		}
+		return total
+	}
 	for parent := range paletteSize {
 		offsets[parent] = int32(len(entries))
+		orphanStandIn := -1
+		if relax && db.counts[parent] == 0 {
+			nearest := int32(math.MaxInt32)
+			for key := range paletteSize {
+				if db.counts[key] == 0 || !snaps(parent, key) {
+					continue
+				}
+				if distance := paletteDistance(parent, key); distance < nearest {
+					orphanStandIn, nearest = key, distance
+				}
+			}
+			if nearest > orphanLimit {
+				orphanStandIn = -1
+			}
+		}
 		for key := range paletteSize {
 			if db.counts[key] == 0 {
 				continue
 			}
-			blend := int(alp[parent*paletteSize+key])
-			if key != parent && (!relax || blend != parent && blend != key ||
+			if key != parent && key != orphanStandIn && (db.counts[parent] == 0 || !relax || !snaps(parent, key) ||
 				toneDistance(parent, key) >= toneDistance(parent, parent)) {
 				continue
 			}

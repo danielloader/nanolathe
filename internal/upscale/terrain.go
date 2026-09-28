@@ -232,10 +232,11 @@ func SynthesizeTerrain(m TerrainMap, params TerrainParams, opts Options) (Terrai
 	weights := exampleWeights(db, atlas)
 	db.parentSampler = makeSampler(db.positions, db.offsets[:], db.counts[:], weights)
 	db.bucketSampler = makeSampler(db.hashPositions, db.hashOffsets, db.hashCounts, weights)
-	relaxParents(&db, records, data.alp, data.palette, options.relax)
+	adjacent := authoredAdjacentDistance(data)
+	relaxParents(&db, records, data.alp, data.palette, options.relax, adjacent)
 	queries := makeTileQueries(data, atlas, projected, workers)
 	if options.seamZone < 0 {
-		options.seamZone = authoredAdjacentDistance(data)
+		options.seamZone = adjacent
 	}
 	featuresDone := time.Now()
 	matches, costs, unmatched := patchMatch(queries, db, records, data.palette, atlas,

@@ -35,8 +35,8 @@ const (
 	// The algorithm versions enter the key, so changing what the
 	// synthesizers compute retires the results that depended on the old
 	// behaviour instead of returning them.
-	terrainAlgorithmVersion = "nanolathe.upscale.terrain.1"
-	bankAlgorithmVersion    = "nanolathe.upscale.bank.2" // 2: skip no longer removes example entries
+	terrainAlgorithmVersion = "nanolathe.upscale.terrain.2" // 2: orphan parents borrow only their nearest stand-in
+	bankAlgorithmVersion    = "nanolathe.upscale.bank.2"    // 2: skip no longer removes example entries
 )
 
 // Cache is a directory of synthesis results keyed by their inputs. The zero

@@ -137,6 +137,52 @@ func TestUnplacedTileIsNearestDoubled(t *testing.T) {
 	}
 }
 
+// An orphan parent (no blocks of its own) whose ALP neighbours include a
+// near colour with few blocks and a far colour with many must borrow only the
+// near one, and nothing once even that is beyond the map's adjacent-pixel
+// distance. Admitting the far colour is how lava orange landed on mauve rock
+// specks on the lava maps (GitHub #25): its many blocks won nearly every draw.
+func TestOrphanParentBorrowsOnlyItsNearestStandIn(t *testing.T) {
+	const orphan, near, far = 1, 2, 3
+	var palette [256][3]uint8
+	palette[orphan] = [3]uint8{155, 91, 99}
+	palette[near] = [3]uint8{139, 71, 79} // squared distance 1,056
+	palette[far] = [3]uint8{223, 79, 7}   // squared distance 13,232
+	// Every blend snaps to its first operand, so every pair is one ALP step
+	// apart: the widest neighbourhood a sparse palette can give.
+	alp := make([]byte, 256*256)
+	for a := range 256 {
+		for b := range 256 {
+			alp[a*256+b] = byte(a)
+		}
+	}
+	relax := func(orphanLimit int32) database {
+		var db database
+		var records []record
+		for _, group := range []struct{ key, count int }{{near, 2}, {far, 50}} {
+			db.offsets[group.key] = len(records)
+			db.counts[group.key] = group.count
+			for range group.count {
+				db.positions = append(db.positions, int32(len(records)))
+				block := byte(group.key)
+				records = append(records, record{key: int16(group.key), block: [4]byte{block, block, block, block}})
+			}
+		}
+		relaxParents(&db, records, alp, flatPalette(palette), true, orphanLimit)
+		return db
+	}
+
+	db := relax(2000)
+	if !db.allowed[orphan][near] || db.allowed[orphan][far] || db.sole[orphan] != near {
+		t.Fatalf("orphan admits near=%v far=%v sole=%d, want only the near stand-in",
+			db.allowed[orphan][near], db.allowed[orphan][far], db.sole[orphan])
+	}
+	db = relax(1000)
+	if db.allowed[orphan][near] || db.allowed[orphan][far] || db.sole[orphan] != -1 {
+		t.Fatal("an orphan borrowed a stand-in beyond the adjacent-pixel limit")
+	}
+}
+
 // testBank builds a small authored bank: two entries, a few frames each, with
 // one composite frame and one empty slot so the "not covered" rules of D2 are
 // exercised.

@@ -6862,7 +6862,7 @@ legal, `cursortoofar` when not (§8).
 
 **Established — how the ghost's index is formed.** The drawer does not choose
 between two stored constants. While the armed latch is MOBILEBUILD it reads
-the site-valid bit (bit 6 of the flags byte, §6), spreads it into an all-ones
+the site-valid bit (bit 6 of the pointer flags byte above), spreads it into an all-ones
 or all-zero mask, ANDs that mask with a one-byte immediate legal offset of 6,
 and adds the illegal entry 4:
 

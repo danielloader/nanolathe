@@ -130,12 +130,16 @@ type BattleInputState struct {
 	BuildFootZ      int32
 	BuildOK         bool
 	BuildNeedsClear bool
-	BuildMX         int32
-	BuildMY         int32
-	BuildCellX      int32
-	BuildCellZ      int32
-	BuildSiteH      int32
-	BuildSticky     bool
+	// BuildSnapped reports that community click snap moved the site off the
+	// raw cursor cell; the patch draws that site with its own preview
+	// colours rather than the engine's ghost (community patch engine CP-CON-6).
+	BuildSnapped bool
+	BuildMX      int32
+	BuildMY      int32
+	BuildCellX   int32
+	BuildCellZ   int32
+	BuildSiteH   int32
+	BuildSticky  bool
 
 	ResultDismissed bool
 }
@@ -334,6 +338,7 @@ func (s *BattleState) ArmPlacement(product string, footX, footZ int32) {
 	s.Input.BuildFootX, s.Input.BuildFootZ = footX, footZ
 	s.Input.BuildOK = false
 	s.Input.BuildNeedsClear = false
+	s.Input.BuildSnapped = false
 	s.Input.BuildSticky = false
 	s.Input.Latch = input.LatchMobileBuild
 }
@@ -347,6 +352,7 @@ func (s *BattleState) ClearPlacement() {
 	s.Input.BuildFootX, s.Input.BuildFootZ = 0, 0
 	s.Input.BuildOK = false
 	s.Input.BuildNeedsClear = false
+	s.Input.BuildSnapped = false
 	s.Input.BuildMX, s.Input.BuildMY = 0, 0
 	s.Input.BuildCellX, s.Input.BuildCellZ = 0, 0
 	s.Input.BuildSiteH = 0

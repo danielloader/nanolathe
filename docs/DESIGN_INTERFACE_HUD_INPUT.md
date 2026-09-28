@@ -3814,15 +3814,19 @@ All mutable terrain and feature reads occur through a read-only session query;
 the host owns only the deterministic scan and command substitution
 [community patch engine CP-CON-6][I6].
 
-When construction kickout is enabled, the shared placement rectangle uses
-the patch's custom preview palette: physical index 234 for a clear accepted
-site, 240 for an accepted site needing own-unit clearance, and 214 for a
-rejected site. This applies to both snapped and ordinary cursor placement.
-The indices bypass `GUIColor`; the patch's internal clear/clearance selector
-is not a GUIPAL field. Without kickout the retail logical legal/illegal
-colours remain in use. Regression checks exercise all three community states,
-the retail bypass, and a snapped Coast to Coast mex with the installed palette
-[community patch engine CP-CON-6].
+When construction kickout is enabled, the placement rectangle follows the
+patch's two drawers. While click snap has moved the site, it uses the custom
+preview palette: physical index 234 for a clear accepted site, 240 for an
+accepted site needing own-unit clearance, and 214 for a rejected site; these
+indices bypass `GUIColor`. Otherwise it is the engine ghost: GUI entry 10 for
+a clear site, 4 for a rejected one, and entry 14 (yellow) for a site accepted
+only because the player's own units occupy it — the patch's clearance
+operand, a supported inference recorded under CP-CON-1. The ordinary ghost
+previously used physical 240 too and drew black over own units (issue #33).
+Without kickout the retail logical legal/illegal colours remain in use.
+Regression checks exercise all six community states, the retail bypass, and
+a snapped Coast to Coast mex with the installed palette
+[community patch engine CP-CON-1, CP-CON-6].
 
 The authored instructions mention Shift+Q/E alternation and using `v` before a
 patrol route, but neither the pinned source nor those instructions settle a

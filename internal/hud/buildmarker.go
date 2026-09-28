@@ -31,6 +31,10 @@ const (
 const (
 	GhostColorLegal   = 10
 	GhostColorIllegal = 4
+	// GhostColorClearance is construction kickout's legal colour for a site
+	// accepted only because the player's own units occupy it (community patch
+	// engine CP-CON-1). It is not a retail colour.
+	GhostColorClearance = 14
 )
 
 // BuildMarkerSegments returns the eight lines retail draws for one queued build

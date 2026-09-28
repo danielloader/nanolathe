@@ -1117,9 +1117,20 @@ permission applies only while the prepared order is a build, and a one-byte
 enable is written into the engine's placement test so it reaches that branch
 at all. The placement preview's colour selector resets to the clear-site
 state at the start of every placement test and changes to the clearance
-state when a square is accepted only because own units occupy it. These
-selector values are not GUI palette indices; the custom snap preview maps
-them to green and yellow explicitly (CP-CON-6). The engine's
+state when a square is accepted only because own units occupy it. The
+selector is the one-byte operand of the engine ghost's colour choice — the
+source's own note calls it the rectangle colour's AND immediate — and its two
+values are 6 (clear, labelled green) and 10 (clearance, labelled yellow).
+They are not GUI palette indices themselves: GUI entry 6 is red in the stock
+install. **Supported inference — the engine ghost's clearance colour is GUI
+entry 14.** Retail's ghost takes entry 10 when legal and 4 when not [07 §9];
+reading the operand as a mask added to the illegal entry gives `4 + 6 = 10`
+for the retail value, so the patch's 10 gives `4 + 10 = 14`, whose GUIPAL
+source `(255,255,85)` is the yellow the author names and players report
+(issue #33) [03 R-MM-01 §1]. A retail trace of the colour arithmetic, or a
+patched screenshot sampled over an own unit, would settle it. The custom
+snap preview maps the same selector to physical entries instead (CP-CON-6).
+The engine's
 "target area blocked" wait limit is patched to 20 at the mobile and VTOL
 sites (**Established** by matching the two replacement operands to the retail
 mobile and VTOL blocked-site branches: each compares the current visit count
@@ -1398,6 +1409,9 @@ snapped position. A rejected site draws with physical palette index 214
 (yellow) when the construction-kickout test admitted own-unit occupants.
 These indices bypass the GUI logical-to-physical map. The patch's internal
 clear/clearance selector must not itself be treated as a GUI colour field.
+The preview draws only while snapping has moved the site; the engine's own
+ghost is switched off for that time and back on otherwise, so an unsnapped
+site keeps the engine ghost and its CP-CON-1 colours.
 
 ### 5.7 Environment, visibility and climate
 

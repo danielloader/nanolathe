@@ -252,18 +252,18 @@ func TestCtrlZSelectsMatchingDefinitions(t *testing.T) {
 	}
 }
 
-// TestCtrlDSelfDestructsSelection locks the Ctrl+D row: the SELFDESTRUCT
-// descriptor is issued for the selection through the human command channel
-// [07 R-CAM-01 §2][04 R-ORD-01 §2].
+// TestCtrlDSelfDestructsSelection locks the Ctrl+D row: the rear-segment
+// `SelfDestruct` is issued for the selection through the human command
+// channel, and a second press takes it away again [07 R-CAM-01 §2].
 func TestCtrlDSelfDestructsSelection(t *testing.T) {
 	b := newTestBattle(testCatalogON05(), testWorldON05(40, 40))
 	b.sess.LocalOwner = 0
 	u := placeUnit(b, "armcons", numeric.Fixed(200*65536), numeric.Fixed(120*65536))
 	replaceSelectionForTest(t, b, u)
 
-	want := orders.Lookup("SelfDestructFG")
+	want := orders.Lookup("SelfDestruct")
 	if want == 0 {
-		t.Skip("order table has no SelfDestructFG")
+		t.Skip("order table has no SelfDestruct")
 	}
 	pressKeys(b, input.KeyCtrl, input.KeyD)
 	if b.battleState().Input.Latch == input.LatchBlast {
@@ -273,14 +273,12 @@ func TestCtrlDSelfDestructsSelection(t *testing.T) {
 	if q == nil {
 		t.Fatalf("no order queue for the selected unit")
 	}
-	found := false
-	for _, n := range q.Primary() {
-		if n != nil && n.ID == want {
-			found = true
-		}
+	if q.LenSecondary() != 1 || q.Secondary()[0].ID != want {
+		t.Fatalf("Ctrl+D queued no rear-segment SelfDestruct record")
 	}
-	if !found {
-		t.Fatalf("Ctrl+D queued no SelfDestructFG record")
+	pressKeys(b, input.KeyCtrl, input.KeyD)
+	if q.LenSecondary() != 0 {
+		t.Fatalf("a second Ctrl+D left %d rear records, want the self-destruct cancelled", q.LenSecondary())
 	}
 }
 

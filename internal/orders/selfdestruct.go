@@ -4,15 +4,18 @@ package orders
 // [04 R-ORD-01 §2]; the two descriptors differ only in the segment they live
 // on. `SelfDestruct` carries the rear-segment selection bit and therefore runs
 // purely on its own deadline, with the secondary pump delivering an empty
-// satisfied set [R-ORDER-02 §1]; `SelfDestructFG` — the `d` button's and the
-// initial-mission interpreter's descriptor — sits on the front segment.
+// satisfied set [R-ORDER-02 §1]. It is the record the player's Ctrl+D issues
+// [07 R-CAM-01 §2]. `SelfDestructFG`, the initial-mission interpreter's `d`
+// token descriptor, sits on the front segment [04 §3.6].
 //
 // The end-to-end timeline is [04 R-SPEC-01 §13]: visit 1 initialises the count
 // from the definition and announces it, each further step falls by one every 30
 // ticks, the `zero` step waits `RNG(15)`, and the visit after that applies
-// 30000 self-damage with cause 3 and completes. Re-issuing the order while it
-// counts sets the cancel-current bit; the next visit announces the termination
-// and completes without damage.
+// 30000 self-damage with cause 3 and completes. Nothing sets the cancel bit in
+// the satisfied set. A countdown ends early only when its record is removed:
+// the removal's cancel notification announces the termination, and no damage
+// is done. For Ctrl+D's record the remover is a second Ctrl+D
+// (Queue.CancelFirstOf).
 //
 // The two producers that spawn this record with p1 = 1 — `Attack_Kamikaze`'s
 // arrival and `Standby_Mine`'s detonation — share combat.go's
@@ -28,7 +31,7 @@ package orders
 // unconditionally, so the routing belongs at the spawn site: every handler
 // spawn in this package goes through spawnAtSegmentHead (stop.go), which is the
 // shape combat.go's self-destruct producer already inlines. `SelfDestructFG` —
-// the `d` button's descriptor — carries no such flag and is issued, not
+// the mission `d` token's descriptor — carries no such flag and is issued, not
 // spawned. A test in wu19168_test.go locks the segment.
 
 import (
@@ -107,7 +110,7 @@ func selfDestructCountdownField(def *content.UnitDef) uint32 {
 // notification is delivered by the removal paths, which invoke the handler with
 // mask 2 whenever the record being freed still has that bit armed
 // [04 R-ORD-01 §0][R-ORDER-02 §2]. Arming it on every counting visit is what
-// makes a re-issued or purged countdown announce its termination.
+// makes a cancelled or purged countdown announce its termination.
 func selfDestructHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Code {
 	if u == nil || n == nil {
 		return Code(5)

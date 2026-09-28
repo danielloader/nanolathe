@@ -129,7 +129,7 @@ func TestSelfDestructWithNoCountdownFieldFiresOnItsFirstVisit(t *testing.T) {
 // notification is delivered by the removal paths, which invoke the removed
 // record's own handler with mask 2 while that bit is still armed
 // [04 R-ORD-01 §0][R-ORDER-02 §2]. Arming it on every counting visit is what
-// makes a re-issue or a purge terminate the countdown instead of detonating.
+// makes a second Ctrl+D or a purge terminate the countdown instead of detonating.
 func TestSelfDestructCancelNotificationCompletesWithoutDamage(t *testing.T) {
 	q, u := selfDestructFixture(t, nil)
 	q.Push(Lookup("SelfDestructFG"), Node{Owner: u.Handle})

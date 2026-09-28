@@ -81,10 +81,14 @@ type HumanSpawnCommand struct {
 
 type HumanSelectionCommand struct{ Handles []pool.Handle }
 
-// HumanSelfDestructCommand carries the selection Ctrl+D acts on. The descriptor
-// is the front-segment `SelfDestructFG`, which [04 R-ORD-01 §2] names as the
-// button's own; the rear-segment `SelfDestruct` is the kamikaze/mine spawn.
-type HumanSelfDestructCommand struct{ Handles []pool.Handle }
+// HumanSelfDestructCommand carries the selection Ctrl+D acts on, and whether
+// Shift was held, which makes an issue queued [07 R-CAM-01 §2]. The descriptor
+// is the rear-segment `SelfDestruct`. The front-segment `SelfDestructFG` is
+// only the mission `d` token's [04 §3.6].
+type HumanSelfDestructCommand struct {
+	Handles []pool.Handle
+	Queued  bool
+}
 
 // HumanOrderTarget is one captured target in an area work list. Unit handles
 // are revalidated at the input boundary; feature goals use Position.
@@ -1234,14 +1238,15 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 	case HumanGroupRecall:
 		s.applyHumanGroup(c.Group, false)
 	case HumanSelfDestruct:
-		// Ctrl+D resolves the SELFDESTRUCT descriptor and issues it for the
-		// selection [07 R-CAM-01 §2]. The front-segment descriptor is the
-		// button's [04 R-ORD-01 §2]; the record's own handler owns the
-		// countdown, the announcement and the 30000 self-damage.
-		id := orders.Lookup("SelfDestructFG")
-		if id == 0 {
-			id = orders.Lookup("SelfDestruct")
-		}
+		// Ctrl+D is a toggle [07 R-CAM-01 §2]. Its name lookup is
+		// case-insensitive and exact, so it resolves the rear-segment
+		// `SelfDestruct`, never `SelfDestructFG` (the mission `d` token's).
+		// Every selected unit already holding one has its first record
+		// removed, and that removal says `Self destruct terminated`. Only when
+		// no selected unit held one does the press issue the order to the
+		// whole selection. The record's handler owns the countdown, the
+		// announcements and the 30000 self-damage [04 R-SPEC-01 §13].
+		id := orders.Lookup("SelfDestruct")
 		if id == 0 {
 			return
 		}
@@ -1249,17 +1254,31 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 		if len(handles) == 0 {
 			handles = s.selectedHumanHandles()
 		}
+		cancelled := false
 		for _, h := range handles {
 			u := s.humanUnit(h)
 			if u == nil {
 				continue
 			}
 			s.bindOrderQueue(u)
+			if orders.QueueForUnit(u).CancelFirstOf(id) {
+				cancelled = true
+			}
+		}
+		if cancelled {
+			return
+		}
+		for _, h := range handles {
+			u := s.humanUnit(h)
+			if u == nil {
+				continue
+			}
 			q := orders.QueueForUnit(u)
 			if q == nil {
 				continue
 			}
-			q.Push(id, orders.NewNodeForOrder(id, 0, u.X, u.Y, u.Z, tick, u.Handle, true))
+			// No target and no goal; Shift makes it a queued issue.
+			q.Push(id, orders.Node{Owner: u.Handle, CreationTick: tick, QueuedIssue: c.SelfDestruct.Queued})
 		}
 	case HumanCancelQueuedMove:
 		s.applyHumanCancelQueuedMove(c.CancelQueuedMove)

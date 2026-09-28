@@ -629,6 +629,35 @@ func (q *Queue) CoalesceTail(id ID, n Node) {
 	q.Push(id, n)
 }
 
+// CancelFirstOf removes the first record of descriptor id and reports whether
+// one went. It is the find-and-remove pair of the Ctrl+D toggle
+// [07 R-CAM-01 §2]. The search walks only the segment the descriptor's
+// rear-segment bit selects, from the front. The removal is the ordinary single
+// removal [04 R-ORDER-02 §2], so a record still armed on gate bit 1 gets its
+// cancel notification: a counting `SelfDestruct` says `Self destruct
+// terminated` and does no damage [04 R-SPEC-01 §13].
+func (q *Queue) CancelFirstOf(id ID) bool {
+	if q == nil || id == 0 {
+		return false
+	}
+	if isSecondary(id) {
+		for _, n := range q.secondary {
+			if n != nil && n.ID == id {
+				q.removeSecondaryRecord(n)
+				return true
+			}
+		}
+		return false
+	}
+	for _, n := range q.primary {
+		if n != nil && n.ID == id {
+			q.unlinkPrimary(n)
+			return true
+		}
+	}
+	return false
+}
+
 // CancelFrontMost removes the first matching node walking the primary queue
 // from the front, and reports whether one went [07 R-P0-11 §6].
 //

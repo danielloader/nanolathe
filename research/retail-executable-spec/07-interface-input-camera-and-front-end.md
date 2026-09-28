@@ -262,7 +262,7 @@ the named sound cue played through the interface sound path.
 | `0x6E` | `n` | Find the next own unit not yet visited by this cycle (per-unit visited bits `0x40`/`0x80` of the status word), glide the camera to it ([R-CAM-01 §12]), record it as the current unit word (a HUD word — *Supported inference* on its reader) and mark it and every on-screen own unit visited; it does **not** change the selection. When every unit has been visited, clear the visited bits on all units and restart. |
 | `0xAA` | Ctrl+A | Select every own selectable unit (additive over the current selection), clear the current build-menu unit, `selection changed` refresh. |
 | `0xAC` | Ctrl+C | Select the own selectable units whose definition is in the authored `CTRL_C` category set (replacing the selection unless Shift is held), then set the follow-camera tracked object to the last own unit in the `Commander` category set — the camera follows the commander ([R-CAM-01 §12]). |
-| `0xAD` | Ctrl+D | Self-destruct: resolve the `SELFDESTRUCT` order descriptor; for every selected unit that carries that button, fire the button's script path; if no selected unit had the button, issue the order through the order dispatcher for the selection. |
+| `0xAD` | Ctrl+D | Self-destruct **toggle**: resolve the rear-segment `SelfDestruct` descriptor by name; remove that descriptor's first record from every selected own unit that holds one (the removal announces `Self destruct terminated`); only when no selected unit held one, issue `SelfDestruct` through the order dispatcher for the selection. "Ctrl+D is a toggle" below has the details. |
 | `0xAB` `0xAE..0xBB` `0xBD..0xC2` | Ctrl+B, Ctrl+E..Ctrl+R, Ctrl+T..Ctrl+Y | Category select: format `CTRL_%c` with the uppercase letter and select the own selectable units whose definition is in that category set (Shift adds to the selection, otherwise units outside the set are deselected). Stock content authors `CTRL_B`, `CTRL_C`, `CTRL_F`, `CTRL_M`, `CTRL_P`, `CTRL_R`, `CTRL_V`, `CTRL_W` (asset census, 278 FBI files); every other letter selects nothing. |
 | `0xBC` | Ctrl+S | Select every own selectable unit in the on-screen list (§8) — replaces the selection; no-op refresh when the list yields none. |
 | `0xC3` | Ctrl+Z | Select every own selectable unit whose definition id matches any currently selected unit's definition (a 256-bit definition mask built from the selection). |
@@ -282,6 +282,38 @@ Tokens with no case (including `0x20` Space, digits with Ctrl+0, and every
 `0xF0..0xF7` navigation token) are dropped by the dispatcher; the arrow
 tokens are never dispatched at all — scrolling uses the held-key queries
 in the scroll pass, not the ring.
+
+**Established fact — Ctrl+D is a toggle** (direct static trace of the
+`0xAD` case and its two queue helpers). The case runs these steps:
+
+1. Collect the local player's units whose status word carries the selected
+   bit, in unit-slot order.
+2. Resolve the literal name `SELFDESTRUCT` through the descriptor registry's
+   canonical-name lookup, a binary search with a case-insensitive whole-string
+   compare. It matches the rear-segment `SelfDestruct` row and never
+   `SelfDestructFG`, whose name is longer ([04 §3.1]). `SelfDestructFG` is
+   only the mission `d` token's descriptor ([04 §3.6]).
+3. For each collected unit, find the **first** record of that descriptor. The
+   search walks only the segment the descriptor's static bit 18 selects,
+   which for `SelfDestruct` is the rear segment. A unit whose countdown came
+   from a mission `d` token (`SelfDestructFG`, front segment) is never found.
+4. When a record is found, remove it through the ordinary single-record
+   removal of [04 R-ORDER-02 §2]: unlink it from its segment, tombstone it
+   (always, for a rear record), run the cleanup and free it. Remember that at
+   least one unit held one.
+5. Only when **no** collected unit held a record, issue `SelfDestruct`
+   through the per-selection order dispatcher, with no target and no goal,
+   as a queued issue when Shift is held and a non-queued one otherwise.
+
+A counting record's handler arms dynamic-gate bit 1 on every counting visit
+([04 R-ORD-01 §2]). The cleanup therefore delivers the cancel notification
+through the handler, which emits status 23 (`Self destruct terminated`)
+unless the unit is death-latched and applies no damage. The record is gone
+in the same host frame that consumed the key. A record removed before its
+first visit, when two presses land within one frame, still has an empty gate
+and goes silently. The test in step 5 is over the whole selection. A mixed
+selection (some units counting, some not) therefore has its countdowns
+cancelled, and the idle units get no new order from that press.
 
 **Established fact — Escape versus F2.** Token `0xE3` is **F2** under the
 translator table of §2 (F1..F12 → `0xE2..0xED`); Escape reaches the

@@ -334,21 +334,18 @@ func (b *battleSession) orderSelected(code int, sx, sy int32, queued bool) bool 
 	return true
 }
 
-// selfDestructSelection is Ctrl+D. Retail resolves the SELFDESTRUCT order
-// descriptor, fires the button's script path for every selected unit that
-// carries that button, and otherwise issues the order through the order
-// dispatcher for the selection [07 R-CAM-01 §2]. The palette's button is not
-// wired here, so the order path runs for the whole selection; the descriptor
-// is the front-segment `SelfDestructFG`, which [04 R-ORD-01 §2] names as the
-// button's own.
-func (b *battleSession) selfDestructSelection() {
+// selfDestructSelection is Ctrl+D, a toggle [07 R-CAM-01 §2]: a second press
+// cancels the selection's countdowns, and only a selection with none issues
+// self-destruct. The session applies the toggle at the input boundary, against
+// the queues as they stand then. Shift makes an issue queued.
+func (b *battleSession) selfDestructSelection(queued bool) {
 	handles := b.selectedHandlesInSlotOrder()
 	if len(handles) == 0 {
 		return
 	}
 	_ = b.enqueueHumanCommand(session.HumanCommand{
 		Kind:         session.HumanSelfDestruct,
-		SelfDestruct: session.HumanSelfDestructCommand{Handles: handles},
+		SelfDestruct: session.HumanSelfDestructCommand{Handles: handles, Queued: queued},
 	})
 }
 

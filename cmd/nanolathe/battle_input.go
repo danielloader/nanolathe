@@ -729,7 +729,7 @@ func (b *battleSession) dispatchCtrlLetters(kbd *input.KeyboardState) {
 		b.disarmPlacement()
 		return
 	case kbd.KeyDown(input.KeyD):
-		b.selfDestructSelection()
+		b.selfDestructSelection(shift)
 		return
 	case b.communitySelectionEnabled() && !shift && kbd.KeyDown(input.KeyB):
 		b.cycleCommunityIdle(communityCycleBuilder)

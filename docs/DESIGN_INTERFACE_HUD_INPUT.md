@@ -1956,7 +1956,7 @@ The rows below are the battle hotkey census
 | `n` | glide to the next unvisited own unit, changing no selection; `N` has no case |
 | Ctrl+A | select every own selectable unit, additively |
 | Ctrl+C | the `CTRL_C` category select, then follow the commander |
-| Ctrl+D | self-destruct the selection |
+| Ctrl+D | toggle: cancel the selection's self-destruct countdowns, or start them when none is running `[07 R-CAM-01 §2]` |
 | Ctrl+B, E..R, T..Y | the `CTRL_%c` category selects |
 | Ctrl+S | select the own selectable units on screen, replacing |
 | Ctrl+Z | select every own unit sharing a selected definition |

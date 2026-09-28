@@ -5765,9 +5765,11 @@ unit; another player's unit counts down with no announcement at all and is
 unaffected. Confirming the symptom needs a retail observation with a
 definition that authors such a countdown.
 
-**Established — the timeline, end to end.** Issue (`d` button → `SelfDestructFG`
-on the front segment; script/AI → `SelfDestruct` on the rear segment;
-[R-ORD-01 §0], [R-ORDER-02 §1]). Visit 1: p2 initialised from the field; with
+**Established — the timeline, end to end.** Issue: the player's Ctrl+D issues
+`SelfDestruct` on the rear segment ([07 R-CAM-01 §2]); script/AI →
+`SelfDestruct` on the rear segment; the mission `d` token (§3.6) is the only
+issuer of `SelfDestructFG`, on the front segment ([R-ORD-01 §0],
+[R-ORDER-02 §1]). Visit 1: p2 initialised from the field; with
 p1 = 0 and a non-zero field, the caption for `n` = the field, deadline 30.
 Every 30 ticks the count falls by one and the next caption is emitted; at
 `n = 0` the caption is `zero`. Every one of those captions passes the status
@@ -5780,14 +5782,27 @@ simulation draw) and p1 becomes 1. The next visit — p1 = 1, or the field was
 or `Standby_Mine` — applies 30000 self-damage with cause 3 (§1 above for the
 funnel arithmetic) and completes. The death path resolves `selfdestructas`
 for cause 3 and `explodeas` for every other cause ([R-DMG-01 §5]); the corpse
-and score consequences are doc 06's. Re-issuing the order while it counts
-sets the cancel-current bit; the next visit emits `Self destruct terminated`
-(status 23) unless the unit is death-latched (state-word bit 14,
-[R-SPEC-01 §12]), and completes without
-damage. A cancelled countdown cannot be resumed; a new order starts from the
-field's value. The unit keeps moving, firing and building throughout — the
-record blocks nothing on the front segment (rear-segment `SelfDestruct`) or
-only its own segment (`SelfDestructFG`).
+and score consequences are doc 06's.
+
+**Established — cancelling.** No producer writes gate bit 1, and the
+secondary pump hands a rear record an empty satisfied set
+([R-ORDER-02 §1]). So the cancelled arm is reached only through a removal.
+Every counting visit arms gate bit 1. The removal cleanup of [R-ORDER-02 §2]
+therefore invokes the handler with the cancel notification, which emits
+`Self destruct terminated` (status 23) unless the unit is death-latched
+(state-word bit 14, [R-SPEC-01 §12]). The record is freed without damage.
+For Ctrl+D's `SelfDestruct`, the remover is a second Ctrl+D press. That
+press removes the unit's first `SelfDestruct` record instead of issuing
+another one ([07 R-CAM-01 §2]).
+
+**Consequences.** A front-segment `SelfDestructFG` has neither static bit 2
+nor bit 6, so any later non-queued order's replacement purge removes it the
+same way ([R-ORD-01 §13]). The replacement purge walks only the front
+segment, and `SelfDestruct` carries bit 6, so it survives every later order.
+A cancelled countdown cannot be resumed, and a new order starts from the
+field's value. A Ctrl+D countdown blocks nothing: the unit keeps moving,
+firing and building throughout. A mission `SelfDestructFG` countdown
+occupies the front segment like any other order.
 
 ### `showplayername` has one reader: the HUD footer name line [R-SPEC-01 §14]
 

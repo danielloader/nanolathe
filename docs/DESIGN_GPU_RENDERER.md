@@ -1423,6 +1423,57 @@ forward and the next present waited a third refresh; on a 120 Hz panel under
 host load that was about half of a heavy save's late frames (3.1% → 1.1% and
 2.7% → 1.3% in two recorded window traces). Original ignores the cap.
 
+**Present slots — Nanolathe host presentation policy (macOS).** Ebitengine
+presents whenever it is given a drawable, whether or not the Draw drew: a Draw
+the cap skipped puts the retained screen on the display again. Under a 60 cap
+on a 120 Hz panel the window therefore presented 120 times a second to show 60
+frames. macOS shows a drawable two refreshes after it is presented and the
+layer has three, so at one present per refresh the queue has no refresh to
+spare. In fullscreen, where the display scans the drawables out directly,
+anything that then occupied the window server — the pointer moving, another
+application drawing in the background — put a present on the display a
+refresh after its own, the presents behind it followed, and with all three
+drawables held the display link missed a refresh as well. Timed at the display
+by Instruments in a traced fullscreen battle, 5.6% of presents were shown late
+with the pointer still and 57% with it moving, and the frames that carried
+content reached the display at the wrong interval 5 and 36 times a second.
+The window's own trace saw a fraction of that, since a present that is late
+at the display was still made on time. Presenting only the frames that carry
+content, with every other refresh left free, none was late in either case.
+
+`framePacer` therefore chooses the refreshes the window presents at. Where
+the display link reports to a delegate (macOS 14 and later), the pacer's
+delegate is installed in front of Ebitengine's through the link's own
+`setDelegate:`. It passes on the refreshes that are a cap's interval apart,
+less the same eighth, and keeps the others, so Ebitengine runs one frame per
+presented frame and every Draw presents; `presentDue` is the cap elsewhere,
+and when the display is no faster than the cap. Slots are spaced from the
+display time of the slot before, so a late frame does not move the ones after
+it. The refresh period is the shortest recent spacing of the link's reports:
+the link's own figures differ between a window scanned out and one
+composited. The cap applies to Enhanced alone, so Original is not paced.
+
+A frame samples its input and its clocks as it begins, so the pacer also
+holds the loop at the top of each frame, in `Layout`, which Ebitengine calls
+before it takes the frame's input. The frame begins at the refresh before its
+slot, which is where a presented frame began before and leaves its latency
+unchanged (25 ms from the frame's beginning to the display at a 60 cap). A
+frame that overruns that refresh presents after its slot arrived and is shown
+late, by a quarter of a 60 Hz frame at a time on a panel that can refresh
+between two of its nominal refreshes. When four of the last 64 frames took
+more than seven tenths of a refresh from their beginning to the end of their
+Draw — the rest is allowed for Ebitengine's flush — frames begin one refresh
+earlier, as far as the cap's interval allows; when all 64 took less than half
+of one, they begin a refresh later again.
+The loop is never held for a link that has stopped reporting, as a hidden
+window's does, nor while a slot already passed on is waiting for a frame.
+
+At a cap of the display's own rate every refresh carries content, nothing is
+kept back, and the late presents remain: 34 irregular intervals a second with
+the pointer moving at 120 FPS in the same battle. A layer the display cannot
+scan out directly is not affected, in a window or otherwise, at the price of
+two refreshes or more between a present and the display.
+
 The default cap is 60 FPS. The Nanolathe options page offers 30 / 60 / 120 and
 previews changes immediately; OK persists them, Cancel restores the entry value.
 Explicit `--fps` overrides the saved preference at window startup, with zero

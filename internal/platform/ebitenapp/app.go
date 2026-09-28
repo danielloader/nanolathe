@@ -110,6 +110,15 @@ type app struct {
 	// refreshPeriod is the estimate presentDue last measured, zero while it
 	// is still settling; the live trace records it with every Draw.
 	refreshPeriod time.Duration
+	// pacer chooses the refreshes a capped window presents on where the host
+	// has a display link to pace, and is nil elsewhere (framePacer). beganAt
+	// is when it let the current frame begin, paceHeld how long it held the
+	// frame first and paceLead how many refreshes before its slot the frame
+	// was to begin.
+	pacer    *framePacer
+	beganAt  time.Time
+	paceHeld time.Duration
+	paceLead int
 	// pipe is the record/submit pipeline's host state
 	// (docs/DESIGN_GPU_RENDERER.md §13.10). It is modern-only: the classic path
 	// never launches a pre-record and never joins one it did not launch.
@@ -197,6 +206,7 @@ type RunOptions struct {
 func (a *app) Update() error {
 	a.trace.beginUpdate()
 	if a.trace != nil && a.trace.started {
+		a.trace.row.paceLead, a.trace.row.paceHeld = a.paceLead, int64(a.paceHeld/time.Microsecond)
 		defer func() { a.trace.row.updEnd = a.trace.now() }()
 	}
 	if !a.loopThreadRaised {
@@ -372,6 +382,17 @@ func (a *app) syncPresentationSettings() {
 	if maxFPS > 0 {
 		a.presentInterval = time.Second / time.Duration(maxFPS)
 	}
+	a.syncPacer()
+}
+
+// syncPacer gives the pacer the cap the executor in use presents under.
+// Original presents after a host step and ignores the cap (§13.5).
+func (a *app) syncPacer() {
+	if a.mode == RendererModern {
+		a.pacer.setInterval(a.presentInterval)
+	} else {
+		a.pacer.setInterval(0)
+	}
 }
 
 // setRenderer shares the pipeline and interpolation cleanup for F10 and live
@@ -396,6 +417,7 @@ func (a *app) setRenderer(mode RendererMode) {
 		a.c.SetEnhanced(true)
 	}
 	a.presentPending = true
+	a.syncPacer()
 }
 
 func rendererName(mode RendererMode) string {
@@ -499,6 +521,9 @@ func (a *app) Draw(screen *ebiten.Image) {
 			a.fpsSim = 0
 		}
 		blend, record, submit := a.drawModern(screen, width, height, showFPS)
+		if !a.beganAt.IsZero() {
+			a.pacer.observeWork(time.Since(a.beganAt))
+		}
 		if showFPS {
 			completed := time.Now()
 			a.fpsCounter.observe(arrived, completed.Sub(drawStarted), a.fpsSim, blend, record, submit)
@@ -789,6 +814,13 @@ func (a *app) launchPreRecord(now, sampledAt time.Time, period time.Duration, ti
 // refresh estimate still settling after a rate switch cannot move it.
 func (a *app) presentDue(now time.Time) bool {
 	refresh := a.refresh.observe(now)
+	if paced := a.pacer.refreshPeriod(now); paced > 0 {
+		// The pacer passed this refresh on as one to present at, and Draws
+		// arrive at the cap's spacing, not the display's.
+		a.refreshPeriod = paced
+		a.presentedAt, a.presentFollowed = now, false
+		return true
+	}
 	a.refreshPeriod = refresh
 	if a.presentInterval > 0 && !a.presentedAt.IsZero() {
 		if !a.presentFollowed {
@@ -914,6 +946,12 @@ func (a *app) observeFullscreen(fullscreen bool) {
 // Layout keeps the logical resolution fixed; Ebitengine letterboxes if the
 // window is resized.
 func (a *app) Layout(outsideWidth, outsideHeight int) (int, int) {
+	// Ebitengine lays the game out first in every frame, before it takes the
+	// frame's input: this is where a paced frame begins (framePacer).
+	arrived := time.Now()
+	a.paceLead = a.pacer.awaitFrame(time.Now, waitForRefresh)
+	a.beganAt = time.Now()
+	a.paceHeld = a.beganAt.Sub(arrived)
 	a.c.SetOutsideSize(outsideWidth, outsideHeight)
 	w, h := a.c.Size()
 	if outsideWidth > 0 && outsideHeight > 0 {
@@ -1090,6 +1128,10 @@ func Run(c *client.Client, mode RendererMode, options RunOptions) error {
 	}
 	defer stopScrollMonitor()
 	game.fullscreenPresentation = startNativeFullscreenPresentation()
+	if options.FrameTrace == nil || !options.FrameTrace.Unpaced {
+		game.pacer = startNativeFramePacer()
+	}
+	game.syncPacer()
 	defer game.fullscreenPresentation.close()
 	defer game.cursorClip.release()
 	RaiseCurrentThread()

@@ -471,10 +471,18 @@ since the first battle Draw; spans are microseconds:
   the window's content since the previous row. Only macOS reports them; there
   fullscreen leaves a band above the content on a display with a camera
   housing, and the pointer can leave through it. Elsewhere they stay zero.
+- `pace_lead`, `pace_held`: how many refreshes before the one it presented
+  at the frame began, and how long the loop was held before it did
+  (DESIGN_GPU_RENDERER §13.5 "Present slots"). `pace_lead` is zero for a frame
+  that was not placed: on a host with no display link to pace, under a cap no
+  slower than the display, or with `--live-unpaced`. While frames are placed,
+  Ebitengine runs one frame for each presented frame, every row is a
+  presented one, and `refresh_us` is the display's period as its link
+  reports it, not a measurement of Draw arrivals.
 
 The time from one Draw's return to the next Update is Ebitengine's flush and
 present plus the wait for the next display-link callback; the report calls it
-`outside`. On a ProMotion panel the display link does not hold to a fixed
+`outside`, and reports the part of it the next frame was held for as `held`. On a ProMotion panel the display link does not hold to a fixed
 grid, so the interval between presented Draws is the frame time the player
 sees. The report counts an interval as late when it exceeds the interval the
 window presents at — the cap or the refresh, the longer — by half a refresh,
@@ -492,6 +500,14 @@ rate. It is a coincidence, not a
 proof of cause: a late frame that coincides with nothing of ours in `frames.csv`
 (and one appears every ten to twenty seconds even in an empty skirmish) is
 the display link or the compositor.
+
+`--live-unpaced` leaves the display link unpaced for the run, so the window
+presents on every refresh: the other half of a comparison. A late present
+that the window server causes is made on time and shown late, so neither
+trace sees it. What reaches the display, and when, is in a Metal System Trace
+of the same run (`xcrun xctrace record --template 'Metal System Trace'
+--launch -- nanolathe ...`): its displayed-surfaces table has one row for
+each surface shown, with the time it was shown from.
 
 `--live-profile-from=S` writes `cpu.pprof` and the allocation pair
 `alloc-base.pprof`/`alloc.pprof` from `S` seconds to the end, and `heap.pprof`

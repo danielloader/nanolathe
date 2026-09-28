@@ -121,3 +121,36 @@ func TestPresentCapBooksLatePresentAtItsRefresh(t *testing.T) {
 		}
 	}
 }
+
+// While the pacer places frames, the Draws Ebitengine runs are the ones the
+// pacer passed a refresh on for, a cap's interval apart, and each presents;
+// the refresh the window records is the display's.
+func TestPresentCapDefersToThePacer(t *testing.T) {
+	a := &app{presentInterval: time.Second / 60, pacer: &framePacer{}}
+	a.pacer.setInterval(a.presentInterval)
+	at := time.Unix(1000, 0)
+	const period = time.Second / 120
+	presented := 0
+	for i := range 80 {
+		at = at.Add(period)
+		if !a.pacer.refresh(at, time.Duration(i+1)*period) {
+			continue
+		}
+		a.pacer.returned()
+		if i < 2*pacerSpacings {
+			a.presentDue(at)
+			continue
+		}
+		// A late Draw is still the frame the refresh was passed on for.
+		if !a.presentDue(at.Add(time.Duration(i%3) * time.Millisecond)) {
+			t.Fatalf("refresh %d was passed on and its Draw did not present", i)
+		}
+		presented++
+		if a.refreshPeriod != period {
+			t.Fatalf("refresh %d: recorded a refresh period of %v, want %v", i, a.refreshPeriod, period)
+		}
+	}
+	if want := (80 - 2*pacerSpacings) / 2; presented != want {
+		t.Fatalf("%d Draws presented, want %d", presented, want)
+	}
+}

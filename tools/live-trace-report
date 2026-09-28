@@ -58,7 +58,9 @@ def ms(us):
 def segments(row, following):
     """Milliseconds by segment for one Ebitengine frame. outside is the time
     from this Draw's return to the next Update: Ebitengine's flush, present and
-    the wait for the next refresh."""
+    the wait for the next refresh. held is the part of it the next frame was
+    held for by the present-slot pacer before it began."""
+    held = ms(following.get("pace_held", 0)) if following else 0.0
     seg = {
         "update": ms(row["upd_end"] - row["upd_start"]) if row["upd_end"] else 0.0,
         "join": ms(row["join1"] + row["join2"]),
@@ -67,8 +69,10 @@ def segments(row, following):
         "body": ms(row["body"]),
         "sim_wait": ms(row["sim_wait"]),
         "draw": ms(row["draw_end"] - row["draw_start"]) if row["draw_end"] else 0.0,
-        "outside": ms(following["upd_start"] - row["draw_end"]) if following and row["draw_end"] else 0.0,
+        "outside": ms(following["upd_start"] - row["draw_end"]) - held if following and row["draw_end"] else 0.0,
     }
+    if "pace_held" in row:
+        seg["held"] = held
     return seg
 
 
@@ -226,6 +230,14 @@ def report(directory, skip, late_rows):
         unfocused = sum(1 for r in presented if not r["focused"])
         print(f"  display refresh {rates}; {switches} switches; unfocused {100.0 * unfocused / len(presented):.1f}% of frames;"
               f" {between} Ebitengine frames outside a battle left out")
+        placed = [r for r in presented if r.get("pace_lead")]
+        if placed:
+            leads = {}
+            for r in placed:
+                leads[r["pace_lead"]] = leads.get(r["pace_lead"], 0) + 1
+            began = ", ".join(f"{lead} before its own {100.0 * n / len(placed):.1f}%" for lead, n in sorted(leads.items()))
+            print(f"  present slots: {100.0 * len(placed) / len(presented):.1f}% of frames placed; began at the refresh {began};"
+                  f" held {statistics.mean(ms(r['pace_held']) for r in placed):.2f} ms mean")
         motion(presented, world_position, local_rates(presented, world_position), late_rows, "world", span)
         moving = [(a, b) for a, b in zip(presented, presented[1:]) if (a["cam_x100"], a["cam_z100"]) != (b["cam_x100"], b["cam_z100"])]
         print(f"  camera moving in {100.0 * len(moving) / max(1, len(presented) - 1):.1f}% of steps")

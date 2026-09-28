@@ -175,6 +175,7 @@ func liveTraceOptions(opts Options, current func() *gameShell, meta map[string]a
 		meta["seed"] = opts.Seed
 	}
 	meta["fps_cap"] = shell.presentation.FPS
+	meta["unpaced"] = opts.LiveUnpaced
 	meta["display"] = loadedSettings().Display
 	meta["effects"] = presentationEffects(shell.presentation)
 	meta["zoom"] = opts.Zoom.Float()
@@ -231,7 +232,7 @@ func liveTraceOptions(opts Options, current func() *gameShell, meta map[string]a
 	return &ebitenapp.FrameTraceOptions{
 		Directory: opts.LiveTrace, Seconds: opts.LiveSeconds,
 		ProfileFrom: opts.LiveProfileFrom, ExecTraceSeconds: opts.LiveExecTrace, Flight: opts.LiveFlight, FlightLimit: flightLimit,
-		Census: census, Metadata: meta,
+		Census: census, Metadata: meta, Unpaced: opts.LiveUnpaced,
 		Battle: func() bool { return current().battle != nil },
 	}
 }

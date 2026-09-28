@@ -1029,8 +1029,10 @@ offsetX = rand() * sx / 0x8000 − sx / 2     (signed truncating division)
 
 so the envelope decays linearly with the remaining counter. The tick after
 the counter reaches zero clears the active flag and consumes **no draws**.
-The jitter lands in the authoritative camera origin; the final view clamp
-holds it inside the map.
+The jitter lands in the current camera origin only, never the desired one;
+the final view clamp holds it inside the map, and the next pass's
+current-to-desired step pulls it back, so it is not a lasting displacement
+([07 §10], [03 §5.6]).
 
 **Phase 11 object family (Established).** The virtual the sweep evaluates
 first is a **removal verdict, evaluated before the update work** — a

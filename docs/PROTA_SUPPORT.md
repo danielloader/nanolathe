@@ -42,7 +42,8 @@ follows the pinned current source
 ([extension reference](../research/extensions/prota-engine.md#current-source-profile-is-a-separate-target));
 Modern adds Nanolathe's documented Modern policies on top. The table sets the
 unit limit to 1500, which the loading screen shows as *Unit limit 1500 (set by …)*,
-naming the source.
+naming the source; a limit the player chose (`--unit-limit` or a saved
+`unitLimit`) replaces it.
 
 The `prota` content profile also turns on nine switches for the historical 4.8
 package's engine changes
@@ -83,6 +84,15 @@ ordinary option you can change later
   dot-colour preferences.
 - **Audio:** 3D sound, 128 voices, and random music.
 - **Skirmish:** all ten player rows shown.
+
+Switching from ProTA back to the original game, or to a mod that recommends
+no settings, offers to put them back: the Mods & Mutators screen's toggle
+reads **Restore default settings**, and **Apply** returns every setting still
+at ProTA's value to its default, keeping any you have changed since; the
+skirmish rows and the megamap's own preferences stay as they are. It is not
+shown if you kept your own settings. The overview alone is the **Tab:
+Megamap** button on Options → Orders; setting it back to **Tab: Options**
+gives the wheel back to zoom and Tab back to the options.
 
 ## Controls
 

@@ -40,6 +40,16 @@ type FollowState struct {
 	latched        pool.Handle
 	latchedDesired Origin
 	latchedGliding bool
+
+	// The shake return is also Nanolathe's own, a stand-in for the desired
+	// origin of an idle, untracked camera, which this build does not
+	// otherwise keep: shakeRest is the origin the current shake started from
+	// and phase 10 steps back toward, and shakeLeft is the origin the last
+	// phase-10 pass left, so a host writer that moved the view in between
+	// ends the return (see Camera.Shake) [07 R-CAM-01 §10].
+	shakeRest      Origin
+	shakeReturning bool
+	shakeLeft      Origin
 }
 
 // SetTracked latches the follow camera's tracked object. Retail's `t`/`T` and

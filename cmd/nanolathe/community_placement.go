@@ -132,15 +132,21 @@ func (b *battleSession) serviceCommunityPlacementInput(in *input.State, cl *clie
 // position. The scanned coordinate is the footprint centre cell used by the
 // extension; the battle state continues to store the north-west footprint
 // anchor expected by construction and rendering.
-func (b *battleSession) communityBuildSnap(def *content.UnitDef, rawX, rawZ, footX, footZ int32, self uint16, cursorX, cursorZ numeric.Fixed) (int32, int32) {
+//
+// preview reports that the patch's own snap preview owns the ghost for this
+// site. For an extractor that is every site whose foot sits centred over a
+// deposit found within the radius, moved or not; for a geothermal only a site
+// the snap actually moved. The engine ghost is switched off for exactly those
+// sites [community patch engine CP-CON-6].
+func (b *battleSession) communityBuildSnap(def *content.UnitDef, rawX, rawZ, footX, footZ int32, self uint16, cursorX, cursorZ numeric.Fixed) (x, z int32, preview bool) {
 	if b == nil || b.sess == nil || def == nil || b.communityPlacement.overrideHeld || footX <= 0 || footZ <= 0 {
-		return rawX, rawZ
+		return rawX, rawZ, false
 	}
 	prefs := b.hostPreferences()
 	features := b.sess.Community
 	radius := effectiveClickSnapRadius(prefs.MexSnapRadius, features.MexSnapRadius, features.MexSnapRadiusMax, features.MexSnap)
 	if radius <= 0 {
-		return rawX, rawZ
+		return rawX, rawZ, false
 	}
 	baseX, baseZ := rawX+footX/2, rawZ+footZ/2
 	choose := func(countAt func(int32, int32) int) (placementSnapCandidate, bool) {
@@ -170,9 +176,9 @@ func (b *battleSession) communityBuildSnap(def *content.UnitDef, rawX, rawZ, foo
 		ok = ok && (chosen.cellX != baseX || chosen.cellZ != baseZ)
 	}
 	if !ok {
-		return rawX, rawZ
+		return rawX, rawZ, false
 	}
-	return chosen.cellX - footX/2, chosen.cellZ - footZ/2
+	return chosen.cellX - footX/2, chosen.cellZ - footZ/2, true
 }
 
 // communityGeoSnapDefinition keeps the extension's bounded diagnostic read:

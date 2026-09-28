@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nanolathe-gg/nanolathe/internal/save"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/vfs"
@@ -84,8 +85,10 @@ func TestUnitLimitCLIAndConfigPrecedence(t *testing.T) {
 		shell := &gameShell{opts: opts, maps: []string{opts.Map}}
 		shell.setup = newSkirmishMenuConfig(opts.Map)
 		shell.applySettings(stored)
-		if shell.setup.UnitLimit != want || shell.captureSettings().UnitLimit != want {
-			t.Fatalf("shell/captured limit = %d/%d, want %d", shell.setup.UnitLimit, shell.captureSettings().UnitLimit, want)
+		// The file keeps the saved choice: a one-off --unit-limit is not
+		// recorded as one.
+		if shell.setup.UnitLimit != want || shell.captureSettings().UnitLimit != 1500 {
+			t.Fatalf("shell/captured limit = %d/%d, want %d/1500", shell.setup.UnitLimit, shell.captureSettings().UnitLimit, want)
 		}
 		req, err := directMapBattleRequest(opts, testContentSet(vfs.New()), nil)
 		if err != nil {
@@ -119,5 +122,22 @@ func TestUnitLimitCLIRejectsOutOfRange(t *testing.T) {
 	}
 	if settings.DefaultUnitLimit != 1000 || session.SkirmishDefaultUnitLimit != settings.DefaultUnitLimit {
 		t.Fatal("unit-limit defaults disagree")
+	}
+}
+
+// TestContentReloadKeepsTheConfiguredWord: a restored save's limit lands in
+// the live configured word, never in the settings file [08 R-SESS-01 §9]. A
+// content reload builds a new shell from the old one's preferences, and the
+// word must cross with them rather than fall back to the file's choice.
+func TestContentReloadKeepsTheConfiguredWord(t *testing.T) {
+	old := &gameShell{}
+	old.setup = newSkirmishMenuConfig("Anteer Straight")
+	old.applySettings(settings.Defaults())
+	old.applyRestoredUnitLimit(&save.BattleImage{Summary: save.Summary{MaxUnits: 250, HasMaxUnits: true}})
+	next := &gameShell{}
+	next.setup = newSkirmishMenuConfig("Anteer Straight")
+	next.adoptLiveSettings(old)
+	if next.setup.UnitLimit != 250 || next.captureSettings().UnitLimit != 0 {
+		t.Fatalf("reloaded shell limit/file = %d/%d, want 250/0", next.setup.UnitLimit, next.captureSettings().UnitLimit)
 	}
 }

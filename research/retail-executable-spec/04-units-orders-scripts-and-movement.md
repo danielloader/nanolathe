@@ -5647,7 +5647,12 @@ whole unit array, sets it when it meets a unit that is alive and not dying,
 own), **complete** (remaining build fraction exactly 0.0) and **activated**
 (state byte bit 0), and whose definition has `istargetingupgrade`. Being
 built, being deactivated, or being paralysed (which does not clear bit 0)
-therefore matters only through bit 0.
+therefore matters only through bit 0. No energy term enters: the rebuild reads
+neither the owner's stock nor the unit's `energyuse`, and the only
+energy-driven writer of bit 0 is the computer player's metal-maker toggle,
+which touches `makesmetal` definitions alone ([03 R-VIS-01 §9]). The
+facility's upkeep is charged at settlement while it is activated
+([05 R-PROD-01 §5]); an unpaid upkeep does not close the gate.
 
 **Established — the consumer.** The registry area enumeration — the routine
 that `Wait`, `Guard_NoMove` and the shared target search use to list enemies
@@ -5656,10 +5661,17 @@ scans the registry's *visible* list first. Then, **only if the targeting-upgrade
 flag is set and that scan produced no candidate**, it scans the registry's
 second list with the same radius test and the same alive/not-dying filter. The
 second list is filled by the rebuild with every non-allied unit carrying
-state-word bit 8 — the radar-detected bit that the radar emitters set and the
-jam callback clears ([R-VIS-01 §5]) — regardless of the visibility predicate.
+state-word bit 8 — the *seen* bit, which the local viewing player's radar
+coverage and line of sight set, which pass 1 marks on that player's own units,
+and which the radar-jam callback clears ([06 §3.1], [R-VIS-01 §4],
+[R-VIS-01 §5]) — regardless of the visibility predicate.
 So with a targeting upgrade active, every autonomous scan of that player falls
-back to radar contacts when nothing visible is in range; explicit orders never
+back to the viewing player's radar and line-of-sight contacts when nothing on
+the visible list is in range — in practice the contacts known by radar alone.
+It is not "every unit in range": a hostile the viewing player neither sees nor
+detects stays unacquirable, a single visible-list hostile inside the radius
+suppresses the fallback for that attempt, and the per-candidate checks of
+[06 §3.2], the physical gate among them, still apply. Explicit orders never
 consulted the registry and are unchanged. This enumeration is the reader of
 the flag [08 R-AI-01 §16] produces. A second accessor that returns the flag
 for a player slot exists but has no caller.

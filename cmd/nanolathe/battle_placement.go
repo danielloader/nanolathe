@@ -112,11 +112,12 @@ func (b *battleSession) updatePlacement(mx, my int32) {
 		def, _ = b.cat.Unit(b.battleState().Input.BuildDef)
 	}
 	rawX, rawZ := world.PlacementAnchor(wx, wz, footX, footZ)
-	buildX, buildZ := rawX, rawZ
+	buildX, buildZ, preview := rawX, rawZ, false
 	if b.communityClickSnapAllowed(mx) && !b.megamapOwnsPointer(mx, my) { // no click snap from the megamap (§3.15)
-		buildX, buildZ = b.communityBuildSnap(def, rawX, rawZ, footX, footZ, self, wx, wz)
+		buildX, buildZ, preview = b.communityBuildSnap(def, rawX, rawZ, footX, footZ, self, wx, wz)
 	}
 	b.battleState().Input.BuildCellX, b.battleState().Input.BuildCellZ = buildX, buildZ
+	b.battleState().Input.BuildSnapPreview = preview
 	result, err := b.checkProductPlacement(b.battleState().Input.BuildCellX, b.battleState().Input.BuildCellZ, def, footX, footZ, self)
 	b.battleState().Input.BuildOK = err == nil
 	b.battleState().Input.BuildNeedsClear = err == nil && result.OccupantsAdmitted
@@ -274,16 +275,7 @@ func (b *battleSession) drawBuildGhost(c *client.Client) {
 		col = c.GUIColor(hud.GhostColorLegal)
 	}
 	if b.sess != nil && b.sess.Community.ConstructionKickout {
-		// The patch's custom preview uses physical palette entries, not
-		// GUIPAL fields (community patch engine CP-CON-6). Its clear-site
-		// selector is not GUI colour 6, which is red in the retail assets.
-		col = 214 // Rejected.
-		if b.battleState().Input.BuildOK {
-			col = 234 // Clear.
-			if b.battleState().Input.BuildNeedsClear {
-				col = 240 // Accepted with own-unit clearance.
-			}
-		}
+		col = communityGhostColor(c, b.battleState().Input.BuildOK, b.battleState().Input.BuildNeedsClear, b.battleState().Input.BuildSnapPreview)
 	}
 	// Retail's adjacent strokes make one solid two-pixel border [07 §9].
 	// Scale that entire border, not just the separation between its strokes:
@@ -293,6 +285,36 @@ func (b *battleSession) drawBuildGhost(c *client.Client) {
 	for inset := 0; inset < thickness; inset++ {
 		c.UIFrameRect(int(l)+inset, int(t)+inset, int(r-l)-2*inset, int(btm-t)-2*inset, col)
 	}
+}
+
+// communityGhostColor is the ghost colour under construction kickout
+// (community patch engine CP-CON-1, CP-CON-6). The patch keeps two drawers.
+// While its click-snap preview owns the site it draws physical palette
+// entries 234 (clear), 240 (own-unit clearance) and 214 (rejected), bypassing
+// the GUI map; in the stock palette 240 is black and only a mod palette such
+// as ProTA's makes it yellow. Every other site keeps the engine's ghost, which
+// forms its colour as the illegal entry 4 plus a legal offset masked in by the
+// site-valid bit [07 §9]: retail's offset 6 gives entry 10, and the patch's
+// clearance offset 10 gives entry 14, the yellow the patch shows over its own
+// units. Drawing physical 240 there instead is what turned that ghost black
+// (issue #33).
+func communityGhostColor(c *client.Client, ok, needsClear, preview bool) uint8 {
+	if preview {
+		switch {
+		case !ok:
+			return 214
+		case needsClear:
+			return 240
+		}
+		return 234
+	}
+	switch {
+	case !ok:
+		return c.GUIColor(hud.GhostColorIllegal)
+	case needsClear:
+		return c.GUIColor(hud.GhostColorClearance)
+	}
+	return c.GUIColor(hud.GhostColorLegal)
 }
 
 func footprintCellsForCatalog(cat *content.Catalog, def *content.UnitDef) (footX, footZ int32) {

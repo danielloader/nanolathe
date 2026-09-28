@@ -11,16 +11,29 @@ import (
 // The window presents one continuous world time T, in ticks, that trails the
 // tick budget's own clock by a lag:
 //
-//	T(t) = F + carry + (t − t_F) × rate − lag
+//	T(t) = F + carry + (t − t_F) × rate − lag − margin × rate
 //
 // F is the global tick after the last host step's release, carry the budget's
-// remainder just after it [01 §4.2] and t_F that step's host millisecond; rate
-// is 30 × the effective speed (active × 0.1 [01 §4.2]) ticks per second. Every
-// prepared host step rebases F + carry, including one that released nothing,
-// so a speed change moves the rate from the step it took effect. The presented
-// pair is the tick after floor(T) and the tick before it, blended at T's
-// fraction, so every presented frame moves the world by the wall time since
-// the last one, at whatever speed and however many ticks a host step releases.
+// remainder just after it [01 §4.2] and t_F that step's IDEAL host millisecond,
+// the instant the window's 30 Hz host clock meant it for; rate is 30 × the
+// effective speed (active × 0.1 [01 §4.2]) ticks per second. Every prepared
+// host step rebases F + carry, including one that released nothing, so a speed
+// change moves the rate from the step it took effect. The presented pair is
+// the tick after floor(T) and the tick before it, blended at T's fraction, so
+// every presented frame moves the world by the wall time since the last one,
+// at whatever speed and however many ticks a host step releases.
+//
+// A step's body runs when the window gets to it, which trails the ideal
+// instant by anything from nothing to a refresh or two: a step lands on the
+// Update nearest its instant, and a modern window runs the body at a Draw's
+// tail, a refresh later again when a cap skips the Draw in between (§13.10).
+// Rebased at the body, every change in that lateness moved T by the same
+// amount — at 60 FPS on a 120 Hz panel a dropped refresh swapped the bodies
+// between the two Draws of a present interval, and the world held for a
+// refresh and then leapt one, over and over while the panel dropped refreshes.
+// Rebased at the ideal instant, T is a function of wall time alone. What the
+// lateness still decides is when the batch T needs is joined, so the margin
+// holds T back by the lateness recently seen (presentMarginCeiling).
 //
 // Measured from one tick instead, as the blend used to be, a host step that
 // released two ticks presented only the second: at 2x the world eased across
@@ -35,6 +48,11 @@ type presentClock struct {
 	baseMS float64
 	lag    float64
 	set    bool
+	// margin is the lateness margin in host milliseconds as of marginMS, the
+	// host millisecond of the body that set it; it releases from there
+	// (presentMarginAt).
+	margin   float64
+	marginMS float64
 	// floor is the last position a Draw presented: the clock never presents
 	// earlier than that, so a lag that grows with the speed holds the world
 	// still until the clock reaches it again rather than replaying ticks.
@@ -51,6 +69,24 @@ type presentClock struct {
 // its speed needs shrinks back to it: three ticks a second, so the world runs a
 // tenth fast for a moment after a speed drop instead of skipping ticks.
 const presentLagEase = 3.0 / 1000
+
+// presentMarginCeiling bounds the lateness margin, in host milliseconds, at one
+// 60 Hz refresh. The lateness a running window produces is at most about that:
+// a step taken up to a refresh either side of its instant, and a body deferred
+// past a cap-skipped Draw. Anything later is a stall, which no margin short of
+// its own length would hide, and which must not leave the world lagging a
+// stall behind for seconds afterwards.
+//
+// presentMarginRelease is how fast, in milliseconds per host millisecond, the
+// margin gives back lateness that has stopped recurring: a refresh's worth in
+// two seconds, so the world runs under one percent fast while it does. Dropped
+// refreshes come in bursts: replaying a traced fullscreen session's timing, a
+// margin released at the lag's own rate (presentLagEase) left twice the world
+// motion errors over 4 ms that this one does (95 against 49 in two minutes).
+const (
+	presentMarginCeiling = 1000.0 / 60
+	presentMarginRelease = 1.0 / 120
+)
 
 // presentationLag is the smallest lag, in ticks, at which T never passes the
 // newest tick the host has joined.
@@ -88,15 +124,45 @@ func (b *battleSession) presentMillis() float64 {
 	return float64(b.millisSource.Millis32())
 }
 
+// presentStepMillis is a host step's ideal host millisecond and how late its
+// body is running against it (negative when early), from the instant the
+// window's host clock named for it. Without one — an injected millisecond
+// source, or a host that names none — the body's own millisecond is the ideal
+// and the step is on time.
+func (b *battleSession) presentStepMillis(due time.Time) (ideal, late float64) {
+	now := b.presentMillis()
+	src, ok := b.millisSource.(*monotonicMillisSource)
+	if !ok || src == nil || due.IsZero() {
+		return now, 0
+	}
+	ideal = float64(due.Sub(src.start)) / float64(time.Millisecond)
+	return ideal, now - ideal
+}
+
 // notePresentStep rebases the clock at a prepared host step, on the game
-// goroutine (prepareSimulationStep): base is the global tick after the step's
-// release plus the budget's carry, and active the speed the next step's budget
-// accrues at. The lag in effect is carried across, so T is continuous at the
-// step whatever the lag is doing.
-func (b *battleSession) notePresentStep(ms, base float64, active int32) {
+// goroutine (prepareSimulationStep): ms is the step's ideal host millisecond
+// and late how far behind it the body runs, base the global tick after the
+// step's release plus the budget's carry, and active the speed the next step's
+// budget accrues at. The lag in effect is carried across, so T is continuous
+// at the step whatever the lag is doing; a lateness beyond the margin raises
+// it at once, which holds the world rather than moving it back.
+func (b *battleSession) notePresentStep(ms, late, base float64, active int32) {
 	p := &b.present
+	at := ms + max(late, 0)
+	p.margin = max(b.presentMarginAt(at), min(max(late, 0), presentMarginCeiling))
+	p.marginMS = at
 	p.lag = b.presentLagAt(ms, active)
 	p.base, p.baseMS, p.set = base, ms, true
+}
+
+// presentMarginAt is the lateness margin, in host milliseconds, at host
+// millisecond ms.
+func (b *battleSession) presentMarginAt(ms float64) float64 {
+	p := &b.present
+	if !p.set {
+		return 0
+	}
+	return max(p.margin-max(ms-p.marginMS, 0)*presentMarginRelease, 0)
 }
 
 // presentLagAt is the lag at host millisecond ms for the given speed.
@@ -139,7 +205,7 @@ func (b *battleSession) presentationAt(ahead time.Duration) (uint32, float32, bo
 	now := b.presentMillis() + float64(ahead)/float64(time.Millisecond)
 	active := min(max(b.simActive, 1), 20)
 	rate := float64(active) * 3 / 1000 // 30 × active × 0.1 ticks per second
-	t := p.base + (now-p.baseMS)*rate - b.presentLagAt(now, active)
+	t := p.base + (now-p.baseMS)*rate - b.presentLagAt(now, active) - b.presentMarginAt(now)*rate
 	if p.floorSet && t < p.floor {
 		t = p.floor
 	}

@@ -223,6 +223,28 @@ func (c *Client) NoteSimulationJoin(wait, batch time.Duration) {
 	}
 }
 
+// SetHostStepDue records the ideal instant of the host step about to run: when
+// the window's 30 Hz host clock meant it to happen. The Update that took the
+// step and the Draw tail that runs its body may trail that instant by a
+// refresh or two, and the host reads this instead of the time the body runs so
+// that where a step happened to land does not move the presented world
+// (docs/DESIGN_GPU_RENDERER.md §13.13). It is platform time for the host's own
+// presentation clock and budget sample; the client itself never reads it.
+func (c *Client) SetHostStepDue(t time.Time) {
+	if c != nil {
+		c.hostStepDue = t
+	}
+}
+
+// HostStepDue is the instant SetHostStepDue last recorded, zero when the
+// window supplies none.
+func (c *Client) HostStepDue() time.Time {
+	if c == nil {
+		return time.Time{}
+	}
+	return c.hostStepDue
+}
+
 // NoteTicksReleased records the sub-ticks one host step released under the
 // asynchronous simulation, for the live frame trace.
 func (c *Client) NoteTicksReleased(n int) {

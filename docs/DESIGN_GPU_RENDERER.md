@@ -1432,7 +1432,9 @@ command-line settings independently of saved window preferences.
 **FPS counter and frame graph — Nanolathe host presentation policy.** `+fps`
 toggles a diagnostic overlay at the upper-right of the modern battle surface.
 It starts off and retains its state across battles in the same process, without
-changing saved settings. Its FPS number comes from the median presented-frame
+changing saved settings. The host hides it when post-battle presentation begins,
+so the title and score screens stay clear without clearing the
+choice for the next battle. Its FPS number comes from the median presented-frame
 interval over the most recent 500 ms, so cap-skipped Draw callbacks do not
 inflate it and an isolated stall does not make the readout flicker. A
 presented frame is timed by the refresh it belongs to, its Draw's arrival,
@@ -1562,7 +1564,13 @@ behind the lock holds it, and one that finds it two or more units ahead — the
 first step, or a stall longer than the host clock replays — takes the raw
 value. The budget's arithmetic, carry and 0..5 clamp [01 §4.2] are untouched;
 only the phase of the sample moves, by less than one unit, and its long-run
-rate is the host clock's, which is the wall clock's. Shots, films, replays and
+rate is the host clock's, which is the wall clock's. The sample is read at the
+step's **ideal instant** — when the window's host clock meant the step for
+(`hostClock.stepDue`), carried with the step's queued input and handed over as
+`client.HostStepDue` — not when its body runs. A modern window runs a body at a
+Draw's tail, a refresh or two after that instant when a cap skips the Draw in
+between or the display drops a refresh (§13.10), and read there a late body
+crossed a unit boundary and released two ticks. Shots, films, replays and
 tests inject their own millisecond source and read it raw. The live trace's
 `released` column counts the ticks each step released.
 
@@ -1867,20 +1875,25 @@ the launch snapshots it and a discard puts it back [03 §2.4.1][I4].
 measured frame is byte-identical to a synchronous record; the benchmark also
 knows the next frame exactly — the group's next fraction is
 `(phase+1)/drawsPerTick` — and a draw that publishes a tick records in place.
-The window passes **one present interval**, computed per Draw as
-`period × 30 × 65536` quanta, where the period is the one the window
-**nominally** presents at (the `--fps` cap, the display's own rate, or the wider
-of the two). It is deliberately not the interval this particular prediction was
-extrapolated over: a frame that hitched measures a long period, and a tolerance
-computed from that period would widen by exactly the lateness it exists to
-catch. So the window presents a matching list **at the fractions it was recorded
-for**, and the pipeline's one presentation divergence is stated as what it is: a
-pre-recorded frame is presented at the instant it was predicted for, and the
-error is bounded by present jitter and capped at one present interval. A fixed
-tolerance cannot work here: the battle's tick fraction reads a millisecond
-source, so at the nominal speed it moves in steps of about 1966 quanta, and a
-tolerance below a producer's own quantisation can never be met by a prediction
-of that producer.
+The window passes **half a display refresh**, computed per Draw as
+`refresh / 2 × 30 × 65536` quanta from the refresh `presentDue` measures (the
+`--fps` cap stands in before one is measured, and the last launch's own period
+only without either). A frame that hitched measures a long period, so the
+tolerance is deliberately not the interval this particular prediction was
+extrapolated over, which would widen it by exactly the lateness it exists to
+catch. So the window presents a matching list **at the fractions it was
+recorded for**, and the pipeline's one presentation divergence is stated as
+what it is: a pre-recorded frame is presented at the instant it was predicted
+for, and the error is bounded by present jitter and capped at half a refresh.
+A Draw a whole refresh late misses and records the frame it will show.
+
+The tolerance used to be one nominal present interval, the cap or the
+display's interval when that was wider. Under a cap slower than the display
+that is two refreshes or more, so a Draw one refresh late still matched and
+showed the world a refresh behind; the next frame made up the difference. In a
+traced fullscreen session on a 120 Hz panel under the default 60 cap every one
+of 96 presents that the panel held for three refreshes was such a match: the
+world stood still for a third of the frame and leapt as far on the next.
 
 **The host body runs in the Draw's idle window.** A pre-record can only serve a
 frame if every client write that frame reads happened before the launch, and the
@@ -2282,12 +2295,13 @@ shared-state check below.
 world time `T`, in ticks, that trails the tick budget's own clock by a lag
 (`cmd/nanolathe/battle_present.go`):
 
-    T(t) = F + carry + (t − t_F) × rate − lag
+    T(t) = F + carry + (t − t_F) × rate − lag − margin × rate
 
 `F + carry` is the global tick after the last prepared host step's release plus
 the budget's remainder [01 §4.2], rebased at every step so a speed change takes
-effect from the step it does; `t_F` is that step's host time, read below the
-millisecond; `rate` is 30 × the effective speed ticks per second. A frame shows
+effect from the step it does; `t_F` is that step's ideal instant (the budget
+sample's, §13.5), below the millisecond; `rate` is 30 × the effective speed
+ticks per second. A frame shows
 the tick after `floor(T)` blended from the one before it at `T`'s fraction, and
 never a tick the host has not joined: a late host step holds the newest joined
 tick until its join. One call (`Options.PresentationTick`) names the pair and
@@ -2308,6 +2322,27 @@ other half and leapt the tick it never showed, a third of a tick and then one
 and two-thirds, frame after frame (every speed above 1x did a version of it; a
 traced 2x battle measured 229 world motion errors over 8 ms a minute, and 22
 with the clock, the rest at late presents).
+
+`T` is rebased at the step's ideal instant rather than when its body runs, so
+it is a function of wall time alone. A body runs anything from a few
+milliseconds to a refresh or two after its instant, and that lateness changes
+from step to step: on a 120 Hz panel under the default 60 cap a body runs at
+the tail of the Draw its step landed before, or one refresh later when that
+Draw is one the cap skips, and a refresh the display drops moves the steps from
+one to the other. Rebased at the body, each change moved the world by the
+difference — it held for a refresh and then leapt one, again and again while
+the panel dropped refreshes (a traced fullscreen session: 142 of 155 on-time
+frames with a world motion error over 4 ms sat beside such a step). What the
+lateness still decides is when the batch `T` needs is joined, so `margin` holds
+`T` back by the lateness recently seen: a body later than the margin raises it
+at once — the one hold that lateness costs — and the margin gives it back at
+a refresh's worth every two seconds, the world running under one percent fast
+meanwhile. It is capped at one 60 Hz refresh: anything later is a stall, which
+holds the world at the newest joined tick until its join and must not leave it
+a stall behind for seconds afterwards. Replayed against that session's timing
+the clock's motion errors over 4 ms fell from 232 to 49 and over 8 ms from 143
+to 13 in two minutes, for 3 ms more latency on average — the lateness the
+body-rebased clock already carried, now held steady.
 
 A speed-up that needs a longer lag holds the presented world still until the
 clock reaches it again (the clock never presents earlier than the last Draw

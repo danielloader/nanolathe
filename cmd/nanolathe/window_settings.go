@@ -52,7 +52,7 @@ func windowOptionsFor(current func() *gameShell) ebitenapp.RunOptions {
 	}
 	options.ShowFPS = func() bool {
 		g := current()
-		return g.battle != nil && g.battle.fpsShown()
+		return g.battle != nil && g.battle.fpsShown() && g.battle.postBattle == nil
 	}
 	options.RendererChanged = func(mode ebitenapp.RendererMode) { current().rendererChanged(mode) }
 	g.commitWindowSize()

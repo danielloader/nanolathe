@@ -236,8 +236,9 @@ func (b *battleSession) stopSimulation(cl *client.Client) {
 // prepareSimulationStep is the asynchronous half of the controller's step: it
 // releases this pump's sub-ticks with PrepareStep, stamps the release for the
 // presentation clock, and leaves ExecuteStep to the simulation goroutine. It
-// returns how many sub-ticks the pump released.
-func (b *battleSession) prepareSimulationStep(scaled int32) int {
+// returns how many sub-ticks the pump released. due is the step's ideal
+// instant from the window's host clock, zero when there is none.
+func (b *battleSession) prepareSimulationStep(scaled int32, due time.Time) int {
 	plan := b.sess.PrepareStep(scaled)
 	if plan.Ticks() > 0 {
 		if b.millisSource == nil {
@@ -253,7 +254,8 @@ func (b *battleSession) prepareSimulationStep(scaled int32) int {
 	}
 	b.simPaused = b.sess.Clock.Paused
 	b.simActive = b.sess.Clock.Active
-	b.notePresentStep(b.presentMillis(), float64(b.sess.Clock.GlobalTick)+float64(plan.Ticks())+float64(b.sess.Clock.Carry), b.simActive)
+	ideal, late := b.presentStepMillis(due)
+	b.notePresentStep(ideal, late, float64(b.sess.Clock.GlobalTick)+float64(plan.Ticks())+float64(b.sess.Clock.Carry), b.simActive)
 	if !plan.Runs() {
 		return plan.Ticks()
 	}

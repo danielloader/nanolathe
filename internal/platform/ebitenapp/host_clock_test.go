@@ -101,3 +101,42 @@ func TestHostCadenceHoldsItsPhaseThroughJitter(t *testing.T) {
 		}
 	}
 }
+
+// Each step's ideal instant is one period after the last, whichever Update
+// takes it and however many one Update takes, so the battle's presentation
+// clock can be rebased on a grid that jitter, a dropped refresh or a catch-up
+// never moves (§13.13). A step is never taken more than a refresh either side
+// of its instant while the Updates keep coming.
+func TestHostStepDueIsTheIdealGrid(t *testing.T) {
+	const period = time.Second / presentationTPS
+	var clock hostClock
+	start := time.Unix(1, 0)
+	clock.advance(start)
+	refresh := time.Second / 120
+	var dues []time.Time
+	for frame := 1; frame <= 1200; frame++ {
+		// Every seventh refresh dropped, every 97th a 70 ms stall, and ±1.5 ms
+		// of arrival jitter.
+		if frame%7 == 0 {
+			continue
+		}
+		at := start.Add(time.Duration(frame)*refresh + time.Duration((frame*7919)%31-15)*100*time.Microsecond)
+		if frame%97 == 0 {
+			at = at.Add(70 * time.Millisecond)
+			start = start.Add(70 * time.Millisecond)
+		}
+		n := clock.advance(at)
+		for i := range n {
+			due := clock.stepDue(at, n, i)
+			if early, late := due.Sub(at), at.Sub(due); n == 1 && (early > refresh || late > 2*refresh) {
+				t.Fatalf("frame %d: a step taken at %v for %v", frame, at.Sub(start), due.Sub(start))
+			}
+			dues = append(dues, due)
+		}
+	}
+	for i := 1; i < len(dues); i++ {
+		if d := dues[i].Sub(dues[i-1]); d != period {
+			t.Fatalf("step %d is %v after the last, want %v", i, d, period)
+		}
+	}
+}

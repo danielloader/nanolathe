@@ -2,6 +2,7 @@ package ebitenapp
 
 import (
 	"runtime"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -25,6 +26,11 @@ type sampledInput struct {
 	command    bool
 	clipboard  func() input.ClipboardText
 	timestamp  uint32
+	// due is the ideal instant of the host step that consumes this sample
+	// (hostClock.stepDue). It is host timing, not input, and travels with the
+	// sample because the step's body may run later than the Update that
+	// scheduled it.
+	due time.Time
 
 	// Refresh samples distinguish physical holds from Ebitengine's one-update
 	// press retention. The host buffer reconstructs that retention at 30 Hz.

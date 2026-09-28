@@ -127,6 +127,24 @@ func (c *BattleController) stepScaled(raw int32) int32 {
 	return next
 }
 
+// sampleMillis is the millisecond a host step's budget reads [01 §4.1]. On the
+// wall clock it is the step's ideal instant when the window names one
+// (client.HostStepDue): the step's body can run a refresh or two after it —
+// deferred to a modern Draw's tail, behind a cap-skipped Draw or a refresh the
+// display dropped — and read at the body, that lateness moved the sample
+// across a unit boundary often enough that a late step released two ticks and
+// the presented world leapt half a tick. Read at the ideal instant, the sample
+// keeps the host clock's own phase however late the body runs. Like the lock,
+// it moves only the phase of the sample. An injected source is read as it is.
+func (c *BattleController) sampleMillis(cl *client.Client) uint32 {
+	if src, ok := c.millis.(*monotonicMillisSource); ok && src != nil && c.stepLocked && cl != nil {
+		if due := cl.HostStepDue(); !due.IsZero() && due.After(src.start) {
+			return uint32(due.Sub(src.start) / time.Millisecond)
+		}
+	}
+	return c.millis.Millis32()
+}
+
 // Step feeds one logical input frame through the production battle decision
 // path and advances the existing presentation-to-simulation budget. Elapsed
 // remains part of the input value for presentation callers, but is not a
@@ -187,7 +205,7 @@ func (c *BattleController) Step(frame BattleInputFrame, cl *client.Client) {
 	// invokes that registry at every runnable sub-tick [01 §4.4][R-CRD-005 §1].
 	scaled := int32(0)
 	if c.millis != nil {
-		scaled = clock.ScaledNow(c.millis.Millis32())
+		scaled = clock.ScaledNow(c.sampleMillis(cl))
 	}
 	if cl != nil {
 		if c.cursorScaledValid {
@@ -204,7 +222,11 @@ func (c *BattleController) Step(frame BattleInputFrame, cl *client.Client) {
 	}
 	budget := c.stepScaled(scaled)
 	if c.battle.sim != nil {
-		released := c.battle.prepareSimulationStep(budget)
+		var due time.Time
+		if cl != nil && c.stepLocked {
+			due = cl.HostStepDue()
+		}
+		released := c.battle.prepareSimulationStep(budget, due)
 		if cl != nil {
 			cl.NoteTicksReleased(released)
 		}

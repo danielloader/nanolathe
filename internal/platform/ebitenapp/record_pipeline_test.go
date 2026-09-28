@@ -75,11 +75,9 @@ func TestUpdateLedgerRunsInlineWhenTheDrawTailStops(t *testing.T) {
 	}
 }
 
-// The tolerance is one present interval expressed in the blend's units: the
-// fractions advance by period × 30 of a whole across one present, and the
-// window accepts a prediction that far out because that is the bound on present
-// jitter it can still call the same frame.
-func TestFractionToleranceIsOnePresentInterval(t *testing.T) {
+// A tolerance duration is expressed in the blend's units: the fractions
+// advance by period × 30 of a whole across it.
+func TestFractionToleranceConvertsToBlendUnits(t *testing.T) {
 	cases := []struct {
 		period time.Duration
 		want   int32
@@ -102,47 +100,50 @@ func TestFractionToleranceIsOnePresentInterval(t *testing.T) {
 			t.Fatalf("fractionTolerance(%v) = %d quanta, want about %d", c.period, got, c.want)
 		}
 	}
-	// One millisecond of draw jitter — the tick fraction producer's own
-	// resolution — has to fit inside a 120 Hz tolerance, or the window would
-	// miss on a single step of the number it is comparing.
-	if q := fractionTolerance(time.Second / 120); q < fractionOne*30/1000 {
-		t.Fatalf("a 120 Hz tolerance of %d quanta is under the producer's own millisecond step; every frame would miss", q)
-	}
 }
 
-// The tolerance is one NOMINAL present interval — the cap, the display's rate,
-// or the wider of the two — and only falls back to the last launch's own
-// measurement. A frame that hitched must not widen its own tolerance by the
-// lateness the cap exists to catch.
-func TestTolerancePeriodIsTheNominalPresentInterval(t *testing.T) {
+// The tolerance is half of the display's measured refresh, whatever the cap:
+// jitter fits inside it and a Draw a whole refresh late does not. It falls back
+// to the cap and only then to the last launch's own measurement, so a frame
+// that hitched never widens its own tolerance while a nominal rate is known.
+func TestToleranceIsHalfARefresh(t *testing.T) {
 	var p pipeline
 	if d := p.tolerancePeriod(0, 0); d != 0 {
 		t.Fatalf("a window with no rate at all = %v, want 0 (the exact path)", d)
 	}
-	if d := p.tolerancePeriod(0, 120); d != time.Second/120 {
-		t.Fatalf("display rate = %v, want %v", d, time.Second/120)
+	refresh := time.Second / 120
+	if d := p.tolerancePeriod(0, refresh); d != refresh/2 {
+		t.Fatalf("uncapped 120 Hz = %v, want %v", d, refresh/2)
 	}
-	// A cap wider than the display's interval is what the window presents at.
-	if d := p.tolerancePeriod(time.Second/30, 120); d != time.Second/30 {
-		t.Fatalf("capped window = %v, want the cap %v", d, time.Second/30)
+	// A 60 cap at 120 Hz presents every other refresh; a Draw that lands one
+	// refresh past the predicted instant must still miss.
+	cap := time.Second / 60
+	if d := p.tolerancePeriod(cap, refresh); d >= refresh {
+		t.Fatalf("60 cap at 120 Hz = %v; a Draw a whole refresh late (%v) would present stale", d, refresh)
 	}
-	// A cap the display cannot reach does not shorten the interval.
-	if d := p.tolerancePeriod(time.Second/240, 120); d != time.Second/120 {
-		t.Fatalf("cap under the display's rate = %v, want %v", d, time.Second/120)
+	if q, late := fractionTolerance(p.tolerancePeriod(cap, refresh)), fractionTolerance(refresh); q >= late {
+		t.Fatalf("tolerance %d quanta admits a refresh-late Draw (%d quanta)", q, late)
 	}
-	// A hitched frame's own measurement never widens the tolerance while a
-	// nominal rate is known.
+	// Measured Draw jitter (about a millisecond at 120 Hz) stays inside.
+	if q := fractionTolerance(p.tolerancePeriod(cap, refresh)); q <= fractionTolerance(time.Millisecond) {
+		t.Fatalf("tolerance %d quanta does not admit a millisecond of jitter", q)
+	}
+	// With no measured refresh the cap stands in.
+	if d := p.tolerancePeriod(cap, 0); d != cap/2 {
+		t.Fatalf("cap only = %v, want %v", d, cap/2)
+	}
+	// A hitched launch's measurement never widens the tolerance while a
+	// nominal rate is known, and is the last resort without one.
 	p.launchPeriod = 31 * time.Millisecond
-	if d := p.tolerancePeriod(0, 60); d != time.Second/60 {
-		t.Fatalf("hitched launch period = %v, want the nominal %v; a hitch would be presented most of a tick out", d, time.Second/60)
+	if d := p.tolerancePeriod(0, time.Second/60); d != time.Second/120 {
+		t.Fatalf("hitched launch period = %v, want half the refresh %v", d, time.Second/120)
 	}
-	// With no nominal rate the last launch's measurement is the last resort.
-	if d := p.tolerancePeriod(0, 0); d != 31*time.Millisecond {
-		t.Fatalf("last-resort period = %v, want %v", d, 31*time.Millisecond)
+	if d := p.tolerancePeriod(0, 0); d != 31*time.Millisecond/2 {
+		t.Fatalf("last-resort period = %v, want %v", d, 31*time.Millisecond/2)
 	}
 	p.launchPeriod = time.Second
-	if d := p.tolerancePeriod(0, 0); d != presentPeriodCeiling {
-		t.Fatalf("a stalled measurement = %v, want the ceiling %v", d, presentPeriodCeiling)
+	if d := p.tolerancePeriod(0, 0); d != presentPeriodCeiling/2 {
+		t.Fatalf("a stalled measurement = %v, want half the ceiling %v", d, presentPeriodCeiling/2)
 	}
 }
 

@@ -217,7 +217,8 @@ func (a *app) Update() error {
 	if a.options.Stats {
 		a.inputPollTime += time.Since(pollStart)
 	}
-	steps := a.hostClock.advance(time.Now())
+	stepAt := time.Now()
+	steps := a.hostClock.advance(stepAt)
 	if a.trace != nil {
 		a.trace.row.steps = steps
 	}
@@ -233,8 +234,10 @@ func (a *app) Update() error {
 	a.c.JoinPreRecord()
 	// The ledger decides where this call's body runs. The modern executor with
 	// a live Draw tail defers it; everything else runs it here and now.
-	for range steps {
-		a.hostSamples = append(a.hostSamples, a.hostInput.take())
+	for i := range steps {
+		sample := a.hostInput.take()
+		sample.due = a.hostClock.stepDue(stepAt, steps, i)
+		a.hostSamples = append(a.hostSamples, sample)
 		for range a.ledger.call(a.mode == RendererModern && a.gpu != nil) {
 			if a.exitPending {
 				break
@@ -280,6 +283,7 @@ func (a *app) updateBody() {
 	a.fullscreenPresentation.update(a.fullscreen, ebiten.IsFocused())
 	applyInput(a.c.Input(), sample)
 	a.c.SetFocused(ebiten.IsFocused())
+	a.c.SetHostStepDue(sample.due)
 	a.stepClient()
 	if a.trace != nil {
 		a.trace.row.released += a.c.TakeTicksReleased()
@@ -563,16 +567,15 @@ func (a *app) drawModern(screen *ebiten.Image, width, height int, showFPS bool) 
 	// the frame the digest named instead of a second, later sample (§13.10).
 	tick16 := a.c.ResolveTickFraction()
 	// Present at the fraction the list was predicted for when the prediction
-	// held to within one present interval, and take the exact path when it did
-	// not (§13.10). The interval is measured, so the tolerance follows the
-	// display the window is actually running on.
-	// The interval is the one the outstanding prediction was made over, so a
-	// frame that arrived late cannot widen the tolerance by its own lateness.
+	// held to within half a refresh, and take the exact path when it did not
+	// (§13.10). The refresh is measured, so the tolerance follows the display
+	// the window is actually running on, and a frame that arrived late cannot
+	// widen it by its own lateness.
 	paused, pausedRecord, pausedSubmit := a.drawPaused(screen, width, height, showFPS)
 	if paused {
 		record, submit = pausedRecord, pausedSubmit
 	} else {
-		tolerance := fractionTolerance(a.pipe.tolerancePeriod(a.presentInterval, ebiten.ActualFPS()))
+		tolerance := fractionTolerance(a.pipe.tolerancePeriod(a.presentInterval, a.refreshPeriod))
 		if a.trace != nil {
 			a.trace.row.armed = a.pipe.armed
 			a.trace.row.preNanos = a.c.PreRecordNanos()

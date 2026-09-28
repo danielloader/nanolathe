@@ -114,23 +114,14 @@ func (l *updateLedger) tail() bool {
 	return true
 }
 
-// fractionTolerance is the window's per-Draw fraction tolerance, in quanta of
-// the 16.16 blend fraction (§13.10). A pre-recorded list whose predicted
-// fractions land within it is presented AT THE FRACTION IT WAS RECORDED FOR
-// rather than re-recorded at the measured one: the window accepts the
-// prediction, so a presented frame shows the instant it was predicted for and
-// the error is present jitter.
-//
-// One present interval is the cap, and it is the guard rail rather than the
-// target: a frame that arrived a whole refresh late is further out than any
-// jitter and takes the exact path instead. The interval is expressed in the
-// blend's units — thirtieths of a second — so period × 30 × 65536 is the
-// number of quanta the fractions advance across one present.
-//
-// A fixed constant cannot serve here. The battle's tick fraction reads a
-// millisecond source and moves in steps of about 1966 quanta at the nominal
-// speed, so any tolerance below one of its steps fails on one millisecond of
-// draw jitter, and one millisecond is an eighth of a 120 Hz present.
+// fractionTolerance converts the window's per-Draw tolerance (tolerancePeriod)
+// into quanta of the 16.16 blend fraction (§13.10). A pre-recorded list whose
+// predicted fractions land within it is presented AT THE FRACTION IT WAS
+// RECORDED FOR rather than re-recorded at the measured one: the window accepts
+// the prediction, so a presented frame shows the instant it was predicted for
+// and the error is present jitter. The duration is expressed in the blend's
+// units — thirtieths of a second — so period × 30 × 65536 is the number of
+// quanta the fractions advance across it.
 func fractionTolerance(period time.Duration) int32 {
 	if period <= 0 {
 		return 0
@@ -145,35 +136,38 @@ func fractionTolerance(period time.Duration) int32 {
 	return int32(q)
 }
 
-// tolerancePeriod picks the interval fractionTolerance is computed from: the
-// interval the window NOMINALLY presents at — the `--fps` cap, the display's
-// own rate, or the wider of the two when both are known. That, and not the
-// interval this particular prediction was extrapolated over, is what makes the
-// cap a guard rail. A frame that hitched measures a long period, and computing
-// its tolerance from that period would widen it by exactly the lateness it
-// exists to catch: the hitch would be presented at a pose most of a tick from
-// where it belongs instead of taking the exact path.
+// tolerancePeriod is how far, as a duration, a pre-record's prediction may be
+// from the Draw that consumes it and still be presented as recorded: half of
+// the display's refresh interval, the smallest step by which a present can
+// land late. Draw jitter is well inside it; a Draw that arrives a whole
+// refresh after the instant its list was recorded for is outside it and takes
+// the exact path, so the frame shows the world where it is when it is shown.
 //
-// The period the last launch measured is the last resort, for a window that
-// has not established a rate yet. With none of the three the tolerance is
-// zero, which is the exact path.
-func (p *pipeline) tolerancePeriod(cap time.Duration, refreshRate float64) time.Duration {
-	nominal := cap
-	if refreshRate > 0 {
-		if d := time.Duration(float64(time.Second) / refreshRate); d > nominal {
-			nominal = d
-		}
+// It used to be one nominal present interval: the cap, or the display's
+// interval when that was wider. Under a cap slower than the display one
+// present interval is two refreshes or more, so a Draw a whole refresh late
+// still matched and showed the world as it had been a refresh earlier, and the
+// next frame made up the difference. In a traced fullscreen session at 120 Hz
+// under the default 60 cap, that was every one of 96 presents held for three
+// refreshes: the world stood still for a third of the frame, then leapt as far
+// on the next one.
+//
+// The refresh is the one presentDue measures. Without one the cap stands in,
+// and the last launch's own period only as a last resort: a hitched frame's
+// measurement never widens the tolerance while a nominal rate is known. With
+// none of the three the tolerance is zero, which is the exact path.
+func (p *pipeline) tolerancePeriod(cap, refresh time.Duration) time.Duration {
+	interval := refresh
+	if interval <= 0 {
+		interval = cap
 	}
-	if nominal <= 0 {
-		nominal = p.launchPeriod
+	if interval <= 0 {
+		interval = p.launchPeriod
 	}
-	if nominal < presentPeriodFloor {
+	if interval < presentPeriodFloor {
 		return 0
 	}
-	if nominal > presentPeriodCeiling {
-		return presentPeriodCeiling
-	}
-	return nominal
+	return min(interval, presentPeriodCeiling) / 2
 }
 
 // observeDraw records this Draw's spacing and returns the interval the

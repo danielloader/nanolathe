@@ -86,6 +86,9 @@ type Client struct {
 	simulationJoinWait, simulationJoinBatch int64 // nanoseconds
 	simulationJoins                         int
 	simulationReleased                      int
+	// hostStepDue is the ideal instant of the host step being run
+	// (SetHostStepDue).
+	hostStepDue time.Time
 	// frameTiming is presentation-only instrumentation for the +fps overlay.
 	// The window adapter changes it only after joining any pre-record worker.
 	frameTiming         bool

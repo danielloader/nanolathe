@@ -70,6 +70,18 @@ func (c *hostClock) advance(now time.Time) int {
 	return steps
 }
 
+// stepDue is the ideal instant of step i of the n that the advance at now
+// just took: carry is the signed time since the last one's, and the steps of
+// one Update are a period apart. A step lands on an Update up to a refresh
+// either side of it, and its body may run a refresh or two later still, at a
+// modern Draw's tail (§13.10); the battle's presentation clock and budget
+// sample read this instant instead, so that where a step happened to run does
+// not move the presented world (§13.13).
+func (c *hostClock) stepDue(now time.Time, n, i int) time.Time {
+	const period = time.Second / presentationTPS
+	return now.Add(-c.carry - time.Duration(n-1-i)*period)
+}
+
 // due is how many steps this Update takes. With no measured refresh faster
 // than the steps it rounds to the closest step, as it always did; the signed
 // remainder keeps display jitter around a boundary from alternating zero and

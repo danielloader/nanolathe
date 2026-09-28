@@ -219,7 +219,7 @@ func TestCommanderKillReachesThePostBattleScreen(t *testing.T) {
 	b.syncSimulationMode(cl)
 
 	step := func() {
-		b.prepareSimulationStep(sess.Clock.ScaledAnchor + 1)
+		b.prepareSimulationStep(sess.Clock.ScaledAnchor+1, time.Time{})
 		b.launchSimulation(cl)
 		b.joinSimulation(cl)
 		cl.PinPresentation()

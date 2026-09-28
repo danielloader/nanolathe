@@ -28,7 +28,7 @@ func presentStep(b *battleSession, ms uint32, joined, released uint32, active in
 	b.millisSource.(*presentTestMillis).ms = ms
 	b.sim.observedTick, b.sim.observedValid = joined, true
 	b.simActive = active
-	b.notePresentStep(b.presentMillis(), float64(released), active)
+	b.notePresentStep(b.presentMillis(), 0, float64(released), active)
 }
 
 // position is the world time a sample presents: the named tick less one, plus
@@ -82,6 +82,56 @@ func TestPresentationClockMovesEvenly(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A step's body runs when the window reaches it, a few milliseconds to a
+// refresh or two after the step's ideal instant, and how late changes from one
+// step to the next. The clock is rebased at the ideal instant and held back by
+// the lateness recently seen, so the world moves by the wall time between
+// Draws whatever the bodies do, and never names a tick not yet joined.
+// Rebased at the body, as it was, the same schedule moved the world a third of
+// a present interval out of step at every change in lateness.
+func TestPresentationClockIgnoresStepLateness(t *testing.T) {
+	src := &presentTestMillis{}
+	b := &battleSession{sim: &battleSim{}, millisSource: src}
+	lateness := []float64{2, 10, 2, 2, 10, 10, 2, 10, 2, 2, 2, 10, 2, 10, 10, 2}
+	const period = 100.0 / 3
+	step := 0
+	var last, lastAt float64
+	for draw := 0; draw < 2*len(lateness)-4; draw++ {
+		at := 1005 + float64(draw)*50/3 // 60 Hz Draws
+		for step < len(lateness) && 1000+float64(step)*period+lateness[step] <= at {
+			// The join makes the previous release presentable; this release
+			// leaves the global tick one further on.
+			b.sim.observedTick, b.sim.observedValid = uint32(100+step), true
+			b.simActive = 10
+			b.notePresentStep(1000+float64(step)*period, lateness[step], float64(101+step), 10)
+			step++
+		}
+		src.ms = uint32(at)
+		tick, fraction, named := b.presentationAt(0)
+		if !named || tick > b.sim.observedTick {
+			t.Fatalf("draw %d named %d, %v; newest joined is %d", draw, tick, named, b.sim.observedTick)
+		}
+		pos := position(tick, fraction)
+		// The first 10 ms body is later than the margin yet seen and holds the
+		// world once; from the Draw after it every frame moves the world by the
+		// time since the last, less what the margin gives back when a late
+		// body raises it again.
+		if at > 1000+period+10+50/3 {
+			moved := (pos - last) / 0.03
+			if want := float64(src.ms) - lastAt; math.Abs(moved-want) > 1.5 {
+				t.Fatalf("draw %d moved the world %.2f ms in %.0f ms", draw, moved, want)
+			}
+		}
+		last, lastAt = pos, float64(src.ms)
+	}
+	// A stall is not jitter: it holds the world, and the margin it leaves is
+	// no larger than one 60 Hz refresh.
+	b.notePresentStep(1000+float64(step)*period, 180, float64(101+step), 10)
+	if m := b.presentMarginAt(1000 + float64(step)*period + 180); m > presentMarginCeiling+1e-9 {
+		t.Fatalf("a 180 ms stall left a %.1f ms margin, want at most %.1f", m, presentMarginCeiling)
 	}
 }
 

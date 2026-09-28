@@ -324,7 +324,18 @@ func TestInstallerRootIgnoresUnusableMemory(t *testing.T) {
 	h := fixtureHost(t, "linux")
 	found := marker(t, filepath.Join(h.home, "TotalAnnihilation"), "totala1.hpi")
 	empty := t.TempDir()
-	for _, remembered := range []string{"", "relative/folder\n", empty + "\n", filepath.Join(empty, "moved") + "\n", found + "\n" + empty + "\n"} {
+	// Each rejected entry would otherwise name a usable folder other than the
+	// discovered one, so accepting it would change the result: a relative
+	// path that resolves from the process directory, and a first line that
+	// holds game data.
+	other := marker(t, filepath.Join(t.TempDir(), "other"), "totala1.hpi")
+	relative := "relative/folder"
+	if wd, err := os.Getwd(); err == nil {
+		if rel, err := filepath.Rel(wd, other); err == nil && !filepath.IsAbs(rel) {
+			relative = rel
+		}
+	}
+	for _, remembered := range []string{"", relative + "\n", empty + "\n", filepath.Join(empty, "moved") + "\n", other + "\n" + empty + "\n"} {
 		fakeInstaller(t, &h, "game-root", remembered)
 		got, err := resolve(nil, h)
 		if err != nil || !reflect.DeepEqual(got, []string{found}) {

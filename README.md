@@ -44,8 +44,10 @@ With no `--root`, Nanolathe searches registered and standard installation
 locations first, including GOG, Steam libraries, and Wine installations. It also
 checks nearby game folders and finally `~/TotalAnnihilation` (a convenient
 location for manually placed data on macOS and Linux).
-It mounts all detected installations in a deterministic order. A custom
-installation can be selected explicitly:
+It mounts only the first installation found in that order; detected
+installations are never overlaid. A build installed by the source installer
+and started directly uses the game folder its launcher remembered instead.
+A custom installation can be selected explicitly:
 
 ```sh
 ./nanolathe --root "/path/to/Total Annihilation"

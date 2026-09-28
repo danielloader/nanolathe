@@ -100,7 +100,8 @@ func (g *gameShell) applySettings(s settings.Settings) {
 	// battle entry, where it sizes the unit pool [05 R-SHARE-01 §7]. No
 	// screen edits it: retail reads it from the profile file, and the
 	// skirmish lobby has no gadget for it [08 R-SKIR-01 §6].
-	g.setup.UnitLimit = s.UnitLimit
+	g.savedUnitLimit = s.UnitLimit
+	g.setup.UnitLimit = s.ConfiguredUnitLimit()
 	if g.opts.UnitLimit != 0 {
 		g.setup.UnitLimit = g.opts.UnitLimit
 	}
@@ -189,8 +190,9 @@ func (g *gameShell) captureSettings() settings.Settings {
 		DamageBars: damageBarsSettingValue(),
 		// Written back unchanged: nothing in the frontend edits it, so this
 		// preserves whatever the file held rather than inventing a value
-		// [08 R-SKIR-01 §6].
-		UnitLimit: setup.UnitLimit,
+		// [08 R-SKIR-01 §6]. The live setup word also carries the default
+		// and any --unit-limit, neither of which is a saved choice.
+		UnitLimit: g.savedUnitLimit,
 		// The options root's `PREV` ("OK") is one of the save points that
 		// rewrite the whole block; the value it saves is whatever the live
 		// display record holds [07 R-FE-01 §6][07 R-FE-01 §11].
@@ -242,6 +244,17 @@ func (g *gameShell) captureSettings() settings.Settings {
 		}
 	}
 	return s
+}
+
+// adoptLiveSettings starts a replacement shell (a content reload) from the
+// running shell's live preferences. The configured unit-limit word is carried
+// on its own: captureSettings returns only the file's own choice, while the
+// live word may also hold a --unit-limit or a restored save's limit, which
+// stays in force for the rest of the process [08 R-SESS-01 §9].
+func (g *gameShell) adoptLiveSettings(old *gameShell) {
+	g.applySettings(old.captureSettings())
+	g.setup.UnitLimit = old.setup.UnitLimit
+	g.settingsWritable = old.settingsWritable
 }
 
 // saveSettings writes the whole block back. A failed write is reported and

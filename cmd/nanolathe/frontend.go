@@ -120,14 +120,18 @@ type gameShell struct {
 	// with the battle controller, without borrowing simulation time [07 R-WGT-01 §1].
 	widgetMillis clock.MillisSource
 
-	maps          []string
-	mapLabels     []string
-	mapIdx        int
-	mapReturn     shellMode
-	mapData       map[string]*retailMapData
-	setup         session.SkirmishConfig
-	selectedSlot  int
-	skirmishSides int // authored SIDE count, bound once when the shell is constructed
+	maps      []string
+	mapLabels []string
+	mapIdx    int
+	mapReturn shellMode
+	mapData   map[string]*retailMapData
+	setup     session.SkirmishConfig
+	// savedUnitLimit is the file's own unitLimit, zero when the player chose
+	// none. Settings writes return it unchanged, so neither the default nor a
+	// one-off --unit-limit is ever recorded as the player's choice.
+	savedUnitLimit int
+	selectedSlot   int
+	skirmishSides  int // authored SIDE count, bound once when the shell is constructed
 	// retailControllers preserves the numeric Controller field that TotalA.exe
 	// puts in each Player%d row: 0=open, 1=human, 2=computer. The session
 	// package has a separate compatibility representation, so the conversion

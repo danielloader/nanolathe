@@ -2276,6 +2276,31 @@ Community inherits it.
    of a packed formation. The release raises the route's repath request and
    clears its request tick, so the next search is admitted promptly. The
    count restarts when the unit's order ends.
+
+   *Work sites* (issue #31). For a ground work approach — a `MobileBuild`,
+   `HelpBuild`, `Reclaim`, `ReclaimUnit`, `Resurrect`, `RepairUnit` or
+   `Capture` head whose annulus or rectangle payload is bound — "the goal
+   footprint" is the goal's whole stand region, not the footprint at the
+   goal's anchor point, which for these goals is the target's own centre or
+   anchor cell, where no helper stands (`System.workStandHeld`). A
+   rectangle's region is every cell of the grown rectangle, border and
+   interior, so a friend of any footprint standing flush against the target
+   holds one of its cells. An annulus's region is every cell of
+   `path.StandBounds` on which its heuristic reads zero or its start predicate
+   accepts: the follower halts an arriving assister on the first committed
+   anchor the start predicate accepts `[04 R-MOV-03 §2]`, and because the two
+   bands use different stored radii that anchor can lie a cell outside the
+   zero band `[04 R-PATH-01 §9]`.
+   A builder already working at the site is therefore never passed through by
+   a second one arriving. The jammed builder keeps ordinary collision and
+   repath: it reaches a free stand cell, or on an empty route its row's own
+   failure arm decides — the mobile build's reach test `[05 R-WORK-01 §12]`,
+   the assist's cannot-get-there `[04 R-ORD-01 §5]`. An attack chase's band
+   and a park rectangle keep the point test; neither is a work site. The scan
+   covers only the goal's own rectangle — for an assist band the square of
+   its arrival radius, `2·(outer/16) + 1` cells wide — runs only on a jammed
+   tick near the destination, reads one occupancy word a cell and allocates
+   nothing.
 3. *During the release.* In the ground commit's per-cell occupant test, a
    cell held by a friendly ground unit is free when either unit is released
    and the occupant is not a same-way mover, or is one the mover already
@@ -2356,6 +2381,28 @@ near-destination start adds a few overlaps where an order finishes
 mid-pass: units left overlapping at the end of a fixture's window rose from
 16 to 19 pairs across the corpus without the 1,500-unit waves.
 
+The work-site rule was measured on 136 authored retail scenes with a probe
+that was not kept: flat terrain, a construction kbot (`armck` or `armack`)
+building an `armsolar`, `armllt`, `armvp` or `armmakr` while four, eight or
+twelve more assist it, arriving in six layouts, and every builder handed a
+build of its own on the tick after completion. Against the contract without
+the rule: ticks on which two builders overlapped before that follow-up
+47,533 → 4,849; builder pairs overlapping when it was given 167 → 17;
+follow-up builds refused with "I can't reach the construction site" 73 → 19,
+72 → 18 of them from a builder standing inside a friend; builders that never
+left their post 62 → 10. Products complete 1.4 ticks later on average. The
+overlaps and refusals left come from releases that start more than 128 world
+units from the goal, from allied pass-through, and from a release into a
+parked builder at another site. For construction throughput, units created
+at 12,000, 18,000 and 24,000 ticks were compared in Modern headless
+skirmishes (three maps, Classic and Modern computer players, seed 7) and
+Survival battles with two buddies (two maps, both AIs, seeds 1–7): 17 of 18
+skirmish runs and 73 of 84 Survival runs are bit-identical. The rest share
+their trajectory up to the first withheld release — at most 51 ticks long in
+the runs traced — and then differ by the battle's own spread; over the seven
+seeds the buddies' units at 24,000 ticks moved by between −3.4% and 0% per
+map and AI.
+
 **Boundaries.** Aircraft, carried units, structures and units with no
 movement head never count jammed ticks. A unit released while its order ends
 stays released until its window closes, and friendly movers may pass through
@@ -2377,7 +2424,8 @@ are listed under [Modern wedge escape](#modern-wedge-escape), after
 [Modern route straightening](#modern-route-straightening) moved them again.
 Those battles contain friendly jams that now drain. Because the policy can end
 a battle sooner, a change to it must run `tools/check-retail --full`, whose
-long trajectory is the only lock on the end tick.
+long trajectory is the only lock on the end tick. The work-site rule moves no
+lock, the long Modern Ashap run included.
 
 **Verification.** `movement.TestJamRelease` (Strict and Community stay blocked
 behind a parked friend; Modern commits on the tick after thirty jammed ticks;
@@ -2390,8 +2438,16 @@ forgotten unit its release), `TestJamReleaseFreesWedgedUnits` (a unit
 wedged inside a same-way friend gets past it where one merely behind such a
 friend keeps queuing; a route-less unit inside a friend is released; Strict
 releases neither), `TestStaticPassableSeesThroughMobilesOnly`
-(kept movers wall their anchors); the Strict, Community and Modern
-`headless` fingerprint locks, including the long Modern Ashap end tick
+(kept movers wall their anchors); for work sites, `TestJamRelease` (a jammed
+builder is never released into a builder at the site, an assister in the
+zero band or one resting on the arrival band outside it; a friend short of
+the site and one in an attack chase's band are still passed; Strict never
+releases) and `path.TestStandBoundsHoldEveryRestingCell`; in the retail tier,
+`session.TestModernBuildersAtASharedSiteNeverStandInsideEachOther` (nine
+construction kbots on one collector: no two overlap while building, and each
+takes its next build on the tick after completion) and
+`TestStrictBuildersAtASharedSiteNeverOverlap`; the Strict, Community and
+Modern `headless` fingerprint locks, including the long Modern Ashap end tick
 (`tools/check-retail --full`).
 
 #### Modern pocket release

@@ -24,6 +24,16 @@ type jamCase struct {
 	moverCell    int32 // the mover's starting cell along the row; 0 is 5
 	routeless    bool  // the mover never holds a route
 	sameHeading  bool  // the blocker always heads exactly as the mover does
+	// siteCell, when nonzero, gives the mover a work approach instead of a
+	// point goal: a MobileBuild head with the rectangle goal of a one-cell
+	// site anchored at that cell of the row, or with assist set a HelpBuild
+	// head with the annulus goal an assist installs around it. outer, when
+	// nonzero, replaces the annulus's outer radius; row, when set, replaces
+	// the head's order row.
+	siteCell int32
+	assist   bool
+	outer    int32
+	row      string
 }
 
 func runJamCase(t *testing.T, c jamCase, ticks uint32) (freed uint32, sys *System) {
@@ -82,14 +92,35 @@ func setupJamCase(t *testing.T, c jamCase) (*System, pool.Handle, pool.Handle, f
 	sys.EnsureUnit(w.Unit(b))
 	sys.EnsureUnit(w.Unit(a))
 	rowZ := int32(row.Raw() >> 16)
-	move := orders.Lookup("Move_Ground")
+	name := "Move_Ground"
+	switch {
+	case c.row != "":
+		name = c.row
+	case c.siteCell != 0 && c.assist:
+		name = "HelpBuild"
+	case c.siteCell != 0:
+		name = "MobileBuild"
+	}
 	q := orders.QueueForUnit(w.Unit(a))
-	q.Push(move, orders.Node{Owner: a, GoalX: world.CellToWorld(c.moverEndCell), GoalZ: row, GoalSupplied: true})
+	q.Push(orders.Lookup(name), orders.Node{Owner: a, GoalX: world.CellToWorld(c.moverEndCell), GoalZ: row, GoalSupplied: true})
 	if c.oneWayAlly {
 		q.SetBinding(&orders.QueueBinding{Lookup: w.Unit, World: &orders.WorldQueryAdapter{DeclaresAlliance: func(from, toward uint8) bool { return from == 0 && toward == c.ownerB }}})
 	}
 	head := q.Head()
-	sys.InstallPointGoal(orders.PointGoalRequest{Owner: head.Owner, Node: head, X: head.GoalX, Z: head.GoalZ, Radius: 4})
+	switch {
+	case c.siteCell != 0 && c.assist:
+		// Half a cell of stand-off out to two cells of build distance, as the
+		// assist approach sizes its band.
+		outer := c.outer
+		if outer == 0 {
+			outer = 40
+		}
+		sys.InstallAnnulusGoal(orders.AnnulusGoalRequest{Owner: head.Owner, Node: head, X: world.CellToWorld(c.siteCell), Z: row, InnerRadius: 8, OuterRadius: outer})
+	case c.siteCell != 0:
+		sys.InstallRectangleGoal(orders.RectangleGoalRequest{Owner: head.Owner, Node: head, CellX: c.siteCell, CellZ: rowZ >> 4, Width: 1, Depth: 1})
+	default:
+		sys.InstallPointGoal(orders.PointGoalRequest{Owner: head.Owner, Node: head, X: head.GoalX, Z: head.GoalZ, Radius: 4})
+	}
 	setHandleRow(&sys.activeOrders, a, &activeMove{order: head, token: 7})
 	step := func(tick uint32) StepResult {
 		// Both routes are re-published each tick so the fixture has no
@@ -130,6 +161,20 @@ func TestJamRelease(t *testing.T) {
 		// friend that blocks it (see TestJamReleaseNearDestinationEndsWhenClear).
 		{"modern releases near the route end to pass the blocker", jamCase{rules: &ModernRules{}, moverEndCell: 12}, modernJamReleaseAfter + 1},
 		{"modern never releases into a one-way ally", jamCase{rules: &ModernRules{}, ownerB: 1, oneWayAlly: true, moverEndCell: 30}, 0},
+		// A builder already working flush against the site is where a second
+		// builder is going: releasing into it stacks the two (issue #31).
+		{"modern never releases into a builder at the site", jamCase{rules: &ModernRules{}, moverEndCell: 9, siteCell: 8}, 0},
+		{"modern never releases into an assister at the site", jamCase{rules: &ModernRules{}, moverEndCell: 7, siteCell: 9, assist: true}, 0},
+		// An outer radius of 50 puts the arrival band (50/16 = 3 cells) a cell
+		// past the zero band (50/18 = 2): the follower halts an assister three
+		// cells out, where the friend stands, so that cell is the site too.
+		{"modern never releases into an assister on the arrival band", jamCase{rules: &ModernRules{}, moverEndCell: 8, siteCell: 10, assist: true, outer: 50}, 0},
+		// A parked friend short of the site is still passed as before.
+		{"modern releases past a friend short of the site", jamCase{rules: &ModernRules{}, moverEndCell: 10, siteCell: 11}, modernJamReleaseAfter + 1},
+		// An attack band is no work site: the point test at its centre keeps
+		// passing a friend parked in the band.
+		{"modern releases past a friend in an attack band", jamCase{rules: &ModernRules{}, moverEndCell: 7, siteCell: 9, assist: true, row: "Attack_Chase"}, modernJamReleaseAfter + 1},
+		{"strict never releases at a site", jamCase{rules: StrictRules{}, moverEndCell: 9, siteCell: 8}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			freed, sys := runJamCase(t, tc.c, ticks)

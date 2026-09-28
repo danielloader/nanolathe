@@ -621,3 +621,51 @@ func TestRectGoalNearestTieTakesFirstEnumerated(t *testing.T) {
 		s.Release()
 	}
 }
+
+// StandBounds holds every cell where a shaped goal's heuristic reads zero or
+// its start predicate accepts: the annulus's two bands use different stored
+// radii [04 §7.4], so the square must reach the farther of them.
+func TestStandBoundsHoldEveryRestingCell(t *testing.T) {
+	center := Cell{X: 40, Z: 50}
+	for _, tc := range []struct {
+		name string
+		goal Goal
+		want int32 // the square's reach about the centre
+	}{
+		// An assist band as HelpBuild sizes it: arrival (outer/16 = 5 cells)
+		// reaches past the zero band (outer/18 = 4 cells).
+		{"assist band", AnnulusGoal(center, 47, 87), 5},
+		{"wide assist band", AnnulusGoal(center, 62, 122), 7},
+		// A saved arrival threshold wider than the radii imply.
+		{"restored wide arrival", AnnulusGoalRestored(center, 64, 128, 4, 169), 13},
+		// A saved arrival threshold narrower than the zero band.
+		{"restored narrow arrival", AnnulusGoalRestored(center, 0, 180, 0, 4), 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, ok := StandBounds(tc.goal)
+			if !ok {
+				t.Fatal("no bounds")
+			}
+			if want := (Rect{Min: Cell{X: center.X - tc.want, Z: center.Z - tc.want}, Max: Cell{X: center.X + tc.want, Z: center.Z + tc.want}}); b != want {
+				t.Fatalf("bounds %v, want %v", b, want)
+			}
+			for z := center.Z - 60; z <= center.Z+60; z++ {
+				for x := center.X - 60; x <= center.X+60; x++ {
+					c := Cell{X: x, Z: z}
+					if (tc.goal.H(c) == 0 || tc.goal.StartSatisfied(c)) && (x < b.Min.X || x > b.Max.X || z < b.Min.Z || z > b.Max.Z) {
+						t.Fatalf("resting cell %v lies outside %v", c, b)
+					}
+				}
+			}
+		})
+	}
+	r := Rect{Min: Cell{X: 3, Z: 4}, Max: Cell{X: 9, Z: 8}}
+	if b, ok := StandBounds(RectPerimeterGoal(r)); !ok || b != r {
+		t.Fatalf("rectangle bounds %v %v, want the stored rectangle %v", b, ok, r)
+	}
+	for _, g := range []Goal{PointGoal(center, 64), AnnulusGoalRestored(center, -18, -18, -1, -1), nil} {
+		if b, ok := StandBounds(g); ok {
+			t.Fatalf("%T reported bounds %v", g, b)
+		}
+	}
+}

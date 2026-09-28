@@ -4875,7 +4875,9 @@ it advances once and then stores
 result rows'
 player surface is 91×21 at x=16 and uses the source slot's frame from
 `textures/logos.gaf:32xlogos`, stretched by the established surface painter;
-the name is centred in the 90×15 text area at x=16 with foreground field 15.
+the name is an appended 90×15 centred label at x=16 whose `colorf` word 15 is
+the GAF pen's light-table row, so it draws in `hattfont11` brightened through
+row 15, not in GUI map entry 15 ([08 R-CAMP-01 §7], [R-FE-02 §5]).
 The row ordinal is not a logo-frame selector. The reveal deadline comparison
 is also strict (`deadline < presentationUnit`), with the inherited deadline
 expired so Kills can reveal on the first pass; each group then schedules

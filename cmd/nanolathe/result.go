@@ -662,22 +662,7 @@ func (h *retailBattleHUD) drawResultStats(c *client.Client, b *battleSession, vi
 			}
 		}
 		if row.Name != "" {
-			// The results builder selects GAF-font slot 1 around each player
-			// label, then restores slot 0. Its null-slot fallback uses the
-			// active frontend FNT [08 R-CAMP-01 §7][03 R-FONT-01 §6].
-			if h.modalFontSmall != nil {
-				textWidth := retailGAFTextWidth(h.modalFontSmall, row.Name)
-				fontMetric := retailGAFTextHeight(h.modalFontSmall)
-				x := int(playerColor.X) + (90-textWidth)/2
-				y := int(playerColor.Y) + (20-fontMetric)/2
-				drawRetailGAFText(c, h.modalFontSmall, row.Name, x, y, 90)
-			} else if h.primaryFont != nil {
-				textWidth := client.MeasureText(h.primaryFont, row.Name)
-				fontMetric := int(h.primaryFont.Height)
-				x := int(playerColor.X) + (90-textWidth)/2
-				y := int(playerColor.Y) + (20-fontMetric)/2
-				c.UITextWidth(h.primaryFont, row.Name, x, y, 90, h.guiColor(15))
-			}
+			h.drawResultName(c, playerColor, row.Name)
 		}
 		for column := 0; column < len(resultBars); column++ {
 			if !h.resultState.active[column] {
@@ -689,6 +674,45 @@ func (h *retailBattleHUD) drawResultStats(c *client.Client, b *battleSession, vi
 		}
 	}
 	h.drawSurvivalResultLine(c, view, len(h.resultState.rows))
+}
+
+// resultNameWidth and resultNameColor are the two words each player's
+// appended name label carries: the width the population writes over the
+// append helper's default, and the helper's own colour word 15
+// [08 R-CAMP-01 §7][07 R-FE-02 §5].
+const (
+	resultNameWidth = 90
+	resultNameColor = 15
+)
+
+// drawResultName paints one player's name label [08 R-CAMP-01 §7]. The
+// population selects GAF-font slot 1 only to take the line metric, which
+// places the label at `rowY + trunc((20 - metric)/2)`. ENDMSN authors no font
+// record, so the label painter takes its GAF branch: it selects slot 1
+// (hattfont11) itself, centres the pen at `x + trunc(w/2) - trunc(tw/2)`, and
+// draws one line limited to the label width with the colour word as the pen
+// mode. That mode is a light-table row, so every byte of the compressed face
+// is brightened through LHT row 15 and the names read lighter than the mode-0
+// bar numbers beside them. A null slot 1 reaches the FNT drawer instead: the
+// common COMIX face, raw palette index 15, no width limit [03 R-FONT-01 §6].
+func (h *retailBattleHUD) drawResultName(c *client.Client, surface gui.Rect, name string) {
+	x, y := int(surface.X), int(surface.Y)
+	if font := h.modalFontSmall; font != nil {
+		textWidth := retailGAFTextWidth(font, name)
+		penY := y + (20-retailGAFTextHeight(font))/2
+		drawRetailGAFTextLit(c, font, name, x+resultNameWidth/2-textWidth/2, penY, resultNameWidth, h.pal, resultNameColor)
+		return
+	}
+	if font := h.primaryFont; font != nil {
+		// TODO(question): with slot 1 null the population's metric is the
+		// height of whichever FNT is active when it runs, and no trace fixes
+		// which one the skirmish results route leaves active; COMIX is what
+		// the painter itself selects. Settled by tracing the last FNT
+		// selection ahead of the population on each results route.
+		textWidth := client.MeasureText(font, name)
+		penY := y + (20-int(font.Height))/2
+		c.UITextWidth(font, name, x+resultNameWidth/2-textWidth/2, penY, -1, resultNameColor)
+	}
 }
 
 func resultBarText(value int) string {

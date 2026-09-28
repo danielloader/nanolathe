@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
+	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
@@ -226,5 +228,30 @@ func TestMegamapDashChainSpacingAndPhase(t *testing.T) {
 	megamapDashChain([2]float64{-100, 0}, [2]float64{200, 0}, 0.5, 0.5, 1000, 1000, 0, 1, 1, emit)
 	if len(got) != 4 || got[0].x != -100 || got[3].x >= 100 {
 		t.Fatalf("clamped chain = %+v", got)
+	}
+}
+
+// The frame buffer hands back the same *frame.Frame for a later tick with a
+// different unit list. A slot index cached for the earlier contents pointed
+// past the shorter list and panicked on footer hover.
+func TestMegamapUnitSlotsRebuildWhenFrameSlotIsReused(t *testing.T) {
+	b := &battleSession{}
+	f := &frame.Frame{Tick: 1}
+	for i := 1; i <= 432; i++ {
+		f.Units = append(f.Units, frame.UnitView{Slot: pool.Handle(i)})
+	}
+	b.megamapUnitSlots(f)
+
+	f.Tick = 3
+	f.Units = f.Units[:0]
+	for i := 1; i <= 430; i++ {
+		f.Units = append(f.Units, frame.UnitView{Slot: pool.Handle(i)})
+	}
+	slots := b.megamapUnitSlots(f)
+	if u, ok := megamapUnitView(f, slots, pool.Handle(432)); ok {
+		t.Fatalf("slot 432 resolved to %+v after its unit left the reused frame", *u)
+	}
+	if u, ok := megamapUnitView(f, slots, pool.Handle(430)); !ok || u.Slot != 430 {
+		t.Fatalf("slot 430 = %v, %v; want the unit in slot 430", u, ok)
 	}
 }

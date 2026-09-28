@@ -52,6 +52,7 @@ type battleMegamap struct {
 	icons               *client.MegamapIconBank
 	slotScratch         []int
 	slotScratchForFrame *frame.Frame
+	slotScratchTick     uint32
 }
 
 // megamapOptions is the resolved presentation block.
@@ -283,9 +284,11 @@ func (b *battleSession) megamapPickTarget(f *frame.Frame, x, y int32) (pool.Hand
 }
 
 // megamapUnitSlots indexes the committed units by pool slot, rebuilt once per
-// published frame.
+// published frame. The frame buffer reuses its slots, so the same pointer
+// returns holding a later tick's units; the cache is keyed on the pointer and
+// the tick together, as the client's other per-frame caches are.
 func (b *battleSession) megamapUnitSlots(f *frame.Frame) []int {
-	if b.megamap.slotScratchForFrame == f && f != nil {
+	if f != nil && b.megamap.slotScratchForFrame == f && b.megamap.slotScratchTick == f.Tick {
 		return b.megamap.slotScratch
 	}
 	largest := 0
@@ -304,7 +307,7 @@ func (b *battleSession) megamapUnitSlots(f *frame.Frame) []int {
 			slots[int(f.Units[i].Slot)] = i + 1
 		}
 	}
-	b.megamap.slotScratch, b.megamap.slotScratchForFrame = slots, f
+	b.megamap.slotScratch, b.megamap.slotScratchForFrame, b.megamap.slotScratchTick = slots, f, f.Tick
 	return slots
 }
 

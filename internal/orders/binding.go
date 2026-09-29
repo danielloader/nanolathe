@@ -194,6 +194,14 @@ type MovementGoalAdapter struct {
 	InstallRectangle   func(RectangleGoalRequest) bool
 	InstallAir         func(AirGoalRequest) bool
 	Release            func(*Node) bool
+	// Destroy is the record destructor's half of the same port: it unbinds the
+	// controller only when this record's own object is the bound one, then
+	// deletes that object. Queue teardown uses it, because destroying a
+	// record whose object another record has displaced must not interrupt
+	// that record [04 R-ORD-01 §9]. Release above is the explicit handler
+	// release, which unbinds whenever the record owns an object. A binding
+	// without Destroy tears down through Release.
+	Destroy func(*Node) bool
 	// RunAir is the queue-local air executor. Keeping it on the binding avoids
 	// a process-global runner when more than one session exists [04 §3.3].
 	RunAir AirLegRunner

@@ -100,7 +100,12 @@ The boundary runs at five places:
   per-unit slice independently of the controller binding. Arrival and rebind
   drop only the binding; explicit record release unbinds the controller before
   destroying its own object, while record destruction unbinds only if its
-  object is currently bound. `ForgetUnit` destroys all retained objects in
+  object is currently bound. The order queue's removal paths reach the
+  destructor through the binding's `Destroy` port and handlers reach the
+  explicit release through `Release`. Wiring teardown to the explicit release
+  let a displaced record's removal wake the bound record with the release bit
+  (`session.TestQueueTeardownOfADisplacedRecordLeavesTheBoundGoal`).
+  `ForgetUnit` destroys all retained objects in
   insertion order. Mover-only restore preserves live record ownership; full
   session restore builds a new system, reconstructs all saved record objects,
   and binds only the primary head. Save projection reads these retained objects

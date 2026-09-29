@@ -755,12 +755,14 @@ Modern adds these branches at the existing guard maintenance cadence:
   `[04 R-AIR-01 §11]`; the landing executor decides whether a pad piece is
   available. A successful selection temporarily prepends `VTOL_Landing`.
 * After combat support and direct ward assistance, mobile builders scan for
-  nearby work. Repair requires energy at least one fifth of storage, as in
-  repair patrol. Candidates use the patrol visitor's inclusive sight radius,
-  friendship, grounded state, damage/build progress and active-reclaim
-  exclusions `[04 R-ORD-01 §4]` `[04 R-ORD-02 §4]`. The first candidate in
-  unit-slot order that resolves command 8 receives the ordinary repair or
-  build-assist order. Its existing water and capability admission still apply.
+  nearby work, unless the ward is a factory with production queued (see
+  "A factory ward" below). Repair requires energy at least one fifth of
+  storage, as in repair patrol. Candidates use the patrol visitor's inclusive
+  sight radius, friendship, grounded state, damage/build progress and
+  active-reclaim exclusions `[04 R-ORD-01 §4]` `[04 R-ORD-02 §4]`. The first
+  candidate in unit-slot order that resolves command 8 receives the ordinary
+  repair or build-assist order. Its existing water and capability admission
+  still apply.
 * If no repair is issued, a `canresurrect` builder selects the first reclaimable
   feature in the feature service's stable anchor order within the same
   inclusive sight radius whose corpse-name prefix resolves to a unit. The
@@ -792,6 +794,26 @@ query or draw. `guard_modern_test.go` covers mode bypass, range and resource
 boundaries, carrier selection, stable work priority, retained queue identity
 and resumption; the session composition tests exercise the central mode and
 catalog-query wiring.
+
+*A factory ward.* A factory with production queued is never idle, so its
+guard keeps following and assisting it and takes no nearby work, neither repair
+nor resurrection. "Production queued" means a `BuildingBuild` record anywhere in
+the factory's front segment. That includes the gap between two products, when
+the record has no target while the last product clears the pad and leg 4 finds
+nothing to join `[04 R-UNIT-06 §1]`. Rally records (`QMove`, `QPatrol`) do not
+count, so once production drains the factory is idle and the nearby-work branch
+applies again. The test asks only the ward's queue. It draws nothing and
+changes nothing. It is part of `orders.ModernRules.GuardWorksNearby`, so Strict
+3.1, whose answer is always no, is unchanged. A play-test report prompted it: a
+commander guarding a vehicle plant went back and forth between the plant and a
+construction vehicle's solar collectors, taking a collector in a gap between
+products and staying on it while the plant built on without help.
+`orders.TestModernGuardStaysWithAFactoryThatHasProductionQueued` locks the gap,
+the drained factory and the Strict bypass.
+`session.TestModernGuardStaysWithAProducingFactoryRetail` locks the play-test
+scene on retail content: a commander guarding an ARMVP with six Flashes queued,
+beside an ARMCV building a row of solar collectors, never works on a collector
+while the plant has production queued. It helps one once the queue empties.
 
 ### 2.3 `internal/cob`
 

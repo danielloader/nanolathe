@@ -56,11 +56,16 @@ func (*ModernRules) GuardSeeksPad(u *units.Unit, n *Node, tick uint32) bool {
 }
 
 // Modern guards finish their ward's assistance first, then select nearby work
-// in stable enumeration order. Selection is read-only and draws no randomness;
-// the ordinary work rows retain their own resource admission and RNG effects.
+// in stable enumeration order. A ward that is a factory with production still
+// queued is never idle, even between products, so its guard keeps following
+// and assisting it. Selection is read-only and draws no randomness; the
+// ordinary work rows retain their own resource admission and RNG effects.
 func (*ModernRules) GuardWorksNearby(u *units.Unit, n *Node, tick uint32) bool {
 	b := bindingFor(u)
 	if b == nil || !canRepairGuard(u) || !hasMover(u) || !rulesOfUnit(u).AllowAutomaticRepair(u, tick) {
+		return false
+	}
+	if wardHasQueuedProduction(getLookupForWard(n, u)) {
 		return false
 	}
 	q := QueueOfUnit(u)
@@ -96,6 +101,26 @@ func (*ModernRules) GuardWorksNearby(u *units.Unit, n *Node, tick uint32) bool {
 	q.PushHead(id, NewNodeForOrder(id, 0, candidate.X, candidate.Y, candidate.Z, tick, u.Handle, false))
 	modernGuardWorkRetry(n, tick)
 	return true
+}
+
+// wardHasQueuedProduction reports whether the ward is a factory with a factory
+// build record still in its front segment. Between two products that record
+// has no target while the last product clears the pad, so the guard's
+// join-the-ward's-order leg finds nothing to join [04 R-UNIT-06 §1], but the
+// factory is not idle. Rally records do not count: a factory whose production
+// has drained keeps only those.
+// Nanolathe Modern policy: DESIGN_UNITS_ORDERS_COB "Modern guard assistance".
+func wardHasQueuedProduction(ward *units.Unit) bool {
+	q := QueueOfUnit(ward)
+	if q == nil {
+		return false
+	}
+	for _, rec := range q.primary {
+		if rec != nil && rec.ID == rowBuildingBuild && rec.Flags&FlagTombstone == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // The landing executor leaves a healed patient attached to its repair pad.

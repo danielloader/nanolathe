@@ -1137,7 +1137,7 @@ func (s *Service) Pump(factory *units.Unit, tick uint32) {
 	if len(prim) == 0 {
 		return
 	}
-	head := firstWorkNode(prim)
+	head := firstWorkNode(factory, prim)
 	if head == nil {
 		return
 	}
@@ -1214,15 +1214,38 @@ func isStandingOpID(id orders.ID) bool {
 	return false
 }
 
-// firstWorkNode returns the first primary node that is construction work,
-// skipping leading standing ops (GetBuilt pending resolution, Park) [RX-05].
-func firstWorkNode(prim []*orders.Node) *orders.Node {
+// firstWorkNode returns the primary record this service advances for the
+// builder, or nil when none may run this visit.
+//
+// A factory skips its leading standing records: its `QMove` and `QPatrol` are
+// rally points that GetBuilt copies onto each product, not moves of its own,
+// and they must not hold up production [04 R-FAC-02 §4][RX-05].
+//
+// A unit with a mover gets no such skip. The primary pump runs the front
+// record and stops at the first gated record with nothing satisfied, so a
+// record queued behind one still waiting is never pumped and never installs a
+// goal [04 §3.3][04 R-ORD-01 §0]. A finished product's `Park` walk, a carried
+// unit's `BeCarried` and an unfinished product's `GetBuilt` therefore hold a
+// Shift-queued build, unit reclaim or air build back until they complete
+// [04 R-FAC-02 §4]. Skipping them here ran a construction vehicle's queued
+// `MobileBuild` while the vehicle was still parking on its factory pad: the
+// build installed its site goal over the park walk's, the displaced `Park`
+// completed on the goal-released bit, its removal released the build's goal
+// in turn, and that bit woke the build's approach without an arrival. The
+// placement arm and the work phase have no range test [05 R-WORK-01 §12]
+// [05 R-WORK-01 §13], so the nanoframe was stamped and built from the pad
+// however far away the site was.
+func firstWorkNode(builder *units.Unit, prim []*orders.Node) *orders.Node {
+	mobile := isMobileBuilder(builder)
 	for _, n := range prim {
 		if n == nil {
 			continue
 		}
 		if !isStandingOpID(n.ID) {
 			return n
+		}
+		if mobile {
+			return nil
 		}
 	}
 	return nil
@@ -1401,9 +1424,10 @@ func (s *Service) StepUnit(ctx TickContext, handle pool.Handle) WorkResult {
 	if len(prim) == 0 {
 		return WorkResult{Builder: handle, Owner: builder.Owner, State: State0}
 	}
-	// Work discovery skips standing ops (GetBuilt pending resolution, Park)
-	// so a completed factory keeps producing [RX-05][05 "Queue insertion"].
-	head := firstWorkNode(prim)
+	// A factory's work discovery skips its standing rally records so it keeps
+	// producing [RX-05][05 "Queue insertion"]; a unit with a mover advances its
+	// front record only (firstWorkNode).
+	head := firstWorkNode(builder, prim)
 	if head == nil {
 		return WorkResult{Builder: handle, Owner: builder.Owner, State: State0}
 	}

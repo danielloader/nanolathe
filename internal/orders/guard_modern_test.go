@@ -298,3 +298,55 @@ func TestModernGuardFailedLandingWaitsForMaintenanceRetry(t *testing.T) {
 		t.Fatal("landing retry changed cadence, phase or RNG")
 	}
 }
+
+// Nanolathe Modern policy: DESIGN_UNITS_ORDERS_COB "Modern guard assistance".
+// A guard whose ward is a factory with production queued keeps following and
+// assisting the factory, including in the gap between products when the
+// factory's build record has no target yet. Once that production drains, the
+// factory is idle and the nearby-work branch applies again. Strict never scans.
+func TestModernGuardStaysWithAFactoryThatHasProductionQueued(t *testing.T) {
+	for _, modern := range []bool{false, true} {
+		t.Run(fmt.Sprintf("modern=%v", modern), func(t *testing.T) {
+			f := newGuardFixture(t, 1, 1)
+			q := QueueForUnit(f.guard)
+			b := q.Binding()
+			b.Rules = modeRules(modern)
+			f.guard.Def.Builder, f.guard.Def.CanReclamate, f.guard.Def.BMCode, f.guard.Def.SightDistance = true, true, 1, 128
+			f.ward.Def.Builder = true
+			b.World = &WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}
+			patient := &units.Unit{Handle: 3, Alive: true, Def: &content.UnitDef{MaxDamage: 100}, Health: 50, MaxHealth: 100, X: f.guard.X + numeric.Fixed(64<<16), Z: f.guard.Z}
+			patient.Move.ModeMirror = 1
+			unitScans := 0
+			b.World.ForEachUnit = func(visit func(pool.Handle, *units.Unit) bool) {
+				unitScans++
+				visit(patient.Handle, patient)
+			}
+			b.World.ForEachFeature = func(func(FeatureView) bool) {}
+			b.Resources = func(uint8) (ResourceView, bool) {
+				return ResourceView{Stock: [2]float32{100, 100}, Capacity: [2]float32{100, 100}}, true
+			}
+			// The gap between products: the factory's build record waits for
+			// the last product to clear the pad, with no product attached.
+			build := Lookup("BuildingBuild")
+			wq := QueueForUnit(f.ward)
+			rally := &Node{ID: Lookup("QMove"), Owner: f.ward.Handle}
+			wq.primary = []*Node{{ID: build, StaticGate: DescriptorFor(build).StaticGate, Owner: f.ward.Handle, Phase: 2, Param2: 3}, rally}
+			n := guardNode(f)
+			n.Phase = 1
+			q.primary = []*Node{n}
+			if code := guardHandler(f.guard, n, 0, 100); code != 2 || len(q.primary) != 1 || q.primary[0] != n || unitScans != 0 {
+				t.Fatalf("guard of a producing factory left it: code=%d queue=%d scans=%d", code, len(q.primary), unitScans)
+			}
+			// Production drained: only the rally record is left.
+			wq.primary = []*Node{rally}
+			code := guardHandler(f.guard, n, 0, 130)
+			if modern {
+				if code != 2 || len(q.primary) != 2 || q.primary[0].ID != Lookup("RepairUnit") || q.primary[0].Target != patient.Handle || q.primary[1] != n {
+					t.Fatalf("guard of an idle factory did not take nearby work: code=%d queue=%v", code, q.primary)
+				}
+			} else if code != 2 || len(q.primary) != 1 || unitScans != 0 {
+				t.Fatal("Strict guard performed Modern scans")
+			}
+		})
+	}
+}

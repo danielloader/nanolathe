@@ -173,6 +173,19 @@ phase byte is order-record state, so it survives a save `[08 R-SAVE-ORDER-01]`:
 | 3 | the work visit: one shared construction step per visit, retrying a tick later | the same |
 | 4 | lower the building edge, repeat the completion transition idempotently, restart a counted successor in the same pass | the same |
 
+**Which record the machine advances.** A unit with a mover advances its front
+record and nothing behind it, because the primary pump runs the head and stops
+at the first gated record with nothing satisfied `[04 §3.3]` `[04 R-ORD-01 §0]`.
+A product's `GetBuilt`, `BeCarried` or `Park` at the head therefore holds a
+Shift-queued `MobileBuild`, `VTOL_MobileBuild` or unit reclaim until it
+completes `[04 R-FAC-02 §4]`: a construction vehicle ordered to build the moment
+it leaves its plant finishes its park walk, then walks to the site. Only a
+factory skips its leading standing records, the `QMove` and `QPatrol` rally
+points its products inherit, so a rally point never stalls production
+`[RX-05]`. `TestQueuedBuildWaitsBehindAMobileBuildersStandingHead` locks both
+halves of the mobile rule, and `session.TestFreshVehicleWalksToItsQueuedBuildRetail`
+the play-test case on retail content in both modes.
+
 Aircraft use the separate `vtolBuildVisit` body and the ordinary primary pump
 inside the construction work window. Its six phases follow `[04 R-ORD-02 §2]`:
 takeoff, site approach, placement, stance-helper-plus-work, work, completion.
@@ -1128,6 +1141,12 @@ active-list order `[05 R-FEAT-01 §10]` [I1].
   `[05 R-WORK-01 §5]` `[05 R-WORK-01 §5-A]`.
 * **In Strict 3.1, a factory whose product never moves is blocked indefinitely.**
   There is no push, no stacking and no force placement `[04 R-FAC-02 §6]`.
+* **A mobile build has no range test once its approach wakes on arrival or on a
+  released goal.** Only the cannot-get-there wake measures the reach; placement
+  and work then run wherever the builder stands `[05 R-WORK-01 §12]`
+  `[05 R-WORK-01 §13]`. Do not add a range test to stop a builder building from
+  far away; find what woke its approach. A build that runs before it reaches the
+  head of its queue is a defect (§2.2, "Which record the machine advances").
 
 ## 5. Divergences
 

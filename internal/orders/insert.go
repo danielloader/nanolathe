@@ -246,9 +246,7 @@ func (q *Queue) cleanupNode(n *Node) {
 		}
 	}
 	emitStopBuilding(u, n)
-	if q.binding != nil && q.binding.Movement != nil && q.binding.Movement.Release != nil {
-		q.binding.Movement.Release(n)
-	}
+	q.destroyGoal(n)
 	// "The record destructor returns all three slots (with their targets
 	// cleared) for every removed record whose static-mask copy lacks bit 16"
 	// [04 R-UNIT-06 §5 part 3] — which is what hands a completed or purged
@@ -258,6 +256,23 @@ func (q *Queue) cleanupNode(n *Node) {
 	// removal must not wipe the weapon targets an acquisition put there.
 	if n.Flags&FlagTombstone == 0 && n.StaticGate&staticSlotKeeper == 0 {
 		clearWeaponBuildTargets(u)
+	}
+}
+
+// destroyGoal is the record destructor's goal cleanup. Queue teardown checks
+// binding identity: a removed record unbinds the controller only when its own
+// object is the bound one, so destroying a record another record displaced
+// neither cancels that record's walk nor raises the goal-released bit on it
+// [04 R-ORD-01 §9]. The explicit release, which ignores identity, belongs to
+// handlers that release their own payload.
+func (q *Queue) destroyGoal(n *Node) {
+	if q == nil || q.binding == nil || q.binding.Movement == nil {
+		return
+	}
+	if m := q.binding.Movement; m.Destroy != nil {
+		m.Destroy(n)
+	} else if m.Release != nil {
+		m.Release(n)
 	}
 }
 

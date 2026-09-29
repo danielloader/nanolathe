@@ -1528,17 +1528,17 @@ func BindQueue(u *units.Unit, q *Queue) {
 // movement payloads; order-record cleanup remains the removal path's owner.
 // Movement checks node identity, so a late cleanup cannot detach a successor.
 func (q *Queue) releaseBoundGoals() {
-	if q == nil || q.binding == nil || q.binding.Movement == nil || q.binding.Movement.Release == nil {
+	if q == nil {
 		return
 	}
 	for _, n := range q.primary {
 		if n != nil {
-			q.binding.Movement.Release(n)
+			q.destroyGoal(n)
 		}
 	}
 	for _, n := range q.secondary {
 		if n != nil {
-			q.binding.Movement.Release(n)
+			q.destroyGoal(n)
 		}
 	}
 }

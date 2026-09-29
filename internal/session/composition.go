@@ -974,14 +974,22 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 		// RWU-19-18 spells out: mover-less no-op, a NULL goal handed to the
 		// controller (cancel the in-flight search, `0x80` on the previous
 		// payload's record, clear has-waypoint and wants-repath), virtual
-		// delete, clear the field. The arrival release of [04 R-MOV-03 §2] and
-		// the queue teardown of [04 R-MOV-03 §9] reach the same helper through
-		// the record, so every caller of this port gets it.
+		// delete, clear the field. Handlers that release their own payload use
+		// it; queue teardown uses Destroy below.
 		movementGoals.Release = func(node *orders.Node) bool {
 			if node == nil {
 				return false
 			}
 			return s.Movement.ReleaseGoalPayload(node)
+		}
+		// Queue teardown is the record destructor, not the explicit release:
+		// it unbinds only when the removed record's object is the bound one
+		// [04 R-ORD-01 §9].
+		movementGoals.Destroy = func(node *orders.Node) bool {
+			if node == nil {
+				return false
+			}
+			return s.Movement.ReleaseGoal(node)
 		}
 		movementGoals.InstallAnnulus = func(req orders.AnnulusGoalRequest) bool {
 			return s.Movement.InstallAnnulusGoal(req)

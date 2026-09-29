@@ -56,19 +56,16 @@ func TestModernRepairQueueReservesAuthoredPiecesInOrder(t *testing.T) {
 	}
 	for i := 2; i < 4; i++ {
 		e := s.repairLandings[i]
-		if e.reserved || !e.holding || e.node.Phase != 1 || e.node.Deadline != 31 || e.node.DynamicGate != 1 {
-			t.Fatalf("waiter %d lost its landing or retry deadline: %+v", i, e)
+		if e.reserved || !e.holding || e.node.Phase != 1 || e.node.Deadline != 31 || e.node.DynamicGate != 0xE9 {
+			t.Fatalf("waiter %d lost its landing, loiter wake or retry deadline: %+v", i, e)
 		}
 		m := s.AirMarkerState(planes[i].Handle)
-		if m.AltOffset != int16(planes[i].Def.CruiseAlt) || airPlanarDistance(m.Goal.X, m.Goal.Z, pad.X, pad.Z) < 64<<16 {
-			t.Fatal("even an unarmed aircraft must wait airborne away from the landing pieces")
+		if m.ArrivalRadius != 0x80 || airPlanarDistance(m.Goal.X, m.Goal.Z, pad.X, pad.Z) != repairHoldRadius<<16 {
+			t.Fatal("even an unarmed aircraft must loiter clear of the landing pieces")
 		}
 		if planes[i].Health != 50 || planes[i].Attachment.Carrier != 0 {
 			t.Fatal("waiting healed or attached an aircraft")
 		}
-	}
-	if airPlanarDistance(s.repairLandings[2].post.X, s.repairLandings[2].post.Z, s.repairLandings[3].post.X, s.repairLandings[3].post.Z) < 64<<16 {
-		t.Fatal("waiting aircraft share a holding station")
 	}
 	if orders.QueueForUnit(planes[0]).Binding().SimRNG.Draws() != 0 {
 		t.Fatal("reservation and holding consumed randomness")
@@ -178,7 +175,7 @@ func TestModernRepairQueueLostPadAndAircraftReuse(t *testing.T) {
 	}
 }
 
-func TestModernRepairHoldingUsesVisibleThreatsOnly(t *testing.T) {
+func TestModernRepairDepartureUsesVisibleThreatsOnly(t *testing.T) {
 	s, w, _, planes := repairQueueFixture(t, 3)
 	for _, u := range planes {
 		enterRepairQueue(s, u, 1)
@@ -189,15 +186,15 @@ func TestModernRepairHoldingUsesVisibleThreatsOnly(t *testing.T) {
 	threat.SlotAt(0).Weapon = &content.WeaponDef{Range: 200}
 	b := orders.QueueForUnit(u).Binding()
 	b.DangerVisible = func(_, target *units.Unit) bool { return target == threat }
-	point := s.repairHoldingPoint(e)
+	point := s.repairDeparturePoint(e)
 	if point.X >= e.pad.X {
-		t.Fatal("holding did not move to the side away from the visible threat")
+		t.Fatal("departure did not move to the side away from the visible threat")
 	}
 	b.DangerVisible = func(_, _ *units.Unit) bool { return false }
-	hidden := s.repairHoldingPoint(e)
+	hidden := s.repairDeparturePoint(e)
 	threat.X = 64 << 16
-	if moved := s.repairHoldingPoint(e); hidden != moved {
-		t.Fatal("an unseen enemy position changed the waiting station")
+	if moved := s.repairDeparturePoint(e); hidden != moved {
+		t.Fatal("an unseen enemy position changed the departure point")
 	}
 }
 
@@ -255,13 +252,13 @@ func TestModernRepairQueueSuspensionKeepsItsApproachReserved(t *testing.T) {
 	}
 }
 
-func TestModernRepairHoldingAvoidsOccupiedAirFootprint(t *testing.T) {
+func TestModernRepairDepartureAvoidsOccupiedAirFootprint(t *testing.T) {
 	s, w, _, planes := repairQueueFixture(t, 3)
 	for _, u := range planes {
 		enterRepairQueue(s, u, 1)
 	}
 	e := s.repairLandings[2]
-	preferred := s.repairHoldingPoint(e)
+	preferred := s.repairDeparturePoint(e)
 	h, err := w.Create(planes[0].Def, 0, preferred.X, preferred.Y, preferred.Z)
 	if err != nil {
 		t.Fatal(err)
@@ -273,8 +270,8 @@ func TestModernRepairHoldingAvoidsOccupiedAirFootprint(t *testing.T) {
 	bx, bz := c.HalfBias()
 	at := QuantizedAnchor(int32(preferred.X), int32(preferred.Z), bx, bz)
 	s.Grid.StampPlane(PlaneAir, at, c.FootPrintX, c.FootPrintZ, int(h))
-	if point := s.repairHoldingPoint(e); point == preferred || !s.repairStationFree(e.unit, point) {
-		t.Fatal("holding station ignored an unrelated aircraft's air footprint")
+	if point := s.repairDeparturePoint(e); point == preferred || !s.repairStationFree(e.unit, point) {
+		t.Fatal("departure point ignored an unrelated aircraft's air footprint")
 	}
 }
 
@@ -292,5 +289,148 @@ func TestModernRepairQueueLoadedTransportBypassesReservations(t *testing.T) {
 	n.Phase = 6
 	if code := s.legVTOLLanding(u, n, 0x20, 1); code != 5 || w.Unit(h).Attachment.Carrier != pad.Handle || len(s.repairLandings) != 0 {
 		t.Fatal("loaded transport did not retain ordinary cargo landing")
+	}
+}
+
+// loiterGoal is VTOL_Landing phase 1's loiter point about the pad for one
+// bearing and radius [04 R-AIR-01 §6].
+func loiterGoal(pad *units.Unit, bearing uint16, radius int32) (numeric.Fixed, numeric.Fixed) {
+	ox, oz := offsetAtBearing(bearing, numeric.Fixed(int64(radius)<<16))
+	return pad.X - ox, pad.Z - oz
+}
+
+// quarterTurn is the loiter bearing's step per leg [04 R-AIR-01 §6].
+const quarterTurn = uint16(0x4000)
+
+// requireLoiterLeg checks the installed leg: the loiter point for bearing b,
+// arrival radius 128, no altitude setter, the bearing a quarter turn on, the
+// retail wake set plus the claim retry, and Param2 untouched.
+func requireLoiterLeg(t *testing.T, s *System, u *units.Unit, n *orders.Node, pad *units.Unit, b uint16, radius int32) {
+	t.Helper()
+	m := s.AirMarkerState(u.Handle)
+	x, z := loiterGoal(pad, b, radius)
+	if !m.IsMarker || m.Goal.X != x || m.Goal.Z != z || m.ArrivalRadius != 0x80 || m.Flags&airMarkerExplicitAlt != 0 {
+		t.Fatalf("leg at bearing %#x radius %d: marker %+v", b, radius, m)
+	}
+	if uint16(n.Param1) != b+quarterTurn || n.Phase != 1 || n.DynamicGate != 0xE9 || n.Param2 != 0 {
+		t.Fatalf("leg at bearing %#x: record %+v", b, *n)
+	}
+}
+
+// TestModernRepairWaitersFlyTheRetailLoiter locks issue 32's fix: a waiting
+// aircraft flies VTOL_Landing's phase-1 loiter leg from its phase-0 bearing
+// [04 R-AIR-01 §6], so it circles the base instead of hanging still. Only a
+// marker outcome turns the circuit; the claim retry's deadline keeps the leg.
+// An unarmed aircraft's radius takes the Modern floor. No draw beyond phase 0's.
+func TestModernRepairWaitersFlyTheRetailLoiter(t *testing.T) {
+	s, _, pad, planes := repairQueueFixture(t, 3)
+	for _, u := range planes[:2] {
+		enterRepairQueue(s, u, 1)
+	}
+	u := planes[2]
+	q := orders.QueueForUnit(u)
+	n := q.Head()
+	if code := s.legVTOLLanding(u, n, 0, 1); code != 1 {
+		t.Fatalf("phase 0 returned %d", code)
+	}
+	draws := q.Binding().SimRNG.Draws()
+	bearing := uint16(n.Param1)
+	n.Phase = 1
+	s.legVTOLLanding(u, n, 0, 2)
+	requireLoiterLeg(t, s, u, n, pad, bearing, repairHoldRadius)
+	marker := s.AirGoalPayload(u.Handle)
+	if code := s.legVTOLLanding(u, n, 1, 32); code != 2 || s.AirGoalPayload(u.Handle) != marker || n.Deadline != 62 {
+		t.Fatal("the claim retry replaced the leg or lost its deadline")
+	}
+	requireLoiterLeg(t, s, u, n, pad, bearing, repairHoldRadius)
+	// An armed aircraft circles at its first weapon's range, as retail does.
+	u.SlotAt(0).Weapon = &content.WeaponDef{Range: 370}
+	for turn := uint16(1); turn <= 4; turn++ {
+		s.legVTOLLanding(u, n, 0xA0, 32+uint32(turn))
+		requireLoiterLeg(t, s, u, n, pad, bearing+turn*quarterTurn, 370)
+	}
+	if q.Binding().SimRNG.Draws() != draws {
+		t.Fatal("loitering consumed randomness")
+	}
+}
+
+// TestModernRepairLoiterSurvivesSaveRestore saves a waiter mid-circuit and
+// restores it into a fresh session: the saved leg, bearing and gate come back,
+// the first claim retry keeps the leg, and the next arrival continues the
+// circuit from the saved bearing without a draw.
+func TestModernRepairLoiterSurvivesSaveRestore(t *testing.T) {
+	src, _, pad, planes := repairQueueFixture(t, 3)
+	for _, u := range planes {
+		enterRepairQueue(src, u, 1)
+	}
+	u := planes[2]
+	n := orders.QueueForUnit(u).Head()
+	src.legVTOLLanding(u, n, 0xA0, 20)
+	requireLoiterLeg(t, src, u, n, pad, 0x4000, repairHoldRadius)
+	resolve := func(h pool.Handle) (uint16, bool) { return uint16(h), h == u.Handle || h == pad.Handle }
+	images, err := orders.RetailOrderImagesWithPayload(u, resolve, nil, src.RetailOrderPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	im := images[0]
+	record := save.OrderRecord{ParentStableID: im.ParentStableID, Main: im.Main, SubtypeCode: im.SubtypeCode, Subtype: im.Subtype, DescriptorName: im.DescriptorName}
+
+	dst, _, loadedPad, loaded := repairQueueFixture(t, 3)
+	for _, v := range loaded[:2] {
+		enterRepairQueue(dst, v, 1)
+	}
+	target := loaded[2]
+	b := orders.QueueForUnit(target).Binding()
+	draws := b.SimRNG.Draws()
+	if err := orders.RetailRestoreOrdersAtTick(target, []save.OrderRecord{record}, map[uint16]pool.Handle{uint16(u.Handle): target.Handle, uint16(pad.Handle): loadedPad.Handle}, b, 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := dst.RestoreHeadGoal(target); err != nil {
+		t.Fatal(err)
+	}
+	head := orders.QueueForUnit(target).Head()
+	requireLoiterLeg(t, dst, target, head, loadedPad, 0x4000, repairHoldRadius)
+	marker := dst.AirGoalPayload(target.Handle)
+	dst.legVTOLLanding(target, head, 1, 50)
+	if dst.AirGoalPayload(target.Handle) != marker {
+		t.Fatal("the first claim retry after load replaced the saved leg")
+	}
+	requireLoiterLeg(t, dst, target, head, loadedPad, 0x4000, repairHoldRadius)
+	dst.legVTOLLanding(target, head, 0xA0, 51)
+	requireLoiterLeg(t, dst, target, head, loadedPad, 0x8000, repairHoldRadius)
+	if b.SimRNG.Draws() != draws {
+		t.Fatal("the restored loiter consumed randomness")
+	}
+}
+
+// TestRepairLoiterStrictBypass keeps the retail leg for Strict, Community and
+// an unbound system: radius from the first weapon slot (zero here, so the
+// point is the pad itself), gate exactly 0xE8 with no claim retry, and no
+// queue state [04 R-AIR-01 §6].
+func TestRepairLoiterStrictBypass(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		rules Rules
+	}{{"unbound", nil}, {"strict", StrictRules{}}, {"community", CommunityRules{}}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, w, pad, planes := repairQueueFixture(t, 3)
+			s.Rules = tc.rules
+			for piece, v := range planes[:2] {
+				if !AttachCargo(w, pad.Handle, v.Handle, piece) {
+					t.Fatal("occupy piece")
+				}
+			}
+			u := planes[2]
+			n := orders.QueueForUnit(u).Head()
+			n.Phase, n.Param1, n.Deadline = 1, 0x1234, -1
+			if code := s.legVTOLLanding(u, n, 0, 5); code != 2 {
+				t.Fatalf("loiter returned %d", code)
+			}
+			m := s.AirMarkerState(u.Handle)
+			if m.Goal.X != pad.X || m.Goal.Z != pad.Z || m.ArrivalRadius != 0x80 || n.DynamicGate != 0xE8 ||
+				n.Deadline != -1 || n.Param1 != 0x5234 || n.Param2 != 0 || len(s.repairLandings) != 0 {
+				t.Fatalf("retail loiter changed: marker %+v record %+v", m, *n)
+			}
+		})
 	}
 }

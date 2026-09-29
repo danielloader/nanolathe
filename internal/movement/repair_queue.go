@@ -7,8 +7,10 @@ import (
 )
 
 // Nanolathe Modern policy, DESIGN_MOVEMENT_PATH "Modern repair-pad queue".
-// These are holding-pattern tuning, not retail constants. The normal approach,
-// descent, attachment and resource-admitted SelfRepair remain the work path.
+// These are queue tuning, not retail constants: the claim retry, the smallest
+// loiter radius a waiter flies, and the departure ring's radius and spacing.
+// The loiter leg itself, the normal approach, descent, attachment and
+// resource-admitted SelfRepair remain retail's.
 const (
 	repairQueueRetry = 30
 	repairHoldRadius = 192
@@ -21,9 +23,8 @@ type repairLanding struct {
 	pad      *units.Unit
 	piece    uint16
 	reserved bool
-	holding  bool
+	holding  bool // flying the loiter leg about anchor
 	anchor   Vec3
-	post     Vec3
 }
 
 func (s *System) discardRepairLanding(n *orders.Node) {
@@ -174,6 +175,10 @@ func (s *System) legQueuedRepairLanding(u *units.Unit, n *orders.Node, satisfied
 	}
 	if entry == nil {
 		entry = &repairLanding{unit: u, node: n, pad: pad, anchor: Vec3{X: u.X, Y: u.Y, Z: u.Z}}
+		// A waiter restored from a save, or re-admitted after a switch from
+		// Strict, keeps flying the leg its record still owns until it arrives:
+		// the marker, bearing and gate persist with the record.
+		entry.holding = n.Phase == 1 && s.airPayloadOwner(u.Handle) == n
 		s.repairLandings = append(s.repairLandings, entry)
 		// Restored and interrupted approaches acquire a fresh reservation
 		// before descending. COB is queried here, never during save restore.
@@ -183,6 +188,9 @@ func (s *System) legQueuedRepairLanding(u *units.Unit, n *orders.Node, satisfied
 	}
 	if entry.pad != pad || !s.usableRepairPad(u, pad) {
 		pad = s.replacementRepairPad(u)
+		if pad != entry.pad {
+			entry.holding = false // a new base is a new loiter centre
+		}
 		entry.pad, entry.reserved = pad, false
 		n.Target = 0
 		if pad != nil {
@@ -204,15 +212,19 @@ func (s *System) legQueuedRepairLanding(u *units.Unit, n *orders.Node, satisfied
 	}
 	s.grantRepairPieces(pad)
 	if !entry.reserved {
-		// A deadline, independent of arrival, retries an occupied or lost pad.
-		// The landing remains the head, keeping suspended battle orders inert.
-		entry.post = s.repairHoldingPoint(entry)
-		entry.holding = true
-		m := s.newPointMarker(u, entry.post)
-		m.setAltitudeOffset(int16(u.Def.CruiseAlt))
-		m.setArrivalRadius(32)
-		s.installAirGoal(u, n, m)
-		n.Phase, n.DynamicGate = 1, 0
+		// Wait on retail's phase-1 loiter leg about the base, from the bearing
+		// phase 0 drew [04 R-AIR-01 §6]. A leg starts when waiting begins or
+		// the base changes, and on retail's own wake set: the marker's movement
+		// outcomes or target removal. The claim retry's deadline only asks for
+		// a piece again and leaves the leg alone, so only arrival turns the
+		// circuit. The radius has a Modern floor: an unarmed aircraft's range
+		// would put its circuit on the pad itself. The landing remains the
+		// head, keeping suspended battle orders inert.
+		if !entry.holding || satisfied&0xE8 != 0 {
+			s.padLoiterLeg(u, n, entry.anchor, max(firstWeaponRange(u), repairHoldRadius))
+			entry.holding = true
+		}
+		n.Phase, n.DynamicGate = 1, 0xE8
 		airDeadline(n, tick, repairQueueRetry)
 		return 2
 	}
@@ -226,11 +238,12 @@ func (s *System) legQueuedRepairLanding(u *units.Unit, n *orders.Node, satisfied
 	return s.legPadLanding(u, n, satisfied, tick, entry)
 }
 
-// repairHoldingPoint searches separated stations around the base. It ranks
-// visible armed contacts conservatively by distance beyond their longest
-// weapon range. Hidden positions never participate. No claim of guaranteed
-// safety is possible when the base itself is under attack.
-func (s *System) repairHoldingPoint(e *repairLanding) Vec3 {
+// repairDeparturePoint chooses where a repaired aircraft leaves its piece for.
+// It searches stations around the base and ranks visible armed contacts
+// conservatively by distance beyond their longest weapon range. Hidden
+// positions never participate. No claim of guaranteed safety is possible when
+// the base itself is under attack.
+func (s *System) repairDeparturePoint(e *repairLanding) Vec3 {
 	centre := e.anchor
 	if e.pad != nil {
 		centre = Vec3{X: e.pad.X, Y: e.pad.Y, Z: e.pad.Z}
@@ -247,7 +260,6 @@ func (s *System) repairHoldingPoint(e *repairLanding) Vec3 {
 	directions := [...]struct{ x, z int64 }{{-1, 0}, {0, -1}, {1, 0}, {0, 1}, {-1, -1}, {1, -1}, {1, 1}, {-1, 1}}
 	var points [16]Vec3
 	var clearance [16]int64
-	var crowded [16]bool
 	var feasible [16]bool
 	for i := range points {
 		radius := int64(repairHoldRadius + repairHoldSpace*(ordinal/8+i/8))
@@ -260,11 +272,6 @@ func (s *System) repairHoldingPoint(e *repairLanding) Vec3 {
 		}
 		points[i], clearance[i] = p, 1<<60
 		feasible[i] = s.repairStationFree(e.unit, p)
-		for _, other := range s.repairLandings {
-			if other != e && other.holding && airPlanarDistance(p.X, p.Z, other.post.X, other.post.Z) < repairHoldSpace<<16 {
-				crowded[i] = true
-			}
-		}
 	}
 	if b := airBinding(e.unit); b != nil && b.DangerVisible != nil {
 		for _, threat := range s.world.IterSliced() {
@@ -291,8 +298,7 @@ func (s *System) repairHoldingPoint(e *repairLanding) Vec3 {
 			continue
 		}
 		if best == -1 || clearance[i] > 0 && clearance[best] <= 0 ||
-			(clearance[i] > 0) == (clearance[best] > 0) &&
-				(crowded[best] && !crowded[i] || crowded[best] == crowded[i] && clearance[i] > clearance[best]) {
+			(clearance[i] > 0) == (clearance[best] > 0) && clearance[i] > clearance[best] {
 			best = i
 		}
 	}

@@ -32,7 +32,7 @@ import "github.com/nanolathe-gg/nanolathe/internal/units"
 // pocket-release certificates belong to the System.
 type Rules interface {
 	// RepairPadQueue reserves landing pieces for approaching aircraft and
-	// keeps other patients waiting near the base until a piece becomes free.
+	// keeps other patients circling the base until a piece becomes free.
 	// Nanolathe Modern policy: DESIGN_MOVEMENT_PATH "Modern repair-pad queue".
 	// The answer is pure; the System owns the queue, never the rule object.
 	RepairPadQueue(*System) bool

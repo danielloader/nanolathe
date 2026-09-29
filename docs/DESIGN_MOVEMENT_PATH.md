@@ -850,8 +850,9 @@ that release occurs [04 R-AIR-01 §8][06 §4.1].
 
 **Nanolathe Modern policy (user-authorized 2026-09-25).** Aircraft seeking
 repair keep their landing order until a pad can take them. They reserve
-individual landing pieces before approaching, wait near the base when its
-pieces are occupied, and clear their piece after repair. `movement.Rules`
+individual landing pieces before approaching, circle the base on retail's
+landing loiter when its pieces are occupied, and clear their piece after
+repair. `movement.Rules`
 owns the `RepairPadQueue` answer, selected by the existing session rule set:
 Modern enables it; Strict 3.1, Community 3.9 and an unbound system bypass it.
 The rule object remains stateless.
@@ -859,9 +860,19 @@ The rule object remains stateless.
 **Strict baseline.** The free-piece predicate counts attached cargo only.
 Approaching aircraft can select the same piece. Losing it in the later
 landing phases restarts the landing sequence; losing the target abandons it.
-Phase 1's waiting radius is the first weapon's range, which can be zero.
-The seven phases, query ordering and single takeoff bearing draw are
-established in [04 R-AIR-01 §6]. Automatic repair seeking and its random base
+While no piece is free, phase 1 flies a loiter leg [04 R-AIR-01 §6]: a point
+marker at the pad offset by the loiter bearing, at a radius equal to the
+first weapon slot's range, with horizontal arrival radius 128 and no altitude
+setter, so its height follows the cruise-altitude rule [04 R-AIR-01 §4]. The
+record wakes on the marker's movement outcomes or target removal, never on a
+timer, and each wake re-queries the pad and advances the bearing a quarter
+turn. The bearing is the machine's only random draw, made once in phase 0.
+In retail an unarmed slot holds the `[noweapon]` sentinel, whose range is 16
+world units [06 R-WPN-05 §2][06 R-DMG-01 §5]; Nanolathe's first-weapon reader
+answers 0 for that slot. Either way every loiter point of an unarmed aircraft
+lies inside the arrival radius, over the pad itself. The seven phases, query
+ordering and single takeoff bearing draw are established in
+[04 R-AIR-01 §6]. Automatic repair seeking and its random base
 selection remain [04 R-AIR-01 §11]. This policy does not change those callers
 or their health threshold.
 
@@ -876,20 +887,55 @@ outputs never create extra capacity. Actual cargo occupancy always wins.
 Approach, descent and attachment use the ordinary landing machine; loss of a
 piece returns the aircraft to the queue rather than to its suspended order.
 
-A waiting record stays at the queue head and retries every 30 ticks,
-independently of marker arrival. Its marker commands the aircraft's authored
-cruise altitude. Holding stations start 192 world units from the base, with
-64-unit spacing and successive rings for larger queues; each choice considers
-sixteen cardinal/diagonal stations in deterministic order. These distances
-are Modern tuning, not retail facts. Stations must fit the aircraft's full
-footprint inside the map and be clear on the air occupancy plane. Among
-feasible stations, prefer those beyond the longest weapon range of every
-currently visible armed hostile, then separation from other waiting aircraft,
-then the greatest minimum clearance from those ranges. Hidden enemy positions
-are never read for scoring. This is conservative local avoidance, not a
-promise of safety at a besieged base or a global flight-path search. If every
-station is blocked, hold the current position and reconsider on the next
-deadline. Unarmed patients use the same holding geometry.
+A waiting record stays at the queue head and flies the Strict baseline's
+phase-1 loiter leg (issue 32, user-chosen 2026-09-28): the same marker,
+arrival radius, gate and quarter-turn bearing step, from the bearing phase 0
+drew, about the base (or its last known position). A new leg starts when the
+aircraft begins waiting or its base changes, and on retail's wake set — a
+marker outcome or target removal — so arrival alone turns the circuit and the
+aircraft never stops at a corner. The queue adds one thing to the gate: a
+claim retry every 30 ticks, which only asks for a piece again and leaves the
+leg and bearing untouched, so a granted piece is taken within 30 ticks rather
+than at the next corner. Nothing else writes the record's parameters; the
+second parameter stays unused.
+
+The loiter radius is the first weapon slot's range, as in retail, but never
+less than 192 world units. The floor is the Modern departure from retail's
+leg: an unarmed aircraft's range puts every loiter point inside the 128-unit
+arrival radius, over the landing pieces, so it hangs over the pad. Measured on
+Ashap Plateau with stock scouts (`ARMPEEP`) queued at one pad, the unfloored
+leg left them hovering 54–90% of their wait directly above the pad centre; with
+the floor they never stopped and, once on the circuit, stayed at least 124
+world units from it. 192 is the radius the queue's stations already used: its
+quarter-turn chord, about 271 world units, exceeds the arrival radius, so
+every leg is real travel. Every armed stock aircraft has a first-weapon range
+of at least 300, so the floor changes only unarmed ones.
+
+Waiting aircraft no longer hold fixed stations: they circle regardless of
+visible threats and may share a circuit, since aircraft in flight do not block
+one another. The threat-scored station search now chooses only the repaired
+aircraft's departure point (below). There it considers sixteen
+cardinal/diagonal stations in deterministic order, starting 192 world units
+from the base with 64-unit rings, which must fit the aircraft's full footprint
+inside the map and be clear on the air occupancy plane. Among feasible
+stations it prefers those beyond the longest weapon range of every currently
+visible armed hostile, then the greatest minimum clearance from those ranges.
+Hidden enemy positions are never read for scoring. With no waiter holding a
+station, the old separation term has nothing to separate and is gone. If every
+station is blocked the aircraft departs to its current position. These
+distances are Modern tuning, not retail facts. This is conservative local
+avoidance, not a promise of safety at a besieged base or a global flight-path
+search.
+
+Boundaries. The circuit is retail's, so its size follows the weapon: 370
+world units for a Brawler, 510 for a Freedom Fighter, 1,280 for a bomber. A
+circuit near the map edge leaves the map and comes back, as retail's does.
+A wider circuit means a longer approach once a piece is granted. With seven
+aircraft queued at one pad on Ashap Plateau, each patient took 13–43% longer
+to reach the pad than with fixed stations for Brawlers and Freedom Fighters.
+With four Thunder bombers it took about 1.7 times as long: they left the
+circuit 900–1,200 world units out rather than about 150. Service stays
+strictly first come, first served.
 
 If a base dies, is carried, changes allegiance or becomes unavailable, choose
 the nearest eligible live base, with the ordinary unit order breaking equal
@@ -901,12 +947,13 @@ Touchdown still creates the ordinary `SelfRepair` on the patient and bills
 the pad through the existing construction/economy admission
 [05 R-WORK-01 §3]. Waiting requests heal nothing and request no resources.
 For a damaged patient the landing also inserts an ordinary `VTOL_Move`
-behind `SelfRepair`, ahead of suspended orders, to leave the piece for a
-holding station after repair. This frees the pad even when no subsequent
+behind `SelfRepair`, ahead of suspended orders, to leave the piece for the
+departure point after repair. This frees the pad even when no subsequent
 order existed. A healthy explicit parking command stays parked; loaded
 transports and non-repair landing targets retain their existing behavior.
-The queue, station scoring and reassignment make no direct RNG draws; the
-ordinary phase-0 bearing draw and authored script execution remain intact.
+The queue, loiter, departure scoring and reassignment make no direct RNG
+draws; the ordinary phase-0 bearing draw and authored script execution remain
+intact.
 
 **Lifetime and persistence.** Entries belong to one movement system and bind
 exact unit, order and pad identities. Canceling/replacing the order or freeing
@@ -918,17 +965,29 @@ runs their ordinary landing sequence; switching back re-admits live requests.
 There is no migration that undoes earlier Modern movement or issued moves.
 
 Reservations are transient and introduce no save schema. The ordinary landing
-phase, marker, retry deadline, repair and departure records already persist.
-After load, live landings rejoin in normal dispatch order and reacquire pieces
-before a fresh approach, including saved descent/touchdown phases. The
-pre-save FIFO order is not retained. No pad script query runs during restore.
+phase, marker, bearing, gate, retry deadline, repair and departure records
+already persist. After load, live landings rejoin in normal dispatch order and
+reacquire pieces before a fresh approach, including saved descent/touchdown
+phases. A waiter restored in phase 1 that still owns its bound marker keeps
+flying that leg until it arrives, so a load neither skips nor repeats a corner;
+a waiter re-admitted after a switch from Strict keeps its retail leg the same
+way. The pre-save FIFO order is not retained. No pad script query runs during
+restore.
 
 **Verification.** `movement.TestModernRepairQueueReservesAuthoredPiecesInOrder`
-locks exclusivity, FIFO, unarmed holding, no healing while waiting and RNG;
+locks exclusivity, FIFO, the unarmed loiter floor, no healing while waiting
+and RNG; `TestModernRepairWaitersFlyTheRetailLoiter` locks the retail leg's
+geometry, the arrival-only quarter turn, a claim retry that keeps the leg,
+the armed radius and zero draws beyond phase 0's;
+`TestModernRepairLoiterSurvivesSaveRestore` saves a waiter mid-circuit and
+checks that the restored leg, bearing and gate continue without a draw;
+`TestRepairLoiterStrictBypass` keeps Strict, Community and an unbound system
+on the unfloored retail leg with no claim retry; and
 `TestRepairQueueStrictBypassAndSwitches` locks the retail collision and draw
-behavior and both switch directions. The queue lifecycle, visible-threat and
-restore tests cover cancellation, suspension, identity reuse, lost bases,
-occupied holding stations and re-admission before touchdown.
+behavior and both switch directions. The queue lifecycle, departure
+visible-threat and restore tests cover cancellation, suspension, identity
+reuse, lost bases, occupied departure stations and re-admission before
+touchdown.
 `airdiag.TestModernAircraftRepairQueueDrains` runs five retail aircraft through
 one retail pad with real flight, COB, resource admission and departure.
 Run the movement/order/airdiag contracts, both repository gates and the

@@ -1039,7 +1039,9 @@ document carries them.
   survivors keep order; a terminal condition created during an update is noticed
   only on the next invocation. Producers append at the end; when the pre-insert
   count exceeds 400 the oldest is destroyed first, so steady state is at most
-  401 `[03 §1]` `[03 R-FX-02 §4]` `[01 R-CORE-01 §4.4.1]`.
+  401 `[03 §1]` `[03 R-FX-02 §4]` `[01 R-CORE-01 §4.4.1]`. Those are Strict's
+  bounds; Community 3.9 and Modern size the simulation's strips from the
+  special-effects limit at battle entry (DESIGN_COMMUNITY_PATCH §4.1, CP-LIM-2).
 * **C5 The fixed effect pool.** Up to 300 fixed-size records; an append at or
   above the cap allocates nothing. The integrator advances velocity against
   gravity, can restore a prior position and invert and halve vertical velocity

@@ -1681,8 +1681,11 @@ func createAndBindServices(s *Session) error {
 	s.resetRadarBlink()
 	// The ten effect strips are allocated at battle entry; a re-entry (retry)
 	// replaces the table, destroying every object of the previous battle
-	// [R-CORE-01 §4.4.1]. Producers may append from here on.
-	s.strips = newStripTable()
+	// [R-CORE-01 §4.4.1]. Producers may append from here on. Their two bounds
+	// are entry parameters like the pools: retail's under Strict, the
+	// Community table's special-effects limit otherwise (DESIGN_COMMUNITY_PATCH
+	// §4.1, CP-LIM-2).
+	s.strips = newStripTableWithSfxLimit(s.EntryCommunity.SfxLimit)
 	if s.Econ == nil {
 		s.Econ = &economy.Service{}
 	}

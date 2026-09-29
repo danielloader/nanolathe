@@ -165,6 +165,7 @@ type Features struct {
     ProjectileCapacity        int        // CP-LIM-1: 0 = retail 300
     ExplosionCapacity         int        // CP-LIM-1: 0 = retail
     DebrisCapacity            int        // CP-LIM-1: 0 = retail
+    SfxLimit                  int        // CP-LIM-2 SfxLimit: 0 = retail 400 per strip, 1000-slot pool
     PathStepAllowance         int        // CP-LIM-2 AISearchMapEntries: 0 = retail 1333
     UnitLimit                 int        // CP-LIM-2 UnitLimit: 0 = the configured setting
     MexSnapRadius, WreckSnapRadius int   // click snap radii, capped by the table's own maxima
@@ -283,7 +284,8 @@ them.
 | CP-LIM-1 pools (B) | session composition parameter → `pool` capacities | projectiles 300, the retail explosion and debris caps `[06 §5.1]` `[01 §6.1]` | 3000 / 3000 / 1000 per the table; allocation above the cap still silently fails, as retail does | same as Community |
 | CP-LIM-2 `AISearchMapEntries` (B) | movement scheduler parameter (`path` step allowance, today a literal 1333 `[04 R-PATH-01 §10]`) | 1333 | the table's `PathStepAllowance`, 66650 in every shipped table | same |
 | CP-LIM-2 `UnitLimit` (B) | the existing configured unit limit ([DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md)) | the setting | the table's limit, capped at Nanolathe's 3276, unless the player chose one (`--unit-limit`, or a saved `unitLimit`), which is layered over every table (`settings.UnitLimitSources`) | same |
-| CP-LIM-2 `UnitType`, `SfxLimit`, composite buffer | content profile `limits` / renderer | already expressed by `limits.units`; effects and composite sizes are Nanolathe host sizing | — |
+| CP-LIM-2 `SfxLimit` (B) | battle-entry strip table (`session` effect strips) | 400 records per strip, 1000-slot shared pool `[03 "Strip storage and lifecycle"]` `[03 R-FX-02 §4]` | the table's `SfxLimit`, 20480 in every shipped table: a strip evicts its oldest object only when its pre-insert count exceeds the limit, and the pool holds ten times it | same as Community |
+| CP-LIM-2 `UnitType`, composite buffer | content profile `limits` / renderer | already expressed by `limits.units`; composite sizes are Nanolathe host sizing | — |
 | CP-LIM-3, CP-LIM-4, CP-LIM-5 | — | not applicable: Nanolathe's build-menu and download compilers have no fixed-size copy to overrun; display minimums are host policy | — |
 
 The auxiliary pool in CP-LIM-1 is the shatter geometry paired with the fixed
@@ -294,14 +296,29 @@ lowest-free allocation.
 
 Capacity overrides are rejected above their owner's representable bounds:
 32767 projectile records (signed compaction markers), 65535 effects (unsigned
-fragment identities), and 2147483647 scheduler steps. Zero retains the retail
+fragment identities), 2147483647 scheduler steps, and 214748364 strip records
+(the pool is ten times it, a 32-bit slot count). Zero retains the retail
 answer; accepted values are used without silent clamping.
 
-Pool capacities, the path allowance and the unit limit are battle-entry
-parameters. A live rule switch changes future policy decisions but retains
-these allocated owners and their entry parameters, as DESIGN_GAMEPLAY_RULES §5
-retains other already-created state. Starting a new battle under Strict is
-required for retail capacities. Reports include the entry table separately
+The special-effects limit is not host sizing. Nanolathe's effect strips are
+authoritative phase-11 state whose particles draw from the CRT stream, so the
+two bounds decide which containers still spend draws, and that stream times the
+wind, the meteors and the victory timer `[01 §7.5]`. It is therefore a
+battle-entry parameter like the pools: Strict keeps retail's 400 and 1000, and
+Community and Modern take the patch's pair. The difference is visible: under
+retail's bound a base with about fifteen builders spraying a hundred world
+units each fills strip 6 and evicts its oldest nano emitters first, so every
+long stream loses its far end and an air builder's short stream vanishes under
+its own hull, while a factory's short arms still reach
+`[03 §5.5 "The nanolathe spray"]`. That is retail 3.1's picture and stays
+Strict's; the patched engine that Community and ProTA run draws the whole
+stream.
+
+Pool capacities, the strip bounds, the path allowance and the unit limit are
+battle-entry parameters. A live rule switch changes future policy decisions but
+retains these allocated owners and their entry parameters, as
+DESIGN_GAMEPLAY_RULES §5 retains other already-created state. Starting a new
+battle under Strict is required for retail capacities. Reports include the entry table separately
 from the current table so this distinction remains reproducible. Modern and
 Community 3.9 save restores preserve the saved unit layout through the existing
 `ModernUnitLimit` save rule, and their writers record the live layout. This is

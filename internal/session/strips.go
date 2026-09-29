@@ -46,6 +46,16 @@ import (
 // 401 records per strip — are retail's, and the per-strip bound is tested
 // after, and independently of, the pool test.
 //
+// Both bounds are battle-entry parameters. Strict 3.1 uses retail's; Community
+// 3.9 and Modern take them from the Community table's `SfxLimit`, the patch's
+// special-effects limit, which moves the per-strip threshold to the limit and
+// the pool to ten times it (DESIGN_COMMUNITY_PATCH §4.1, CP-LIM-2). The bounds
+// are simulation-visible, not host sizing: an evicted or dropped container
+// spends no more CRT draws, and the CRT stream times the wind, the meteors and
+// the victory timer [01 §7.5]. Under retail's bound a busy base evicts its
+// oldest nano emitters first, so long streams lose their far ends
+// [03 §5.5 "The nanolathe spray"].
+//
 // Closed 2026-09-02 [03 R-FX-02 §4]. This carried an open-question marker saying the
 // pool's capacity was untraced and that exhaustion was therefore not modelled.
 //
@@ -62,19 +72,24 @@ const (
 	// index [R-CORE-01 §4.4.1].
 	stripCount = 10
 
-	// stripSteadyCap is the eviction threshold [03 "Strip storage and
+	// stripSteadyCap is retail's eviction threshold [03 "Strip storage and
 	// lifecycle"][R-STRIP-01 §1]: when the pre-insert count exceeds 400 the
 	// oldest object is destroyed first, so steady state holds at most 401
 	// records per strip.
 	stripSteadyCap = 400
 
-	// stripPoolCapacity is the shared slot pool's hard capacity: 1000
+	// stripPoolCapacity is retail's shared slot pool capacity: 1000
 	// containers live across all ten strips together, for the whole life of
 	// the process [03 R-FX-02 §4]. A producer that finds the pool full
 	// constructs nothing, runs no family init and appends nothing — the
 	// "silently drops the object" of [R-STRIP-01 §1]. The ten per-strip bounds
 	// sum to 4010, so this test is the binding one first.
 	stripPoolCapacity = 1000
+
+	// stripSfxPoolFactor is the Community patch's pool size per unit of its
+	// special-effects limit: the pool holds ten slots for each record one
+	// strip may keep (community-patch-engine.md CP-LIM-2).
+	stripSfxPoolFactor = 10
 
 	// Strip 6 nano emitters spawn five particles per spawn tick, each
 	// costing six CRT draws (three for the source box point, three for the
@@ -322,18 +337,30 @@ type stripTable struct {
 	particleFree [][]stripParticle
 
 	// live is the shared slot pool's occupancy: one count across all ten
-	// strips, capped at stripPoolCapacity [03 R-FX-02 §4]. Retail's pool is a
+	// strips, capped at poolCapacity [03 R-FX-02 §4]. Retail's pool is a
 	// LIFO free list of fixed slots [03 R-FX-02 §1]; nothing here depends on
 	// WHICH slot a container got, only on how many are out, so the count is
 	// the whole of the pool Nanolathe needs.
 	live int
+
+	// steadyCap and poolCapacity are the two bounds, fixed at battle entry:
+	// retail's 400 and 1000, or the Community table's SfxLimit and ten times
+	// it (see the storage note above).
+	steadyCap    int
+	poolCapacity int
 }
 
-// newStripTable allocates the empty table. Battle entry calls this; battle
-// exit (and a fresh battle entry replacing the table) destroys every object
-// by dropping the table [R-CORE-01 §4.4.1].
-func newStripTable() *stripTable {
-	return &stripTable{}
+// newStripTableWithSfxLimit allocates the empty table for a battle entry;
+// battle exit (and a fresh battle entry replacing the table) destroys every
+// object by dropping the table [R-CORE-01 §4.4.1]. Zero is Strict's retail
+// answer, 400 records per strip over a 1000-slot pool; a positive
+// special-effects limit is the patch's own pair, the limit per strip and ten
+// times it for the pool (community-patch-engine.md CP-LIM-2).
+func newStripTableWithSfxLimit(sfxLimit int) *stripTable {
+	if sfxLimit <= 0 {
+		return &stripTable{steadyCap: stripSteadyCap, poolCapacity: stripPoolCapacity}
+	}
+	return &stripTable{steadyCap: sfxLimit, poolCapacity: sfxLimit * stripSfxPoolFactor}
 }
 
 // release destroys every object and clears the table (battle exit)
@@ -346,8 +373,8 @@ func (t *stripTable) release() {
 		t.strips[i] = nil
 	}
 	// Battle exit walks all ten strips and destroys every object with the
-	// slot-returning flag, so a new battle always starts with all 1000 slots
-	// free; nothing leaks across battles [03 R-FX-02 §4].
+	// slot-returning flag, so a new battle always starts with every slot free;
+	// nothing leaks across battles [03 R-FX-02 §4].
 	t.live = 0
 }
 
@@ -364,28 +391,29 @@ func (t *stripTable) anyObjects() bool {
 }
 
 // poolFull is the shared pool's take entry seen from the producer: it reports
-// whether all 1000 slots are out [03 R-FX-02 §4]. A producer must consult it
-// BEFORE it runs the family init, because that is where retail's take sits —
-// the draws inside an init or a spawn are not spent by a dropped object, while
-// the draws a call site makes before calling the producer are spent regardless
-// (the burning-feature emission's two jitter draws, the debris fire particle's
-// four) [03 R-FX-02 §4][05 R-FEAT-01 §16][03 R-FX-01 §3].
+// whether every slot is out — 1000 of them in retail [03 R-FX-02 §4]. A
+// producer must consult it BEFORE it runs the family init, because that is
+// where retail's take sits — the draws inside an init or a spawn are not spent
+// by a dropped object, while the draws a call site makes before calling the
+// producer are spent regardless (the burning-feature emission's two jitter
+// draws, the debris fire particle's four) [03 R-FX-02 §4][05 R-FEAT-01 §16]
+// [03 R-FX-01 §3].
 func (t *stripTable) poolFull() bool {
-	return t == nil || t.live >= stripPoolCapacity
+	return t == nil || t.live >= t.poolCapacity
 }
 
 // append inserts one object at the vector end of the given strip, destroying
 // the oldest object first when the pre-insert count exceeds the steady cap
-// [03 "Strip storage and lifecycle"][R-STRIP-01 §1]. The 401-record eviction
-// is tested after, and independently of, the pool test above [03 R-FX-02 §4];
-// the evicted object is destroyed with the slot-returning flag, so it gives
-// its slot back. Out-of-range strip indices cannot occur: every call site uses
-// a literal strip index.
+// [03 "Strip storage and lifecycle"][R-STRIP-01 §1]. The eviction — at 401
+// records in retail — is tested after, and independently of, the pool test
+// above [03 R-FX-02 §4]; the evicted object is destroyed with the
+// slot-returning flag, so it gives its slot back. Out-of-range strip indices
+// cannot occur: every call site uses a literal strip index.
 func (t *stripTable) append(strip int, o stripObject) {
 	if t == nil || strip < 0 || strip >= stripCount {
 		return
 	}
-	if len(t.strips[strip]) > stripSteadyCap {
+	if len(t.strips[strip]) > t.steadyCap {
 		// Destroy the oldest object and slide the survivors left; same-strip
 		// order among survivors equals insertion order [R-STRIP-01 §1].
 		t.recycleParticles(t.strips[strip][0].particles)

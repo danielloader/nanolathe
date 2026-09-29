@@ -277,7 +277,7 @@ desync-relevant; HOST keys are local preferences.
 | `UnitLimit` | 3663 | 1500 | SIM: per-player unit limit (four engine operand sites; file documents 20–1500) |
 | `AISearchMapEntries` | 66650 | 66650 | SIM: path-search step allowance; retail 1333, patch x50 |
 | `UnitType` | 16000 | 16000 | SIM: unit-definition capacity; <= 512 leaves stock |
-| `SfxLimit` | 16000 | 20480 | SIM/HOST: special-effects vector count; backing buffer = value x10 |
+| `SfxLimit` | 16000 | 20480 | SIM: per-strip effect eviction threshold (retail 400); strip-object pool = value x10 (retail 1000) |
 | `X_CompositeBuf` / `Y_CompositeBuf` | 1280 / 1280 | 1280 / 1280 | HOST: model composite buffer (retail 600x600) |
 | `UseVideoMemory` | TRUE | TRUE | HOST: draw surfaces in video memory (written back) |
 | `DisplayModeMinHeight768` | FALSE | TRUE | HOST: minimum 768 height / 1024 width |
@@ -494,7 +494,19 @@ module, with no byte validation and no failure path:
   build-target parsing and category membership all scale with it.
 - `SfxLimit` (code 16000, shipped 20480) sets the special-effects vector count
   at 20 sites and, through a twenty-first hook, its heap backing size =
-  value × 10.
+  value × 10. **Established — retail-side identification.** Every one of the
+  twenty patched operands, checked in the retail 3.1 image, is the literal
+  400 that a strip producer compares against its strip's pre-insert object
+  count before evicting the oldest object — the per-strip bound of retail's
+  effect strips `[03 "Strip storage and lifecycle"]` `[03 R-STRIP-01 §1]`;
+  the nano emitter producers are among them. The twenty-first hook replaces
+  the slot count, 1000, that the shared strip-object pool is constructed with
+  (76-byte slots, the nano segment record's size) `[03 R-FX-02 §4]`. So
+  under the patch a strip keeps up to `SfxLimit + 1` objects and the pool
+  holds `10 × SfxLimit` of them; the hook is installed whatever the value, so
+  even `SfxLimit = 400` gives a 4000-slot pool rather than retail's 1000. The
+  two bounds decide which effect containers exist and therefore which spend
+  their CRT draws; the limit is a simulation capacity, not host sizing.
 - `UnitLimit` (code 3663, shipped 1500) sets the per-player unit limit at four
   operand sites, including the multiplayer limit.
 - `X_CompositeBuf`/`Y_CompositeBuf` (1280) size the model composite buffer

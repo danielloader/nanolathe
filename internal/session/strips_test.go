@@ -18,6 +18,10 @@ import (
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
+// newStripTable is the retail-bounded table the phase-11 fixtures use: Strict's
+// 400-record strips over a 1000-slot pool [03 R-FX-02 §4].
+func newStripTable() *stripTable { return newStripTableWithSfxLimit(0) }
+
 // newStripTestSession builds a minimal fixture for the phase-11 strip
 // contracts: seeded per-session streams, a clock the test pins by direct
 // tick writes, and the battle-entry strip table [R-CORE-01 §4.4.1].
@@ -1820,5 +1824,53 @@ func TestWreckSmokeColumnLandPathOnly(t *testing.T) {
 	}
 	if got := crt.Draws() - draws; got != 0 {
 		t.Fatalf("the silent path spent %d CRT draws, want 0", got)
+	}
+}
+
+// TestStripBoundsFollowTheSpecialEffectsLimit locks CP-LIM-2's SfxLimit
+// (community-patch-engine.md §5.1; DESIGN_COMMUNITY_PATCH §4.1): zero keeps
+// retail's 400-record eviction threshold and 1000-slot pool [03 "Strip storage
+// and lifecycle"][03 R-FX-02 §4], and a positive limit moves the threshold to
+// the limit and the pool to ten times it. Nothing else about either test
+// changes: the pool is still consulted first, and eviction still removes the
+// oldest object of the strip.
+func TestStripBoundsFollowTheSpecialEffectsLimit(t *testing.T) {
+	if retail := newStripTableWithSfxLimit(0); retail.steadyCap != 400 || retail.poolCapacity != 1000 {
+		t.Fatalf("retail bounds = %d/%d, want 400/1000", retail.steadyCap, retail.poolCapacity)
+	}
+	if shipped := newStripTableWithSfxLimit(20480); shipped.steadyCap != 20480 || shipped.poolCapacity != 204800 {
+		t.Fatalf("shipped Community bounds = %d/%d, want 20480/204800", shipped.steadyCap, shipped.poolCapacity)
+	}
+
+	s, crt := newStripTestSession(35, 35)
+	s.strips = newStripTableWithSfxLimit(3)
+	s.Clock.GlobalTick = 5
+	src := [3]numeric.Fixed{0, 0, 0}
+	dst := func(i int) [3]numeric.Fixed {
+		return [3]numeric.Fixed{numeric.FixedFromInt(int64(100 + i)), 0, 0}
+	}
+	// Six emitters on strip 6 under a limit of three: the strip keeps four,
+	// the newest four, in insertion order.
+	for i := 0; i < 6; i++ {
+		s.appendStripNanoEmitter(src, dst(i))
+	}
+	if got := len(s.strips.strips[6]); got != 4 {
+		t.Fatalf("strip 6 holds %d emitters under a limit of 3, want 4", got)
+	}
+	// The narrowed destination box of a degenerate point is the point itself.
+	if first := s.strips.strips[6][0].dst[0]; first != dst(2)[0] {
+		t.Fatalf("oldest survivor aims at %v, want the third emitter's %v", first, dst(2)[0])
+	}
+	// Fill the thirty-slot pool across the other nine strips (four records
+	// each at most, so they can hold it); the next producer drops without
+	// drawing.
+	others := []int{0, 1, 2, 3, 4, 5, 7, 8, 9}
+	for n := 0; s.strips.live < 30 && n < 100; n++ {
+		s.appendStripSprinkle(others[n%len(others)], src, src, 16, 1)
+	}
+	draws := crt.Draws()
+	s.appendStripNanoEmitter(src, dst(9))
+	if got := crt.Draws() - draws; got != 0 || s.strips.live != 30 {
+		t.Fatalf("full 30-slot pool: producer spent %d draws, live %d", got, s.strips.live)
 	}
 }

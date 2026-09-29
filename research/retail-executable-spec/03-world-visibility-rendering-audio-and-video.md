@@ -7137,12 +7137,28 @@ up the green ramp `0xa1..0xa7`, never `0xa0`.
 
 The record's own spawn window closes one tick after creation, so each accepted
 work step contributes **ten particles over two ticks**; continuous construction
-therefore holds two live records and ten new particles per tick. Per tick the
+therefore has two records spawning and ten new particles per tick. Per tick the
 record's update advances each particle, drops the ones whose expiry tick has
-passed, and the record itself is destroyed once its particle list empties.
+passed, and the record itself is destroyed once its particle list empties —
+which is not two ticks after it was made but after its last particle lands, so
+a builder working continuously at distance `d` keeps about `trunc(d/4) + 3`
+records alive, one per tick of travel.
 The spray record is the strip-6 container object of [R-STRIP-01 §2]: a
 pooled strip object whose update advances, expires, and refills its internal
 particle list, evicted under the common 401-record rule.
+
+**Established — what the bound does to a busy base.** Every builder's records
+share strip 6's bound, and each submission past it evicts the strip's
+**oldest** record, whose particles have travelled furthest. Once a base's
+builders together keep more than 401 records — about fifteen builders spraying
+across a hundred world units each — the surviving records are all younger than
+a common age, so every stream is cut back to that age's worth of travel at four
+world units per tick: long streams lose their far ends and stop short of their
+target, a factory's own short arm-to-product streams still reach, and an air
+builder's stream, which starts under its own hull (strip 6 draws before the
+second unit pass), can vanish entirely. This follows from the bound, the
+one-record-per-work-step cadence and the particle lifetime above; it is retail
+3.1's picture, not a drawing defect.
 
 Each particle draws at its world position through the ordinary projection,
 gated by the local player's coverage at its own projected tile — the same

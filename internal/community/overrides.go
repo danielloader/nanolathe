@@ -62,6 +62,7 @@ type Overrides struct {
 	ProjectileCapacity        *int                 `json:"projectileCapacity,omitempty"`
 	ExplosionCapacity         *int                 `json:"explosionCapacity,omitempty"`
 	DebrisCapacity            *int                 `json:"debrisCapacity,omitempty"`
+	SfxLimit                  *int                 `json:"sfxLimit,omitempty"`
 	PathStepAllowance         *int                 `json:"pathStepAllowance,omitempty"`
 	UnitLimit                 *int                 `json:"unitLimit,omitempty"`
 	MexSnapRadius             *int                 `json:"mexSnapRadius,omitempty"`
@@ -169,6 +170,7 @@ func apply(base Features, o Overrides, logicalPath string) (Features, error) {
 	applyInt(&base.ProjectileCapacity, o.ProjectileCapacity)
 	applyInt(&base.ExplosionCapacity, o.ExplosionCapacity)
 	applyInt(&base.DebrisCapacity, o.DebrisCapacity)
+	applyInt(&base.SfxLimit, o.SfxLimit)
 	applyInt(&base.PathStepAllowance, o.PathStepAllowance)
 	applyInt(&base.UnitLimit, o.UnitLimit)
 	applyInt(&base.MexSnapRadius, o.MexSnapRadius)
@@ -204,6 +206,7 @@ func validate(f Features) error {
 		{"projectileCapacity", f.ProjectileCapacity},
 		{"explosionCapacity", f.ExplosionCapacity},
 		{"debrisCapacity", f.DebrisCapacity},
+		{"sfxLimit", f.SfxLimit},
 		{"pathStepAllowance", f.PathStepAllowance},
 		{"unitLimit", f.UnitLimit},
 		{"mexSnapRadius", f.MexSnapRadius},
@@ -291,6 +294,12 @@ func validateParsedInt(name string, value int) error {
 	case "debrisCapacity":
 		if value > int(^uint(0)>>1)/100000 {
 			return fmt.Errorf("overflows backing store size")
+		}
+	case "sfxLimit":
+		// The patch writes the limit into 32-bit compare operands and ten
+		// times it into the pool's 32-bit slot count.
+		if int64(value) > (1<<31-1)/10 {
+			return fmt.Errorf("exceeds strip pool slot limit %d", (1<<31-1)/10)
 		}
 	case "aiBuilderPlacementLimit":
 		if int64(value) > 1<<31-1 {
@@ -396,6 +405,8 @@ func intField(o *Overrides, name string) **int {
 		return &o.ExplosionCapacity
 	case "debrisCapacity":
 		return &o.DebrisCapacity
+	case "sfxLimit":
+		return &o.SfxLimit
 	case "pathStepAllowance":
 		return &o.PathStepAllowance
 	case "unitLimit":

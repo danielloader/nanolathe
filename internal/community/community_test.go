@@ -8,13 +8,13 @@ import (
 
 func TestShippedTableIdentity(t *testing.T) {
 	wantDigest := map[string]string{
-		"ota":        "9f578f1bfff90fb537a3bbc061e207522b1be8daa0a2e1990b6c8a3efcfb6e1b",
-		"prota":      "66ef84a5fc72bf71e8f756e7237a22f9c5d3d5d82203c4dff7d78f0453e0ef9b",
-		"escalation": "90edd0191a613f76736f3dc3de82aff92245db2dcd6758ebda32ce148fc2c2eb",
-		"tazero":     "2b1c493261fc088e9e3c317b201d31d87805a7f11f74250fccf06ea2008020e3",
-		"bta":        "1651b0fd12fbb0b3ec3c4b1da01bdfb8b37175b049f4887a851e9f9039834285",
-		"mayhem":     "973b1470b63ec5f6c409c7ba5d9c4ec9af2e4e624ccfb444093df8bb5c1daa74",
-		"twilight":   "973b1470b63ec5f6c409c7ba5d9c4ec9af2e4e624ccfb444093df8bb5c1daa74",
+		"ota":        "d73d9fc7306d0e9abb259d10c5e5d58d26bf4c553a8d738f427368be8f3c6f95",
+		"prota":      "936c51eec9338d1ea3e8edcfd27682bf423644433a8224d384730e350de0ca81",
+		"escalation": "ca05f9962a1b9168f0075395ca47a4795beec10c9d441539aeaf24fd96ee5b3b",
+		"tazero":     "d6d658142e99e20b0e695bfe77627adb56f39651ad1b5fbb6baad524cd797cee",
+		"bta":        "065211bd90dfd8cdd4cbe932858c84e29b4323299f95db3c7e7e8c423470e359",
+		"mayhem":     "43e268190cff408e56fa700146d155d2a04272e1604d340d0e430ad9583a5dc3",
+		"twilight":   "43e268190cff408e56fa700146d155d2a04272e1604d340d0e430ad9583a5dc3",
 	}
 	for name, want := range wantDigest {
 		got, err := Table(name)
@@ -35,6 +35,11 @@ func TestShippedTableIdentity(t *testing.T) {
 	}
 	if prota.PathStepAllowance != 66650 || prota.UnitLimit != 1500 {
 		t.Fatalf("prota preference defaults = path %d, units %d", prota.PathStepAllowance, prota.UnitLimit)
+	}
+	// The shipped preference file's SfxLimit, not the code's absent-key
+	// default of 16000 (community-patch-engine.md §4.1, CP-LIM-2).
+	if prota.SfxLimit != 20480 {
+		t.Fatalf("prota SfxLimit = %d, want the shipped 20480", prota.SfxLimit)
 	}
 	escalation, _ := Table("escalation")
 	if escalation.RepairRate != (RepairRate{Enabled: true, RepairMultiplier: 3, SelfHealMultiplier: 3}) || !escalation.BuildWeaponSlotGuard || !escalation.AirCorpseFall {
@@ -130,6 +135,10 @@ func TestParseOverrideAndValidation(t *testing.T) {
 	if err != nil || parsed.AreaDamageOverflow == nil || *parsed.AreaDamageOverflow {
 		t.Fatalf("ParseOverride explicit false = %+v, %v", parsed, err)
 	}
+	parsed, err = ParseOverride("sfxLimit=400")
+	if err != nil || parsed.SfxLimit == nil || *parsed.SfxLimit != 400 {
+		t.Fatalf("ParseOverride sfxLimit = %+v, %v", parsed, err)
+	}
 	for _, malformed := range []string{
 		"missing-equals",
 		"unknown=true",
@@ -141,6 +150,8 @@ func TestParseOverrideAndValidation(t *testing.T) {
 		"pathStepAllowance=2147483648",
 		"projectileCapacity=32768",
 		"explosionCapacity=65536",
+		"sfxLimit=-1",
+		"sfxLimit=214748365",
 		"table=unknown",
 		"table=",
 	} {
@@ -172,7 +183,7 @@ func TestResolveDefaultsToMainlineAndDigestStable(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Resolve(false) = %+v, want mainline %+v", got, want)
 	}
-	const wantDigest = "66ef84a5fc72bf71e8f756e7237a22f9c5d3d5d82203c4dff7d78f0453e0ef9b"
+	const wantDigest = "936c51eec9338d1ea3e8edcfd27682bf423644433a8224d384730e350de0ca81"
 	firstDigest := got.Digest()
 	secondDigest := got.Digest()
 	if firstDigest != secondDigest {

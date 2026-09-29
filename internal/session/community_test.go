@@ -101,6 +101,11 @@ func TestCommunityFreshAndRestoredEntryShareConfiguration(t *testing.T) {
 	if src.Units.UnitLimit() != limit || src.Combat.Slots.Capacity() != src.EntryCommunity.ProjectileCapacity {
 		t.Fatal("table did not size unit pool")
 	}
+	// CP-LIM-2's special-effects limit sizes the strip table at the same entry
+	// (DESIGN_COMMUNITY_PATCH §4.1).
+	if sfx := src.EntryCommunity.SfxLimit; sfx != 20480 || src.strips.steadyCap != sfx || src.strips.poolCapacity != 10*sfx {
+		t.Fatalf("strip bounds %d/%d for SfxLimit %d", src.strips.steadyCap, src.strips.poolCapacity, sfx)
+	}
 	inputs, err := src.RetailBattleSaveInputs(RetailBattleSummary(src, "community configuration", "1", limit), save.Camera{})
 	if err != nil {
 		t.Fatal(err)
@@ -130,9 +135,41 @@ func TestCommunityFreshAndRestoredEntryShareConfiguration(t *testing.T) {
 	if src.Community != dst.Community || src.EntryCommunity != dst.EntryCommunity || dst.Units.UnitLimit() != limit || dst.Combat.Slots.Capacity() != src.Combat.Slots.Capacity() {
 		t.Fatal("restore discarded entry configuration")
 	}
+	if dst.strips.steadyCap != src.strips.steadyCap || dst.strips.poolCapacity != src.strips.poolCapacity {
+		t.Fatal("restore discarded the strip bounds")
+	}
 	src.SetGameplay(gameplay.Strict31)
 	if src.Community != (community.Features{}) || src.EntryCommunity != dst.EntryCommunity || src.Units.UnitLimit() != limit {
 		t.Fatal("live switch resized entry state")
+	}
+	if src.strips.steadyCap != dst.strips.steadyCap {
+		t.Fatal("live switch resized the strip table")
+	}
+}
+
+// TestStripBoundsAreEntryParametersOfTheRuleSet locks where CP-LIM-2's
+// special-effects limit reaches the simulation: a Strict battle enters with
+// retail's 400-record strips over a 1000-slot pool [03 "Strip storage and
+// lifecycle"][03 R-FX-02 §4], and a Modern one with the shipped table's 20480
+// and ten times it (DESIGN_COMMUNITY_PATCH §4.1).
+func TestStripBoundsAreEntryParametersOfTheRuleSet(t *testing.T) {
+	f := loadRetailFixture(t)
+	for _, c := range []struct {
+		mode       gameplay.Mode
+		cap, slots int
+	}{
+		{gameplay.Strict31, 400, 1000},
+		{gameplay.Modern, 20480, 204800},
+	} {
+		cfg := f.cfg
+		cfg.Gameplay = c.mode
+		s, err := NewSkirmishWithEntryOptions(f.fs, f.cat, cfg, SkirmishEntryOptions{})
+		if err != nil {
+			t.Fatalf("%s: %v", c.mode, err)
+		}
+		if s.strips.steadyCap != c.cap || s.strips.poolCapacity != c.slots {
+			t.Errorf("%s strip bounds = %d/%d, want %d/%d", c.mode, s.strips.steadyCap, s.strips.poolCapacity, c.cap, c.slots)
+		}
 	}
 }
 

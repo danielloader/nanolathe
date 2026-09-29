@@ -76,12 +76,17 @@ type Features struct {
 	ProjectileCapacity        int        `json:"projectileCapacity"`
 	ExplosionCapacity         int        `json:"explosionCapacity"`
 	DebrisCapacity            int        `json:"debrisCapacity"`
-	PathStepAllowance         int        `json:"pathStepAllowance"`
-	UnitLimit                 int        `json:"unitLimit"`
-	MexSnapRadius             int        `json:"mexSnapRadius"`
-	WreckSnapRadius           int        `json:"wreckSnapRadius"`
-	MexSnapRadiusMax          int        `json:"mexSnapRadiusMax"`
-	WreckSnapRadiusMax        int        `json:"wreckSnapRadiusMax"`
+	// SfxLimit is CP-LIM-2's special-effects limit: the per-strip eviction
+	// threshold of the ten effect strips, and ten times it the shared
+	// strip-object pool. Zero is retail's 400 and 1000
+	// (community-patch-engine.md CP-LIM-2; DESIGN_COMMUNITY_PATCH §4.1).
+	SfxLimit           int `json:"sfxLimit"`
+	PathStepAllowance  int `json:"pathStepAllowance"`
+	UnitLimit          int `json:"unitLimit"`
+	MexSnapRadius      int `json:"mexSnapRadius"`
+	WreckSnapRadius    int `json:"wreckSnapRadius"`
+	MexSnapRadiusMax   int `json:"mexSnapRadiusMax"`
+	WreckSnapRadiusMax int `json:"wreckSnapRadiusMax"`
 }
 
 // Digest returns the SHA-256 digest of the canonical JSON representation of

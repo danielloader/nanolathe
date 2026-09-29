@@ -27,6 +27,7 @@ var common = Features{
 	ProjectileCapacity: 3000,
 	ExplosionCapacity:  3000,
 	DebrisCapacity:     1000,
+	SfxLimit:           20480,
 	PathStepAllowance:  66650,
 	UnitLimit:          1500,
 }

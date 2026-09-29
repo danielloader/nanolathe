@@ -79,6 +79,10 @@ type Presentation struct {
 	// BuildMenuPageSize is the content set's build page lock, spelled and
 	// applied as mod metadata's buildMenuPageSize; the mod's own value wins.
 	BuildMenuPageSize int `json:"build_menu_page_size,omitempty"`
+	// MainMenuVersion is the text the main menu writes into its `DebugString`
+	// version label in place of the executable's `v3.1` literal, for a
+	// package whose engine replaces that literal. Empty keeps `v3.1`.
+	MainMenuVersion string `json:"main_menu_version,omitempty"`
 }
 
 // Profile is one content set's load-time description.

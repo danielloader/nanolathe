@@ -292,21 +292,22 @@ func (h *retailBattleHUD) drawBattleInfoWindow(c *client.Client, b *battleSessio
 	h.drawBattleBriefingText(c, b, window)
 }
 
-// drawBattleInfoLabel is the kind-5 label pen of [03 R-FONT-01 §6]. It is not
-// the button pen the shared battle-modal painter also uses for labels: a label
-// has no 3-pixel inset and no vertical centring — its pen y IS the gadget's y
-// — and its width limit depends on which family the painter's font walk
-// selected.
+// drawBattleInfoLabel is the label painter of [03 R-FONT-01 §6], which these
+// windows share with the other battle modals and the front end. Which branch
+// draws is decided by whether the painter's font walk MATCHED one of the
+// window's kind-7 records, not by whether that record's file loaded:
 //
-//   - a `fontnumber` that matched one of the window's kind-7 records draws
-//     through the FNT drawer with the width limit DROPPED (a matched record
-//     whose file did not load leaves the common font active, which is what a
-//     nil `selected` means here);
-//   - a `fontnumber` that matched none draws through the GAF pen with the
-//     limit set to the gadget width, so a row wider than its column is
-//     truncated at the column edge with nothing appended. Neither
+//   - a match draws through the FNT drawer with the width limit dropped (a
+//     matched record whose file did not load leaves the common font active,
+//     which is what a nil `selected` means here);
+//   - no match takes the GAF branch, drawModalLabelGAF: GAF slot 1
+//     (`hattfont11`), the pen at the label's own x and y with no inset, and
+//     the width limit set to the label width, so a row wider than its column
+//     is truncated at the column edge with nothing appended. Neither
 //     `GAMEOPTIONS.GUI` nor `HELP.GUI` authors a font record, so that is the
-//     branch every printed row takes [07 R-FE-01 §7].
+//     branch every printed row takes [07 R-FE-01 §7]. The branch's wrapper
+//     runs only for a label taller than two metrics, which no appended row
+//     (height 15) is.
 func (h *retailBattleHUD) drawBattleInfoLabel(c *client.Client, window *gui.Window, gad gui.Gadget, r gui.Rect, text string, selected *formats.FNT, clip gui.Rect) {
 	if h == nil || c == nil || window == nil || text == "" {
 		return
@@ -321,30 +322,5 @@ func (h *retailBattleHUD) drawBattleInfoLabel(c *client.Client, window *gui.Wind
 		}
 		return
 	}
-	if h.modalFont == nil {
-		// The GAF pen's null-slot fallback calls the FNT drawer and drops the
-		// caller's width limit, which is exactly the FNT branch above
-		// [03 R-FONT-01 §6].
-		if h.guiFont != nil {
-			h.drawModalLabelFNT(c, window, gad, r, text, h.guiFont)
-		}
-		return
-	}
-	textWidth := retailGAFTextWidth(h.modalFont, text)
-	gx, gy, w := int(r.X), int(r.Y), int(r.W)
-	if gad.Rect.RawX == -1 {
-		gx = int(window.Rect.X) + (int(window.Rect.W)-textWidth)/2
-	}
-	penX := gx
-	switch {
-	case gad.Attribs&4 != 0:
-		penX = gx + w - textWidth
-	case gad.Attribs&2 != 0:
-		penX = gx + w/2 - textWidth/2
-	}
-	// TODO(T23): the painter wraps instead when twice the line metric is less
-	// than the label height minus one, and no GAF wrapper exists here yet. No
-	// row these three windows print can reach it — the appended height is 15
-	// and the GAF metric is never below 7 — so the single-line pen stands.
-	drawRetailGAFTextClipped(c, h.modalFont, text, penX, gy, w, int(clip.X), int(clip.Y), int(clip.W), int(clip.H))
+	h.drawModalLabelGAF(c, window, clip, gad, r, text, h.guiFont)
 }

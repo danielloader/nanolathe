@@ -3432,7 +3432,10 @@ cue.
   inset and no vertical centring (`penY` is the label's own y), and the width
   limit set to the column width, which **truncates** a row whose text is wider
   than its column — the pen stops at the first glyph that does not fit and
-  appends nothing. The stock longest `help.tdf` descriptions are cut this way.
+  appends nothing. **Established corpus observation:** measured in the face
+  this branch draws (`hattfont11`, GAF slot 1), no stock `help.tdf` row and no
+  stock game-settings name exceeds its column, so stock text is never cut;
+  measured in `hattfont12` four help descriptions and three names would be.
 * `BRIEFING.GUI` opens with **no** flags, so it keeps its authored origin, and
   its opener clears the inert-label attribute bit `0x10` on `MOREBAR` and
   `TextRegion`: unlike `MSNBRIEF`, where the screen hit-tests those two

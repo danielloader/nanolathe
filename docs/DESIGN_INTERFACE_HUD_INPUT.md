@@ -1756,7 +1756,38 @@ Opening `MAINMENU` activates its authored `DebugString` label and supplies the
 retail literal `v3.1`. Its fresh window rectangle moves left by half the primary
 GAF text width (active FNT fallback), with integer division; the cached authored
 window stays unchanged so returning to the menu cannot accumulate the shift
-`[07 R-FE-01 §3]`.
+`[07 R-FE-01 §3]`. A content profile whose package replaces that literal names
+the replacement as `presentation.main_menu_version`, and the same shift
+measures it. ProTA 4.8's patch list configures `4.8` as that string, and its
+window places the label at x 323 in its own title box
+([ProTA engine package](../research/extensions/prota-engine.md#main-menu-version-label)).
+The label is then drawn by the label painter below, so the visible text is
+narrower than the width the shift measured: stock `v3.1` is drawn from x 307,
+which a retail capture of the stock menu shows.
+
+**Label painter.** A label whose `fontnumber` matches one of its window's
+kind-7 font records is drawn with that FNT (`drawRetailLabelFNT`); every other
+label — all labels of every stock window except `BRIEFING` and `MSNBRIEF` —
+takes the painter's GAF branch (`drawRetailLabelGAF`) `[03 R-FONT-01 §6]`. The
+branch measures, wraps and draws in GAF-font slot 1, `hattfont11`. With
+that slot null it uses the common FNT with no width limit. The pen follows
+the label rules shared with the FNT branch (`retailLabelPenX`): right
+`gx + w - tw`, else centre `gx + trunc(w/2) - trunc(tw/2)`, else `gx`, with
+no inset. An authored x of -1 centres on the panel, and the pen Y is the
+label's own y. A label taller than two metrics goes to the wrapper, with a
+line pitch of metric + 2 and the height spent per line. Any other label is
+drawn on one line limited to its width, so a zero-width label draws nothing:
+`NEWGAME`'s `SIDENAME` shows no text. The button painter's three-pixel insets
+and vertical centring belong to buttons and the remaining kinds, not to
+labels. Nanolathe screens built from authored labels (the Mods & Mutators
+text, the option-page headings, the main menu's `MODSTATUS` line) draw
+through the same branch, so the `MODSTATUS` centring and `fitDetail`'s line
+budget measure in the label face. The in-battle modal windows draw their
+labels through the same layout (`drawModalLabelGAF`, sharing
+`drawRetailLabelLines`) in the battle HUD's slot 1, clipped to the window's
+private surface: the `YESORNO` title and the `RESTART` mission lines are the
+visible cases. The three background-bitmap children (`igmbrief`,
+`GameSettings`, `dhelp`) use the same branch through `drawBattleInfoLabel`.
 
 While a `MAINMENU` window is in the chain, `menu_sparks.go` runs the background
 shimmer: one hundred single-pixel records that spawn in the top 220 rows over
@@ -1851,15 +1882,18 @@ panel fill, so they have their own painter rather than the shared modal one.
 It blits the bitmap at the window origin clipped to the window rectangle and
 otherwise uses the battle modal family's art chain.
 
-That painter also carries the **kind-5 label pen** the shared modal painter
-does not separate from the button pen: a label has no 3-pixel inset and no
-vertical centring — its pen y is the gadget's own y — and its width limit is
+Its labels go through the shared **kind-5 label painter**
+(`drawBattleInfoLabel`, C16): a label has no 3-pixel inset and no
+vertical centring — its pen y is the gadget's own y — and its branch is
 decided by whether the `fontnumber` walk *matched* a kind-7 record, not by
 whether that record's file loaded. A match draws through the FNT drawer with
-the limit dropped; no match draws through the GAF pen with the limit set to
-the gadget width `[03 R-FONT-01 §6]`. Neither `GAMEOPTIONS.GUI` nor `HELP.GUI`
-authors a font record, so every printed row takes the GAF branch, and a row
-wider than its column is truncated at the column edge. Their rows are
+the limit dropped; no match takes the GAF branch (`drawModalLabelGAF`): GAF
+slot 1 (`hattfont11`) with the limit set to the gadget width
+`[03 R-FONT-01 §6]`. Neither `GAMEOPTIONS.GUI` nor `HELP.GUI` authors a font
+record, so every printed row takes the GAF branch, and a row wider than its
+column is truncated at the column edge. In that face no stock `help.tdf` row
+or `GAMEOPTIONS` name is wider than its column; in `hattfont12` four help
+descriptions and three option names were. Their rows are
 **left-aligned**: both openers rewrite every appended record's attribute word
 to 1 after the append helper stored 2, and this build's helper stores the
 value that survives that rewrite. Getting this wrong is visible — a centred

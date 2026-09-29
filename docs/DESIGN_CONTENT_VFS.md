@@ -845,6 +845,14 @@ Evidence is the Alpha 5 authored archive and Base soundtrack readme
 ([TA Zero engine](../research/extensions/ta-zero-engine.md#authored-package-factions-and-single-player-coverage));
 setup and compatibility boundaries are in [TA_ZERO_SUPPORT](TA_ZERO_SUPPORT.md).
 
+*Main-menu version text.* The optional `presentation.main_menu_version`
+replaces the `v3.1` literal the main menu writes into its `DebugString`
+label, for a package whose engine replaces that literal. Empty keeps `v3.1`.
+The `prota` profile names `4.8`, the version string ProTA 4.8's patch list
+configures
+([ProTA engine package](../research/extensions/prota-engine.md#main-menu-version-label));
+the front-end contract is DESIGN_INTERFACE_HUD_INPUT C16.
+
 *Boundaries.* The layout rewrites the **first** segment only, matched
 case-insensitively like every other lookup (C7); a later segment of the same
 name is untouched. It is a read view: mounting, provider precedence,

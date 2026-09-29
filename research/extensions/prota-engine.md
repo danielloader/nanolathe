@@ -781,6 +781,40 @@ the executable import to `win32.dll` and establishes its enumeration and
 empty-folder behavior. No third-party implementation code is required to
 reproduce the authored music-directory contract independently.
 
+### Main-menu version label
+
+**Established — authored layout.** The identified archive's
+`guiP/MAINMENU.GUI` differs from the stock window in one record only: the
+`DebugString` label is authored at `(323, 416)` instead of `(320, 300)` and
+active instead of inactive. Its width `300`, height `0`, attribute word `80`,
+font number `0` and placeholder text `Debug Build` are the stock values, and
+the window still authors no font record. The archive's `bitmaps/FrontendX.pcx`
+(the 4.5 changelog's "Edited title screen") paints a framed dark box over
+roughly `x 289–354`, `y 398–435`, with the word `ProTA` drawn into the art in
+green across roughly `x 301–339`, `y 402–413`. The label row at `y 416` is the
+empty lower half of that box. Sources: the archive's window and bitmap.
+
+**Established — authored configuration.** The shipped `dplayx.dll` carries its
+patch list as an embedded text resource (RCDATA 1000, 22,651 bytes, SHA-256
+`dc590023f5c6440a0b1c50f89b0306d1ab51bd518043546b4a871d4b6f8e2a17`). Its
+`[Settings]` section sets `GameVersionString=4.8`, which the authors' own
+comment describes as changing the version string (`DebugString`). The same
+section sets `MultiplayerVersionMajor=4` and `MultiplayerVersionMinor=8` for
+the battleroom. The resource was located through the executable format's
+resource directory and read as text; no loader code was examined for this
+finding.
+
+**Supported inference — the label reads exactly `4.8`.** The setting's value,
+its comment and the ProTA maintainer's 28 September 2026 report ("should show
+the actual version which should be 4.8", against a Nanolathe capture that read
+`v3.1`) agree. How the loader applies the value, verbatim or with a prefix
+such as `v`, has not been observed. The layout is consistent with either.
+Under the retail rules the label moves left by half its `hattfont12` width
+[07 R-FE-01 §3] and the label painter then draws it in `hattfont11` from that
+x [03 R-FONT-01 §6]. `4.8` therefore spans `x 313–327` and `v4.8` spans
+`x 309–329`, both centred on `x 320` under the art's word. A capture of the
+ProTA 4.8 main menu on its own engine would settle the exact text.
+
 ### Package acceptance cases
 
 These are acceptance requirements derived from the established sources above,
@@ -941,3 +975,8 @@ proxy binary instead.
   evidence scope above). What remains unknown is whether the three shipped
   builds correspond to revisions of that tree, and no Nanolathe implementation
   may rely on their behavior as that tree's behavior.
+- **Unknown — the exact main-menu version text.** The package configures
+  `4.8` for the version label, but whether its loader writes that value
+  verbatim or decorates it (for example `v4.8`) is not observed; see
+  [Main-menu version label](#main-menu-version-label). A capture of the 4.8
+  main menu on the shipped engine settles it.

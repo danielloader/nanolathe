@@ -9,6 +9,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
+	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
 )
 
@@ -272,6 +273,11 @@ func (g *gameShell) drawRetailTextState(c *client.Client, p *ui.Panel, index int
 		g.drawRetailLabelFNT(c, p, gad, r, text, selected, color)
 		return
 	}
+	if gad.Kind == gui.KindLabel {
+		color, shade := g.retailTextPen(p, index, gad)
+		g.drawRetailLabelGAF(c, p, gad, r, text, color, shade)
+		return
+	}
 	if !g.hasRetailTextFont() && selected == nil {
 		return
 	}
@@ -411,22 +417,132 @@ func (g *gameShell) drawRetailLabelFNT(c *client.Client, p *ui.Panel, gad gui.Ga
 	if c == nil || font == nil || text == "" {
 		return
 	}
-	tw := client.MeasureText(font, text)
-	gx, gy, w := int(r.X), int(r.Y), int(r.W)
-	if gad.Rect.RawX == -1 && p != nil && p.Window != nil {
-		gx = int(p.Window.Rect.X) + (int(p.Window.Rect.W)-tw)/2
+	var window *gui.Window
+	if p != nil {
+		window = p.Window
 	}
-	penX := gx
-	switch {
-	case gad.Attribs&4 != 0:
-		penX = gx + w - tw
-	case gad.Attribs&2 != 0:
-		penX = gx + w/2 - tw/2
-	}
+	penX, gy := retailLabelPenX(window, gad, r, client.MeasureText(font, text)), int(r.Y)
 	if gad.Attribs&8 != 0 {
 		c.UITextWidth(font, text, penX+1, gy+3, -1, g.guiColor(0))
 	}
 	c.UITextWidth(font, text, penX, gy, -1, color)
+}
+
+// retailLabelPenX places a label's pen the way both label-painter branches do
+// [03 R-FONT-01 §6]: an authored x of -1 centres the text on the panel width,
+// then attribute bit 4 (right) puts the pen at `gx + w - tw`, else bit 2
+// (centre) at `gx + trunc(w/2) - trunc(tw/2)` — two separate truncations —
+// else at `gx`. There is no inset; the button painter's three-pixel insets
+// are not the label's.
+func retailLabelPenX(window *gui.Window, gad gui.Gadget, r gui.Rect, textWidth int) int {
+	gx, w := int(r.X), int(r.W)
+	if gad.Rect.RawX == -1 && window != nil {
+		gx = int(window.Rect.X) + (int(window.Rect.W)-textWidth)/2
+	}
+	switch {
+	case gad.Attribs&4 != 0:
+		return gx + w - textWidth
+	case gad.Attribs&2 != 0:
+		return gx + w/2 - textWidth/2
+	}
+	return gx
+}
+
+// drawRetailLabelGAF is the front end's label painter GAF branch, taken when
+// the label's `fontnumber` matched none of the window's kind-7 records —
+// every label of every stock window but BRIEFING and MSNBRIEF. It draws
+// drawRetailLabelLines in the front end's label face, through light-table row
+// `shade` (the label's live colour word); the FNT fallback draws in that word
+// raw [03 R-FONT-01 §6].
+func (g *gameShell) drawRetailLabelGAF(c *client.Client, p *ui.Panel, gad gui.Gadget, r gui.Rect, text string, color byte, shade int) {
+	measure, metric, ok := g.retailLabelTextMetrics()
+	if c == nil || !ok || text == "" {
+		return
+	}
+	font := g.retailGAFLabelFont()
+	var pal *palette.Tables
+	if g.assets != nil {
+		pal = g.assets.pal
+	}
+	var window *gui.Window
+	if p != nil {
+		window = p.Window
+	}
+	drawRetailLabelLines(window, gad, r, text, measure, metric, func(line string, x, y int) {
+		if font == nil {
+			c.UITextWidth(g.font, line, x, y, -1, color)
+			return
+		}
+		drawRetailGAFTextLit(c, font, line, x, y, int(r.W), pal, shade)
+	})
+}
+
+// drawRetailLabelLines lays out the label painter's GAF branch
+// [03 R-FONT-01 §6], shared by the front end and the in-battle modal
+// windows:
+//
+//   - the painter makes GAF-font slot 1 (`hattfont11`) the window's current
+//     font for its whole run, so measure and metric come from it, or from
+//     the common FNT when that slot is null (retailLabelFaceMetrics);
+//   - the pen is retailLabelPenX, and `penY` is the label's own y;
+//   - a rectangle taller than two metrics (`2 × metric < h − 1`) goes to the
+//     wrapper with `maxW = w` and `maxH = h`, each line `metric + 2` below the
+//     last; everything else is one line.
+//
+// draw paints one line at its pen. On the GAF path it limits the line to the
+// label width `w`, so a zero-width label draws nothing; on the FNT fallback
+// the limit is dropped.
+func drawRetailLabelLines(window *gui.Window, gad gui.Gadget, r gui.Rect, text string, measure func(string) int, metric int, draw func(line string, x, y int)) {
+	x, y := retailLabelPenX(window, gad, r, measure(text)), int(r.Y)
+	if 2*metric < int(r.H)-1 {
+		for _, line := range retailLabelWrapLines(text, measure, int(r.W), int(r.H), metric+2) {
+			draw(line, x, y)
+			y += metric + 2
+		}
+		return
+	}
+	draw(text, x, y)
+}
+
+// retailLabelWrapLines is the GAF pen's word wrapper [03 R-FONT-01 §6]. It
+// breaks on a space or a carriage return, keeps the longest run of whole words
+// whose width does not exceed maxW (a line exactly maxW wide fits), and cuts
+// each line from the string verbatim. A first word wider than maxW yields an
+// empty line and the walk resumes one byte later. Each line spends `pitch` of
+// maxH, and the height is tested only after a line, so one line is always
+// produced.
+func retailLabelWrapLines(text string, measure func(string) int, maxW, maxH, pitch int) []string {
+	if cut := strings.IndexByte(text, 0); cut >= 0 {
+		text = text[:cut]
+	}
+	var lines []string
+	start, lastBreak, i := 0, 0, 0
+	for {
+		for i < len(text) && text[i] != ' ' && text[i] != '\r' {
+			i++
+		}
+		var line string
+		switch width := measure(text[start:i]); {
+		case maxW < width:
+			line, i = text[start:lastBreak], lastBreak
+		case i == len(text) || text[i] == '\r':
+			line = text[start:i]
+		default:
+			lastBreak = i
+			i++
+			continue
+		}
+		lines = append(lines, line)
+		maxH -= pitch
+		if i >= len(text) {
+			return lines
+		}
+		i++
+		start, lastBreak = i, i
+		if maxH < 1 {
+			return lines
+		}
+	}
 }
 
 // retailTextPen resolves the two things a gadget's text pen needs: the

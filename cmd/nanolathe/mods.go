@@ -478,8 +478,10 @@ func installMainMenuModsButton(window *gui.Window) {
 	}
 }
 
-// refreshMainMenuModStatus writes the status line, centred like retail
-// centres its version literal.
+// refreshMainMenuModStatus writes the status line and centres it on the
+// screen. The line is a copy of the version label, so the label painter draws
+// it with its pen at the rectangle's x in its own face (GAF slot 1); the
+// centring measures in that same face [03 R-FONT-01 §6].
 func (g *gameShell) refreshMainMenuModStatus(p *ui.Panel) {
 	if p == nil || p.Window == nil {
 		return
@@ -495,7 +497,11 @@ func (g *gameShell) refreshMainMenuModStatus(p *ui.Panel) {
 	}
 	p.SetActive("MODSTATUS", true)
 	p.SetText("MODSTATUS", text)
-	p.Window.Gadgets[index].Rect.X = int32((retailScreenW - g.retailTextWidth(text)) / 2)
+	width := 0
+	if measure, _, ok := g.retailLabelTextMetrics(); ok {
+		width = measure(text)
+	}
+	p.Window.Gadgets[index].Rect.X = int32((retailScreenW - width) / 2)
 }
 
 // ---------------------------------------------------------------------------
@@ -1537,14 +1543,19 @@ func (g *gameShell) activateMutatorsGadget(name string) {
 
 // fitDetail trims text to the lines the authored description label holds,
 // ending a cut line with "...", so a long summary never runs into the line
-// beneath it.
+// beneath it. Every caller fills a label, so it measures in the label
+// painter's face (GAF slot 1) [03 R-FONT-01 §6].
 func (g *gameShell) fitDetail(text string, width, lines int) string {
-	wrapped := retailWrapLines(text, g.retailTextWidth, width)
+	measure, _, ok := g.retailLabelTextMetrics()
+	if !ok {
+		measure = g.retailTextWidth
+	}
+	wrapped := retailWrapLines(text, measure, width)
 	if len(wrapped) <= lines {
 		return text
 	}
 	last := wrapped[lines-1]
-	for last != "" && g.retailTextWidth(last+"...") > width {
+	for last != "" && measure(last+"...") > width {
 		last = last[:len(last)-1]
 	}
 	return strings.Join(append(append([]string(nil), wrapped[:lines-1]...), strings.TrimSpace(last)+"..."), " ")

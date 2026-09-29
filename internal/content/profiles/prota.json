@@ -3,6 +3,7 @@
   "name": "prota",
   "controls": "community",
   "minimumGameplay": "community-3.9",
+  "presentation": {"main_menu_version": "4.8"},
   "detect": [
     "downloadP",
     "gamedatP",

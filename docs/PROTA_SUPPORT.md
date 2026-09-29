@@ -33,6 +33,17 @@ Load saved battles with the same mod, or the same roots, profile and gameplay
 selection. A save made with a library mod records it and switches to it on
 load ([DESIGN_MODS_MUTATORS §7](DESIGN_MODS_MUTATORS.md#7-the-save-sidecar)).
 
+## Main menu
+
+ProTA's title box shows its version, **4.8**, under the word *ProTA*, centred
+the way ProTA's own window places it. The version comes from the `prota`
+content profile's `presentation.main_menu_version`, which records the
+version string ProTA 4.8's patch list configures. The original game keeps
+its `v3.1`
+([the extension reference](../research/extensions/prota-engine.md#main-menu-version-label)).
+Whether ProTA's own engine prints exactly `4.8` or adds a prefix has not been
+seen on a capture.
+
 ## Gameplay
 
 ProTA requires **Community 3.9** or **Modern**: while it is selected the

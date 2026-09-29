@@ -79,7 +79,8 @@ func TestModalTitleBindsOnlyFirstNamedLabel(t *testing.T) {
 	for code, pixel := range map[byte]byte{'I': 37, 'A': 37, 'B': 83} {
 		font.Frames[code] = bindingEntry("glyph", pixel).Frames[0]
 	}
-	hud := &retailBattleHUD{modalFont: font}
+	// Labels draw in GAF slot 1, the label painter's face [03 R-FONT-01 §6].
+	hud := &retailBattleHUD{modalFontSmall: font}
 	c := bindingClient(t)
 	c.SetUIStage(painterBindingStage(func(c *client.Client) { hud.drawGUIWindow(c, w, nil, "A") }))
 	actual := c.ComposeFrameSnapshot()

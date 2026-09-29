@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 
+	"github.com/nanolathe-gg/nanolathe/formats"
+	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/visibility"
@@ -112,5 +114,40 @@ func TestBattleInfoLabelAppendAndTruncate(t *testing.T) {
 	truncateBattleInfoWindow(window, authored)
 	if len(window.Gadgets) != authored {
 		t.Fatalf("truncate left %d gadgets, want the authored %d", len(window.Gadgets), authored)
+	}
+}
+
+// A printed row is a label without a font record, so the label painter's GAF
+// branch draws it: in GAF slot 1, pen at the column x with no inset, and cut
+// at the column width with nothing appended [03 R-FONT-01 §6][07 R-FE-01 §7].
+func TestBattleInfoLabelDrawsInLabelFace(t *testing.T) {
+	face := func(pixel byte) *formats.GAFEntry {
+		font := &formats.GAFEntry{Frames: make([]formats.GAFFrameRef, 256)}
+		font.Frames['x'] = bindingEntry("glyph", pixel).Frames[0]
+		// The capital-I frame sets the metric (height + 2 = 12, so a 15-pixel
+		// row stays on one line) and the baseline the glyphs hang from.
+		font.Frames['I'] = formats.GAFFrameRef{Frame: &formats.GAFFrame{Width: 1, Height: 10, Pixels: make([]byte, 10), Transparent: make([]bool, 10)}}
+		return font
+	}
+	h := &retailBattleHUD{modalFont: face(37), modalFontSmall: face(83)}
+	window := &gui.Window{Rect: gui.Rect{W: 32, H: 24}, Gadgets: []gui.Gadget{{Kind: gui.KindPanel}}}
+	appendBattleInfoLabel(window, "xxxxx", 2, 2, 3)
+	row := window.Gadgets[1]
+	c := bindingClient(t)
+	c.SetUIStage(painterBindingStage(func(c *client.Client) {
+		h.drawBattleInfoLabel(c, window, row, row.Rect, row.Text, nil, window.Rect)
+	}))
+	snap := c.ComposeFrameSnapshot()
+	at := func(x, y int) byte { return snap.Indexed[y*snap.Width+x] }
+	if at(2, 12) != 83 || at(4, 12) != 83 {
+		t.Fatalf("row glyphs at x 2 and 4 = %d, %d, want the slot-1 face's 83 from the column x", at(2, 12), at(4, 12))
+	}
+	if at(5, 12) == 83 {
+		t.Fatal("the row drew past its 3-pixel column")
+	}
+	for i, pixel := range snap.Indexed {
+		if pixel == 37 {
+			t.Fatalf("slot-0 glyph drawn at (%d,%d)", i%snap.Width, i/snap.Width)
+		}
 	}
 }

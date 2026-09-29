@@ -237,6 +237,10 @@ func (h *retailBattleHUD) drawGUIWindowState(c *client.Client, window *gui.Windo
 		if fallback == nil {
 			fallback = h.guiFont
 		}
+		if gad.Kind == gui.KindLabel {
+			h.drawModalLabelGAF(c, window, clip, gad, r, text, fallback)
+			continue
+		}
 		var textWidth, metric int
 		switch {
 		case h.modalFont != nil:
@@ -264,42 +268,34 @@ func (h *retailBattleHUD) drawGUIWindowState(c *client.Client, window *gui.Windo
 				})
 			continue
 		}
-		if gad.Kind == gui.KindButton {
-			flash := uint16(0)
-			if panel != nil {
-				flash = panel.FlashRow(i)
-			}
-			h.drawBattleButtonCaption(c, clip, gad, r, text, selected, textWidth, metric, flash)
-			continue
+		flash := uint16(0)
+		if panel != nil {
+			flash = panel.FlashRow(i)
 		}
-		x := int(r.X)
-		switch {
-		case gad.Attribs&1 != 0:
-			x += 3
-		case gad.Attribs&4 != 0:
-			x = int(r.X+r.W) - textWidth - 3
-			if x < int(r.X) {
-				x = int(r.X)
-			}
-		case gad.Attribs&2 != 0:
-			x += (int(r.W)-1-textWidth)/2 + 1
-		default:
-			x += 3
-		}
-		y := retailTextPenY(gad, r, metric)
-		if h.modalFont != nil {
-			drawRetailGAFTextClipped(c, h.modalFont, text, x, y, int(r.W), int(clip.X), int(clip.Y), int(clip.W), int(clip.H))
-			continue
-		}
-		// A button installs map entry `colorf`, which the builder zeroed at
-		// open; a label installs its colour word raw, likewise zero because no
-		// battle modal writes it [03 R-FONT-01 §6].
-		color := byte(0)
-		if gad.Kind == gui.KindButton {
-			color = h.guiColor(0)
-		}
-		c.UITextWidth(fallback, text, x, y, -1, color)
+		h.drawBattleButtonCaption(c, clip, gad, r, text, selected, textWidth, metric, flash)
 	}
+}
+
+// drawModalLabelGAF is the label painter's GAF branch in a modal window: the
+// front end's drawRetailLabelLines in GAF slot 1 (`hattfont11`), each line
+// limited to the label width and clipped to the window's private surface
+// [03 R-FONT-01 §6]. With slot 1 null the common FNT draws with no width
+// limit, unclipped as the FNT drawer is elsewhere. Glyphs are plain and the
+// FNT colour is raw palette index 0: the label's colour word is the pen mode
+// and the foreground, the builder zeroes it, and no battle modal writes it.
+func (h *retailBattleHUD) drawModalLabelGAF(c *client.Client, window *gui.Window, clip gui.Rect, gad gui.Gadget, r gui.Rect, text string, common *formats.FNT) {
+	measure, metric, ok := retailLabelFaceMetrics(h.modalFontSmall, common)
+	if c == nil || !ok || text == "" {
+		return
+	}
+	small := h.modalFontSmall
+	drawRetailLabelLines(window, gad, r, text, measure, metric, func(line string, x, y int) {
+		if small == nil {
+			c.UITextWidth(common, line, x, y, -1, 0)
+			return
+		}
+		drawRetailGAFTextClipped(c, small, line, x, y, int(r.W), int(clip.X), int(clip.Y), int(clip.W), int(clip.H))
+	})
 }
 
 // retailBattleButtonText selects the retained runtime stage caption. Dynamic
@@ -432,18 +428,7 @@ func (h *retailBattleHUD) drawModalLabelFNT(c *client.Client, window *gui.Window
 	if c == nil || window == nil || font == nil || text == "" {
 		return
 	}
-	tw := client.MeasureText(font, text)
-	gx, gy, w := int(r.X), int(r.Y), int(r.W)
-	if gad.Rect.RawX == -1 {
-		gx = int(window.Rect.X) + (int(window.Rect.W)-tw)/2
-	}
-	penX := gx
-	switch {
-	case gad.Attribs&4 != 0:
-		penX = gx + w - tw
-	case gad.Attribs&2 != 0:
-		penX = gx + w/2 - tw/2
-	}
+	penX, gy := retailLabelPenX(window, gad, r, client.MeasureText(font, text)), int(r.Y)
 	if gad.Attribs&8 != 0 {
 		c.UITextWidth(font, text, penX+1, gy+3, -1, h.guiColor(0))
 	}

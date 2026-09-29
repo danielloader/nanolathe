@@ -16,6 +16,41 @@ func (g *gameShell) retailGAFTextFont() *formats.GAFEntry {
 	return &g.assets.gafFont.Entries[0]
 }
 
+// retailGAFLabelFont returns the secondary frontend GAF-font slot, slot 1
+// (`hattfont11`). The label painter makes it the window's current font for
+// its whole run; nil is the null slot, whose pen falls back to the active FNT
+// [03 R-FONT-01 §6].
+func (g *gameShell) retailGAFLabelFont() *formats.GAFEntry {
+	if g == nil || g.assets == nil || g.assets.gafFontSmall == nil || len(g.assets.gafFontSmall.Entries) == 0 {
+		return nil
+	}
+	return &g.assets.gafFontSmall.Entries[0]
+}
+
+// retailLabelTextMetrics is the front end's label face: its slot 1 and its
+// common FNT (retailLabelFaceMetrics).
+func (g *gameShell) retailLabelTextMetrics() (measure func(string) int, metric int, ok bool) {
+	var common *formats.FNT
+	if g != nil {
+		common = g.font
+	}
+	return retailLabelFaceMetrics(g.retailGAFLabelFont(), common)
+}
+
+// retailLabelFaceMetrics is the family the label painter's GAF branch
+// measures and draws with: GAF slot 1's glyph widths and capital-I metric,
+// or, with that slot null, the common FNT that the painter's empty font walk
+// left active [03 R-FONT-01 §6]. ok is false when neither is loaded.
+func retailLabelFaceMetrics(small *formats.GAFEntry, common *formats.FNT) (measure func(string) int, metric int, ok bool) {
+	if small != nil {
+		return func(text string) int { return retailGAFTextWidth(small, text) }, retailGAFTextHeight(small), true
+	}
+	if common != nil {
+		return func(text string) int { return client.MeasureText(common, text) }, int(common.Height), true
+	}
+	return nil, 0, false
+}
+
 func (g *gameShell) hasRetailTextFont() bool {
 	return g.retailGAFTextFont() != nil || (g != nil && g.font != nil)
 }

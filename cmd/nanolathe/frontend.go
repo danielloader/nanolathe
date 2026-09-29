@@ -815,10 +815,12 @@ func (g *gameShell) openMenuWithTokenFlush(mode shellMode, flushTokens bool) {
 			}
 			panel = ui.NewPanel(window)
 			if mode == modeMenuMain {
-				// Retail supplies this literal, reveals the authored label, and
+				// Retail supplies its literal, reveals the authored label, and
 				// shifts its fresh rectangle by half the primary-font width
-				// (integer division) [07 R-FE-01 §3].
-				const menuVersion = "v3.1"
+				// (integer division) [07 R-FE-01 §3]. The label painter then
+				// draws from that x in its own, smaller face
+				// [03 R-FONT-01 §6].
+				menuVersion := g.mainMenuVersion()
 				panel.SetActive("DebugString", true)
 				panel.SetText("DebugString", menuVersion)
 				if i := window.GadgetIndex("DebugString"); i >= 0 {
@@ -851,6 +853,21 @@ func (g *gameShell) openMenuWithTokenFlush(mode shellMode, flushTokens bool) {
 		// at the transition that opens it.
 		g.applyDisplaySize(clPtr, retailScreenW, retailScreenH)
 	}
+}
+
+// retailMenuVersion is the literal the retail main-menu loader writes into
+// the `DebugString` label [07 R-FE-01 §3].
+const retailMenuVersion = "v3.1"
+
+// mainMenuVersion is the version label's text: the retail literal, or the
+// `main_menu_version` the mounted content profile names for a package whose
+// engine replaces that literal. ProTA 4.8's patch list sets its version string
+// to `4.8` (research/extensions/prota-engine.md "Main-menu version label").
+func (g *gameShell) mainMenuVersion() string {
+	if g != nil && g.cs != nil && g.cs.presentation.MainMenuVersion != "" {
+		return g.cs.presentation.MainMenuVersion
+	}
+	return retailMenuVersion
 }
 
 // applyDisplaySize moves the presentation surface to one logical size. It is

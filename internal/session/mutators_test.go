@@ -268,9 +268,14 @@ func TestStrictIncomeScalesSettlementProduction(t *testing.T) {
 func TestStrictUnitSpeedShortensAStraightMove(t *testing.T) {
 	arrival := func(speed content.Factor) int {
 		cat := minimalCatalogForStrict()
+		// A mobile unit is created facing its buildangle [04 §2.3b]. The walker
+		// authors east, its direction of travel, so the move is the straight
+		// leg being measured: created facing north, the turn arcs it into the
+		// neighbouring row, where the search's equal-cost staircase routes set
+		// the leg count instead of the speed.
 		d := &content.UnitDef{UnitName: "mutwalker", ObjectName: "mutwalker", MaxDamage: 100, Limit: -1,
 			SightDistance: 64, MovementClass: "testmove", FootprintX: 1, FootprintZ: 1, BMCode: 1, CanMove: true,
-			MaxVelocity: 1 << 16, Acceleration: 1 << 12, BrakeRate: 1 << 13, TurnRate: 1000}
+			MaxVelocity: 1 << 16, Acceleration: 1 << 12, BrakeRate: 1 << 13, TurnRate: 1000, BuildAngle: 49152}
 		d.CanonicalKey = content.CanonicalKey(d.UnitName)
 		cat.Units[d.CanonicalKey] = d
 		installFixtureCOB(cat)

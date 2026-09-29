@@ -1181,6 +1181,28 @@ func groundPostMoveHeight(t *world.Terrain, u *units.Unit) (numeric.Fixed, bool)
 
 const unitTransformDirty uint32 = 1 << 16
 
+// CorrectCreatedPose is the post-move correction the allocator runs on every
+// unit it creates, after its mode install and before the creation stamp
+// [04 R-MOV-01 §5]. The initializer has just raised transform-dirty, so the
+// gate always passes; the unit needs a mover, which only `bmcode 1` receives,
+// and a grounded mirror. It is the same four-branch correction the sweep runs
+// after a mover tick: an upright unit takes the terrain height, a floater
+// sea level less its waterline, and anything else the ground-plate conform.
+//
+// The hover bob reads the mover's scalar speed, zero in a new mover, and its
+// last-proposal tick, which the mover constructor does not initialise in
+// retail: the word holds whatever the heap held, so a hovercraft's bob at
+// creation is indeterminate there. This reads the new record's zero, the same
+// value the sweep reads until the unit first proposes a move, and any
+// difference is gone at the unit's first sweep visit, because `canhover` runs
+// the correction on every tick.
+func (s *System) CorrectCreatedPose(u *units.Unit) {
+	if s == nil || u == nil || u.Def == nil || u.Def.BMCode != 1 {
+		return
+	}
+	applyGroundPostMove(s.Terrain, u, true, u.Move.ModeMirror, newHoverBob(u, 0, s.tick, 0))
+}
+
 // applyGroundPostMove is the sole ordinary ground writer for Y, pitch, and
 // bank. Its four-corner path follows the root selection primitive, while the
 // upright and floater paths deliberately leave the angle words unchanged

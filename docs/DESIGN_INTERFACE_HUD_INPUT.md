@@ -2503,9 +2503,10 @@ later does not retarget the queued request.
 developer spawn handler places each unit it creates: through the mission
 spawner's position fixup — buildings snap to their footprint grid and take the
 spawner's height probe, mobiles retain the terrain point `[08 R-ENTRY-01 §6]`
-`[08 R-ENTRY-02 §1]` — and through nothing else. That handler runs no placement
-validator `[07 R-CAM-01 §6]`, so the command does not test terrain
-suitability, slope, depth, features, building yards or occupancy: a unit can
+`[08 R-ENTRY-02 §1]`, which the allocator's creation-time post-move correction
+then grounds or floats `[04 R-MOV-01 §5]` — and through nothing else. That
+handler runs no placement validator `[07 R-CAM-01 §6]`, so the command does not
+test terrain suitability, slope, depth, features, building yards or occupancy: a unit can
 be spawned on top of another unit or structure, or on ground it could not be
 built on. The session checks only the current local player, the catalog
 definition, and that the captured point lies on the map — a Nanolathe guard

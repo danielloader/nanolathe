@@ -90,7 +90,11 @@ func TestCOBBitmapExplosionBindsBeforeCreate(t *testing.T) {
 	if len(views) != 6 {
 		t.Fatalf("bitmap records = %d, want 6", len(views))
 	}
-	origin, ok := u.COBBinding().ComposePiece(1, u.Move.Heading, u.Move.Pitch, u.Move.Bank)
+	// Create ran at the initializer's heading — 32768 for buildangle 0, which
+	// takes no draw — and only then did the allocator give this mobile
+	// definition its buildangle heading [04 §2.3b].
+	const createHeading = 32768
+	origin, ok := u.COBBinding().ComposePiece(1, createHeading, u.Move.Pitch, u.Move.Bank)
 	if !ok {
 		t.Fatal("fixture child did not resolve through the piece-port locator")
 	}

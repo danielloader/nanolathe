@@ -1858,6 +1858,10 @@ func createAndBindServices(s *Session) error {
 	if s.Movement.Terrain != s.World {
 		return fmt.Errorf("session: Movement.Terrain mismatch")
 	}
+	// The allocator grounds or floats each unit it creates through the
+	// movement-owned post-move correction [04 R-MOV-01 §5]. Bound here, like
+	// the extraction sampler above, before any battle-entry allocation.
+	s.Units.SetCreationPose(s.Movement)
 	// Bind movement classes explicitly [02 "Movement class record"]
 	s.Movement.SetClasses(s.Catalog.Movement)
 	s.Movement.Damage = s.acceptDamage

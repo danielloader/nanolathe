@@ -1289,7 +1289,9 @@ InitialMission timing").**
      2^19) >> 20`, `coord' = (footprint + 2·cell) << 19` per axis (i.e. to
      the centre of a footprint-aligned 16-unit cell), and `y` ← the terrain
      height probe at that cell (`<< 16`); a mobile definition keeps the
-     authored `x,y,z` untouched;
+     authored `x,y,z` untouched here, and the allocator's creation-time
+     post-move correction then replaces `y` (and the pitch and roll) for
+     any definition that receives a mover ([04 R-MOV-01 §5]);
    - allocation through the common allocator with the fresh-build arguments
      (two simulation draws on success, [04 §2.3b]; refusal — slice full or
      per-definition limit — stores 0, no diagnostic);

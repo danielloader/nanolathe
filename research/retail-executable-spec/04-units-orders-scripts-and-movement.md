@@ -366,18 +366,34 @@ position in the global RNG call order. The word is written nowhere else
 belongs to a different structure family in the presentation code).
 
 **Lifecycle and writer census — Established.** The allocator is the only
-heading writer in the common unit-creation path. Mission-unit creation invokes
-the allocator first and then copies the authored mission placement angle over
-the initialized heading [08 "Unit creation and InitialMission timing — Established"].
-Factory products are allocated as nanoframes and retain the initialized
-heading; the factory's `QueryBuildInfo` result supplies a position, not a
-separate product-heading adjustment. Completion, `GetBuilt`, and the factory
-queue do not rewrite that heading. Mobile movement may subsequently update a
-unit's heading through its normal desired-heading integrator, but this is not
-an angle-adjustment read.
+heading writer in the common unit-creation path, and it writes the heading
+twice. The initializer writes the drawn heading above. Later in the same
+allocation — after the script bind and `Create`, the weapon-slot pass and the
+extraction pass ([R-CB-01 §4]) — the allocator constructs a mover when the
+definition's `bmcode` is 1, and in that same branch stores the definition's
+`buildangle` word, unchanged, into the heading. The drawn heading therefore
+outlives creation only for a structure (`bmcode` 0), which receives no mover.
+Every mobile unit leaves the allocator facing its authored `buildangle`: 0,
+north, for a definition that authors none, which includes every stock
+commander. `Create`'s own synchronous work, the weapon-slot queries included,
+still runs at the drawn heading. (Correction: this section formerly said every
+unit kept the drawn heading. A retail capture of a skirmish start shows the
+Arm commander facing north, back to the camera, as the second write predicts.)
+
+Mission-unit creation invokes the allocator first and then copies the authored
+mission placement angle over the allocator's heading
+[08 "Unit creation and InitialMission timing — Established"]. Factory products
+are allocated as nanoframes. A structure product keeps the drawn heading; a
+mobile product's `buildangle` heading is replaced on every tick it is carried
+by the factory's heading plus the pad piece's turn ([R-FAC-02 §2]). The
+factory's `QueryBuildInfo` result supplies a position, not a separate
+product-heading adjustment. Completion, `GetBuilt`, and the factory queue do not
+rewrite that heading. Mobile movement may subsequently update a unit's heading
+through its normal desired-heading integrator, but this is not an
+angle-adjustment read.
 
 The authored mission-placement record's facing angle is a separate writer: it
-is copied over the initializer result after a mission unit is allocated. The
+is copied over the allocator's heading after a mission unit is allocated. The
 heading-form `StartBuilding` variant likewise carries the producer's current
 heading to the producer's script as its first argument; it does not write the
 new product's heading. Construction-command placement therefore has no
@@ -11273,6 +11289,35 @@ mismatch raises the dirty bit there and nothing raises it again while the
 aircraft sits ([R-AIR-01 §6] "Touchdown"). A `canhover` definition
 forces the branch every tick even when nothing moved, which is what animates
 the hover bob below while parked.
+
+**The allocator runs this correction once at creation — Established.** The
+common initializer sets transform-dirty together with the grounded mirror
+value 1. The allocator then constructs the mover (for `bmcode` 1 only; see
+[R-P28-ANG-01R §2]), installs its caller's mode argument into the mirror —
+`1` for every ordinary creation, the replaced unit's mode for an ownership
+transfer — and calls this correction before the creation footprint stamp
+([R-COLL-01 §4]). The dirty bit is therefore raised and consumed inside the
+allocator, and every freshly created mobile unit with a grounded mirror takes
+one of the four branches below at the position it was created at: `upright`
+units stand on the terrain, floaters sit at sea level less their waterline,
+and the rest take the ground-plate conform. A structure has no mover and gets
+no write. This is the only thing that moves a stationary new unit onto the
+ground: the commit's stationary early return ([R-COLL-01 §1]) means an idle
+unit never raises the bit again until it moves. It is why a mission unit's
+authored `YPos` does not survive creation ([08 R-ENTRY-01 §6]). Stock
+missions depend on it: the Core Contingency Arm mission Gelidus authors its
+Arm units 115 world units above the snow, and Arm mission 23 authors its ships
+at `YPos=0`, on the sea floor.
+
+Save reconstruction calls the same allocator, but the loader writes the saved
+Y and orientation back after the allocator returns, so a restored unit keeps
+its saved pose. For a `canhover` unit, the conform at creation reads the hover
+bob's inputs from a mover constructed a moment earlier. The mover constructor
+does not initialise the last-proposal tick (the age the bob below fades over),
+and the allocation is not zero-filled, so the bob's age — and with it the
+hovercraft's creation-time height, pitch and roll — is indeterminate in retail.
+It is corrected at the unit's first sweep visit, because `canhover` forces this
+branch every tick.
 
 **The four branches — Established.**
 

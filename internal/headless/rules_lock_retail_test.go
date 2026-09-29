@@ -101,38 +101,50 @@ import (
 // Only the queued record's own state differs at tick 54000 (and at 42000).
 // The Community and Modern locks do not move. (Measured on top of the
 // build-walk start above; before it, this moved the Modern long lock instead.)
+//
+// Retail's allocator tail [04 §2.3b][04 R-MOV-01 §5] moves every lock. A
+// mobile unit is now created facing its authored `buildangle`, so both
+// commanders start facing north instead of the drawn heading's south, and
+// every created mover is grounded or floated at creation. The benchmark scene
+// composes differently from its first frame. The ashap trajectories diverge
+// from the commanders' first turns: the computer player builds at the same
+// rate as before (units created at 12000/18000/24000 ticks within two of the
+// previous run in every set) but its first attack reaches the idle commander
+// at a different time. Strict now ends at tick 28680 instead of reaching its
+// 54000-tick bound, Community at 30660 and Modern at 45390.
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
 	lockAshapUnitLimit             = 250 // Strict setting; Community's table overrides it.
 	lockDifficulty                 = 1
-	lockAshapStrict6000            = "partial-v1:0790d067f534aa05"
-	lockAshapCommunity6000         = "partial-v1:c03b266aa379b492"
-	lockAshapModern6000            = "partial-v1:839e437ed39a2166"
-	lockAshapStrict54000           = "partial-v1:a9d87c5f66975e27"
-	lockAshapCommunity54000        = "partial-v1:3dd46eceb9692349"
-	lockAshapModern54000           = "partial-v1:82715a9a6b4a8a3b"
-	lockAshapCommunityEnd   uint32 = 43530
-	lockAshapModernEnd      uint32 = 40710
+	lockAshapStrict6000            = "partial-v1:70eab79cd1e632ce"
+	lockAshapCommunity6000         = "partial-v1:b23e0c381c4d960b"
+	lockAshapModern6000            = "partial-v1:2c3f331ca125eaa7"
+	lockAshapStrict54000           = "partial-v1:4baa308e5eba5d5e"
+	lockAshapCommunity54000        = "partial-v1:2ce958e331ce6a19"
+	lockAshapModern54000           = "partial-v1:f86635381d796c1b"
+	lockAshapStrictEnd      uint32 = 28680
+	lockAshapCommunityEnd   uint32 = 30660
+	lockAshapModernEnd      uint32 = 45390
 
 	lockBenchSeed             uint32 = 7
 	lockBenchWarmupTicks             = 600
 	lockBenchTotalTicks              = 1500
-	lockBenchStrictInitial           = "partial-v1:3e1cbf1c074f060d"
-	lockBenchCommunityInitial        = "partial-v1:f6cbc51b5ef4deff"
-	lockBenchModernInitial           = "partial-v1:f6cbc51b5ef4deff"
-	lockBenchStrictWarm              = "partial-v1:28ff61dadcebdbbe"
-	lockBenchCommunityWarm           = "partial-v1:b3f28816feec8b96"
-	lockBenchModernWarm              = "partial-v1:b557f33a6d6b705f"
-	lockBenchStrictFinal             = "partial-v1:d9a2117919303fbb"
-	lockBenchCommunityFinal          = "partial-v1:53337ba6e3dbe94c"
-	lockBenchModernFinal             = "partial-v1:7cfe97eb076cba49"
+	lockBenchStrictInitial           = "partial-v1:bf488aacf042d582"
+	lockBenchCommunityInitial        = "partial-v1:55165c066f8b6eaa"
+	lockBenchModernInitial           = "partial-v1:55165c066f8b6eaa"
+	lockBenchStrictWarm              = "partial-v1:5afe0089d8db02b8"
+	lockBenchCommunityWarm           = "partial-v1:32013bdf5ea1c7ef"
+	lockBenchModernWarm              = "partial-v1:d572e18b93e69c9d"
+	lockBenchStrictFinal             = "partial-v1:2ccfe9ca8e307df2"
+	lockBenchCommunityFinal          = "partial-v1:5575c03c3bd46d32"
+	lockBenchModernFinal             = "partial-v1:6003a291b3f00bc5"
 )
 
 // TestStrictFingerprintIsLocked holds the retail baseline. Nothing in a Modern
 // rule set may move any value here.
 func TestStrictFingerprintIsLocked(t *testing.T) {
-	runFingerprintLock(t, gameplay.Strict31, lockAshapStrict6000, lockAshapStrict54000, 54000, lockBenchStrictInitial, lockBenchStrictWarm, lockBenchStrictFinal)
+	runFingerprintLock(t, gameplay.Strict31, lockAshapStrict6000, lockAshapStrict54000, lockAshapStrictEnd, lockBenchStrictInitial, lockBenchStrictWarm, lockBenchStrictFinal)
 }
 
 // TestCommunityFingerprintIsLocked holds the approved mainline feature table.

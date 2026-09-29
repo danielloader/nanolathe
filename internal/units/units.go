@@ -1075,6 +1075,12 @@ type World struct {
 	// creator then leaves the rate at its zero value rather than inventing one.
 	extraction ExtractionSampler
 
+	// pose is the movement-side post-move correction the allocator runs once
+	// on every unit it creates [04 R-MOV-01 §5]. It is bound once at battle
+	// entry; nil (unit-package fixtures, which have no terrain) leaves the
+	// caller's position as passed.
+	pose CreationPose
+
 	// simulationRNG is the session-owned, battle-wide Park-Miller stream. It is
 	// bound by session composition before the first production allocation; nil
 	// is retained only for small unit-package fixtures, which receive the
@@ -1174,6 +1180,56 @@ func (w *World) SetExtractionSampler(s ExtractionSampler) {
 		return
 	}
 	w.extraction = s
+}
+
+// CreationPose is the post-move Y, pitch and roll correction as the allocator
+// runs it, once, on the unit it has just created [04 R-MOV-01 §5]. The common
+// initializer raises the transform-dirty bit, and the allocator calls the
+// correction after installing its mode argument and before the creation
+// stamp, so the bit is set and consumed inside the allocator: the correction's
+// Y, pitch and roll writes are its only lasting effect. internal/movement owns
+// the correction and satisfies this interface.
+type CreationPose interface {
+	CorrectCreatedPose(u *Unit)
+}
+
+// SetCreationPose binds the battle's post-move correction to the creator. Like
+// the extraction sampler it must be installed before the first allocation of a
+// battle.
+func (w *World) SetCreationPose(p CreationPose) {
+	if w == nil {
+		return
+	}
+	w.pose = p
+}
+
+// allocatorMoverTail is what the allocator does after the initializer and the
+// script bind: the heading write for a definition that receives a mover, the
+// mode install, and the post-move correction every creation runs
+// [04 §2.3b][04 R-MOV-01 §5].
+//
+// A mover is constructed only for `bmcode 1`, and the allocator then writes
+// the definition's `buildangle` word straight into the heading, replacing the
+// initializer's drawn heading: every mobile unit therefore starts facing its
+// authored `buildangle`, which is 0 (north) for the stock commanders, and only
+// a structure keeps the drawn heading. Mission placement copies its authored
+// angle over this afterwards, a factory product's carried branch replaces it
+// every tick, and save reconstruction restores the saved heading.
+//
+// The mode argument is installed next: ordinary creation passes grounded `1`,
+// capture passes the replaced unit's mode [05 R-WORK-01 §15]. The correction
+// then grounds or floats a grounded mover at the position it was created at,
+// which is why a mission unit's authored `YPos` does not survive creation
+// [08 R-ENTRY-01 §6].
+func (w *World) allocatorMoverTail(u *Unit, def *content.UnitDef, moverMode uint8, facing StructureFacing) {
+	if def.BMCode == 1 {
+		u.Move.Heading = HeadingWithFacing(uint16(def.BuildAngle), facing)
+	}
+	u.Move.Mode = moverMode & 3
+	u.Move.ModeMirror = u.Move.Mode
+	if w.pose != nil {
+		w.pose.CorrectCreatedPose(u)
+	}
 }
 
 // sampleExtraction is the creation-time extraction sample of
@@ -1788,8 +1844,7 @@ func (w *World) create(def *content.UnitDef, owner uint8, x, y, z numeric.Fixed,
 	// The wrapper then writes its two-bit mode argument; capture supplies the
 	// replaced unit's mode through that argument [05 R-WORK-01 §15]. Mark a
 	// non-default result as authoritative for the deferred movement bootstrap.
-	u.Move.Mode = moverMode & 3
-	u.Move.ModeMirror = u.Move.Mode
+	w.allocatorMoverTail(u, def, moverMode, facing)
 	u.RestoredMoveMode = u.Move.Mode != CreatedMoverMode
 	// Site 1 of `activatewhenbuilt` [04 R-SPEC-01 §12]: "the unit creation
 	// service, WHEN CALLED WITH ITS ALREADY BUILT ARGUMENT ... activatewhenbuilt
@@ -2089,6 +2144,10 @@ func (w *World) createWithForcedSlotFacing(def *content.UnitDef, owner uint8, x,
 		w.pool.Free(h)
 		return 0, fmt.Errorf("units: strict COB binding for %q: %w", def.UnitName, err)
 	} // [P1-I01] VM per-unit for forced slot
+	// Save reconstruction runs the same allocator, so the same tail runs here;
+	// the restore adapter that follows writes the saved position, orientation
+	// and mode over everything it produced [08 R-SAVE-02 §6].
+	w.allocatorMoverTail(u, def, CreatedMoverMode, facing)
 	// Site 1 of `activatewhenbuilt` [04 R-SPEC-01 §12]; see the note on the
 	// ordinary allocation path above. The forced-slot entry point restores an
 	// already-built record and has no unbuilt form, because every caller it has

@@ -90,16 +90,17 @@ import (
 // benchmark warm and final locks and the Modern long run (which would end at
 // 35580 without it); no Strict lock and no Community ashap lock sees it.
 //
-// Retail's front-record pump [04 §3.3][04 R-ORD-01 §0] moves the Modern ashap
+// Retail's front-record pump [04 §3.3][04 R-ORD-01 §0] moves the Strict ashap
 // 54000-tick lock and nothing else. The computer player queues work on
 // products still being built, and the construction step used to advance a
 // queued MobileBuild behind the unfinished product's GetBuilt head into its
 // approach phase. It now waits at phase 0 until GetBuilt completes. At that
 // tick the approach starts either way, so the run does not diverge: draw
-// counts, units created and live units are equal, and the Modern hashes at
-// 30000, 42000 and 48000 ticks are unchanged. Only the queued record's own
-// state differs at tick 54000 (and at 24000 and 36000). The Strict and
-// Community locks do not move.
+// counts, units created, live units and orders submitted are equal, and the
+// Strict hashes at every 6000-tick step to 36000 and at 48000 are unchanged.
+// Only the queued record's own state differs at tick 54000 (and at 42000).
+// The Community and Modern locks do not move. (Measured on top of the
+// build-walk start above; before it, this moved the Modern long lock instead.)
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
@@ -108,7 +109,7 @@ const (
 	lockAshapStrict6000            = "partial-v1:0790d067f534aa05"
 	lockAshapCommunity6000         = "partial-v1:c03b266aa379b492"
 	lockAshapModern6000            = "partial-v1:839e437ed39a2166"
-	lockAshapStrict54000           = "partial-v1:e855d7d9dc3045ad"
+	lockAshapStrict54000           = "partial-v1:a9d87c5f66975e27"
 	lockAshapCommunity54000        = "partial-v1:3dd46eceb9692349"
 	lockAshapModern54000           = "partial-v1:82715a9a6b4a8a3b"
 	lockAshapCommunityEnd   uint32 = 43530

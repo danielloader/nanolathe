@@ -149,6 +149,13 @@ mod:
   the mod root. Omitted means detection, exactly as today.
 - `minimumGameplay` is a reserved word; omitted means none.
 - `controls` names a controls preset (§4.3); omitted means none.
+- `buildMenuPageSize` (optional, not shown above; no hosted mod sets it)
+  locks the Modern expanded sidebar to at most that many
+  build products per page, keeping a mod's hand-placed paging; omitted or zero
+  keeps auto-flow, and a negative value is refused. A content profile carries
+  the same lock as `presentation.build_menu_page_size`, which a mod naming
+  none inherits, and the player's settings file overrides both
+  (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock").
 - A mod that omits `minimumGameplay` or `controls` takes the value its
   resolved content profile names, if any: shipped and user profiles carry the
   same two optional keys (`internal/content/profiles`; the shipped `prota`
@@ -935,6 +942,7 @@ dependencies.
 |---|---|
 | Extraction refuses absolute paths, `..`, symlinks and case-folded duplicates; skips executables and `__MACOSX`; enforces the caps; an interrupted install leaves nothing installed | `modlibrary` tests on authored fixture zips |
 | Metadata disagreeing with the manifest refuses the install; unmet `requires` block selection | `modlibrary` |
+| A negative `buildMenuPageSize` is refused; a mod naming none takes its profile's, its own wins, and the player's settings value wins over both | `modlibrary.TestBuildMenuPageSizeMetadata`, `main.TestContentBuildMenuPageSize`, `main.TestExpandedSidebarBuildPageLock` |
 | Precedence: `--mod` over setting, a manual stack disables both, a mod's profile beats a saved `contentProfile`, a command line below the minimum is rejected | `modlibrary`, `cmd/nanolathe` |
 | A mod without `controls` or `minimumGameplay` takes its content profile's; metadata wins; ProTA recommends controls and a minimum, Escalation a minimum only | `modlibrary.TestLocalPackageTakesItsProfileRecommendations`, `profiles.TestProfileRecommendations` |
 | Preset contents, and the retail preset keeping skirmish rows; the offer key and its once-only record | `main.TestCommunityControlsPresetContents`, `main.TestRetailControlsPresetKeepsSkirmishRows`, `main.TestControlsOfferIsRememberedPerMod` |

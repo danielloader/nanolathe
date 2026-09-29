@@ -602,6 +602,12 @@ type Presentation struct {
 	// ExpandedSidebar uses spare modern UI height for more authored controls.
 	// This is a Nanolathe presentation preference (interface design §3.3).
 	ExpandedSidebar int `json:"expandedSidebar"`
+	// BuildMenuPageSize locks the expanded sidebar's build pages to at most
+	// this many product cells, overriding the running mod's own lock. Zero,
+	// the default, defers to the mod and otherwise fills every row that fits
+	// (interface design §3.3 "Build page lock"). It has no options row; the
+	// settings file is its only editor.
+	BuildMenuPageSize int `json:"buildMenuPageSize"`
 	// CommunitySelection chooses Retail (0), Community (1), or Zero (2)
 	// selection controls (DESIGN_INTERFACE_HUD_INPUT §3.13). It is host input
 	// policy, independent of gameplay and renderer selection.
@@ -714,6 +720,9 @@ func (p *Presentation) Normalize() {
 	}
 	if p.ExpandedSidebar < 0 {
 		p.ExpandedSidebar = DefaultPresentation().ExpandedSidebar
+	}
+	if p.BuildMenuPageSize < 0 {
+		p.BuildMenuPageSize = 0
 	}
 	if p.CommunitySelection < 0 || p.CommunitySelection > 2 {
 		p.CommunitySelection = 0

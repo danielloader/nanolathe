@@ -819,6 +819,14 @@ automatic weapon guide during building placement. It does not disable explicit
 Shift + `+showranges` guides. These fields reach presentation only, never a tick
 or the catalog hash. See DESIGN_GPU_RENDERER §20 for the display contract.
 
+*Build page lock (Nanolathe UI policy).* The same block may carry
+`"build_menu_page_size": 12`, a positive number of products on each Modern
+expanded-sidebar build page; omitted or zero keeps auto-flow and a negative
+value refuses the profile. A mod's own `buildMenuPageSize` metadata and the
+player's settings value take precedence, in that order; no shipped profile sets
+it. DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock" owns the layout contract
+and precedence.
+
 *TA Zero presentation resources.* The `zero` profile additionally maps
 `music` to the Base package's `tamus` directory. The existing audio enumerator
 keeps physical tracks 2–17 and excludes the bonus intro, with logical paths

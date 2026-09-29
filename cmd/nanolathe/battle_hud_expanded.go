@@ -20,6 +20,7 @@ type expandedSidebarKey struct {
 	width, height           int32
 	page, count, remembered int
 	localPage               int
+	lock                    int
 	flat                    bool
 	transport               bool
 	builder                 pool.Handle

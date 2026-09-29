@@ -214,6 +214,9 @@ type battleSession struct {
 	showRanges bool
 	// Placement guides are presentation preferences only (GPU design §20).
 	rangePreferences contentprofiles.Presentation
+	// modBuildPageSize is the running content's build page lock: the mod's
+	// metadata value, else its content profile's. Zero means none.
+	modBuildPageSize int
 
 	// interfaceType is the persisted LEFTCLICK stage for a direct battle. A
 	// frontend-backed battle reads the shell's live copy instead, so an
@@ -584,7 +587,7 @@ func composeBattleEntryDetached(sess *session.Session, cat *content.Catalog, cs 
 	}
 	b := &battleSession{
 		sess: sess, cat: cat, cam: cam, hud: hud, fs: cs.fs, shell: shell, iconRoots: strategicIconSearchRoots(cs),
-		showRanges: cs.presentation.ShowRanges, rangePreferences: cs.presentation,
+		showRanges: cs.presentation.ShowRanges, rangePreferences: cs.presentation, modBuildPageSize: cs.buildMenuPageSize(),
 		millisSource: newMonotonicMillisSource(), battleUI: ui.NewProductionBattleState(),
 	}
 	if savedCamera != nil {

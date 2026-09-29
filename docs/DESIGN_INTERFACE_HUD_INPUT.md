@@ -1616,7 +1616,8 @@ all pages, including the partial final page and Orders; hit regions and artwork
 must not overlap build cells.
 
 The row count is the number of complete 64-pixel cells that fit after reserving
-controls. Build-page count is the ceiling of logical cell count divided by cell capacity;
+controls. Without a build page lock (below), build-page count is the ceiling of
+logical cell count divided by cell capacity;
 there are no empty trailing pages or fixed per-builder item caps. Page zero is
 Orders, which continues to display the remembered build partition; positive
 pages select partitions of the list. The pager remains host state: arrows
@@ -1643,6 +1644,53 @@ controls. OTA coverage must also enter after the completed front-end transition
 and select every builder with authored product pages; testing only commanders or
 pre-transition windows masks retained shortcut differences. Classic and preference-Off use the existing layout tests. This is a
 host UI extension, not a promise to support arbitrary replacement command GUIs.
+
+#### Build page lock
+
+**Nanolathe host presentation policy**, added because some mods place up to
+twelve products on each authored build page, and auto-flow re-partitions them.
+ProTA 4.8, TA Zero Alpha 5 and Escalation all document or author twelve-slot
+pages ([ProTA engine](../research/extensions/prota-engine.md),
+[Extended build menus](../research/extensions/build-menus.md),
+[TAESC engine](../research/extensions/taesc-engine.md)). In the installed
+packages many builders fill a twelve-product page and follow it with a shorter
+one (ProTA's ARMALAB authors twelve then two), and the ProTA and Escalation
+commanders' pages hold fewer than twelve. None of their configuration files
+(`ProTA.ini`, `TAZero.ini`, `TAESC.ini`) names a page size, so the lock is a
+Nanolathe setting rather than a translated mod option; the authored pages stay
+the only source of page membership, and no shipped content profile sets a
+lock. A positive lock caps each expanded build page at
+that many logical cells, and a locked page also never spans two authored
+source pages, so a short authored page stays a page of its own rather than
+pulling the next page's products forward. Cells keep the ordering and
+normalized two-column geometry above; the lock changes only where pages break.
+Composites still count as one cell.
+
+The lock resolves in this order, first positive value winning:
+
+1. the player's `presentation.buildMenuPageSize` in the settings file, which has
+   no options row;
+2. the mounted mod's `buildMenuPageSize` metadata (DESIGN_MODS_MUTATORS §4.2);
+3. the content profile's `presentation.build_menu_page_size`, which a mod
+   without its own value inherits;
+4. none: auto-flow, the default, fills every complete row that fits.
+
+A player's zero defers to the mod, so a player cannot restore auto-flow over a
+mod's lock. Captures (`--shot`, `--film`) read no settings file, so there only
+the mod's or profile's lock applies.
+
+A lock larger than the complete build cells that fit on the current surface is
+not shrunk to fit: the flat layout is not used, and the builder keeps the
+authored/fitted layout above, which is the mod's own placement (that path may
+still partition an authored page taller than the rail into row groups). The
+comparison is against the lock, not the builder's largest page, so a lock of
+twelve at 768 rows, where stock OTA fits eight cells, shows the authored
+layout although no stock page holds more than six. Classic and Expanded sidebar Off ignore the lock and
+compose byte-identically with or without one. Page count is one Orders page
+plus the locked partitions; the pager, resize anchoring and reseed rules above
+are unchanged. `TestExpandedSidebarBuildPageLock` locks the precedence, the
+short-page break and the oversized fallback; `TestContentBuildMenuPageSize`
+locks the mod-over-profile order.
 
 #### Rail backdrop
 

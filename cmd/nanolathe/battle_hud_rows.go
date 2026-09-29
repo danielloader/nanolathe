@@ -19,7 +19,8 @@ type sidebarRowPaging struct {
 	authoredPage, authoredRemembered, authoredCount int
 	anchor, capacity                                int
 	anchorSource                                    sidebarGadgetSource
-	starts                                          []int
+	starts                                          []int // fitted pages' first row group
+	cellStarts                                      []int // flat pages' first logical cell
 }
 
 func (h *retailBattleHUD) expandedSidebarPaging(b *battleSession, f *frame.Frame) (sidebarPagingState, bool) {
@@ -44,6 +45,8 @@ func (h *retailBattleHUD) selectExpandedSidebarPage(b *battleSession, f *frame.F
 		p.anchor = (page - 1) * p.capacity
 		if len(p.starts) >= page {
 			p.anchor = p.starts[page-1]
+		} else if len(p.cellStarts) >= page {
+			p.anchor = p.cellStarts[page-1]
 		}
 	}
 	h.retireExpandedSidebar()

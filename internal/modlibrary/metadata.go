@@ -52,6 +52,11 @@ type Metadata struct {
 	MinimumGameplay string   `json:"minimumGameplay,omitempty"` // a reserved gameplay word or ""
 	Controls        string   `json:"controls,omitempty"`        // "community", "retail", "zero" or ""
 	Requires        []string `json:"requires,omitempty"`        // logical paths the BASE install must resolve
+	// BuildMenuPageSize locks the expanded sidebar's build pages to at most
+	// this many products, so a mod whose menus place a fixed number of
+	// products per page keeps that paging. Zero or omitted leaves the host's
+	// auto-flow (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock").
+	BuildMenuPageSize int `json:"buildMenuPageSize,omitempty"`
 }
 
 // idPattern is the stable id's alphabet (§4.2): lowercase letters, digits and
@@ -135,6 +140,9 @@ func (m Metadata) Validate() error {
 		if _, err := cleanRelative(m.ContentProfile); err != nil {
 			return fail(fmt.Sprintf("mod contentProfile %q leaves the mod root", m.ContentProfile), "a shipped profile name or a profile path relative to the mod root")
 		}
+	}
+	if m.BuildMenuPageSize < 0 {
+		return fail(fmt.Sprintf("mod buildMenuPageSize %d is negative", m.BuildMenuPageSize), "a positive number of products per build page, or omitted")
 	}
 	for _, required := range m.Requires {
 		if strings.TrimSpace(required) == "" {

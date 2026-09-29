@@ -310,6 +310,32 @@ func (u *Unit) SlotAt(idx int) *Slot {
 	return &u.Slots[idx]
 }
 
+// WeaponRecord is the weapon record slot idx points at. Retail's slot
+// initializer copies the definition's three weapon links into the slots
+// unconditionally, so an unarmed slot points at weapon record 0, the
+// `[noweapon]` sentinel, and never at nothing [06 R-WPN-05 §2]. This build
+// keeps an unarmed slot's Weapon nil so every gate reads it as empty; a reader
+// that follows the slot to one of its record's fields — the engagement
+// distance of [06 R-WPN-05 §1], the air legs' first-slot `Range`
+// [04 R-AIR-01 §4] — asks this instead and gets the definition's link, which
+// is the sentinel for a missed or empty name [02 §5 R-CONTENT-02]. A restored
+// slot already holds that link [08 R-SAVE-WEAPON-01], so fresh and restored
+// units answer alike. It is nil only for a unit with no definition, an index
+// out of range, or a catalog without a record 0.
+func (u *Unit) WeaponRecord(idx int) *content.WeaponDef {
+	s := u.SlotAt(idx)
+	if s == nil {
+		return nil
+	}
+	if s.Weapon != nil {
+		return s.Weapon
+	}
+	if u.Def == nil {
+		return nil
+	}
+	return [NumSlots]*content.WeaponDef{u.Def.Weapon1Def, u.Def.Weapon2Def, u.Def.Weapon3Def}[idx]
+}
+
 // NanolatheBox is the six-word box the nano-segment submission routine builds
 // when a unit is the boxed end of a work segment: this unit's world position
 // plus the six signed extents of its definition's bounding record

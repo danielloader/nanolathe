@@ -68,7 +68,7 @@ func RetailUnitImage(u *Unit, orderCount uint32, stableID, targetSlot RetailStab
 	binary.LittleEndian.PutUint16(data[0x3f:], uint16(u.Kills))
 
 	for i := range u.Slots {
-		if err := writeRetailWeaponSlot(data[0x41+i*0x18:], &u.Slots[i], retailWeaponDefinition(u, i), targetSlot); err != nil {
+		if err := writeRetailWeaponSlot(data[0x41+i*0x18:], &u.Slots[i], u.WeaponRecord(i), targetSlot); err != nil {
 			return nil, fmt.Errorf("units: retail save: unit %d weapon slot %d: %w", id, i, err)
 		}
 	}
@@ -259,15 +259,3 @@ func optionalRetailStableID(resolve RetailStableID, h pool.Handle) uint16 {
 func fitsInt32(v int64) bool     { return v >= math.MinInt32 && v <= math.MaxInt32 }
 func putI32(dst []byte, v int32) { binary.LittleEndian.PutUint32(dst, uint32(v)) }
 func putI16(dst []byte, v int16) { binary.LittleEndian.PutUint16(dst, uint16(v)) }
-
-// retailWeaponDefinition retains the inactive record-0 identity even when the
-// runtime slot uses nil for an inactive link [08 R-SAVE-WEAPON-01].
-func retailWeaponDefinition(u *Unit, index int) *content.WeaponDef {
-	if u.Slots[index].Weapon != nil {
-		return u.Slots[index].Weapon
-	}
-	if u.Def == nil {
-		return nil
-	}
-	return [NumSlots]*content.WeaponDef{u.Def.Weapon1Def, u.Def.Weapon2Def, u.Def.Weapon3Def}[index]
-}

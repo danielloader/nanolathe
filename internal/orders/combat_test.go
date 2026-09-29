@@ -491,3 +491,13 @@ func TestAttackUTypeAcquiresTheAuthoredType(t *testing.T) {
 		t.Fatalf("spawned descriptor %q, want the resolver's answer for command code 3 against a unit", name)
 	}
 }
+
+// The engagement-distance helper walks to the slot's record, and an unarmed
+// slot's record is weapon record 0, so it reports that record's range rather
+// than zero [06 R-WPN-05 §1][06 R-WPN-05 §2].
+func TestEngagementDistanceOfAnUnarmedSlotIsTheSentinelsRange(t *testing.T) {
+	u := &units.Unit{Def: &content.UnitDef{Weapon2Def: &content.WeaponDef{ID: 0, Range: 16}}}
+	if got := engagementDistance(u, 1); got != 16 {
+		t.Fatalf("unarmed slot engagement distance = %d, want the sentinel's 16", got)
+	}
+}

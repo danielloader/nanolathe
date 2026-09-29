@@ -372,15 +372,16 @@ func offsetAtBearing(heading uint16, radius numeric.Fixed) (numeric.Fixed, numer
 // firstWeaponRange is the unit's first weapon slot's `Range` in whole world
 // units, the quantity several air legs use as a radius [04 R-AIR-01 §4]
 // [04 R-AIR-01 §7].
+//
+// Corrected: an unarmed slot read 0 here. Retail's slot points at weapon record
+// 0, the `[noweapon]` sentinel, whose stock `range` is 16 [06 R-WPN-05 §2]
+// [06 R-DMG-01 §5], so an unarmed aircraft loiters, orbits and follows at that
+// record's range — and a restored one already did [08 R-SAVE-WEAPON-01].
 func firstWeaponRange(u *units.Unit) int32 {
-	if u == nil {
-		return 0
+	if w := u.WeaponRecord(0); w != nil {
+		return w.Range
 	}
-	slot := u.SlotAt(0)
-	if slot == nil || slot.Weapon == nil {
-		return 0
-	}
-	return slot.Weapon.Range
+	return 0
 }
 
 func (s *System) unitFor(h pool.Handle) *units.Unit {

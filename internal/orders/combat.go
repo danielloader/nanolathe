@@ -228,17 +228,19 @@ func bindSlotToPosition(u *units.Unit, k int, x, z numeric.Fixed) {
 // substate onto the target's own position and drove `Suppress` phase 2 down its
 // `p2 < 1` *re-arm* arm on the first wake.
 //
-// A slot with no resolved weapon has no range and reports 0, which is what the
-// caller's own guards already expect.
+// Corrected: an unarmed slot used to report 0 here. The helper walks to the
+// slot's record, and retail's unarmed slot points at weapon record 0, the
+// `[noweapon]` sentinel, whose stock `range` is 16 [06 R-WPN-05 §2]
+// [06 R-DMG-01 §5]. A unit with no definition, or a catalog with no record 0,
+// still reports 0.
 func engagementDistance(u *units.Unit, slot uint32) int32 {
-	if u == nil || slot >= uint32(units.NumSlots) {
+	if slot >= uint32(units.NumSlots) {
 		return 0
 	}
-	s := u.SlotAt(int(slot))
-	if s == nil || s.Weapon == nil {
-		return 0
+	if w := u.WeaponRecord(int(slot)); w != nil {
+		return w.Range
 	}
-	return s.Weapon.Range
+	return 0
 }
 
 // captionClear is [04 R-ORD-01 §1]'s "caption clear": the one-shot helper that

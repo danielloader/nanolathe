@@ -229,7 +229,7 @@ func RetailUnitWeaponDefinitions(u *Unit, data []byte) error {
 		return fmt.Errorf("units: retail restore: invalid unit weapon image")
 	}
 	for i := range u.Slots {
-		definition := retailWeaponDefinition(u, i)
+		definition := u.WeaponRecord(i)
 		definition.RestoreActiveByte(data[0x41+i*0x18+8])
 		u.Slots[i].Weapon = definition
 	}

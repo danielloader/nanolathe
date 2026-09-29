@@ -90,3 +90,25 @@ func TestSlotControlByteRoundTripsThroughTheSave(t *testing.T) {
 		}
 	}
 }
+
+// TestWeaponRecordOfAnUnarmedSlotIsTheDefinitionsLink locks [06 R-WPN-05 §2]:
+// retail copies all three definition links into the slots, so an unarmed slot
+// points at weapon record 0 rather than at nothing. The slot itself stays
+// empty here — the enabled and populated gates read it that way — but a reader
+// of the record's fields must get the definition's link, the sentinel.
+func TestWeaponRecordOfAnUnarmedSlotIsTheDefinitionsLink(t *testing.T) {
+	armed, sentinel := &content.WeaponDef{ID: 1, Range: 300}, &content.WeaponDef{ID: 0, Range: 16}
+	u := &Unit{Def: &content.UnitDef{Weapon1Def: armed, Weapon2Def: sentinel}}
+	installWeapons(u, u.Def)
+	if u.SlotAt(1).IsPopulated() {
+		t.Fatal("the unarmed slot must stay empty for the slot gates")
+	}
+	for idx, want := range [NumSlots]*content.WeaponDef{armed, sentinel, nil} {
+		if got := u.WeaponRecord(idx); got != want {
+			t.Fatalf("slot %d record = %+v, want %+v", idx, got, want)
+		}
+	}
+	if (&Unit{}).WeaponRecord(0) != nil || u.WeaponRecord(NumSlots) != nil {
+		t.Fatal("a unit without a definition, or an index past the slots, has no record")
+	}
+}

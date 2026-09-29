@@ -46,10 +46,11 @@ func TestMapBrowserSchemaAdmission(t *testing.T) {
 			if err := fs.MountDirectory(root, 0); err != nil {
 				t.Fatal(err)
 			}
-			names, err := enumerateSkirmishMaps(fs)
+			census, err := censusSkirmishMaps(fs)
 			if err != nil {
 				t.Fatal(err)
 			}
+			names := census.names
 			if got := len(names) == 1; got != tc.listed {
 				t.Fatalf("browser names %v; listed want %v", names, tc.listed)
 			}

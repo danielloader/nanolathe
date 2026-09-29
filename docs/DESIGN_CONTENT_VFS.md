@@ -671,10 +671,24 @@ nanolathe: <what failed>: logical path <path>, providers searched [<a>, <b>], ex
 `requiredContentError` and `unitScriptMissingError` in `internal/content` build
 it; the provider list comes from `FS.Sources` when the overlay offers it and
 from a single `Stat` otherwise, and each entry is a `ProviderID` — never a
-host path (C13). Mount-time observations that are not failures — a suppressed
-duplicate mount, the archive-count remark — are collected on `FS.Notes()` for
-the caller to surface. Nothing in this area logs from inside a tick; the
-compile happens before the session exists.
+host path (C13). Mount-time observations that do not stop the mount — a
+suppressed duplicate mount, the archive-count remark, and an archive discovery
+rejected (C5) — are collected on `FS.Notes()` for the caller to surface.
+Nothing in this area logs from inside a tick; the compile happens before the
+session exists.
+
+The windowed command surfaces them once, at startup, on standard error — which
+the source installer's launcher appends to its run log
+(`tools/installer/README.md`). Each note is written as
+`nanolathe: content mount: <note>`; then one line in the shape above for each
+map file the skirmish map census could not load, naming the archive that holds
+it; then the map count with the providers that supplied the listed maps, as
+`nanolathe: retail frontend: 96 skirmish maps (btmaps.ccx 6, ccmaps.ccx 53,
+totala2.hpi 37)`. The report never changes which maps are listed. It exists
+because a rejected archive and an unreadable one both leave the list short by
+that archive's maps with no other sign, and they need different remedies
+(issue #50). `--check-install` and the displayless runner do not print the
+notes yet.
 
 ## 5. Divergences
 

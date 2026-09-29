@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -122,6 +123,9 @@ type gameShell struct {
 
 	maps      []string
 	mapLabels []string
+	// mapCensus is the host's account of how maps was built, reported once
+	// at startup (writeFrontendStartupReport).
+	mapCensus skirmishMapCensus
 	mapIdx    int
 	mapReturn shellMode
 	mapData   map[string]*retailMapData
@@ -328,10 +332,12 @@ func newGameShell(opts Options, cs *contentSet) (*gameShell, error) {
 	// The map census and the TNT reader are typed on the concrete overlay,
 	// so they read `maps` unmapped; no content profile renames it, and a test
 	// in this package asserts that (DESIGN_CONTENT_VFS §5 "Content profiles").
-	maps, err := enumerateSkirmishMaps(cs.unmappedMount)
+	census, err := censusSkirmishMaps(cs.unmappedMount)
 	if err != nil {
 		return nil, err
 	}
+	maps := census.names
+	shell.mapCensus = census
 	sides, err := content.CompileSides(cs.fs)
 	if err != nil {
 		return nil, retailFrontendAssetError(cs, "frontend factions", "gamedata/sidedata.tdf", "authored side definitions", err)
@@ -450,7 +456,7 @@ func runGameShell(launch, opts Options, cs *contentSet) error {
 			return err
 		}
 	}
-	fmt.Fprintf(os.Stderr, "nanolathe: retail frontend: %d skirmish maps\n", len(shell.maps))
+	writeFrontendStartupReport(os.Stderr, shell)
 	shell.queueStartupMovie()
 	defer func() { host.shell.closeIntro(cl) }()
 	options := host.windowOptions()
@@ -1182,20 +1188,45 @@ func (g *gameShell) teardownBattle(cl *client.Client) {
 	g.loadingReturn = modeMenuMain
 }
 
-// enumerateSkirmishMaps is the retail map census: only OTA files with a
-// Network schema are put into the SELMAP MAPNAMES list [08 "Schema choice"].
-func enumerateSkirmishMaps(fs *vfs.FS) ([]string, error) {
+// skirmishMapCensus is the skirmish map list together with the host's account
+// of how it was built. The account never changes which maps are listed; it
+// exists so a startup log can say why maps a player expects are missing. An
+// archive the mount rejected and an archive whose map files cannot be read
+// both leave the list short by that archive's maps with nothing else to show
+// for it (issue #50), and the two need different remedies.
+type skirmishMapCensus struct {
+	names []string
+	// suppliers counts the listed maps by the provider that supplied each,
+	// in case-folded provider-name order. Loose files are counted together.
+	suppliers []mapSupplier
+	// skipped holds one diagnostic per map file the census could not load.
+	// A readable map without a Network schema is not skipped; it is simply
+	// not a skirmish map.
+	skipped []string
+}
+
+type mapSupplier struct {
+	provider string
+	maps     int
+}
+
+// censusSkirmishMaps is the retail map census: only OTA files with a Network
+// schema are put into the SELMAP MAPNAMES list [08 "Schema choice"]. It
+// returns that list with the account skirmishMapCensus describes.
+func censusSkirmishMaps(fs *vfs.FS) (skirmishMapCensus, error) {
+	var census skirmishMapCensus
 	if fs == nil {
-		return nil, fmt.Errorf("nanolathe: skirmish map census failed: no mounted content")
+		return census, fmt.Errorf("nanolathe: skirmish map census failed: no mounted content")
 	}
 	entries, err := fs.RetailReadDir("maps")
 	if err != nil {
 		if errors.Is(err, vfs.ErrNotFound) {
-			return nil, nil
+			return census, nil
 		}
-		return nil, err
+		return census, err
 	}
 	seen := make(map[string]bool, len(entries))
+	supplierIndex := make(map[string]int)
 	var names []string
 	for _, entry := range entries {
 		if entry.IsDir || !strings.HasSuffix(strings.ToLower(entry.Name), ".ota") {
@@ -1203,7 +1234,11 @@ func enumerateSkirmishMaps(fs *vfs.FS) ([]string, error) {
 		}
 		p := entry.Path
 		ota, err := formats.LoadOTAFile(fs, p)
-		if err != nil || !ota.HasNetworkSchema() {
+		if err != nil {
+			census.skipped = append(census.skipped, skippedMapDiagnostic(entry, err))
+			continue
+		}
+		if !ota.HasNetworkSchema() {
 			continue
 		}
 		base := entry.Name
@@ -1217,13 +1252,86 @@ func enumerateSkirmishMaps(fs *vfs.FS) ([]string, error) {
 		// records, not a folded copy: the localized-string lookup is only
 		// consulted when it returns something different from the stem.
 		names = append(names, base)
+		supplier := mapSupplierName(entry.Source)
+		if i, ok := supplierIndex[supplier]; ok {
+			census.suppliers[i].maps++
+		} else {
+			supplierIndex[supplier] = len(census.suppliers)
+			census.suppliers = append(census.suppliers, mapSupplier{provider: supplier, maps: 1})
+		}
 	}
 	// The map loader hands the packed name list to the retail string sorter
 	// ("SORTED LIST1") before installing it in MAPNAMES. That is a bubble sort whose
 	// comparison is _stricmp, so the authored MAPNAMES order is ascending and
 	// case-insensitive, not archive order [07 §4].
 	sort.SliceStable(names, func(i, j int) bool { return retailStricmp(names[i], names[j]) < 0 })
-	return names, nil
+	sort.Slice(census.suppliers, func(i, j int) bool {
+		a, b := census.suppliers[i].provider, census.suppliers[j].provider
+		if la, lb := strings.ToLower(a), strings.ToLower(b); la != lb {
+			return la < lb
+		}
+		return a < b
+	})
+	census.names = names
+	return census, nil
+}
+
+// mapSupplierName names the provider of a listed map for the startup report:
+// an archive's file name, or "loose files" for every loose map together. It
+// never names a host path (DESIGN_CONTENT_VFS C13).
+func mapSupplierName(source vfs.Provenance) string {
+	if source.ProviderType == "directory" {
+		return "loose files"
+	}
+	return source.ProviderID()
+}
+
+// skippedMapDiagnostic names a map file the census could not load, with the
+// provider that holds it and the cause. A host file error keeps only its
+// cause, since the provider already says which file it was (C13).
+func skippedMapDiagnostic(entry vfs.EntryInfo, err error) string {
+	cause := err
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		cause = pathErr.Err
+	}
+	name := entry.OriginalPath // the spelling the provider records
+	if name == "" {
+		name = entry.Path
+	}
+	return fmt.Sprintf("nanolathe: skirmish map census skipped a map: logical path %s, providers searched [%s], expected a readable OTA file: %v",
+		name, entry.Source.ProviderID(), cause)
+}
+
+// writeFrontendStartupReport writes the windowed frontend's one startup
+// account of its content to w: every mount note the overlay recorded (a
+// rejected archive, a suppressed duplicate, the archive-count remark), every
+// map file the census skipped, and the skirmish map count with the providers
+// that supplied it. The source installer's launcher appends standard error to
+// its run log, so a player reporting missing maps can send the lines that say
+// whether an archive was rejected or its maps failed to load
+// (DESIGN_CONTENT_VFS §4).
+func writeFrontendStartupReport(w io.Writer, shell *gameShell) {
+	if shell == nil {
+		return
+	}
+	if shell.cs != nil && shell.cs.unmappedMount != nil {
+		for _, note := range shell.cs.unmappedMount.Notes() {
+			fmt.Fprintf(w, "nanolathe: content mount: %s\n", strings.TrimPrefix(note, "nanolathe: "))
+		}
+	}
+	for _, line := range shell.mapCensus.skipped {
+		fmt.Fprintln(w, line)
+	}
+	suppliers := make([]string, 0, len(shell.mapCensus.suppliers))
+	for _, supplier := range shell.mapCensus.suppliers {
+		suppliers = append(suppliers, fmt.Sprintf("%s %d", supplier.provider, supplier.maps))
+	}
+	from := ""
+	if len(suppliers) != 0 {
+		from = " (" + strings.Join(suppliers, ", ") + ")"
+	}
+	fmt.Fprintf(w, "nanolathe: retail frontend: %d skirmish maps%s\n", len(shell.maps), from)
 }
 
 // retailStricmp is the comparison the retail string sorter uses. The helper folds

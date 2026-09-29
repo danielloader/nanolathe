@@ -100,8 +100,9 @@ func TestRepairGoalRefreshAllowsPathAdmission(t *testing.T) {
 
 // A replacement shortly after an actual poll keeps the throttle; an older
 // timestamp is cleared by the goal installer, not replaced with install time.
+// The installer's age test is inclusive at ten ticks [04 R-PATH-01 §8] step 6.
 func TestGoalReplacementPreservesRecentPollTick(t *testing.T) {
-	for _, age := range []uint32{10, 11} {
+	for _, age := range []uint32{9, 10} {
 		t.Run(fmt.Sprintf("age_%d", age), func(t *testing.T) {
 			s, w, h := releaseFixture(t, wiringDef(), 2)
 			u := w.Unit(h)
@@ -117,7 +118,7 @@ func TestGoalReplacementPreservesRecentPollTick(t *testing.T) {
 			s.tick = 100 + age
 			install()
 			want := uint32(100)
-			if age > 10 {
+			if age >= 10 {
 				want = 0
 			}
 			if route.LastRequestTick != want {

@@ -78,19 +78,30 @@ import (
 // that one bit back reproduces the previous values exactly. The trajectories
 // do not diverge, so the 54000-tick and benchmark locks hold; the Modern
 // commander is still approaching its site at tick 6000, so its lock holds too.
+//
+// Retail runs the goal installer's acceptance rule for the mobile-build
+// rectangle too [04 R-PATH-01 §8][04 R-PATH-01 §13]: a builder walks the
+// synthetic straight line at the rectangle's goal point from the order's own
+// tick, and a stale last-request tick is zeroed, where it used to stand until
+// the search published. That moves every Strict, Community and Modern lock but
+// the benchmark initial ones, and the Community and Modern long runs now end at
+// ticks 43530 and 40710. Of those, the installer's age test being inclusive at
+// ten ticks ([04 R-PATH-01 §8] step 6) alone moves the Community and Modern
+// benchmark warm and final locks and the Modern long run (which would end at
+// 35580 without it); no Strict lock and no Community ashap lock sees it.
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
 	lockAshapUnitLimit             = 250 // Strict setting; Community's table overrides it.
 	lockDifficulty                 = 1
-	lockAshapStrict6000            = "partial-v1:bfc3b98e66838d54"
-	lockAshapCommunity6000         = "partial-v1:3ee37e7e5104c034"
-	lockAshapModern6000            = "partial-v1:320cbaa11e9fd28a"
-	lockAshapStrict54000           = "partial-v1:4a62d6ab26833264"
-	lockAshapCommunity54000        = "partial-v1:ae0cc2ee810199ec"
-	lockAshapModern54000           = "partial-v1:d7f48d704d2eb5d3"
-	lockAshapCommunityEnd   uint32 = 53430
-	lockAshapModernEnd      uint32 = 54000
+	lockAshapStrict6000            = "partial-v1:0790d067f534aa05"
+	lockAshapCommunity6000         = "partial-v1:c03b266aa379b492"
+	lockAshapModern6000            = "partial-v1:839e437ed39a2166"
+	lockAshapStrict54000           = "partial-v1:e855d7d9dc3045ad"
+	lockAshapCommunity54000        = "partial-v1:3dd46eceb9692349"
+	lockAshapModern54000           = "partial-v1:82715a9a6b4a8a3b"
+	lockAshapCommunityEnd   uint32 = 43530
+	lockAshapModernEnd      uint32 = 40710
 
 	lockBenchSeed             uint32 = 7
 	lockBenchWarmupTicks             = 600
@@ -98,12 +109,12 @@ const (
 	lockBenchStrictInitial           = "partial-v1:3e1cbf1c074f060d"
 	lockBenchCommunityInitial        = "partial-v1:f6cbc51b5ef4deff"
 	lockBenchModernInitial           = "partial-v1:f6cbc51b5ef4deff"
-	lockBenchStrictWarm              = "partial-v1:dce20f30bcdeef34"
-	lockBenchCommunityWarm           = "partial-v1:f907fb371a053c87"
-	lockBenchModernWarm              = "partial-v1:020c5588af463a71"
-	lockBenchStrictFinal             = "partial-v1:d0eaf19c8a8f135b"
-	lockBenchCommunityFinal          = "partial-v1:81b03660538b0eac"
-	lockBenchModernFinal             = "partial-v1:8566bce851e216f7"
+	lockBenchStrictWarm              = "partial-v1:28ff61dadcebdbbe"
+	lockBenchCommunityWarm           = "partial-v1:b3f28816feec8b96"
+	lockBenchModernWarm              = "partial-v1:b557f33a6d6b705f"
+	lockBenchStrictFinal             = "partial-v1:d9a2117919303fbb"
+	lockBenchCommunityFinal          = "partial-v1:53337ba6e3dbe94c"
+	lockBenchModernFinal             = "partial-v1:7cfe97eb076cba49"
 )
 
 // TestStrictFingerprintIsLocked holds the retail baseline. Nothing in a Modern

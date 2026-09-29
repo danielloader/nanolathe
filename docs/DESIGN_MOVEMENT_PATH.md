@@ -636,8 +636,8 @@ Sparse restored slots are never compacted or represented by a count cutoff
 `[04 R-PATH-01 §6]`.
 
 The follower's last-request tick records an admitted scheduler poll. Goal
-installation preserves that tick when at most ten ticks old and clears it when
-older; activation and request staging never replace it with the current tick
+installation preserves that tick when under ten ticks old and clears it when
+at least ten ticks old (before tick ten, always); activation and request staging never replace it with the current tick
 `[04 R-PATH-01 §8]`. The scheduler alone applies the inclusive
 `lastRequestTick + 60 <= tick` admission test and stamps a positive poll
 `[04 R-MOV-01 §7]`; the 60 is `Rules.RepathDelay`, which Modern lengthens by
@@ -1000,7 +1000,7 @@ evicted the mover's single goal slot `[04 §7.2]` `[04 §7.4]` `[04 §3.5]`.
 | `HelpBuild` phase 0 | annulus at the target | outer `builddistance + half`, inner `half`, where `half` is the assist approach term over the **target's** footprint and `builddistance` is the builder's own `[04 R-ORD-01 §12]` `[05 R-WORK-01 §2]` |
 | `RepairUnit` phase 1, `Capture` phase 0 | rectangle perimeter from the target's committed anchor cell and footprint | grown by the mover's own footprint `[04 R-PATH-01 §12]` |
 | `Reclaim` phase 0, `Resurrect` phase 0 | rectangle perimeter from the **feature's** origin cell and size | the anchor already is the origin: a feature's stamp writes its index on the anchor and the fringe sentinel across the rest `[04 R-ORD-01 §5]` `[05 R-ECO-02 §2]` `[05 R-FEAT-01 §3]` |
-| `MobileBuild` approach | rectangle perimeter at the product's anchor cell and footprint | no candidate generator, no range filter and no sort: the candidate set is the search's own border enumeration and the selection is the border cell it closes first `[04 R-PATH-01 §12]` `[04 R-PATH-01 §13]` `[04 R-MOV-03 §9]` |
+| `MobileBuild` approach | rectangle perimeter at the product's anchor cell and footprint | no candidate generator, no range filter and no sort: the candidate set is the search's own border enumeration and the selection is the border cell it closes first `[04 R-PATH-01 §12]` `[04 R-PATH-01 §13]` `[04 R-MOV-03 §9]`; installing it runs the goal installer's acceptance rule like every other ground goal, so the builder walks the synthetic line at the rectangle's goal point while the search runs, and a last-request tick at least ten ticks old is zeroed `[04 R-PATH-01 §8]` |
 | `VTOL_MobileBuild` approach (the air executor's phase 1) | air point marker at the goal snapped onto the product's footprint | horizontal arrival radius `builddistance`, strict; construction dispatches the movement leg from record phase 1, which installs the marker and gate `0xE0`; phase 2 consumes its outcome before placement `[04 R-ORD-02 §2]` `[04 R-AIR-01 §6]` |
 | `Park` (a no-rally product's terminal record) | rectangle perimeter on the rectangle the handler installed, centred on the product's own committed cell | `[04 R-FAC-02 §4]` `[04 §7.2]` |
 

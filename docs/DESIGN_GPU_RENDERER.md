@@ -1595,9 +1595,20 @@ before every Draw on every platform. Ebitengine owns window coordinates,
 letterboxing, DPI, capture and VM input injection; no native cursor bridge is
 needed. Original retains its 30 Hz cursor. The cursor's shape and animation, hover, orders,
 placement previews and camera continue using the ordinary host step; the fresh
-position never publishes command input or consumes RNG. The GAF hotspot remains
-authored [07 §8]. Capture keeps the pointer hidden; the release frame preserves
-its saved restore point [07 R-CAM-01 §11]. F11 reads the submitted GPU image,
+position never publishes command input or consumes RNG. A cursor recorded in
+the same list as the build placement ghost is pinned (`PinCursorToRecord`):
+`cursorfindsite` over a legal site and `cursortoofar` over an illegal one keep
+their recorded host-step position, because the ghost was snapped from that
+pointer and moving only the cursor would carry it up to a couple of cells
+ahead of the ghost while the mouse sweeps. While the ghost is shown the pointer
+therefore moves at the 30 Hz host step, as in Original. The pin lasts one
+recording, so every other cursor — and the placement cursor over the minimap,
+where no ghost is drawn [07 §9] — keeps the fresh position. Retail draws its
+cursor from a fresh OS position on its own 30 Hz thread [01 R-PLAT-01 §4]
+[03 R-FX-01 §5], independently of the pointer record that places the ghost
+[07 §9], so this pairing is host presentation policy, not a retail rule. The
+GAF hotspot remains authored [07 §8]. Capture keeps the pointer hidden; the
+release frame preserves its saved restore point [07 R-CAM-01 §11]. F11 reads the submitted GPU image,
 cursor included. This removes the 30 Hz positional sampling limit;
 cursor presentation still shares the selected FPS cap and any rendering stalls.
 

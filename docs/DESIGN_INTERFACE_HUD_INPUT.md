@@ -1424,11 +1424,21 @@ keeps its animation phase. Shape selection is the four-step chooser of §2.5
 placement is armed, `cursorfindsite` is drawn with its artwork centred on the
 pointer used for site picking. The retail GAF offset puts that one reticle
 down-right of the pointer; this display choice changes neither the chosen
-cursor shape nor the site, click or order. The green/red footprint border keeps
+cursor shape nor the site, click or order. Modern's late cursor positioning
+(DESIGN_GPU_RENDERER, "Pointer latency") skips the cursor drawn with the ghost —
+this reticle over a legal site, `cursortoofar` over an illegal one — so it stays
+on the host-step pointer the ghost was snapped from and the two move together;
+retail's separate cursor thread does not tie them. At rest the reticle sits on
+the pointer, up to half a cell from the footprint centre along each map axis,
+plus on uneven ground the screen shift of drawing the ghost flat at the site
+height: that is the retail round-to-nearest site snap and site height [07 §9],
+not an offset. When community click snap moves the ghost onto a deposit, only
+the ghost moves; the reticle stays on the pointer (community patch engine
+CP-CON-6). The green/red footprint border keeps
 its retail validity colour and cell-aligned rectangle. The default preview is
 the building's pulsing nanoframe wireframe, using the committed tick and the
 construction colour ramp [03 §5.2]. The preview pauses with the committed
-tick and consumes no RNG. Both choices apply in every gameplay mode because
+tick and consumes no RNG. These choices apply in every gameplay mode because
 they are presentation only `[07 §8][07 §9]`.
 
 **C13 — the panel slide.** On entering battle a flip surface is allocated at the

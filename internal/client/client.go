@@ -494,6 +494,10 @@ type Client struct {
 
 	// Software cursor, drawn last over the composed surface [07 §8].
 	cursors *Cursors
+	// cursorPinned records that this frame's recording drew the build
+	// placement ghost, so its cursor keeps the host-step position through
+	// Modern late positioning (PinCursorToRecord). composeIndexed clears it.
+	cursorPinned bool
 
 	// uiStage is the sole UI adapter. World ordering stays in drawCommittedFrame;
 	// cmd-owned authored surfaces run once at its final interface slot [03 §1].

@@ -161,6 +161,20 @@ func (c *Client) SetCursors(cs *Cursors) {
 // Cursors returns the installed software cursor, or nil.
 func (c *Client) Cursors() *Cursors { return c.cursors }
 
+// PinCursorToRecord keeps the cursor recorded in this frame at its host-step
+// pointer through Modern late positioning (PositionPresentationCursor). The
+// battle shell calls it when it draws the build placement ghost: the ghost was
+// snapped from that host-step pointer, so a cursor moved to a fresher one would
+// run ahead of the ghost while the mouse sweeps. Both placement shapes are
+// covered — `cursorfindsite` over a legal site and `cursortoofar` over an
+// illegal one [07 §8][07 §9]. The pin lasts for one recording; Original never
+// late-positions, so it changes nothing there.
+func (c *Client) PinCursorToRecord() {
+	if c != nil {
+		c.cursorPinned = true
+	}
+}
+
 // PositionPresentationCursor applies a newer host position only to the joined
 // frame's cursor command. Picking and command input keep their host-step sample.
 // Capture release retains the saved restore position until the next step, when
@@ -201,5 +215,5 @@ func (c *Client) drawCursor() {
 	}
 	// Record then execute inline: classicSink.Cursor runs the same UIBlit at the
 	// hotspot-resolved origin this used to call directly [07 §8].
-	c.emitCursor(drawlist.Cursor{Frame: f, HotX: int32(x), HotY: int32(y), CenterOnPointer: centerOnPointer})
+	c.emitCursor(drawlist.Cursor{Frame: f, HotX: int32(x), HotY: int32(y), CenterOnPointer: centerOnPointer, Pinned: c.cursorPinned})
 }

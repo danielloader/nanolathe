@@ -157,5 +157,66 @@ func checkMaterialDevicePixels() error {
 	if hot[at] <= cold[at] || hot[at+1] <= cold[at+1] || hs.DeviceDraws != cs.DeviceDraws || hs.Passes != cs.Passes {
 		return fmt.Errorf("material lost independent wreck cooling or added submissions: %v -> %v", cold[at:at+4], hot[at:at+4])
 	}
+	return checkFinishAnchorDevicePixels()
+}
+
+// checkFinishAnchorDevicePixels locks the anchor of §23.7 and §29.1: the
+// finish and the glint move light between orientations and never lift a face
+// that points straight up, whose palette colour is what the authored art shows
+// from above. An overhead saturated metal face, an overhead paint face and an
+// overhead neutral face under the glint keep their exact pixels; a metal face
+// turned away from the key darkens without a tint; a neutral metal face turned
+// toward it brightens with a cool cast.
+func checkFinishAnchorDevicePixels() error {
+	pal := fixturePalette()
+	pal.Base[90] = [4]byte{110, 110, 110, 255}
+	pal.Base[91] = [4]byte{130, 65, 25, 255}
+	const w, h = 120, 30
+	r, err := NewChecked(&pal, w, h)
+	if err != nil {
+		return err
+	}
+	up := [3]float32{0, 0, 1}
+	subjects := []struct {
+		color    uint8
+		material uint8
+		normal   [3]float32
+	}{
+		{91, drawlist.ModelMaterialMetal, up},
+		{91, drawlist.ModelMaterialPaint, up},
+		{90, drawlist.ModelMaterialDefault, up},
+		{90, drawlist.ModelMaterialMetal, [3]float32{1, 0, 0}},
+		{90, drawlist.ModelMaterialMetal, [3]float32{-0.35, -0.15, 0.9246621}},
+	}
+	var list drawlist.List
+	list.RecordClear()
+	list.RecordFill(drawlist.Fill{Rect: drawlist.Rect{W: w, H: h}, Index: 25})
+	for i, sub := range subjects {
+		f := directFace(0, 0, 16, 16, sub.color, 10, 10)
+		f.Normal, f.Material = sub.normal, sub.material
+		list.RecordModel(drawlist.Model{Geometry: directSubject(6+int32(i)*22, 6, 16, 16, f)})
+	}
+	list.RecordExpand()
+	read := func(on bool) []byte {
+		r.setMetalGlint(on)
+		r.setMaterials(on)
+		pixels := make([]byte, w*h*4)
+		r.Execute(&list, w, h).ReadPixels(pixels)
+		return pixels
+	}
+	off, on := read(false), read(true)
+	at := func(i int) int { return (14*w + 14 + i*22) * 4 }
+	for i := 0; i < 3; i++ {
+		if !bytes.Equal(off[at(i):at(i)+3], on[at(i):at(i)+3]) {
+			return fmt.Errorf("overhead face %d lifted: %v -> %v", i, off[at(i):at(i)+4], on[at(i):at(i)+4])
+		}
+	}
+	away, lit := on[at(3):at(3)+3], on[at(4):at(4)+3]
+	if away[0]+20 > off[at(3)] || away[0] != away[1] || away[1] != away[2] {
+		return fmt.Errorf("metal turned away from the key did not darken untinted: %v -> %v", off[at(3):at(3)+3], away)
+	}
+	if lit[0] <= off[at(4)] || lit[2] <= lit[1] || lit[1] <= lit[0] {
+		return fmt.Errorf("metal turned toward the key missed its cool highlight: %v -> %v", off[at(4):at(4)+3], lit)
+	}
 	return nil
 }

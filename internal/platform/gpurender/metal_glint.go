@@ -8,9 +8,24 @@ func (r *Renderer) setMetalGlint(on bool) { r.metalGlint = on }
 // The fixed unit half-vector is in the same world X/Z/height axes as Normal.
 // Five squarings make a narrow power-32 lobe without a sqrt, pow, clock or RNG.
 // Turning geometry supplies motion; translating the camera cannot make it swim.
+//
+// The lobe is anchored at an overhead face: a face pointing straight up already
+// shows its authored palette colour, so it catches no glint, and the weight
+// rises from there to one at the half-vector. Only faces turned toward the key
+// light are lifted (GPU design §23.7).
 func metalFaceGlint(normal [3]float32) float32 {
-	x := max(normal[0]*-0.35+normal[1]*-0.15+normal[2]*0.9246621, 0)
-	x = min(x, 1)
+	return max(metalLobe(normal[0]*-0.35+normal[1]*-0.15+normal[2]*0.9246621)-glintOverhead, 0) * glintRange
+}
+
+// glintOverhead is the power-32 lobe of an upward normal (0, 0, 1), about
+// 0.08, and glintRange rescales what lies above it back to 0..1.
+var (
+	glintOverhead = metalLobe(0.9246621)
+	glintRange    = 1 / (1 - glintOverhead)
+)
+
+func metalLobe(x float32) float32 {
+	x = min(max(x, 0), 1)
 	x *= x
 	x *= x
 	x *= x

@@ -5085,6 +5085,14 @@ an artistic overhead key; the clamped normal dot product is squared five times
 per-pixel normal, point-light loop or additional geometry: rotating panels change
 their response and a stationary panel keeps its highlight.
 
+The weight is **anchored at an overhead face**. An upward normal's own lobe,
+about 0.08, is subtracted and what lies above it is rescaled to 0–1, so a face
+pointing straight up catches nothing and only faces turned toward the key are
+lifted. The palette colour is what the authored art already shows from above,
+and the overhead camera mostly sees such faces: the unanchored lobe gave every
+flat roof that 8% floor, 2–3 luma levels over a whole CORCA construction
+aircraft on top of its real highlights (measured 2026-09-28).
+
 The face-constant ColorG attribute holds the original palette byte plus 256 times
 the rounded 0–255 highlight weight; both the atlas body shader and the native
 overflow shader decode those sixteen numeric bits, and the packed RGB battle
@@ -5673,13 +5681,37 @@ contracts.
 ### 29.1 Materials
 
 A curated texture-name table annotates textured unit faces as default, metal or
-paint. It does not classify feature or wreck faces. Metal receives a broad cool
-response beneath the existing glint; paint receives a weaker rough highlight. The
-coefficients preserve authored dark seams and panel hue, and untagged faces
-retain their existing shading. The team-colour panel textures `colorslt`,
-`colorsmd`, `colorsdk` and `colordk2` use the metal finish for every player
-frame, preserving the selected team hue; team logos retain their existing
-classification.
+paint. It does not classify feature or wreck faces. Untagged faces retain their
+existing shading. The team-colour panel textures `colorslt`, `colorsmd`,
+`colorsdk` and `colordk2` use the metal finish for every player frame; team logos
+retain their existing classification.
+
+Both finishes are **anchored at an overhead face**, like the glint of §23.7. A
+face's response `r` is its outward normal's dot product with the §23.7
+half-vector, clamped to 0–1 and rounded to sevenths; an upward normal gives 6/7,
+and a face at that response keeps its palette colour exactly. The palette colour is
+what the authored art shows from above, so a finish moves light between
+orientations instead of adding it: faces turned toward the key brighten and
+faces turned away darken.
+
+* **Metal** scales the colour by `1 + 0.42·(r⁴ − (6/7)⁴)`, from about 0.77 on a
+  wall to 1.19 facing the key. A metal's reflection takes its own colour, so the
+  scale keeps hue and saturation and a team panel keeps its team shade. Above the
+  anchor, a neutral face — the glint's saturation mask of §23.7, one minus a
+  smoothstep from 0.2 to 0.65 — tints the brightening with the cool sky colour
+  (0.72, 0.84, 1.0) scaled to unit luminance (0.876, 1.021, 1.216), so bare
+  steel catches a cool highlight without it adding light.
+* **Paint** scales by `1 + 0.12·(r² − (6/7)²)` and adds a 0.075 white sheen
+  times `r² − (6/7)²` only above the anchor; authored hue stays legible.
+
+The first finish added its cool lobe on top of the palette colour, largest on
+the faces the camera sees most. It raised the metal faces of the stock
+commanders and CORSOLAR by 15–27 luma levels on average and pushed the light
+`colorslt` team shade toward white: an ARMCOM strip the classic executor draws
+as [145, 172, 212] read [223, 255, 255] with the glint. Anchoring replaced it on
+2026-09-28 after a tester reported washed-out units. The metal faces of the
+same models now average from 16 luma levels darker to 9 brighter than classic,
+darker the more of them turn away from the key.
 
 The table is **authored data, not Go source**. `internal/client/materials/
 materials.tdf` is a TDF file with one `[materials]` section whose keys are 3DO
@@ -5749,9 +5781,13 @@ report the submitted workload.
 
 Device readbacks verify material key, reveal and waterline behavior, unchanged
 model submissions and image allocation, and compatibility with §28's independent
-wreck composite. Scorch checks cover monotonic fading, exact disabled-output
-equality at expiry, zero expired submissions, object/HUD and wet masking, cloned
-replay, view scale, reset and bounded public batches. Staged impacts observed
+wreck composite. The anchor has its own readback: an overhead saturated metal
+face, an overhead paint face and an overhead neutral face under the glint keep
+their exact pixels, a metal face turned away from the key darkens untinted, and
+a neutral one turned toward it brightens with a cool cast. Scorch checks cover
+monotonic fading, exact disabled-output equality at expiry, zero expired
+submissions, object/HUD and wet masking, cloned replay, view scale, reset and
+bounded public batches. Staged impacts observed
 through 511 ticks must leave images byte-identical to the disabled output once
 every mark expires.
 

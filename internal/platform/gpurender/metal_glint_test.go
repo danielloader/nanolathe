@@ -16,6 +16,14 @@ func TestMetalGlintFacingAndPacking(t *testing.T) {
 	if metalFaceGlint([3]float32{-0.35, -0.15, 0.9246621}) < 0.99 {
 		t.Fatal("aligned panel misses the highlight")
 	}
+	// The anchor: an overhead face already shows its authored colour and
+	// catches nothing; tilting it toward the key raises the weight.
+	if g := metalFaceGlint([3]float32{0, 0, 1}); g != 0 {
+		t.Fatalf("overhead face catches glint %v, want 0", g)
+	}
+	if g := metalFaceGlint([3]float32{-0.18, -0.08, 0.98}); g <= 0 || g >= 1 {
+		t.Fatalf("face tilted toward the key catches %v, want between 0 and 1", g)
+	}
 	for weight := 0; weight <= 255; weight++ {
 		for index := 0; index <= 255; index++ {
 			packed := int(metalGlintColor(byte(index), float32(weight)/255))

@@ -21,15 +21,28 @@ func modelFinish(albedo vec3, lit vec3, finish float) vec3 {
  material := mod(finish, 4.0)
  response := floor(finish/4.0)/7.0
  if material > 0.5 && material < 1.5 {
-  // Brushed steel carries a broad cool reflection under the approved glint.
-  // Dark seams retain their original contrast (GPU design §29).
+  // Brushed steel: a broad reflection anchored at an overhead face (response
+  // 6/7), which keeps its palette colour exactly. Faces turned toward the key
+  // brighten and faces turned away darken, so the finish moves light rather
+  // than adding it. Metal reflects its own colour, so the gain scales the
+  // colour and keeps hue and saturation; only a neutral steel highlight takes
+  // a cool cast (GPU design §29).
   lobe := response*response
   lobe *= lobe
   peak := max(albedo.r, max(albedo.g, albedo.b))
-  lit = lit*0.87 + albedo*vec3(0.05, 0.10, 0.16)*(1.0-response) + vec3(0.72, 0.84, 1.0)*lobe*0.42*smoothstep(0.06, 0.3, peak)
+  low := min(albedo.r, min(albedo.g, albedo.b))
+  saturation := (peak-low)/max(peak, 0.001)
+  over := lobe - 0.5397751
+  // Above the anchor the neutral-steel highlight is the old cool sky colour
+  // (0.72, 0.84, 1.0) scaled to unit luminance: it tints the brightening
+  // without adding to it.
+  sky := mix(vec3(1.0), vec3(0.876, 1.021, 1.216), (1.0-smoothstep(0.2, 0.65, saturation))*step(0.0, over))
+  lit = lit*(vec3(1.0)+0.42*over*sky)
  } else if material > 1.5 {
-  // Paint has a rough, weak white highlight; authored hue remains legible.
-  lit = lit*0.93 + albedo*0.035 + vec3(0.075)*response*response
+  // Paint: a weak response anchored the same way, and a faint white sheen
+  // only on faces turned toward the key; authored hue remains legible.
+  over := response*response - 0.7346939
+  lit = lit*(1.0+0.12*over) + vec3(0.075)*max(over, 0.0)
  }
  return min(lit, vec3(1.0))
 }

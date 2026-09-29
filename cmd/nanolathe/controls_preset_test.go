@@ -23,15 +23,11 @@ func presetTestShell(t *testing.T) *gameShell {
 // preferences ProTA.ini pins, each written as its own stored value.
 func TestCommunityControlsPresetContents(t *testing.T) {
 	g := presetTestShell(t)
-	g.presentation.FactoryHundredBatch = 1
 	g.applyControlsPreset(controlsPresetCommunity)
 	p := g.presentation
-	if p.FactoryHundredBatch != 0 {
-		t.Fatal("Community preset retained the hundred-batch preference")
-	}
 	for name, value := range map[string]int{
 		"communitySelection": p.CommunitySelection, "doubleClickSelection": p.DoubleClickSelection,
-		"queuedOrderDrag": p.QueuedOrderDrag, "communityCounters": p.CommunityCounters,
+		"factoryHundredBatch": p.FactoryHundredBatch, "queuedOrderDrag": p.QueuedOrderDrag, "communityCounters": p.CommunityCounters,
 		"reloadBars": p.ReloadBars, "veteranLabels": p.VeteranLabels, "groupNumbers": p.GroupNumbers,
 		"weatherReport": p.WeatherReport, "overview": p.Overview, "megamapWheel": p.MegamapWheel,
 		"megamapWheelMove": p.MegamapWheelMove, "megamapFlash": p.MegamapFlash, "victoryCue": p.VictoryCue,

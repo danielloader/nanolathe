@@ -62,13 +62,24 @@ func (b *battleSession) drawCommunityBuildPreview(c *client.Client) {
 	}
 	if drag := b.modernDrag; drag != nil {
 		if drag.product == input.BuildDef {
-			for _, site := range drag.sites {
+			drag.forEachPreviewSite(func(site dragBuildSite) {
 				drawSite(site.cell.x, site.cell.z, site.height, drag.facing)
-			}
+			})
 		}
 		return
 	}
 	drawSite(input.BuildCellX, input.BuildCellZ, input.BuildSiteH, b.communityPlacementFacing(def))
+}
+
+// forEachPreviewSite visits the drag sites that preview a model. A cancel
+// site removes a queued build rather than placing one, so it shows only its
+// crossed-out box (DESIGN_INTERFACE_HUD_INPUT §3.11).
+func (d *battleCommandDrag) forEachPreviewSite(visit func(dragBuildSite)) {
+	for _, site := range d.sites {
+		if !site.cancel {
+			visit(site)
+		}
+	}
 }
 
 // communityPreviewFacing applies PreviewFaceOpponent's fog-safe host gate.

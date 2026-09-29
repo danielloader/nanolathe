@@ -93,4 +93,20 @@ func TestCommunityPreviewFacingFiltersInactiveWatcherAndAlliedPlayers(t *testing
 	}
 }
 
+// A Shift row's cancel site previews no model: it removes a queued build,
+// so only its crossed-out box is drawn (DESIGN_INTERFACE_HUD_INPUT §3.11).
+// Valid and refused sites keep their model preview.
+func TestCommunityPreviewSkipsDragCancelSites(t *testing.T) {
+	d := &battleCommandDrag{sites: []dragBuildSite{
+		{cell: dragPoint{1, 1}, valid: true},
+		{cell: dragPoint{3, 1}, cancel: true},
+		{cell: dragPoint{5, 1}},
+	}}
+	var got []dragPoint
+	d.forEachPreviewSite(func(site dragBuildSite) { got = append(got, site.cell) })
+	if len(got) != 2 || got[0] != (dragPoint{1, 1}) || got[1] != (dragPoint{5, 1}) {
+		t.Fatalf("previewed sites %v, want the valid and refused sites only", got)
+	}
+}
+
 func whole(v int64) numeric.Fixed { return numeric.Fixed(v << 16) }

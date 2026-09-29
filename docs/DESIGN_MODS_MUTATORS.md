@@ -225,6 +225,7 @@ mod:
   |---|---|---|---|
   | `presentation.communitySelection` (idle unit keys) | Options → Orders | 1 | 0 |
   | `presentation.doubleClickSelection` | Options → Orders | 1 | 0 |
+  | `presentation.factoryHundredBatch` (Ctrl+Shift factory batch of 100) | Options → Orders | 1 | 0 |
   | `presentation.queuedOrderDrag` | Options → Placement | 1 | 0 |
   | `switchAlt` (digits recall groups) | Options → Orders, `+switchalt` | 1 | 0 |
   | `presentation.communityCounters` | Options → HUD | 1 | 0 |
@@ -286,8 +287,8 @@ mod:
   128 voices, random music and ten displayed skirmish rows. It offers the Zero
   selection scheme and Ctrl+Shift factory batches of 100, with the host
   boundaries in [DESIGN_INTERFACE_HUD_INPUT §3.13](DESIGN_INTERFACE_HUD_INPUT.md#313-optional-community-selection-controls).
-  Applying either the Retail or Community preset disables the hundred-unit
-  batch. All other Zero rows are unchanged, including options whose historical
+  The Community preset enables the hundred-unit batch too; the Retail preset
+  disables it. All other Zero rows are unchanged, including options whose historical
   behavior is not established. It follows the same one-time Apply/Keep mine offer. Tests
   lock the independent thresholds, palette, unchanged preferences and
   persisted colour-table identity.

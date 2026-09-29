@@ -82,7 +82,9 @@ Consequences:
 - **The director draws from the simulation stream** at one fixed site (§6.8),
   only in Survival sessions.
 - **The Modern spawn command stays Modern-only.** The director shares its
-  validation and creation path but not its gate; it is not a chat command.
+  creation path but not its gate or its placement: the command places as
+  retail's spawn handler does, with no site validation, while the director
+  keeps the site check of §6.5. It is not a chat command.
 
 ## 4. The session
 
@@ -311,9 +313,11 @@ To make each wave distinct rather than a uniform mix:
 
 ### 6.5 Spawning
 
-Each unit is created at a spawn cell (§6.6) through the same validated path
-as the spawn command: placement check, then the ordinary fully built
-creator, then movement registration. At most `SpawnPerTick` units are created
+Each unit is created at a spawn cell (§6.6) through a validated path: the
+site check (`checkSpawnPlacement` — mission placement's structure snap and
+height, then bounds, terrain, features, occupancy and building yards), then
+the ordinary fully built creator and movement registration the spawn command
+also uses. At most `SpawnPerTick` units are created
 per tick so a large wave does not land in one tick. If the attacker reaches
 its unit limit, the rest of the wave is dropped; later waves still rise in
 tier, so pressure rises through quality once quantity is capped.
@@ -340,7 +344,7 @@ The base region of a class is the region of its passable cell nearest the
 centre site within `LandReach` cells (`WaterReach` for naval classes, which
 fight from the shore). A class with no such cell never enters. Each unit is
 created at the nearest cell of its base region to the entry point, within
-`SpawnReach` cells, where the spawn command's placement checks pass.
+`SpawnReach` cells, where the §6.5 site check passes.
 
 ### 6.7 Orders and warnings
 

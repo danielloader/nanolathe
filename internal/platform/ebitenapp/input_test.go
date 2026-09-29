@@ -37,6 +37,8 @@ func TestApplyInputPublishesObservedPointerTransitions(t *testing.T) {
 	}
 }
 
+// Escape is a toggle key: a second service with it still held yields no token.
+// The editing keys' host repeat is locked in keyrepeat_test.go.
 func TestApplyInputDoesNotManufactureHeldEditorKeyTokens(t *testing.T) {
 	in := input.NewState()
 	first := sampledInput{}

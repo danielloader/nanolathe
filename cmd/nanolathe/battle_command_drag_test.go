@@ -398,3 +398,146 @@ func TestCommandDragAltRespectsSelectionAndArmedWork(t *testing.T) {
 		})
 	}
 }
+
+// dragQueuedSites returns the builder's queued build goals, in queue order.
+func dragQueuedSites(b *battleSession, builder pool.Handle) (goals []dragPoint, products []string) {
+	for _, n := range orders.QueueForUnit(b.sess.Units.Unit(builder)).Primary() {
+		if orders.IsMobileBuild(n.ID) {
+			goals = append(goals, dragPoint{int32(n.GoalX.Floor()), int32(n.GoalZ.Floor())})
+			products = append(products, n.BuildDefKey)
+		}
+	}
+	return goals, products
+}
+
+func dragRow(b *battleSession, cl *client.Client, fromX, toX, z int32, mods input.Modifiers) []dragBuildSite {
+	x0, y := o5ScreenWorld(b.cam, numeric.FixedFromInt(int64(fromX)), 0, numeric.FixedFromInt(int64(z)))
+	x1, _ := o5ScreenWorld(b.cam, numeric.FixedFromInt(int64(toX)), 0, numeric.FixedFromInt(int64(z)))
+	dragInput(b, cl, x0, y, input.MouseButtonLeft, "press", mods)
+	dragInput(b, cl, x1, y, input.MouseButtonLeft, "held", mods)
+	var sites []dragBuildSite
+	if b.modernDrag != nil {
+		sites = slices.Clone(b.modernDrag.sites)
+	}
+	dragInput(b, cl, x1, y, input.MouseButtonLeft, "release", mods)
+	return sites
+}
+
+// A Shift row over the builder's own queued sites of the dragged product
+// sends each such site the ordinary queued toggle, as a Shift-click there
+// would [07 R-P0-11 §6]; the rest of the row still appends (§3.11).
+func TestCommandDragShiftRowCancelsQueuedSites(t *testing.T) {
+	b, cl, _, builder := resourceFixture(t, false)
+	b.armPlacement(b.cat.Units["armsolar"])
+	shift := input.Modifiers{Shift: true}
+	if sites := dragRow(b, cl, 400, 496, 320, shift); len(sites) != 4 {
+		t.Fatalf("first row previewed %d sites, want 4", len(sites))
+	}
+	b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
+	queued, _ := dragQueuedSites(b, builder)
+	if len(queued) != 4 || !b.battleState().PlacementArmed() {
+		t.Fatalf("first row queued %v", queued)
+	}
+
+	// Without Shift nothing is toggled: queued footprints stay reserved.
+	x0, y := o5ScreenWorld(b.cam, numeric.FixedFromInt(400), 0, numeric.FixedFromInt(320))
+	x1, _ := o5ScreenWorld(b.cam, numeric.FixedFromInt(560), 0, numeric.FixedFromInt(320))
+	dragInput(b, cl, x0, y, input.MouseButtonLeft, "press", shift)
+	dragInput(b, cl, x1, y, input.MouseButtonLeft, "held", input.Modifiers{})
+	for i, site := range b.modernDrag.sites {
+		if site.cancel || (i < 4) == site.valid {
+			t.Fatalf("unshifted site %d = %+v", i, site)
+		}
+	}
+	// Shift at release decides, and the preview follows it.
+	dragInput(b, cl, x1, y, input.MouseButtonLeft, "held", shift)
+	sites := slices.Clone(b.modernDrag.sites)
+	dragInput(b, cl, x1, y, input.MouseButtonLeft, "release", shift)
+	if len(sites) != 6 {
+		t.Fatalf("second row previewed %d sites, want 6", len(sites))
+	}
+	for i, site := range sites {
+		if site.cancel != (i < 4) || site.valid != (i >= 4) {
+			t.Fatalf("site %d = %+v, want the first four cancelled and two added", i, site)
+		}
+	}
+	cmds := resourceBuildCommands(b.sess)
+	if len(cmds) != 6 {
+		t.Fatalf("commands %+v", cmds)
+	}
+	for i, c := range cmds {
+		if !c.Queued || c.AppendOnly != (i >= 4) || c.Product != "armsolar" {
+			t.Fatalf("command %d intent %+v", i, c)
+		}
+	}
+	b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
+	remaining, _ := dragQueuedSites(b, builder)
+	if len(remaining) != 2 || remaining[0].x <= queued[3].x || remaining[1].x <= remaining[0].x {
+		t.Fatalf("queue after the cancelling row %v, want only the two new sites past %v", remaining, queued)
+	}
+}
+
+// The row cancels only the dragged product and only from a committed queue:
+// another product at the site stays reserved (the toggle would remove it),
+// and a command awaiting its tick suppresses cancellation until it applies.
+func TestCommandDragCancelBoundaries(t *testing.T) {
+	b, cl, _, builder := resourceFixture(t, false)
+	// A 3x3 extractor centred within one cell of the third solar site.
+	if err := b.DispatchMobileBuild("extractor", numeric.FixedFromInt(472), 0, numeric.FixedFromInt(336), true); err != nil {
+		t.Fatal(err)
+	}
+	b.armPlacement(b.cat.Units["armsolar"])
+	shift := input.Modifiers{Shift: true}
+	dragRow(b, cl, 400, 432, 320, shift)
+	b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
+	if before, products := dragQueuedSites(b, builder); len(before) != 3 {
+		t.Fatalf("queue %v %v", before, products)
+	}
+	probe := func() dragBuildSite {
+		t.Helper()
+		x, y := o5ScreenWorld(b.cam, numeric.FixedFromInt(472), 0, numeric.FixedFromInt(336))
+		dragInput(b, cl, x, y, input.MouseButtonLeft, "press", shift)
+		if b.modernDrag == nil || len(b.modernDrag.sites) != 1 {
+			t.Fatal("probe press did not capture")
+		}
+		site := b.modernDrag.sites[0]
+		escape := input.NewState()
+		escape.Mouse.SetPosition(float32(x), float32(y))
+		escape.Kbd.SetKey(input.KeyEscape, true)
+		b.handleInput(escape, cl)
+		b.armPlacement(b.cat.Units["armsolar"])
+		return site
+	}
+	// Before the gesture is a drag it is a Shift-click, whose toggle matches
+	// any product: the preview shows the extractor it would remove.
+	if site := probe(); !site.cancel {
+		t.Fatalf("undragged press over the extractor = %+v, want the click's cancellation", site)
+	}
+	// An unshifted build awaiting its tick will purge the queue first.
+	if err := b.DispatchMobileBuild("armsolar", numeric.FixedFromInt(640), 0, numeric.FixedFromInt(640), false); err != nil {
+		t.Fatal(err)
+	}
+	if site := probe(); site.cancel {
+		t.Fatal("a site was cancelled against a queue that a pending command will change")
+	}
+	if len(resourceBuildCommands(b.sess)) != 1 {
+		t.Fatal("an abandoned probe issued a command")
+	}
+	b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
+	b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
+	// Rebuild the three-site queue behind the pending purge, then drag.
+	if err := b.DispatchMobileBuild("extractor", numeric.FixedFromInt(472), 0, numeric.FixedFromInt(336), false); err != nil {
+		t.Fatal(err)
+	}
+	dragRow(b, cl, 400, 432, 320, shift)
+	b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
+	sites := dragRow(b, cl, 400, 464, 320, shift)
+	if len(sites) != 3 || !sites[0].cancel || !sites[1].cancel || sites[2].cancel || sites[2].valid {
+		t.Fatalf("sites %+v, want two solar cancels and a refused extractor site", sites)
+	}
+	b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
+	after, products := dragQueuedSites(b, builder)
+	if len(after) != 1 || products[0] != "extractor" {
+		t.Fatalf("queue after row %v %v, want only the extractor", after, products)
+	}
+}

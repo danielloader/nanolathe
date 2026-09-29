@@ -786,7 +786,18 @@ repaired as elapsed time.
 The user/network request is clamped to 1..20 by the common setter; the
 keyboard speed keys reach the full 1..20 range (speed-up is skipped when the
 requested value is already 20, speed-down when it is 1). The effective speed
-is the value used in the budget. The budget's hysteresis counter decrements
+is the value used in the budget.
+
+**Established — the slowest step is slow motion, not a stop.** The budget of
+§4.2 is the only consumer of the speed word, and it scales elapsed time
+linearly by `activeSpeed × 0.1`; there is no other speed table. The bottom
+step, speed 1 — announced `Game Speed -9`, since announcements print the
+offset from 10 ([07 R-CAM-01 §3]) — therefore runs a tenth of nominal: three
+ticks per second of scaled time, one per ten scaled units. No step reaches
+zero, and `-10` is unreachable because speed-down stops at 1. Each step is
+`3 × speed` ticks per second before the carry's single-precision rounding;
+sampled once per scaled unit, that rounding loses one tick in ten seconds at
+speeds 7, 9, 17 and 19. The budget's hysteresis counter decrements
 on normal (<6) work and increments on capped (>=6) work:
 
 - after more than 100 normal observations, effective speed may rise one step

@@ -394,6 +394,22 @@ registry branch at load; it overrides last-used registry values, not the reverse
   the separate clock option keeps game time visible there; and the F11 macro text is no longer relayed to
   other players. Source: `ExternQuickKey.cpp`, `tahook.cpp`, `dialog.cpp`,
   `sharedialog.cpp`; `tdraw.txt`.
+- **Ctrl hundred batch (Established from the pinned source, host-side).**
+  While Ctrl is held, the same quick-key handler changes the build-page
+  click's Shift batch from five to one hundred, as +100 for a left click and
+  −100 for a right click, and restores the retail five when Ctrl is released.
+  Ctrl+Shift+click therefore orders or cancels one hundred; plain and
+  Ctrl-only clicks keep ±1. The handler runs only while the interface
+  upgrade is on, which the recorder's `.ehaoff` turns off and whose help text
+  names "Queue 100 units" ([TA Demo Recorder](ta-demo-recorder.md)). The
+  rewritten values are that click's Shift batch in the retail click handler
+  (retail analysis of the rewritten site), and that click also serves the
+  stockpile toys, so the source's batch reaches them too. Source:
+  `ExternQuickKey.cpp` (constructor, key-down and key-up of `Message`).
+  Whether the shipped ProTA 4.8 draw DLL contains the same handler branch is
+  **Supported inference**: its recorder advertises the function, and a
+  ProTA 4.8 player reports the gesture, but the shipped selection audit did
+  not cover this key.
 - **Double-click selection (Established from the pinned source, host-side).**
   `ExternQuickKey::Message` handles both left and right double-click messages
   through the same branch when `DoubleClick` is enabled. The live-game gate

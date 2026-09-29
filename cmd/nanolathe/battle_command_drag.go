@@ -8,6 +8,8 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
+	"github.com/nanolathe-gg/nanolathe/internal/construction"
+	"github.com/nanolathe-gg/nanolathe/internal/content"
 	committedframe "github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
@@ -26,6 +28,27 @@ type dragBuildSite struct {
 	cell   dragPoint
 	height int32
 	valid  bool
+	// cancel marks a Shift row site that removes an existing queued build
+	// instead of adding one; cancelled is that build's footprint and height,
+	// which the preview crosses out (§3.11).
+	cancel          bool
+	cancelled       resourceRect
+	cancelledHeight int32
+}
+
+// dragQueuedPointTolerance is the queued-order toggle's match distance: one
+// map cell on each of X and Z, inclusive [07 R-P0-11 §6]. The session applies
+// the same test when the toggling command arrives.
+const dragQueuedPointTolerance = numeric.Fixed(16 << 16)
+
+// dragQueuedBuild is one primary-queue record of the drag's builder, in queue
+// order, as the release's toggling commands will find it.
+type dragQueuedBuild struct {
+	goalX, goalY, goalZ numeric.Fixed
+	footX, footZ        int32
+	product             string
+	build               bool // this builder's own mobile-build order kind
+	taken               bool // an earlier site of this gesture cancels it
 }
 
 type battleCommandDrag struct {
@@ -190,11 +213,18 @@ func (b *battleSession) serviceCommandDrag(in *input.State, cl *client.Client, m
 		case input.LatchMobileBuild:
 			accepted := false
 			for _, site := range d.sites {
-				if !site.valid {
+				if !site.valid && !site.cancel {
 					continue
 				}
+				// A new site appends without the repeated-site toggle; a cancel
+				// site sends exactly the queued command a Shift-click there
+				// sends, whose toggle removes the queued build [07 R-P0-11 §6].
+				queued, appendOnly := modifiers.Shift || accepted, true
+				if site.cancel {
+					queued, appendOnly = true, false
+				}
 				wx, wz := world.PlacementCenter(site.cell.x, site.cell.z, state.BuildFootX, state.BuildFootZ)
-				if b.dispatchMobileBuildFacing(d.product, wx, numeric.FixedFromInt(int64(site.height)), wz, modifiers.Shift || accepted, true, d.facing) == nil {
+				if b.dispatchMobileBuildFacing(d.product, wx, numeric.FixedFromInt(int64(site.height)), wz, queued, appendOnly, d.facing) == nil {
 					accepted = true
 				}
 			}
@@ -261,9 +291,34 @@ func (b *battleSession) updateCommandDrag(cl *client.Client, mx, my int32, modif
 		reserved, complete := b.resourceReservations()
 		def, _ := b.cat.Unit(d.product)
 		d.facing = b.communityPlacementFacing(def)
+		// Only a queued (Shift) release runs the toggle, as with the click.
+		var queue []dragQueuedBuild
+		if modifiers.Shift {
+			if f, ok := b.currentSnapshot(); ok {
+				queue = b.dragCancelQueue(f, d.builder)
+			}
+		}
 		d.sites = d.sites[:0]
 		for _, cell := range cells {
 			result, err := b.checkProductPlacement(cell.x, cell.z, def, state.BuildFootX, state.BuildFootZ, uint16(d.builder))
+			if err == nil && len(queue) != 0 {
+				// The click admits a site only when placement accepts it,
+				// and so does its cancellation. Before the gesture becomes a
+				// drag it is still that click, whose match ignores the product.
+				wx, wz := world.PlacementCenter(cell.x, cell.z, state.BuildFootX, state.BuildFootZ)
+				if i := dragCancelMatch(queue, wx, wz, d.product, !d.dragged); i >= 0 {
+					n := &queue[i]
+					n.taken = true
+					site := dragBuildSite{cell: cell, height: result.SiteHeight, cancel: true, cancelledHeight: int32(n.goalY.Floor())}
+					site.cancelled = resourceRect{cell.x, cell.z, state.BuildFootX, state.BuildFootZ}
+					if n.footX > 0 && n.footZ > 0 {
+						x, z := world.PlacementAnchor(n.goalX, n.goalZ, n.footX, n.footZ)
+						site.cancelled = resourceRect{x, z, n.footX, n.footZ}
+					}
+					d.sites = append(d.sites, site)
+					continue
+				}
+			}
 			valid := err == nil && complete
 			rect := resourceRect{cell.x, cell.z, state.BuildFootX, state.BuildFootZ}
 			for _, r := range reserved {
@@ -285,6 +340,71 @@ func (b *battleSession) updateCommandDrag(cl *client.Client, mx, my int32, modif
 			}
 		}
 	}
+}
+
+// dragCancelQueue copies the drag builder's committed primary queue for the
+// cancellation preview (§3.11). It returns nil — nothing can be cancelled —
+// when the committed queue cannot prove what the release's commands will
+// meet: a truncated published queue, or any typed command still awaiting its
+// tick, since that command may edit the queue first. Both clear within a tick.
+func (b *battleSession) dragCancelQueue(f *committedframe.Frame, builder pool.Handle) []dragQueuedBuild {
+	if f == nil || b.cat == nil || b.sess == nil || len(b.sess.PendingHumanCommands()) != 0 {
+		return nil
+	}
+	v, ok := snapshotUnitByHandle(f, builder)
+	if !ok {
+		return nil
+	}
+	def, ok := b.cat.Unit(v.DefName)
+	if !ok || def == nil {
+		return nil
+	}
+	// The session issues the flying builder's own kind; the toggle matches
+	// only records of the kind being issued [07 R-P0-11 §6].
+	kind := construction.MobileBuildOrder
+	if def.CanFly {
+		kind = construction.VTOLMobileBuildOrder
+	}
+	for _, q := range f.OrderQueues {
+		if q.Unit != builder {
+			continue
+		}
+		if q.PrimaryTruncated {
+			return nil
+		}
+		out := make([]dragQueuedBuild, 0, len(q.Primary))
+		for _, o := range q.Primary {
+			out = append(out, dragQueuedBuild{goalX: o.GoalX, goalY: o.GoalY, goalZ: o.GoalZ, footX: int32(o.FootX), footZ: int32(o.FootZ), product: o.BuildProduct, build: o.Kind == kind})
+		}
+		return out
+	}
+	return nil
+}
+
+// dragCancelMatch finds the record the queued toggle at (wx, wz) removes: the
+// front-most untaken record of the builder's own build kind whose goal lies
+// within one cell on X and on Z [07 R-P0-11 §6]. A drag row cancels it only
+// when it is the dragged product; otherwise the toggle would remove another
+// building, so the row reports no cancellation (-1) there.
+func dragCancelMatch(queue []dragQueuedBuild, wx, wz numeric.Fixed, product string, anyProduct bool) int {
+	within := func(a, b numeric.Fixed) bool {
+		d := a - b
+		if d < 0 {
+			d = -d
+		}
+		return d <= dragQueuedPointTolerance
+	}
+	for i := range queue {
+		n := &queue[i]
+		if n.taken || !n.build || !within(n.goalX, wx) || !within(n.goalZ, wz) {
+			continue
+		}
+		if anyProduct || content.CanonicalKey(n.product) == content.CanonicalKey(product) {
+			return i
+		}
+		return -1
+	}
+	return -1
 }
 
 // dragMoveActors and dragAreaTargets read the committed frame they are given:
@@ -354,6 +474,16 @@ func (b *battleSession) drawCommandDrag(cl *client.Client) {
 	if d.product != "" {
 		state := &b.battleState().Input
 		for _, site := range d.sites {
+			if site.cancel {
+				// A crossed-out red box over the queued build the release removes.
+				c := site.cancelled
+				l, t, r, bt := b.siteRectToScreen(c.x*16, c.z*16, (c.x+c.w)*16, (c.z+c.h)*16, site.cancelledHeight)
+				cl.UIFrameRect(int(l), int(t), int(r-l), int(bt-t), red)
+				cl.UIFrameRect(int(l)+1, int(t)+1, int(r-l)-2, int(bt-t)-2, red)
+				cl.UIWorldLine(l, t, r-1, bt-1, red)
+				cl.UIWorldLine(r-1, t, l, bt-1, red)
+				continue
+			}
 			color := red
 			if site.valid {
 				color = green

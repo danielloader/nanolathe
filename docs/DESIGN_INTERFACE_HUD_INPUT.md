@@ -173,16 +173,31 @@ state. The existing `MouseState.SetButton`/`Sample` edge APIs remain live-state
 samples and do not claim to reconstruct native event history; producers must
 call the pointer methods above to retain a same-interval down/up pair.
 
-The platform boundary owns native message history, timestamp scaling, and
-double-click recognition. The current Ebiten producer polls all modifier and
-button states before it constructs one snapshot, retains observed left/right
-transitions without representing their retention order as native chronology,
-updates the motion fallback, and publishes once before `Client.Step`. Its
-timestamp is the existing scaled 30-Hz host-clock value. Polling does not
-recover native ordering among changes that arrived between polls, nor native
-key repeat/history.
+The platform boundary owns native message history, timestamp scaling,
+double-click recognition and key repeat. The current Ebiten producer polls all
+modifier and button states before it constructs one snapshot, retains observed
+left/right transitions without representing their retention order as native
+chronology, updates the motion fallback, and publishes once before
+`Client.Step`. Its timestamp is the existing scaled 30-Hz host-clock value.
+Polling does not recover native ordering among changes that arrived between
+polls, nor native key repeat/history.
 `TODO(T25): establish an Ebiten event source that exposes native ordering and
 repeat.` [07 §2] [01 R-PLAT-01 §6]
+
+**Held editing keys repeat.** Retail enqueued one token per operating-system
+repeat of a held key, and the battle frame drains one token per host frame, so
+a held key repeated at the OS rate bounded by the frame rate `[07 §2]`
+`[07 R-CAM-01 §1]`. Ebiten's character batch already carries the repeats of
+printable characters, but it reports the non-printing keys only as held state.
+`internal/platform/ebitenapp/keyrepeat.go` therefore re-issues the token of a
+held Backspace, Delete, arrow, Home, End, Page Up or Page Down key after the
+host delay and then at most once per 30 Hz service, translated with the
+modifiers of that service. The delay and rate are host policy (§5). The toggle
+keys — Enter, Escape, Tab, Insert (paste), Pause, the function keys and the
+Ctrl/Alt compositions — keep one token per press; retail would have repeated
+them too, and that remains part of the T25 gap. Repeat state belongs to one
+keyboard state and never reaches the simulation except through the tokens an
+ordinary press would also produce.
 
 The producer reconstructs **left and right double-clicks**,
 because its inputs are host settings rather than retail behaviour: retail read
@@ -582,8 +597,9 @@ transition census for every explicit enable/disable write; current code must
 not be read as a universal navigation lifetime.` Ebiten does not provide native
 event chronology between its text batch and physical navigation edges. The
 adapter retains each observation after the producer queue, but does not invent
-repeat cadence or a native order among simultaneous physical edges
-`TODO(T25)` `[07 R-WGT-01 §2]`.
+a native order among simultaneous physical edges `TODO(T25)`
+`[07 R-WGT-01 §2]`. Held editing and cursor keys repeat at the host cadence of
+§2.2 and §5; the widgets see those repeats as ordinary tokens.
 
 Quickkey comparison folds only ASCII letters. A `TokenText` rune in the byte
 range `0x80..0xFF` compares to the same stored quickkey byte unchanged; a rune
@@ -881,6 +897,14 @@ Rebuilding a merged page restores the selected category's down-state in the
 replacement panel, including the Nanolathe category, while releasing the old
 pointer capture. Direct opens and per-page reopens therefore show the same
 radio selection as pointer activation `[07 R-WGT-01 §3]`.
+A page's staged buttons show their stored value in the current-stage byte and
+never in the down-state word, because the stage selects both the caption and
+the art. `NOTRAK` works the same way: the `MUSIC` page shows `musicmode` bit 0
+as the switch's stage, and a click stores the stage it selects. The bit used
+to go into the down-state word. The switch then always opened showing `Off`,
+so with music on, a player who set it back to `Off` turned the music on again.
+`TestMusicSwitchShowsAndSetsTheMusicBit` and, on the retail page,
+`TestMusicSwitchRetailPage` lock it `[03 R-AUD-01 §4]`.
 Every routine there takes one of two arms, chosen by the `inBattle` word on the
 options state: the front end opens `STARTOPT.GUI` over `options4x` and merges
 `SOUNDS`/`MUSIC`/`SPEEDS`/`VISUALS` with their own full-screen plates; the
@@ -2439,39 +2463,68 @@ resource changes or RNG draws.
 The case-insensitive catalog name and world point under the cursor **at
 submission** enter the ordinary human-command queue. The pointer must be over
 the battlefield, outside the HUD and minimap. Moving the camera or pointer
-later does not retarget the queued request. Buildings use the existing mission
-footprint snap and height probe `[08 R-ENTRY-01 §6]` `[08 R-ENTRY-02 §1]`;
-mobiles retain the terrain point. The session checks the current local player,
-catalog definition, map bounds, terrain suitability, features and occupancy
-before allocation. Every footprint cell is checked even for open building
-yards; there is no search for a nearby free site or displacement of blockers.
+later does not retarget the queued request.
 
-Successful allocation uses the normal fully built creator, including its unit
+**Placement is retail's.** The session places the unit exactly as retail's
+developer spawn handler places each unit it creates: through the mission
+spawner's position fixup — buildings snap to their footprint grid and take the
+spawner's height probe, mobiles retain the terrain point `[08 R-ENTRY-01 §6]`
+`[08 R-ENTRY-02 §1]` — and through nothing else. That handler runs no placement
+validator `[07 R-CAM-01 §6]`, so the command does not test terrain
+suitability, slope, depth, features, building yards or occupancy: a unit can
+be spawned on top of another unit or structure, or on ground it could not be
+built on. The session checks only the current local player, the catalog
+definition, and that the captured point lies on the map — a Nanolathe guard
+that retail's pointer, confined to the clamped view, could never trip.
+
+Successful allocation uses the normal fully built creator — the allocator
+arguments retail's handler and mission spawner also pass — including its unit
 limits, COB initialization, activation, allocator RNG sequence and movement
 registration. The normal observer and publication passes expose the unit. No
 build resources are charged or granted; subsequent unit operation participates
 in the ordinary economy. Rejections before allocation draw no RNG; allocator
 or script failures retain the common creator's failure semantics. Usage errors,
-unknown names, unsuitable sites and allocation failures produce chat feedback.
+unknown names, an off-map point and allocation failures produce chat feedback.
+
+**Which parts are retail.** Retail: the position fixup, the absence of any
+site validation, the fully built creator and its RNG effects, and the
+allocator's own refusals. Nanolathe Modern policy: the command itself and its
+Strict bypass, the exact case-insensitive name (retail matches `?`/`*`
+patterns and spawns every match), one unit per line (retail steps 32 world
+units between matches), `Session.LocalOwner` as owner (retail takes the slot
+from a second word, slot 0 when absent), no developer access, the off-map
+guard, and the feedback lines.
 
 Verification locks submission-time coordinates, local rather than viewing
-ownership, creation state, repeated-site rejection, no resource charge, ordinary
+ownership, creation state, a second unit stacked on an occupied site (and a
+structure on a structure), the off-map refusal, no resource charge, ordinary
 creation RNG effects and the Strict bypass, including a mode switch after enqueue.
 
 **Shorthand `+<unit>` (Nanolathe Modern policy).** A command line of exactly
 one word that matches no registered command and names a catalog unit
 (case-insensitive) queues the same request as `+spawn <unit>`, with the same
-submission-time pointer capture, validation and feedback. Retail's analogue is
-the developer-only mask-4 default handler, which offers any unmatched first
-word as a unit name, spawns one unit per matching definition for the
-*viewing* player at the pointer and steps 32 world units per unit
-`[07 R-CAM-01 §6]` `[07 R-CAM-01 §9]`. The shorthand deliberately keeps the
-`+spawn` contract instead: no developer access, one unit, local ownership.
-A word naming no unit, a line with arguments, and every Strict 3.1 line remain
-plain chat with no feedback, exactly as an unregistered command would. The
-retail default handler itself is not implemented: its creation state,
-per-definition matching rule, wrap arithmetic and RNG effects are untraced
-(`TODO(question)` in `cmd/nanolathe/battle_spawn.go`).
+submission-time pointer capture, placement and feedback. Retail's analogue is
+the developer-only mask-4 default handler, which treats any unmatched first
+word as a name pattern, creates one fully built unit per matching definition
+for the slot named by a second word (slot 0 when absent), and steps 32 world
+units between footprints `[07 R-CAM-01 §6]` `[07 R-CAM-01 §9]`. The shorthand
+deliberately keeps the `+spawn` contract instead: no developer access, one
+unit, local ownership. A word naming no unit, a line with arguments, and every
+Strict 3.1 line remain plain chat with no feedback, exactly as an unregistered
+command would. The retail default handler itself is traced but not
+implemented; it belongs with developer mode (DESIGN_DEVELOPER_TOOLS).
+
+**Repeating the last command.** Retail replays the retained last `+` command
+only with `\` and only with developer access; Insert has no battle action and
+pastes the clipboard in a focused editor `[07 R-CAM-01 §2]` `[07 R-CAM-01 §9]`
+`[07 §2]`. The Insert replay that players remember is a later engine-patch
+feature — documented for the Escalation and TA Zero engines
+([taesc-engine](../research/extensions/taesc-engine.md),
+[ta-zero-engine](../research/extensions/ta-zero-engine.md),
+[mod-engine-compatibility](../research/extensions/mod-engine-compatibility.md))
+and undocumented for ProTA's. It is not adopted: under AGENTS.md, evidence that
+a patch implements a behaviour is not authorization to enable it, so an Insert
+replay would need the user's approval as a new Modern policy.
 
 **Retail cheat and visibility commands.** The mask-2 set (`Radar`, `ATM`,
 `View`, `LOS`, `Mapping`, `DoubleShot`, `HalfShot`, `NowISee`, `Meteor`) and
@@ -2749,10 +2802,72 @@ its dominant normalized axis; the other axis follows the straight segment,
 rounded to the nearest cell, with half-cell ties toward the drag endpoint.
 Normalized axis ties choose X. A grid walks rows from the pressed corner toward
 the current corner. Touching edges are allowed. Invalid sites and reserved
-queued footprints are red and skipped; valid sites are green. On release the
+queued footprints are red and skipped, unless a Shift row cancels them (below);
+valid sites are green. On release the
 first accepted build replaces orders unless Shift is held, and subsequent sites
 append without duplicate-site toggle. If no site is valid, placement stays armed.
 A click still uses the existing single-site path, on release in modern mode.
+
+**Cancelling queued sites with a Shift row (requested input policy,
+2026-09-28).** A player sweeps a row over queued sites to take them off, as
+the community line tool allows. The retail basis is the click: a queued
+(Shift) build click at a point that already carries a queued record of the
+same order kind, within one map cell on X and on Z, removes the front-most
+such record and issues nothing; the test runs only with the queue flag and
+does not compare products [07 R-P0-11 §6]. The community X line generator
+feeds every candidate through that ordinary click with queue semantics forced
+on ([TA Zero engine, X placement](../research/extensions/ta-zero-engine.md#x-placement-established-shipped-contract)),
+so its line toggles queued sites off. That the line therefore removes them is
+an inference from those two established contracts. Nanolathe does not
+reproduce the X gesture; this rule gives the drag row the click's result.
+
+While Shift is held, each row site that placement accepts is matched, in row
+order, the way that click would be matched: against the drag builder's
+committed primary queue, taking the front-most record of the builder's own
+mobile-build kind (flying builders have their own kind) whose goal lies
+within the cell tolerance and that no earlier site of this gesture took. When
+that record is the dragged product, the site is a cancel site. It is drawn as
+a crossed-out red box over the queued footprint, without the optional
+Community model preview, and on release it receives
+exactly the queued, non-append command a Shift-click there sends, so the
+session's toggle removes the record. Other sites keep the rules above: free
+valid sites append, overlapping ones stay red and are skipped. A row can
+therefore both cancel and add, in row order, like Shift-clicks along it.
+
+Boundaries:
+
+* **Same product only.** When the front-most record in tolerance is another
+  product, the toggle would remove that other building, so the site is not a
+  cancel site; it overlaps the reservation and stays red. This deliberately
+  narrows the click, which ignores the product, so a sweep cannot silently
+  erase a different building. Until the press becomes a drag it is still that
+  click, and its one-site preview uses the click's product-blind match.
+* **Shift only.** Without Shift the first accepted site replaces orders, as
+  before, and queued footprints stay reserved. Shift at release decides, so
+  the preview follows the live Shift state while dragging.
+* **Placement must accept the site,** as it must for the click. A started
+  nanoframe occupies its own site, so started work is not cancelled.
+* **One gesture, no re-planning.** A footprint the gesture cancels stays
+  reserved for the rest of that gesture, so a new site overlapping it stays
+  red. Only the command page's builder is examined, as the typed build
+  command names only that builder.
+* **Committed evidence only.** A truncated published queue, or any typed
+  command still awaiting its tick, disables cancellation until the next
+  publication: a pending command may change the queue first and turn a toggle
+  into an addition. A record that completes between the publication and the
+  command's tick is re-queued by the toggle, exactly as for a Shift-click.
+* Classic is unchanged: drag commands exist only with the modern executor.
+
+The optional Community queued-order drag (`presentation.queuedOrderDrag`,
+Options → Placement) is a different gesture. It moves one queued build or move
+order with Shift and no armed product; cancellation needs an armed product.
+
+`TestCommandDragShiftRowCancelsQueuedSites` covers a mixed row (four cancels,
+two additions), the unshifted preview and the resulting queue.
+`TestCommandDragCancelBoundaries` covers another product in tolerance, the
+product-blind undragged preview, and suppression by a pending command.
+`TestCommunityPreviewSkipsDragCancelSites` keeps the model preview off cancel
+sites.
 
 Repair and Reclaim use rectangular world areas, with their command armed and
 the left button dragged. Repair visits visible local damaged or unfinished
@@ -3024,16 +3139,29 @@ The selector uses the existing options control (`NCYCLE`) with three stages.
 
 `presentation.factoryHundredBatch` is a separate host input preference,
 default off and normalized as a low-bit boolean. When enabled, Ctrl+Shift on a
-factory product adds or subtracts 100 through the existing signed command
-producer. Alt still takes precedence with its existing batch of 20; other
-clicks retain 1 or Shift's 5. Stockpile buttons retain their separate counts.
-This factory-only scope and Alt precedence are explicit Nanolathe host policy;
-the Zero controls documentation establishes the hundred-unit gesture. The
-options UI exposes this preference beside selection. The optional Zero preset
-offers scheme 2 and the hundred-unit batch; Keep mine changes neither. No
-input consumer tests a content-profile name or gameplay mode. Tests preserve
-Retail/Community meanings, Zero water-versus-armed membership, held filters,
-modifier precedence, signed counts, persistence and preset refusal.
+factory product, including a mobile unit in a factory's menu, adds (left) or
+subtracts (right) 100 through the existing signed command producer. Alt still
+takes precedence with its existing batch of 20; other clicks retain 1 or
+Shift's 5. Stockpile buttons retain their separate counts. This factory-only
+scope and Alt precedence are explicit Nanolathe host policy. The gesture has
+two sources. The Zero controls documentation describes it. The pinned source's
+quick-key handler, the file the Community scheme above follows, sets the
+counted click's Shift batch to one hundred while Ctrl is held
+([community patch engine §4.2](../research/extensions/community-patch-engine.md#42-data-driven-switches-outside-totalaini)).
+That source batch also reaches the stockpile toys, which Nanolathe leaves at
+five. ProTA 4.8 ships the recorder whose interface upgrade lists "Queue 100
+units" ([TA Demo Recorder](../research/extensions/ta-demo-recorder.md)), and a
+ProTA 4.8 player reports the gesture. That the shipped 4.8 draw DLL has the
+branch is a **Supported inference**. The options UI exposes this preference beside
+selection (*100 batch*). The Community preset, which ProTA names, and the Zero
+preset turn it on with their selection schemes; the Retail preset turns it
+off, and Keep mine changes nothing. No input consumer tests a content-profile
+name or gameplay mode. Tests preserve Retail/Community meanings, Zero
+water-versus-armed membership, held filters, modifier precedence, signed
+counts, persistence and preset refusal.
+`TestCommunityPresetFactoryHundredBatchForMobileProduct` clicks a mobile product
+in a structure factory's menu: Ctrl+Shift gives 5 under default preferences,
+and +100 and −100 once the Community preset is applied.
 
 With `doubleClickSelection` enabled, a platform-classified left or right double-click
 strictly inside the battle viewport and over an own unit replaces the selection
@@ -3465,11 +3593,23 @@ because the committed tick no longer advances. Nanolathe also draws the in-battl
 title (§3.8 "In-battle end titles"), but the cue does not depend on it
 being drawn.
 
+**The switch.** The HUD page's *Victory cue* row is an ordinary HUD switch.
+A click writes `presentation.victoryCue` through the same options transaction
+as the other rows: OK saves it, and Undo, Restore Defaults and Cancel take it
+back. Like every row on the page, the click plays only the page's `Options`
+cue. It does not preview the victory sound, because the hook plays only for a
+shown win. The row used to be missing from the options dispatcher. A click
+moved only its drawn stage, and the next click on any other HUD switch redrew
+every row from the preferences and showed the Victory cue as Off again.
+
 **Files.** `cmd/nanolathe/victory_cue.go` (the hook), a one-line call from the
 result branch of the battle update in `battle.go`, and the switch in
-`community_hud_options.go`. `TestVictoryCueTriggerRule`,
+`community_hud_options.go`, dispatched with the other HUD rows in
+`retail_menu_options.go`. `TestVictoryCueTriggerRule`,
 `TestVictoryCueWatcherGate` and `TestVictoryCueOffIsRetail` lock the rule, the
-title gate and the retail default.
+title gate and the retail default. `TestCommunityHUDEverySwitchCommits` locks
+the switch: each HUD row writes only its own preference, and the click plays
+only the `Options` cue.
 
 ## 4. Retail behaviour that is not a bug
 
@@ -3491,6 +3631,12 @@ title gate and the retail default.
   case. With `SwitchAlt` set, a plain digit recalls and additive recall becomes
   unreachable from the keyboard. That is retail's behaviour, not a gap
   `[07 R-CAM-01 §4]` `[07 R-CAM-01 §14]`.
+* **`Game Speed -9` is slow motion, not a pause.** The `-` key stops at speed
+  1, which the budget runs at a tenth of nominal: three ticks a second
+  `[01 §4.3]` `[07 R-CAM-01 §3]`. Original samples those ticks as retail did,
+  so units step three times a second; Enhanced interpolation between committed
+  ticks (DESIGN_GPU_RENDERER §5.3) draws the same slow motion smoothly. Neither
+  changes the tick rate.
 * **`N` does nothing.** `n` and `N` are separate character tokens and the
   dispatcher has a case only for `n`. The stockpile round is enqueued by the
   palette's `MAKENUKE`/`MAKEANTI` gadgets alone `[07 R-CAM-01 §14]`.
@@ -3587,6 +3733,20 @@ title gate and the retail default.
   same-type selector admits both buttons, matching the licensed patch source.
   This is host input policy, not a retail behavior claim: no
   number here was measured from the executable.
+
+* **The key-repeat delay and rate are host policy.** Retail had no repeat
+  policy: the operating system repeated a held key's messages at the user's
+  keyboard settings, and each repeat became one token `[07 §2]`
+  `[07 R-CAM-01 §1]`. `internal/platform/ebitenapp/keyrepeat.go` reconstructs
+  that repeat for the editing and cursor keys (§2.2) and holds both constants.
+  The recorded values are the Windows defaults: keyboard delay setting 1, about
+  **500 ms**, expressed as **15** units of the scaled 30-Hz host clock; and
+  repeat speed setting 31, about **30 per second**, expressed as **1** unit, so
+  at most one repeat per host service — the bound retail's one-token-per-frame
+  drain already placed on the OS rate. A release re-arms the delay, and
+  services that share a timestamp (a catch-up drain) repeat at most once. This
+  is host input policy, not a retail behavior claim: no number here was
+  measured from the executable.
 
 * **SC15 — the cursor index table.** The previously published twenty-entry table
   was off by one from slot 10 up. The reference install's `anims/cursors.gaf`

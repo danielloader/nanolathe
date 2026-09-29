@@ -277,3 +277,22 @@ func malformedBox(edit func(*[28]byte)) []byte {
 	edit(&box)
 	return box[:]
 }
+
+// TestSlowestSpeedIsATenthNotPause locks the bottom of the speed range: the
+// `-` hotkey stops at speed 1, announced `Game Speed -9`, and the budget's
+// `activeSpeed × 0.1` makes that three ticks per second of scaled time — slow
+// motion, never a stop [01 §4.2][01 §4.3][07 R-CAM-01 §2].
+func TestSlowestSpeedIsATenthNotPause(t *testing.T) {
+	s := State{Requested: 1, Active: 1}
+	total, first := 0, int32(0)
+	for now := int32(1); now <= 300; now++ { // ten seconds, one sample per scaled unit
+		n := s.AdvanceSP(now)
+		if n > 0 && first == 0 {
+			first = now
+		}
+		total += n
+	}
+	if total != 30 || first != 10 {
+		t.Fatalf("speed 1 ran %d ticks in 300 scaled units, first at unit %d; want 30, first at 10", total, first)
+	}
+}

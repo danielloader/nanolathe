@@ -64,11 +64,13 @@ func TestRetailSpawnChatCreatesUsableUnits(t *testing.T) {
 				t.Fatal("mobile spawn missed the submission point")
 			}
 		}
+		// Retail's spawn handler validates no site, so the same pointer
+		// stacks a second unit on the first [07 R-CAM-01 §6].
 		before = len(b.sess.Units.Iter())
 		b.commitLocalChat("+spawn " + name)
 		applyPendingBattleCommands(b)
-		if len(b.sess.Units.Iter()) != before {
-			t.Fatal("repeat spawn overwrote occupied site")
+		if len(b.sess.Units.Iter()) != before+1 {
+			t.Fatal("repeat spawn at an occupied site was refused")
 		}
 		if err := b.sess.EnqueueHumanCommand(session.HumanCommand{Kind: session.HumanSelectionReplace, Selection: session.HumanSelectionCommand{Handles: []pool.Handle{created.Handle}}}); err != nil {
 			t.Fatal(err)

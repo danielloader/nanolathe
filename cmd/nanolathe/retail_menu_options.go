@@ -1010,13 +1010,20 @@ func (g *gameShell) syncRetailSoundPage() {
 // With music off the gauge, the four transport buttons and `TRACKMODE` are
 // disabled; `TRACKTYPE` is active only while music is on **and** the mode is
 // `Custom` [03 R-AUD-01 §4].
+//
+// Both are staged buttons, whose caption and art are the current-stage byte;
+// the down-state word only selects the pressed frame [07 R-WGT-01 §3]. So the
+// music bit goes into `NOTRAK`'s stage. It used to go into the down-state
+// word, which left the caption on stage 0 (`Off`) whatever the bit was: with
+// music on the switch read `Off`, a click turned the music off and showed
+// `On`, and the click back to `Off` turned the music on again.
 func (g *gameShell) syncRetailMusicPage() {
 	p := optionsPanel
 	if p == nil || optionsAssets == nil {
 		return
 	}
 	on := g.audioPrefs.MusicMode != 0
-	p.SetStatus("NOTRAK", boolInt(on))
+	p.SetStageAt(p.Index("NOTRAK"), boolInt(on))
 	p.SetStageAt(p.Index("TRACKMODE"), g.audioPrefs.CDMode-1)
 	for _, name := range []string{"MUSICVOL", "CDPREV", "CDSTOP", "CDPLAY", "CDNEXT", "TRACKMODE"} {
 		retailGreyGadget(optionsAssets.window, name, !on)
@@ -1485,7 +1492,7 @@ func (g *gameShell) setRetailShadowBits(on bool) {
 // handler that consumes the fired result [07 R-WGT-01 §3].
 func retailOptionsCue(key string) string {
 	switch key {
-	case "communityhud", "nhealth", "ncounters", "nreload", "nveteran", "ngroups", "nallies", "nweather",
+	case "communityhud", "nhealth", "ncounters", "nreload", "nveteran", "ngroups", "nallies", "nweather", "nvictory",
 		"builders", "bghold", "bgman", "bgroam", "bphold", "bpman", "bproam", "ncycle", "ndouble", "nhundred", "nswitchalt", "noverview",
 		"placement", "npreview", "nroverlay", "norderdrag", "nteamnano", "nmexsnap", "nwrecksnap", "nsnapmod",
 		"nanolathe", "ngameplay", "nrender", "nfps", "nsidebar",
@@ -1516,7 +1523,7 @@ func (g *gameShell) activateRetailOptionsGadget(name string) bool {
 	// precedes them all, as it does on the screens frontendCue serves.
 	g.playMenuCue(retailOptionsCue(retailOptionsCueKey(name)))
 	switch name {
-	case "NHEALTH", "NCOUNTERS", "NRELOAD", "NVETERAN", "NGROUPS", "NALLIES", "NWEATHER":
+	case "NHEALTH", "NCOUNTERS", "NRELOAD", "NVETERAN", "NGROUPS", "NALLIES", "NWEATHER", "NVICTORY":
 		return g.activateCommunityHUDOption(name)
 	case "BGHOLD", "BGMAN", "BGROAM", "BPHOLD", "BPMAN", "BPROAM", "NCYCLE", "NDOUBLE", "NHUNDRED", "NSWITCHALT", "NOVERVIEW":
 		return g.activateBuilderOption(name)
@@ -1597,7 +1604,9 @@ func (g *gameShell) activateRetailOptionsGadget(name string) bool {
 
 	// ---- MUSIC ----------------------------------------------------------
 	case "NOTRAK":
-		g.audioPrefs.MusicMode = boolInt(g.audioPrefs.MusicMode == 0)
+		// The stage the click selected is the value, so the switch always
+		// does what it then shows [03 R-AUD-01 §4][07 R-WGT-01 §3].
+		g.audioPrefs.MusicMode = g.retailOptionsStage("NOTRAK", 2, g.audioPrefs.MusicMode)
 		g.setRetailMusicEnabled(g.audioPrefs.MusicMode != 0)
 		g.syncRetailMusicPage()
 		return true
@@ -1811,7 +1820,7 @@ func retailOptionsPageKey(name string) (string, bool) {
 
 func retailOptionsCueKey(name string) string {
 	switch name {
-	case "COMMUNITYHUD", "NCOUNTERS", "NRELOAD", "NVETERAN", "NGROUPS", "NALLIES", "NWEATHER":
+	case "COMMUNITYHUD", "NHEALTH", "NCOUNTERS", "NRELOAD", "NVETERAN", "NGROUPS", "NALLIES", "NWEATHER", "NVICTORY":
 		return strings.ToLower(name)
 	case "BUILDERS", "BGHOLD", "BGMAN", "BGROAM", "BPHOLD", "BPMAN", "BPROAM", "NCYCLE", "NDOUBLE", "NHUNDRED", "NSWITCHALT", "NOVERVIEW":
 		return strings.ToLower(name)

@@ -97,7 +97,11 @@ func selectionPresetRow() controlsPresetRow {
 // (research/extensions/ta-zero-engine.md, "Documented engine-level behavior").
 var controlsPresetRows = []controlsPresetRow{
 	selectionPresetRow(),
-	presentationRow("Factory Ctrl+Shift 100", 0, 0, 1, func(p *settings.Presentation) *int { return &p.FactoryHundredBatch }),
+	// The pinned source's quick-key handler, which the Community selection
+	// row already follows, makes Shift's factory step 100 while Ctrl is held;
+	// ProTA 4.8's recorder lists "Queue 100 units" among the interface-upgrade
+	// functions it enables (DESIGN_INTERFACE_HUD_INPUT §3.13).
+	presentationRow("Factory Ctrl+Shift 100", 1, 0, 1, func(p *settings.Presentation) *int { return &p.FactoryHundredBatch }),
 	presentationRow("Double-click select", 1, 0, 1, func(p *settings.Presentation) *int { return &p.DoubleClickSelection }),
 	presentationRow("Order drag", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.QueuedOrderDrag }),
 	{

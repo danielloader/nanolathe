@@ -31,17 +31,17 @@ func (b *battleSession) spawnChatCommand(words []string) {
 // unitNameChatCommand is the Modern shorthand `+<unit>`: a single word that
 // names a catalog unit and matched no registered command queues the same
 // request as `+spawn <unit>`. Retail reaches a unit-name default handler only
-// with developer access, and spawns per matching definition for the viewing
-// player with a 32-unit step [07 R-CAM-01 §6][07 R-CAM-01 §9]; this shorthand
-// is Nanolathe Modern policy with the `+spawn` contract instead
+// with developer access. It creates one fully built unit per definition whose
+// name matches the word as a wildcard pattern, owned by the slot the second
+// word names (slot 0 when absent), stepping 32 world units between footprints,
+// and validates no site [07 R-CAM-01 §6][07 R-CAM-01 §9]. This shorthand is
+// Nanolathe Modern policy with the `+spawn` contract instead — exact name, one
+// unit, local owner, no developer access — and shares only that placement
 // (DESIGN_INTERFACE_HUD_INPUT "Modern spawn command"). A word that names no
 // unit, carries arguments, or arrives under Strict 3.1 stays plain chat with
-// no feedback, as an unregistered retail command does.
-//
-// TODO(question): the retail developer default handler's creation state
-// (complete or nanoframe), per-definition matching rule, wrap arithmetic and
-// RNG effects are not traced; a bounded trace of that handler would settle
-// them before a Strict developer spawn could be offered.
+// no feedback, as an unregistered retail command does. The retail handler
+// itself belongs with developer mode (DESIGN_DEVELOPER_TOOLS) and is not
+// implemented.
 func (b *battleSession) unitNameChatCommand(words []string) bool {
 	if b == nil || b.sess == nil || b.sess.Catalog == nil || len(words) != 1 {
 		return false

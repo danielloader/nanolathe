@@ -133,6 +133,7 @@ func applyInput(in *input.State, sample sampledInput) {
 
 // applyInputWith is applyInput against a caller-supplied double-click
 // recognizer, so a test can drive a press pair without the process-wide one.
+// Key repeat state follows the keyboard state it serves (keyrepeat.go).
 func applyInputWith(in *input.State, sample sampledInput, clicks *doubleClickRecognizer) {
 	if in == nil || in.Mouse == nil || in.Kbd == nil {
 		return
@@ -143,6 +144,8 @@ func applyInputWith(in *input.State, sample sampledInput, clicks *doubleClickRec
 	m, k := in.Mouse, in.Kbd
 	m.ResetEdges()
 	k.ResetEdges()
+	repeat := &nativeKeyRepeat
+	repeat.sync(k)
 
 	for key := input.Key(1); key < input.KeyCount; key++ {
 		wasHeld := k.KeyHeld(key)
@@ -151,13 +154,27 @@ func applyInputWith(in *input.State, sample sampledInput, clicks *doubleClickRec
 			down = false
 		}
 		k.SetKey(key, down)
-		if down && !wasHeld {
+		switch {
+		case down && !wasHeld:
+			repeat.press(key, sample.timestamp)
 			if token, ok := sampledKeyToken(key, sample); ok {
 				if isPasteToken(token) && sample.clipboard != nil {
 					token.Clipboard = portableClipboardText(sample.clipboard())
 				}
 				in.EnqueueToken(token)
 			}
+		case down:
+			// A held editing key re-issues its token at the host repeat
+			// rate, translated with the modifiers of this service, the way a
+			// repeated key-down message was [07 §2]. Only keyRepeats keys
+			// are ever armed, and none of them is a paste token.
+			if repeat.due(key, sample.timestamp) {
+				if token, ok := sampledKeyToken(key, sample); ok {
+					in.EnqueueToken(token)
+				}
+			}
+		default:
+			repeat.release(key)
 		}
 	}
 
@@ -206,10 +223,11 @@ func applyInputWith(in *input.State, sample sampledInput, clicks *doubleClickRec
 		in.EnqueuePointer(event)
 	}
 	// TODO(T25): Ebiten polling exposes no native message order and no
-	// key-repeat history. Do not synthesize those details here. The double-click
-	// classification above is the one reconstruction, and only because its
-	// inputs — interval and rectangle — are host settings rather than retail
-	// behaviour. Each button has an independent recognizer candidate.
+	// key-repeat history. Do not synthesize native order here. The double-click
+	// classification above and the editing-key repeat of keyrepeat.go are the
+	// reconstructions, and only because their inputs — interval, rectangle,
+	// delay and rate — are host settings rather than retail behaviour. Each
+	// button has an independent recognizer candidate.
 	in.PublishPointer()
 
 	// AppendInputChars preserves character order within its own batch. Ebiten

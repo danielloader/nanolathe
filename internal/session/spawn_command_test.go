@@ -37,10 +37,13 @@ func TestSpawnCommandModernOwnershipResourcesAndRNG(t *testing.T) {
 	if s.SimRNG().Draws()-sim != 2 || s.CrtRNG().Draws() != crt {
 		t.Fatal("spawn changed ordinary creation RNG effects")
 	}
+	// Retail's spawn handler validates no site, so a second request at the
+	// occupied point stacks a second unit with the ordinary creation draws
+	// [07 R-CAM-01 §6].
 	sim = s.SimRNG().Draws()
 	s.applyHumanCommand(c, 1)
-	if len(s.Units.Iter()) != 1 || s.SimRNG().Draws() != sim {
-		t.Fatal("occupied site admitted another allocation")
+	if us := s.Units.Iter(); len(us) != 2 || us[1].X != c.Spawn.X || us[1].Z != c.Spawn.Z || s.SimRNG().Draws()-sim != 2 {
+		t.Fatalf("occupied site: units=%d draws=%d, want a stacked second unit and 2 draws", len(s.Units.Iter()), s.SimRNG().Draws()-sim)
 	}
 }
 
@@ -80,17 +83,23 @@ func TestSpawnCommandStrictAndInvalidRequestsDoNotMutate(t *testing.T) {
 	}
 }
 
-func TestSpawnCommandStructureSnaps(t *testing.T) {
+// A structure takes the mission spawner's snap and height, and a second one
+// on the same site is created on top of the first: the retail spawn handler
+// runs no placement validator, not even against depth or an existing yard
+// [07 R-CAM-01 §6][08 R-ENTRY-01 §6].
+func TestSpawnCommandStructureSnapsAndStacks(t *testing.T) {
 	s := wu19205SpawnerSession(t)
-	s.Catalog.Units["teststruct"].MinWaterDepth = -10000
 	c := HumanCommand{Kind: HumanSpawn, Spawn: HumanSpawnCommand{Unit: "teststruct", X: 165 << 16, Y: 90 << 16, Z: 165 << 16}}
-	s.applyHumanCommand(c, 1)
-	us := s.Units.Iter()
-	if len(us) != 1 {
-		t.Fatalf("spawned units = %d", len(us))
+	for range 2 {
+		s.applyHumanCommand(c, 1)
 	}
-	u := us[0]
-	if u.X != 160<<16 || u.Z != 160<<16 || u.Y != 10<<16 {
-		t.Fatalf("structure point = %d,%d,%d", u.X, u.Y, u.Z)
+	us := s.Units.Iter()
+	if len(us) != 2 {
+		t.Fatalf("spawned units = %d, want 2 stacked", len(us))
+	}
+	for _, u := range us {
+		if u.X != 160<<16 || u.Z != 160<<16 || u.Y != 10<<16 {
+			t.Fatalf("structure point = %d,%d,%d", u.X, u.Y, u.Z)
+		}
 	}
 }

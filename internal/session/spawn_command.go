@@ -12,8 +12,10 @@ import (
 )
 
 // applySpawnCommand is Nanolathe Modern policy, not a retail cheat:
-// DESIGN_INTERFACE_HUD_INPUT "Modern spawn command". Validation precedes the
-// ordinary allocator so rejected requests cannot consume creation RNG draws.
+// DESIGN_INTERFACE_HUD_INPUT "Modern spawn command". Its placement is the
+// retail developer spawn handler's (spawnCommandPlacement); its gate, owner
+// and single exact name are the policy's. Rejections precede the ordinary
+// allocator so they cannot consume creation RNG draws.
 func (s *Session) applySpawnCommand(c HumanSpawnCommand, tick uint32) {
 	if s.Gameplay.Normalize() != gameplay.Modern {
 		return
@@ -32,7 +34,7 @@ func (s *Session) applySpawnCommand(c HumanSpawnCommand, tick uint32) {
 		say(fmt.Sprintf("Unknown unit: %s", c.Unit))
 		return
 	}
-	x, y, z, reason := s.checkSpawnPlacement(def, c.X, c.Y, c.Z)
+	x, y, z, reason := s.spawnCommandPlacement(def, c.X, c.Y, c.Z)
 	if reason != "" {
 		say(reason)
 		return
@@ -50,10 +52,31 @@ func (s *Session) applySpawnCommand(c HumanSpawnCommand, tick uint32) {
 	say(fmt.Sprintf("Spawned %s", def.UnitName))
 }
 
-// checkSpawnPlacement is the spawn command's validation, shared with the
-// Survival director (DESIGN_SURVIVAL §6.5): mission placement's structure
-// snapping and height, then bounds, terrain, features, occupancy and building
-// yards. It draws nothing. An empty reason admits the returned position.
+// spawnCommandPlacement places a spawn request where retail's developer
+// unit-spawn handler places each unit: through the mission spawner's position
+// fixup — a structure snaps to its footprint grid and takes the spawner's
+// height probe, a mobile keeps the captured point — and through nothing else.
+// That handler runs no placement validator, so a unit may be spawned on top
+// of units, structures, features or ground it could not be built on; the
+// creator's own refusals (unit limit, no free slot) remain [07 R-CAM-01 §6]
+// [08 R-ENTRY-01 §6]. The one refusal here is Nanolathe's: a captured point
+// off the map, which retail's pointer, confined to the clamped view, could
+// not supply. It draws nothing.
+func (s *Session) spawnCommandPlacement(def *content.UnitDef, px, py, pz numeric.Fixed) (x, y, z numeric.Fixed, reason string) {
+	// Cells are sixteen world units: the 16.16 point shifted right by 20.
+	cx, cz := int64(px>>20), int64(pz>>20)
+	if cx < 0 || cz < 0 || cx >= int64(s.World.CellW) || cz >= int64(s.World.CellH) {
+		return 0, 0, 0, "Cannot spawn: point outside the map"
+	}
+	x, y, z = missionPlacementPosition(s.World, def, mission.UnitPlacement{X: int32(px), Y: int32(py), Z: int32(pz)})
+	return x, y, z, ""
+}
+
+// checkSpawnPlacement is the Survival director's site validation
+// (DESIGN_SURVIVAL §6.5): mission placement's structure snapping and height,
+// then bounds, terrain, features, occupancy and building yards. The `+spawn`
+// command no longer uses it; it places as retail's spawn handler does. It
+// draws nothing. An empty reason admits the returned position.
 func (s *Session) checkSpawnPlacement(def *content.UnitDef, px, py, pz numeric.Fixed) (x, y, z numeric.Fixed, reason string) {
 	// Reuse mission placement for structure snapping and authored waterline
 	// height; mobiles retain the captured terrain point [08 R-ENTRY-01 §6].

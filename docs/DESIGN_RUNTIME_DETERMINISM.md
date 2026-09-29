@@ -464,9 +464,11 @@ floor the saved binary64, then narrow to the signed low word; store
 clamps to zero and is not repaired as elapsed time `[01 §4.2]`.
 
 **C3 — speed.** The multiplier is `activeSpeed × 0.1` with `activeSpeed`
-clamped `1..20`. The lag-throttle expression `max(0.01, (3600 − min(lag, 3600))
-/ 2700)` is implemented and unreachable, and is kept rather than deleted
-`[01 §4.2]`.
+clamped `1..20`. The slowest step, speed 1 (`Game Speed -9`), is a tenth of
+nominal — three ticks a second, slow motion rather than a pause — and no step
+reaches zero `[01 §4.3]`. The lag-throttle expression `max(0.01, (3600 −
+min(lag, 3600)) / 2700)` is implemented and unreachable, and is kept rather
+than deleted `[01 §4.2]`.
 
 **C4 — pause is a branch.** The single-player path short-circuits the budget and
 stalls the anchor, so unpause yields one capped burst of at most five. The

@@ -278,10 +278,18 @@ the named sound cue played through the interface sound path.
 | `0xED` | F12 | Clear the message ring (producer and display indices both reset to zero). |
 | `0xF8` | Pause | Toggle the local pause bit and emit packet `0x19` with sub-kind `0` and the new bit ([01 §4.3]). |
 
-Tokens with no case (including `0x20` Space, digits with Ctrl+0, and every
-`0xF0..0xF7` navigation token) are dropped by the dispatcher; the arrow
-tokens are never dispatched at all — scrolling uses the held-key queries
-in the scroll pass, not the ring.
+Tokens with no case (including `0x20` Space, digits with Ctrl+0, `0xEE`
+Insert, `0xEF` Delete, and every `0xF0..0xF7` navigation token) are dropped
+by the dispatcher; the arrow tokens are never dispatched at all — scrolling
+uses the held-key queries in the scroll pass, not the ring.
+
+**Established — Insert replays nothing.** Neither this dispatcher nor the
+film second switch of [R-CAM-01 §9] has an Insert case, and none of the
+input pass's special-token peeks names it. Insert's one consumer is the
+focused text editor, where it is the clipboard paste of §2; the chat editor
+holds no history of earlier lines, since every commit clears its storage
+(§5 "Chat"). The retained last `+` command is replayed only by `\`, and only
+with developer access ([R-CAM-01 §9]).
 
 **Established fact — Ctrl+D is a toggle** (direct static trace of the
 `0xAD` case and its two queue helpers). The case runs these steps:
@@ -629,14 +637,57 @@ truncates and closes an empty `memdump.txt`), `Move x y` (camera-jump family), `
 Description`), `SeaLevel n`, `Search x y r`, `SelBoxes` (flags bit 2),
 `TreeDeath` (flags bit 3), `Feature name` (spawn a feature at the pointer),
 `ZBuffer`. The **default handler** (mask 4) treats an unrecognised first word
-as a unit definition name and spawns one unit per matching definition for the
-viewing player at the pointer's world position, stepping the spawn point by
-32 world units per unit and wrapping at the play-area edge. `+syncerr` is a
+as a unit-name pattern and spawns one unit per matching definition at the
+pointer's world position (contract below). `+syncerr` is a
 separate string with a network-only reader. None of these run outside
 developer mode. The release-build stubs and profiler routing are detailed in
 [01 R-PLAT-01 §9]; a registered name does not establish that its advertised
 diagnostic exists. The remaining commands above are a vocabulary census,
 not a complete implementation contract for their deeper effects.
+
+**Established — the default unit-spawn handler** (direct static trace;
+corrects this section's earlier "for the viewing player"):
+
+1. **Start point.** A copy of the pointer's world position triple — the same
+   position the world-click paths consume — is the running spawn point.
+2. **Matching.** The handler walks the loaded unit definitions in definition
+   order from index 1 (index 0 is never offered). The first word is a
+   **pattern**, compared with each definition's name case-insensitively
+   (both sides upper-cased byte by byte): `?` matches any one character and
+   `*` any run of characters, including none; every other byte must match.
+   A match must consume the whole name. `+CORRL` therefore matches only
+   `CORRL`, while `+cor*` matches every definition whose name begins `COR`.
+3. **Owner.** The second word's integer value (the handlers' shared
+   signed-decimal reader, above), narrowed to its low byte, is the owning
+   player slot; with no second word the owner is slot **0**. The handler
+   validates neither the slot nor any other player state; the viewing slot
+   is not consulted.
+4. **Per match, in order.** Except for the first match, the spawn point's X
+   first advances by the definition's half-width (the negated minimum-X word
+   of its compiled extent record, `footprintX × 8` world units). The
+   point then passes through the mission spawner's **position fixup** of
+   [08 R-ENTRY-01 §6] — a non-mobile definition snaps to its footprint grid
+   and takes the spawner's terrain height probe; a mobile one keeps the point
+   unchanged — and the snapped point becomes the running point. The unit is
+   created through the common allocator with the same arguments the mission
+   spawner and the skirmish commander placement pass: **fully built**, in any
+   free slot of the owner's slice, with the allocator's ordinary creation
+   draws on success ([04 §2.3b]). After the attempt, X advances by 32 world
+   units plus the definition's half-width (its maximum-X extent word), so
+   the next unit's footprint begins 32 world units past this one's. If the
+   new X is at or beyond the play-area right edge ([03 §3.4]; a signed
+   comparison), Z advances by 160 world units and X restarts at 160. The
+   match count and the step advance whether or not the allocator succeeded.
+5. **No site validation.** Nothing on the path runs the placement validator
+   or tests occupancy, features, slope, depth or building yards: units spawn
+   on top of units, structures and features, and on ground they could not be
+   built on. The only refusals are the common allocator's own ([04 §2.3a]:
+   the per-definition limit gate for that owner, or no free slot in the
+   owner's slice), each of which skips that match silently.
+6. **No match.** When no definition matched, the handler formats
+   `debugdat\<word>.txt`, and if that file opens it runs it as a command
+   script (the `Include` path) and then restores the pointer's world
+   position triple.
 
 ### Interface options (`SPEEDS.GUI`) and their consumers [R-CAM-01 §7]
 

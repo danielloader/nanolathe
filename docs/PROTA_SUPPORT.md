@@ -75,8 +75,8 @@ setting with its new value and your current one; **Apply** writes them and
 ordinary option you can change later
 ([the full table](DESIGN_MODS_MUTATORS.md#43-selection-and-precedence)):
 
-- **Controls:** idle-unit keys, double-click selection, queued-order drag, and
-  digits recalling groups (`SwitchAlt`).
+- **Controls:** idle-unit keys, double-click selection, queued-order drag,
+  Ctrl+Shift factory batches of 100, and digits recalling groups (`SwitchAlt`).
 - **HUD:** Community counters, reload bars, veterancy labels, group digits,
   the wind and tide readout, the game clock, the victory cue, and a
   dot-colour square on each allied resource bar.
@@ -104,6 +104,16 @@ With **Idle keys** on (Options → Orders):
 | Ctrl+F | Select the next idle factory and centre the view. |
 | Ctrl+S | Select on-screen units in the authored `CTRL_W` category that cannot fly. |
 | Ctrl+Shift+B/F | Keep the ordinary additive authored-category selection. |
+
+With **100 batch** on (Options → Orders), Ctrl+Shift+click on a unit in a
+factory's build menu queues 100 more, and Ctrl+Shift+right-click takes 100
+off, as ProTA's interface upgrade does. Shift alone keeps 5, Alt gives 20, and
+the stockpile buttons keep 1 and 5.
+
+With the modern renderer, Shift-dragging a building row over your builder's
+queued sites of the same building cancels them, as Shift-clicking each one
+does, and adds the empty sites along the row
+([DESIGN_INTERFACE_HUD_INPUT §3.11](DESIGN_INTERFACE_HUD_INPUT.md#311-modern-drag-commands)).
 
 **2-click** selects every on-screen unit of the clicked type, with either
 mouse button. **Digits: Groups** (Options → Orders, or the `+switchalt` chat

@@ -36,7 +36,7 @@ func markers(names ...string) markerFS {
 	return markerFS{present: present}
 }
 
-// TestShippedProfilesCarryTheInventoryTables locks the four shipped tables.
+// TestShippedProfilesCarryTheInventoryTables locks the shipped tables.
 // The directory names are the ones the content sets' own archives and
 // configuration files spell; the limits are the values their `.ini` files
 // declare, except the two read caps, which are Nanolathe host caps.
@@ -62,6 +62,13 @@ func TestShippedProfilesCarryTheInventoryTables(t *testing.T) {
 			directories: map[string]string{
 				"weapons": "weaponP", "gamedata": "gamedatP", "guis": "guiP",
 				"unitpics": "unitpicsP", "download": "downloadP",
+			},
+			limits: profiles.Limits{Units: 16000, Weapons: 16000, TNTBytes: 64 << 20, LOSBytes: 8 << 20, UnitLimit: 1500, SearchEntries: 66650},
+		},
+		"mayhem": {
+			markers: []string{"downloadsM", "guiM", "unitpicM", "weaponM"},
+			directories: map[string]string{
+				"download": "downloadsM", "guis": "guiM", "unitpics": "unitpicM", "weapons": "weaponM",
 			},
 			limits: profiles.Limits{Units: 16000, Weapons: 16000, TNTBytes: 64 << 20, LOSBytes: 8 << 20, UnitLimit: 1500, SearchEntries: 66650},
 		},
@@ -111,7 +118,7 @@ func TestShippedProfilesCarryTheInventoryTables(t *testing.T) {
 // Detection follows complete logical trees, even after an archive is renamed.
 // An unrelated or incomplete tree must not accidentally select a preset.
 func TestDetectionRequiresOneCompleteLayout(t *testing.T) {
-	for _, name := range []string{"retail", "escalation", "prota", "zero"} {
+	for _, name := range []string{"retail", "escalation", "prota", "zero", "mayhem"} {
 		t.Run(name, func(t *testing.T) {
 			preset, err := profiles.Lookup(name)
 			if err != nil {
@@ -130,6 +137,10 @@ func TestDetectionRequiresOneCompleteLayout(t *testing.T) {
 				}
 			}
 		})
+	}
+	mayhem, err := profiles.Resolve(markers("downloadsM", "guiM", "unitpicM", "weaponM"), "mayhem")
+	if err != nil || mayhem.Name != "mayhem" || mayhem.Gameplay.Table != "mayhem" || mayhem.MinimumGameplay != "community-3.9" {
+		t.Fatalf("explicit Mayhem profile = %+v, %v", mayhem, err)
 	}
 	profile, err := profiles.Detect(markers("TAESC.gp3", "unitsE"))
 	if err != nil || profile.Name != "retail" {
@@ -180,7 +191,7 @@ func TestResolvePrefersTheExplicitSelector(t *testing.T) {
 
 	if _, err := profiles.Lookup("escalatoin"); err == nil {
 		t.Fatal("a misspelled profile name was accepted")
-	} else if !strings.Contains(err.Error(), "providers searched [escalation, prota, zero, retail]") {
+	} else if !strings.Contains(err.Error(), "providers searched ["+strings.Join(profiles.Names(), ", ")+"]") {
 		t.Fatalf("rejection %q does not name the shipped profiles", err)
 	}
 }
@@ -210,7 +221,7 @@ func TestAuthoredProfileRejectsShapesNoLoaderCouldUse(t *testing.T) {
 }
 
 // The optional recommendations are the fallback for a mod whose metadata
-// names none (docs/DESIGN_MODS_MUTATORS.md §4.3); ProTA and Zero ship them, and
+// names none (docs/DESIGN_MODS_MUTATORS.md §4.3); ProTA, Zero and Mayhem ship them, and
 // an unknown value is refused like any other malformed profile.
 func TestProfileRecommendations(t *testing.T) {
 	for _, name := range profiles.Names() {
@@ -224,7 +235,7 @@ func TestProfileRecommendations(t *testing.T) {
 		} else if name == "zero" {
 			wantControls, wantMinimum = "zero", "community-3.9"
 		}
-		if name == "escalation" {
+		if name == "escalation" || name == "mayhem" {
 			wantMinimum = "community-3.9"
 		}
 		if profile.Controls != wantControls || profile.MinimumGameplay != wantMinimum {

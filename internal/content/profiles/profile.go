@@ -9,7 +9,7 @@
 // docs/DESIGN_CONTENT_VFS.md §5 "Content profiles" and listed in
 // docs/INVARIANTS.md I11.
 //
-// The four shipped profiles are embedded JSON, so adding one is a data edit.
+// The shipped profiles are embedded JSON, so adding one is a data edit.
 // Their evidence is the content sets' own documentation and configuration
 // files, recorded in the E1 inventory; no third-party executable was examined.
 package profiles
@@ -33,7 +33,7 @@ var shipped embed.FS
 // detectionOrder is the order detection walks the shipped profiles. It is an
 // explicit list rather than a directory listing so ambiguity diagnostics have
 // a stable order [I1]. Retail is the fallback when no renamed layout matches.
-var detectionOrder = [...]string{"escalation", "prota", "zero", "retail"}
+var detectionOrder = [...]string{"escalation", "prota", "zero", "mayhem", "retail"}
 
 // RetailName is the profile every unmodified install resolves to.
 const RetailName = "retail"
@@ -196,6 +196,7 @@ func Lookup(selector string) (Profile, error) {
 // Archive filenames are packaging, not content: an archive need not expose its
 // host filename through Stat. Multiple matching layouts require an explicit
 // selector rather than silently choosing one content set by preset order.
+// An empty marker list never auto-detects a profile.
 func Detect(mounted vfs.FSOps) (Profile, error) {
 	if mounted == nil {
 		return load(RetailName)
@@ -208,6 +209,9 @@ func Detect(mounted vfs.FSOps) (Profile, error) {
 		profile, err := load(name)
 		if err != nil {
 			return Profile{}, err
+		}
+		if len(profile.Detect) == 0 {
+			continue
 		}
 		matched := true
 		for _, marker := range profile.Detect {
@@ -245,6 +249,10 @@ func Resolve(mounted vfs.FSOps, selector string) (Profile, error) {
 
 // GameplaySources carries the authored table and legacy parameter defaults.
 // Strict ignores these declarations (DESIGN_COMMUNITY_PATCH §3.2 and §5).
+// TODO(question): Does Total Mayhem 11.3.0's bundled tdraw.dll match the
+// pinned Mayhem table exactly? A matching licensed source revision or
+// versioned release record would settle it; the catalogue labels this
+// package experimental until then (research/extensions/total-mayhem-engine.md).
 func (p Profile) GameplaySources() []community.Overrides {
 	legacy := community.Overrides{}
 	if p.Name != RetailName && p.Limits.UnitLimit != 0 {

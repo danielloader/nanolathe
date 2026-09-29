@@ -787,8 +787,8 @@ those content sets' own archives, readmes and `.ini` files; no patched
 executable was examined.
 **Nanolathe answers with a content profile**: a named, load-time description
 of a mounted content set carrying a directory table and the limits its content
-needs. `internal/content/profiles` embeds four — `retail` (empty), `escalation`,
-`prota`, `zero` — as JSON, so adding one is a data edit. After mounting and
+needs. `internal/content/profiles` embeds five — `retail` (empty), `escalation`,
+`prota`, `zero`, `mayhem` — as JSON, so adding one is a data edit. After mounting and
 before anything reads content, detection checks each known layout's complete
 set of renamed directories in the mounted logical namespace. It does not
 require a particular archive filename or version. One complete layout selects
@@ -798,7 +798,9 @@ only orders diagnostics. Ordinary launches need no `--content-profile` flag:
 retail-layout mods use the ordinary mounted overlay, and known renamed layouts
 are detected automatically. Unknown renamed layouts remain selectable through
 an authored JSON table; directory prefixes and suffixes are not enough evidence
-to infer which families they contain. The selected profile's table becomes a
+to infer which families they contain. Mayhem keeps `units` and `gamedata` but
+ships `weaponM`, `guiM`, `unitpicM`, and `downloadsM`; their complete marker set
+selects its profile. The selected profile's table becomes a
 `vfs.Layout`, a read view over the mounted overlay that rewrites the first path segment on the way down and reverses it on
 the way back, so the compiler keeps asking for `units/` and provenance, the
 catalog hash inputs and every diagnostic stay retail-named. An empty table
@@ -934,7 +936,7 @@ fallback census, battle terrain, battle minimap and menu preview. A ranged
 catalog census is unaffected, because it reads two short header ranges and
 never the whole terrain. Consequently a listed map can still exceed the cap
 when opened; range support must not bypass the full-load cap. The resolved
-retail profile uses 16 MiB and the three shipped mod profiles use 64 MiB.
+retail profile uses 16 MiB and the four shipped mod profiles use 64 MiB.
 Applying this existing profile policy to runtime readers replaces their former
 independent 32 MiB terrain/radar and 1 GiB menu limits. Detached callers with
 no catalog limit retain the bounded 32 MiB terrain/radar fallback; a menu

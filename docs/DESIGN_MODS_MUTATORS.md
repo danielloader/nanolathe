@@ -525,6 +525,16 @@ For whoever builds the hosted zips:
   mounts the original root list and the merged root and finds identical
   winners (`vfs.Manifest`) and an identical compiled catalog hash (§13 unit 8).
 
+**Total Mayhem 11.3.0.** Its one upstream ZIP contains authored archives
+`mayhem.gp3` and `TADemoM.ufo`, icons and changelogs alongside the retail
+`TotalA.exe`, engine DLLs and Windows renderer files. The hosted package keeps
+the authored archives, icons and changelogs only. Its `mayhem` content profile
+maps the four renamed content trees, carries the limits documented in
+`mayhem.ini`, and selects the existing `mayhem` Community table. The catalogue
+marks compatibility experimental because exact equivalence to its shipped
+runtime DLL and all gameplay/controls paths is not established
+([Total Mayhem package](../research/extensions/total-mayhem-engine.md)).
+
 ## 6. Mutators
 
 ### 6.1 Policy

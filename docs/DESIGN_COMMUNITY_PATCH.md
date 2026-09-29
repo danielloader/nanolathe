@@ -244,10 +244,12 @@ the maintainers' "all features enabled" build and the one the ProTA package
 ships for otherwise-retail content — and it is what Community 3.9 and Modern
 start from for retail content (D2). The shipped content profiles gain a
 `gameplay` block: `escalation.json` → `escalation`, `prota.json` → `prota`,
-`zero.json` → `tazero`, `retail.json` → nothing (the set's base table
-applies). The three profiles Nanolathe ships no content table for (`bta`,
-`mayhem`, `twilight`) are selectable by name from the settings file or a
-user-authored profile.
+`zero.json` → `tazero`, `mayhem.json` → `mayhem`, `retail.json` → nothing
+(the set's base table applies). The two tables Nanolathe ships no content
+profile for (`bta`, `twilight`) are selectable by name from the settings file
+or a user-authored profile. The `mayhem` table comes from the pinned current
+source profile; equivalence to the DLL bundled in Total Mayhem 11.3.0 remains
+unverified ([Total Mayhem package](../research/extensions/total-mayhem-engine.md#executable-and-runtime)).
 
 The five ProTA 4.8 package switches of §4.7 are false in **every** shipped
 table, `prota` included. They are behaviours of that historical package's

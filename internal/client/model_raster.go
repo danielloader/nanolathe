@@ -79,6 +79,7 @@ type screenPoly struct {
 	heights  []float32
 	normal   [3]float32
 	material uint8
+	glint    uint8
 	// x2, y2 are the corner's exact doubled-resolution screen coordinates,
 	// filled by the direct projection alone for the Enhanced supersample
 	// (doubledPlacement.exact; DESIGN_GPU_RENDERER §17.3). The local

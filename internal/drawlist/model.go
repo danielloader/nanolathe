@@ -39,6 +39,19 @@ type ModelFace struct {
 	// Material is a curated Enhanced art annotation (GPU design §29).
 	// Zero leaves the existing lighting unchanged.
 	Material uint8
+	// Glint is a curated per-texture metallic glint strength (GPU design
+	// §23.7). Zero is the tuned glint; otherwise Glint-1 is a whole percentage
+	// of it, 0..200, so 1 turns the glint off.
+	Glint uint8
+}
+
+// GlintScale is the factor the face's glint weight is multiplied by: one for
+// the tuned glint, zero for none.
+func (f *ModelFace) GlintScale() float32 {
+	if f.Glint == 0 {
+		return 1
+	}
+	return float32(f.Glint-1) / 100
 }
 
 // Authored presentation finishes, not retail material metadata (GPU design §29).

@@ -594,7 +594,7 @@ func (c *Client) sameModelPacket(a, b *drawlist.ModelGeometry) bool {
 	for i := range a.Faces {
 		fa, fb := &a.Faces[i], &b.Faces[i]
 		if fa.Texture != fb.Texture || fa.Color != fb.Color || fa.Shaded != fb.Shaded ||
-			fa.Normal != fb.Normal || fa.Material != fb.Material || !slices.Equal(fa.Vertices, fb.Vertices) {
+			fa.Normal != fb.Normal || fa.Material != fb.Material || fa.Glint != fb.Glint || !slices.Equal(fa.Vertices, fb.Vertices) {
 			return false
 		}
 	}

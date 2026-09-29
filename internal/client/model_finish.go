@@ -16,19 +16,26 @@ import (
 // metadata (DESIGN_GPU_RENDERER §29.1). It lives in an authored TDF file rather
 // than in Go so the art classification is reviewable and overridable as
 // content: the reviewed stock texture sheet supplies neutral plate and painted
-// camouflage, and unknown art keeps its existing lighting.
+// camouflage, and unknown art keeps its existing lighting. The same file sets a
+// texture's metallic glint strength (§23.7), so a content pack controls both
+// by texture name.
 
 // MaterialTablePath is the logical path an install may supply to replace the
 // embedded annotation wholesale — a remaster pack or a loose gamedata
 // directory. Absent, the embedded table stands.
 const MaterialTablePath = "nanolathe/materials.tdf"
 
-// materialSection is the texture annotation's section, and effectsSection the
-// per-family effect strengths a content pack may set beside it (§19.4, §15).
+// materialSection is the texture annotation's section, glintSection the
+// per-texture glint strengths, and effectsSection the per-family effect
+// strengths a content pack may set beside them (§19.4, §15, §23.7).
 const (
 	materialSection = "materials"
+	glintSection    = "glint"
 	effectsSection  = "effects"
 )
+
+// GlintMax bounds a texture's glint percentage, like an effect family's.
+const GlintMax = 200
 
 // GlowFamilies is a content pack's strength for Enhanced lights and ground trails,
 // as a percentage of the tuned look (DESIGN_GPU_RENDERER §19.4 and §15): Weapons is the
@@ -64,11 +71,17 @@ var embeddedMaterialTDF []byte
 // at load time, so the pointer swap is atomic and the map itself never mutates.
 var materialTable atomic.Pointer[map[string]uint8]
 
-// materialGeneration counts the annotations installed into materialTable. It
-// exists so a resolved texture reference can carry the finish it read as a
-// plain byte and still be invalidated when an install replaces the table: the
-// per-face compose path compares this counter instead of lowercasing the
-// texture name and probing the map on every textured face.
+// glintTable is the active per-texture glint strength, keyed like
+// materialTable and holding drawlist.ModelFace.Glint's encoding: a name absent
+// from it keeps the tuned glint. It is replaced whole at load time and read
+// under the same generation as materialTable.
+var glintTable atomic.Pointer[map[string]uint8]
+
+// materialGeneration counts the annotations installed into materialTable and
+// glintTable. It exists so a resolved texture reference can carry the finish
+// and glint it read as plain bytes and still be invalidated when an install
+// replaces a table: the per-face compose path compares this counter instead
+// of lowercasing the texture name and probing the maps on every textured face.
 //
 // A writer stores the table first and bumps the counter second, and a reader
 // samples the counter first and the table second. Both orders are the
@@ -76,26 +89,30 @@ var materialTable atomic.Pointer[map[string]uint8]
 // generation and is therefore discarded, never kept under the new one.
 var materialGeneration atomic.Uint64
 
-// materialForKey annotates an already-lowercased texture name and reports the
-// generation it was read under, for a caller that wants to cache the byte.
-func materialForKey(key string) (uint8, uint64) {
-	gen := materialGeneration.Load()
-	table := materialTable.Load()
-	if table == nil {
-		return drawlist.ModelMaterialDefault, gen
+// materialForKey annotates an already-lowercased texture name with its finish
+// and its glint encoding, and reports the generation they were read under, for
+// a caller that wants to cache the bytes.
+func materialForKey(key string) (material, glint uint8, gen uint64) {
+	gen = materialGeneration.Load()
+	if table := materialTable.Load(); table != nil {
+		material = (*table)[key]
 	}
-	return (*table)[key], gen
+	if table := glintTable.Load(); table != nil {
+		glint = (*table)[key]
+	}
+	return material, glint, gen
 }
 
 func init() {
-	table, families, err := parseContentTable(embeddedMaterialTDF)
-	if err != nil || table == nil {
+	table, glint, families, err := parseContentTable(embeddedMaterialTDF)
+	if err != nil || table == nil || glint == nil {
 		// The embedded file ships inside the binary, so a parse failure is a
 		// build defect rather than a content condition; the package tests fail
 		// on it before anything reaches a player.
 		panic(fmt.Sprintf("nanolathe: embedded material annotation is unreadable: %v", err))
 	}
 	materialTable.Store(&table)
+	glintTable.Store(&glint)
 	materialGeneration.Add(1)
 	glowFamilies.Store(&families)
 }
@@ -133,33 +150,64 @@ func findSection(doc *formats.Document, name string) *formats.Section {
 }
 
 // parseContentTable reads the whole annotation file: the [materials] texture
-// table, nil when the file has no such section, and the [effects] family
-// strengths, every family at its default when the file has none. A file with
-// neither section is unreadable, and so is one whose [materials] section
-// annotates nothing or whose [effects] section holds a value that is not a
-// whole number.
-func parseContentTable(data []byte) (map[string]uint8, GlowFamilies, error) {
-	families := DefaultGlowFamilies()
+// table and the [glint] strength table, each nil when the file has no such
+// section, and the [effects] family strengths, every family at its default
+// when the file has none. A file with none of the three sections is
+// unreadable, and so is one whose [materials] section annotates nothing or
+// whose [glint] or [effects] section holds a value that is not a whole number.
+func parseContentTable(data []byte) (table, glint map[string]uint8, families GlowFamilies, err error) {
+	families = DefaultGlowFamilies()
 	doc, err := formats.ParseTDF(data)
 	if err != nil {
-		return nil, families, err
+		return nil, nil, families, err
 	}
-	materials, effects := findSection(doc, materialSection), findSection(doc, effectsSection)
-	if materials == nil && effects == nil {
-		return nil, families, fmt.Errorf("no [%s] or [%s] section", materialSection, effectsSection)
+	materials, glints, effects := findSection(doc, materialSection), findSection(doc, glintSection), findSection(doc, effectsSection)
+	if materials == nil && glints == nil && effects == nil {
+		return nil, nil, families, fmt.Errorf("no [%s], [%s] or [%s] section", materialSection, glintSection, effectsSection)
 	}
-	var table map[string]uint8
 	if materials != nil {
 		if table, err = materialSectionTable(materials); err != nil {
-			return nil, families, err
+			return nil, nil, families, err
+		}
+	}
+	if glints != nil {
+		if glint, err = glintSectionTable(glints); err != nil {
+			return nil, nil, families, err
 		}
 	}
 	if effects != nil {
 		if families, err = parseGlowFamilies(effects); err != nil {
-			return nil, families, err
+			return nil, nil, families, err
 		}
 	}
-	return table, families, nil
+	return table, glint, families, nil
+}
+
+// glintSectionTable reads the authored [glint] section into a lowercase
+// texture-name map of drawlist.ModelFace.Glint encodings: a whole percentage
+// of the tuned glint, clamped to 0..GlintMax, stored plus one so that zero
+// stays the tuned glint. 100 is the tuned glint itself and is not stored. A
+// repeated spelling keeps its last value [fmt tdf "Duplicate keys"]. An empty
+// section is valid and leaves every texture at the tuned glint.
+func glintSectionTable(section *formats.Section) (map[string]uint8, error) {
+	table := make(map[string]uint8)
+	for _, item := range section.Assignments() {
+		name := strings.ToLower(strings.TrimSpace(item.Key))
+		if name == "" {
+			continue
+		}
+		v, err := strconv.Atoi(strings.TrimSpace(item.Value))
+		if err != nil {
+			return nil, fmt.Errorf("[%s] %s=%q is not a whole percentage", glintSection, item.Key, item.Value)
+		}
+		v = min(max(v, 0), GlintMax)
+		if v == 100 {
+			delete(table, name)
+			continue
+		}
+		table[name] = uint8(v + 1)
+	}
+	return table, nil
 }
 
 // parseGlowFamilies reads the [effects] section: light and trail percentages,
@@ -226,24 +274,30 @@ func materialSectionTable(section *formats.Section) (map[string]uint8, error) {
 // materialDiagnostic is the one diagnostic shape this loader reports
 // [AGENTS.md §Diagnostics].
 func materialDiagnostic(logical, providers string, cause error) error {
-	return fmt.Errorf("nanolathe: material annotation override is unreadable: logical path %s, providers searched [%s], expected a TDF [%s] section of texture=metal|paint and/or an [%s] section of family=percent: %w",
-		logical, providers, materialSection, effectsSection, cause)
+	return fmt.Errorf("nanolathe: material annotation override is unreadable: logical path %s, providers searched [%s], expected a TDF [%s] section of texture=metal|paint, a [%s] section of texture=percent and/or an [%s] section of family=percent: %w",
+		logical, providers, materialSection, glintSection, effectsSection, cause)
 }
 
 // SetMaterialTable installs an authored annotation file. Its [materials]
 // section replaces the texture table whole; a file without one keeps the table
-// in force, so a pack may set only its effect strengths. Its [effects] section
+// in force, so a pack may set only its effect strengths. Its [glint] section
+// likewise replaces the glint table whole or, absent, keeps it. Its [effects] section
 // replaces the family strengths, and a file without one restores the defaults.
 // Everything in force is kept when the supplied bytes cannot be read, so a
 // broken override falls back to the embedded annotation rather than to no
 // finish.
 func SetMaterialTable(logical string, data []byte, providers string) error {
-	table, families, err := parseContentTable(data)
+	table, glint, families, err := parseContentTable(data)
 	if err != nil {
 		return materialDiagnostic(logical, providers, err)
 	}
 	if table != nil {
 		materialTable.Store(&table)
+	}
+	if glint != nil {
+		glintTable.Store(&glint)
+	}
+	if table != nil || glint != nil {
 		materialGeneration.Add(1)
 	}
 	glowFamilies.Store(&families)
@@ -254,10 +308,11 @@ func SetMaterialTable(logical string, data []byte, providers string) error {
 // load starts from the embedded table and then applies the override the
 // content supplies at MaterialTablePath, if any, so remounting different
 // content in one process (a mod switch, docs/DESIGN_MODS_MUTATORS.md §4.4)
-// never keeps the previous content's table: an override without a [materials]
-// section sets only its [effects] over the embedded table, and one that cannot
-// be read leaves the embedded table in force and reports why. No such file is
-// the ordinary case and not an error.
+// never keeps the previous content's tables: an override without a [materials]
+// or [glint] section sets only the sections it has over the embedded ones, and
+// one that cannot be read leaves the embedded tables in force and reports why.
+// The glint reset relies on the embedded file carrying a [glint] section of its
+// own, which init enforces. No such file is the ordinary case and not an error.
 func LoadMaterialTable(fs vfs.FSOps) error {
 	if fs == nil {
 		return nil
@@ -282,6 +337,16 @@ func modelTextureMaterial(texture string) uint8 {
 	table := materialTable.Load()
 	if table == nil {
 		return drawlist.ModelMaterialDefault
+	}
+	return (*table)[strings.ToLower(texture)]
+}
+
+// modelTextureGlint is a textured unit face's glint encoding from the active
+// table (DESIGN_GPU_RENDERER §23.7): zero, the tuned glint, for unlisted art.
+func modelTextureGlint(texture string) uint8 {
+	table := glintTable.Load()
+	if table == nil {
+		return 0
 	}
 	return (*table)[strings.ToLower(texture)]
 }

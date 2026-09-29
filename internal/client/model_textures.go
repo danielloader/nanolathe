@@ -45,7 +45,10 @@ type texRef struct {
 	// was read under; a later install makes the byte stale and the compose path
 	// resolves that face's name itself. A zero value is stale by construction,
 	// because installing the embedded table leaves generation one.
+	// glint is this texture name's glint encoding (drawlist.ModelFace.Glint),
+	// read and invalidated with material.
 	material    uint8
+	glint       uint8
 	materialGen uint64
 }
 
@@ -56,6 +59,16 @@ func (r *texRef) materialAnnotation(texture string) uint8 {
 		return r.material
 	}
 	return modelTextureMaterial(texture)
+}
+
+// glintAnnotation is the glint encoding this reference carries while the
+// annotation it was read from is still installed, and a fresh resolution
+// otherwise.
+func (r *texRef) glintAnnotation(texture string) uint8 {
+	if r.materialGen == materialGeneration.Load() {
+		return r.glint
+	}
+	return modelTextureGlint(texture)
 }
 
 // modelTextureCursor binds the generic presentation cursor to decoded GAF

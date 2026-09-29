@@ -22,8 +22,10 @@ func metalFaceGlint(normal [3]float32) float32 {
 // The constant ColorG lane carries the flat palette byte plus an eight-bit
 // glint weight, equally on every corner. At most sixteen numeric bits leave
 // ample interpolation headroom. No extra vertex, texture, uniform or pass.
+// A per-texture strength above 100% can push the weight past one, so it is
+// clamped to keep the material bits above it intact.
 func metalGlintColor(index byte, glint float32) float32 {
-	return float32(index) + float32(uint32(glint*255+0.5))*256
+	return float32(index) + float32(uint32(min(max(glint, 0), 1)*255+0.5))*256
 }
 
 const metalGlintShaderSource = `

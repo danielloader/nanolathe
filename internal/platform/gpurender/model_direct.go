@@ -1220,7 +1220,7 @@ func (r *Renderer) appendFaceCore(d *modelPlaceCtx, f *drawlist.ModelFace, tex m
 	custom2, custom3 := float32(entry), lighting
 	colorG := float32(f.Color)
 	if r.metalGlint && !shadow {
-		colorG = metalGlintColor(f.Color, metalFaceGlint(f.Normal))
+		colorG = metalGlintColor(f.Color, metalFaceGlint(f.Normal)*f.GlintScale())
 	}
 	if !shadow {
 		colorG = r.modelFinishColor(d, f, colorG)

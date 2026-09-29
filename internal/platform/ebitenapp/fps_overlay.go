@@ -34,20 +34,11 @@ func (a *app) drawFPSOverlay(screen *ebiten.Image, screenWidth int) {
 	}
 	var columns [fpsPlotRight - fpsPlotLeft]fpsGraphColumn
 	// The interval the window presents at is the cap or the display's refresh,
-	// the longer. A frame is late when it missed a refresh: its interval
-	// exceeds that by half a refresh, the rule the live trace report uses
-	// (docs/BATTLE_BENCHMARK.md "Live window trace").
+	// the longer. Each frame was counted late against the spacing the present
+	// schedule meant it to have (presentLateAfter).
 	target := max(a.presentInterval, a.refreshPeriod)
-	lateAfter := time.Duration(0)
-	if target > 0 {
-		refresh := a.refreshPeriod
-		if refresh <= 0 {
-			refresh = target
-		}
-		lateAfter = target + refresh/2
-	}
 	now := time.Now()
-	summary := a.fpsCounter.graph(now, lateAfter, columns[:])
+	summary := a.fpsCounter.graph(now, columns[:])
 	live := a.fpsCounter.live(now)
 	lanes := [...]fpsLane{
 		{"Frame", live.interval, summary.peakInterval, [3]byte{72, 170, 245}, func(c fpsGraphColumn) time.Duration { return c.interval }},
@@ -57,7 +48,7 @@ func (a *app) drawFPSOverlay(screen *ebiten.Image, screenWidth int) {
 		{"Record", live.record, summary.peakRecord, [3]byte{185, 130, 230}, func(c fpsGraphColumn) time.Duration { return c.record }},
 		{"Submit", live.submit, summary.peakSubmit, [3]byte{70, 207, 205}, func(c fpsGraphColumn) time.Duration { return c.submit }},
 	}
-	paintFPSGraph(a.fpsGraphPixels, columns[:], lanes[:], target, lateAfter)
+	paintFPSGraph(a.fpsGraphPixels, columns[:], lanes[:], target)
 	a.fpsGraph.WritePixels(a.fpsGraphPixels)
 	x := max(0, screenWidth-fpsOverlayWidth-6)
 	op := &ebiten.DrawImageOptions{}
@@ -111,12 +102,39 @@ func (a *app) drawFPSOverlay(screen *ebiten.Image, screenWidth int) {
 
 func ms(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
 
+// presentLateAfter is how long after the frame before it the frame just
+// presented could come and still be on time. A frame is late when it missed a
+// refresh: its interval then exceeds the spacing the present schedule meant
+// it to have by half a refresh, the rule the live trace report uses
+// (docs/BATTLE_BENCHMARK.md "Live window trace").
+//
+// While the cadence is even that spacing is the cap or the display's
+// refresh, the longer. Where the refresh does not divide the cap it is the
+// spacing the schedule planned for this frame (presentPlan): a 120 cap at
+// 144 Hz spaces its frames one refresh and two, and against the cap alone
+// every frame held for two refreshes, one in five, counted late.
+func (a *app) presentLateAfter() time.Duration {
+	spacing := a.presentPlan.expected
+	if spacing <= 0 {
+		spacing = max(a.presentInterval, a.refreshPeriod)
+	}
+	if spacing <= 0 {
+		return 0
+	}
+	refresh := a.refreshPeriod
+	if refresh <= 0 {
+		refresh = spacing
+	}
+	return spacing + refresh/2
+}
+
 // paintFPSGraph draws six separate lanes on one fixed bitmap, avoiding one
 // GPU call per sample. The lanes are not stacked: async recording and host
 // simulation may overlap Draw work. Each pixel column keeps a peak in its
 // 30-second time slice; the target interval's line is shown at half height,
-// and a frame interval past lateAfter — a missed refresh — is drawn orange.
-func paintFPSGraph(pixels []byte, columns []fpsGraphColumn, lanes []fpsLane, target, lateAfter time.Duration) {
+// and a column holding a late frame — one that missed a refresh — is drawn
+// orange in the frame lane.
+func paintFPSGraph(pixels []byte, columns []fpsGraphColumn, lanes []fpsLane, target time.Duration) {
 	for i := 0; i < len(pixels); i += 4 {
 		pixels[i], pixels[i+1], pixels[i+2], pixels[i+3] = 13, 20, 28, 255
 	}
@@ -141,7 +159,7 @@ func paintFPSGraph(pixels []byte, columns []fpsGraphColumn, lanes []fpsLane, tar
 			x := fpsPlotLeft + i
 			y := fpsGraphY(value, scale, top, bottom)
 			color := lane.color
-			if index == 0 && lateAfter > 0 && value > lateAfter {
+			if index == 0 && column.late {
 				color = [3]byte{245, 133, 58}
 			}
 			for row := y; row <= bottom; row++ {

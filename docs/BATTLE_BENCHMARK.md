@@ -454,6 +454,11 @@ since the first battle Draw; spans are microseconds:
   `refresh_us` is the display refresh period the present cap measured
   (a ProMotion panel changes it while the game runs) and `cap_us` the cap's
   interval, zero for none.
+- `plan_us`: on a presented frame, the spacing the present schedule planned
+  from it to the next presented frame where the display's refresh does not
+  divide the cap (DESIGN_GPU_RENDERER §13.5 "Present schedule"): one refresh
+  or two at a 120 cap on 144 Hz. It is zero where the cadence is even and on
+  a skipped Draw. Traces from before the column have none.
 - What the presented frame showed, zero on a Draw that presented no recorded
   battle frame (a skipped one, or a paused redraw): `tick_prev` and `tick`, the
   committed pair the world blends between (equal when unblended), and `tick16`
@@ -489,10 +494,14 @@ The time from one Draw's return to the next Update is Ebitengine's flush and
 present plus the wait for the next display-link callback; the report calls it
 `outside`, and reports the part of it the next frame was held for as `held`. On a ProMotion panel the display link does not hold to a fixed
 grid, so the interval between presented Draws is the frame time the player
-sees. The report counts an interval as late when it exceeds the interval the
-window presents at — the cap or the refresh, the longer — by half a refresh,
-and names the segments that were abnormal around it, including a refresh-rate
-change or lost focus.
+sees. The report counts an interval as late when it exceeds the spacing the
+window meant it to have by half a refresh, the FPS overlay's rule: the
+earlier frame's `plan_us` where there is one, and otherwise the cap or the
+refresh, the longer, which is also the rule for a trace from before the
+column. Against the cap alone, every frame a 120 cap holds for two refreshes
+at 144 Hz as planned, one in five, counted late. The report names the
+segments that were abnormal around a late interval, including a
+refresh-rate change or lost focus.
 
 A frame on time can still show the wrong instant, so the report also measures
 motion: for each pair of presented frames, how far the world's blended tick
@@ -528,9 +537,9 @@ idle P during a cycle), or the render thread blocked in a Metal call.
 trace instead and writes `flight-<frame>.trace` (the last three seconds or so)
 when a frame spikes: a host step, record, join or Execute far over a 120 Hz
 budget, a host step held 6 ms by the simulation, or a presented frame at least
-12 ms later than the interval the window presents at (two refreshes at
-120 Hz). At most one snapshot every two seconds is written, and eight per run
-(32 for a trace of play). It is how a hitch that comes once every
+12 ms later than the spacing the window meant it to have, the report's
+spacing above (two refreshes at 120 Hz). At most one snapshot every two
+seconds is written, and eight per run (32 for a trace of play). It is how a hitch that comes once every
 few minutes is caught with every goroutine's state and blocking stacks around
 it; a music track change opening its MP3 on the host step was found this way.
 It cannot be combined with `--live-exec-trace`.

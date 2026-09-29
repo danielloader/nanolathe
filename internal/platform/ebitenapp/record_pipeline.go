@@ -172,7 +172,17 @@ func (p *pipeline) tolerancePeriod(cap, refresh time.Duration) time.Duration {
 
 // observeDraw records this Draw's spacing and returns the interval the
 // prediction should extrapolate over, or zero when there is no usable one.
-func (p *pipeline) observeDraw(now time.Time, cap time.Duration) time.Duration {
+//
+// planned is the spacing the present schedule means the next present to have
+// while its cadence is uneven (presentDue), and it is the interval when there
+// is one. An uneven cadence mixes two spacings — one refresh and two at a 120
+// cap on 144 Hz — so neither the last spacing nor the cap predicts the next.
+// Extrapolated over the longer of them on a synthetic 144 Hz refresh train,
+// 40% of the presents at a 120 cap and 80% at a 60 cap missed their
+// pre-record, and the ones that hit showed an instant up to 1.4 and 2.8 ms
+// from their own; over the plan every one hit, exactly. An even cadence has
+// no plan, and extrapolates over the last spacing or the cap, the longer.
+func (p *pipeline) observeDraw(now time.Time, cap, planned time.Duration) time.Duration {
 	period := time.Duration(0)
 	if !p.lastDrawAt.IsZero() {
 		period = now.Sub(p.lastDrawAt)
@@ -182,7 +192,9 @@ func (p *pipeline) observeDraw(now time.Time, cap time.Duration) time.Duration {
 		p.period = period
 	}
 	period = p.period
-	if cap > period {
+	if planned > 0 {
+		period = planned
+	} else if cap > period {
 		period = cap
 	}
 	if period < presentPeriodFloor || period > presentPeriodCeiling {

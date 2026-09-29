@@ -89,7 +89,10 @@ type frameTrace struct {
 	flight     *trace.FlightRecorder
 	flights    int
 	lastFlight time.Duration
-	lastDraw   int64
+	// lastDraw is when the last presented frame's Draw began, and lastPlan the
+	// spacing the present schedule planned from it to the next, zero for an
+	// even cadence.
+	lastDraw, lastPlan int64
 	// pointerX and pointerY are the logical pointer the latest host step
 	// applied; every row repeats them until the next step.
 	pointerX, pointerY int32
@@ -131,6 +134,10 @@ type frameRow struct {
 	// Whether the fullscreen window was on the composited route
 	// (nativeScanout).
 	composited bool
+	// The spacing the present schedule planned from this presented frame to
+	// the next while its cadence is uneven, and zero otherwise
+	// (DESIGN_GPU_RENDERER §13.5 "Present schedule").
+	plan int64
 }
 
 func newFrameTrace(opts *FrameTraceOptions) (*frameTrace, error) {
@@ -160,13 +167,14 @@ func newFrameTrace(opts *FrameTraceOptions) (*frameTrace, error) {
 			{Name: "/sched/pauses/total/gc:seconds"},
 			{Name: "/gc/heap/live:bytes"},
 		}}
-	fmt.Fprintln(t.w, "frame,upd_start,upd_end,steps,upd_bodies,draw_start,draw_end,due,hit,armed,sync,join1,join2,record,execute,blit,body,sim_wait,sim_batch,sim_joins,launch,passes,vertices,subjects,gc_cycles,alloc_bytes,gc_cpu_us,gc_pause_us,heap_live,x_prepare,x_model,x_place,x_replay,pre_us,released,battle,focused,refresh_us,cap_us,bodies,tick_prev,tick,tick16,cam16,cam_x100,cam_z100,atlas_uploads,atlas_union_kb,ptr_x,ptr_y,ptr_exits,ptr_enters,pace_lead,pace_held,composited")
+	fmt.Fprintln(t.w, "frame,upd_start,upd_end,steps,upd_bodies,draw_start,draw_end,due,hit,armed,sync,join1,join2,record,execute,blit,body,sim_wait,sim_batch,sim_joins,launch,passes,vertices,subjects,gc_cycles,alloc_bytes,gc_cpu_us,gc_pause_us,heap_live,x_prepare,x_model,x_place,x_replay,pre_us,released,battle,focused,refresh_us,cap_us,bodies,tick_prev,tick,tick16,cam16,cam_x100,cam_z100,atlas_uploads,atlas_union_kb,ptr_x,ptr_y,ptr_exits,ptr_enters,pace_lead,pace_held,composited,plan_us")
 	return t, nil
 }
 
 // markDraw records the presentation context of a battle Draw, presented or
-// skipped by the cap.
-func (t *frameTrace) markDraw(refresh, capInterval time.Duration, focused bool) {
+// skipped by the cap, and the spacing the present schedule planned from it to
+// the next present, which is written only for a presented one.
+func (t *frameTrace) markDraw(refresh, capInterval, plan time.Duration, focused bool) {
 	if t == nil || !t.started {
 		return
 	}
@@ -174,6 +182,7 @@ func (t *frameTrace) markDraw(refresh, capInterval time.Duration, focused bool) 
 	t.row.focused = focused
 	t.row.refresh = int64(refresh / time.Microsecond)
 	t.row.capUS = int64(capInterval / time.Microsecond)
+	t.row.plan = int64(plan / time.Microsecond)
 }
 
 // markShown records what the presented frame shows: the committed pair the
@@ -260,13 +269,19 @@ func (t *frameTrace) beginUpdate() {
 
 // flightSpike reports whether the frame just closed is worth a flight
 // snapshot: a segment far over a 120 Hz budget, a host step held up by the
-// simulation, or a presented frame at least 12 ms later than the interval the
-// window presents at — two refreshes at 120 Hz, whatever the cap.
+// simulation, or a presented frame at least 12 ms later than the spacing the
+// window meant it to have — two refreshes at 120 Hz, whatever the cap. That
+// spacing is the one the present schedule planned from the frame before
+// while the cadence is uneven, and otherwise the cap or the refresh, the
+// longer.
 func (t *frameTrace) flightSpike(r frameRow) bool {
 	if r.body-r.simWait > 6000 || r.simWait > 6000 || r.record > 6000 || r.execute > 10000 || r.join1+r.join2 > 6000 {
 		return true
 	}
-	nominal := max(r.capUS, r.refresh)
+	nominal := t.lastPlan
+	if nominal == 0 {
+		nominal = max(r.capUS, r.refresh)
+	}
 	if nominal == 0 {
 		nominal = 8333
 	}
@@ -324,7 +339,9 @@ func (t *frameTrace) flushRow() {
 		t.snapshotFlight()
 	}
 	if r.due {
-		t.lastDraw = r.drawStart
+		t.lastDraw, t.lastPlan = r.drawStart, r.plan
+	} else {
+		r.plan = 0
 	}
 	b := func(v bool) int {
 		if v {
@@ -347,7 +364,7 @@ func (t *frameTrace) flushRow() {
 		}
 	}
 	exits, enters := nativePointerCrossings.take()
-	fmt.Fprintf(t.w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", t.rows,
+	fmt.Fprintf(t.w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", t.rows,
 		r.updStart, r.updEnd, r.steps, r.updBodies, r.drawStart, r.drawEnd, b(r.due), b(r.hit), b(r.armed), b(r.sync),
 		r.join1, r.join2, r.record, r.execute, r.blit, r.body, r.simWait, r.simBatch, r.simJoins, r.launch,
 		r.passes, r.vertices, r.subs,
@@ -355,7 +372,7 @@ func (t *frameTrace) flushRow() {
 		int64(t.samples[2].Value.Float64()*1e6), int64(pauses*1e6), t.samples[4].Value.Uint64(),
 		r.xPrepare, r.xModel, r.xPlace, r.xReplay, r.preNanos/1000, r.released,
 		b(r.battle), b(r.focused), r.refresh, r.capUS, r.bodies, r.tickPrev, r.tick, r.tick16, r.cam16, r.camX100, r.camZ100, r.atlasUploads, r.atlasUnionKB,
-		t.pointerX, t.pointerY, exits, enters, r.paceLead, r.paceHeld, b(r.composited))
+		t.pointerX, t.pointerY, exits, enters, r.paceLead, r.paceHeld, b(r.composited), r.plan)
 	t.rows++
 	if t.rows%256 == 0 {
 		t.w.Flush()

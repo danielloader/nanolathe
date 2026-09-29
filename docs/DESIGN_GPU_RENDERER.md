@@ -1403,11 +1403,14 @@ jitter: two steps a refresh apart, then a gap a refresh too long, repeatedly
 while the phases stayed close, and the world and camera blends paced by the
 step jumped and held at each pair. It does not select simulation ticks or
 consume RNG; the session still owns that budget. Original presents only after a host step; Enhanced may present on every
-Draw. `--fps N` caps how often Enhanced presents: a Draw that arrives
-sooner than the cap's interval (less an eighth of it, the vsync jitter
-allowance) returns without recording and the retained screen keeps the last
-frame. Draw still sits on the display's vsync grid, so the cap lands on the
-nearest refresh multiple below it. The refresh is measured, not assumed — half
+Draw. `--fps N` caps how often Enhanced presents: a Draw the cap does not
+present returns without recording and the retained screen keeps the last
+frame. Draw still sits on the display's vsync grid. Where the cap's interval
+is a whole number of refreshes, a Draw that arrives sooner than the interval
+(less an eighth of it, the vsync jitter allowance, and at most half a
+refresh) is skipped, so the cap lands on that multiple; where it is not, the
+present schedule below chooses the refreshes. The refresh is measured, not
+assumed — half
 the median spacing of two consecutive Draw arrivals — because a ProMotion panel
 changes it mid-battle, dropping from 120 Hz to 60 Hz and back. When the
 measured refresh is no faster than the cap every refresh is due, and only a
@@ -1422,6 +1425,106 @@ booked that much earlier. Timed by its late arrival it pushed the cap's clock
 forward and the next present waited a third refresh; on a 120 Hz panel under
 host load that was about half of a heavy save's late frames (3.1% → 1.1% and
 2.7% → 1.3% in two recorded window traces). Original ignores the cap.
+
+**Present schedule — Nanolathe host presentation policy.** Holding the whole
+number of refreshes above the cap's interval fell well short of the cap
+wherever the refresh does not divide it. On a 144 Hz display (6.9 ms) a 120
+cap's threshold of 7.3 ms passed over every other refresh and presented 72
+frames a second, a 60 cap every third refresh (48) and a 30 cap every fifth
+(28.8). A tester with a 144 Hz display on Windows reported 79, 49 and 24;
+another's overlay read a median frame of 13.7 ms under the 120 cap, and 2,497
+frames in 30 seconds. The macOS pacer's slot rule was the same test and fell
+as short on a 144 Hz external display. The allowance could also overshoot: an eighth of a 30 cap's
+interval is a whole refresh at 240 Hz, and that cap presented 32 times a
+second.
+
+The window's cap and the pacer therefore share one schedule
+(`frame_pacer.go`). While the cap's interval is within a thirty-second of a
+whole number of refreshes (`evenCadence`) nothing changes: every n-th refresh
+presents, timed from the present before. Otherwise each present is due one
+cap interval after the last present's **deadline**, not after the present,
+and is made at the refresh nearest that deadline. The refreshes between
+presents then take the two whole numbers either side of the ratio in turn,
+spread as evenly as whole refreshes allow, and the rate is the cap's: 1, 1,
+1, 1, 2 refreshes for a 120 cap at 144 Hz, 2, 2, 3, 2, 3 for a 60 cap, and
+5, 5, 5, 5, 4 for a 30 cap. The schedule never presents faster than the cap
+to catch up: a present that lands a refresh or more after the refresh its
+deadline chose — a refresh with no Draw, a stall — starts the schedule again
+from itself, as the even cadence always did. The refresh a present plans for
+the next is chosen when the present is made, and held as a time: chosen
+afresh at every Draw, a deadline half-way between two refreshes followed the
+wobble of the measured refresh from Draw to Draw, skipped the earlier refresh
+and restarted the schedule from the later one. The window counts a Draw in
+refreshes from the last present: it belongs to the refresh it arrived after,
+unless it came within a quarter of a refresh of the next, the quarter the
+late-present booking above uses. A present booked earlier by that rule leaves
+a deadline the schedule kept where it was.
+
+The price is judder. No gate presents 120 evenly spaced frames a second on a
+display that refreshes 144 times: one frame in five stays on screen for two
+refreshes (13.9 ms) and the others for one (6.9 ms), 24 times a second. Each
+frame still shows the world at the instant it is presented (the blend
+below), so motion is where it should be; what alternates is how long each
+frame stays. Two even alternatives were rejected. Presenting every refresh
+while the refresh is under twice the cap is perfectly even, but presents 144
+frames a second for a cap of 120 — a fifth more work than the cap allows, and
+bounding that work is what a cap is for. Holding the largest whole number of
+refreshes is even too, and is the reported defect: 72 frames for a cap of
+120. A player who wants an even cadence on such a display can choose a cap
+the refresh divides, or present at the display's own rate with `--fps 0`.
+
+The thirty-second covers the display and the cap running on different
+clocks. A 60 cap is 1.998 refreshes of a 119.88 Hz panel; a schedule held
+exactly to the cap would correct that drift with a frame one refresh short
+every eight seconds, where the even cadence presents 59.94 times a second. It
+also covers the window's refresh estimate, which moves by a percent or two
+when Draws jitter by a third of a refresh. The nearest ratio the schedule must
+still hold to the cap is a 30 cap at 144 Hz, 4% from five refreshes. A display
+within an eighth of the cap's interval of the cap itself still presents every
+refresh, as above: that can exceed the cap by up to a seventh, and the band
+holds only displays whose rate is the cap's.
+
+While the cadence is uneven the schedule also plans the spacing to the next
+present, and the pre-record extrapolates over that plan (§13.10,
+`observeDraw`). Its interval otherwise — the last spacing or the cap, the
+longer — predicts neither spacing of an uneven cadence: on a synthetic 144 Hz
+refresh train 40% of the presents at a 120 cap and 80% at a 60 cap missed
+their pre-record, and the ones that hit showed an instant up to 1.4 and 2.8 ms
+from their own. Over the plan every one hit, exactly. An even cadence keeps
+the old interval, and the pre-record's tolerance stays half a refresh.
+
+Presents per second on synthetic refresh trains, after the first second, with
+the Draws on time and then up to 1.5 ms late for their refreshes; the pacer's
+column drives the macOS pacer with the link's display times
+(`present_cap_test.go`, `frame_pacer_test.go`):
+
+| Display | Cap | Before | After | After, 1.5 ms late | Pacer before → after |
+|---|---|---|---|---|---|
+| 144 Hz | 120 | 72.0 | 120.0 | 120.0 | 72.0 → 120.0 |
+| 144 Hz | 60 | 48.0 | 60.0 | 60.0 | 48.0 → 60.0 |
+| 144 Hz | 30 | 28.8 | 30.0 | 29.9 | 28.8 → 30.0 |
+| 165 Hz | 120 | 82.5 | 120.0 | 120.0 | 82.5 → 120.0 |
+| 165 Hz | 60 | 55.0 | 60.0 | 60.0 | 55.0 → 60.0 |
+| 165 Hz | 30 | 33.0 | 30.0 | 30.0 | 33.0 → 30.0 |
+| 100 Hz | 60 | 50.0 | 60.0 | 60.0 | 50.0 → 60.0 |
+| 100 Hz | 30 | 33.3 | 30.0 | 30.0 | 33.3 → 30.0 |
+| 75 Hz | 60 | 37.5 | 60.0 | 60.0 | 37.5 → 60.0 |
+| 75 Hz | 30 | 25.0 | 30.0 | 30.0 | 25.0 → 30.0 |
+| 240 Hz | 30 | 32.0 | 30.0 | 30.0 | 30.0 → 30.0 |
+
+At 120 Hz under caps of 120, 60 and 30 and at 60 Hz under 60 and 30, every
+Draw was decided as before with the Draws up to 1.5 ms late, and at 240 Hz
+under a 60 cap with them up to 0.5 ms late. Late by a third of a refresh or
+more, the measured refresh can wobble out of the thirty-second, and some
+Draws are then decided by the schedule instead, at about the same rate.
+
+Before the schedule, the 144 Hz train with its Draws up to 1.5 ms late
+presented 82 times a second under the 120 cap, some presents falling a single
+refresh apart, beside a median spacing of two refreshes — close to the
+second tester's overlay, 83 frames a second at a median of 13.7 ms, whose
+display's rate was not reported. The first tester's 24 under a 30 cap is below
+the train's 28.8. Draw arrivals on Windows were not measured, and no Windows
+window has run the schedule.
 
 **Present slots — Nanolathe host presentation policy (macOS).** Ebitengine
 presents whenever it is given a drawable, whether or not the Draw drew: a Draw
@@ -1444,9 +1547,9 @@ content, with every other refresh left free, none was late in either case.
 `framePacer` therefore chooses the refreshes the window presents at. Where
 the display link reports to a delegate (macOS 14 and later), the pacer's
 delegate is installed in front of Ebitengine's through the link's own
-`setDelegate:`. It passes on the refreshes that are a cap's interval apart,
-less the same eighth, and keeps the others, so Ebitengine runs one frame per
-presented frame and every Draw presents; `presentDue` is the cap elsewhere,
+`setDelegate:`. It passes on the refreshes the present schedule chooses,
+counted on the link's own display times, and keeps the others, so Ebitengine
+runs one frame per presented frame and every Draw presents; `presentDue` is the cap elsewhere,
 and when the display is no faster than the cap. Slots are spaced from the
 display time of the slot before, so a late frame does not move the ones after
 it. The refresh period is the shortest recent spacing of the link's reports:
@@ -1561,17 +1664,24 @@ so brief spikes stay visible at their approximate time. Lane labels show a
 recent sample; Sim, Blend, Record and Submit medians include only frames where
 that phase ran. With no such phase sample in 500 ms its live value is zero.
 The graph, peak and late count remain unsmoothed. Cadence bars turn orange when
-a frame missed a refresh: its interval exceeds the interval the window
-presents at (the cap or the display refresh, the longer) by half a refresh,
-the rule the live trace report uses. The overlay reports how many intervals
-did so, the 30-second cadence peak and its amount over the target,
+a frame missed a refresh: its interval exceeds the spacing the present
+schedule meant it to have by half a refresh. While the cadence is even that
+spacing is the cap or the display refresh, the longer, the rule the live
+trace report uses. Where the refresh does not divide the cap it is the
+spacing the schedule planned for that frame, a whole number of refreshes:
+against the cap alone every frame a 120 cap holds for two refreshes at
+144 Hz, one in five, counted late though it was on time. The live trace
+records the plan (`plan_us`); its report counts late frames by the same rule
+and its flight recorder measures spikes from the same spacing
+(docs/BATTLE_BENCHMARK.md "Live window trace"). The overlay reports how many
+intervals did so, the 30-second cadence peak and its amount over the target,
 and the render passes the last presented frame issued (`ModelStats.Passes`):
 on the development machine's Metal driver a frame past about 80 passes makes
 the windowed present wait for the GPU, so that number is watched against the
 §22 budget.
 Changing the live FPS cap starts a fresh history, so the
-late count uses one budget. A line in each lane marks the cap interval. The
-Draw "room" is cap interval minus the median callback time and may be negative.
+graph and the late count describe one cap. A line in each lane marks the cap
+interval. The Draw "room" is cap interval minus the median callback time and may be negative.
 It is a partial wall-time margin: the sim step may run in Update or the Draw
 tail, and an asynchronous pre-record can overlap other work, so lanes are never
 added.

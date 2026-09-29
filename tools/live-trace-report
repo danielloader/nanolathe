@@ -17,9 +17,9 @@ import pathlib
 import statistics
 import sys
 
-# A presented interval longer than the interval the window presents at by
+# A presented interval longer than the spacing the window meant it to have by
 # this many refresh periods missed at least one refresh; the report calls it
-# late.
+# late. It is the FPS overlay's rule (DESIGN_GPU_RENDERER §13.5).
 LATE_REFRESHES = 0.5
 
 # A presented frame whose content moved this many milliseconds more or less
@@ -101,8 +101,13 @@ def refresh_of(row, fallback):
 
 
 def nominal_of(row, fallback):
-    """The interval the window presents at: the cap or the refresh, the
-    longer, in ms. Traces from before the columns existed use fallback."""
+    """The spacing the window meant the presented frame after this one to
+    have, in ms: the present schedule's plan while its cadence is uneven
+    (plan_us), otherwise the cap or the refresh, the longer. Traces from
+    before plan_us existed, and even cadences, have no plan; traces from
+    before the other columns existed use fallback."""
+    if row.get("plan_us", 0):
+        return row["plan_us"] / 1000.0
     return max(row.get("cap_us", 0), row.get("refresh_us", 0)) / 1000.0 or fallback
 
 

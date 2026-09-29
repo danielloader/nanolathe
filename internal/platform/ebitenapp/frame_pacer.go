@@ -53,6 +53,12 @@ type framePacer struct {
 	// lastSlot is the display time of the last refresh passed on and open
 	// that of the slot a frame may now begin for, both on the link's clock.
 	lastSlot, open time.Duration
+	// lead is how far the last slot fell after its deadline, and zero when
+	// the schedule restarted from it: the next slot's deadline is a cap's
+	// interval after the last slot, less lead. after is how long after the
+	// last slot the next one is, chosen at the last slot under the cap
+	// interval planFor and zero for no plan (presentPlan).
+	lead, after, planFor time.Duration
 	// handedAt is when the last slot was passed on, until Ebitengine returns
 	// it: a frame has taken its drawable and presented.
 	handedAt time.Time
@@ -109,6 +115,54 @@ const (
 	pacerFastDisplay = time.Second / 100
 )
 
+// The present schedule — which refreshes a capped window presents at — is
+// shared by presentDue and the pacer (DESIGN_GPU_RENDERER §13.5 "Present
+// schedule"). It applies while the display is faster than the cap by more
+// than an eighth of the cap's interval; nearer the cap every refresh
+// presents.
+//
+// A cap that is a whole number of the display's refreshes (evenCadence)
+// presents every that many refreshes, each present timed from the one
+// before: a 60 cap presents every second refresh at 120 Hz. A cap the
+// refresh does not divide cannot present evenly, and holding the whole
+// number of refreshes above the cap's interval presented a 120 cap at 144 Hz
+// on every second refresh, 72 times a second, and a 60 cap on every third, 48
+// times. There each present is due a cap's interval after the last one's
+// deadline rather than after the present, at the refresh nearest that
+// deadline: the refreshes between presents take the two whole numbers either
+// side of the ratio in turn — 1, 1, 1, 1, 2 for a 120 cap at 144 Hz — and
+// average the cap. A present a refresh or more after the refresh its
+// deadline chose, one that missed a refresh or followed a stall, starts the
+// schedule again from itself, so the window never presents faster than the
+// cap to catch up.
+
+// cadenceTolerance is how near, as a fraction of the cap's interval, a whole
+// number of refreshes must be for the cap to keep the even cadence. The
+// display and the cap run on different clocks: a 60 cap is 1.998 refreshes of
+// a 119.88 Hz panel, and a schedule held exactly to the cap would correct
+// that drift with a frame one refresh short every eight seconds. The window's
+// refresh estimate, taken from Draw arrivals, also moves by a percent or two
+// when they jitter by a third of a refresh. The nearest ratio the schedule
+// must still hold to the cap is a 30 cap at 144 Hz, 4% from five refreshes.
+const cadenceTolerance = 32
+
+// evenCadence reports whether a cap's interval is, within cadenceTolerance, a
+// whole number of refresh periods.
+func evenCadence(interval, period time.Duration) bool {
+	if period <= 0 {
+		return true
+	}
+	off := interval - max(1, (interval+period/2)/period)*period
+	return off <= interval/cadenceTolerance && -off <= interval/cadenceTolerance
+}
+
+// refreshesUntil is how many refreshes after a present the refresh nearest a
+// deadline that long after it is: the first no more than half a refresh
+// before the deadline, and never the present's own.
+func refreshesUntil(deadline, period time.Duration) time.Duration {
+	return max(1, (deadline-period/2+period-1)/period)
+}
+
 // setInterval is nil-safe, as are refreshPeriod and awaitFrame: a host with
 // no display link to pace holds no pacer.
 func (p *framePacer) setInterval(interval time.Duration) {
@@ -127,11 +181,13 @@ func (p *framePacer) setInterval(interval time.Duration) {
 // the display scans the window out directly and four when the window is
 // composited.
 //
-// A slot is a refresh at least the cap's interval after the last one, less an
-// eighth of the interval: the allowance presentDue gives a Draw, so both land
-// a cap on the same multiple of the refresh. Slots are counted from the last
-// slot's own display time and not from when its frame arrived, so a frame
-// that was late does not move the ones after it.
+// The pacer keeps refreshes back only while the display is faster than the
+// cap by more than an eighth of the cap's interval, the allowance presentDue
+// gives a Draw. Its slots then follow the present schedule presentDue keeps,
+// on the link's display times: each slot is the refresh nearest its deadline.
+// Slots are counted from the last slot's own display time and not from when
+// its frame arrived, so a frame that was late does not move the ones after
+// it.
 func (p *framePacer) refresh(now time.Time, target time.Duration) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -147,19 +203,62 @@ func (p *framePacer) refresh(now time.Time, target time.Duration) bool {
 		threshold = 0
 	}
 	p.paced = threshold > p.period
-	slot := !p.paced || p.lastSlot == 0 || target-p.lastSlot >= threshold || target < p.lastSlot
+	slot := !p.paced || p.lastSlot == 0 || target < p.lastSlot
+	lead := time.Duration(0)
+	if !slot {
+		// The link's display times lie on the refresh grid, so a refresh is
+		// within half of one of the refresh the plan chose, or a whole
+		// refresh or more from it.
+		since, after := target-p.lastSlot, p.plannedAfter(interval)
+		slot = since >= after-p.period/2
+		if slot && since < after+p.period/2 && !evenCadence(interval, p.period) {
+			lead = since - (interval - p.lead)
+		}
+	}
 	if slot {
 		p.lastSlot, p.open, p.handedAt = target, target, now
+		p.lead, p.after, p.planFor = lead, 0, interval
+		if p.paced {
+			p.after = refreshesUntil(interval-lead, p.period) * p.period
+		}
 	}
 	if p.paced {
-		// The next slot is the first refresh the cap's interval after the
-		// last, and its frame begins when it is near enough.
-		ahead := max(1, (p.lastSlot+threshold-target+p.period-1)/p.period)
+		// The next slot is the refresh nearest the next deadline, and its
+		// frame begins when it is near enough.
+		next := p.lastSlot + p.plannedAfter(interval)
+		ahead := max(1, (next-target+p.period/2)/p.period)
 		if int(ahead) <= 1+p.early {
 			p.open = target + ahead*p.period
 		}
 	}
 	return slot
+}
+
+// plannedAfter is how long after the last slot the next one is. It is chosen
+// at the last slot, and afresh only when there is no plan for the cap in
+// force. The caller holds mu, and the display is measured.
+func (p *framePacer) plannedAfter(interval time.Duration) time.Duration {
+	if p.after > 0 && p.planFor == interval {
+		return p.after
+	}
+	return refreshesUntil(interval-p.lead, p.period) * p.period
+}
+
+// plannedSpacing is how long after the last slot the pacer means the next one
+// to be while the present schedule's cadence is uneven, and zero otherwise:
+// an even cadence's spacing is the cap's interval, which the window already
+// has.
+func (p *framePacer) plannedSpacing(now time.Time) time.Duration {
+	if p == nil {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	interval := min(time.Duration(p.interval.Load()), pacerIntervalCeiling)
+	if !p.pacing(now) || p.period <= 0 || evenCadence(interval, p.period) {
+		return 0
+	}
+	return p.plannedAfter(interval)
 }
 
 // observeWork is the game loop reporting how long a frame took from its

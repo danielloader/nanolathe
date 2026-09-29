@@ -16,11 +16,14 @@ const (
 type fpsSample struct {
 	at       time.Time
 	interval time.Duration
-	draw     time.Duration
-	sim      time.Duration
-	blend    time.Duration
-	record   time.Duration
-	submit   time.Duration
+	// lateAfter is the interval past which the frame missed a refresh, zero
+	// for none (drawFPSOverlay's presentLateAfter).
+	lateAfter time.Duration
+	draw      time.Duration
+	sim       time.Duration
+	blend     time.Duration
+	record    time.Duration
+	submit    time.Duration
 }
 
 // fpsCounter records presented modern frames, excluding cap-skipped Draw
@@ -40,8 +43,9 @@ type fpsCounter struct {
 	liveScratch [6][]time.Duration
 }
 
-// observe records one presented frame whose Draw arrived at now.
-func (c *fpsCounter) observe(now time.Time, draw, sim, blend, record, submit time.Duration) {
+// observe records one presented frame whose Draw arrived at now, late if it
+// came more than lateAfter after the frame before it.
+func (c *fpsCounter) observe(now time.Time, lateAfter, draw, sim, blend, record, submit time.Duration) {
 	if c.presented.IsZero() {
 		c.presented = now
 		return
@@ -50,7 +54,7 @@ func (c *fpsCounter) observe(now time.Time, draw, sim, blend, record, submit tim
 		if c.history == nil {
 			c.history = make([]fpsSample, fpsHistoryCapacity)
 		}
-		c.history[c.next] = fpsSample{at: now, interval: interval, draw: draw, sim: sim, blend: blend, record: record, submit: submit}
+		c.history[c.next] = fpsSample{at: now, interval: interval, lateAfter: lateAfter, draw: draw, sim: sim, blend: blend, record: record, submit: submit}
 		c.next = (c.next + 1) % len(c.history)
 		if c.count < len(c.history) {
 			c.count++
@@ -112,6 +116,8 @@ func (c *fpsCounter) live(now time.Time) fpsLiveSummary {
 }
 
 type fpsGraphColumn struct {
+	// late says a frame in the column missed a refresh.
+	late     bool
 	interval time.Duration
 	draw     time.Duration
 	sim      time.Duration
@@ -133,8 +139,8 @@ type fpsGraphSummary struct {
 
 // graph groups samples by elapsed time, retaining each phase's worst duration
 // in a pixel column so a brief stall stays visible for 30 seconds. A frame
-// whose interval exceeds lateAfter is counted late; zero counts none.
-func (c *fpsCounter) graph(now time.Time, lateAfter time.Duration, columns []fpsGraphColumn) fpsGraphSummary {
+// whose interval exceeds its own lateAfter is counted late.
+func (c *fpsCounter) graph(now time.Time, columns []fpsGraphColumn) fpsGraphSummary {
 	var summary fpsGraphSummary
 	for i := 0; i < c.count; i++ {
 		index := (c.next - 1 - i + len(c.history)) % len(c.history)
@@ -168,12 +174,13 @@ func (c *fpsCounter) graph(now time.Time, lateAfter time.Duration, columns []fps
 		if sample.submit > summary.peakSubmit {
 			summary.peakSubmit = sample.submit
 		}
-		if lateAfter > 0 && sample.interval > lateAfter {
-			summary.late++
-		}
 		column := len(columns) - 1 - int(age.Nanoseconds()*int64(len(columns))/fpsHistoryDuration.Nanoseconds())
 		if column < 0 {
 			column = 0
+		}
+		if sample.lateAfter > 0 && sample.interval > sample.lateAfter {
+			summary.late++
+			columns[column].late = true
 		}
 		if sample.interval > columns[column].interval {
 			columns[column].interval = sample.interval

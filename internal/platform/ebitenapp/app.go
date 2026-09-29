@@ -98,14 +98,16 @@ type app struct {
 	// scaled units. Like inputStarted it is platform time and never reaches the
 	// client's clock or the sim [I6].
 	updatedAt time.Time
-	// presentInterval is the minimum spacing between two presented modern
-	// frames, zero for the display's own refresh; presentedAt is when the last
-	// one was presented, and presentFollowed says a Draw has arrived since;
+	// presentInterval is the cap's interval, the average spacing of presented
+	// modern frames at most, zero for the display's own refresh; presentedAt
+	// is when the last one was presented, and presentFollowed says a Draw has
+	// arrived since; presentPlan is the present schedule's plan for the next;
 	// refresh measures the window's current refresh period from Draw arrivals.
 	// See RunOptions.MaxFPS and presentDue.
 	presentInterval time.Duration
 	presentedAt     time.Time
 	presentFollowed bool
+	presentPlan     presentPlan
 	refresh         refreshEstimate
 	// refreshPeriod is the estimate presentDue last measured, zero while it
 	// is still settling; the live trace records it with every Draw.
@@ -509,7 +511,7 @@ func (a *app) Draw(screen *ebiten.Image) {
 	if a.mode == RendererModern {
 		due := a.presentDue(arrived)
 		if a.trace != nil {
-			a.trace.markDraw(a.refreshPeriod, a.presentInterval, a.c.IsFocused())
+			a.trace.markDraw(a.refreshPeriod, a.presentInterval, a.presentPlan.spacing, a.c.IsFocused())
 		}
 		if !due {
 			return
@@ -531,7 +533,7 @@ func (a *app) Draw(screen *ebiten.Image) {
 		}
 		if showFPS {
 			completed := time.Now()
-			a.fpsCounter.observe(arrived, completed.Sub(drawStarted), a.fpsSim, blend, record, submit)
+			a.fpsCounter.observe(arrived, a.presentLateAfter(), completed.Sub(drawStarted), a.fpsSim, blend, record, submit)
 			a.fpsSim = 0
 		}
 		return
@@ -574,7 +576,7 @@ func (a *app) drawModern(screen *ebiten.Image, width, height int, showFPS bool) 
 	if a.trace != nil {
 		a.trace.row.join2 = int64(now.Sub(joinStarted) / time.Microsecond)
 	}
-	period := a.pipe.observeDraw(now, a.presentInterval)
+	period := a.pipe.observeDraw(now, a.presentInterval, a.presentPlan.spacing)
 	// How far this Draw is through the current Update, in updates: the camera's
 	// own fraction (§13.5). Before the first Update there is nothing to measure
 	// and the camera stays where it is.
@@ -797,16 +799,27 @@ func (a *app) launchPreRecord(now, sampledAt time.Time, period time.Duration, ti
 // The screen is retained between Draws (Run configures that), so a skipped Draw
 // leaves the last presented frame on the display.
 //
-// While the window refreshes faster than the cap, a Draw that arrives sooner
-// than the cap's interval, less an eighth of it for vsync jitter, is skipped:
-// a 60 cap presents every other refresh at 120 Hz. The refresh is not fixed,
-// though: a ProMotion panel drops to 60 Hz while a battle runs and switches
-// back later. Timed in the window, at 60 Hz that test skipped the Draw after
-// any present more than 2 ms late — the next refresh then arrives early
-// relative to it — so one hitch cost two refreshes and the counter read 55-59.
-// When the measured refresh is no faster than the cap, every refresh is due;
-// only a Draw less than half a refresh after the last present, one of a burst
-// of back-to-back Draws, is skipped.
+// While the cap's interval is a whole number of the window's refreshes
+// (evenCadence), a Draw that arrives sooner than the interval, less an eighth
+// of it for vsync jitter, is skipped: a 60 cap presents every other refresh at
+// 120 Hz. The allowance is at most half a refresh; an eighth of a 30 cap's
+// interval is a whole refresh at 240 Hz. The refresh is not fixed, though: a
+// ProMotion panel drops to 60 Hz while a battle runs and switches back later.
+// Timed in the window, at 60 Hz that test skipped the Draw after any present
+// more than 2 ms late — the next refresh then arrives early relative to it —
+// so one hitch cost two refreshes and the counter read 55-59. When the
+// measured refresh is no faster than the cap, less the same eighth, every
+// refresh is due; only a Draw less than half a refresh after the last
+// present, one of a burst of back-to-back Draws, is skipped. Until the refresh
+// is measured the cap is taken to be a whole number of refreshes.
+//
+// Where the refresh does not divide the cap, a Draw presents at the refresh
+// the present schedule chose for it (the present schedule in frame_pacer.go):
+// a 120 cap presents five refreshes in six at 144 Hz. The Draw is counted in
+// refreshes from the last present. It belongs to the refresh it arrived after,
+// unless it arrived within a quarter of a refresh before the next one, the
+// quarter by which the booking below tells a Draw late for its refresh from
+// one early for the next.
 //
 // A present is timed by the refresh it belonged to, not by when its Draw
 // arrived. Draws follow the display's refreshes, so the Draw after a present
@@ -816,35 +829,102 @@ func (a *app) launchPreRecord(now, sampledAt time.Time, period time.Duration, ti
 // its late arrival it moved the cap's clock, and the next present waited an
 // extra refresh. Under host load that was about half the late frames of a
 // heavy save at 120 Hz. The earlier time is taken only from that pattern, so a
-// refresh estimate still settling after a rate switch cannot move it.
+// refresh estimate still settling after a rate switch cannot move it. A
+// deadline the schedule kept stays where it was.
 func (a *app) presentDue(now time.Time) bool {
 	refresh := a.refresh.observe(now)
 	if paced := a.pacer.refreshPeriod(now); paced > 0 {
 		// The pacer passed this refresh on as one to present at, and Draws
 		// arrive at the cap's spacing, not the display's.
 		a.refreshPeriod = paced
-		a.presentedAt, a.presentFollowed = now, false
+		a.presented(now, presentPlan{spacing: a.pacer.plannedSpacing(now)})
 		return true
 	}
 	a.refreshPeriod = refresh
-	if a.presentInterval > 0 && !a.presentedAt.IsZero() {
-		if !a.presentFollowed {
-			a.presentFollowed = true
-			if gap := now.Sub(a.presentedAt); refresh > 0 && gap >= refresh/4 && gap <= refresh-refresh/4 {
-				a.presentedAt = a.presentedAt.Add(gap - refresh)
+	interval := a.presentInterval
+	if interval <= 0 || a.presentedAt.IsZero() {
+		a.presented(now, presentPlan{})
+		return true
+	}
+	plan := &a.presentPlan
+	if !a.presentFollowed {
+		a.presentFollowed = true
+		if gap := now.Sub(a.presentedAt); refresh > 0 && gap >= refresh/4 && gap <= refresh-refresh/4 {
+			a.presentedAt = a.presentedAt.Add(gap - refresh)
+			if plan.kept {
+				plan.lead += gap - refresh
+				plan.after = refreshesUntil(interval-plan.lead, refresh) * refresh
 			}
 		}
-		allowance := a.presentInterval / 8
-		threshold := a.presentInterval - allowance
-		if refresh >= threshold {
-			threshold = refresh / 2
-		}
-		if now.Sub(a.presentedAt) < threshold {
+	}
+	since := now.Sub(a.presentedAt)
+	switch {
+	case refresh >= interval-interval/8:
+		if since < refresh/2 {
 			return false
 		}
+	case refresh <= 0 || evenCadence(interval, refresh):
+		allowance := interval / 8
+		if refresh > 0 {
+			allowance = min(allowance, refresh/2)
+		}
+		if since < interval-allowance {
+			return false
+		}
+	default:
+		after := plan.after
+		if after <= 0 || plan.interval != interval {
+			after = refreshesUntil(interval-plan.lead, refresh) * refresh
+		}
+		// The refresh this Draw belongs to, counted from the last present.
+		slot := (since + refresh/4) / refresh * refresh
+		if since < refresh/2 || slot < after-refresh/2 {
+			return false
+		}
+		next := presentPlan{interval: interval}
+		if slot < after+refresh/2 {
+			// On the refresh the plan chose: the schedule carries on from
+			// the deadline. A present a refresh or more later restarts it.
+			next.lead, next.kept = since-(interval-plan.lead), true
+		}
+		next.after = refreshesUntil(interval-next.lead, refresh) * refresh
+		next.spacing = next.after
+		a.presented(now, next)
+		return true
 	}
-	a.presentedAt, a.presentFollowed = now, false
+	a.presented(now, presentPlan{})
 	return true
+}
+
+// presentPlan is the present schedule's record of the last present and its
+// plan for the next (presentDue).
+type presentPlan struct {
+	// lead is how long after its deadline the last present's Draw arrived and
+	// kept whether the present kept the schedule: the next deadline is a cap's
+	// interval after the last present, less lead. A present that restarted
+	// the schedule has no lead.
+	lead time.Duration
+	kept bool
+	// after is how long after the last present the refresh the next is due
+	// at comes: the refresh nearest the next deadline. It is chosen when the
+	// present is made, under the cap interval, and zero for no plan. The
+	// refresh estimate moves by a few hundredths from Draw to Draw, and
+	// chosen afresh at every Draw for a deadline half-way between two
+	// refreshes it skipped the earlier refresh and then booked the later one
+	// as a refresh late, restarting the schedule. It is a time and not a
+	// count of refreshes so that a display that changes its rate, as a
+	// ProMotion panel does, still presents at the refresh nearest it.
+	after, interval time.Duration
+	// spacing is the spacing planned to the next present while the cadence is
+	// uneven, and zero otherwise; expected is the one planned for the last.
+	spacing, expected time.Duration
+}
+
+// presented records a present whose Draw arrived at now, and the plan for
+// the next.
+func (a *app) presented(now time.Time, next presentPlan) {
+	next.expected = a.presentPlan.spacing
+	a.presentedAt, a.presentFollowed, a.presentPlan = now, false, next
 }
 
 // refreshEstimate measures the refresh period the window is running at from

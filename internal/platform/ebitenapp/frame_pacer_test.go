@@ -1,6 +1,7 @@
 package ebitenapp
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -459,5 +460,45 @@ func TestFramePacerIsOptional(t *testing.T) {
 	p.awaitFrame(time.Now, waitForRefresh)
 	if got := p.refreshPeriod(time.Now()); got != 0 {
 		t.Fatalf("no pacer reported a refresh period %v", got)
+	}
+}
+
+// Where the display's refresh does not divide the cap, the slots follow the
+// present schedule: the cap's rate, the refreshes between two slots always one
+// of the two whole numbers either side of the ratio, and no frame late for its
+// slot. Before the schedule a 144 Hz display presented a 120 cap at 72 slots a
+// second, a 60 cap at 48 and a 30 cap at 28.8. While the cadence is uneven
+// the pacer plans each slot's spacing, and the plan is the spacing that
+// follows.
+func TestFramePacerMatchesTheCapOnAnyDisplay(t *testing.T) {
+	for _, hz := range []int{75, 100, 144, 165, 240} {
+		for _, fps := range []int{30, 60, 120} {
+			l := newPacedLoop(hz, time.Second/time.Duration(fps))
+			var planned []time.Duration
+			for range 12 * fps {
+				l.frame(time.Millisecond)
+				planned = append(planned, l.p.plannedSpacing(l.now()))
+			}
+			ratio := scheduleRatio(float64(hz), fps)
+			lo, hi := time.Duration(math.Floor(ratio))*l.period, time.Duration(math.Ceil(ratio))*l.period
+			first := 2 * fps
+			for i := first + 1; i < len(l.slots); i++ {
+				gap := l.slots[i] - l.slots[i-1]
+				if gap != lo && gap != hi {
+					t.Fatalf("%d Hz, %d cap: frame %d reached the display %v after the one before, want %v or %v", hz, fps, i, gap, lo, hi)
+				}
+				if l.callbacks[i] < l.begins[i]+l.works[i]+l.period/4 {
+					t.Fatalf("%d Hz, %d cap: frame %d was late for its slot", hz, fps, i)
+				}
+				if even := lo == hi; even && planned[i-1] != 0 || !even && planned[i-1] != gap {
+					t.Fatalf("%d Hz, %d cap: frame %d planned %v, then reached the display %v after the one before", hz, fps, i-1, planned[i-1], gap)
+				}
+			}
+			span := l.slots[len(l.slots)-1] - l.slots[first]
+			rate := float64(len(l.slots)-1-first) / span.Seconds()
+			if want := float64(hz) / ratio; math.Abs(rate-want) > want/200 {
+				t.Fatalf("%d Hz, %d cap: %.2f slots a second, want %.2f", hz, fps, rate, want)
+			}
+		}
 	}
 }

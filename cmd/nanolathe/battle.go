@@ -731,6 +731,7 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 	b.applySwitchAltSetting(s)
 	b.applyClockSetting(s)
 	b.applyInterfaceTypeSetting(s)
+	b.applyGameSpeedSetting(s)
 	// `textlines`/`textscroll` configure the message ring and `screenchat`
 	// sets its class filter; retail's startup loader installs these the same
 	// way it installs damagebars [02 §3][07 R-HUD-03 §14.3][07 R-HUD-03 §14.4].

@@ -1824,9 +1824,12 @@ Sound Mode's Mono-versus-3D choice is applied to the audio device (see
 DESIGN_PRESENTATION_CLIENT §2.6). `Interface Type` is consumed by the battle pointer and cursor
 paths: a shell battle reads its live in-memory stage, and a direct battle copies
 the loaded stage at entry, with no per-frame preferences read `[07 R-CAM-01
-§5]`. `gamespeed` is consumed only from the in-battle arm: the
-front-end root has no session to apply it to, and battle entry is the reader
-there.
+§5]`. Fresh campaign and skirmish battles copy the shell's live `gamespeed`
+into both scheduler speed words at client installation; direct entry uses its
+loaded preference block. The front-end slider therefore supplies the next
+battle's speed, and the in-battle arm applies changes immediately. Save loads
+retain their restored scheduler and the isolated Settings preview keeps its own
+speed `[08 R-ENTRY-01 §3]`.
 
 **C18 — the in-battle modal chain.** An empty selection activates the
 side-authored `<prefix>gen.gui`, not the underlying `<prefix>main.gui`. In a

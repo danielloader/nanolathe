@@ -95,9 +95,11 @@ var nlPresets = map[string]nlPreset{
 	},
 	// construct is construction only: constructors raising structures with
 	// every site in reach from where they stand, so none walks, framed on the
-	// work, for the build mutators.
+	// work, for the build mutators. The lead-in includes the stock constructors'
+	// opening and aiming before their script-owned readiness write, so the
+	// compare appears with work underway [04 R-ORD-01 §5].
 	"construct": {
-		scene:  film.Scene{Kind: "battle", Map: "Greenhaven", Seed: 7, PreTicks: 45, Roster: "kbots", Anchor: []int32{2230, 4440}},
+		scene:  film.Scene{Kind: "battle", Map: "Greenhaven", Seed: 7, PreTicks: 120, Roster: "kbots", Anchor: []int32{2230, 4440}},
 		camera: still(0, 20, 1.5),
 		loop:   40,
 		topUp:  true,
@@ -861,8 +863,8 @@ func nlStageHotWrecks(st *nlStage) {
 // ---------------------------------------------------------------- worksite
 
 // nlWorksite is what each constructor raises: three sites round it, each in
-// nanolathe reach of where it stands, so it builds from the first tick and
-// never walks.
+// nanolathe reach of where it stands. The lead-in hides the small approach
+// to the site's edge and the script's readiness wait before work starts.
 var nlWorksite = [][3]string{
 	{"armllt", "armrad", "armllt"},
 	{"armrad", "armllt", "armrad"},

@@ -1633,7 +1633,7 @@ func (s *Service) TickProjectiles(tick uint32, w *units.World, terrain *world.Te
 				s.MarkDead(h)
 				continue
 			}
-			s.advanceBurstAt(i, tick, simRNG, s.weaponLookupFor(catalog), muzzleForBurst)
+			s.advanceBurstAt(i, tick, simRNG, s.weaponLookupFor(catalog), muzzleForBurst, w, terrain)
 			continue
 		}
 		var weapon *content.WeaponDef

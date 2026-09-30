@@ -6,8 +6,8 @@ import (
 )
 
 // ModernRules is the approved Nanolathe Modern rule set of the combat service:
-// the terrain preflight of docs/DESIGN_WEAPONS_PROJECTILES.md §2.3.1 and the
-// Hold Fire suppression of §2.6.1, and the threat/incoming-fire prototype.
+// the terrain/obstruction preflight of docs/DESIGN_WEAPONS_PROJECTILES.md
+// §2.3.1/§2.3.2, Hold Fire suppression of §2.6.1, and threat/incoming fire.
 // These are user-authorized departures from the
 // retail firing pipeline, not parity defects [I11].
 //
@@ -31,7 +31,7 @@ func (*ModernRules) AreaIndexTick(q AreaVictimQuery) {
 	}
 }
 
-// AdmitShot runs the §2.3.1 preview and records the verdict on the query. The
+// AdmitShot runs the §2.3.1/§2.3.2 previews and records the verdict on the query. The
 // preview uses the actual launch and motion kernels, so the answer is the one
 // the real shot would produce for the geometry known this tick; an exhausted
 // work budget or unpreviewable family admits, because incomplete prediction
@@ -41,6 +41,10 @@ func (*ModernRules) AdmitShot(q *ShotQuery) bool {
 		return true
 	}
 	q.Covered, q.Blocked = false, false
+	if modernObstructedShot(q) {
+		q.Blocked = true
+		return false
+	}
 	if q.Service != nil && q.World != nil && q.Target != nil && q.Shooter != nil {
 		preview := Projectile{Shooter: q.Shooter.Handle, ShooterSide: q.Shooter.Owner}
 		if modernReliableWeapon(q.Launch.Weapon) {

@@ -346,6 +346,79 @@ the next authoritative input boundary. Cancel/Undo enqueue the restored
 choice; a paused match consumes the final queued choice when it resumes.
 Strict mode does not undo shots or state changes made earlier in Modern.
 
+### 2.3.2 Modern friendly and feature obstruction
+
+**Nanolathe Modern policy — user-authorized 2026-09-29.** Units hold fire
+when the current launch trajectory crosses an own or allied unit's stamped
+footprint, or a feature (including a wreck) whose height obstructs it. They
+retain their target and orders and retry as geometry changes. This implements
+the requested stop option; it does not add a maneuver order.
+
+**Strict baseline.** Retail admission does not inspect these intervening
+objects. Projectile contact samples only each post-motion point, ignores the
+shooter's own player, can hit another allied player, and resolves units before
+features; sufficiently fast shots skip cells [06 §8.1]. Strict 3.1 and
+Community preserve that behavior and its RNG/resource effects.
+
+**Modern answer.** The existing `combat.Rules.AdmitShot` gate checks obstruction
+before incoming-fire coordination and terrain admission. The preview uses the
+actual resolved muzzle, post-spread ballistic angles and stored distance word,
+ordinary/vertical/dropped creators, and existing motion kernels under the
+bound guidance policy. It walks the
+cells crossed between consecutive trajectory points, testing the height
+interval inside each cell. This is an intentional safety sweep, independent
+of the unchanged point-based projectile collision. An artillery arc above
+the blocker passes; a fast beam through a thin friendly footprint waits.
+Own-player units are protected too, except the shooter itself. Allied means
+the shooter's current alliance declaration through the session's existing
+reaction binding. Unit bands retain ground's strict upper gate and air's
+inclusive lower and upper gates [06 R-DMG-01 §7]. Features resolve fringe
+anchors and use the contacted cell's floor plus the authored height byte,
+with equality passing [06 §8.1]. Units-only weapons still ignore features.
+An enemy target occupying the cell takes precedence over its underlying
+feature. When actual endpoint contact selects the ground target, that terminal
+contact also precedes the air occupant for a segment wholly inside the ground
+target's height gate; a descending segment crossing an ally above that gate
+still blocks. A target crossed only between samples
+cannot shield a friend, because the live projectile may skip it. Obstructions
+beyond the resolved aim plane are outside the slot-launch check.
+
+**Bursts.** The slot gate checks the initial trajectory even for a burst.
+Each due pellet is checked again after the ordinary muzzle refresh, using its
+inherited template velocity (including the preceding spray), and the first
+movement sample on the next tick (appends lie outside the captured phase span
+[06 §4.3][06 §5.1]), before count,
+deadline, allocation, sound or RNG work. A blocked pellet cancels the
+unlaunched remainder. Already emitted pellets continue; the original launch's
+resource charge is retained. No refund or new persistent burst state is added.
+Pellets trace to actual contact or nominal expiry without an aim-plane cutoff:
+the ballistic creator deliberately retains an unrelated stored target point
+[06 §6.1][06 §6.4], so that field cannot safely bound a burst's trajectory.
+The public pure burst scheduler has no world geometry and keeps its existing
+behavior; the authoritative projectile driver supplies the world and terrain.
+
+**Effects and boundaries.** A refused slot launch consumes no accuracy draws,
+reload, ammunition, energy, metal, Fire/Rock callback or launch event. The
+query owns reusable preview scratch; the new obstruction preview allocates
+nothing. Rebinding affects the next slot/pellet admission and needs no save
+migration. Guidance freezes the current live target point, even for a mobile
+target; this is current-geometry safety, not a prediction of future movement.
+Ballistic and dropped motion stop before unknown future wind. Interceptors,
+cruise, malformed or wrapped geometry, uncertain phase/expiry behavior and
+exhaustion of the shared 4,096-step/cell budget remain admitted. Burst expiry
+uses the nominal timer/distance deadline without speculative random decay.
+This policy does not promise protection from splash at an otherwise clear
+target, future interceptions, or shots already in flight. Retail research
+continues to describe retail behavior.
+
+**Verification.** `modern_obstruction_test.go` locks own/allied/enemy
+distinctions, vertical boundaries, feature-byte/fringe resolution, fast shots
+in all eight directions, clear artillery arcs, guided shots at mobile targets,
+blocked/recovered firing, stockpile ammunition, RNG/resources, burst
+cancellation and Strict bypass. Run the affected combat/session and citation
+checks, both repository gates and the displayless simulation-cost benchmark;
+this changes authoritative firing only.
+
 ### Modern threat targeting and incoming fire
 
 **Nanolathe Modern policy — authorized prototype.** This section defines an

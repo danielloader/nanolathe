@@ -9,6 +9,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
+	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
 
 // Reproduce a Roam Flash taking a hidden rocket tower's fire through the real
@@ -34,6 +35,21 @@ func TestModernRetailFlashMovesAfterHiddenRocketImpact(t *testing.T) {
 			s.Vis.RefreshMode(3, true, eligible, observers)
 			flash := placeCompleteRetailUnit(t, s, "ARMFLASH", 0, numeric.FixedFromInt(1472), numeric.FixedFromInt(2416))
 			tower := placeCompleteRetailUnit(t, s, "CORRL", 1, numeric.FixedFromInt(968), numeric.FixedFromInt(2792))
+			// Author a clear firing corridor for this impact-response fixture.
+			// Modern correctly refuses the fresh map's intervening trees; shot
+			// obstruction is locked separately in combat's contract tests.
+			for cz := world.WorldToCell(flash.Z) - 2; cz <= world.WorldToCell(tower.Z)+2; cz++ {
+				for cx := world.WorldToCell(tower.X) - 2; cx <= world.WorldToCell(flash.X)+2; cx++ {
+					cell := s.World.PlotAt(cx, cz)
+					if cell != nil && !cell.IsEmpty() {
+						cell.SetFeature(world.PlotFeatureNone)
+						cell.SetOccupied(false)
+						s.Features.ReleaseRemovedAt(int(cx), int(cz))
+						s.World.NoteFootprintRestamp(cx, cz, 1, 1)
+					}
+				}
+			}
+			s.World.BumpStaticObstacleRevision()
 			// Give the enemy a spotting footprint without adding another attack target
 			// to the Flash's local scene. Owner zero still cannot see the tower.
 			s.Vis.Publish(1, int32(flash.X.Int()/32), int32((flash.Z.Int()-flash.Y.Int()/2)/32), 0, 320)

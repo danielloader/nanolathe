@@ -325,7 +325,8 @@ state its retail baseline, Modern rule, conservative limits and verification;
 retail research continues to describe the executable. Both branches need
 contract tests, including resource and RNG effects. An unknown retail mechanic
 is still an unknown; the Modern setting does not authorize invented evidence.
-Current contracts are DESIGN_WEAPONS_PROJECTILES §2.3.1 (terrain admission) and
+Current contracts are DESIGN_WEAPONS_PROJECTILES §2.3.1 (terrain admission),
+§2.3.2 (friendly and feature obstruction), and
 "Modern threat targeting and incoming fire", DESIGN_UNITS_ORDERS_COB
 "Modern Hold Fire" and "Modern danger response", DESIGN_MOVEMENT_PATH
 "Modern danger escape", "Modern learned terrain", "Modern group-order

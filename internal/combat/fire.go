@@ -6,6 +6,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
+	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
 
 // FireSpy records the fixed callback order for testing [06 §4.1] C2.
@@ -589,17 +590,17 @@ func (s *Service) AdvanceBursts(tick uint32, simRNG *rng.Simulation, weaponByID 
 	if s == nil {
 		return 0
 	}
-	return s.advanceBurstsRange(0, s.Count(), tick, simRNG, weaponByID, muzzlePos)
+	return s.advanceBurstsRange(0, s.Count(), tick, simRNG, weaponByID, muzzlePos, nil, nil)
 }
 
 // advanceBurstAt is the one-record scheduler branch of the phase dispatcher.
 // The caller's captured span decides which records are reached; a successful
 // clone is appended beyond that span and waits for the next tick [06 §5.1].
-func (s *Service) advanceBurstAt(index int, tick uint32, simRNG *rng.Simulation, weaponByID func(id int32) (*content.WeaponDef, bool), muzzlePos func(shooter pool.Handle, piece int16) (Vec3, bool)) int {
-	return s.advanceBurstsRange(index, index+1, tick, simRNG, weaponByID, muzzlePos)
+func (s *Service) advanceBurstAt(index int, tick uint32, simRNG *rng.Simulation, weaponByID func(id int32) (*content.WeaponDef, bool), muzzlePos func(shooter pool.Handle, piece int16) (Vec3, bool), unitsWorld *units.World, terrain *world.Terrain) int {
+	return s.advanceBurstsRange(index, index+1, tick, simRNG, weaponByID, muzzlePos, unitsWorld, terrain)
 }
 
-func (s *Service) advanceBurstsRange(start, entry int, tick uint32, simRNG *rng.Simulation, weaponByID func(id int32) (*content.WeaponDef, bool), muzzlePos func(shooter pool.Handle, piece int16) (Vec3, bool)) int {
+func (s *Service) advanceBurstsRange(start, entry int, tick uint32, simRNG *rng.Simulation, weaponByID func(id int32) (*content.WeaponDef, bool), muzzlePos func(shooter pool.Handle, piece int16) (Vec3, bool), unitsWorld *units.World, terrain *world.Terrain) int {
 	if s == nil {
 		return 0
 	}
@@ -637,6 +638,23 @@ func (s *Service) advanceBurstsRange(start, entry int, tick uint32, simRNG *rng.
 					p.Pos = pos
 					p.StartPos = pos
 				}
+			}
+		}
+		// Modern holds the unlaunched remainder if the current pellet would
+		// cross a friendly footprint or feature. Check its inherited velocity
+		// after muzzle refresh, before allocation, deadline/count writes or RNG.
+		// Nanolathe Modern policy: DESIGN_WEAPONS_PROJECTILES §2.3.2.
+		if unitsWorld != nil && previewsShot(s.rules()) && wDef != nil {
+			saved := s.shotQuery
+			s.shotQuery = ShotQuery{Service: s, World: unitsWorld, Shooter: unitsWorld.Unit(p.Shooter),
+				Launch: Slot{Weapon: wDef}, Muzzle: p.Pos, Aim: p.TargetPos, Tick: tick,
+				Terrain: terrain, Target: unitsWorld.Unit(p.TargetUnit), Wind: s.ProjectileWind, Burst: p}
+			admitted := s.rules().AdmitShot(&s.shotQuery)
+			s.shotQuery = saved
+			if !admitted {
+				p.BurstRemaining = 0
+				s.MarkDead(h)
+				continue
 			}
 		}
 		// Decrement remaining and advance deadline [06 §4.3] burst state copy.

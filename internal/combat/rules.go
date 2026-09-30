@@ -93,7 +93,7 @@ type Rules interface {
 	// AdmitShot reports whether one resolved fire attempt may launch.
 	// StrictRules returns true without work: retail admits the shot and never
 	// samples terrain [06 R-WPN-05 §1]. ModernRules runs the
-	// DESIGN_WEAPONS_PROJECTILES §2.3.1 preview and records its verdict on the
+	// DESIGN_WEAPONS_PROJECTILES §2.3.1/§2.3.2 previews and records the verdict on the
 	// query.
 	AdmitShot(q *ShotQuery) bool
 
@@ -180,11 +180,17 @@ type ShotQuery struct {
 	Target *units.Unit
 	Wind   *world.Wind
 
-	// Blocked reports that the rule set proved terrain obstruction before the
+	// Blocked reports terrain or Modern friendly/feature obstruction before the
 	// resolved target. A refused launch keeps the relative Aim pair, so the
 	// caller reads this to decide whether to copy the slot's angles back
 	// [06 R-WPN-05 §4].
 	Blocked bool
+	// Burst is the parked template for a pending pellet, or nil for a slot
+	// launch. Admission copies it and never mutates the live template.
+	Burst *Projectile
+
+	// Obstruction preview scratch shares this query's nested-attempt lifetime.
+	obstructionPreview Projectile
 }
 
 // StrictRules is the retail rule set: every question answers as the executable

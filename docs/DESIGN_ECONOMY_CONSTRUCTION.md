@@ -169,7 +169,7 @@ phase byte is order-record state, so it survives a save `[08 R-SAVE-ORDER-01]`:
 |---|---|---|
 | 0 | building-class gate, then raise the activate edge on a positive count and advance in the same pass | skip the door handshake, zero the blocked-area counter, advance |
 | 1 | wait, as a level test with no timeout, for the script to set the in-build-stance bit | the approach: install the rectangle goal at the site and walk |
-| 2 | resolve the exit spot, validate it, allocate the nanoframe | validate the chosen site; on a legal site take all three weapon slots through `orders.TakeWorkSlots`, then write the site height and allocate the nanoframe |
+| 2 | resolve the exit spot, validate it, allocate the nanoframe | with no bound product, validate the chosen site, take all three weapon slots through `orders.TakeWorkSlots`, write the site height, allocate the nanoframe and arrange `StartBuilding`; with a bound product, wait for script readiness |
 | 3 | the work visit: one shared construction step per visit, retrying a tick later | the same |
 | 4 | lower the building edge, repeat the completion transition idempotently, restart a counted successor in the same pass | the same |
 
@@ -195,6 +195,21 @@ only identifies the current call window. Earlier pump deliveries are forwarded
 onto that record, and `ContinuePrimaryWork` resumes it without pumping the
 secondary queue again. Both work phases invoke movement's due orbit update
 before applying work `[04 §10.3]` `[08 R-SAVE-ORDER-01]`.
+
+Ground placement retains phase 2 while the newly bound product waits for
+`INBUILDSTANCE`; the product reference distinguishes placement from readiness
+without another saved marker. This also admits a restored retail phase-2
+readiness record with its product already bound. The wait arms cancel-current,
+target-removal and script-touched bits with no deadline, and the ordinary
+queue pump must consume the script event before the construction window
+re-tests the level. A ready level advances to phase 3 and applies the first
+work quantum in that visit. Neither callback return nor complete piece
+animation is a gate, and issuing `StartBuilding` does not clear an already-set
+stance. While the wait holds, this builder produces no health, fraction,
+resource, nano or reveal-deadline effect; other builders retain their own work
+visits. The aircraft's discarded readiness verdict above remains distinct
+`[04 R-ORD-01 §1]` `[04 R-ORD-01 §5]` `[04 R-ORD-02 §2]`
+`[05 R-P0-06 §1]` `[04 R-COB-06]`.
 
 The activate edge is a real rising edge, because the yard-door handshake is
 entirely script-owned: the engine raises `Activate` and waits, and nothing but

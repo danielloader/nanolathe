@@ -311,16 +311,37 @@ func (s *Service) handleState2(factory *units.Unit, node *orders.Node, tick uint
 	}
 }
 
-// handleMobileState2 implements mobile build placement at the authoritative site anchor [P0-I05][05 "Factory production lifecycle"].
-// Mobile payload carries site in Node.GoalX/Z (world coords) via QueueMobileBuild [P0-I05].
-// Validation uses the product's yard at the snapped site, not the factory exit spot.
+// handleMobileState2 places the ground frame, then waits for script readiness
+// before entering work [04 R-ORD-01 §5][05 R-P0-06 §1]. The bound target
+// distinguishes readiness from placement on this saved phase, including a
+// restored retail phase-2 readiness record [08 R-SAVE-ORDER-01].
 func (s *Service) handleMobileState2(builder *units.Unit, node *orders.Node, tick uint32) {
-	switch s.mobilePlacementVisit(builder, node, tick) {
-	case 1:
-		node.Phase = uint8(State3)
-	case 8:
-		s.removeHead(builder, node)
+	if node.Target == 0 {
+		switch s.mobilePlacementVisit(builder, node, tick) {
+		case 1:
+			// Placement has arranged StartBuilding and bound the new frame.
+		case 8:
+			s.removeHead(builder, node)
+			return
+		default:
+			return
+		}
+	} else if node.DynamicGate != 0 {
+		// The ordinary queue pump must consume the script-touched event;
+		// construction cannot poll an armed level wait every tick
+		// [04 R-COB-06][04 R-ORD-01 §1].
+		return
 	}
+	if !builder.InBuildStance {
+		node.DynamicGate = InterruptCancel | InterruptStop | units.PendingScriptTouched
+		node.Deadline = -1
+		return
+	}
+	// Readiness is the script's level, not the callback's return or the end
+	// of every animation. A high level admits work in this same visit
+	// [04 R-ORD-01 §1][04 R-ORD-01 §5].
+	node.Phase = uint8(State3)
+	s.handleState3(builder, node, tick)
 }
 
 // mobilePlacementVisit shares the ground and air placement effects while

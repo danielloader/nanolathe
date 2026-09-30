@@ -74,6 +74,12 @@ type CursorSelection struct {
 	// session's read-only query. Nil leaves the in-range answer.
 	WeaponAdmits func(actor, target *units.Unit, x, y, z numeric.Fixed) bool
 
+	// RepairAdmits is the shared repair/assistance admission, including the
+	// target's committed movement mode and water reach [07 §8][04 R-ORD-01 §7].
+	// The shell binds the session's read-only query on committed unit copies.
+	// Nil retains the capability-based preview for callers without a world.
+	RepairAdmits func(actor, target *units.Unit) bool
+
 	// Metal and Energy are the viewer's current stocks. The command-fire shape
 	// turns to cursortoofar when the armed weapon's per-shot cost is not
 	// covered [07 §8][05 "Weapon per-shot cost"].
@@ -249,7 +255,9 @@ func cursorForActor(latch input.Latch, u *units.Unit, h CursorHover, sel CursorS
 			if hostile && reclaimUnitAdmits(u, t) {
 				return render.CursorReclamate
 			}
-			if allied && canAssist(def) && needsWork(t) {
+			// The bound shape uses nano-reach alone; code 2's additional
+			// unsigned health compare belongs to order commit [07 §8].
+			if allied && repairCursorAdmits(u, t, sel) && (sel.RepairAdmits != nil || needsWork(t)) {
 				return render.CursorRepair
 			}
 			if def.CanFly && t.Def != nil && t.Def.IsAirBase {
@@ -329,7 +337,7 @@ func cursorForActor(latch input.Latch, u *units.Unit, h CursorHover, sel CursorS
 		return render.CursorDefend
 
 	case input.LatchRepair:
-		if t == nil || !canAssist(def) {
+		if !repairCursorAdmits(u, t, sel) {
 			return render.CursorNormal
 		}
 		return render.CursorRepair
@@ -428,14 +436,12 @@ func contextualCursor(u *units.Unit, h CursorHover, sel CursorSelection, hostile
 		// same order as the resolver's step 3, whose assistance half runs before
 		// its own-unit reject [04 R-ORD-02 §1].
 		//
-		// "Needing assistance" is *unfinished*, not *damaged*. The default
-		// interface type is the only one this build runs, and its contextual
-		// code "never turns a click on a damaged friendly into a repair (only an
+		// "Needing assistance" is *unfinished*, not *damaged*. The Type-0
+		// contextual code "never turns a click on a damaged friendly into a repair (only an
 		// unfinished one into assistance)" [04 R-ORD-02 §1]; a damaged complete
 		// friendly reaches the own-unit reject instead [04 R-ORD-02 §7]. This row
-		// used to read `needsWork`, which is damaged-or-unfinished — code 2's
-		// condition, correct under the MOVE latch above and nowhere else — so the
-		// cursor promised a repair the click then refused.
+		// used to read `needsWork`, which is damaged-or-unfinished, so the
+		// cursor promised a repair the idle click then refused.
 		//
 		// The capability gate is the actor's `canreclamate` mirror bit, because
 		// that is the flag the resolver reads: the assistance arm's whole
@@ -444,7 +450,7 @@ func contextualCursor(u *units.Unit, h CursorHover, sel CursorSelection, hostile
 		// the same authored capability flags the order predicate reads", and the
 		// authored `builder` key is a different key — a factory carries it
 		// without a nanolathe.
-		if allied && def.CanReclamate && underConstruction(t) {
+		if allied && def.CanReclamate && underConstruction(t) && (sel.RepairAdmits == nil || sel.RepairAdmits(u, t)) {
 			return render.CursorRepair
 		}
 		if isInspectable(t, sel.Viewer) {
@@ -537,18 +543,24 @@ func hasLiveMover(u *units.Unit) bool {
 	return u != nil && u.Flags&units.BuildingClassStatus == 0
 }
 
-// canAssist is the repair/help-build capability gate. The authored record has
-// no separate repair flag: assistance is gated on the builder's nanolathe,
-// which is the flag the order resolver reads for HelpBuild/RepairUnit
-// [04 §3.4].
+// canAssist retains the capability preview for callers with no bound world
+// query. The battle shell uses the resolver's shared nanolathe admission
+// instead [04 R-ORD-01 §7].
 func canAssist(def *content.UnitDef) bool { return def.Builder }
 
-// needsWork reports a target the MOVE latch's repair arm would act on: still
-// under construction, or damaged. Both are code 2's condition — "the target is
-// unfinished → `HelpBuild`; the target's 16-bit health is below its `maxdamage`
-// → `RepairUnit`" [04 R-ORD-02 §1] — and code 2 is the one arm that adds a
-// health test of its own [04 R-ORD-02 §7]. It is deliberately NOT the idle
-// latch's condition: see contextualCursor.
+func repairCursorAdmits(actor, target *units.Unit, sel CursorSelection) bool {
+	if target == nil {
+		return false
+	}
+	if sel.RepairAdmits != nil {
+		return sel.RepairAdmits(actor, target)
+	}
+	return canAssist(actor.Def)
+}
+
+// needsWork is the unfinished-or-damaged preview used when a caller provides
+// no bound repair query. The battle MOVE shape instead asks shared nano-reach;
+// command code 2 applies its stricter health compare later [07 §8][04 R-ORD-02 §7].
 func needsWork(t *units.Unit) bool {
 	if t == nil {
 		return false

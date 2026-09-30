@@ -476,9 +476,11 @@ service stays enabled throughout supported single-player scope, so a new
 mutable enable flag is unnecessary here. I03 owns ordered token service; the
 shared I06 toggle/radio mutation path is implemented.
 
-`TODO(question)`: Nanolathe has no identified authored battle-root
-`MAIN2.GUI` opener. Retail builds that root before the successful transition;
-its integration must preserve that timing when the root owner is implemented.
+Battle HUD entry loads and builds the side-prefix `MAIN2.GUI` root before
+the first successful transition disables startup preclear; later entries
+retain that process-lifetime state.
+Its resolved header panel is retained for the empty-selection painter
+`[07 §6]` `[07 R-WGT-01 §3]`.
 Actual command, options, confirmation and result windows build at their runtime
 open, after the transition. The options caller relabels the already-built
 MISSION caption, retaining the originally assigned accelerator. Results
@@ -1737,6 +1739,11 @@ its bottom border at the surface edge, where retail shows it at 640×480;
 stock CORE art ends in a purple row that a mirrored or tiled copy would repeat
 mid-rail. A surface no taller than the art keeps the retail stamp. The radar,
 strips and rail controls draw over the backdrop exactly as before.
+With no selected units, the retained side-prefix `MAIN2.GUI` header panel
+draws over that backdrop at its native authored origin and size. This reveals
+the stock faction emblem without stretching it; the host backdrop remains
+visible below the root at taller sizes. No command window is opened and no
+command input is admitted for that state `[07 §6]` `[07 R-HUD-05]`.
 `TestRailWindowReachesBelowArt` locks the extent test; seeded `--shot`
 comparisons against the retail path must match outside the rail columns.
 

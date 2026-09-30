@@ -25,6 +25,7 @@ import (
 // This test is what says no.
 func TestCOBDoesNotImportUnits(t *testing.T) {
 	fset := token.NewFileSet()
+	//lint:ignore SA1019 This boundary guard deliberately scans imports under every build tag.
 	pkgs, err := parser.ParseDir(fset, ".", nil, parser.ImportsOnly)
 	if err != nil {
 		t.Fatalf("parse internal/cob: %v", err)

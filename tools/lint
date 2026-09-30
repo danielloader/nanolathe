@@ -30,8 +30,9 @@ if [ -z "${NANOLATHE_HOST_LOCK_FD:-}" ]; then
 fi
 . "$(dirname "$0")/go-budget"
 
-STATICCHECK_VERSION=2025.1.1
-DEADCODE_VERSION=v0.36.0
+# These analyzers must understand the Go 1.27 compiler's export format.
+STATICCHECK_VERSION=2026.2.1
+DEADCODE_VERSION=v0.50.0
 
 # The -f template prints "<package path> <function>" per unreachable function
 # and nothing else. deadcode's default format carries file:line positions,

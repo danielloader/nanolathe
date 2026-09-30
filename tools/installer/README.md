@@ -36,8 +36,8 @@ settings are outside the versioned release directories.
 original shortcut launcher with one that checks for updates. You can also close
 the game and rerun that command whenever you want to update manually.
 
-Supported installer targets: Mac Intel/Apple Silicon, Linux x86-64/ARM64, and
-Windows x64/ARM64. Linux requires a graphical desktop and the window-system, graphics,
+Supported installer targets: Mac Intel/Apple Silicon (macOS 13 or newer),
+Linux x86-64/ARM64, and Windows x64/ARM64. Linux requires a graphical desktop and the window-system, graphics,
 and audio runtime libraries used by Ebitengine. Go alone builds the desktop
 engine; a separate C compiler is not required. The Windows installer selects a native compiler and engine for the host CPU,
 including when PowerShell itself runs under x64 emulation on ARM64.

@@ -294,3 +294,53 @@ any timing it produced.
 
 This is an opt-in development and regression probe, not a CI threshold. Keep
 baseline outputs outside the repository.
+
+## Go 1.27.1 upgrade comparison (2026-09-29)
+
+Go 1.25.0 and Go 1.27.1 ran the same engine source and reference assets on
+Darwin/arm64 (Apple M3 Pro), with twelve logical CPUs and `GOMAXPROCS=2`.
+Both binaries were built with `-trimpath`, without extra compiler experiments or runtime tuning.
+The simulation source was revision `020d2100`; later integrated settings and
+renderer changes were included in the separate
+[live renderer comparison](BATTLE_BENCHMARK.md#go-1271-upgrade-comparison-2026-09-29).
+No gameplay implementation or engine dependency version changed for this upgrade.
+
+Each run used the default 250-unit armies, seed 7, the mode's default unit
+limit, 1,200 warm-up ticks and 3,000 measured ticks. Profiles, phase timing and
+thread CPU sampling were disabled. Prebuilt binaries alternated old/new,
+then new/old, through the ordinary benchmark lock. Modern had three runs per
+compiler; Strict and Community had eight each after early host variability
+prompted additional samples. All samples are retained. Outputs are outside
+the repository in `/private/tmp/nanolathe-go127-perf/`, under
+`sim-MODE-go125-N` and `sim-MODE-go127-N`.
+
+Values below are medians across runs, including the median of each run's
+maximum tick time. Each pair reads **Go 1.25.0 → Go 1.27.1**; timings are ms.
+
+| Mode | Process CPU/tick | Wall p50 | Wall p95 | Run maximum | Allocated bytes/tick |
+|---|---:|---:|---:|---:|---:|
+| Modern | 1.877 → 1.812 | 1.744 → 1.665 | 2.765 → 2.705 | 8.934 → 8.740 | 86,428 → 86,428 |
+| Strict 3.1 | 1.210 → 1.101 | 1.144 → 1.041 | 1.577 → 1.498 | 4.555 → 4.594 | 19,871 → 19,871 |
+| Community 3.9 | 1.591 → 1.447 | 1.433 → 1.290 | 2.407 → 2.299 | 9.323 → 9.310 | 16,721 → 16,721 |
+
+The median within-pair CPU changes were −3.3%, −5.7% and −5.9%, respectively.
+Host drift affects the medians across runs, so these observations do not establish
+a universal speedup. The small Strict maximum difference did not accompany a
+median or p95 slowdown; isolated maxima remained noisy. No sustained regression
+was observed, and allocation rates were unchanged within measurement noise.
+
+Every run within a mode had identical scene metadata, catalog hash, all three
+partial fingerprints, both RNG draw counts and all seven census samples.
+The measured windows began with about 750 live units, active combat, factory
+construction and more than 6,200 features. Equality of the partial fingerprint
+alone is not a whole-state equivalence claim; the census and ordinary contract
+gates remain necessary.
+
+To reproduce a sample with each prebuilt compiler-specific binary:
+
+```sh
+GOMAXPROCS=2 /tmp/nanolathe-headless --sim-benchmark=/tmp/go-comparison \
+  --root="$HOME/TotalAnnihilation" --gameplay=modern --seed=7 \
+  --warmup-ticks=1200 --benchmark-ticks=3000 --benchmark-profiles=false \
+  --phase-timing=false --thread-cpu-timing=false
+```

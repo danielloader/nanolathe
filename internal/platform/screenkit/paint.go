@@ -208,6 +208,7 @@ func Poly(dst *ebiten.Image, pts []float64, c color.RGBA) {
 	for i := 1; i < n-1; i++ {
 		idx = append(idx, 0, uint16(i), uint16(i+1))
 	}
+	//lint:ignore SA1019 Retain the triangle-fan antialiasing path during the compiler upgrade.
 	op := &ebiten.DrawTrianglesOptions{AntiAlias: true}
 	op.ColorScaleMode = ebiten.ColorScaleModePremultipliedAlpha
 	dst.DrawTriangles(v, idx, white, op)

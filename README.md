@@ -29,9 +29,10 @@ shortcut. It remembers one selected Total Annihilation installation and stores
 new saves separately. See the [installer guide](tools/installer/README.md) for
 updates, paths, and platform limitations.
 
-To build manually, install Go 1.25 or newer and provide a local retail
+To build manually, install Go 1.27.1 or newer and provide a local retail
 installation. Ebitengine 2.10 builds on desktop platforms with Go alone;
-Linux still needs a graphical desktop and graphics/audio runtime libraries.
+macOS requires version 13 or newer. Linux still needs a graphical desktop and
+graphics/audio runtime libraries.
 
 ```sh
 git clone https://github.com/nanolathe-gg/nanolathe.git

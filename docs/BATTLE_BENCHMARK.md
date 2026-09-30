@@ -229,6 +229,43 @@ or live user input.
 The seed fixes simulation streams; authored content, settings and code revision
 also matter. Camera origins and shake status are recorded with each census.
 
+## Go 1.27.1 upgrade comparison (2026-09-29)
+
+The compiler upgrade also compared prebuilt Go 1.25.0 and Go 1.27.1 desktop
+binaries at revision `b4e95bd6`, including the settings and effect work integrated
+while the [simulation comparison](SIM_BENCHMARK.md#go-1271-upgrade-comparison-2026-09-29)
+ran. Each pair used identical source, assets and scene metadata. Runs were
+sequential through the shared benchmark lock, with `GOMAXPROCS=2`, `-trimpath`
+builds and no extra compiler experiments or runtime tuning.
+
+There were three runs per compiler for each renderer, alternating old/new,
+new/old, old/new. The default Expanded Confluence fixture ran at 1920×1080,
+seed 7, Modern gameplay and zoom 1, with the standard 300-tick lead-in,
+two-second renderer warm-up and 180 measured draws. Classic used 30 draws/s;
+Modern used 60, exercising interpolation. Compare compilers within each
+renderer; the two renderer windows cover different numbers of simulation ticks.
+Outputs are outside the repository in `/private/tmp/nanolathe-go127-perf/`,
+under `battle-RENDERER-go125-N` and `battle-RENDERER-go127-N`.
+
+Values are medians across runs; the maximum column is the median of the run
+maxima. Each pair reads **Go 1.25.0 → Go 1.27.1**, in ms. DrawWork measures
+host work after pacing, not GPU execution or display scanout.
+
+| Renderer | DrawWork p50 | DrawWork p95 | DrawWork maximum | Step p50 | Allocated bytes/draw |
+|---|---:|---:|---:|---:|---:|
+| Classic | 24.186 → 23.777 | 28.923 → 28.591 | 33.976 → 33.865 | 2.540 → 2.463 | 3,658,075 → 3,658,020 |
+| Modern | 8.244 → 8.165 | 12.003 → 11.854 | 13.379 → 12.704 | 2.866 → 2.642 | 826,635 → 821,496 |
+
+No renderer slowdown was observed. Every before/after pair had identical
+per-draw censuses and byte-identical start/end snapshots for units, orders,
+movement, construction, features, projectiles and AI. All six final image
+comparisons had identical decoded pixels; Classic and Modern captures were
+also inspected visually. PNG file bytes differed because
+[Go 1.27 changed compression output](https://go.dev/doc/go1.27#compressflate).
+The frame census retained active construction, burning features, air and naval
+units, projectiles and effects. This is regression evidence for these fixtures
+on this host, not a guarantee about all hardware or workloads.
+
 Scene version 5 has a different workload from the earlier Great Divide and Ashap scenes. The
 report warns when scene metadata differs across input directories, and when
 measured combat, sprite features, fire or requested construction is absent.
@@ -543,4 +580,3 @@ seconds is written, and eight per run (32 for a trace of play). It is how a hitc
 few minutes is caught with every goroutine's state and blocking stacks around
 it; a music track change opening its MP3 on the host step was found this way.
 It cannot be combined with `--live-exec-trace`.
-

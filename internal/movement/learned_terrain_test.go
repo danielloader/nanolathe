@@ -122,10 +122,17 @@ func TestModernTerrainRejectionTeachesOnlyTheOwner(t *testing.T) {
 
 // Modern: a step another unit rejects teaches nothing, because the search
 // already has a writer for that case — the occupant-age gate [04 R-COLL-01 §3].
+// The mover's row is walled on both sides, so that Modern steering finds no
+// way round the unit and the mover walks into it
+// (docs/DESIGN_MOVEMENT_PATH.md "Modern steering").
 func TestModernUnitRejectionTeachesNothing(t *testing.T) {
 	sys, w, h, _ := learnedFixture(t, &ModernRules{})
 	for z := int32(learnedWallZ); z <= learnedWallEndZ; z++ {
 		sys.Terrain.PlotAt(learnedWallX, z).SetMaxHeight(10)
+	}
+	for x := int32(0); x < 20; x++ {
+		sys.Terrain.PlotAt(x, 1).SetMaxHeight(200)
+		sys.Terrain.PlotAt(x, 3).SetMaxHeight(200)
 	}
 	parked, err := w.Create(wiringDef(), 0, world.CellToWorld(learnedWallX), 0, world.CellToWorld(2))
 	if err != nil {

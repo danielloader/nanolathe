@@ -41,11 +41,10 @@ looks like sidestepping emerges from two independent timers — the follower's
 else `[04 R-COLL-01 §7]` `[04 R-MOV-01 §7]`. Unapproved additions in this area invent retail behaviour. The explicit
 Modern construction-clearance contract below,
 [Modern learned terrain](#modern-learned-terrain),
-[Modern re-route staggering](#modern-re-route-staggering),
 [Modern group-order spreading](#modern-group-order-spreading),
 [Modern unreachable moves](#modern-unreachable-moves),
 [Modern wedge escape](#modern-wedge-escape) and
-[Modern pocket release](#modern-pocket-release) are
+[Modern traffic](#modern-traffic), which does steer, smooth and re-plan, are
 user-authorized exceptions and must not be removed as parity defects.
 
 ### Modern construction clearance priority
@@ -292,13 +291,14 @@ gameplay seam, bound on `System.Rules` by the session's rule set; unbound it
 answers as Strict 3.1. It carries
 [Community contested-cell claims](#community-contested-cell-claims),
 [Modern learned terrain](#modern-learned-terrain),
-[Modern re-route staggering](#modern-re-route-staggering),
 [Modern group-order spreading](#modern-group-order-spreading),
 [Modern bounded path work](#modern-bounded-path-work),
 [Modern unreachable moves](#modern-unreachable-moves),
 [Modern wedge escape](#modern-wedge-escape) and
-[Modern pocket release](#modern-pocket-release), and `LearnedTerrain`
+[Modern traffic](#modern-traffic), and `LearnedTerrain`
 is the per-owner grid the learned-terrain policy keeps on the `System`.
+`OverlapRules` answers the policies Modern traffic retired, for the
+pathfinding laboratory's baseline; no reserved rule set binds it.
 
 **Routes** (`route.go`). `Route` is up to twenty published points plus the
 active and dirty bits. `Publish` clamps the count first and applies the zero-
@@ -645,8 +645,8 @@ installation preserves that tick when under ten ticks old and clears it when
 at least ten ticks old (before tick ten, always); activation and request staging never replace it with the current tick
 `[04 R-PATH-01 §8]`. The scheduler alone applies the inclusive
 `lastRequestTick + 60 <= tick` admission test and stamps a positive poll
-`[04 R-MOV-01 §7]`; the 60 is `Rules.RepathDelay`, which Modern lengthens by
-0–7 ticks ([Modern re-route staggering](#modern-re-route-staggering)). This distinction matters for `RepairUnit`, which refreshes
+`[04 R-MOV-01 §7]`; the 60 is `Rules.RepathDelay`, which Modern answers with
+fifteen ([Modern prompt re-routing](#modern-prompt-re-routing)). This distinction matters for `RepairUnit`, which refreshes
 its rectangle goal every 30–59 ticks: stamping each refresh as a request would
 continually postpone admission and leave its synthetic route through an
 obstacle. Replacement invalidates the old route binding and failure state while
@@ -1576,12 +1576,12 @@ ends, which is what honest fog pathing costs and which no repath timing
 changes.
 
 **No prompt repath.** Letting Modern re-request immediately after a lesson,
-instead of waiting out the sixty-tick throttle, was considered and not adopted:
-it would be a second departure, and the measurement above bounds what it could
-recover at the blocked share of the trip. This policy never shortens the
-throttle; the separate
-[Modern re-route staggering](#modern-re-route-staggering) only lengthens it by
-up to seven ticks.
+instead of waiting out the throttle, was considered and not adopted: it would
+be a second departure, and the measurement above bounds what it could recover
+at the blocked share of the trip. This policy never shortens the throttle.
+The throttle itself is the separate
+[Modern prompt re-routing](#modern-prompt-re-routing)'s, fifteen ticks since
+2026-09-29; the measurements in this section were made under sixty.
 
 **The seam.** `movement.Rules` (`internal/movement/rules.go`) is a new seam,
 composed as `session.RuleSet.Movement` beside the other package seams:
@@ -1662,6 +1662,13 @@ learned, and that the restored unit still gets free.
 
 ### Modern re-route staggering
 
+**Retired from Modern on 2026-09-29.**
+[Modern prompt re-routing](#modern-prompt-re-routing) replaced it: Modern's
+throttle is fifteen ticks for every unit. The stagger is kept as
+`OverlapRules.RepathDelay` for the pathfinding laboratory's baseline, and no
+reserved rule set answers it. The text below describes the policy as it
+stood; where it says Modern, read the baseline.
+
 **Nanolathe Modern policy.** A follower's re-route throttle is lengthened by a
 deterministic 0–7 ticks, re-drawn from the unit's slot and its last admission
 tick at every admission, so followers that were admitted together stop coming
@@ -1716,7 +1723,7 @@ worst tick settles at one eighth of the cohort. Mixing in the last admission
 tick re-draws each unit's offset every cycle, so two units that happen to
 share a stamp almost always separate at the next one. For 240 units stamped on
 one tick the largest same-tick re-admission is 40 after one cycle and 20 after
-ten, still falling (`TestModernRepathStaggerSeparatesACohort`); Strict keeps all
+ten, still falling (`TestRepathStaggerSeparatesACohort`); Strict keeps all
 240 together.
 
 **What it does not spread.** The first admission after an order is not
@@ -1777,8 +1784,8 @@ The Modern ashap 6000-tick and fixture initial locks are unchanged.
 
 **Verification.** `movement.TestStrictRepathDelayIsRetailsSixty` (Strict and
 Community return 60 for every slot and stamp; unbound refuses at `last+59` and
-admits at `last+60`), `TestModernRepathDelayBoundsAndDeterminism`,
-`TestModernRepathStaggerSeparatesACohort`, `TestModernPollHonoursTheRepathDelay`
+admits at `last+60`), `TestStaggeredRepathDelayBoundsAndDeterminism`,
+`TestRepathStaggerSeparatesACohort`, `TestModernPollHonoursTheRepathDelay`
 (refused one tick before the delay, admitted and stamped on it) and
 `TestRepathDueDoesNotAllocate`; the Strict, Community and Modern
 `headless` fingerprint locks cover RNG and resource effects over whole
@@ -1790,10 +1797,9 @@ battles.
 units their first route request on the same scheduler tick, the requests are
 admitted over three consecutive ticks instead of one: nearest goal first, cut
 so that each tick carries about a third of the group's summed goal distance.
-It is a load-balancing policy like
-[Modern re-route staggering](#modern-re-route-staggering), which it completes:
-that policy spreads re-requests and deliberately leaves the first request
-alone. It changes only the tick a request is admitted on, never the request,
+It is a load-balancing policy, built to complete
+[re-route staggering](#modern-re-route-staggering), since retired, which
+spread re-requests and deliberately left the first request alone. It changes only the tick a request is admitted on, never the request,
 its goal or any search input.
 
 **Strict 3.1 behavior.** Goal installation zeroes an admission stamp older than
@@ -1850,10 +1856,13 @@ Integer arithmetic only, no RNG, no map iteration; the list is walked in
 staging order and the sort breaks ties by slot. Assignment reuses its scratch
 and allocates nothing once warm.
 
-**Composition with re-route staggering.** A held request is admitted on its hold
-tick and stamped with it; from then on the follower is under the ordinary
-throttle, so its next re-request is `RepathDelay` (60–67 ticks) after the held
-admission. The two policies share `repathDue`, so staging and admission agree.
+**Composition with the re-route throttle.** A held request is admitted on its
+hold tick and stamped with it; from then on the follower is under the
+ordinary throttle, so its next re-request is `RepathDelay` after the held
+admission: fifteen ticks under
+[Modern prompt re-routing](#modern-prompt-re-routing), and 60–67 under the
+stagger this policy was measured with. Both share `repathDue`, so staging and
+admission agree.
 
 **What a waiting unit does.** Nothing new. Goal installation already gives the
 follower something to steer by before any search returns `[04 R-PATH-01 §8]`:
@@ -2043,6 +2052,13 @@ Modern; the answer does not allocate); the Strict, Community and Modern
 
 ### Modern allied pass-through
 
+**Retired from Modern on 2026-09-29.** [Modern traffic](#modern-traffic)
+replaced it: friendly units never share cells, and two movers that meet
+head-on steer past each other. The policy is kept as
+`OverlapRules.AlliedPassThrough` for the pathfinding laboratory's baseline,
+and no reserved rule set answers it. The text below describes the policy as
+it stood; where it says Modern, read the baseline.
+
 **Nanolathe Modern policy.** Two ground movers of the same owner, or of owners
 allied with each other, that meet heading against each other while both are
 mid-route may pass through each other's footprints instead of stopping. It
@@ -2110,12 +2126,11 @@ locks moved to `partial-v1:4fd8922d85f7e16f` and `partial-v1:8fdb5da2c8ee19d8`
 because that battle's computer armies now pass through each other.
 
 **Verification.** `movement.TestAlliedPassThrough` (Strict and Community
-reject; Modern passes same-owner and mutually allied head-on movers and
+reject; the baseline passes same-owner and mutually allied head-on movers and
 commits into the passed cell; an unallied owner, same-direction traffic, a
 routeless blocker and a mover near its route end are rejected by that
-blocker), `TestAlliedPassThroughAnswers` (the answers; a Strict tick never
-resolves the alliance query); the Strict, Community and Modern `headless`
-fingerprint locks.
+blocker), `TestAlliedPassThroughAnswers` (every reserved rule set answers off
+and the baseline on; a Strict tick never resolves the alliance query).
 
 ### Modern unreachable moves
 
@@ -2279,6 +2294,17 @@ certificate, a gate reopened during the dwell is reached, and a switch to
 Strict during the dwell keeps the retry.
 
 ### Modern jam release
+
+**Retired from Modern on 2026-09-29.** [Modern traffic](#modern-traffic)
+replaced it: friendly units never share cells, a held mover steers round
+what holds it and asks for a route again after half a second, and a unit its
+friends have boxed in is given a
+[route through them](#modern-routes-through-friends) that it follows as far
+as they let it. The policy is kept as `OverlapRules.JamRelease` for the
+pathfinding laboratory's baseline, and no reserved rule set answers it. A
+release after five seconds as a last resort was measured beside Modern
+traffic and left out. The text below describes the policy as it stood; where
+it says Modern, read the baseline.
 
 **Nanolathe Modern policy.** A ground mover that friendly units have held in
 place for one second stops colliding with friendly ground units for three
@@ -2534,6 +2560,14 @@ Modern `headless` fingerprint locks, including the long Modern Ashap end tick
 
 #### Modern pocket release
 
+**Retired from Modern on 2026-09-29**, with the jam release it extends. Under
+[Modern arrival places](#modern-arrival-places) a unit sealed out of its own
+free place settles where it stands instead of passing through the friends
+round it. The policy is kept as `OverlapRules.PocketRelease` for the
+pathfinding laboratory's baseline, and no reserved rule set answers it. The
+text below describes the policy as it stood; where it says Modern, read the
+baseline.
+
 **Nanolathe Modern policy.** A ground mover sealed out of its own free
 destination — a packed formation filled in around its slot before it got
 there, so the slot is free but every way in is held by parked friends — is
@@ -2710,7 +2744,7 @@ enemy, a blocked or held goal, a unit not against the ring or beyond the near
 bound get nothing), `TestPocketReleaseWindowIsOpenAndTheMapEdgeIsAWall`,
 `TestPocketReleaseEndsOnlyOnItsGoal` and `TestPocketReleaseGrantCapFinishesInPlace`;
 in the retail tier, on an authored block of parked fleas around a free slot,
-`session.TestModernPocketReleaseTakesASealedOutUnitIntoItsSlot` (Modern
+`session.TestPocketReleaseTakesASealedOutUnitIntoItsSlot` (the baseline
 reaches the slot, Modern without the rule does not, the block never moves),
 `TestStrictAndCommunityNeverGrantAPocketRelease`,
 `TestPocketReleaseLeavesAHeldGoalToCrowdedArrival` (identical with and
@@ -2725,6 +2759,11 @@ before it is published, so a unit whose goal lies a little off its row or
 column travels in a straight line instead of weaving between two parallel
 lines. Everything else about the route — how it is found, where it ends,
 when it publishes — is the retail search's.
+
+Since 2026-09-29 Modern binds `path.SmoothKernel`, which runs this pass and
+then [route smoothing](#modern-route-smoothing) on the same slice. The
+straightening kernel is unchanged, and the pathfinding laboratory's baseline
+binds it alone.
 
 **Strict 3.1 behavior.** The retail search reconstructs a route from the
 cells where its grid path turns, converts them to world points and the
@@ -2741,7 +2780,8 @@ replace the sawtooth with a straight route, and with slots none collided and
 none arrived in the window. Strict 3.1 and Community bind
 `path.RetailKernel`.
 
-**Modern behavior.** The Modern rule set binds `path.StraightenKernel`. It
+**Modern behavior.** `path.StraightenKernel`, which the Modern rule set bound
+by itself until route smoothing wrapped it,
 opens the retail search unchanged; on the slice that search finishes, if the
 route has 3 to 64 points, it walks them once: while the points on either side
 of an interior turn share a row or a column no more than 16 cells apart, and
@@ -2837,9 +2877,13 @@ and an unbound `System` answers the same.
 **Where wedges come from.** Among ground units only the Arm Jammer's corpse
 (3x3 over a 2x2 movement footprint) is larger than its unit in the reference
 install; the other larger corpses are ships' and do not block. In battle,
-wedges come from overlap: [allied pass-through](#modern-allied-pass-through)
+when this policy was measured, wedges came from overlap:
+[allied pass-through](#modern-allied-pass-through)
 and [jam release](#modern-jam-release) let friendly units overlap, and a unit
-that dies inside a friend leaves its wreck over it. In the three-army
+that dies inside a friend leaves its wreck over it. Both are retired since
+2026-09-29 ([Modern traffic](#modern-traffic)), which leaves the corpse
+larger than its unit; the policy is kept for that case and costs nothing
+where no unit is wedged. In the three-army
 simulation-benchmark battle on Town & Country (clean spawn sites, seeds 7, 11
 and 23, 6,000 ticks; research branch `research/r7-wedge`) every one of the 19
 wedge events was the wreck of a unit that died overlapping the covered one —
@@ -2986,3 +3030,581 @@ Strict and Community never touch it); in the opt-in `pathbench` build,
 wedged unit leaves under Strict or `modern-no-wedge`, all four leave under
 Modern); the Strict, Community and Modern `headless` fingerprint locks,
 including the long Modern Ashap end tick (`tools/check-retail --full`).
+
+### Modern traffic
+
+**Nanolathe Modern policy (user-authorized 2026-09-29).** Friendly units never
+share cells. A ground mover steers round what is ahead of it; its routes are
+pulled taut, searched with a weight that follows the load and planned beside
+the routes friends already hold; it asks for a route again after half a
+second; the units of a group are given places to stand; and a unit that cannot
+reach its place settles where it may. The user asked for this in so many
+words — no units moving over each other, with full freedom to rebuild Modern's
+ground movement, judged by recorded games — and chose it as Modern's default
+and only movement after reading the measurements below.
+
+It replaces three policies and one throttle, which are **retired from
+Modern**: [allied pass-through](#modern-allied-pass-through),
+[jam release](#modern-jam-release) and its
+[pocket release](#modern-pocket-release), under which friendly units passed
+through each other, and [re-route staggering](#modern-re-route-staggering).
+Their code, tests and design text are kept for the pathfinding laboratory's
+baseline, `movement.OverlapRules`, so that what Modern was can be measured
+beside what it is ([PATHFINDING_LAB](PATHFINDING_LAB.md)). No reserved rule
+set answers them and the game links no rule set that does.
+
+The policy has seven parts, each with its own section below:
+
+| Part | What it changes | Where |
+|---|---|---|
+| [Steering](#modern-steering) | the heading a mover wants | `traffic_steer.go` |
+| [Route smoothing](#modern-route-smoothing) | which points a finished route publishes | `path.SmoothKernel` |
+| [Search weight](#modern-search-weight) | how greedy a route search is | `System.searchUnder` |
+| [Prompt re-routing](#modern-prompt-re-routing) | when a follower may ask again | `ModernRules.RepathDelay` |
+| [Route claims](#modern-route-claims) | what a search step costs | `pilot_claims.go` |
+| [Arrival places](#modern-arrival-places) | the goal of a plain move | `pilot_arrive.go` |
+| [Routes through friends](#modern-routes-through-friends) | what a search reads as a wall, for a unit whose own searches find nothing | `traffic_through.go` |
+
+**What no part changes.** The commit validator. Every part changes what a
+unit wants, which route it is given or where its order sends it; a step onto
+a held cell is refused as retail refuses it `[04 R-COLL-01 §2]`, and the
+blocked response that follows a refusal is retail's `[04 R-COLL-01 §1]`.
+Nothing moves a unit, stamps occupancy or writes the visibility grids.
+
+**Strict 3.1 behavior.** Retail has no push, no yield, no sidestep and no
+shortcut smoothing `[04 R-COLL-01 §7]`: a refused mover halves its speed,
+clamps against its old footprint and proposes the same step again, its
+follower asks for a route every sixty ticks `[04 R-MOV-01 §7]`, the search
+weighs its heuristic by its player's load `[04 R-PATH-01 §6]`
+`[04 R-PATH-01 §10]`, and every unit of a group sent to one point is given
+the retail selection offsets `[04 R-STANCE-01 §5]`. `StrictRules.Traffic`
+answers the zero value, `StrictRules.RepathDelay` sixty, and
+`StrictRuleSet` binds `path.RetailKernel`; Community inherits all three and
+an unbound `System` answers the same. Under them nothing steers, nothing is
+claimed or placed and no traffic state is written. One counter runs under
+every rule set: the search work charged a tick and its average, two integers
+on the `System` that no retail path reads.
+
+**The seam.** `movement.Rules.Traffic` answers a `movement.Traffic` value: a
+set of switches and numbers, and the `movement.Pilot`s that take part in a
+mover's visit, in route searches and in the giving of orders. `ModernRules`
+answers the package value `modernTraffic` (`modern_traffic.go`), so the
+dispatch allocates nothing. It is asked once a tick in `BeginTick`, before
+any unit is visited, and the `System` keeps that answer for the tick; the
+command boundary asks once per group command. No existing answer owned these
+decisions and no new seam was needed: the questions are asked by this
+package's own follower, scheduler and search opening about state this package
+owns ([DESIGN_GAMEPLAY_RULES §9](DESIGN_GAMEPLAY_RULES.md#9-extending-the-existing-mechanism)
+step 2). The kernel is the existing `session.RuleSet.Path` seam. `Traffic`
+holds the policy's own switches and numbers and nothing else; the pathfinding
+laboratory's sets answer other values of them. What the laboratory built and
+did not choose was removed from the engine after the adoption.
+
+**State.** Rule objects and pilots are values without state; what the policy
+remembers lives on the `System`, which is one battle's:
+
+| State | Holds | Written |
+|---|---|---|
+| `System.traffic`, dense by handle | the side a mover passes on, the heading round and until when; the tick its goal was installed; since when its searches have found nothing, and the reading its route was planned under | in the unit's own visit and at its search's end |
+| arrival rows, dense by handle (`System.PilotState`) | the unit's place, how near it has come and when, where it has stood and since when, the exchanges its order has made | at the start of a tick and in the unit's own visit |
+| claim grids, one per owner (`System.PilotState`) | per 32-world-unit block and sector, how many routes cross it | recounted every four ticks from the routes units hold |
+| `System.workSmooth` | the route search work charged a tick, averaged over eight | at the start of a tick |
+
+All of it is allocated at first use under a rule set that answers the policy,
+so a Strict session never allocates it. A unit's rows are dropped when the
+unit is forgotten (`ForgetUnit`: death, slot reuse, load reset). **None of it
+is saved**, as no Modern transient state is
+([DESIGN_GAMEPLAY_RULES §6](DESIGN_GAMEPLAY_RULES.md#6-save-interaction)): a
+loaded battle starts with none. Its units take their places up again from
+their orders' goals at the first tick, the claims are recounted at the first
+tick from the routes the save carries, and what is lost is the side a unit
+was passing on and the counts of ticks it had stood, which begin again. After
+a switch to Strict 3.1 or Community 3.9 the state is kept and neither read
+nor written; a switch back resumes with it. A route published before a switch
+is followed to its end in either direction.
+
+**Measured effect.** The pathfinding laboratory replays moments cut from
+recorded multiplayer games under any rule set and scores each unit's trip:
+the ticks from its order until it has come to rest for good at its goal
+([PATHFINDING_LAB](PATHFINDING_LAB.md)). Rule sets are compared moment by
+moment, three replays each, with standard errors. Settings were chosen on one
+set of moments and are reported on another, drawn by lottery, that no setting
+was chosen on. The final run (2026-09-29, from main `160834d4`, artifacts
+`~/nanolathe-bench/path-redesign/out/final-v4`) measured the policy as the
+laboratory rule set `next-v4`, which answers as `ModernRules` does
+(`pathlab.TestTheAdoptedSetIsModern`), against Modern as it then was:
+
+| Held-out groups and single units (592 units) | Ticks to arrive | Against Modern before | Arrived |
+|---|---|---|---|
+| Strict 3.1 | 818 | +44 ± 6 | 72.7% |
+| Modern before, overlap removed and nothing in its place | 811 | +38 ± 6 | 74.5% |
+| Modern before | 774 | — | 80.8% |
+| Modern before with route smoothing | 737 | −37 ± 4 | 88.1% |
+| Modern traffic | 707 | −67 ± 7 | 92.7% |
+
+Refused steps fall from 60 ticks a unit to 42. Over every held-out moment,
+armies of 32 units and more included (3,025 units), the difference is
+−30 ± 4 ticks; the armies alone, whose windows are too short for most units
+to arrive under any rules, get 779 world units nearer their goals in the
+window against 739. On the moments the settings were chosen on (1,598 units)
+it is −82 ± 7 ticks, 91.7% arriving against 88.4%, with Strict 3.1 at
++118 ± 13. A diagnostic capture of 103 units passing through the trees on
+Great Divide, replayed the same way, takes 689 ticks a unit against 848, and
+1,063 under Strict 3.1.
+
+Whole games show what half a minute cannot. The computer played itself
+through 64 games on eight maps under each movement policy, and every five
+seconds the run counted the ground units that were *held*: standing within
+three cells of one point for ten seconds while their order's goal lay more
+than twenty cells away.
+
+| Ground units held | Six maps of open ground | Two maps of narrow passes |
+|---|---|---|
+| Retail's movement and search, same brains | 0.28% | 8.6% |
+| Modern before | 0.14% | 2.1% |
+| Modern traffic | 0.15% | 7.5% |
+
+**Cost to the player.**
+
+- *Crowds in narrow passes.* Where wrecks close a pass and the computer
+  player goes on sending armies into it, Modern's units now stand in rows
+  behind the first instead of walking through each other to the front: three
+  and a half times as many are held as before, and about as many as under
+  retail's movement. Most of them are on patrol and attack orders to goals
+  they cannot reach, which only a plain move can be finished short of.
+- *Authored chokes.* On the [path benchmark](PATH_BENCHMARK.md)'s 181
+  authored scenes — dense blocks of 64 to 256 units ordered from a standing
+  start, opposed columns through gaps one or two units wide, waves of 1,500 —
+  4,057 of 22,386 units come near their goals in the window, between
+  Strict 3.1's 2,885 and Modern before's 5,908. Where two blocks must pass
+  through each other, overlap is hard to beat. The recordings say how often
+  that happens: friendly units meeting head-on within three cells of terrain
+  are about 2% of blocked time.
+- *A parked friend in the way of a single unit* is gone round, where it was
+  walked through: in the moments picked for that case the trip is 43 ± 61
+  ticks longer on twenty units.
+- *Units reverse more.* A unit that goes round something turns one way and
+  then the other: 4.0 reversals per 1,000 world units travelled against 1.2.
+  Turning per distance is what it was.
+- *A unit may finish short of its goal*: at the edge of the group it was sent
+  into, or at the nearest ground it can stand on when its goal cannot be
+  reached. It reports `Arrived`.
+- *Search work.* A refused unit asks again after half a second, and a search
+  at weight 1.5 looks at more ground: on the held-out moments 15 searches
+  per thousand unit-ticks of movement against 9, and 23 units of search work
+  a unit-tick against 11. The [simulation-cost benchmark](SIM_BENCHMARK.md),
+  three runs of each in alternation on a machine in use by other work:
+
+  | Tick cost, ms | 750 units: mean | 99th | 1,500 units: mean | 99th |
+  |---|---|---|---|---|
+  | Modern before | 1.68 | 4.61 | 2.86 | 6.62 |
+  | Modern traffic | 1.90 | 4.30 | 3.97 | 7.82 |
+
+  At landing, on a quiet machine, `tools/sim-bench` with seed 7 on the build
+  before and the build after, three runs of each in alternation (750 units,
+  300 measured ticks): mean 1.39 ms before and 1.79 after, 99th percentile
+  2.53 and 3.40, worst tick 4.1 and 4.9.
+
+**Boundaries.** Grounded movers only — vehicles, walkers, ships and
+hovercraft on the ground plane — and only while they hold an order. Aircraft,
+carried units and structures never reach any part. Only friendly units are
+followed, passed behind, claimed against or read as absent; another player's
+unit is something to go round and is never looked through. The policy keeps
+[learned terrain](#modern-learned-terrain),
+[group-order spreading](#modern-group-order-spreading),
+[bounded path work](#modern-bounded-path-work),
+[group destination slots](DESIGN_INTERFACE_HUD_INPUT.md#modern-group-destination-slots),
+[unreachable moves](#modern-unreachable-moves),
+[route straightening](#modern-route-straightening),
+[wedge escape](#modern-wedge-escape),
+[crowded arrival](#modern-crowded-arrival) and the
+[repair-pad queue](#modern-repair-pad-queue) as they are, and was measured
+with them. A last resort — passing through friends only after five seconds
+held — was measured and left out: it buys nothing on recorded games and
+brings back the overlap the policy exists to remove.
+
+**Determinism and fingerprints.** Every part reads committed state in the
+sweep's slot order, or at the start of the tick in pool order, with integer
+arithmetic. The three sorts the arrival places make have total orders that
+end in the handle. No map is ranged, neither random stream is drawn, and no
+clock is read. Modern stays deterministic and bit-identical across hosts.
+Strict and Community fingerprints do not move. Every Modern lock but the
+benchmark fixture's initial one moves: the 6,000-tick Ashap Plateau lock to
+`partial-v1:824232669152f4bf`, the long battle to
+`partial-v1:29ff0dcd82dc2105`, which now ends at tick 40,470, and the
+benchmark fixture's warm and final locks to `partial-v1:5a1f17b4776a9c71` and
+`partial-v1:b102eac17ad75900`. The build before the adoption, playing the same
+scenes under the laboratory's candidate rule set, reached the same values bit
+for bit: what was measured is what was adopted.
+
+**Verification.** `movement.TestModernTrafficAnswer` (the answer, value for
+value, and that the dispatch does not allocate);
+`TestModernGoesRoundAParkedFriendAndStrictRunsIntoIt` (Modern passes a friend
+at rest without a refused step and without sharing its cell; Strict,
+Community and an unbound `System` run into it, keep no traffic state and draw
+from neither stream, nor does Modern draw);
+`TestModernHeadOnMoversPartWithoutSharingACell` (the same for two movers
+meeting); `TestStrictIgnoresTrafficStateAfterASwitch`;
+`TestModernTrafficKeepsItsStateOnTheSystem` (two battles bound to one rules
+value do not share state);
+`TestTrafficAnswers`, `TestAlliedPassThroughAnswers`,
+`TestJamReleaseAnswers` and `TestPocketReleaseAnswers` (every reserved rule
+set answers the retired policies off and only the laboratory's baseline
+answers them on); `session.TestReservedRuleSetsBindTheirSearchKernels`;
+`pathlab.TestTheAdoptedSetIsModern` and `TestTheBaselineIsTheOverlapRules`;
+in the retail tier `session.TestModernSealedOutUnitSettlesWhereItStands` and
+`TestModernHeldGoalIsGivenTheNearestFreePlace`; the Strict, Community and
+Modern `headless` fingerprint locks, which cover RNG and resource effects
+over whole battles, the long Modern end tick included
+(`tools/check-retail --full`). Each part's own tests are listed with it.
+
+#### Modern steering
+
+**Nanolathe Modern policy.** A ground mover looks ahead along the heading it
+wants and, when its footprint could not stand there, wants the nearest
+heading to either side along which it could. It turns past what stands in
+its way before it reaches it, instead of driving into it, halving its speed
+and waiting for a route around.
+
+**Strict 3.1 behavior.** The follower wants the heading to its waypoint and
+nothing else `[04 R-MOV-01 §2]`. What is in the way refuses the step when the
+unit reaches it `[04 R-COLL-01 §1]`, and what looks like going round emerges
+from the follower's repath and the class layer's occupant age
+`[04 R-COLL-01 §7]` `[04 R-MOV-01 §7]`.
+
+**Modern behavior.** On each visit of a grounded mover that holds an order
+and a waypoint, more than 64 world units from the end of its route
+(`System.steerAround`):
+
+1. *Look.* The footprint is walked along the wanted heading from the unit's
+   position, sampled four times a cell, for three cells, and no farther than
+   the point of its route the unit is making for: what lies beyond that
+   point lies off the route, which turns there. Each anchor is tested as the
+   commit validator would test it, static ground first and then the
+   occupant `[04 R-COLL-01 §2]`.
+2. *Keep the way wanted* when the footprint can stand along all of it. One
+   exception: a mover whose last step was refused, and which chose a way
+   round within the last 24 ticks, keeps that way while it is free. A unit
+   pressed against something creeps, and the way it wants looks free on one
+   visit and held on the next.
+3. *What is ahead decides who steers.* A friendly mover going the same way
+   and making way is followed, however slow. A friendly mover crossing is
+   passed behind, on the side it comes from. A friendly mover coming the
+   other way, its heading 120° or more from the unit's, is passed on the
+   right, a rule both units apply, so they part without either knowing the
+   other's choice. A friend at rest or held is passed on the side its centre
+   is not on. Anything else — ground, a feature, a structure, another
+   player's unit — is passed on the right unless a side has been chosen.
+4. *Choose.* Headings a sixteenth of a circle apart are tried, up to a
+   quarter turn to either side, nearest first and the preferred side first;
+   a mover that has chosen a side within the last 24 ticks tries that side
+   through before the other. The first along which the footprint can stand
+   for the whole look ahead is wanted, and its side is kept for 24 ticks.
+   When none is free the mover keeps the heading it wants, and the commit
+   refuses its step as retail does.
+5. *A waypoint passed beside is taken.* A mover that is steering round
+   something, whose last step was not refused, and that is within 56 world
+   units of the point it is making for and past it along the leg that
+   follows, takes the point as reached: the ordinary test wants it within
+   five world units `[04 R-MOV-01 §3]`, and a unit that went round something
+   standing on the point would turn back for it.
+
+Steering never brakes and never changes a speed. The wanted heading goes
+through the unit's own turn rate as any wanted heading does.
+
+**Boundaries.** The last 64 world units of a route belong to the arrival
+rules, and steering is off there. Steering reads the real ground three cells
+ahead whether or not the owner has mapped it, as a unit's own commit does;
+the route search stays blind to unmapped ground, and
+[learned terrain](#modern-learned-terrain) still teaches by the steps that
+are refused. A unit with no order, or braking with no waypoint, does not
+steer. Rejected as measured: overtaking a slower friend, turning to the
+heading with most room when none is free, a longer look ahead, finer
+headings, damping, and waiting a few ticks before turning.
+
+**Verification.** `movement.TestSidestepGoesRoundAParkedFriend` (the side a
+friend at rest is passed on), `TestSidestepLooksNoFartherThanTheWaypoint`,
+`TestWaypointBesideIsTakenFromAUnitGoingRound` (taken from a unit that is
+steering; not from one whose side was chosen long ago, that is not steering,
+or whose last step was refused), `TestRefusedMoverKeepsItsWayRound`, and the
+contract tests above.
+
+#### Modern route smoothing
+
+**Nanolathe Modern policy.** After [route straightening](#modern-route-straightening)
+a finished route is pulled taut: a run of turns is replaced by one straight
+leg wherever the mover's footprint can stand all the way along that leg.
+
+**Strict 3.1 behavior.** The retail search turns by eighths of a circle and
+publishes the cells where its grid path turns `[04 R-PATH-01 §3]`
+`[04 R-PATH-01 §7]`, so a route runs up to a tenth longer than the ground
+requires with nothing in the way; the mover itself steers at any heading
+`[04 R-MOV-01 §2]`. Strict 3.1 and Community bind `path.RetailKernel`.
+
+**Modern behavior.** The Modern rule set binds `path.SmoothKernel`, which
+opens the straightening kernel's search unchanged. On the slice that search
+finishes, for a route of 3 to 64 points, it walks the route once: from each
+point it keeps, it takes the farthest later point it can reach in a straight
+line no longer than 1,024 world units. A leg is judged by samples eight world
+units apart along it and six to either side, since a mover does not hold a
+line exactly, each at the anchor a mover's commit would hold there: the
+commit adds half a cell before it divides `[04 R-COLL-01 §1]`. A leg reads a
+friendly unit that is on its own way somewhere as absent, which the search
+does not (`Traffic.LegsThroughMovers`): it will not be standing there when
+the unit arrives. Friends at rest or at work, other players' units,
+structures, features and ground are read as the search reads them. Under
+[route claims](#modern-route-claims) a leg may not cross ground dearer than
+the stretch it replaces. At most 4,096 anchors are probed for one route, and
+each is charged to the player's work like a heap pop `[04 §7.3]`. The result
+is published on that same slice, so publication timing is retail's.
+
+**History.** [Route straightening](#modern-route-straightening) records that
+a general line-of-sight shortcut was measured and rejected on authored
+chokes, where it sends each unit of a column at a gap from its own angle.
+That finding stands, and the authored scenes still show it
+("Cost to the player" above). It is adopted on the evidence of recorded
+games, where it is the largest single gain of the seven parts and improves
+Modern before by itself, with steering, route claims and arrival places to
+part the units it brings together.
+
+**Boundaries.** The first and last points and the route's status are never
+altered. The kernel is zero size and keeps no state across requests.
+
+**Verification.** `path.TestSmoothPullsADogLegTaut`,
+`TestSmoothKeepsATurnRoundAWall`, `TestSmoothLeavesLongLegs`,
+`TestSmoothLeavesShortRoutes`, `TestSmoothReadsTheLegView` (a leg crosses a
+friend on its own way, the search does not),
+`TestSmoothJudgesALegAtTheMoversAnchors` (a leg half a cell from a wall is
+judged where a mover would stand) and
+`TestSmoothKeepsToGroundTheSearchAccepted`;
+`session.TestReservedRuleSetsBindTheirSearchKernels`;
+`session.TestRuleSetImplementationsAreZeroSizeOrPointers`.
+
+#### Modern search weight
+
+**Nanolathe Modern policy.** A route search weighs its heuristic at one and a
+half while route searching is idle and at three while it is busy.
+
+**Strict 3.1 behavior.** The scheduler hands each search its player's
+weight: one and a half times six, three or one, chosen anew every 150 ticks
+by how much the scheduler polled for that player against the unit limit, the
+heaviest for the least `[04 R-PATH-01 §6]` `[04 R-PATH-01 §10]`. A lone
+unit's search is the greediest, and a crowd's searches look at the most
+ground when there is least time for it.
+
+**Modern behavior.** `System.searchUnder` replaces the weight it is handed
+with `Traffic.HeuristicScale`, 1.5 in 16.16, and with `Traffic.BusyScale`, 3,
+while the search work charged a tick, averaged over the last eight ticks,
+is above `Traffic.BusyWork`, 3,000 units. The average is kept on the `System`
+and brought up to date at the start of every tick; the scheduler's admission,
+budgets and charges are retail's.
+
+**Measured.** The weight is where route quality and tick cost trade. At 1.5
+always, a tick of the 1,500-unit benchmark costs 5.75 ms and its 99th
+percentile 14.15; following the load, 3.97 and 7.82, for three ticks a trip
+on the tuning moments (−68 ± 7 against −71 ± 8). Lighter than 1.5 was worse:
+the shortest routes put a whole group on one line.
+
+**Boundaries.** Every search of a session is weighed alike, whoever asks.
+The busy test reads work already charged, so it cannot disagree between
+hosts.
+
+**Verification.** `movement.TestBusyScaleWeighsSearchesUnderLoad`.
+
+#### Modern prompt re-routing
+
+**Nanolathe Modern policy.** A follower may ask for a route again fifteen
+ticks after its last admission. It replaces
+[re-route staggering](#modern-re-route-staggering).
+
+**Strict 3.1 behavior.** The follower's poll admits an armed follower when
+`lastRequestTick + 60 <= currentTick`, inclusively `[04 R-MOV-01 §7]`.
+`StrictRules.RepathDelay` answers sixty; Community inherits it.
+
+**Modern behavior.** `ModernRules.RepathDelay` answers fifteen for every unit
+and tick. The stamp, the inclusive comparison, the flag's writers, the
+ten-tick goal-install reset `[04 R-PATH-01 §8]`, the scheduler's single
+active request, its charges and its budgets are retail's, and staging and
+admission share `System.repathDue` as before.
+
+**Measured.** On the tuning moments −53 ± 8 ticks with it against −27 ± 10
+without, the other parts as they were then. Eight and four ticks were no
+better than fifteen. It about doubles the number of searches.
+
+**What became of the stagger.** Staggering spread a cohort's re-requests over
+eight ticks so that the searches of units admitted together did not fall on
+one tick. Under this policy a cohort comes due every fifteen ticks instead,
+[bounded path work](#modern-bounded-path-work) and
+[group-order spreading](#modern-group-order-spreading) still bound what one
+tick admits, and the search weight doubles while searching is busy. The tick
+cost above was measured so.
+
+**Boundaries.** It keeps no state, so saves, restores and switches need
+nothing: a follower stamped under either mode is judged by the mode bound
+when it is polled.
+
+**Verification.** `movement.TestModernRepathDelayIsHalfASecond` (fifteen for
+every unit and stamp; refused at `last+14` and admitted at `last+15`; Strict
+after a switch refuses at `last+59`), `TestStrictRepathDelayIsRetailsSixty`,
+`TestModernPollHonoursTheRepathDelay`, `TestRepathDueDoesNotAllocate`.
+
+#### Modern route claims
+
+**Nanolathe Modern policy.** A route search is told where friendly traffic is
+about to go. Two streams that meet plan lanes beside each other instead of
+one through the other, and units that lose least by going round are the ones
+that go round.
+
+**Strict 3.1 behavior.** A search knows the ground and the units standing on
+it `[04 R-PATH-01 §2]` `[04 R-PATH-01 §14]` and nothing of where any unit is
+going. Every member of a group is sent down the same line and through the
+same gap.
+
+**Modern behavior.** Every four ticks each grounded mover that holds a
+searched route claims the ground that route crosses over its next 768 world
+units (`ClaimsPilot.BeginTick`): per block of 32 world units, the sector of
+the search's eight the route crosses it in. The goal installer's straight
+line `[04 R-PATH-01 §8]` claims nothing. When a search is opened it is given
+an extra cost of a step (`path.SearchConfig.CostDir`): four for each claim a
+unit of the requester's owner holds on the step's anchor along the step's
+way, and twenty-four for each claim against it, three sectors or more off,
+each counted to six; the requester's own claims are left out. A cardinal
+step costs sixteen. The cost joins the terrain term the anchor's first
+allocation stores `[04 R-PATH-01 §3]`. A slow-turning unit, one whose
+authored turn rate is below 700, pays only for the claims of other
+slow-turning units: vehicles keep the direct way and walkers go round them.
+The stock walkers turn at 900 and more and the stock vehicles at 512 and
+less.
+
+**Measured.** On the tuning moments −71 ± 8 ticks with claims against
+−62 ± 9 without. A first version that charged every claim alike cost time on
+recorded games; the direction is what made it pay.
+
+**Boundaries.** Claims are per owner: allies' routes are not counted. They
+are counted afresh from the routes units hold, so nothing is remembered that
+a save would have to carry, and a restored game counts on the ticks the
+saved one would have. Nothing here steers, slows or moves a unit.
+
+**Verification.** `movement.TestClaimsChargesForAFriendsRoute`,
+`TestClaimsChargeMoreAgainstTheWay`, `TestClaimsRankExemptsSlowTurningUnits`
+and `TestClaimsIgnoresTheStraightLineFallback`;
+`path.TestExtraCostTurnsARouteAside` and
+`TestSmoothKeepsToGroundTheSearchAccepted`.
+
+#### Modern arrival places
+
+**Nanolathe Modern policy.** Every plain ground move has a place: the
+footprint its unit will stand on. Units sent to one point are given places
+round it, a unit whose place is taken is given another, and a unit that
+cannot reach its place settles where it may.
+
+**Strict 3.1 behavior.** A unit's goal is the point it was sent to. Units
+ordered to one exact point all make for it, the first takes it and the rest
+press toward a held cell; a move whose goal cannot be had retries for as long
+as its record is the last primary one `[04 R-ORD-01 §4]`.
+
+**Modern behavior.** Only `Move_Ground` records with no target, on finished
+grounded mobile units, are given places (`ArrivePilot`).
+
+1. *Places.* At the start of a tick, before any order installs its goal,
+   the plain moves ordered since the last tick are gathered by owner and
+   point. Units of one owner ordered on one tick to one exact point, as
+   separate orders the command boundary did not spread, are given a block of
+   footprints centred on the point: its rows across the way the group
+   travels, the units at the front taking the far rows and keeping their
+   order across the way, and then any two members of one footprint whose
+   straight lines cross exchanging places. A unit sent alone to a point
+   another live order reserves, or a parked unit or the ground holds, is
+   given the nearest free footprint within ten cells. A group the command
+   boundary gave [destination slots](DESIGN_INTERFACE_HUD_INPUT.md#modern-group-destination-slots)
+   keeps them. A move first seen after it has begun — the computer player's,
+   one that waited behind another order, any move after a load — keeps the
+   goal it has for its place.
+2. *Exchange.* A unit within 160 world units of its place looks at it every
+   eight ticks. When the ground or a parked unit holds it, the unit is given
+   the nearest free footprint.
+3. *Settling at the edge.* A unit within 160 world units of a place that is
+   free, that has come no nearer for twenty ticks, and whose way is held by
+   something that will not move of itself — its last step was refused by
+   ground, a structure or a unit at rest, or it holds no route — takes the
+   footprint it stands on for its place. A friend passing in front of it
+   does not make it settle.
+4. *Settling short of a sealed goal.* A unit farther than that from its
+   place, that has stood within 48 world units of one point for 150 ticks,
+   and whose goal the ground closes off from where it stands — the
+   goal-sealed probe of [unreachable moves](#modern-unreachable-moves), which
+   reads every mobile unit as absent, asked at any distance from the ground
+   nearest the goal — takes the footprint it stands on for its place. Those
+   are the units the first to reach that ground keep from it.
+
+An order makes at most six such changes. Each is an ordinary goal install:
+the order's goal is written and the point goal installed exactly as the
+order's own handler does, the follower re-plans at its next activation, and
+the move then ends by the ordinary arrival.
+
+**Measured.** On the tuning moments places and exchange are worth nine ticks
+a trip (−62 ± 9 against −53 ± 8) and settling at the edge twenty-two
+(−90 ± 8 against −68 ± 7). Pairs of units heading for the same exact point
+fall from 71,004 to 115. Settling short of a sealed goal costs a trip nothing
+and, on the two maps of narrow passes, leaves 0.64 units a game standing on a
+move order against 3.65 without it.
+
+**Boundaries.** A place is free when the owner believes the ground passable,
+no parked unit stands on it and no other live order reserves it; a parked
+unit is a structure, or a unit at rest holding no route, waiting for none and
+with nothing to do. Patrol, guard, attack, build and repair approaches keep
+their own goals and their own failure handling, which is why a crowd sent to
+attack what it cannot reach does not settle. A unit that settles reports
+`Arrived`, as under unreachable moves.
+
+**Verification.** `movement.TestArrivePlacesABlock`,
+`TestArrivePlacesASingleOffAParkedFriend`, `TestArriveExchangesATakenPlace`,
+`TestArriveSettlesAtTheEdge` (a unit at rest that refused the step settles
+the unit after twenty ticks; a friend on the move does not),
+`TestArriveSettlesShortOfASealedGoal`,
+`TestArriveSealedWaitsForAUnitThatMoves` and
+`TestArriveAdoptsAMoveThatWaited`; in the retail tier
+`session.TestModernSealedOutUnitSettlesWhereItStands` (a unit parked units
+seal out of its free place settles outside them without sharing a cell, a
+hostile unit among them changes nothing, and Strict 3.1 keeps the retry) and
+`TestModernHeldGoalIsGivenTheNearestFreePlace`.
+
+#### Modern routes through friends
+
+**Nanolathe Modern policy.** A unit whose searches have found nothing for
+five seconds is searched for again with friendly units read as absent, so
+that a crowd in a narrow place does not hold itself.
+
+**Strict 3.1 behavior.** A route search reads a mobile unit that has stood
+for a second as a wall `[04 R-PATH-01 §14]`, and a request whose setup finds
+no ground nearer its goal than where the unit stands publishes nothing
+`[04 R-PATH-01 §4]`. A unit friends stand round is left without a route for
+as long as they stand; being left without one it stands, and is a wall to
+the units behind it.
+
+**Modern behavior.** When a ground unit's search for a live order finishes
+rejected with no points, and the unit's own searches have found nothing
+since at least 150 ticks (`Traffic.ThroughAfter`; the first such search
+starts the count and a route its own search finds ends it), the request is
+searched again at once under another reading of the ground
+(`System.searchUnder`): first with the friendly units that have somewhere to
+go read as absent, and, when that finds nothing either, with every friendly
+unit read as absent (`Traffic.Through` is two). Friendly means the
+requester's owner or an owner mutually allied with it. Another player's
+units, structures, features and ground stay what they are. What the first
+search cost is charged with the second. The unit follows the route as far as
+its friends let it, since the commit refuses a step onto a held cell as
+always, and waits behind one that is on its own way.
+
+**Measured.** After five seconds it costs a trip nothing (−85 ± 7 on the
+tuning moments against −82 ± 8 without). Searched the first time a search
+fails it costs 28 ticks a trip: friends setting off leave a unit among them
+without a route for a moment, and that mends itself.
+
+**Boundaries.** A request whose own search finds a route is not touched.
+Nothing here moves a unit or enters a held cell. Asking the friend that
+refuses such a unit to stand aside was measured and left out.
+
+**Verification.** `movement.TestThroughPlansThroughTheFriendsThatBoxAUnitIn`,
+`TestThroughWaitsBeforeItPlansThroughFriends`,
+`TestThroughKeepsAnotherPlayersUnits` and `TestThroughLeavesAFoundRouteAlone`.

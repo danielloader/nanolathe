@@ -112,6 +112,16 @@ import (
 // previous run in every set) but its first attack reaches the idle commander
 // at a different time. Strict now ends at tick 28680 instead of reaching its
 // 54000-tick bound, Community at 30660 and Modern at 45390.
+//
+// Modern traffic (DESIGN_MOVEMENT_PATH "Modern traffic") moves every Modern
+// lock but the benchmark initial one. Friendly units no longer share cells:
+// allied pass-through, jam release and pocket release are retired from
+// Modern. Ground movers steer round what is ahead of them, routes are pulled
+// taut and searched with Modern's own weights, a follower asks again after
+// half a second, and the units of a group are given places. The Modern long
+// run now ends at tick 40470. No Strict or Community lock moves. The build
+// before the adoption, playing these scenes under the pathfinding
+// laboratory's candidate rule set, reached the same values bit for bit.
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
@@ -119,13 +129,13 @@ const (
 	lockDifficulty                 = 1
 	lockAshapStrict6000            = "partial-v1:70eab79cd1e632ce"
 	lockAshapCommunity6000         = "partial-v1:b23e0c381c4d960b"
-	lockAshapModern6000            = "partial-v1:2c3f331ca125eaa7"
+	lockAshapModern6000            = "partial-v1:824232669152f4bf"
 	lockAshapStrict54000           = "partial-v1:4baa308e5eba5d5e"
 	lockAshapCommunity54000        = "partial-v1:2ce958e331ce6a19"
-	lockAshapModern54000           = "partial-v1:f86635381d796c1b"
+	lockAshapModern54000           = "partial-v1:29ff0dcd82dc2105"
 	lockAshapStrictEnd      uint32 = 28680
 	lockAshapCommunityEnd   uint32 = 30660
-	lockAshapModernEnd      uint32 = 45390
+	lockAshapModernEnd      uint32 = 40470
 
 	lockBenchSeed             uint32 = 7
 	lockBenchWarmupTicks             = 600
@@ -135,10 +145,10 @@ const (
 	lockBenchModernInitial           = "partial-v1:55165c066f8b6eaa"
 	lockBenchStrictWarm              = "partial-v1:5afe0089d8db02b8"
 	lockBenchCommunityWarm           = "partial-v1:32013bdf5ea1c7ef"
-	lockBenchModernWarm              = "partial-v1:d572e18b93e69c9d"
+	lockBenchModernWarm              = "partial-v1:5a1f17b4776a9c71"
 	lockBenchStrictFinal             = "partial-v1:2ccfe9ca8e307df2"
 	lockBenchCommunityFinal          = "partial-v1:5575c03c3bd46d32"
-	lockBenchModernFinal             = "partial-v1:6003a291b3f00bc5"
+	lockBenchModernFinal             = "partial-v1:b102eac17ad75900"
 )
 
 // TestStrictFingerprintIsLocked holds the retail baseline. Nothing in a Modern

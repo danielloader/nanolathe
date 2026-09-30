@@ -5,7 +5,8 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
-// Nanolathe Modern policy (DESIGN_MOVEMENT_PATH "Modern allied
+// Retired from Modern on 2026-09-29 and answered only by OverlapRules, the
+// pathfinding laboratory's baseline (DESIGN_MOVEMENT_PATH "Modern allied
 // pass-through"): two ground movers of the same or mutually allied owners
 // that meet heading against each other, both mid-route, may pass through each
 // other's footprints instead of deadlocking head-on. Retail rejects every

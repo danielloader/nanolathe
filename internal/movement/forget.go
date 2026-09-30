@@ -48,6 +48,7 @@ func (s *System) ForgetUnit(h pool.Handle) {
 	// Cancels the scheduler request and drops the active order binding.
 	s.DeactivateMove(h)
 	s.clearJamRelease(h)
+	s.clearTraffic(h)
 	if s.Scheduler != nil {
 		s.CancelPathRequest(h)
 	}

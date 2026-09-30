@@ -15,6 +15,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
+	"github.com/nanolathe-gg/nanolathe/internal/movement"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
@@ -32,11 +33,22 @@ type ArenaPlayer struct {
 
 // ArenaRequest describes one displayless AI-versus-AI match.
 type ArenaRequest struct {
-	Root     string
-	Roots    []string
-	Map      string
-	Gameplay gameplay.Mode // a registered set whose planner is aikit.HostPlanner
-	Seed     uint32
+	// Jam adds ArenaResult.Jam, a picture of the ground units when the match
+	// ended, for the pathfinding laboratory. JamOf names the kind of unit
+	// whose reading of the ground the picture carries; without it, or with
+	// no such unit alive, it is the first held unit's that has no route.
+	Jam   bool
+	JamOf string
+	// Watch names units by handle whose every tick from WatchFrom on is
+	// added to ArenaResult.Watch: a match plays the same again, so the units
+	// a picture showed held can be followed through the ticks before it.
+	Watch     []int
+	WatchFrom uint32
+	Root      string
+	Roots     []string
+	Map       string
+	Gameplay  gameplay.Mode // a registered set whose planner is aikit.HostPlanner
+	Seed      uint32
 	// MapSeed plays the battle on ArenaMapSeed(Seed, Map) instead of Seed.
 	// A Modern brain draws its style and jitter from the battle seed and its
 	// slot, so a tournament that reuses one seed list on every map would
@@ -256,6 +268,24 @@ type ArenaSample struct {
 	// to go somewhere that never leaves is boxed in by buildings, features
 	// or wrecks. Units the army holds at home (no far goal) do not count.
 	Trapped int32 `json:"tr"`
+	// Held counts ground units of any role that have stood within
+	// holdRadius of one point for holdAge ticks while the goal of their
+	// current order lies beyond trapRadius: a unit with somewhere to go
+	// that is not going. HeldMoving counts those of them whose order is a
+	// plain ground move, which no weapon range or work site explains.
+	Held       int32 `json:"hd"`
+	HeldMoving int32 `json:"hm"`
+	// HeldOpen and HeldMovingOpen count those of the two whose goal the
+	// ground connects with where they stand, for their kind and owner and
+	// with every mobile unit absent: the others are kept from a goal they
+	// cannot reach however they move.
+	HeldOpen       int32 `json:"ho"`
+	HeldMovingOpen int32 `json:"hmo"`
+	// Circling counts the held units that have gone circleWalk world units
+	// since their hold began: on the move and going nowhere.
+	Circling int32 `json:"ci"`
+	// Ground is the ground units the two counts were taken over.
+	Ground int32 `json:"gu"`
 }
 
 // ArenaCost is the measured AI cost for one player.
@@ -379,12 +409,159 @@ type ArenaPlayerResult struct {
 	// TrappedMax and TrappedMean summarize ArenaSample.Trapped.
 	TrappedMax  int32   `json:"trapped_max"`
 	TrappedMean float64 `json:"trapped_mean"`
+	// HeldMean and HeldMovingMean are the means of ArenaSample.Held and
+	// HeldMoving over the series, HeldMovingMax the greatest HeldMoving,
+	// and GroundMean the mean of the ground units they were taken over.
+	HeldMean       float64 `json:"held_mean"`
+	HeldMovingMean float64 `json:"held_moving_mean"`
+	HeldMovingMax  int32   `json:"held_moving_max"`
+	GroundMean     float64 `json:"ground_mean"`
+	// HeldOpenMean, HeldOpenMax and HeldMovingOpenMean summarize
+	// ArenaSample.HeldOpen and HeldMovingOpen.
+	HeldOpenMean       float64 `json:"held_open_mean"`
+	HeldOpenMax        int32   `json:"held_open_max"`
+	HeldMovingOpenMean float64 `json:"held_moving_open_mean"`
+	// CirclingMean and CirclingMax summarize ArenaSample.Circling.
+	CirclingMean float64 `json:"circling_mean"`
+	CirclingMax  int32   `json:"circling_max"`
+	// HeldByOrder is the held units counted over the series by the name of
+	// the order they stood on, and HeldRefused those of them whose last
+	// step a friend had refused.
+	HeldByOrder map[string]int `json:"held_by_order,omitempty"`
+	HeldRefused int            `json:"held_refused"`
+	// HeldLast lists the units held when the match ended, for looking into
+	// a jam: where each stands and wants to go, on what order, for how
+	// long, and what refused its last step.
+	HeldLast []ArenaHeld `json:"held_last,omitempty"`
+}
+
+// ArenaHeld is one held unit at the end of a match.
+type ArenaHeld struct {
+	Unit    string `json:"unit"`
+	Order   string `json:"order"`
+	X       int32  `json:"x"`
+	Z       int32  `json:"z"`
+	GoalX   int32  `json:"goal_x"`
+	GoalZ   int32  `json:"goal_z"`
+	Ticks   uint32 `json:"ticks"`
+	Routed  bool   `json:"routed"`
+	Refused bool   `json:"refused"`
+	// By is what refused it: "ground", "structure", "parked", "mover",
+	// "other player" or "".
+	By string `json:"by,omitempty"`
+}
+
+// ArenaJam is the ground units of a match that has ended, and the ground as
+// one of them reads it: a picture to look into a jam with.
+type ArenaJam struct {
+	Tick  uint32         `json:"tick"`
+	CellW int32          `json:"cell_w"`
+	CellH int32          `json:"cell_h"`
+	Units []ArenaJamUnit `json:"units"`
+	// Of names the unit whose reading of the ground Search and Static are,
+	// over the cell rectangle X0, Z0 to X1, Z1: a row of digits for each row
+	// of anchors, 0 for one the unit may not stand on. Static is the reading
+	// with every mobile unit absent.
+	Of     string   `json:"of,omitempty"`
+	X0     int32    `json:"x0"`
+	Z0     int32    `json:"z0"`
+	X1     int32    `json:"x1"`
+	Z1     int32    `json:"z1"`
+	Search []string `json:"search,omitempty"`
+	Static []string `json:"static,omitempty"`
+	// Cells is movement.LabCells over the same rectangle: what stands on
+	// each cell, a row of letters for each row of cells.
+	Cells []string `json:"cells,omitempty"`
+}
+
+// ArenaJamUnit is one ground unit of an ArenaJam.
+type ArenaJamUnit struct {
+	ID     int    `json:"id"`
+	Owner  int    `json:"owner"`
+	Unit   string `json:"unit"`
+	X      int32  `json:"x"`
+	Z      int32  `json:"z"`
+	FootX  int32  `json:"foot_x"`
+	FootZ  int32  `json:"foot_z"`
+	Order  string `json:"order,omitempty"`
+	GoalX  int32  `json:"goal_x,omitempty"`
+	GoalZ  int32  `json:"goal_z,omitempty"`
+	Routed bool   `json:"routed,omitempty"`
+	// Created is the tick the order was made, Phase its phase, Queued how
+	// many orders wait behind it and Target whether it names a unit.
+	Created uint32 `json:"created,omitempty"`
+	Phase   int32  `json:"phase,omitempty"`
+	Queued  int    `json:"queued,omitempty"`
+	Target  bool   `json:"target,omitempty"`
+	// Refused and By are the last step's verdict, as in ArenaHeld; Blocker
+	// is the unit that refused it, when one did.
+	Refused bool   `json:"refused,omitempty"`
+	By      string `json:"by,omitempty"`
+	Blocker int    `json:"blocker,omitempty"`
+	Speed   int32  `json:"speed,omitempty"`
+	// Stood is how many ticks ago the unit last changed its cells, and Held
+	// for how many it has been held (zero for a unit that is not).
+	Stood uint32 `json:"stood,omitempty"`
+	Held  uint32 `json:"held,omitempty"`
+	// Walked is the way a held unit has gone since its hold began, in world
+	// units, and Open whether the ground connects where it stands with its
+	// goal (the census's test, which no search's reading enters).
+	Walked int32 `json:"walked,omitempty"`
+	Open   bool  `json:"open,omitempty"`
+	// Heading is the unit's heading, Route what is left of its route, in
+	// world units, and Ring movement.LabRing's reading of the anchors round
+	// it.
+	Heading uint16     `json:"heading"`
+	Route   [][2]int32 `json:"route,omitempty"`
+	Ring    string     `json:"ring,omitempty"`
+	// Views is what a route search answers for a held unit, by
+	// movement.LabRouteViews.
+	Views []movement.LabRouteView `json:"views,omitempty"`
+}
+
+// ArenaCircling is one unit a sample counted as circling.
+type ArenaCircling struct {
+	Tick   uint32 `json:"tick"`
+	ID     int    `json:"id"`
+	Unit   string `json:"unit"`
+	X      int32  `json:"x"`
+	Z      int32  `json:"z"`
+	Held   uint32 `json:"held"`
+	Walked int32  `json:"walked"`
+}
+
+// ArenaWatch is one tick of one watched unit: where it is, in sixteenths of
+// a world unit, its heading and speed, whether its step was refused and by
+// what unit, and the point of its route it is making for.
+type ArenaWatch struct {
+	Tick    uint32 `json:"t"`
+	ID      int    `json:"id"`
+	X       int32  `json:"x"`
+	Z       int32  `json:"z"`
+	Heading uint16 `json:"h"`
+	Speed   int32  `json:"s"`
+	Refused bool   `json:"r,omitempty"`
+	Blocker int    `json:"b,omitempty"`
+	Points  int    `json:"n,omitempty"`
+	NextX   int32  `json:"nx,omitempty"`
+	NextZ   int32  `json:"nz,omitempty"`
+	Order   string `json:"o,omitempty"`
+	// Side, Steering and Ahead are movement.LabSteer's.
+	Side     int8  `json:"sd,omitempty"`
+	Steering bool  `json:"st,omitempty"`
+	Ahead    uint8 `json:"ah,omitempty"`
 }
 
 // ArenaResult is the outcome of one match.
 type ArenaResult struct {
-	Map  string `json:"map"`
-	Seed uint32 `json:"seed"` // the requested seed
+	// Jam is the picture ArenaRequest.Jam asks for.
+	Jam *ArenaJam `json:"jam,omitempty"`
+	// Watch is what ArenaRequest.Watch asks for.
+	Watch []ArenaWatch `json:"watch,omitempty"`
+	// Circling lists the first units the samples counted as circling.
+	Circling []ArenaCircling `json:"circling,omitempty"`
+	Map      string          `json:"map"`
+	Seed     uint32          `json:"seed"` // the requested seed
 	// BattleSeed is the seed both battle streams started from: Seed, or
 	// ArenaMapSeed(Seed, Map) when the request asked for map mixing.
 	BattleSeed uint32 `json:"battle_seed"`
@@ -799,6 +976,20 @@ type arenaTracker struct {
 	events      []ArenaEvent
 	firstAttack [10]uint32
 	anchors     map[pool.Handle]trapAnchor
+	holds       map[pool.Handle]trapAnchor
+	heldOrders  [10][]int // by player and order id
+	heldRefused [10]int
+	// refused reports a unit whose last ground step was refused.
+	refused func(u *units.Unit) bool
+	// circling is the first circling units the samples counted.
+	circling []ArenaCircling
+	// follow is the ground guard's order.
+	follow orders.ID
+	// reach is the ground labelled for the kinds and owners of the units
+	// asked about at tick reachTick, and reachKeys their keys.
+	reach     []*movement.LabReach
+	reachKeys []string
+	reachTick uint32
 }
 
 // trapAnchor is where a ground combat unit was first seen, and whether it
@@ -807,11 +998,30 @@ type trapAnchor struct {
 	x, z int32
 	tick uint32
 	left bool
+	// order, target and goalX, goalZ name what the unit was doing when a
+	// hold's clock started: another order, or the same for another place,
+	// starts it again. walked is the way the unit has gone since, in world
+	// units, and lastX, lastZ where it was a tick ago, in sixteenths.
+	order        orders.ID
+	target       uint32
+	goalX, goalZ int32
+	walked       int32
+	walked16     int32
+	lastX, lastZ int32
+	seen         bool
 }
 
 const (
 	trapRadius = 320
 	trapAge    = 3600 // two minutes
+	holdRadius = 48
+	holdAge    = 300 // ten seconds
+	// holdGoal is how far, in world units, the goal of an order of one kind
+	// may move and the order still be the one a hold's clock started on.
+	holdGoal = 128
+	// circleWalk is the way a held unit has gone, in world units, for it to
+	// count as circling: it is on the move and goes nowhere.
+	circleWalk = 160
 )
 
 func playArena(req ArenaRequest, sess *session.Session) (ArenaResult, error) {
@@ -823,7 +1033,11 @@ func playArena(req ArenaRequest, sess *session.Session) (ArenaResult, error) {
 	probe := newArenaProbe(req.MeasureAllocs)
 	var drained []frame.EventView
 	table := aikit.BuildTable(sess.Catalog, sess.Rules.Construction)
-	tr := &arenaTracker{table: table, anchors: map[pool.Handle]trapAnchor{}}
+	tr := &arenaTracker{table: table, anchors: map[pool.Handle]trapAnchor{}, holds: map[pool.Handle]trapAnchor{}, follow: orders.Lookup("Follow_Ground")}
+	tr.refused = func(u *units.Unit) bool {
+		mv := sess.Movement
+		return mv != nil && int(u.Handle) < len(mv.Collisions) && mv.Collisions[u.Handle] != nil && mv.Collisions[u.Handle].Blocked
+	}
 	hosts := make([]*aikit.Host, n)
 	for i, p := range req.Players {
 		m := sess.AI[i]
@@ -911,6 +1125,7 @@ func playArena(req ArenaRequest, sess *session.Session) (ArenaResult, error) {
 	gc0.read()
 	started := time.Now()
 	var walk []*units.Unit
+	var watch []ArenaWatch
 	classesByID := orderClasses()
 	var paceNext time.Time
 	if req.PaceTPS > 0 {
@@ -928,6 +1143,34 @@ func playArena(req ArenaRequest, sess *session.Session) (ArenaResult, error) {
 		tickDur = append(tickDur, int32(time.Since(t0).Nanoseconds()/100))
 		aiTick = append(aiTick, probe.endTick())
 		tick := sess.Clock.GlobalTick
+		walk = sess.Units.AppendLiveSliced(walk[:0])
+		tr.walked(walk)
+		if len(req.Watch) > 0 && tick >= req.WatchFrom && sess.Movement != nil {
+			mv := sess.Movement
+			for _, id := range req.Watch {
+				u := sess.Units.Unit(pool.Handle(id))
+				if u == nil || !u.Alive || id >= len(mv.Collisions) || mv.Collisions[id] == nil {
+					continue
+				}
+				c := mv.Collisions[id]
+				row := ArenaWatch{Tick: tick, ID: id, X: int32(int64(u.X) >> 12), Z: int32(int64(u.Z) >> 12), Heading: c.Heading, Speed: c.Speed, Refused: c.Blocked}
+				if c.Blocked {
+					row.Blocker = c.BlockerID
+				}
+				if id < len(mv.Routes) && mv.Routes[id] != nil && mv.Routes[id].Active {
+					r := mv.Routes[id]
+					row.Points = int(r.Count)
+					if r.Count > 1 {
+						row.NextX, row.NextZ = r.Points[1].X, r.Points[1].Z
+					}
+				}
+				if q := orders.QueueOfUnit(u); q != nil && q.Head() != nil {
+					row.Order = orders.DescriptorFor(q.Head().ID).Name
+				}
+				row.Side, row.Steering, row.Ahead = mv.LabSteer(pool.Handle(id))
+				watch = append(watch, row)
+			}
+		}
 		if tick%req.SampleEvery == 0 {
 			walk = sess.Units.AppendLiveSliced(walk[:0])
 			for i := 0; i < n; i++ {
@@ -1059,15 +1302,41 @@ func playArena(req ArenaRequest, sess *session.Session) (ArenaResult, error) {
 		c.JoinWaits = len(probe.parts[i][aikit.PartJoin])
 		c.PrepUS = float64(probe.prepNS[i]) / 1000
 		pr.Built = tr.built[i]
-		var trappedSum int64
+		var trappedSum, heldSum, heldMovingSum, groundSum, openSum, movingOpenSum, circlingSum int64
 		for _, smp := range series[i] {
 			trappedSum += int64(smp.Trapped)
+			heldSum += int64(smp.Held)
+			heldMovingSum += int64(smp.HeldMoving)
+			groundSum += int64(smp.Ground)
+			openSum += int64(smp.HeldOpen)
+			movingOpenSum += int64(smp.HeldMovingOpen)
+			pr.HeldMovingMax = max(pr.HeldMovingMax, smp.HeldMoving)
+			pr.HeldOpenMax = max(pr.HeldOpenMax, smp.HeldOpen)
+			circlingSum += int64(smp.Circling)
+			pr.CirclingMax = max(pr.CirclingMax, smp.Circling)
 			if smp.Trapped > pr.TrappedMax {
 				pr.TrappedMax = smp.Trapped
 			}
 		}
 		if len(series[i]) > 0 {
 			pr.TrappedMean = float64(trappedSum) / float64(len(series[i]))
+			pr.HeldMean = float64(heldSum) / float64(len(series[i]))
+			pr.HeldMovingMean = float64(heldMovingSum) / float64(len(series[i]))
+			pr.GroundMean = float64(groundSum) / float64(len(series[i]))
+			pr.HeldOpenMean = float64(openSum) / float64(len(series[i]))
+			pr.HeldMovingOpenMean = float64(movingOpenSum) / float64(len(series[i]))
+			pr.CirclingMean = float64(circlingSum) / float64(len(series[i]))
+			pr.HeldRefused = tr.heldRefused[i]
+			pr.HeldLast = tr.heldLast(sess, i, sess.Clock.GlobalTick)
+			for id, n := range tr.heldOrders[i] {
+				if n == 0 {
+					continue
+				}
+				if pr.HeldByOrder == nil {
+					pr.HeldByOrder = map[string]int{}
+				}
+				pr.HeldByOrder[orders.DescriptorFor(orders.ID(id)).Name] = n
+			}
 		}
 		if hosts[i] != nil {
 			if rep, ok := hosts[i].Brain().(aikit.Reporter); ok {
@@ -1096,6 +1365,11 @@ func playArena(req ArenaRequest, sess *session.Session) (ArenaResult, error) {
 			result.Reason = "points"
 		}
 	}
+	if req.Jam {
+		result.Jam = tr.jam(sess, sess.Clock.GlobalTick, req.JamOf)
+	}
+	result.Watch = watch
+	result.Circling = tr.circling
 	if trace != nil {
 		trace.Events = tr.events
 		trace.Series = series
@@ -1202,6 +1476,27 @@ func sampleArena(sess *session.Session, walk []*units.Unit, table *aikit.Table, 
 			continue
 		}
 		s.Units++
+		if u.Remaining == 0 && info.Role.Has(aikit.RoleMobile) && !info.Role.Has(aikit.RoleAir) {
+			s.Ground++
+			if held, moving := tr.held(u, tick); held {
+				s.Held++
+				if moving {
+					s.HeldMoving++
+				}
+				if open, ok := tr.open(sess, u, tick); ok && open {
+					s.HeldOpen++
+					if moving {
+						s.HeldMovingOpen++
+					}
+				}
+				if a := tr.holds[u.Handle]; a.walked >= circleWalk {
+					s.Circling++
+					if len(tr.circling) < 64 {
+						tr.circling = append(tr.circling, ArenaCircling{Tick: tick, ID: int(u.Handle), Unit: u.Def.UnitName, X: int32(int64(u.X) >> 16), Z: int32(int64(u.Z) >> 16), Held: tick - a.tick, Walked: a.walked})
+					}
+				}
+			}
+		}
 		if u.Remaining != 0 {
 			// Remaining runs 1 → 0 as the frame is built [04 §2.3].
 			s.FrameValue += int32(float32(info.Value) * (1 - u.Remaining))
@@ -1243,6 +1538,71 @@ func sampleArena(sess *session.Session, walk []*units.Unit, table *aikit.Table, 
 	return s
 }
 
+// walked adds this tick's step to the way every unit with a hold has gone.
+func (tr *arenaTracker) walked(walk []*units.Unit) {
+	for _, u := range walk {
+		a, ok := tr.holds[u.Handle]
+		if !ok || u.Def == nil || u.Def.CanFly {
+			continue
+		}
+		x, z := int32(int64(u.X)>>12), int32(int64(u.Z)>>12)
+		if a.seen && (x != a.lastX || z != a.lastZ) {
+			dx, dz := int64(x-a.lastX), int64(z-a.lastZ)
+			// Sixteenths of a world unit a tick, summed whole: a step is
+			// well under a cell.
+			a.walked16 += int32(isqrt64(dx*dx + dz*dz))
+			a.walked = a.walked16 / 16
+		}
+		a.lastX, a.lastZ, a.seen = x, z, true
+		tr.holds[u.Handle] = a
+	}
+}
+
+func isqrt64(v int64) int64 {
+	if v <= 0 {
+		return 0
+	}
+	x := v
+	y := (x + 1) / 2
+	for y < x {
+		x = y
+		y = (x + v/x) / 2
+	}
+	return x
+}
+
+// open reports whether the ground connects where u stands with the goal of
+// its head order, for its kind and owner and with every mobile unit absent:
+// a held unit it answers false for is kept by the ground from a goal it
+// cannot reach, which no way of moving mends.
+func (tr *arenaTracker) open(sess *session.Session, u *units.Unit, tick uint32) (open, ok bool) {
+	mv := sess.Movement
+	if mv == nil {
+		return false, false
+	}
+	if tr.reachTick != tick {
+		// The ground is labelled afresh at every sample: structures and
+		// wrecks come and go.
+		tr.reachTick = tick
+		tr.reachKeys = tr.reachKeys[:0]
+	}
+	key := mv.LabReachKey(u)
+	for i, k := range tr.reachKeys {
+		if k == key {
+			return mv.LabGoalOpen(u, tr.reach[i])
+		}
+	}
+	i := len(tr.reachKeys)
+	if i == len(tr.reach) {
+		tr.reach = append(tr.reach, &movement.LabReach{})
+	}
+	if !mv.LabReachOf(u, tr.reach[i]) {
+		return false, false
+	}
+	tr.reachKeys = append(tr.reachKeys, key)
+	return mv.LabGoalOpen(u, tr.reach[i])
+}
+
 // trapped reports whether u has stayed within trapRadius of where it was
 // first seen for trapAge ticks without ever leaving, while its current
 // order's goal lies beyond trapRadius.
@@ -1281,6 +1641,252 @@ func (tr *arenaTracker) trapped(u *units.Unit, tick uint32) bool {
 		return dx*dx+dz*dz > trapRadius*trapRadius
 	}
 	return false
+}
+
+// held reports whether u has stood within holdRadius of one point for
+// holdAge ticks while its current order's goal lies beyond trapRadius, and
+// whether that order is a plain ground move.
+func (tr *arenaTracker) held(u *units.Unit, tick uint32) (held, moving bool) {
+	x, z := int32(int64(u.X)>>16), int32(int64(u.Z)>>16)
+	a, ok := tr.holds[u.Handle]
+	dx, dz := int64(x-a.x), int64(z-a.z)
+	var now trapAnchor
+	if q := orders.QueueOfUnit(u); q != nil && q.Head() != nil {
+		n := q.Head()
+		now.order, now.target = n.ID, uint32(n.Target)
+		if n.Target == 0 {
+			now.goalX, now.goalZ = int32(int64(n.GoalX)>>16), int32(int64(n.GoalZ)>>16)
+		}
+	}
+	gx, gz := int64(now.goalX-a.goalX), int64(now.goalZ-a.goalZ)
+	if !ok || dx*dx+dz*dz > holdRadius*holdRadius || now.order != a.order || now.target != a.target || gx*gx+gz*gz > holdGoal*holdGoal {
+		now.x, now.z, now.tick = x, z, tick
+		now.lastX, now.lastZ, now.seen = a.lastX, a.lastZ, a.seen
+		tr.holds[u.Handle] = now
+		return false, false
+	}
+	if tick-a.tick < holdAge {
+		return false, false
+	}
+	q := orders.QueueOfUnit(u)
+	if q == nil {
+		return false, false
+	}
+	for _, node := range q.Primary() {
+		if node == nil {
+			continue
+		}
+		if node.ID == tr.follow {
+			// A guard's goal is where it stands by its ward, kept as an
+			// offset from it: not a place on the map.
+			return false, false
+		}
+		gx, gz := int64(int64(node.GoalX)>>16), int64(int64(node.GoalZ)>>16)
+		if gx == 0 && gz == 0 {
+			return false, false
+		}
+		dx, dz = gx-int64(x), gz-int64(z)
+		far := dx*dx+dz*dz > trapRadius*trapRadius
+		if far && int(u.Owner) < len(tr.heldOrders) {
+			row := tr.heldOrders[u.Owner]
+			for int(node.ID) >= len(row) {
+				row = append(row, 0)
+			}
+			row[node.ID]++
+			tr.heldOrders[u.Owner] = row
+			if tr.refused != nil && tr.refused(u) {
+				tr.heldRefused[u.Owner]++
+			}
+		}
+		return far, node.ID == orders.Lookup("Move_Ground")
+	}
+	return false, false
+}
+
+// heldLast lists player's ground units that are held at tick.
+func (tr *arenaTracker) heldLast(sess *session.Session, player int, tick uint32) []ArenaHeld {
+	var out []ArenaHeld
+	mv := sess.Movement
+	for _, u := range sess.Units.AppendLive(nil) {
+		if int(u.Owner) != player || u.Def == nil || u.Dying || u.Remaining != 0 {
+			continue
+		}
+		info := tr.table.Of(u.Def)
+		if info == nil || !info.Role.Has(aikit.RoleMobile) || info.Role.Has(aikit.RoleAir) {
+			continue
+		}
+		a, ok := tr.holds[u.Handle]
+		if !ok || tick-a.tick < holdAge {
+			continue
+		}
+		q := orders.QueueOfUnit(u)
+		if q == nil || q.Head() == nil {
+			continue
+		}
+		node := q.Head()
+		h := ArenaHeld{Unit: u.Def.UnitName, Order: orders.DescriptorFor(node.ID).Name, X: int32(int64(u.X) >> 16), Z: int32(int64(u.Z) >> 16),
+			GoalX: int32(int64(node.GoalX) >> 16), GoalZ: int32(int64(node.GoalZ) >> 16), Ticks: tick - a.tick}
+		dx, dz := int64(h.GoalX-h.X), int64(h.GoalZ-h.Z)
+		if (h.GoalX == 0 && h.GoalZ == 0) || dx*dx+dz*dz <= trapRadius*trapRadius {
+			continue
+		}
+		if mv != nil && int(u.Handle) < len(mv.Collisions) && mv.Collisions[u.Handle] != nil {
+			c := mv.Collisions[u.Handle]
+			h.Refused = c.Blocked
+			if int(u.Handle) < len(mv.Routes) && mv.Routes[u.Handle] != nil {
+				h.Routed = mv.Routes[u.Handle].Active
+			}
+			if c.Blocked {
+				h.By = "ground"
+				if id := c.BlockerID; id >= 0 && id < len(mv.Collisions) && mv.Collisions[id] != nil {
+					o := mv.Collisions[id]
+					ou := sess.Units.Unit(pool.Handle(id))
+					switch {
+					case o.Building:
+						h.By = "structure"
+					case ou != nil && ou.Owner != u.Owner:
+						h.By = "other player"
+					case o.Speed == 0:
+						h.By = "parked"
+					default:
+						h.By = "mover"
+					}
+				}
+			}
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
+// jam draws the picture ArenaRequest.Jam asks for.
+func (tr *arenaTracker) jam(sess *session.Session, tick uint32, kind string) *ArenaJam {
+	mv := sess.Movement
+	if mv == nil || sess.World == nil {
+		return nil
+	}
+	j := &ArenaJam{Tick: tick, CellW: sess.World.CellW, CellH: sess.World.CellH}
+	var of, named *units.Unit
+	first := true
+	for _, u := range sess.Units.AppendLive(nil) {
+		if u.Def == nil || u.Dying || u.Def.CanFly {
+			continue
+		}
+		if int(u.Handle) >= len(mv.Collisions) || mv.Collisions[u.Handle] == nil {
+			continue
+		}
+		c := mv.Collisions[u.Handle]
+		if kind != "" && named == nil && strings.EqualFold(u.Def.UnitName, kind) {
+			named = u
+		}
+		ju := ArenaJamUnit{ID: int(u.Handle), Owner: int(u.Owner), Unit: u.Def.UnitName, X: int32(int64(u.X) >> 16), Z: int32(int64(u.Z) >> 16),
+			FootX: int32(c.FootPrintX), FootZ: int32(c.FootPrintZ), Speed: int32(c.Speed), Refused: c.Blocked}
+		if c.Building || !u.Def.CanMove {
+			ju.By = "is a structure"
+			ju.Refused = false
+			j.Units = append(j.Units, ju)
+			continue
+		}
+		if tick >= c.LastStampTick {
+			ju.Stood = tick - c.LastStampTick
+		}
+		ju.Heading = c.Heading
+		ju.Ring = mv.LabRing(u)
+		if int(u.Handle) < len(mv.Routes) && mv.Routes[u.Handle] != nil {
+			r := mv.Routes[u.Handle]
+			ju.Routed = r.Active && r.Count >= 2
+			if r.Active {
+				for k := 0; k < int(r.Count); k++ {
+					ju.Route = append(ju.Route, [2]int32{r.Points[k].X, r.Points[k].Z})
+				}
+			}
+		}
+		if c.Blocked {
+			ju.By = "ground"
+			if id := c.BlockerID; id >= 0 && id < len(mv.Collisions) && mv.Collisions[id] != nil {
+				o := mv.Collisions[id]
+				ou := sess.Units.Unit(pool.Handle(id))
+				ju.Blocker = id
+				switch {
+				case o.Building:
+					ju.By = "structure"
+				case ou != nil && ou.Owner != u.Owner:
+					ju.By = "other player"
+				case o.Speed == 0:
+					ju.By = "parked"
+				default:
+					ju.By = "mover"
+				}
+			}
+		}
+		if q := orders.QueueOfUnit(u); q != nil && q.Head() != nil {
+			node := q.Head()
+			ju.Order = orders.DescriptorFor(node.ID).Name
+			ju.GoalX, ju.GoalZ = int32(int64(node.GoalX)>>16), int32(int64(node.GoalZ)>>16)
+			ju.Created, ju.Phase, ju.Queued, ju.Target = node.CreationTick, int32(node.Phase), q.LenPrimary()-1, node.Target != 0
+			if held, _ := tr.held(u, tick); held {
+				a := tr.holds[u.Handle]
+				{
+					ju.Held = tick - a.tick
+					ju.Walked = a.walked
+					if open, ok := tr.open(sess, u, tick); ok {
+						ju.Open = open
+					}
+					if v, ok := mv.LabRouteViews(u); ok {
+						ju.Views = v[:]
+					}
+					if !ju.Routed && ju.Order == "Move_Ground" && of == nil {
+						of = u
+					}
+				}
+			}
+		}
+		if ju.Held > 0 {
+			cx, cz := ju.X/16, ju.Z/16
+			if first {
+				j.X0, j.Z0, j.X1, j.Z1 = cx, cz, cx, cz
+				first = false
+			}
+			j.X0, j.Z0, j.X1, j.Z1 = min(j.X0, cx), min(j.Z0, cz), max(j.X1, cx), max(j.Z1, cz)
+		}
+		j.Units = append(j.Units, ju)
+	}
+	if named != nil {
+		of = named
+		if first {
+			first = false
+		}
+	}
+	if of == nil {
+		return j
+	}
+	// The whole map, up to a size a picture is still read at.
+	const margin = 512
+	j.X0, j.Z0 = max(j.X0-margin, 0), max(j.Z0-margin, 0)
+	j.X1, j.Z1 = min(j.X1+margin, j.CellW-1), min(j.Z1+margin, j.CellH-1)
+	search, static, ok := mv.LabGround(of, j.X0, j.Z0, j.X1, j.Z1)
+	if !ok {
+		return j
+	}
+	j.Of = of.Def.UnitName
+	w := int(j.X1 - j.X0 + 1)
+	if cells := mv.LabCells(of, j.X0, j.Z0, j.X1, j.Z1); len(cells) > 0 {
+		for at := 0; at+w <= len(cells); at += w {
+			j.Cells = append(j.Cells, string(cells[at:at+w]))
+		}
+	}
+	row := make([]byte, w)
+	for at := 0; at+w <= len(search); at += w {
+		for i := 0; i < w; i++ {
+			row[i] = '0' + search[at+i]
+		}
+		j.Search = append(j.Search, string(row))
+		for i := 0; i < w; i++ {
+			row[i] = '0' + static[at+i]
+		}
+		j.Static = append(j.Static, string(row))
+	}
+	return j
 }
 
 func traceFrame(walk []*units.Unit, table *aikit.Table, n int, tick uint32) ArenaFrame {

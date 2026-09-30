@@ -140,6 +140,10 @@ Setting `NANOLATHE_PBTRACE=<dir>` writes, on the diagnostic pass, one JSON
 lines trace per case, rule set and size: the terrain, then every unit's cell
 position, owner, blocked flag and move-order flag every 15 ticks
 (`NANOLATHE_PBTRACE_EVERY` changes the cadence), then the reporting goals.
+`NANOLATHE_PBTRACE_DETAIL=1` adds, for every unit of a frame, its heading and
+speed, the unit that refused its last step, the point of its route it is
+making for and how it last steered: what tells two units that refuse each
+other from a queue.
 `tools/path-bench-render TRACE OUT.png` draws a trace as a contact sheet
 (Python with Pillow).
 
@@ -153,12 +157,19 @@ corpus totals excluding the scripted waves.
 
 The suite registers rule sets for attributing a change to a Modern pathfinding
 policy (`internal/session/path_bench_before_test.go`): `modern-no-pathfinding`
-switches every one off (bounded path work, group destination slots, allied
-pass-through, unreachable moves, jam release and its pocket release, route
-straightening and wedge escape), and `modern-no-bound`, `-no-slots`,
-`-no-pass`, `-no-unreach`, `-no-jam`, `-no-pocket`, `-no-straighten` and
-`-no-wedge` each switch off one. A new Modern pathfinding policy adds its own
-`-no-` set and joins `modern-no-pathfinding`.
+switches every one off (bounded path work, group destination slots,
+unreachable moves, wedge escape, prompt re-routing, the traffic policy, and
+route straightening with route smoothing), and each of these switches off
+one: `modern-no-bound`, `-no-slots`, `-no-unreach`, `-no-wedge`,
+`-no-prompt`, `-no-smooth` (straightening alone), `-no-straighten` (the retail
+kernel), and for the parts of the traffic policy `-no-steering`,
+`-no-weight`, `-no-through`, `-no-claims` and `-no-places`. A new Modern
+pathfinding policy adds its own `-no-` set and joins `modern-no-pathfinding`.
+`modern-overlap` is Modern's movement as it stood before its traffic policy
+replaced allied pass-through, jam release and pocket release
+([DESIGN_MOVEMENT_PATH](DESIGN_MOVEMENT_PATH.md#modern-traffic)): the
+pathfinding laboratory's baseline, for measuring what Modern was beside what
+it is.
 
 Scenario details: [terrain, naval and knowledge](PATH_BENCHMARK_TERRAIN.md),
 [traffic, lifecycle and wrecks](PATH_BENCHMARK_TRAFFIC.md), and

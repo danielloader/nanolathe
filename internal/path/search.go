@@ -5,9 +5,12 @@ package path
 // between budget slices; a budget boundary never publishes a partial route.
 
 const (
-	CardinalCost    int32 = 16 // [04 §7.2]
-	DiagonalCost    int32 = 22 // [04 §7.2]
-	SteepCost       int32 = 30 // [04 R-PATH-01 §3]
+	CardinalCost int32 = 16 // [04 §7.2]
+	DiagonalCost int32 = 22 // [04 §7.2]
+	SteepCost    int32 = 30 // [04 R-PATH-01 §3]
+	// maxExtraCost bounds SearchConfig.CostDir, so the stored terrain term keeps
+	// its width.
+	maxExtraCost    int32 = 4096
 	ShortRunPenalty int32 = 75 // [04 R-PATH-01 §3]
 	ShortRunLimit         = 5  // [04 R-PATH-01 §3]
 	// StartRun is the straight-run counter the seeded start node carries. It
@@ -31,6 +34,36 @@ const (
 )
 
 var dirDelta = [8]Cell{{0, -1}, {-1, -1}, {-1, 0}, {-1, 1}, {0, 1}, {1, 1}, {1, 0}, {1, -1}}
+
+// Octant is the sector whose direction lies nearest (dx, dz), and DirNone for
+// no direction at all.
+func Octant(dx, dz int64) uint8 {
+	ax, az := max(dx, -dx), max(dz, -dz)
+	if ax == 0 && az == 0 {
+		return DirNone
+	}
+	// A direction within 22.5 degrees of an axis belongs to the axis: the
+	// tangent of 67.5 degrees is 309/128 to four places.
+	switch {
+	case az*128 >= ax*309:
+		if dz < 0 {
+			return DirN
+		}
+		return DirS
+	case ax*128 >= az*309:
+		if dx < 0 {
+			return DirW
+		}
+		return DirE
+	case dx < 0 && dz < 0:
+		return DirNW
+	case dx < 0:
+		return DirSW
+	case dz > 0:
+		return DirSE
+	}
+	return DirNE
+}
 
 // IsDiagonal reports whether dir is one of the four diagonal sectors. The
 // eight sectors alternate cardinal and diagonal from north, so the low bit
@@ -269,7 +302,19 @@ type SearchConfig struct {
 	HasBounds     bool
 	Bounds        Rect
 	PassableValue func(Cell) uint8
-	Revise        func()
+	// LegValue, when set, is the passability a kernel's pass over the
+	// finished route reads in place of PassableValue. The search itself
+	// never reads it.
+	LegValue func(Cell) uint8
+	// CostDir, when set, is an extra cost of a step onto an anchor, in the
+	// search's own cost units (a cardinal step is sixteen), given the sector
+	// of the step that reaches the anchor: what a step costs may depend on
+	// which way it goes. It joins the terrain term the anchor's first
+	// allocation stores, so a relaxation reuses it like that term
+	// [04 R-PATH-01 §3]. Strict 3.1 and Community 3.9 never set it; Modern
+	// route claims do (docs/DESIGN_MOVEMENT_PATH.md "Modern route claims").
+	CostDir func(Cell, uint8) int32
+	Revise  func()
 	// StartDir supplies the unit heading's quantized sector. Zero is north,
 	// retaining the pre-existing API's zero-value behavior [04 R-PATH-01 §4].
 	StartDir uint8
@@ -510,6 +555,7 @@ func (s *Session) Resume(budget int) ([]Point, Status, bool) {
 	goal := s.cfg.Goal
 	passable := s.cfg.PassableValue
 	hasBounds, bounds := s.cfg.HasBounds, s.cfg.Bounds
+	extraDir := s.cfg.CostDir
 	for s.heap.HasCandidate() && s.popped-startPopped < budget {
 		id, f, ok := s.heap.BeginExpand()
 		if !ok {
@@ -602,6 +648,11 @@ func (s *Session) Resume(budget int) ([]Point, Status, bool) {
 					s.heap.Fix(other, node.F)
 				}
 				continue
+			}
+			// Nanolathe Modern route claims; nil under Strict 3.1 and
+			// Community 3.9, whose step cost is retail's.
+			if extraDir != nil {
+				terrain += min(max(extraDir(c, d), 0), maxExtraCost)
 			}
 			gNew := curG + turn + step + terrain + short
 			nid := ns.allocFresh(c, gNew, goal.H(c), id, d, run, uint16(terrain))

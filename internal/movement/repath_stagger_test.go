@@ -31,18 +31,44 @@ func TestStrictRepathDelayIsRetailsSixty(t *testing.T) {
 	}
 }
 
-// Modern's delay is 60..67, a pure function of slot and admission tick, and
-// every one of the eight values occurs (DESIGN_MOVEMENT_PATH "Modern re-route
-// staggering").
-func TestModernRepathDelayBoundsAndDeterminism(t *testing.T) {
+// Modern asks again after half a second, whatever the unit and the tick
+// (DESIGN_MOVEMENT_PATH "Modern prompt re-routing"): the answer reads no
+// state, so a save, a load and a switch of rule set need none.
+func TestModernRepathDelayIsHalfASecond(t *testing.T) {
 	m := &ModernRules{}
-	var seen [modernRepathSpread]int
+	for slot := 0; slot < 600; slot += 7 {
+		for _, last := range []uint32{0, 1, 14, 15, 16, 60, 1234, 0xffff_ff00} {
+			if got := m.RepathDelay(nil, slot, last); got != 15 {
+				t.Fatalf("Modern delay(slot %d, last %d) = %d, want 15", slot, last, got)
+			}
+		}
+	}
+	s := &System{Rules: m}
+	route := &Route{WantsRepath: true, LastRequestTick: 300}
+	if s.repathDue(route, 5, 314) || !s.repathDue(route, 5, 315) {
+		t.Fatal("Modern: want refused at last+14 and admitted at last+15")
+	}
+	// A follower stamped under Modern is judged by the set bound when it is
+	// polled: Strict applies retail's sixty from the next poll.
+	s.Rules = StrictRules{}
+	if s.repathDue(route, 5, 359) || !s.repathDue(route, 5, 360) {
+		t.Fatal("Strict after Modern: want refused at last+59 and admitted at last+60")
+	}
+}
+
+// The staggered delay is 60..67, a pure function of slot and admission tick,
+// and every one of the eight values occurs (DESIGN_MOVEMENT_PATH "Modern
+// re-route staggering"). Modern replaced it; the laboratory's baseline keeps
+// it.
+func TestStaggeredRepathDelayBoundsAndDeterminism(t *testing.T) {
+	m := &OverlapRules{}
+	var seen [overlapRepathSpread]int
 	for slot := 1; slot < 512; slot++ {
 		d := m.RepathDelay(nil, slot, 60)
-		if d < 60 || d >= 60+modernRepathSpread {
-			t.Fatalf("slot %d delay %d outside [60, %d)", slot, d, 60+modernRepathSpread)
+		if d < 60 || d >= 60+overlapRepathSpread {
+			t.Fatalf("slot %d delay %d outside [60, %d)", slot, d, 60+overlapRepathSpread)
 		}
-		if again := (&ModernRules{}).RepathDelay(nil, slot, 60); again != d {
+		if again := (&OverlapRules{}).RepathDelay(nil, slot, 60); again != d {
 			t.Fatalf("slot %d delay %d then %d: not deterministic", slot, d, again)
 		}
 		seen[d-60]++
@@ -56,12 +82,12 @@ func TestModernRepathDelayBoundsAndDeterminism(t *testing.T) {
 }
 
 // A cohort admitted on one tick that keeps re-arming stays in step for ever
-// under Strict. Modern splits it at the first re-admission and keeps
+// under Strict. The stagger splits it at the first re-admission and keeps
 // separating units that share an admission tick, so the largest same-tick
 // burst keeps falling instead of settling at one eighth of the cohort. This is
 // the property the per-admission mix was chosen for over a fixed per-slot
 // phase.
-func TestModernRepathStaggerSeparatesACohort(t *testing.T) {
+func TestRepathStaggerSeparatesACohort(t *testing.T) {
 	const units = 240
 	burst := func(rules Rules, cycles int) int {
 		last := make([]uint32, units)
@@ -70,7 +96,7 @@ func TestModernRepathStaggerSeparatesACohort(t *testing.T) {
 		}
 		worst := 0
 		for c := 0; c < cycles; c++ {
-			counts := make([]int, 60+(cycles+1)*(60+modernRepathSpread))
+			counts := make([]int, 60+(cycles+1)*(60+overlapRepathSpread))
 			worst = 0
 			for i := range last {
 				last[i] += rules.RepathDelay(nil, i+1, last[i])
@@ -83,21 +109,29 @@ func TestModernRepathStaggerSeparatesACohort(t *testing.T) {
 	if got := burst(StrictRules{}, 10); got != units {
 		t.Fatalf("Strict cohort burst after 10 cycles = %d, want the whole cohort %d", got, units)
 	}
-	first, later := burst(&ModernRules{}, 1), burst(&ModernRules{}, 10)
-	t.Logf("Modern largest same-tick burst of %d: %d after one re-admission, %d after ten", units, first, later)
+	first, later := burst(&OverlapRules{}, 1), burst(&OverlapRules{}, 10)
+	t.Logf("staggered largest same-tick burst of %d: %d after one re-admission, %d after ten", units, first, later)
 	if first > units/4 {
-		t.Fatalf("Modern first re-admission burst = %d of %d, want the cohort split", first, units)
+		t.Fatalf("staggered first re-admission burst = %d of %d, want the cohort split", first, units)
 	}
 	if later >= first || later > units/12 {
-		t.Fatalf("Modern burst after 10 cycles = %d (first %d), want it still falling below %d", later, first, units/12)
+		t.Fatalf("staggered burst after 10 cycles = %d (first %d), want it still falling below %d", later, first, units/12)
 	}
 }
 
-// The scheduler poll uses the same due test as staging: under Modern a staged
-// follower is refused one tick before its delay and admitted on it.
+// The scheduler poll uses the same due test as staging: a staged follower is
+// refused one tick before its delay and admitted on it, under Modern's delay
+// and under the staggered one.
 func TestModernPollHonoursTheRepathDelay(t *testing.T) {
+	for _, rules := range []Rules{&ModernRules{}, &OverlapRules{}} {
+		pollHonoursTheRepathDelay(t, rules)
+	}
+}
+
+func pollHonoursTheRepathDelay(t *testing.T, rules Rules) {
+	t.Helper()
 	s := NewSystem(syntheticTerrainForIntegrate(), wiringProfile, NewOccupancyGrid())
-	s.Rules = &ModernRules{}
+	s.Rules = rules
 	w := newMovementFixtureWorld(4)
 	s.BindWorld(w)
 	start, _, ok := w.SliceForPlayer(0)
@@ -117,7 +151,7 @@ func TestModernPollHonoursTheRepathDelay(t *testing.T) {
 	p.SetPathTick(delay - 1)
 	for range 8 {
 		if _, result := p.Poll(0); result == path.PollRequest {
-			t.Fatalf("admitted at tick %d, one before the Modern delay", delay-1)
+			t.Fatalf("%T: admitted at tick %d, one before the delay", rules, delay-1)
 		}
 	}
 	p.SetPathTick(delay)
@@ -129,12 +163,12 @@ func TestModernPollHonoursTheRepathDelay(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("not admitted at the Modern delay tick %d", delay)
+	t.Fatalf("%T: not admitted at the delay tick %d", rules, delay)
 }
 
 func TestRepathDueDoesNotAllocate(t *testing.T) {
 	route := &Route{WantsRepath: true, LastRequestTick: 60}
-	for _, rules := range []Rules{nil, &ModernRules{}} {
+	for _, rules := range []Rules{nil, &ModernRules{}, &OverlapRules{}} {
 		s := &System{Rules: rules}
 		if allocs := testing.AllocsPerRun(200, func() {
 			learnedRulesSink = s.repathDue(route, 9, 125)

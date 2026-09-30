@@ -18,8 +18,9 @@ import (
 // jams. It runs only on the diagnostic pass when NANOLATHE_PBTRACE
 // names a directory, and never on a timed pass.
 type pbTracer struct {
-	f     *os.File
-	every int
+	f      *os.File
+	every  int
+	detail bool
 }
 
 type pbTraceHeader struct {
@@ -33,8 +34,27 @@ type pbTraceHeader struct {
 }
 
 type pbTraceFrame struct {
-	Tick  int
-	Units [][6]float64 // cellX, cellZ, owner, blocked, hasOrder, handle
+	Tick   int
+	Units  [][6]float64    // cellX, cellZ, owner, blocked, hasOrder, handle
+	Detail []pbTraceDetail `json:",omitempty"`
+}
+
+// pbTraceDetail is what NANOLATHE_PBTRACE_DETAIL adds for every unit of a
+// frame: heading and speed, the unit that refused its last step (-1 for none
+// or for ground), how many points its route holds and the one it is making
+// for, in world units, and how the laboratory's steering last steered it
+// (movement.LabSteer).
+type pbTraceDetail struct {
+	ID       int
+	Heading  uint16
+	Speed    int32
+	Blocker  int
+	Points   int
+	NextX    int32
+	NextZ    int32
+	Side     int8
+	Steering bool
+	Ahead    uint8
 }
 
 func pbTraceOpen(sc *pbScene, id, rules string, n int) *pbTracer {
@@ -71,7 +91,7 @@ func pbTraceOpen(sc *pbScene, id, rules string, n int) *pbTracer {
 	if v, e := strconv.Atoi(os.Getenv("NANOLATHE_PBTRACE_EVERY")); e == nil && v > 0 {
 		every = v
 	}
-	return &pbTracer{f: f, every: every}
+	return &pbTracer{f: f, every: every, detail: os.Getenv("NANOLATHE_PBTRACE_DETAIL") != ""}
 }
 
 func (tr *pbTracer) frame(sc *pbScene, tick int) {
@@ -96,6 +116,22 @@ func (tr *pbTracer) frame(sc *pbScene, tick int) {
 				has = 1
 			}
 			fr.Units = append(fr.Units, [6]float64{float64(u.X.Raw()) / 65536 / 16, float64(u.Z.Raw()) / 65536 / 16, float64(u.Owner), blocked, has, float64(u.Handle)})
+			if tr.detail && sys != nil && int(u.Handle) < len(sys.Collisions) && sys.Collisions[u.Handle] != nil {
+				c := sys.Collisions[u.Handle]
+				d := pbTraceDetail{ID: int(u.Handle), Heading: c.Heading, Speed: c.Speed, Blocker: -1}
+				if c.Blocked {
+					d.Blocker = c.BlockerID
+				}
+				if int(u.Handle) < len(sys.Routes) && sys.Routes[u.Handle] != nil && sys.Routes[u.Handle].Active {
+					r := sys.Routes[u.Handle]
+					d.Points = int(r.Count)
+					if r.Count > 1 {
+						d.NextX, d.NextZ = r.Points[1].X, r.Points[1].Z
+					}
+				}
+				d.Side, d.Steering, d.Ahead = sys.LabSteer(u.Handle)
+				fr.Detail = append(fr.Detail, d)
+			}
 		})
 	}
 	enc, _ := json.Marshal(fr)

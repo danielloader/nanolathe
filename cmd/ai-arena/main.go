@@ -28,6 +28,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/aikit"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/headless"
+	"github.com/nanolathe-gg/nanolathe/internal/session"
 
 	_ "github.com/nanolathe-gg/nanolathe/mods"
 	aikitmod "github.com/nanolathe-gg/nanolathe/mods/aikit"
@@ -152,6 +153,11 @@ func runMatch(args []string) error {
 	allocs := fs.Bool("allocs", false, "measure per-think allocations (use synchronous personas)")
 	level := fs.String("level", "hard", "the battle's difficulty word: easy, medium or hard (the retail planner's plan gates; with -income retail, every computer player's income)")
 	income := fs.String("income", "full", "computer income: full (every computer player credited in full) or retail (the 3.1 difficulty discount on every computer player)")
+	watch := fs.String("watch", "", "unit handles, comma separated, whose every tick from -watch-from on is added to the result")
+	watchFrom := fs.Uint("watch-from", 0, "the first tick -watch records")
+	jamOf := fs.String("jam-of", "", "the kind of unit whose reading of the ground -jam carries (a unit name); implies -jam")
+	jam := fs.Bool("jam", false, "add a picture of the ground units at the end of the match to the result, for the pathfinding laboratory")
+	rules := fs.String("rules", "", "the harness rule set, for the pathfinding laboratory: aikit-retail-move, or aikit-<set> for a laboratory rule set, as aikit-lab-overlap (default: the harness with Modern's movement)")
 	metal := fs.Int("metal", 0, "starting metal (default skirmish 1000)")
 	energy := fs.Int("energy", 0, "starting energy (default skirmish 1000)")
 	root := fs.String("root", "", "content root")
@@ -179,6 +185,12 @@ func runMatch(args []string) error {
 	default:
 		return fmt.Errorf("unknown -income %q (have full, retail)", *income)
 	}
+	if *rules != "" {
+		if _, ok := session.LookupRuleSet(*rules); !ok {
+			return fmt.Errorf("unknown -rules %q", *rules)
+		}
+		req.Gameplay = gameplay.Mode(*rules)
+	}
 	req.PaceTPS = *pace
 	for i, spec := range players {
 		p, err := parsePlayer(spec, i)
@@ -186,6 +198,14 @@ func runMatch(args []string) error {
 			return err
 		}
 		req.Players = append(req.Players, p)
+	}
+	req.Jam = *jam || *jamOf != ""
+	req.JamOf = *jamOf
+	req.WatchFrom = uint32(*watchFrom)
+	for _, f := range strings.Split(*watch, ",") {
+		if id, err := strconv.Atoi(strings.TrimSpace(f)); err == nil {
+			req.Watch = append(req.Watch, id)
+		}
 	}
 	if *tracePath != "" {
 		req.TraceEvery = uint32(*traceEvery)

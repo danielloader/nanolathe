@@ -175,34 +175,34 @@ func TestJamRelease(t *testing.T) {
 		{"strict stays blocked", jamCase{rules: StrictRules{}, moverEndCell: 30}, 0},
 		{"community stays blocked", jamCase{rules: CommunityRules{}, moverEndCell: 30}, 0},
 		// Released after thirty jammed ticks, the mover commits on the next.
-		{"modern releases a unit parked friends hold", jamCase{rules: &ModernRules{}, moverEndCell: 30}, modernJamReleaseAfter + 1},
-		{"modern keeps a same-way queue", jamCase{rules: &ModernRules{}, headingB: 0xC000, blockerRoute: true, moverEndCell: 30}, 0},
-		{"modern never releases into an enemy", jamCase{rules: &ModernRules{}, ownerB: 1, moverEndCell: 30}, 0},
+		{"overlap releases a unit parked friends hold", jamCase{rules: &OverlapRules{}, moverEndCell: 30}, modernJamReleaseAfter + 1},
+		{"overlap keeps a same-way queue", jamCase{rules: &OverlapRules{}, headingB: 0xC000, blockerRoute: true, moverEndCell: 30}, 0},
+		{"overlap never releases into an enemy", jamCase{rules: &OverlapRules{}, ownerB: 1, moverEndCell: 30}, 0},
 		// Near the destination the release only takes the unit through the
 		// friend that blocks it (see TestJamReleaseNearDestinationEndsWhenClear).
-		{"modern releases near the route end to pass the blocker", jamCase{rules: &ModernRules{}, moverEndCell: 12}, modernJamReleaseAfter + 1},
-		{"modern never releases into a one-way ally", jamCase{rules: &ModernRules{}, ownerB: 1, oneWayAlly: true, moverEndCell: 30}, 0},
+		{"overlap releases near the route end to pass the blocker", jamCase{rules: &OverlapRules{}, moverEndCell: 12}, modernJamReleaseAfter + 1},
+		{"overlap never releases into a one-way ally", jamCase{rules: &OverlapRules{}, ownerB: 1, oneWayAlly: true, moverEndCell: 30}, 0},
 		// A builder already working flush against the site is where a second
 		// builder is going: releasing into it stacks the two (issue #31).
-		{"modern never releases into a builder at the site", jamCase{rules: &ModernRules{}, moverEndCell: 9, siteCell: 8}, 0},
-		{"modern never releases into an assister at the site", jamCase{rules: &ModernRules{}, moverEndCell: 7, siteCell: 9, assist: true}, 0},
+		{"overlap never releases into a builder at the site", jamCase{rules: &OverlapRules{}, moverEndCell: 9, siteCell: 8}, 0},
+		{"overlap never releases into an assister at the site", jamCase{rules: &OverlapRules{}, moverEndCell: 7, siteCell: 9, assist: true}, 0},
 		// An outer radius of 50 puts the arrival band (50/16 = 3 cells) a cell
 		// past the zero band (50/18 = 2): the follower halts an assister three
 		// cells out, where the friend stands, so that cell is the site too.
-		{"modern never releases into an assister on the arrival band", jamCase{rules: &ModernRules{}, moverEndCell: 8, siteCell: 10, assist: true, outer: 50}, 0},
+		{"overlap never releases into an assister on the arrival band", jamCase{rules: &OverlapRules{}, moverEndCell: 8, siteCell: 10, assist: true, outer: 50}, 0},
 		// A parked friend short of the site is still passed as before.
-		{"modern releases past a friend short of the site", jamCase{rules: &ModernRules{}, moverEndCell: 10, siteCell: 11}, modernJamReleaseAfter + 1},
+		{"overlap releases past a friend short of the site", jamCase{rules: &OverlapRules{}, moverEndCell: 10, siteCell: 11}, modernJamReleaseAfter + 1},
 		// An attack band is no work site: the point test at its centre keeps
 		// passing a friend parked in the band.
-		{"modern releases past a friend in an attack band", jamCase{rules: &ModernRules{}, moverEndCell: 7, siteCell: 9, assist: true, row: "Attack_Chase"}, modernJamReleaseAfter + 1},
+		{"overlap releases past a friend in an attack band", jamCase{rules: &OverlapRules{}, moverEndCell: 7, siteCell: 9, assist: true, row: "Attack_Chase"}, modernJamReleaseAfter + 1},
 		{"strict never releases at a site", jamCase{rules: StrictRules{}, moverEndCell: 9, siteCell: 8}, 0},
 		// A builder jammed at a held site while a moving friend passes
 		// through it is not wedged: the pass-through separates by itself, and
 		// a release would carry it into the builder at the site. Inside a
 		// parked friend it is wedged, and a release takes it out.
-		{"modern never releases out of a moving friend at a held site", jamCase{rules: &ModernRules{}, moverEndCell: 9, siteCell: 8, wedge: wedgeMoving}, 0},
-		{"modern releases out of a parked friend at a held site", jamCase{rules: &ModernRules{}, moverEndCell: 9, siteCell: 8, wedge: wedgeParked}, modernJamReleaseAfter + 1},
-		{"modern releases out of a moving friend near a point goal", jamCase{rules: &ModernRules{}, moverEndCell: 9, wedge: wedgeMoving}, modernJamReleaseAfter + 1},
+		{"overlap never releases out of a moving friend at a held site", jamCase{rules: &OverlapRules{}, moverEndCell: 9, siteCell: 8, wedge: wedgeMoving}, 0},
+		{"overlap releases out of a parked friend at a held site", jamCase{rules: &OverlapRules{}, moverEndCell: 9, siteCell: 8, wedge: wedgeParked}, modernJamReleaseAfter + 1},
+		{"overlap releases out of a moving friend near a point goal", jamCase{rules: &OverlapRules{}, moverEndCell: 9, wedge: wedgeMoving}, modernJamReleaseAfter + 1},
 		{"strict never releases out of a friend at a site", jamCase{rules: StrictRules{}, moverEndCell: 9, siteCell: 8, wedge: wedgeParked}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -218,13 +218,15 @@ func TestJamRelease(t *testing.T) {
 }
 
 func TestJamReleaseAnswers(t *testing.T) {
-	for _, r := range []Rules{StrictRules{}, CommunityRules{}} {
+	// Modern retired the policy with the other two that let friendly units
+	// share cells (DESIGN_MOVEMENT_PATH "Modern traffic").
+	for _, r := range []Rules{StrictRules{}, CommunityRules{}, &ModernRules{}} {
 		if after, life := r.JamRelease(nil); after != 0 || life != 0 {
 			t.Fatalf("%T releases jams: (%d, %d)", r, after, life)
 		}
 	}
-	if after, life := (&ModernRules{}).JamRelease(nil); after != 30 || life != 90 {
-		t.Fatalf("Modern answers (%d, %d), want (30, 90)", after, life)
+	if after, life := (&OverlapRules{}).JamRelease(nil); after != 30 || life != 90 {
+		t.Fatalf("the laboratory's baseline answers (%d, %d), want (30, 90)", after, life)
 	}
 }
 
@@ -233,7 +235,7 @@ func TestJamReleaseAnswers(t *testing.T) {
 // never left inside a friend that would block every later step (review probe:
 // 1x1 mover, parked 3x3 friend on cells 7-9, goal at cell 15).
 func TestJamReleaseNeverEndsInsideAFriend(t *testing.T) {
-	sys, a, _, step := setupJamCase(t, jamCase{rules: &ModernRules{}, moverEndCell: 15, blockerFoot: 3})
+	sys, a, _, step := setupJamCase(t, jamCase{rules: &OverlapRules{}, moverEndCell: 15, blockerFoot: 3})
 	u := sys.world.Unit(a)
 	for tick := uint32(1); tick <= 400; tick++ {
 		step(tick)
@@ -249,7 +251,7 @@ func TestJamReleaseNeverEndsInsideAFriend(t *testing.T) {
 
 // Forgetting a unit drops its release, and a finished order forgets the run.
 func TestJamReleaseStateIsCleared(t *testing.T) {
-	sys, a, _, step := setupJamCase(t, jamCase{rules: &ModernRules{}, moverEndCell: 30})
+	sys, a, _, step := setupJamCase(t, jamCase{rules: &OverlapRules{}, moverEndCell: 30})
 	for tick := uint32(1); tick <= modernJamReleaseAfter-1; tick++ {
 		step(tick)
 	}
@@ -270,7 +272,7 @@ func TestJamReleaseStateIsCleared(t *testing.T) {
 // Near its destination a released unit passes the friend that blocked it and
 // the release ends at the first commit that leaves it clear of every friend.
 func TestJamReleaseNearDestinationEndsWhenClear(t *testing.T) {
-	sys, a, _, step := setupJamCase(t, jamCase{rules: &ModernRules{}, moverEndCell: 12})
+	sys, a, _, step := setupJamCase(t, jamCase{rules: &OverlapRules{}, moverEndCell: 12})
 	u := sys.world.Unit(a)
 	passed := false
 	for tick := uint32(1); tick <= 90; tick++ {
@@ -295,7 +297,7 @@ func TestJamReleaseNearDestinationEndsWhenClear(t *testing.T) {
 // step and never reads blocked, yet is wedged all the same and is released
 // (DESIGN_MOVEMENT_PATH "Modern jam release").
 func TestJamReleaseFreesWedgedUnits(t *testing.T) {
-	queued := jamCase{rules: &ModernRules{}, sameHeading: true, blockerRoute: true, moverEndCell: 30, blockerFoot: 5}
+	queued := jamCase{rules: &OverlapRules{}, sameHeading: true, blockerRoute: true, moverEndCell: 30, blockerFoot: 5}
 	if freed, _ := runJamCase(t, queued, 60); freed != 0 {
 		t.Fatalf("a unit behind a same-way friend it does not overlap left the queue on tick %d", freed)
 	}
@@ -315,7 +317,7 @@ func TestJamReleaseFreesWedgedUnits(t *testing.T) {
 	if cleared == 0 {
 		t.Fatal("a unit wedged inside a same-way friend never got past it")
 	}
-	stuck := jamCase{rules: &ModernRules{}, moverEndCell: 30, blockerFoot: 3, moverCell: 8, routeless: true}
+	stuck := jamCase{rules: &OverlapRules{}, moverEndCell: 30, blockerFoot: 3, moverCell: 8, routeless: true}
 	sys, a, _, step = setupJamCase(t, stuck)
 	released := false
 	for tick := uint32(1); tick <= 45 && !released; tick++ {

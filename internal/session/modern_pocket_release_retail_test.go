@@ -10,17 +10,21 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/movement"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
+	"github.com/nanolathe-gg/nanolathe/internal/path"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/testsupport/retailcat"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
 
-// Nanolathe Modern policy: docs/DESIGN_MOVEMENT_PATH.md "Modern pocket
-// release". The fixture is authored here — flat terrain, a 3x3 block of
-// parked retail fleas whose centre slot is free, and one more flea standing
-// against the block with an assigned move to that slot — and says nothing
-// about retail beyond the Strict retry it locks [04 R-ORD-01 §4].
+// docs/DESIGN_MOVEMENT_PATH.md "Modern pocket release": retired from Modern
+// on 2026-09-29 and kept by the pathfinding laboratory's baseline, which
+// these tests bind (movement.OverlapRules). What Modern does in the same
+// scenes is locked in modern_traffic_retail_test.go. The fixture is authored
+// here — flat terrain, a 3x3 block of parked retail fleas whose centre slot
+// is free, and one more flea standing against the block with an assigned
+// move to that slot — and says nothing about retail beyond the Strict retry
+// it locks [04 R-ORD-01 §4].
 
 const (
 	pocketTicks  = 600
@@ -29,17 +33,23 @@ const (
 	pocketHoleZ  = 24
 )
 
-// noPocketRules is Modern with the pocket release switched off, the
-// path benchmark's modern-no-pocket, composed here because that set is
-// registered only in the opt-in benchmark build.
-type noPocketRules struct{ movement.ModernRules }
+// noPocketRules is the baseline with the pocket release switched off.
+type noPocketRules struct{ movement.OverlapRules }
 
 func (*noPocketRules) PocketRelease(*movement.System) (int32, uint32) { return 0, 0 }
 
-func pocketlessModern() *RuleSet {
+// overlapBaseline is the laboratory's baseline as a rule set: Modern with the
+// movement and the search kernel it had before its traffic policy.
+func overlapBaseline() *RuleSet {
 	set := ModernRuleSet()
-	set.Movement = &noPocketRules{}
+	set.Movement, set.Path = &movement.OverlapRules{}, path.StraightenKernel{}
 	return &set
+}
+
+func pocketlessBaseline() *RuleSet {
+	set := overlapBaseline()
+	set.Movement = &noPocketRules{}
+	return set
 }
 
 type pocketRun struct {
@@ -187,16 +197,16 @@ var pocketHole = movement.Cell{X: pocketHoleX, Z: pocketHoleZ}
 
 // The pocket release takes a unit sealed out of its own free slot through the
 // parked friends around it and into the slot; the friends do not move and no
-// overlap is left. Modern without the pocket release leaves the same unit
-// standing outside for the whole window: its searches are rejected, the
+// overlap is left. The baseline without the pocket release leaves the same
+// unit standing outside for the whole window: its searches are rejected, the
 // retry installs no line to walk, and jam release never counts a unit at
 // rest.
-func TestModernPocketReleaseTakesASealedOutUnitIntoItsSlot(t *testing.T) {
-	without := pocketScene(t, ModernRuleSetName, pocketlessModern(), "free")
+func TestPocketReleaseTakesASealedOutUnitIntoItsSlot(t *testing.T) {
+	without := pocketScene(t, ModernRuleSetName, pocketlessBaseline(), "free")
 	if without.final == pocketHole || without.passedRing {
 		t.Fatalf("without the pocket release the mover reached %v (passed the block: %v); the scene no longer seals it out", without.final, without.passedRing)
 	}
-	with := pocketScene(t, ModernRuleSetName, nil, "free")
+	with := pocketScene(t, ModernRuleSetName, overlapBaseline(), "free")
 	if with.final != pocketHole || with.done == 0 {
 		t.Fatalf("the pocket release left the mover at %v (move done at tick %d); want its slot %v", with.final, with.done, pocketHole)
 	}
@@ -222,14 +232,14 @@ func TestStrictAndCommunityNeverGrantAPocketRelease(t *testing.T) {
 // where the unit stands (DESIGN_MOVEMENT_PATH "Modern crowded arrival") on
 // exactly the tick it does without the pocket release.
 func TestPocketReleaseLeavesAHeldGoalToCrowdedArrival(t *testing.T) {
-	with := pocketScene(t, ModernRuleSetName, nil, "held")
+	with := pocketScene(t, ModernRuleSetName, overlapBaseline(), "held")
 	if with.passedRing || with.ringMoved {
 		t.Fatalf("passed the block %v, block moved %v; a held goal is never released into", with.passedRing, with.ringMoved)
 	}
 	if with.done == 0 || with.final.X > pocketHoleX-4 {
 		t.Fatalf("move done at tick %d with the mover at %v; want crowded arrival to finish it outside the block", with.done, with.final)
 	}
-	if without := pocketScene(t, ModernRuleSetName, pocketlessModern(), "held"); without != with {
+	if without := pocketScene(t, ModernRuleSetName, pocketlessBaseline(), "held"); without != with {
 		t.Fatalf("the pocket release changed a held-goal run: %+v without, %+v with", without, with)
 	}
 	t.Logf("crowded arrival finished the held-goal move at tick %d at %v", with.done, with.final)
@@ -238,10 +248,10 @@ func TestPocketReleaseLeavesAHeldGoalToCrowdedArrival(t *testing.T) {
 // A hostile unit in the ring opens the pocket (only parked friends wall it),
 // so nothing is certified and no release ever takes the mover through the
 // enemy, which the same block of friends does not stop
-// (TestModernPocketReleaseTakesASealedOutUnitIntoItsSlot passes the same
+// (TestPocketReleaseTakesASealedOutUnitIntoItsSlot passes the same
 // west-middle position when it is friendly).
 func TestPocketReleaseNeverPassesAnEnemy(t *testing.T) {
-	run := pocketScene(t, ModernRuleSetName, nil, "enemy")
+	run := pocketScene(t, ModernRuleSetName, overlapBaseline(), "enemy")
 	if run.passedEnemy || run.final == pocketHole || run.ringMoved {
 		t.Fatalf("passed the enemy %v, reached %v, block moved %v", run.passedEnemy, run.final, run.ringMoved)
 	}

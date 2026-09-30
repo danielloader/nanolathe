@@ -57,6 +57,26 @@ func TestModernGuardStaysWithAProducingFactoryRetail(t *testing.T) {
 	if err := sess.EnqueueHumanCommand(HumanCommand{Kind: HumanFactoryBuild, FactoryBuild: HumanFactoryBuildCommand{Builder: ph, Product: "armflash", Count: 6}}); err != nil {
 		t.Fatalf("queue production: %v", err)
 	}
+	// Which side of the plant a guard's way there ends on is the movement
+	// policy's business, and nearby work is judged from where the guard
+	// stands. The commander is therefore walked to the side the collectors
+	// are on before it is told to guard.
+	post := orders.ResolvePos{X: plant.X, Y: plant.Y, Z: plant.Z + world.CellToWorld(5), InterfaceType: orders.InterfaceTypeRightClick}
+	if err := sess.EnqueueHumanCommand(HumanCommand{Kind: HumanOrder, Order: HumanOrderCommand{
+		Handles: []pool.Handle{com.Handle}, Code: 2, AssignedPosition: true, Position: post,
+	}}); err != nil {
+		t.Fatalf("move order: %v", err)
+	}
+	for i := 0; i < 900; i++ {
+		fund()
+		step()
+		if dx, dz := int64(com.X-post.X)>>16, int64(com.Z-post.Z)>>16; dx*dx+dz*dz <= 32*32 && orders.QueueForUnit(com).Head() == nil {
+			break
+		}
+	}
+	if dx, dz := int64(com.X-post.X)>>16, int64(com.Z-post.Z)>>16; dx*dx+dz*dz > 32*32 {
+		t.Fatalf("fixture: the commander stands %d, %d from its post", dx, dz)
+	}
 	if err := sess.EnqueueHumanCommand(HumanCommand{Kind: HumanOrder, Order: HumanOrderCommand{
 		Handles: []pool.Handle{com.Handle}, Code: 7, Target: ph,
 		Position: orders.ResolvePos{X: plant.X, Y: plant.Y, Z: plant.Z, InterfaceType: orders.InterfaceTypeRightClick},

@@ -98,11 +98,17 @@ type HumanOrderTarget struct {
 }
 
 type HumanOrderCommand struct {
-	Handles  []pool.Handle
-	Code     int
-	Target   pool.Handle
-	Position orders.ResolvePos
-	Queued   bool
+	// StagedCount, when it exceeds the number of acting units, is the size
+	// of the selection the order was given to. Only a replay's staging sets
+	// it (Session.StageGroupMove): a recorded group can have had members
+	// the replay does not stage, and the formation cutoff counts them all
+	// [04 R-STANCE-01 §5]. The command boundary leaves it zero.
+	StagedCount int32
+	Handles     []pool.Handle
+	Code        int
+	Target      pool.Handle
+	Position    orders.ResolvePos
+	Queued      bool
 	// AssignedPosition is an explicit per-actor destination from a drag
 	// formation (DESIGN_INTERFACE_HUD_INPUT §3.11). Ordinary clicks leave it
 	// false so the retail selection offsets apply [04 R-STANCE-01 §5].
@@ -1312,8 +1318,16 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 		var count int32
 		if !c.Order.AssignedPosition {
 			center, count = s.humanOrderCentroid(handles, excluded)
+			if c.Order.StagedCount > count && count != 0 {
+				count = c.Order.StagedCount
+			}
 		}
 		slots := s.groupDestinationSlots(c.Order, handles, excluded, target, center, count)
+		// The units this command gives a ground move, for the traffic
+		// policy's arrival places (movement.Pilot); nothing reads it under
+		// Strict 3.1 or Community 3.9.
+		var moved []pool.Handle
+		var movedOwner uint8
 		for _, h := range handles {
 			u := s.humanUnit(h)
 			if u == nil || h == excluded {
@@ -1358,6 +1372,12 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 				n.HumanMoveSequence = c.Sequence
 			}
 			q.Push(id, n)
+			if target == nil && !c.Order.Queued && id == orders.Lookup("Move_Ground") {
+				moved, movedOwner = append(moved, h), u.Owner
+			}
+		}
+		if len(moved) > 1 && s.Movement != nil {
+			s.Movement.NoteGroupOrder(movedOwner, moved, c.Order.Position.X, c.Order.Position.Z, tick)
 		}
 	}
 }

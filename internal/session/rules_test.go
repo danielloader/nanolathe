@@ -116,15 +116,16 @@ func TestBindRulesProjectsEverySeam(t *testing.T) {
 }
 
 // Strict 3.1 and Community bind the retail search kernel; Modern binds the
-// retail search behind route straightening (DESIGN_MOVEMENT_PATH "Modern route
-// straightening"). The scheduler owns when a route publishes under every kernel
+// retail search behind route straightening and route smoothing
+// (DESIGN_MOVEMENT_PATH "Modern route straightening", "Modern route
+// smoothing"). The scheduler owns when a route publishes under every kernel
 // (docs/DESIGN_GAMEPLAY_RULES.md "The path search kernel"), and this test is
 // what makes changing a reserved set's kernel a deliberate edit.
 func TestReservedRuleSetsBindTheirSearchKernels(t *testing.T) {
 	for _, set := range reservedRuleSets() {
 		if set.Name == ModernRuleSetName {
-			if _, ok := set.Path.(path.StraightenKernel); !ok {
-				t.Fatalf("%s bound search kernel %T, want route straightening", set.Name, set.Path)
+			if _, ok := set.Path.(path.SmoothKernel); !ok {
+				t.Fatalf("%s bound search kernel %T, want route smoothing", set.Name, set.Path)
 			}
 			continue
 		}

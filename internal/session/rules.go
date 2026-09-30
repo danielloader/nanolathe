@@ -53,17 +53,20 @@ type RuleSet struct {
 	Construction construction.Rules
 	UnitLimit    UnitLimitRules
 	ScriptPorts  ScriptPortRules
-	// Movement is the movement system's policy seam: whether a ground mover
-	// rejected by static ground teaches its owner the blocks the route search
-	// had read as unexplored (DESIGN_MOVEMENT_PATH "Modern learned terrain").
-	// It is separate from Path below, which replaces the search itself.
+	// Movement is the movement system's policy seam: what a rejected step
+	// teaches, when a follower may ask for a route again, where the units of
+	// a group come to rest and how a ground mover behaves toward the units
+	// around it (DESIGN_MOVEMENT_PATH "Modern learned terrain" to "Modern
+	// traffic"). It is separate from Path below, which replaces the search
+	// itself.
 	Movement movement.Rules
 	// Path is the search kernel one route request is opened with. It is a
 	// whole-subsystem seam rather than a policy one: it decides how a route
 	// is found, while the scheduler keeps admission order, the per-player
 	// step allowance and the publication boundary, so a replacement cannot
-	// move when a route becomes visible. Both reserved sets bind the retail
-	// kernel; there is no Modern kernel yet.
+	// move when a route becomes visible. Strict 3.1 and Community 3.9 bind
+	// the retail kernel; Modern binds the retail search with its route
+	// straightened and pulled taut.
 	Path path.Kernel
 	// Planner is the computer player's per-tick think step, projected onto
 	// every manager this session owns. The retail manager keeps owning its
@@ -191,9 +194,10 @@ func ModernRuleSet() RuleSet {
 		UnitLimit:    ModernUnitLimit{},
 		ScriptPorts:  ModernScriptPorts{},
 		Movement:     &movement.ModernRules{},
-		// The retail search with its sawtooth turns straightened
-		// (DESIGN_MOVEMENT_PATH "Modern route straightening").
-		Path: path.StraightenKernel{},
+		// The retail search with its sawtooth turns straightened and its
+		// route then pulled taut (DESIGN_MOVEMENT_PATH "Modern route
+		// straightening", "Modern route smoothing").
+		Path: path.SmoothKernel{},
 		// The retail step with Modern wave air targets: members without a
 		// weapon that can engage an airborne hostile take a grounded one
 		// (DESIGN_SESSIONS_AI_SAVE "Modern wave air targets"). Target choice,

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Path Lab Player</title>
+<link rel="stylesheet" href="player.css">
+<style>
+  :root {
+    color-scheme: light;
+    --plp-bg: #fcfcfb;
+    --plp-fg: #0b0b0b;
+    --plp-muted: #62615d;
+    --plp-accent: #2a78d6;
+    --plp-warn: #e5372d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --plp-bg: #1a1a19;
+      --plp-fg: #f4f4f2;
+      --plp-muted: #a3a29c;
+      --plp-accent: #3987e5;
+      --plp-warn: #ff453a;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plp-bg: #1a1a19;
+    --plp-fg: #f4f4f2;
+    --plp-muted: #a3a29c;
+    --plp-accent: #3987e5;
+    --plp-warn: #ff453a;
+  }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: var(--plp-bg);
+    color: var(--plp-fg);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  h1 {
+    margin: 0;
+    font-size: 18px;
+  }
+  #theme {
+    border: 1px solid var(--plp-muted);
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    padding: 2px 10px;
+    cursor: pointer;
+  }
+  #status {
+    color: var(--plp-muted);
+  }
+  #status.error {
+    color: var(--plp-warn);
+  }
+  .player + .player {
+    margin-top: 28px;
+  }
+  code {
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Path lab player</h1>
+  <button id="theme" type="button">Switch theme</button>
+</header>
+<p id="status"></p>
+<div id="players"></div>
+<script src="player.js"></script>
+<script>
+(function () {
+  'use strict';
+  var status = document.getElementById('status');
+  var players = document.getElementById('players');
+  var q = new URLSearchParams(location.search);
+  var src = q.get('bundle');
+  var opts = { speed: +(q.get('speed') || 4), autoplay: q.get('autoplay') === '1' };
+
+  function say(text, error) {
+    status.textContent = text;
+    status.className = error ? 'error' : '';
+  }
+  window.addEventListener('error', function (e) { say('Error: ' + e.message, true); });
+
+  document.getElementById('theme').addEventListener('click', function () {
+    var html = document.documentElement;
+    var dark = html.getAttribute('data-theme') === 'dark' ||
+      (!html.hasAttribute('data-theme') && matchMedia('(prefers-color-scheme: dark)').matches);
+    html.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+
+  function mountAll() {
+    var list = window.PATHLAB_BUNDLES || [];
+    if (!list.length) { say('The bundle did not load.', true); return; }
+    say('');
+    list.forEach(function (b) {
+      var div = document.createElement('div');
+      div.className = 'player';
+      players.appendChild(div);
+      var o = Object.assign({}, opts);
+      if (q.get('t') != null) o.start = b.t0 + (+q.get('t')) * 30;
+      PathLabPlayer.mount(div, b, o);
+    });
+  }
+
+  // Bundles are read from paths relative to this page only.
+  function relative(path) {
+    return path && !/^[a-z][a-z0-9+.-]*:/i.test(path) && path.indexOf('//') !== 0;
+  }
+
+  function loadScript(path) {
+    var s = document.createElement('script');
+    s.src = path;
+    s.onload = mountAll;
+    s.onerror = function () { say('Could not load ' + path + '.', true); };
+    document.head.appendChild(s);
+  }
+
+  if (!src) {
+    if (window.PATHLAB_BUNDLES && window.PATHLAB_BUNDLES.length) { mountAll(); return; }
+    say('Open this page with ?bundle=path/to/bundle.json (or bundle.js when the page is opened from disk). Optional: &t=seconds, &speed=1|2|4|8, &autoplay=1.');
+    return;
+  }
+  if (!relative(src)) { say('The bundle path must be relative to this page.', true); return; }
+  if (/\.js$/i.test(src)) { loadScript(src); return; }
+  say('Loading ' + src + '...');
+  fetch(src)
+    .then(function (r) { if (!r.ok) throw new Error(r.status + ' ' + r.statusText); return r.json(); })
+    .then(function (b) { window.PATHLAB_BUNDLES = [b]; mountAll(); })
+    .catch(function () {
+      // A page opened from disk may not fetch files; the script form of
+      // the bundle, written by pack -js, loads through a script tag.
+      loadScript(src.replace(/\.json$/i, '') + '.js');
+    });
+})();
+</script>
+</body>
+</html>

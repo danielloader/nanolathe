@@ -80,12 +80,12 @@ func TestAlliedPassThrough(t *testing.T) {
 	}{
 		{"strict keeps the retail rejection", passCase{rules: StrictRules{}, headingB: west, moverEndCell: 18, blockerRoute: true}, true},
 		{"community keeps the retail rejection", passCase{rules: CommunityRules{}, headingB: west, moverEndCell: 18, blockerRoute: true}, true},
-		{"modern same owner head-on passes", passCase{rules: &ModernRules{}, headingB: west, moverEndCell: 18, blockerRoute: true}, false},
-		{"modern mutually allied head-on passes", passCase{rules: &ModernRules{}, ownerB: 1, allied: true, headingB: west, moverEndCell: 18, blockerRoute: true}, false},
-		{"modern other owner without alliance blocks", passCase{rules: &ModernRules{}, ownerB: 1, headingB: west, moverEndCell: 18, blockerRoute: true}, true},
-		{"modern same-direction traffic blocks", passCase{rules: &ModernRules{}, headingB: 0xC000, moverEndCell: 18, blockerRoute: true}, true},
-		{"modern idle blocker blocks", passCase{rules: &ModernRules{}, headingB: west, moverEndCell: 18, blockerRoute: false}, true},
-		{"modern mover near its route end blocks", passCase{rules: &ModernRules{}, headingB: west, moverEndCell: 8, blockerRoute: true}, true},
+		{"overlap same owner head-on passes", passCase{rules: &OverlapRules{}, headingB: west, moverEndCell: 18, blockerRoute: true}, false},
+		{"overlap mutually allied head-on passes", passCase{rules: &OverlapRules{}, ownerB: 1, allied: true, headingB: west, moverEndCell: 18, blockerRoute: true}, false},
+		{"overlap other owner without alliance blocks", passCase{rules: &OverlapRules{}, ownerB: 1, headingB: west, moverEndCell: 18, blockerRoute: true}, true},
+		{"overlap same-direction traffic blocks", passCase{rules: &OverlapRules{}, headingB: 0xC000, moverEndCell: 18, blockerRoute: true}, true},
+		{"overlap idle blocker blocks", passCase{rules: &OverlapRules{}, headingB: west, moverEndCell: 18, blockerRoute: false}, true},
+		{"overlap mover near its route end blocks", passCase{rules: &OverlapRules{}, headingB: west, moverEndCell: 8, blockerRoute: true}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			blocked, _ := runPassCase(t, tc.c)
@@ -99,13 +99,15 @@ func TestAlliedPassThrough(t *testing.T) {
 // The answers themselves, and that a Strict tick never resolves an alliance
 // query.
 func TestAlliedPassThroughAnswers(t *testing.T) {
-	for _, r := range []Rules{StrictRules{}, CommunityRules{}} {
+	// Modern retired the policy with the other two that let friendly units
+	// share cells (DESIGN_MOVEMENT_PATH "Modern traffic").
+	for _, r := range []Rules{StrictRules{}, CommunityRules{}, &ModernRules{}} {
 		if r.AlliedPassThrough(nil) {
 			t.Fatalf("%T allows pass-through", r)
 		}
 	}
-	if !(&ModernRules{}).AlliedPassThrough(nil) {
-		t.Fatal("Modern does not allow pass-through")
+	if !(&OverlapRules{}).AlliedPassThrough(nil) {
+		t.Fatal("the laboratory's baseline does not allow pass-through")
 	}
 	_, sys := runPassCase(t, passCase{rules: StrictRules{}, allied: true, headingB: 0x4000, moverEndCell: 18, blockerRoute: true})
 	if sys.passAlliance != nil {

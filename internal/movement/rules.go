@@ -3,10 +3,10 @@ package movement
 import "github.com/nanolathe-gg/nanolathe/internal/units"
 
 // Rules is the movement system's gameplay seam. It carries the learned-terrain
-// policy, the contested-cell claim answer, the follower's re-route throttle
-// and the group-order admission spread. Strict keeps the retail blocked mover
-// loop and owner-state claim rule; Community may select the stable
-// lower-unit-index claim rule
+// policy, the contested-cell claim answer, the follower's re-route throttle,
+// the group-order admission spread and the traffic policy. Strict keeps the
+// retail blocked mover loop and owner-state claim rule; Community may select
+// the stable lower-unit-index claim rule
 // (docs/DESIGN_MOVEMENT_PATH.md "Community contested-cell claims") [04 R-MOV-01 §7][04 R-COLL-01 §3]
 // (community-patch-engine.md CP-DMG-2).
 //
@@ -26,10 +26,11 @@ import "github.com/nanolathe-gg/nanolathe/internal/units"
 // certificate is live, per follower visit; WedgeEscape at most once per ground
 // visit whose proposal fails a static cell test, and once per opened search;
 // PocketRelease once per cannot-get-there publication and, while a pocket
-// certificate is live, per follower visit.
+// certificate is live, per follower visit; Traffic once a tick.
 // Every implementation is a zero-size value or a pointer to one, so dispatch
-// allocates nothing; the learned grid and the unreachable-move and
-// pocket-release certificates belong to the System.
+// allocates nothing; the learned grid, the unreachable-move and
+// pocket-release certificates and everything the traffic policy remembers
+// belong to the System.
 type Rules interface {
 	// RepairPadQueue reserves landing pieces for approaching aircraft and
 	// keeps other patients circling the base until a piece becomes free.
@@ -101,8 +102,10 @@ type Rules interface {
 	// AlliedPassThrough reports whether two ground movers of the same or
 	// mutually allied owners, meeting head-on while both are mid-route, may
 	// pass through each other's footprints (DESIGN_MOVEMENT_PATH "Modern
-	// allied pass-through"). It is asked once per ground mover visit and must
-	// be a pure answer: no writes, no RNG.
+	// allied pass-through"). No reserved rule set answers true: Modern
+	// retired the policy for steering, and OverlapRules keeps it for the
+	// pathfinding laboratory. It is asked once per ground mover visit and
+	// must be a pure answer: no writes, no RNG.
 	AlliedPassThrough(s *System) bool
 
 	// UnreachableMoves is the unreachable-move completion: frontierCells > 0
@@ -123,8 +126,10 @@ type Rules interface {
 	// friendly ground occupants, other than same-way movers ahead of it, for
 	// lifetime ticks, planning over the static view meanwhile
 	// (docs/DESIGN_MOVEMENT_PATH.md "Modern jam release"). (0, 0) is
-	// retail's occupant test [04 R-COLL-01 §1]. It is asked once per ground
-	// mover visit and once per search opening, and must be a pure answer.
+	// retail's occupant test [04 R-COLL-01 §1] and every reserved rule set's:
+	// Modern retired the policy for steering, and OverlapRules keeps it for
+	// the pathfinding laboratory. It is asked once per ground mover visit and
+	// once per search opening, and must be a pure answer.
 	JamRelease(s *System) (jamAfter uint16, lifetime uint32)
 
 	// WedgeEscape reports whether a ground mover whose committed footprint
@@ -142,7 +147,8 @@ type Rules interface {
 	WedgeEscape(s *System) bool
 
 	// PocketRelease extends JamRelease to a unit sealed out of its own free
-	// destination (docs/DESIGN_MOVEMENT_PATH.md "Modern pocket release"):
+	// destination (docs/DESIGN_MOVEMENT_PATH.md "Modern pocket release"), and
+	// like it is answered by no reserved rule set:
 	// nearCells > 0 certifies, at the empty publication that raises the
 	// cannot-get-there bit on an eligible terminal ground move, a goal within
 	// nearCells per axis whose free footprint a bounded flood finds closed
@@ -156,6 +162,15 @@ type Rules interface {
 	// and, while a certificate is live, per follower visit, and must be a
 	// pure answer: no writes, no RNG.
 	PocketRelease(s *System) (nearCells int32, dwell uint32)
+
+	// Traffic is the traffic policy: how a ground mover behaves toward the
+	// units around it while every unit keeps its own cells, how its routes
+	// are searched, and where the units of a group come to rest (traffic.go;
+	// docs/DESIGN_MOVEMENT_PATH.md "Modern traffic"). The zero value is
+	// retail's blocked response and nothing else [04 R-COLL-01 §1]. It is
+	// asked once a tick, before any unit is visited, and once per group
+	// command; it must be a pure answer: no writes, no RNG.
+	Traffic(s *System) Traffic
 }
 
 // StrictRules is the retail baseline: nothing is learned and nothing learned
@@ -214,7 +229,8 @@ func (StrictRules) PathWorkBound(*System) (int32, bool) { return 0, false }
 func (StrictRules) GroupDestinationSlots(*System) bool { return false }
 
 // AlliedPassThrough is off under Strict 3.1: every occupied footprint cell
-// rejects a proposal [04 R-COLL-01 §2].
+// rejects a proposal [04 R-COLL-01 §2]. Community and Modern inherit the
+// answer.
 func (StrictRules) AlliedPassThrough(*System) bool { return false }
 
 // UnreachableMoves is off under Strict 3.1: an empty publication raises the
@@ -224,6 +240,7 @@ func (StrictRules) UnreachableMoves(*System) (int32, uint32) { return 0, 0 }
 
 // JamRelease is off under Strict 3.1: every friendly occupant blocks the
 // commit and every search reads the occupancy layer [04 R-COLL-01 §1].
+// Community and Modern inherit the answer.
 func (StrictRules) JamRelease(*System) (uint16, uint32) { return 0, 0 }
 
 // WedgeEscape is off under Strict 3.1: the validator tests every cell of the
@@ -235,27 +252,15 @@ func (StrictRules) WedgeEscape(*System) bool { return false }
 // retailRepathDelay is the follower poll's throttle period [04 R-MOV-01 §7].
 const retailRepathDelay = 60
 
-// modernRepathSpread is the number of distinct Modern re-route delays,
-// retail's 60 through 67 ticks. It is Nanolathe Modern policy tuning
-// (docs/DESIGN_MOVEMENT_PATH.md "Modern re-route staggering").
-const modernRepathSpread = 8
+// modernRepathDelay is Modern's throttle period: a mover that is held, or
+// has come to the end of what its route told it, asks again after half a
+// second. It is Nanolathe Modern policy tuning
+// (docs/DESIGN_MOVEMENT_PATH.md "Modern prompt re-routing").
+const modernRepathDelay = 15
 
-// RepathDelay adds a deterministic per-admission offset of 0..7 ticks to
-// retail's throttle, so followers admitted on the same tick — a group order,
-// or a cohort that has re-requested in step ever since — come due on
-// different ticks. The offset mixes the unit's slot with the tick of its last
-// admission rather than using the slot alone: a fixed per-slot phase would
-// split a cohort into eight sub-cohorts that then stay in step for ever,
-// while re-mixing at every admission keeps separating units that happen to
-// share a tick (docs/DESIGN_MOVEMENT_PATH.md "Modern re-route staggering").
-func (*ModernRules) RepathDelay(_ *System, slot int, last uint32) uint32 {
-	// Odd multipliers of the kind public integer hashes use (the first is the
-	// 32-bit golden ratio); any well-mixing odd constants would serve.
-	mix := uint32(slot)*0x9e3779b1 ^ (last+1)*0x85ebca6b
-	mix ^= mix >> 15
-	mix *= 0x2c1b3c6d
-	return retailRepathDelay + uint32(uint64(mix)*modernRepathSpread>>32)
-}
+// RepathDelay lets a follower ask for a route again half a second after its
+// last admission (docs/DESIGN_MOVEMENT_PATH.md "Modern prompt re-routing").
+func (*ModernRules) RepathDelay(*System, int, uint32) uint32 { return modernRepathDelay }
 
 // modernSpreadMinGroup and modernSpreadTicks are the Modern group-order
 // spread's threshold and width. They are Nanolathe Modern policy tuning
@@ -278,21 +283,19 @@ func (*ModernRules) PathWorkBound(*System) (int32, bool) { return modernCarrySha
 // destination (DESIGN_INTERFACE_HUD_INPUT "Modern group destination slots").
 func (*ModernRules) GroupDestinationSlots(*System) bool { return true }
 
-// AlliedPassThrough lets head-on friendly movers pass
-// (DESIGN_MOVEMENT_PATH "Modern allied pass-through").
-func (*ModernRules) AlliedPassThrough(*System) bool { return true }
-
 // FirstRequestSpread admits a large same-tick group of first requests over
 // three ticks (docs/DESIGN_MOVEMENT_PATH.md "Modern group-order spreading").
 func (*ModernRules) FirstRequestSpread(*System) (int, int) {
 	return modernSpreadMinGroup, modernSpreadTicks
 }
 
-// ModernRules carries the approved learned-terrain, re-route staggering,
-// group-order spreading, bounded path work, group destination slot, allied
-// pass-through, unreachable-move, jam-release, pocket-release and
-// wedge-escape policies. It is zero size and is held by pointer so a later
-// set may embed it and override one answer.
+// ModernRules carries the approved learned-terrain, prompt re-routing,
+// group-order spreading, bounded path work, group destination slot,
+// unreachable-move, wedge-escape, repair-pad queue and traffic policies.
+// Friendly units never share cells under it: allied pass-through, jam release
+// and pocket release are retired from Modern and answered as Strict answers
+// them (OverlapRules). It is zero size and is held by pointer so a later set
+// may embed it and override one answer.
 type ModernRules struct{ CommunityRules }
 
 // StaticRejection teaches the owner the mapping blocks the route search reads

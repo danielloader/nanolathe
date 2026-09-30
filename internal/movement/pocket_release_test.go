@@ -104,27 +104,29 @@ func (f *pocketFixture) visit(tick uint32) bool {
 
 // pocketNoJamRules answers the pocket release on and jam release off: the
 // extension has nothing to extend, so it is off.
-type pocketNoJamRules struct{ ModernRules }
+type pocketNoJamRules struct{ OverlapRules }
 
 func (*pocketNoJamRules) JamRelease(*System) (uint16, uint32) { return 0, 0 }
 
 func TestPocketReleaseAnswers(t *testing.T) {
-	for _, rules := range []Rules{StrictRules{}, CommunityRules{}} {
+	// Modern retired the policy with the other two that let friendly units
+	// share cells (DESIGN_MOVEMENT_PATH "Modern traffic").
+	for _, rules := range []Rules{StrictRules{}, CommunityRules{}, &ModernRules{}} {
 		if near, dwell := rules.PocketRelease(nil); near != 0 || dwell != 0 {
 			t.Fatalf("%T PocketRelease = (%d, %d), want retail (0, 0)", rules, near, dwell)
 		}
 	}
-	if near, dwell := (&ModernRules{}).PocketRelease(nil); near != modernPocketNear || dwell != modernPocketDwell {
-		t.Fatalf("Modern PocketRelease = (%d, %d)", near, dwell)
+	if near, dwell := (&OverlapRules{}).PocketRelease(nil); near != modernPocketNear || dwell != modernPocketDwell {
+		t.Fatalf("the laboratory's baseline PocketRelease = (%d, %d)", near, dwell)
 	}
-	for _, s := range []*System{{}, {Rules: &pocketNoJamRules{}}} {
+	for _, s := range []*System{{}, {Rules: &ModernRules{}}, {Rules: &pocketNoJamRules{}}} {
 		if _, _, on := s.pocketPolicy(); on {
 			t.Fatalf("%T: the pocket release is on without jam release", s.Rules)
 		}
 	}
-	s := &System{Rules: &ModernRules{}}
+	s := &System{Rules: &OverlapRules{}}
 	if _, _, on := s.pocketPolicy(); !on {
-		t.Fatal("Modern does not release pockets")
+		t.Fatal("the laboratory's baseline does not release pockets")
 	}
 	if n := testing.AllocsPerRun(100, func() { _, _, _ = s.pocketPolicy() }); n != 0 {
 		t.Fatalf("PocketRelease dispatch allocated %g times", n)
@@ -157,7 +159,7 @@ func TestPocketReleaseLeavesStrictAndCommunityUntouched(t *testing.T) {
 // friend, an enemy, a statically blocked goal, a goal a parked friend holds,
 // a mover not against the ring or one beyond the near bound get nothing.
 func TestPocketReleaseCertifiesOnlyASealedPocket(t *testing.T) {
-	f := sealedPocket(t, &ModernRules{})
+	f := sealedPocket(t, &OverlapRules{})
 	for tick := uint32(1); tick <= 60; tick++ {
 		f.visit(tick)
 	}
@@ -180,7 +182,7 @@ func TestPocketReleaseCertifiesOnlyASealedPocket(t *testing.T) {
 				mover = Cell{X: 12 + modernPocketNear + 2, Z: 10}
 				friends = append(friends, Cell{X: mover.X + 1, Z: 10})
 			}
-			f := newPocketFixture(t, &ModernRules{}, 40, friends, nil, mover, goal)
+			f := newPocketFixture(t, &OverlapRules{}, 40, friends, nil, mover, goal)
 			east := f.sys.world.Unit(f.friends[4]) // (13,10)
 			switch kind {
 			case "open side":
@@ -222,7 +224,7 @@ func TestPocketReleaseWindowIsOpenAndTheMapEdgeIsAWall(t *testing.T) {
 		if capped {
 			friends = append(friends, Cell{X: 10, Z: end + 1})
 		}
-		return newPocketFixture(t, &ModernRules{}, 64, friends, nil, Cell{X: 10, Z: 8}, Cell{X: 10, Z: 10})
+		return newPocketFixture(t, &OverlapRules{}, 64, friends, nil, Cell{X: 10, Z: 8}, Cell{X: 10, Z: 10})
 	}
 	closed := corridor(10+pocketWindowHalf-2, true)
 	closed.reject(t, 5)
@@ -237,7 +239,7 @@ func TestPocketReleaseWindowIsOpenAndTheMapEdgeIsAWall(t *testing.T) {
 
 	// A goal on the map's west edge, walled by friends on its other sides.
 	goal := Cell{X: 0, Z: 10}
-	edge := newPocketFixture(t, &ModernRules{}, 20, []Cell{{X: 0, Z: 9}, {X: 0, Z: 11}, {X: 1, Z: 9}, {X: 1, Z: 10}, {X: 1, Z: 11}}, nil, Cell{X: 2, Z: 10}, goal)
+	edge := newPocketFixture(t, &OverlapRules{}, 20, []Cell{{X: 0, Z: 9}, {X: 0, Z: 11}, {X: 1, Z: 9}, {X: 1, Z: 10}, {X: 1, Z: 11}}, nil, Cell{X: 2, Z: 10}, goal)
 	edge.reject(t, 5)
 	if edge.sys.pocketLive != 1 {
 		t.Fatal("the map edge did not wall the pocket")
@@ -249,7 +251,7 @@ func TestPocketReleaseWindowIsOpenAndTheMapEdgeIsAWall(t *testing.T) {
 // A pocket release closes that way only on the unit's own goal anchor; an
 // ordinary release near the destination still ends at once.
 func TestPocketReleaseEndsOnlyOnItsGoal(t *testing.T) {
-	f := sealedPocket(t, &ModernRules{})
+	f := sealedPocket(t, &OverlapRules{})
 	f.reject(t, 5)
 	at := uint32(5 + modernPocketDwell)
 	if f.visit(at) || !handleRow(f.sys.jamReleases, f.u.Handle).pocket {
@@ -268,7 +270,7 @@ func TestPocketReleaseEndsOnlyOnItsGoal(t *testing.T) {
 		t.Fatal("the pocket release outlived the unit's arrival on its goal")
 	}
 
-	g := sealedPocket(t, &ModernRules{})
+	g := sealedPocket(t, &OverlapRules{})
 	setHandleRow(&g.sys.jamReleases, g.u.Handle, jamRelease{until: at + 90, limit: at + 180, cooldown: at + 150})
 	g.sys.BeginTick(at)
 	g.sys.noteJamRelease(g.u, handleRow(g.sys.Collisions, g.u.Handle), false, -1, at, modernJamReleaseAfter, modernJamReleaseLifetime)
@@ -281,7 +283,7 @@ func TestPocketReleaseEndsOnlyOnItsGoal(t *testing.T) {
 // its cooldown are over; with the grants used and the pocket still sealed,
 // the move finishes where the unit stands.
 func TestPocketReleaseGrantCapFinishesInPlace(t *testing.T) {
-	f := sealedPocket(t, &ModernRules{})
+	f := sealedPocket(t, &OverlapRules{})
 	f.reject(t, 5)
 	start := handleRow(f.sys.Collisions, f.u.Handle).CachedAnchor
 	tick := uint32(5 + modernPocketDwell)

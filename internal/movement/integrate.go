@@ -211,6 +211,27 @@ type System struct {
 	// with no unit released (docs/DESIGN_MOVEMENT_PATH.md "Modern jam
 	// release").
 	jamReleases []jamRelease
+	// traffic is the traffic policy's state, dense by handle and never
+	// saved: a load starts every unit with none (traffic.go;
+	// docs/DESIGN_MOVEMENT_PATH.md "Modern traffic").
+	traffic  []trafficState
+	labStats LabStats
+	// visit is the scratch record handed to the bound rules' Pilot.
+	visit Visit
+	// searchCfg is the scratch configuration handed to the Pilot's Search.
+	searchCfg path.SearchConfig
+	// countRefusals makes the laboratory count refused steps by kind
+	// (LabStats.Refused).
+	countRefusals bool
+	// workTick is the route search work charged so far this tick and
+	// workSmooth its average over the last eight ticks (Traffic.BusyScale).
+	// Neither is saved.
+	workTick, workSmooth int64
+	// PilotState is whatever the bound rules' Pilot remembers for this
+	// session (pilot.go). It is never saved.
+	PilotState any
+	// trafficNow is this tick's traffic policy, asked once in BeginTick.
+	trafficNow Traffic
 	// pockets holds the Modern pocket-release certificates, dense by handle
 	// and never ranged; pocketLive counts the set rows so the follower asks
 	// nothing while it is zero, and the cells, seen and stack slices are the
@@ -718,6 +739,10 @@ type pathWorkingSet struct {
 	session    path.Search
 	goal       path.Goal
 	activation uint64
+	// through is the reading the search was opened under: zero for the
+	// request's own, and otherwise one of Modern routes through friends'
+	// (traffic_through.go).
+	through uint8
 }
 
 // thresholdSqFromRadius computes the goal-handle threshold² = floor(radiusParam/16)² [R-P0-01].
@@ -2360,6 +2385,7 @@ func (s *System) ActivateMove(u *units.Unit, head *orders.Node) bool {
 	token := s.nextActivation
 	binding := &activeMove{order: head, token: token}
 	setHandleRow(&s.activeOrders, u.Handle, binding)
+	s.noteGoal(u.Handle, head.GoalX, head.GoalZ)
 	if route := handleRow(s.Routes, u.Handle); !wasBound && usableActiveRoute(u, route) && !s.HasPathRequest(u.Handle) {
 		// The route is persisted but its order/goal binding is derived. Adoption
 		// does not stamp request-poll state; the wants-repath poll is the writer of
@@ -2568,6 +2594,7 @@ func (s *System) serviceGroundFollower(u *units.Unit, head *orders.Node, route *
 	}
 	if route.Active && route.Count > 1 {
 		route.Prune(Point{X: int32(int64(u.X) >> 16), Z: int32(int64(u.Z) >> 16)})
+		s.passWaypoint(u, route, tick)
 	}
 	blocked := false
 	if coll := handleRow(s.Collisions, u.Handle); coll != nil {
@@ -2848,8 +2875,26 @@ func (s *System) pathKernel() path.Kernel {
 // [04 §7.3] C11 C12 via a resumable search per unit held in deterministic
 // slice storage indexed by handle [I1].
 func (s *System) searchFunc(r path.Request, scale int32, budget int) path.WorkResult {
+	return s.searchUnder(r, scale, budget, 0)
+}
+
+// searchUnder is searchFunc under one reading of the ground: the request's
+// own when through is zero, and otherwise one of Modern routes through
+// friends', which a search that found nothing opens in its place
+// (traffic_through.go).
+func (s *System) searchUnder(r path.Request, scale int32, budget int, through uint8) path.WorkResult {
 	if s == nil {
 		return path.WorkResult{Status: path.StatusRejected, Done: true}
+	}
+	// Nanolathe Modern policy: one heuristic weight while route searching is
+	// idle and a heavier one while it is busy, in place of the weight the
+	// scheduler hands over by its player's load [04 R-PATH-01 §6]; Strict
+	// keeps the scheduler's (docs/DESIGN_MOVEMENT_PATH.md "Modern search
+	// weight").
+	if tr := s.trafficNow; tr.BusyScale > 0 && s.workSmooth > int64(tr.BusyWork) {
+		scale = tr.BusyScale
+	} else if s.trafficNow.HeuristicScale > 0 {
+		scale = s.trafficNow.HeuristicScale
 	}
 	idx := int(r.Unit)
 	// Grow sessions slice to cover handle deterministically [I1].
@@ -2864,10 +2909,11 @@ func (s *System) searchFunc(r path.Request, scale int32, budget int) path.WorkRe
 		}
 	}
 	ws := handleRow(s.sessions, idx)
-	needsNew := ws == nil || ws.session == nil || ws.goal != r.Goal || ws.activation != r.Activation
+	needsNew := through != 0 || ws == nil || ws.session == nil || ws.goal != r.Goal || ws.activation != r.Activation
 	var sess path.Search
 	if !needsNew {
 		sess = ws.session
+		through = ws.through
 	}
 	if needsNew {
 		// [04 R-PATH-01 §4] step 1: request setup copies the requesting unit's
@@ -2970,14 +3016,39 @@ func (s *System) searchFunc(r path.Request, scale int32, budget int) path.WorkRe
 					return layer.passableLearned(c.X, c.Z, footX, footZ, owner, learned)
 				}
 			}
-			// Nanolathe Modern jam release: a released unit plans over the
-			// static view with friendly mobile units transparent, so its route
-			// leads through the friendly jam it may now cross, while a hostile
-			// mover still walls its anchor: the release never lets a unit
-			// through an enemy (docs/DESIGN_MOVEMENT_PATH.md "Modern jam
-			// release").
+			if s.trafficNow.LegsThroughMovers {
+				// Nanolathe Modern policy: the pass over the finished route
+				// reads a friend on its own way as absent, which the search
+				// does not (docs/DESIGN_MOVEMENT_PATH.md "Modern route
+				// smoothing").
+				learned := s.rules().LearnedTerrain(s)
+				keeps := s.keepsItsGround(owner)
+				cfg.LegValue = func(c path.Cell) uint8 {
+					return layer.passableThrough(c.X, c.Z, footX, footZ, owner, learned, keeps)
+				}
+			}
+			// staticView marks a search that reads friendly mobile units as
+			// absent, and hostile names the units that stay walls to it.
 			staticView := false
 			var hostile func(id int) bool
+			if through != 0 {
+				// Nanolathe Modern policy: the request's own search found
+				// nothing, and this one reads friendly units as absent
+				// (docs/DESIGN_MOVEMENT_PATH.md "Modern routes through
+				// friends").
+				learned := s.rules().LearnedTerrain(s)
+				staticView, hostile = true, s.throughKeeps(owner, through)
+				walls := hostile
+				cfg.PassableValue = func(c path.Cell) uint8 {
+					return layer.passableThrough(c.X, c.Z, footX, footZ, owner, learned, walls)
+				}
+			}
+			// Jam release, the pathfinding laboratory's baseline: a released
+			// unit plans over the static view with friendly mobile units
+			// transparent, so its route leads through the friendly jam it may
+			// now cross, while a hostile mover still walls its anchor: the
+			// release never lets a unit through an enemy
+			// (docs/DESIGN_MOVEMENT_PATH.md "Modern jam release").
 			if jamAfter, _ := s.rules().JamRelease(s); jamAfter > 0 && s.releasing(requester, s.tick) {
 				learned := s.rules().LearnedTerrain(s)
 				staticView, hostile = true, s.hostileMover(owner)
@@ -3021,6 +3092,14 @@ func (s *System) searchFunc(r path.Request, scale int32, budget int) path.WorkRe
 				PassableValue: func(path.Cell) uint8 { return 0 },
 			}
 		}
+		if p := s.trafficNow.Pilot; p != nil {
+			// Through the system's scratch copy: a configuration whose
+			// address is taken here would be moved to the heap for every
+			// search, pilot or none.
+			s.searchCfg = cfg
+			p.Search(s, r, &s.searchCfg)
+			cfg, s.searchCfg = s.searchCfg, path.SearchConfig{}
+		}
 		// A replaced session gives the table back before the new one asks for
 		// it, so a goal or activation change does not leave it lent.
 		s.dropPathSession(idx)
@@ -3030,7 +3109,7 @@ func (s *System) searchFunc(r path.Request, scale int32, budget int) path.WorkRe
 		// request — the resumption below and every node it expands stay
 		// inside the opened search.
 		sess = s.pathKernel().NewSession(cfg)
-		setHandleRow(&s.sessions, idx, &pathWorkingSet{session: sess, goal: r.Goal, activation: r.Activation})
+		setHandleRow(&s.sessions, idx, &pathWorkingSet{session: sess, goal: r.Goal, activation: r.Activation, through: through})
 		// Request setup reports its established 0x100/0x200 notification to
 		// the goal object's owning order even when search work continues. These
 		// bits are distinct from the final route diagnostic [04 R-PATH-01
@@ -3048,8 +3127,22 @@ func (s *System) searchFunc(r path.Request, scale int32, budget int) path.WorkRe
 		setup = sess.SetupSteps()
 	}
 	pops := sess.Popped() - before
+	s.labStats.Pops += uint64(pops + setup)
+	s.workTick += int64(pops + setup)
 	if done {
+		s.labStats.Searches++
 		s.dropPathSession(idx)
+		if top := s.trafficNow.Through; top != 0 {
+			if len(points) == 0 && status == path.StatusRejected && through < top && s.throughFor(r) && s.throughDue(r.Unit, through) {
+				// Nothing nearer under this reading: open the next. What
+				// this one cost is charged with it.
+				res := s.searchUnder(r, scale, budget-pops, through+1)
+				res.SetupSteps += setup
+				res.Pops += pops
+				return res
+			}
+			s.noteThrough(r.Unit, through, len(points) != 0)
+		}
 	}
 	return path.WorkResult{Points: points, Status: status, Done: done, SetupSteps: setup, Pops: pops}
 }
@@ -3388,7 +3481,14 @@ func (s *System) BeginTick(tick uint32) {
 	// query is resolved once per tick, not per contested cell.
 	if s != nil {
 		s.passAlliance = nil
-		if jamAfter, _ := s.rules().JamRelease(s); jamAfter > 0 || s.rules().AlliedPassThrough(s) {
+		// The search work of the tick before, smoothed over eight.
+		s.workSmooth += (s.workTick - s.workSmooth) / 8
+		s.workTick = 0
+		s.trafficNow = s.rules().Traffic(s)
+		if p := s.trafficNow.Pilot; p != nil {
+			p.BeginTick(s, tick)
+		}
+		if jamAfter, _ := s.rules().JamRelease(s); jamAfter > 0 || s.rules().AlliedPassThrough(s) || s.trafficNow != (Traffic{}) {
 			s.passAlliance = s.diplomacyRows()
 		}
 	}
@@ -3658,6 +3758,30 @@ func (s *System) StepUnit(handle pool.Handle, tick uint32) StepResult {
 		steer.Acceleration = int32(u.Def.Acceleration)
 		steer.BrakeRate = int32(u.Def.BrakeRate)
 	}
+	// The traffic policy applies to a grounded mover with an order; the
+	// zero value is retail's visit (docs/DESIGN_MOVEMENT_PATH.md "Modern
+	// traffic").
+	var traffic Traffic
+	if u.Move.Mode&3 == 1 && !orderless {
+		traffic = s.trafficNow
+	}
+	steerBrake := false
+	if traffic.Sidestep && !brakingOnly {
+		// Nanolathe Modern policy: the mover wants a heading past what is
+		// ahead of it (docs/DESIGN_MOVEMENT_PATH.md "Modern steering").
+		coll.X, coll.Z = int32(u.X.Raw()), int32(u.Z.Raw())
+		coll.Heading = u.Move.Heading
+		if u.Def != nil {
+			coll.MaxVelocity = int32(u.Def.MaxVelocity)
+		}
+		desired, steerBrake = s.steerAround(u, coll, s.ProfileFor(handle), route, desired, tick, traffic)
+	}
+	if pilot := traffic.Pilot; pilot != nil {
+		// The visit a pilot sees is the system's own scratch record: one
+		// declared here would be moved to the heap on every visit.
+		s.visit = Visit{Unit: u, Coll: coll, Profile: s.ProfileFor(handle), Route: route, Head: head, Tick: tick}
+		pilot.Visit(s, &s.visit)
+	}
 	steer.UpdateHeading(desired) // [04 §8.1] C20
 	// The callback/save residual is the saturated heading step, including
 	// zero when the follower has no waypoint [04 R-MOV-01 §2, §3, §6].
@@ -3671,6 +3795,9 @@ func (s *System) StepUnit(handle pool.Handle, tick uint32) StepResult {
 	if hasWaypoint {
 		t1x, t1z, t2x, t2z := routeTargets(route, int32(u.X.Raw()), int32(u.Z.Raw()))
 		accelerate = followerAccelerates(steer, desired, int32(u.X.Raw()), int32(u.Z.Raw()), t1x, t1z, t2x, t2z)
+		if steerBrake {
+			accelerate = false
+		}
 	}
 	steer.UpdateFollowerSpeed(cap, hasWaypoint, accelerate)
 	steer.Integrate() // [04 §8.1] C20: heading commit + fixed trig position step
@@ -3819,6 +3946,9 @@ func (s *System) StepUnit(handle pool.Handle, tick uint32) StepResult {
 	coll.BlockerID = blockerID
 	if jamAfter > 0 {
 		s.noteJamRelease(u, coll, isBlocked, blockerID, tick, jamAfter, jamLifetime)
+	}
+	if isBlocked && s.countRefusals {
+		s.noteRefusedKind(u, coll, staticReject, blockerID)
 	}
 	u.Move.ModeMirror = coll.CachedMode & 3
 	u.X = numeric.Fixed(int64(coll.X))

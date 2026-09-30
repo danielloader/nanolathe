@@ -327,11 +327,12 @@ is still an unknown; the Modern setting does not authorize invented evidence.
 Current contracts are DESIGN_WEAPONS_PROJECTILES §2.3.1 (terrain admission) and
 "Modern threat targeting and incoming fire", DESIGN_UNITS_ORDERS_COB
 "Modern Hold Fire" and "Modern danger response", DESIGN_MOVEMENT_PATH
-"Modern danger escape", "Modern learned terrain", "Modern re-route
-staggering", "Modern group-order spreading", "Modern bounded path work",
-"Modern allied pass-through", "Modern unreachable moves", "Modern jam
-release" with its "Modern pocket release", "Modern route straightening" and
-"Modern wedge escape",
+"Modern danger escape", "Modern learned terrain", "Modern group-order
+spreading", "Modern bounded path work", "Modern unreachable moves", "Modern
+route straightening", "Modern wedge escape" and "Modern traffic" with its
+seven parts (which retired "Modern re-route staggering", "Modern allied
+pass-through", "Modern jam release" and "Modern pocket release" from Modern;
+those remain documented as the pathfinding laboratory's baseline),
 DESIGN_INTERFACE_HUD_INPUT "Modern group destination slots", and
 DESIGN_ECONOMY_CONSTRUCTION "Modern factory-exit yielding", "Modern construction-site yielding",
 and "Modern authored build membership", and

@@ -99,19 +99,28 @@ Current policies: [terrain admission](docs/DESIGN_WEAPONS_PROJECTILES.md#231-mod
 [construction-site clearance](docs/DESIGN_ECONOMY_CONSTRUCTION.md#modern-construction-site-yielding), and
 [authored build membership](docs/DESIGN_ECONOMY_CONSTRUCTION.md#modern-authored-build-membership), and
 [learned terrain](docs/DESIGN_MOVEMENT_PATH.md#modern-learned-terrain), and
-[re-route staggering](docs/DESIGN_MOVEMENT_PATH.md#modern-re-route-staggering), and
 [group-order spreading](docs/DESIGN_MOVEMENT_PATH.md#modern-group-order-spreading), and
 [bounded path work](docs/DESIGN_MOVEMENT_PATH.md#modern-bounded-path-work), and
 [group destination slots](docs/DESIGN_INTERFACE_HUD_INPUT.md#modern-group-destination-slots), and
-[allied pass-through](docs/DESIGN_MOVEMENT_PATH.md#modern-allied-pass-through), and
 [unreachable moves](docs/DESIGN_MOVEMENT_PATH.md#modern-unreachable-moves), and
-[jam release](docs/DESIGN_MOVEMENT_PATH.md#modern-jam-release) with its
-[pocket release](docs/DESIGN_MOVEMENT_PATH.md#modern-pocket-release), and
 [route straightening](docs/DESIGN_MOVEMENT_PATH.md#modern-route-straightening), and
 [wedge escape](docs/DESIGN_MOVEMENT_PATH.md#modern-wedge-escape), and
+[traffic](docs/DESIGN_MOVEMENT_PATH.md#modern-traffic) (user-authorized
+2026-09-29: friendly units never share cells) with its
+[steering](docs/DESIGN_MOVEMENT_PATH.md#modern-steering),
+[route smoothing](docs/DESIGN_MOVEMENT_PATH.md#modern-route-smoothing),
+[search weight](docs/DESIGN_MOVEMENT_PATH.md#modern-search-weight),
+[prompt re-routing](docs/DESIGN_MOVEMENT_PATH.md#modern-prompt-re-routing),
+[route claims](docs/DESIGN_MOVEMENT_PATH.md#modern-route-claims),
+[arrival places](docs/DESIGN_MOVEMENT_PATH.md#modern-arrival-places) and
+[routes through friends](docs/DESIGN_MOVEMENT_PATH.md#modern-routes-through-friends), and
 [wave air targets](docs/DESIGN_SESSIONS_AI_SAVE.md#modern-wave-air-targets), and
 [Modern AI move retention](docs/DESIGN_UNITS_ORDERS_COB.md#modern-ai-move-retention), and
 [repair-pad queue](docs/DESIGN_MOVEMENT_PATH.md#modern-repair-pad-queue).
+Retired from Modern by its traffic policy, and kept only as the pathfinding
+laboratory's baseline (`movement.OverlapRules`): re-route staggering, allied
+pass-through, jam release and pocket release. Do not restore them as parity
+or regression fixes.
 See also [INVARIANTS.md I11](docs/INVARIANTS.md#i11--retail-baseline-and-modern-gameplay).
 
 ---

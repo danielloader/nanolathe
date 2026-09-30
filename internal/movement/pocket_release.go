@@ -6,10 +6,11 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
-// Nanolathe Modern policy: docs/DESIGN_MOVEMENT_PATH.md "Modern pocket
-// release", an extension of Modern jam release. Nothing here is a retail
-// claim; Strict 3.1 and Community 3.9 answer (0, 0) from Rules.PocketRelease
-// and never reach any of it.
+// Retired from Modern on 2026-09-29 and answered only by OverlapRules, the
+// pathfinding laboratory's baseline: docs/DESIGN_MOVEMENT_PATH.md "Modern
+// pocket release", an extension of jam release. Nothing here is a retail
+// claim; every reserved rule set answers (0, 0) from Rules.PocketRelease and
+// never reaches any of it.
 //
 // The unit it answers for is sealed out of its own free destination: a
 // packed formation filled around the unit's slot before the unit got there,
@@ -66,7 +67,7 @@ type pocketCert struct {
 	token uint64
 }
 
-// Modern pocket-release tuning (docs/DESIGN_MOVEMENT_PATH.md "Modern pocket
+// Pocket-release tuning (docs/DESIGN_MOVEMENT_PATH.md "Modern pocket
 // release"). None is a retail constant.
 const (
 	// modernPocketNear is the largest per-axis cell distance between a
@@ -85,12 +86,12 @@ const (
 
 // PocketRelease is off under Strict 3.1: a unit keeps its move and the
 // order's own retry for as long as the record is the last primary one
-// [04 R-ORD-01 §4]. Community inherits the answer.
+// [04 R-ORD-01 §4]. Community and Modern inherit the answer.
 func (StrictRules) PocketRelease(*System) (int32, uint32) { return 0, 0 }
 
 // PocketRelease releases a sealed-out unit into its own free slot
 // (docs/DESIGN_MOVEMENT_PATH.md "Modern pocket release").
-func (*ModernRules) PocketRelease(*System) (int32, uint32) {
+func (*OverlapRules) PocketRelease(*System) (int32, uint32) {
 	return modernPocketNear, modernPocketDwell
 }
 

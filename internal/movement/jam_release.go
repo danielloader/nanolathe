@@ -7,10 +7,11 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
-// Nanolathe Modern policy (DESIGN_MOVEMENT_PATH "Modern jam release"): a
-// ground mover that friendly units have held in place for a second stops
-// colliding with friendly ground units for a short release window and plans
-// over the static view, so a friendly jam always drains. Terrain, features,
+// Retired from Modern on 2026-09-29 and answered only by OverlapRules, the
+// pathfinding laboratory's baseline (DESIGN_MOVEMENT_PATH "Modern jam
+// release"): a ground mover that friendly units have held in place for a
+// second stops colliding with friendly ground units for a short release
+// window and plans over the static view, so a friendly jam always drains. Terrain, features,
 // structures and enemies still block, a same-way mover ahead is still a queue
 // to wait in, and the release ends before the unit's route end so an overlap
 // is never carried into a destination. Retail rejects every occupied
@@ -54,12 +55,13 @@ type jamRelease struct {
 }
 
 // JamRelease releases a unit after jamAfter jammed ticks for lifetime ticks
-// (docs/DESIGN_MOVEMENT_PATH.md "Modern jam release").
-func (*ModernRules) JamRelease(*System) (uint16, uint32) {
+// (docs/DESIGN_MOVEMENT_PATH.md "Modern jam release"). Modern retired the
+// policy; the laboratory's baseline keeps it.
+func (*OverlapRules) JamRelease(*System) (uint16, uint32) {
 	return modernJamReleaseAfter, modernJamReleaseLifetime
 }
 
-// Modern jam-release timing: one second jammed, three seconds released.
+// Jam-release timing: one second jammed, three seconds released.
 const (
 	modernJamReleaseAfter    = 30
 	modernJamReleaseLifetime = 90

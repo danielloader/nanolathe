@@ -1,6 +1,11 @@
 package main
 
 import (
+	"github.com/nanolathe-gg/nanolathe/internal/aikit"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
+	"github.com/nanolathe-gg/nanolathe/internal/movement"
+	"github.com/nanolathe-gg/nanolathe/internal/path"
+	"github.com/nanolathe-gg/nanolathe/internal/pathlab"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	aikitmod "github.com/nanolathe-gg/nanolathe/mods/aikit"
 )
@@ -15,4 +20,31 @@ import (
 func init() {
 	session.RegisterRuleSet(aikitmod.ArenaSet, aikitmod.ArenaRuleSet)
 	session.RegisterRuleSet(aikitmod.ArenaRetailIncomeSet, aikitmod.ArenaRetailIncomeRuleSet)
+	// Other movement under the same harness, for the pathfinding laboratory
+	// (docs/PATHFINDING_LAB.md "Whole games"): whole games played by the
+	// same brains, for what a short moment cannot show. "aikit" itself plays
+	// Modern's movement. "aikit-retail-move" is the harness with retail's
+	// movement and route search: what the same brains' games look like under
+	// the rules the recorded games were played by. "aikit-<set>" is the
+	// harness with the movement and the search of a laboratory rule set:
+	// "aikit-lab-overlap" is Modern's movement as it stood before its traffic
+	// policy.
+	session.RegisterRuleSet("aikit-retail-move", func() session.RuleSet {
+		return harness(movement.StrictRules{}, path.RetailKernel{})
+	})
+	for _, name := range pathlab.RuleSetNames() {
+		session.RegisterRuleSet("aikit-"+name, func() session.RuleSet {
+			set, ok := session.LookupRuleSet(name)
+			if !ok {
+				panic("nanolathe: the arena's movement set is not linked: logical path internal/pathlab, providers searched [session rule sets], expected " + name)
+			}
+			return harness(set.Movement, set.Path)
+		})
+	}
+}
+
+// harness is the arena's research set with another movement policy and
+// search kernel.
+func harness(rules movement.Rules, kernel path.Kernel) session.RuleSet {
+	return session.RuleSet{Base: gameplay.Modern, Planner: aikit.HostPlanner{}, ComputerIncome: session.FullComputerIncome{}, Movement: rules, Path: kernel}
 }

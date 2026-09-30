@@ -64,7 +64,7 @@ func (*ModernRules) YieldObstruction(s *Service, requester *units.Unit, clear wo
 	slices.Sort(blockers)
 	eligible := blockers[:0]
 	for _, h := range blockers {
-		if s.factoryYieldEligible(requester, s.World.Unit(h)) {
+		if s.factoryYieldEligible(requester, s.World.Unit(h), urgent) {
 			eligible = append(eligible, h)
 			if len(eligible) == factoryYieldBlockers {
 				break
@@ -86,7 +86,8 @@ func (*ModernRules) YieldObstruction(s *Service, requester *units.Unit, clear wo
 	}
 	for _, h := range eligible {
 		u := s.World.Unit(h)
-		destination, route, ok := s.factoryYieldDestination(u, forbidden, urgent)
+		air := u.Def.CanFly
+		destination, route, ok := s.factoryYieldDestination(u, forbidden, urgent && !air)
 		if !ok {
 			continue
 		}
@@ -95,16 +96,21 @@ func (*ModernRules) YieldObstruction(s *Service, requester *units.Unit, clear wo
 		z := world.CellToWorld(destination.MinZ()) + numeric.Fixed(int64(destination.Depth())*8<<16)
 		q := s.queueForUnit(u)
 		id := orders.Lookup("Move_Ground")
+		if air {
+			// The ordinary air order owns takeoff and ground-plane release
+			// [04 R-ORD-02 §2][04 R-AIR-01 §6]. Site clearance only issues it.
+			id = orders.Lookup("VTOL_Move")
+		}
 		q.Push(id, orders.NewMoveNode(id, x, z, tick, u.Handle, true))
-		if urgent {
+		if urgent && !air {
 			s.Movement.StageModernClearance(u, q.Head(), route)
 		}
 		forbidden = append(forbidden, destination)
 	}
 }
 
-func (s *Service) factoryYieldEligible(factory, u *units.Unit) bool {
-	if u == nil || !u.Alive || u.Dying || u.Def == nil || u.Owner != factory.Owner || u.Remaining != 0 || u.Attachment.Carrier != 0 || u.Def.BMCode != 1 || !u.Def.CanMove || u.Def.CanFly || u.Def.MaxVelocity <= 0 || !s.Movement.HasMover(u.Handle) || u.ParalyzeExpire != 0 {
+func (s *Service) factoryYieldEligible(factory, u *units.Unit, constructionSite bool) bool {
+	if u == nil || !u.Alive || u.Dying || u.Def == nil || u.Owner != factory.Owner || u.Remaining != 0 || u.Attachment.Carrier != 0 || u.Def.BMCode != 1 || !u.Def.CanMove || (u.Def.CanFly && !constructionSite) || u.Def.MaxVelocity <= 0 || !s.Movement.HasMover(u.Handle) || u.ParalyzeExpire != 0 {
 		return false
 	}
 	if (u.Flags>>units.StandingMoveShift)&units.StandingFieldMask == 0 || u.Move.Mode != 1 || u.Move.Speed != 0 || u.Move.VelX != 0 || u.Move.VelY != 0 || u.Move.VelZ != 0 || s.Movement.HasPathRequest(u.Handle) {
@@ -123,7 +129,11 @@ func (s *Service) factoryYieldEligible(factory, u *units.Unit) bool {
 		return false
 	}
 	head := q.Head()
-	return head == nil || (head.Flags&orders.FlagAutoOp != 0 && head.ID == orders.Lookup("Standby"))
+	idle := orders.Lookup("Standby")
+	if u.Def.CanFly {
+		idle = orders.Lookup("VTOL_Standby")
+	}
+	return head == nil || (head.Flags&orders.FlagAutoOp != 0 && head.ID == idle)
 }
 
 func yieldOverlap(a, b world.FootprintRect) bool {
@@ -148,6 +158,7 @@ func (s *Service) factoryYieldDestination(u *units.Unit, forbidden []world.Footp
 	visited[factoryYieldRadius*width+factoryYieldRadius] = true
 	tail := 1
 	profile := s.Movement.ProfileFor(u.Handle)
+	air := u.Def.CanFly
 	directions := [...]movement.Cell{{X: 0, Z: -1}, {X: -1, Z: 0}, {X: 0, Z: 1}, {X: 1, Z: 0}}
 	for head := 0; head < tail && head < factoryYieldBudget; head++ {
 		cell := queue[head]
@@ -157,10 +168,14 @@ func (s *Service) factoryYieldDestination(u *units.Unit, forbidden []world.Footp
 			continue
 		}
 		if head != 0 {
-			if !s.Movement.IsGoalCellPassable(u.Handle, path.Cell{X: cell.X, Z: cell.Z}) || !s.factoryYieldClear(u.Handle, rect, profile) {
+			clear := (air || s.Movement.IsGoalCellPassable(u.Handle, path.Cell{X: cell.X, Z: cell.Z})) && s.factoryYieldClear(u.Handle, rect, profile)
+			if !clear && !air {
 				continue
 			}
-			legal := true
+			// Modern aircraft need a free destination footprint, but their
+			// ordinary flight can cross blocked ground on the way there
+			// (DESIGN_ECONOMY_CONSTRUCTION, "Modern construction-site yielding").
+			legal := clear
 			for _, other := range forbidden {
 				if yieldOverlap(rect, other) {
 					legal = false

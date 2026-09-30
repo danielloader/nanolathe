@@ -686,6 +686,13 @@ policy do the evacuation, because it already exists, is tested, issues
 ordinary orders, and does not draw from the C runtime generator. Alternative:
 Modern runs the kick algorithm too, which would retire the yielding policy.
 
+The 2026-09-30 issue #54 fix extends Modern's replacement to completed idle
+grounded aircraft through ordinary `VTOL_Move`, preserving its draw-free
+issuance and protected-order rules. Community's sourced kickout already
+includes these aircraft; regression fixtures verify clearance and resumed
+construction in both modes, and the Strict bypass. The owning contract is
+[Modern construction-site yielding](DESIGN_ECONOMY_CONSTRUCTION.md#modern-construction-site-yielding).
+
 **D4 — Does Modern take every mainline feature?** The recommendation is yes:
 Modern = Community with its table, plus Nanolathe policies. The exceptions are
 D3 and D5. A user who wants Modern's policies without a community feature

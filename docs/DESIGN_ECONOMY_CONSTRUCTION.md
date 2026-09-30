@@ -943,17 +943,35 @@ counter, eleven 30-tick waits, removal and queue advancement
 [04 R-ORDER-02 §1]. Modern keeps that exact budget too.
 
 On the first failed placement visit, and each nonterminal retry, inspect the
-snapped product footprint and request clearance from idle same-owner ground or
-naval movers. Use the factory policy's eligibility, physical occupancy checks,
+snapped product footprint and request clearance from idle same-owner ground,
+naval or grounded air movers. Use the factory policy's eligibility and physical
+occupancy checks,
 ascending-handle selection, bounded cardinal search and separate destinations.
 The requesting builder is excluded; its own site-clearance approach remains
-unchanged. Hold Position, explicit orders, moving units, work, aircraft and
+unchanged. Hold Position, explicit orders, moving units, work, attached units and
 other owners remain untouched. Failed terrain/feature admission may coexist
 with mobile blockers; moving those blockers does not waive any admission test.
 No new clearance request is made on the terminal give-up visit.
 
+**Grounded aircraft (issue #54, user-authorized 2026-09-30).** Community's
+CP-CON-1 kickout already includes aircraft occupying the site; Modern's
+replacement must also clear completed, idle, unattached aircraft. An empty
+queue or an automatic `VTOL_Standby` is idle; explicit standby, movement,
+repair and queued work are protected. Factory-exit and yard-close requests
+continue to leave aircraft alone. The shared bounded cardinal search chooses
+a free destination footprint outside the construction site and registered
+factory footprints, with the same separate destinations for the selected
+blockers. Aircraft may cross blocked ground during this enumeration; only
+the destination must satisfy the movement profile and full-footprint occupancy
+checks, because the ordinary flight requires no ground route. Issue a quiet
+`VTOL_Move`, with no staged ground route. The order's normal takeoff preamble
+and mover commit release its ground cells [04 R-ORD-02 §2][04 R-AIR-01 §6]
+[04 R-COLL-01 §4]. Issuance changes neither resources nor either RNG stream;
+no direct altitude, mode or occupancy change is made by construction.
+
 **Priority means prompt routing, not stronger collision rights.** Issue an
-ordinary quiet `Move_Ground` immediately, replacing only automatic idle work.
+ordinary quiet `Move_Ground` immediately for ground and naval movers,
+replacing only automatic idle work.
 Retain the search's complete cardinal route instead of throwing it away and
 waiting for global A* service. The movement adapter stages this one-shot route
 for the new order; its next ordinary activation installs it directly, with no
@@ -972,8 +990,12 @@ added. Disabling Modern stops new requests; issued moves finish normally.
 Tests exercise first-visit issuance and physical clearance/allocation before
 330 elapsed ticks with the global scheduler entirely unserviced; Strict's
 unchanged give-up; requester/explicit-order/Hold Position/other-owner exclusion;
-route bends, ordinary replacement and stale-hint cleanup. The movement-side
-lifetime and save rules are in
+route bends, ordinary replacement and stale-hint cleanup. Aircraft fixtures
+lock first-visit issuance, normal takeoff and next-retry nanoframe allocation
+under Community and Modern, Strict and disabled-Community rejection, the
+different CRT draw contracts, protected orders and crossing blocked ground.
+An asset-gated fixture repeats that contract with stock ARMPEEP and ARMSOLAR.
+The movement-side lifetime and save rules are in
 [Modern construction clearance priority](DESIGN_MOVEMENT_PATH.md#modern-construction-clearance-priority).
 
 ### Community construction-site kickout
@@ -992,7 +1014,7 @@ At the mobile and VTOL blocked-site branches, enabled Community waits while the
 visit counter is at most 20, increments once, and retries after exactly 30
 ticks; the next visit abandons. Strict, and Community/Modern with the feature
 disabled, retain the inclusive limit 10. Modern with the feature enabled keeps
-the 20-visit budget but uses the Modern construction-site yielding above for
+the inclusive limit 10 and uses the Modern construction-site yielding above for
 automatic evacuation, per D3.
 
 Enabled Community automatic evacuation de-duplicates occupants of the snapped

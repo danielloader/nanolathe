@@ -6053,14 +6053,15 @@ state. Its projected rectangle coordinates carry the separate beam-space
 values. The later HUD rail can overwrite pixels in its own interface pass.
 No separate plate clipping rule exists because no plate is drawn.
 
-**Viewport coordinates.** The `(0,32,W-1,H-33)` battle viewport rectangle
-of §5 and the `(128,32,W-1,H-33)` subrect of [03 §4.1] describe different
-coordinate records, not one universal selection clip. The static
-call chain establishes that selection consumes the runtime surface-descriptor
-clip, but does not establish its left value for every visible/hidden-panel
-state. That selection-left value is therefore **Unknown** until a focused
-mode/panel capture records the descriptor at the selection draw. Neither
-tuple may be used as a universal canonical value.
+**Viewport coordinates.** The `HOT UNITS` producer consumes the initialized
+`(128,32,W-1,H-33)` battle viewport record [R-REV-01 §5]. Its writer census
+corrects the previous claim of a second `(0,32,W-1,H-33)` producer tuple.
+Selection consumes the active working surface's clip descriptor, a separate
+record. The static selection call chain does not establish that descriptor's
+left value for every visible/hidden-panel state. That selection-left value
+therefore remains **Unknown** until a focused mode/panel capture records the
+descriptor at the selection draw; the collector's tuple alone does not
+settle it.
 
 **Established palette/remap.** The rectangular outline's outer color is
 logical map entry **15** for an ordinary drag-selection rectangle, and its
@@ -6343,6 +6344,16 @@ exactly three tests, in this order:
    fractional carry absent from this producer. Retain the candidate exactly
    when `left <= viewportRight`, `right >= viewportLeft`,
    `top <= viewportBottom` and `bottom >= viewportTop`.
+
+   **Established — collector viewport record.** Battle entry initializes its
+   bounds to `(128,32,W-1,H-33)` and derives the inclusive width and height
+   from those bounds. These are the only stores to the collector's bounds
+   in the image. All uses that pass the record by reference read it without
+   writing or retaining a mutable alias; other uses copy the tuple by value
+   into a working surface. HUD/window painting therefore does not change
+   the collector's bounds. This corrects the earlier transition/input
+   description with left 0; the separate question about the selection
+   surface's clip in each panel state remains [R-SEL-02A]'s Unknown.
 3. **Ownership or foreign visibility.** A candidate whose owner byte equals
    the **viewing** player's owner byte is appended without any visibility
    query — the viewing slot, not the local one, and the two differ in a

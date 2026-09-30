@@ -1955,14 +1955,16 @@ not be substituted for the clip rectangle's left/top values. The HUD rail is
 composed later and may cover overlapping outline pixels. A separate
 authored-plate clip policy cannot be claimed because the plate is not drawn.
 
-**Viewport-coordinate record.** The transition-time battle viewport record
-and the beam-space projection origin are distinct. The static call chain proves
-which record the selection writer consumes, but not the record's left edge
-for every panel/mode state (the corpus contains both a visible-panel
-`(128,32,W-1,H-33)` description and a transition/input `(0,32,W-1,H-33)`
-description). Therefore the selection clip's left value outside a captured
-state is **Unknown**; a mode/panel capture of the descriptor at the selection
-call would settle it. Neither prior tuple is a universal canonical value.
+**Viewport-coordinate record.** The `HOT UNITS` collector's initialized
+battle viewport is **Established** as `(128,32,W-1,H-33)`; its complete
+writer census shows no HUD/window change [07 R-REV-01 §5]. This corrects the
+previous transition/input description with left 0. The active working
+surface's clip and the beam-space projection origin are separate records.
+The static selection call chain proves which surface descriptor the writer
+consumes, but not its left edge for every panel/mode state. That selection
+clip value therefore remains **Unknown** outside a captured state; a
+mode/panel capture of the descriptor at the selection call would settle it.
+The collector's tuple alone is not a universal selection clip.
 
 **Unknown.** The static trace does not establish a per-selected-unit plate
 pass, an additional primary-selection treatment, or any use of the authored

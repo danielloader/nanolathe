@@ -9,10 +9,11 @@ import (
 // defInfo is what the survival layer derives once per definition from the
 // immutable catalog.
 type defInfo struct {
-	tower bool  // a land tower that fires at ground units
-	aa    bool  // a land tower whose fire reaches aircraft
-	wall  bool  // an unarmed wall piece (becomes a feature when finished)
-	gdps  int32 // damage per second against ground units
+	tower  bool  // a land tower that fires at ground units
+	aa     bool  // a land tower whose fire reaches aircraft
+	wall   bool  // an unarmed wall piece that finishes as a solid feature
+	gdps   int32 // damage per second against ground units
+	grange int32 // longest range of that ground fire
 }
 
 // table indexes defInfo by UnitInfo.Index.
@@ -39,25 +40,28 @@ func (t *table) build(k *aikit.Kit) {
 		}
 		land := def.MinWaterDepth <= 0
 		d := &t.d[i]
-		if def.IsFeature && u.DPS == 0 && land && !u.Role.Any(aikit.RoleEnergy|aikit.RoleExtractor|aikit.RoleMetalMaker|aikit.RoleStorage|aikit.RoleFactory|aikit.RoleRadar) {
+		// A conversion product can finish as decoration or disappear. Only
+		// an authored solid feature provides defence (DESIGN_SURVIVAL §16.8).
+		f := u.FinishedFeature
+		if def.IsFeature && u.DPS == 0 && land && f != nil && f.Blocking && f.FootprintX > 0 && f.FootprintZ > 0 && (f.Damage > 0 || f.Indestructible) &&
+			!u.Role.Any(aikit.RoleEnergy|aikit.RoleExtractor|aikit.RoleMetalMaker|aikit.RoleStorage|aikit.RoleFactory|aikit.RoleRadar|aikit.RoleSonar|aikit.RoleJammer) {
 			d.wall = true
 			continue
 		}
 		if !u.Role.Has(aikit.RoleDefense) || !land {
 			continue
 		}
-		d.gdps = groundDPS(def)
+		d.gdps, d.grange = groundFire(def)
 		d.tower = d.gdps > 0
 		d.aa = u.AirDPS > 0
 	}
 }
 
-// groundDPS is the sustained damage per second of a definition's weapons
+// groundFire is the sustained damage per second and reach of a definition's weapons
 // that can fire at ground units: not anti-air only, not interceptors, not
 // water-only, not paralyzers, not a manually fired super-weapon. Integer,
 // like UnitInfo.DPS.
-func groundDPS(def *content.UnitDef) int32 {
-	var dps int32
+func groundFire(def *content.UnitDef) (dps, reach int32) {
 	for _, w := range [...]*content.WeaponDef{def.Weapon1Def, def.Weapon2Def, def.Weapon3Def} {
 		if w == nil || content.IsWeaponInactive(w) || w.Interceptor || w.ToAirWeapon || w.WaterWeapon || w.Paralyzer {
 			continue
@@ -69,8 +73,11 @@ func groundDPS(def *content.UnitDef) int32 {
 		burst := max(int64(w.Burst), 1)
 		reload := max(int64(w.ReloadTime), 1)
 		dps += int32(dmg * burst * 30 / reload)
+		if w.Range > reach && w.Range < 32767 {
+			reach = w.Range
+		}
 	}
-	return dps
+	return dps, reach
 }
 
 // cos1000 and sin1000 read the simulation's integer sine table, ×1000.

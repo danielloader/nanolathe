@@ -24,12 +24,17 @@ import (
 // configured ones: the utility towers answer danger only (the survival
 // layer plans the ring), no scouts (there is no base to find), a compact
 // base, the balanced style, an
-// earlier tech-2 transition (the waves climb the build tree), and a
+// earlier tech-2 transition with more constructor/assistance weight and a
+// heavier cost-efficiency blend (the waves climb the build tree), and a
 // tactics army with no raiding, harassing or probing.
 var survivalDefaults = map[string]string{
 	"def_plan":    "0",
 	"w_scout":     "0",
-	"tech_time":   "12",
+	"tech_time":   "8",
+	"w_cons":      "120",
+	"w_assist":    "70",
+	"v_ref":       "350",
+	"open_army":   "3",
 	"wide_base":   "0",
 	"style":       "balanced",
 	"personality": "off",
@@ -63,8 +68,7 @@ func newSurvivalHost(m *ai.Manager, configured map[string]string) *aikit.Host {
 // survivalBrain composes the survival brain for player from the scenario
 // and the configured parameters over the survival defaults.
 func survivalBrain(info *ai.SurvivalInfo, player uint8, configured map[string]string) *core.Brain {
-	kv := maps.Clone(survivalDefaults)
-	maps.Copy(kv, configured)
+	kv := survivalParams(configured)
 	ut, err := NewUtilTac(kv)
 	if err != nil {
 		ut, _ = NewUtilTac(survivalDefaults)
@@ -79,6 +83,12 @@ func survivalBrain(info *ai.SurvivalInfo, player uint8, configured map[string]st
 	sc.Starts = append(sc.Starts, info.Starts...)
 	br := ut.Brain
 	return survival.New(sc, sp, survival.Layers{Strategy: br.Strategy, Economy: br.Economy, Army: br.Army, Production: br.Prod})
+}
+
+func survivalParams(configured map[string]string) map[string]string {
+	kv := maps.Clone(survivalDefaults)
+	maps.Copy(kv, configured)
+	return kv
 }
 
 // survivalFeed hands the brain the warnings the director published at or

@@ -632,7 +632,9 @@ configured parameters on top, key by key, and wrapped layer by layer:
 |---|---|
 | `def_plan=0` | the utility's own towers only answer danger; the survival layer plans the ring |
 | `w_scout=0` | there is no base to scout |
-| `tech_time=12` | the waves climb the build tree |
+| `tech_time=8`, `tech_income=60`, `w_tech=100` | invest wave rewards through the authored tech tree earlier, at 60% of the ordinary recurring-income preference thresholds |
+| `w_cons=120`, `w_assist=70`, `open_army=3` | retain an early fighting force, then more constructors and construction assistance |
+| `v_ref=350` | favour efficient heavier combat products as the economy grows |
 | `wide_base=0`, `style=balanced` | a compact base; the tuned weights |
 | `raid=0`, `harass=0`, `probe=0`, `tour=0` | there is nothing to raid or probe |
 
@@ -686,20 +688,37 @@ by `mods/aikit` `ValidateParams` like every other key.
   beside the human's start brought the fight to the human's commander.)
   The site is pulled in (not nearer than 640 wu) until the point is on the
   dry land the buddy's commander class reaches from its start, and moved out
-  or in by turns after a failed placement. The tower is the one the builder can make with
-  the most ground firepower times hit points per cost, heavier and
-  longer-ranged towers winning as income grows, none dearer than 90
-  seconds of income or than the stores hold, whichever is more; while aircraft threaten, a sector's second tower is
+  or in by turns after a failed placement. The tower is the one the builder
+  can make with the best domain firepower, hit points and range for its cost.
+  Its score is `DPS × HP / (value + 150 + 25 × equivalent income) ×
+  (600 + range)`, with domain range clamped to 200–1,200 wu, integer division
+  before the range factor, and the shared metal-equivalent conversion.
+  Each resource's cost must fit the larger of its stock and 90 seconds of
+  its own income; abundant energy cannot pay a metal deficit. A product is
+  also capped at one and a half times aggregate owed tower value, so an
+  expensive upgrade does not postpone smaller coverage. While aircraft
+  threaten, a sector's second tower is
   anti-air. Towers go through the executor's layout rules and exit guard
   (`Kit.BuildKeep`), so they never seal a factory.
-- **Walls.** A warned or attacked sector with two towers gets a segment of
-  three wall pieces 128 wu beyond its towers' line, across the bearing: at
-  most one segment per 90 seconds and three per sector, never more than
-  half its towers, later rows staggered sideways. A segment spans a fraction
-  of its sector's arc, so the bearings between segments stay open —
-  corridors for the buddy's units and the human's, and the lanes the
-  attackers are funnelled into. Pieces avoid own factories' exit lanes and
-  metal spots.
+- **Walls.** A warned or attacked sector with a completed ground tower
+  covering its pieces gets three wall pieces 128 wu beyond its towers' line:
+  at most one segment per 90 seconds and three per sector, never more than
+  half its completed ground towers rounded up. Later rows stagger sideways.
+  Only authored, unarmed land products that become solid defensive features
+  qualify. The union of the construction and finished footprints, at their
+  shared anchor, and actual construction-grid centres keep at least 64 wu
+  between sector approaches. Pieces avoid factory exits, allied towers and
+  metal spots. `Kit.BuildExact` refuses a blocked piece instead of relocating
+  it into an open corridor.
+- **Cleanup.** Once three constructors exist, a quarter rounded down (with
+  one possible from three) of otherwise idle reclaim-capable constructors clear observed factory
+  approaches, then base-to-factory corridors, then nearby wreck metal.
+  One economic and at least one defensive constructor remain available.
+  Searches stay within 1,200 wu of the builder; ordinary 96 wu feature
+  reclaim areas exclude authored defensive features. Assigned areas are
+  reserved from utility reclaim too. Threatened areas or approaches cancel
+  cleanup, without cancelling later construction work. Factory unblocking
+  also preserves authored defensive features.
 - **Repairs.** Damaged buildings (below 70 %) with no stronger attacker at
   them are repaired, towers and factories first — its own and, within
   1,300 wu of the site, its teammates' (§16.4).
@@ -730,16 +749,23 @@ by `mods/aikit` `ValidateParams` like every other key.
   an extractor run — but not before its first factory stands (on The Pass
   the only factory site lies far out, and the leash kept it from ever
   being built).
-- **Army.** The posture never permits an offensive. The tactics army is
-  shown a Survival world: its home is the start site itself — the team's
-  weakest point is the human's commander, and a wave that walks past the
-  buddy's side reaches it first; its enemy point lies 1,600 wu
-  out on the threatened bearing (an allied building under fire, §16.4, else
-  the warned ground direction the buddy weighs most, else the armed
-  attackers in view, else its outer side), so
-  it gathers on the towers' line; and its picture holds only attackers
-  within 1,400 wu beyond the buddy's perimeter, so it fights what comes and
-  does not chase stragglers to a map edge.
+- **Army.** Three persistent ground detachments cover distinct approaches;
+  a reserve keeps one fifth of the ground force plus air and naval support.
+  New troops reinforce according to warning pressure, observed attackers,
+  sector ownership and travel distance. Existing memberships survive warning
+  changes and are keyed by handle and generation. Each detachment has its own
+  tactics policy under the same player action budget. Fronts see local threats;
+  the reserve sees threats near the base. Forward waiting points are on
+  reachable, clear ground 640–1,300 wu out, with room scaled to the force,
+  checked every ten seconds. Clear waiting points avoid factory exits and
+  the central base.
+  Rear refuges remain separate from waiting points for ordinary tactics
+  retreat and withdrawal. If a growing force or cramped ground cannot fit a
+  clear stage and refuge pair, its ordinary reactive tactics continue from
+  the defence centre with its own front bearing; only the reserve follows
+  pressure. Refused fronts still accept reachable reinforcements. The posture
+  never permits an offensive, and ordinary combat, retreat and reach checks
+  still apply.
 
 ### 16.4 The team in sight
 
@@ -764,12 +790,16 @@ survival layer reads from them:
   48 wu beyond its footprint, and an allied factory the 160 wu in front of
   it (its exit lane, toward +Z as the executor keeps an own factory's). A
   tower site in one moves 96 or 192 wu to either side, then up to 256 wu
-  out in front, when that clears it. Failing that, a site beside a
-  building stands — the placement search keeps footprints apart, and on a
+  out in front, when that clears it. Failing that, a site beside an
+  ordinary building stands — the placement search keeps footprints apart, and on a
   cramped map (Ashap Plateau) the team's buildings fill the ring's ground,
   where refusing such sites left the human's side without towers — and a
   site in a factory's lane is pulled in further. Wall pieces are dropped
-  from anywhere in a box.
+  from anywhere in a box. Allied defensive towers have an absolute reservation:
+  128 wu beyond their footprint and a 256 wu outward firing lane, widened by
+  64 wu on either side of the tower footprint. Every Modern AI build's final
+  footprint must clear it, including nanoframes, economy products and walls.
+  This refusal has no cramped-map fallback and also applies outside Survival.
 - **Repairs.** A teammate's damaged building within 1,300 wu of the site is
   repaired as the buddy's own are (§16.3). The repair order takes a
   friendly target on nano-reach alone, with no ownership test
@@ -977,7 +1007,7 @@ MODERN_AI_RESEARCH §3).
   buddies; play-testing should decide the guard's share, the tower share
   and the human's reserved spots.
 
-### 16.8 Coordinated defence policy (2026-09-29)
+### 16.8 Coordinated defence policy (2026-09-30)
 
 **Nanolathe Modern AI policy**, authorized by the maintainer's Survival
 play-test request. These are decisions of a Modern computer player in every
@@ -990,8 +1020,10 @@ extra visibility, damage, build membership or movement privilege.
   approaches rather than turning one entire army toward each new warning.
   Use observed threats and public warnings to reinforce threatened approaches,
   preserve a reserve and keep staging points clear of the core and factory
-  lanes. Retain the tactics layer's combat, retreat and reach checks; changing
-  a warning alone must not shuffle every unit across the base.
+  lanes. Keep forward waiting points separate from rear retreat refuges;
+  continue ordinary reactive tactics when that pair cannot fit. Retain the
+  tactics layer's combat, retreat and reach checks; changing a warning alone
+  must not shuffle every unit across the base.
 - **Allied tower clearance.** Every Modern AI building-placement candidate,
   including economy buildings and walls, must keep its entire footprint clear
   of a reserved margin around allied defensive towers. The executor enforces
@@ -1022,3 +1054,72 @@ wall gaps and authored tech admission. Comparative displayless battles use
 matching maps, seeds, pace and buddies with an idle human stand-in. Results
 must report survival, wave progress, investment and limitations; these policy
 choices are not retail findings. See §16.6 for isolation and async checks.
+
+### 16.9 Evaluation (2026-09-30)
+
+Six paired, displayless battles compare the pre-change brain at `b758d6f3`
+with the coordinated defence candidate at `2dae5c6b`. Both use the same
+telemetry probe and reference assets, Modern gameplay, Hard Modern buddies,
+normal Survival pace, the listed seed for both authoritative generators, an
+idle human and a 45-minute ceiling. There are no supplied player commands or
+mutators. Minutes below are game time; `45+` is a censored run, not a win.
+Advanced products mean authored build-tree depth at least three for factories
+and four for combat units, sampled every ten game seconds after completion.
+
+| Map, seed, buddies | Alive: before → after (min) | Wave reached | First advanced factory (min) | First advanced combat unit (min) | Peak standing towers | Score |
+|---|---|---|---|---|---|---|
+| Painted Desert, 1, 2 | 45+ → 45+ | 16 → 16 | 15.5 → 16.3 | 20.5 → 20.0 | 88 → 94 | 246,915 → 251,477 |
+| Painted Desert, 2, 1 | 45+ → 45+ | 16 → 16 | none → 12.7 | none → 19.8 | 34 → 30 | 239,701 → 252,928 |
+| Ashap Plateau, 1, 2 | 45+ → 45+ | 16 → 16 | 39.5 → 16.8 | none → 20.2 | 32 → 62 | 245,261 → 259,115 |
+| Ashap Plateau, 2, 2 | 45+ → 42.8 | 16 → 16 | none → none | none → none | 37 → 42 | 305,783 → 238,204 |
+| The Pass, 1, 1 | 17.5 → 22.6 | 8 → 10 | none → none | none → none | 1 → 2 | 13,458 → 24,388 |
+| The Pass, 2, 2 | 39.6 → 32.9 | 15 → 13 | none → none | none → none | 16 → 9 | 120,598 → 77,832 |
+
+Advanced combat production appeared in three candidates versus one baseline.
+Tower counts increased in four rounds, with affordable upgrades selected when
+their builders and economy permitted them. Cleanup issued 152, 42, 275 and 220
+ordinary clearing jobs in the four broad-map rounds respectively; it had no
+eligible three-constructor pool on The Pass. The corresponding wall-segment
+order counts were 29, 15, 15 and 10 (three on The Pass seed 2). These are
+issued jobs, not completed segments or recovered-metal totals. The cleanup
+metal counter records selected observed metal, not the amount actually paid.
+Completed wall units convert to features, so unit-only sampling cannot count
+their survival reliably. Peak towers are sampled standing populations, not
+cumulative construction counts.
+
+The refinement that refused combat commands when a clear stage/refuge pair
+could not fit lost The Pass seed 2 at 26.1 minutes. Keeping ordinary reactive
+tactics and reachable reinforcement allocation active raised that to 32.9,
+but did not recover the baseline's 39.6. This is why pair refusal preserves
+actors and front bearings (§16.3), rather than pausing defence. Surviving
+memberships stayed split between fronts and reserve even when large groups
+needed the fallback.
+
+A separate paired variant raised `sv_tower` from 22 to 35 on Painted Desert
+seed 1 with two buddies. It reached the same wave and ceiling, but scored
+239,403 rather than 251,477, and advanced combat production began later
+(20.7 rather than 20.0 minutes). Retain the existing 22 percent: better tower
+selection and coverage are the adopted investment change. Restoring
+`tech_income=100` on both Painted Desert starts produced the exact same final
+fingerprints. Those funded rounds cannot establish the lower income
+threshold's effect; focused contracts establish the earlier preference at
+lower recurring income, while retaining stock and danger gates.
+
+The paired Classic simulation-cost fixture used alternating builds, two Go
+workers, 1,200 warm-up ticks and 300 measured ticks, phase timing enabled and
+profiles/thread timing disabled. Scene metadata, census, all three partial
+fingerprints and both RNG draw totals matched. Median tick times in the final
+pair were 1.71 ms before and 1.77 ms after; earlier alternating pairs were
+1.88/1.90 ms before and 1.88/1.97 ms after. Allocation remained about 61.4 KB
+and 587 objects per tick. Shared-host timings do not establish a speedup.
+This checks engine isolation and common tick cost;
+it does not measure late-game Modern brain cost. Whole-tree fast and full
+retail gates, device fixtures, affected contracts and the Survival/controller
+race checks passed.
+
+These rounds justify the requested formation, clearance and investment
+contracts, not a claim of uniformly stronger survival. Four scores rose and
+two fell; lost value also rose, sharply when the Ashap seed 2 team died.
+Different AI commands change combat RNG consumption and therefore later
+wave composition even at the same initial seed. The narrow-map opening gap
+in §16.7 remains, and active-human play-testing is still needed.

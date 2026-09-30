@@ -5,19 +5,14 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/aikit/core"
 )
 
-// Army wraps the tactics army. The posture already forbids an offensive;
-// the wrapper also shows the army a Survival world: its home is the
-// defence centre between the start site and this survivor's start, the
-// enemy lies along the threatened bearing (an allied building under fire,
-// else a warned direction, else the attackers in view, else this
-// survivor's outer side), and only attackers within reach of the team's
-// ground are in its picture, so it gathers on the threatened side of the
-// towers and fights what comes instead of chasing stragglers toward a map
-// edge.
+// Army keeps the tactics army in persistent detachments, holding distinct
+// approaches with a reserve (DESIGN_SURVIVAL §16.8). Other army policies
+// retain the single defensive picture.
 type Army struct {
 	st    *state
 	inner core.Policy
 	view  aikit.Obs
+	force detachments
 }
 
 // Init implements core.Policy.
@@ -25,6 +20,7 @@ func (a *Army) Init(b *core.Board) {
 	if a.inner != nil {
 		a.inner.Init(b)
 	}
+	a.force.init(b, a.inner)
 }
 
 // Plan implements core.Policy.
@@ -34,6 +30,10 @@ func (a *Army) Plan(b *core.Board) {
 		st.setup(b)
 	}
 	if a.inner == nil {
+		return
+	}
+	if a.force.enabled {
+		a.force.plan(b, st, a.near(b))
 		return
 	}
 	o := b.O
@@ -145,6 +145,10 @@ func (st *state) threatPoint(b *core.Board) (int32, int32) {
 
 // Explain implements core.Explaining.
 func (a *Army) Explain(b *core.Board, x *aikit.Explain) {
+	if a.force.enabled {
+		a.force.explain(x)
+		return
+	}
 	if e, ok := a.inner.(core.Explaining); ok {
 		e.Explain(b, x)
 	}
@@ -152,6 +156,10 @@ func (a *Army) Explain(b *core.Board, x *aikit.Explain) {
 
 // Report implements aikit.Reporter for the army's own counters.
 func (a *Army) Report(add func(name string, value int64)) {
+	if a.force.enabled {
+		a.force.report(add)
+		return
+	}
 	if r, ok := a.inner.(aikit.Reporter); ok {
 		r.Report(add)
 	}

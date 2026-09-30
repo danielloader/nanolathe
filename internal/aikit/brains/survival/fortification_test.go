@@ -6,10 +6,15 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/aikit"
 	"github.com/nanolathe-gg/nanolathe/internal/aikit/core"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
 )
 
 // These authored fixtures lock the Modern AI policy in DESIGN_SURVIVAL
 // §16.8. Their names and statistics describe no retail unit.
+func (st *state) pickTower(b *core.Board, builder *aikit.UnitInfo, aa bool) *aikit.UnitInfo {
+	return st.pickTowerBudget(b, builder, aa, 1<<62)
+}
+
 func fortificationTable(units ...*aikit.UnitInfo) table {
 	for i, u := range units {
 		u.Index = int32(i)
@@ -152,6 +157,10 @@ func TestFirstWallSegmentNeedsCompletedGroundCoverage(t *testing.T) {
 func TestWallSegmentsPreserveCorridorsAndAlliedFactoryLanes(t *testing.T) {
 	st, b, _ := fortificationState(t)
 	st.defense.wallFootX, st.defense.wallFootZ = 2, 2
+	st.defense.wallBuildX, st.defense.wallBuildZ = 2, 2
+	// A centre off the construction grid exercises the final snapped sites.
+	st.cx += 7
+	st.cz += 9
 	tower := b.O.Own[0].Info
 	b.O.Own = nil
 	for _, d := range sectorDir {
@@ -165,6 +174,9 @@ func TestWallSegmentsPreserveCorridorsAndAlliedFactoryLanes(t *testing.T) {
 				t.Fatalf("sector %d segment %d has %d pieces", s, n, len(pts))
 			}
 			for k, p := range pts {
+				if p[0]%16 != 0 || p[1]%16 != 0 {
+					t.Fatal("wall geometry checked an unsnapped construction centre")
+				}
 				for _, prev := range pts[:k] {
 					if absI(int64(p[0]-prev[0])) < 32 && absI(int64(p[1]-prev[1])) < 32 {
 						t.Fatalf("sector %d has overlapping wall pieces %v and %v", s, prev, p)
@@ -217,5 +229,64 @@ func TestAlliedTowerReservationHasNoFallback(t *testing.T) {
 	}
 	if !st.clearOfAllyTowers(b, st.cx+800, st.cz+200, 2, 2) {
 		t.Fatal("clear candidate was rejected beside the tower reservation")
+	}
+}
+
+func TestAirOnlyBuilderDoesNotPostponeGroundCoverage(t *testing.T) {
+	st, b, _ := fortificationState(t)
+	ground := b.O.Own[0].Info
+	aa := fortificationTower(100, 0, 1000, 100, 500, true)
+	st.tab = fortificationTable(ground, aa)
+	st.air = true
+	st.towers[0] = 0
+	st.want[0] = 500
+	b.O.Own = []aikit.OwnUnit{
+		{H: pool.Handle(1), Gen: 1, Built: true, Info: &aikit.UnitInfo{Role: aikit.RoleBuilder, Builds: []*aikit.UnitInfo{aa}}},
+		{H: pool.Handle(2), Gen: 1, Built: true, Info: &aikit.UnitInfo{Role: aikit.RoleBuilder, Builds: []*aikit.UnitInfo{ground}}},
+	}
+	b.Builders = []int32{0, 1}
+	if !st.planOne(b) || len(st.jobs.list) != 1 || st.jobs.list[0].prod != ground || st.jobs.list[0].who.h != 2 {
+		t.Fatal("air-only constructor postponed the available ground tower")
+	}
+}
+
+func TestWallCorridorsUseAnchoredFinishedFootprints(t *testing.T) {
+	st, b, _ := fortificationState(t)
+	st.cx += 7
+	st.cz += 9
+	st.defense.wallFootX, st.defense.wallFootZ = 4, 2
+	st.defense.wallBuildX, st.defense.wallBuildZ = 1, 1
+	tower := b.O.Own[0].Info
+	b.O.Own = nil
+	for _, d := range sectorDir {
+		b.O.Own = append(b.O.Own, aikit.OwnUnit{Info: tower, X: st.cx + int32(d[0]*towerRoom/1000), Z: st.cz + int32(d[1]*towerRoom/1000), Built: true})
+	}
+	var any bool
+	for s := range sectorDir {
+		for n := int32(0); n < maxWallSegments; n++ {
+			st.defense.wallN[s] = n
+			for _, a := range st.wallSite(b, s, nil) {
+				any = true
+				if a[0]%16 != 8 || a[1]%16 != 8 {
+					t.Fatal("odd construction footprint lost grid alignment")
+				}
+				neighbor := (s + 1) % numSectors
+				for nn := int32(0); nn < maxWallSegments; nn++ {
+					st.defense.wallN[neighbor] = nn
+					for _, c := range st.wallSite(b, neighbor, nil) {
+						// Blocking rectangles share the unit anchor, extending
+						// 64×32 wu toward +X/+Z. Rectangle distance is exact.
+						xgap := max(absI(int64(a[0]-c[0]))-64, 0)
+						zgap := max(absI(int64(a[1]-c[1]))-32, 0)
+						if xgap*xgap+zgap*zgap < 64*64 {
+							t.Fatalf("finished footprints narrowed a corridor: %v, %v", a, c)
+						}
+					}
+				}
+			}
+		}
+	}
+	if !any {
+		t.Fatal("mismatched authored footprints admitted no wall pieces")
 	}
 }

@@ -19,11 +19,12 @@ import (
 type defense struct {
 	// failed counts recent placement failures per sector; a failed site
 	// moves out a step each time and the count fades.
-	failed               [numSectors]int32
-	failAt               [numSectors]uint32
-	wallAt               [numSectors]uint32 // tick of the last wall segment ordered
-	wallN                [numSectors]int32  // segments ordered per sector
-	wallFootX, wallFootZ int32              // the selected wall's finished footprint
+	failed                 [numSectors]int32
+	failAt                 [numSectors]uint32
+	wallAt                 [numSectors]uint32 // tick of the last wall segment ordered
+	wallN                  [numSectors]int32  // segments ordered per sector
+	wallFootX, wallFootZ   int32              // the selected wall's finished footprint
+	wallBuildX, wallBuildZ int32              // construction-grid centre alignment
 }
 
 // towerStart is the tick before which the survivor plans no towers of its
@@ -216,14 +217,17 @@ func (st *state) clearOfAllyTowers(b *core.Board, x, z, fx, fz int32) bool {
 			return false
 		}
 		dx, dz := int64(u.X-st.cx), int64(u.Z-st.cz)
-		if dx == 0 && dz == 0 {
-			dx, dz = st.outX, st.outZ
+		r := aikit.ISqrt64(dx*dx + dz*dz)
+		if r == 0 {
+			continue
 		}
-		r := max(aikit.ISqrt64(dx*dx+dz*dz), 1)
+		dx, dz = dx*1000/r, dz*1000/r
 		forward, side := vx*dx+vz*dz, vx*dz-vz*dx
 		along, across := absI(dx)*hx+absI(dz)*hz, absI(dz)*hx+absI(dx)*hz
-		lane := int64(max(u.Info.FootX, u.Info.FootZ))*8 + 256
-		if forward+along >= 0 && forward-along < lane*r && absI(side) < 64*r+across {
+		tx, tz := int64(max(u.Info.FootX, 1))*8, int64(max(u.Info.FootZ, 1))*8
+		lane := absI(dx)*tx + absI(dz)*tz + 256*1000
+		width := absI(dz)*tx + absI(dx)*tz + 64*1000
+		if forward+along > 0 && forward-along < lane && absI(side) < width+across {
 			return false
 		}
 	}
@@ -252,15 +256,10 @@ func (st *state) reachable(x, z int32) bool {
 	return st.reach.At(x, z) == st.homeRegion
 }
 
-// pickTower is the tower builder can make that buys the most firepower
+// pickTowerBudget is the tower builder can make that buys the most firepower
 // against ground units (anti-air: against aircraft) per cost, with heavier
 // and longer-ranged towers taking over as income grows; nil when it can
-// make none it can afford.
-func (st *state) pickTower(b *core.Board, builder *aikit.UnitInfo, aa bool) *aikit.UnitInfo {
-	return st.pickTowerBudget(b, builder, aa, 1<<62)
-}
-
-// pickTowerBudget also keeps a larger upgrade from postponing coverage when
+// make none it can afford. It also keeps a larger upgrade from postponing coverage when
 // the configured tower share is only owed enough for a smaller tower.
 func (st *state) pickTowerBudget(b *core.Board, builder *aikit.UnitInfo, aa bool, budget int64) *aikit.UnitInfo {
 	inc := int64(b.Metal.Income) + int64(b.Energy.Income)/aikit.EnergyPerMetal
@@ -317,6 +316,7 @@ func (st *state) nextWall(b *core.Board, u *aikit.OwnUnit) (sector int, prod *ai
 	}
 	st.defense.wallFootX = max(wp.FootX, wp.FinishedFeature.FootprintX)
 	st.defense.wallFootZ = max(wp.FootZ, wp.FinishedFeature.FootprintZ)
+	st.defense.wallBuildX, st.defense.wallBuildZ = wp.FootX, wp.FootZ
 	best := -1
 	var bestW int64
 	var pts [wallPieces][2]int32
@@ -368,6 +368,7 @@ func (st *state) wallSite(b *core.Board, s int, dst [][2]int32) [][2]int32 {
 	n := int64(st.defense.wallN[s])
 	r := max(int64(st.radius[s]), towerRoom) + wallAhead + n*64
 	fx, fz := max(st.defense.wallFootX, 1), max(st.defense.wallFootZ, 1)
+	bx, bz := max(st.defense.wallBuildX, 1), max(st.defense.wallBuildZ, 1)
 	width := int64(max(fx, fz)) * 16
 	dx, dz := sectorDir[s][0], sectorDir[s][1]
 	axis := max(absI(dx), absI(dz))
@@ -378,7 +379,9 @@ func (st *state) wallSite(b *core.Board, s int, dst [][2]int32) [][2]int32 {
 	// Limit each segment to its sector's middle, leaving a 64 wu corridor
 	// between neighbouring sectors even when later rows shift toward it.
 	half := spacing*(wallPieces-1)/2 + across
-	sideMax := (r-along)*sin1000(sectorAngle/2)/cos1000(sectorAngle/2) - wallCorridor/2 - half
+	// Leave room for a cell's diagonal snap before choosing the row's offset.
+	// The final per-piece test below still owns the corridor boundary.
+	sideMax := (r-along)*sin1000(sectorAngle/2)/cos1000(sectorAngle/2) - wallCorridor/2 - half - 24
 	if sideMax < 0 {
 		return dst
 	}
@@ -391,11 +394,19 @@ func (st *state) wallSite(b *core.Board, s int, dst [][2]int32) [][2]int32 {
 		lat := (k - (wallPieces-1)/2) * spacing
 		x := int32(int64(cx) - dz*lat/1000)
 		z := int32(int64(cz) + dx*lat/1000)
-		vx, vz := int64(x-st.cx), int64(z-st.cz)
+		// Validate the centre the ordinary executor will actually use, so
+		// grid alignment cannot narrow the planned 64 wu corridor (§16.8).
+		x = (x/16-bx/2)*16 + bx*8
+		z = (z/16-bz/2)*16 + bz*8
+		// Completion anchors the finished feature at the unit's cell origin.
+		// Check the union of both footprints there, rather than assuming the
+		// larger finished feature is centred on the construction unit.
+		ux, uz := x-bx*8+fx*8, z-bz*8+fz*8
+		vx, vz := int64(ux-st.cx), int64(uz-st.cz)
 		ahead, side := (vx*dx+vz*dz)/1000, (vz*dx-vx*dz)/1000
-		if x >= 64 && x <= m.WorldW-64 && z >= 64 && z <= m.WorldH-64 &&
+		if ux >= 64 && ux <= m.WorldW-64 && uz >= 64 && uz <= m.WorldH-64 &&
 			absI(side)+across <= (ahead-along)*sin1000(sectorAngle/2)/cos1000(sectorAngle/2)-wallCorridor/2 &&
-			st.reachable(x, z) && st.clearOfAllies(x, z) && st.clearOfAllyTowers(b, x, z, fx, fz) && st.wallCovered(b, x, z) {
+			st.reachable(x, z) && st.clearOfAllies(ux, uz) && st.clearOfAllyTowers(b, ux, uz, fx, fz) && st.wallCovered(b, ux, uz) {
 			dst = append(dst, [2]int32{x, z})
 		}
 	}

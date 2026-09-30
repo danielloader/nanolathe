@@ -54,3 +54,29 @@ func TestDirectedCleanupOnlyReclaimsObservedNondefensiveBlockers(t *testing.T) {
 		})
 	}
 }
+
+// The factory's ordinary cheapest-opening path must not dismantle the wall
+// the Survival layer just paid for; a tree enclosure remains reclaimable.
+func TestFactoryUnblockingPreservesAuthoredDefensiveFeatures(t *testing.T) {
+	for _, defensive := range []bool{false, true} {
+		m, ter := pocketMap(new(Rand), 256, 256, 0)
+		feature := &content.FeatureDef{Blocking: true, Reclaimable: true, FootprintX: 1, FootprintZ: 1}
+		ter.FeatureDefs = []*content.FeatureDef{feature}
+		for z := int32(112); z <= 150; z++ {
+			for x := int32(112); x <= 150; x++ {
+				if x == 112 || x == 150 || z == 112 || z == 150 {
+					ter.PlotAt(x, z).SetFeature(0)
+				}
+			}
+		}
+		e := &executor{m: &ai.Manager{Terrain: ter}, mapInfo: m, table: &Table{defensiveFeatures: map[*content.FeatureDef]bool{feature: defensive}}}
+		var grid exitGrid
+		if !e.buildExitGrid(&grid, nil, testFactory(6, 6), 0, 128*16+48, 128*16+48, true) || grid.flood(noExtra) {
+			t.Fatal("feature enclosure did not seal the factory")
+		}
+		opening := grid.cheapestOpening(nil, 8)
+		if (len(opening) == 0) != defensive {
+			t.Fatalf("defensive=%v cheapest opening=%v", defensive, opening)
+		}
+	}
+}

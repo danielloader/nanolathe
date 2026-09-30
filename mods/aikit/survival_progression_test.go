@@ -42,7 +42,7 @@ func TestSurvivalProgressionDefaultsAndOverrides(t *testing.T) {
 func TestSurvivalTechIsEarlierAndResourceGated(t *testing.T) {
 	early := progressionSnapshot(t, nil, 28, true, false)
 	later := progressionSnapshot(t, map[string]string{"tech_time": "12"}, 28, true, false)
-	poor := progressionSnapshot(t, nil, 10, true, false)
+	poor := progressionSnapshot(t, nil, 5, true, false)
 	if !(early.want > later.want && early.want > poor.want && poor.want == 0) {
 		t.Fatalf("tech want: survival %d, configured later %d, poor %d", early.want, later.want, poor.want)
 	}

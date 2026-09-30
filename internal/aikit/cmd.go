@@ -44,6 +44,9 @@ type Command struct {
 	// Keep asks the site search to refuse a site that would cut an own
 	// factory's exit off from open ground (layout.go).
 	Keep bool
+	// Exact preserves a planned wall segment's corridors by refusing a
+	// blocked requested site instead of relocating the piece.
+	Exact bool
 	// target is the unit Target named when the command was issued.
 	target *units.Unit
 }
@@ -538,7 +541,9 @@ func (e *executor) execBuild(c *Command, b *batch, tick uint32, w *units.World) 
 	if c.Keep {
 		e.prepareGuard(c.X, c.Z, tick)
 	}
-	if c.Spot >= 0 {
+	if c.Exact {
+		cx, cz, ok = e.exactSite(c.Product, c.X, c.Z, w, tick)
+	} else if c.Spot >= 0 {
 		cx, cz, ok = e.spotSite(c.Product, c.Spot, w, tick)
 	} else {
 		cx, cz, ok = e.findSite(c.Product, c.X, c.Z, c.Spacing, w, tick)

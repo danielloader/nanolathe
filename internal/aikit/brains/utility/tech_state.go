@@ -98,14 +98,20 @@ func (s *shared) observeTech(b *core.Board) {
 	// safe: an enemy army estimate above ours holds it back (fully at 1.6×)
 	// unless metal is piling up unspent.
 	tt := int64(s.p.TechTime) * 1800
-	ready := mul(lin(s.mInc, 15000, 28000), lin(int64(s.tick), tt*2/3, tt))
+	// This only changes investment preference. Ordinary construction and
+	// production still pay their authored costs (DESIGN_SURVIVAL §16.8).
+	incPct := int64(s.p.TechIncome)
+	if incPct == 0 {
+		incPct = 100 // older synthetic parameter fixtures
+	}
+	ready := mul(lin(s.mInc, 15000*incPct/100, 28000*incPct/100), lin(int64(s.tick), tt*2/3, tt))
 	safe := one - lin(s.armyRatio, 900, 1600)
 	if s.part(gTech) {
 		// The human timeline: a tech-2 factory by a median minute 12, held
 		// back by pressure on the base or an enemy army estimate of 1.5–3×
 		// ours rather than from 0.9× (econ_growth.go).
 		tt = tt * 3 / 4
-		ready = mul(lin(s.mInc, 12000, 24000), lin(int64(s.tick), tt*2/3, tt))
+		ready = mul(lin(s.mInc, 12000*incPct/100, 24000*incPct/100), lin(int64(s.tick), tt*2/3, tt))
 		safe = min64(one-lin(s.pressure, 200, 600), one-lin(s.armyRatio, 1500, 3000))
 	}
 	if s.mCap > 0 {

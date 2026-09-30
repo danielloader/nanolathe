@@ -48,6 +48,7 @@ type Params struct {
 	Air         int32 // air: 1 builds air plants and aircraft when useful; 0 = never on purpose
 	Tech        int32 // tech: 1 runs the timed tech-2 transition; 0 = the old income gate only
 	TechTime    int32 // tech_time: minutes by which the first tech-2 factory is fully wanted
+	TechIncome  int32 // tech_income: percent of the normal tech income thresholds
 	WUpgrade    int32 // w_upgrade: extractor upgrade weight, percent of an extractor's
 	Layout      int32 // layout: 1 lays the base out in streets and blocks, keeps factory exits open, reclaims
 	WReclaim    int32 // w_reclaim: weight of reclaiming wrecks and clearing streets
@@ -110,6 +111,7 @@ var Specs = [...]ParamSpec{
 	{"air", 1, 0, 1, "switch: air plants and aircraft when useful"},
 	{"tech", 1, 0, 1, "switch: timed tech-2 transition (factory, advanced constructors, moho, fusion)"},
 	{"tech_time", 16, 4, 40, "minutes by which the first tech-2 factory is fully wanted (with income)"},
+	{"tech_income", 100, 25, 200, "percent of the tech income thresholds; Survival can invest wave rewards at lower recurring income"},
 	{"w_upgrade", 300, 0, 1000, "extractor upgrade (moho over an extractor) weight, percent of a new extractor's"},
 	{"layout", 1, 0, 1, "switch: rows and zones as people build, factory exits kept open (and reopened), wrecks and lane features reclaimed"},
 	{"w_reclaim", 60, 0, 400, "weight of reclaiming wrecks near the base and clearing factory lanes"},
@@ -135,7 +137,7 @@ func (p *Params) slots() [numParams]*int32 {
 		&p.WCons, &p.WArmy, &p.WAA, &p.WRange, &p.WMix, &p.WScout, &p.VRef,
 		&p.TravelHalf, &p.ThreatHalf, &p.Hysteresis, &p.EcoEarly, &p.EcoLate,
 		&p.EcoRamp, &p.AttackMin, &p.AttackGrow, &p.AttackRatio, &p.ComRadius,
-		&p.SpotsPerCon, &p.FacTime, &p.WAir, &p.Naval, &p.Air, &p.Tech, &p.TechTime, &p.WUpgrade, &p.Layout, &p.WReclaim,
+		&p.SpotsPerCon, &p.FacTime, &p.WAir, &p.Naval, &p.Air, &p.Tech, &p.TechTime, &p.TechIncome, &p.WUpgrade, &p.Layout, &p.WReclaim,
 		&p.ReachMix, &p.Fleet, &p.TidalField, &p.Growth, &p.FacFirst, &p.WFacFirst, &p.Expand, &p.ExpandFrom, &p.Army, &p.Metal, &p.FacBackoff,
 	}
 }

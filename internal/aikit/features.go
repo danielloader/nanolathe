@@ -29,7 +29,10 @@ func (e *executor) featureBlock(cx, cz int32) (blocking, removable bool, ax, az 
 	if !ok || def == nil || !def.Blocking {
 		return false, false, 0, 0
 	}
-	return true, def.Reclaimable && !def.Indestructible, int32(fx), int32(fz)
+	// Exit recovery must preserve authored defences too (§16.8); pricing
+	// a wall as cheap wreckage would undo the Survival wall planner.
+	defensive := e.table != nil && e.table.defensiveFeatures[def]
+	return true, def.Reclaimable && !def.Indestructible && !defensive, int32(fx), int32(fz)
 }
 
 // reclaimFeature queues a reclaim of the feature anchored at cell (ax, az)
@@ -82,12 +85,6 @@ func (e *executor) buildingAt(w *units.World, cell *world.PlotCell) *units.Unit 
 	return u
 }
 
-// refreshFeatures lists the features near the start into the observation:
-// the maxFeatures nearest the start when more stand within FeatureRadius (a
-// first-come cut in row order kept only the northern ones, missing lane
-// blockers south of the factories), listed in row order. It runs on the
-// simulation thread when a batch is applied, so no think is reading the
-// observation then.
 // observedBlocker permits directed cleanup only for a reclaimable obstacle
 // in the last fair feature observation, never an unseen map feature.
 func (e *executor) observedBlocker(cx, cz int32) bool {
@@ -103,6 +100,12 @@ func (e *executor) observedBlocker(cx, cz int32) bool {
 	return false
 }
 
+// refreshFeatures lists the features near the start into the observation:
+// the maxFeatures nearest the start when more stand within FeatureRadius (a
+// first-come cut in row order kept only the northern ones, missing lane
+// blockers south of the factories), listed in row order. It runs on the
+// simulation thread when a batch is applied, so no think is reading the
+// observation then.
 func (e *executor) refreshFeatures(tick uint32) {
 	o, m, t := e.obs, e.mapInfo, e.m.Terrain
 	if o == nil || m == nil || t == nil || (o.FeaturesTick != 0 && tick-o.FeaturesTick < FeatureEvery) {

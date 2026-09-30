@@ -311,19 +311,25 @@ func (st *state) planOne(b *core.Board) bool {
 	}
 	// The first free constructor that makes a land tower plans it (a ship
 	// makes none, and would otherwise keep every tower waiting).
-	if bi := st.freeBuilderThat(b, func(u *aikit.OwnUnit) bool { return st.pickTower(b, u.Info, false) != nil }); bi >= 0 {
-		if s, prod, x, z, ok := st.nextTower(b, &o.Own[bi]); ok {
-			u := &o.Own[bi]
-			// The free constructor nearest the site builds it.
-			if nb := st.freeBuilderNear(b, x, z); nb >= 0 {
-				aa := st.tab.of(prod).aa && !st.tab.of(prod).tower
-				if p := st.pickTower(b, o.Own[nb].Info, aa); p != nil {
-					u, prod = &o.Own[nb], p
-				}
+	var sector int
+	var product *aikit.UnitInfo
+	var tx, tz int32
+	if bi := st.freeBuilderThat(b, func(u *aikit.OwnUnit) bool {
+		var ok bool
+		sector, product, tx, tz, ok = st.nextTower(b, u)
+		return ok
+	}); bi >= 0 {
+		s, prod, x, z := sector, product, tx, tz
+		u := &o.Own[bi]
+		// The free constructor nearest the site builds it.
+		if nb := st.freeBuilderNear(b, x, z); nb >= 0 {
+			if o.Own[nb].Info.Buildable(prod) {
+				// Retain the debt-capped product and its planned footprint.
+				u = &o.Own[nb]
 			}
-			js.list = append(js.list, job{kind: jobTower, who: handleGen{u.H, u.Gen}, sector: s, prod: prod, x: x, z: z, since: b.Tick})
-			return true
 		}
+		js.list = append(js.list, job{kind: jobTower, who: handleGen{u.H, u.Gen}, sector: s, prod: prod, x: x, z: z, since: b.Tick})
+		return true
 	}
 	if t, ok := st.repairTarget(b); ok {
 		// The free constructor nearest the building that can reach it: a
@@ -390,7 +396,7 @@ func (st *state) emit(b *core.Board) {
 				return
 			}
 			for n, pt := range pts {
-				k.Build(u.H, j.prod, pt[0], pt[1], -1, 0, n > 0)
+				k.BuildExact(u.H, j.prod, pt[0], pt[1], n > 0)
 			}
 			st.stat.walls++
 		case jobRepair:

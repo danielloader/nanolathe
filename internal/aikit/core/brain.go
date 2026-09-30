@@ -62,6 +62,20 @@ func (br *Brain) Think(k *aikit.Kit, o *aikit.Obs) {
 	}
 }
 
+// Report exposes each layer's observational counters to host diagnostics.
+func (br *Brain) Report(add func(name string, value int64)) {
+	// A match can finish before the persona's first observation/think.
+	// Its layers have no initialized counters to publish in that case.
+	if br.Board.O == nil {
+		return
+	}
+	for _, p := range br.policies() {
+		if r, ok := p.(aikit.Reporter); ok {
+			r.Report(add)
+		}
+	}
+}
+
 // Explain implements aikit.Explainer.
 func (br *Brain) Explain(x *aikit.Explain) {
 	b := &br.Board

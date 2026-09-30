@@ -1,5 +1,38 @@
 package aikit
 
+import (
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/units"
+)
+
+// BuildExact retains a defensive feature's planned line and gaps. A blocked
+// site fails normally; it gains no special placement admission (§16.8).
+func (k *Kit) BuildExact(builder pool.Handle, product *UnitInfo, x, z int32, queued bool) {
+	var one [1]pool.Handle
+	one[0] = builder
+	k.push(Command{Kind: CmdBuild, Product: product, X: x, Z: z, Spot: -1, Keep: true, Exact: true, Queued: queued}, one[:])
+}
+
+func (e *executor) exactSite(info *UnitInfo, x, z int32, w *units.World, tick uint32) (int32, int32, bool) {
+	p := e.placement(info)
+	if !p.ok {
+		return 0, 0, false
+	}
+	cx, cz := x/16-p.footX/2, z/16-p.footZ/2
+	fx, fz := p.footX, p.footZ
+	if info.Def != nil && info.Def.IsFeature && info.FinishedFeature != nil {
+		fx = max(fx, info.FinishedFeature.FootprintX)
+		fz = max(fz, info.FinishedFeature.FootprintZ)
+	}
+	e.prepareLanes()
+	e.prepareTowerSpace()
+	if !p.mobile && e.blocksLane(cx, cz, fx, fz) || !info.Role.Has(RoleExtractor) && e.overlapsSpot(cx, cz, fx, fz) || e.blocksAllyTower(cx, cz, fx, fz) || !e.validAt(p, cx, cz) || e.guardRefuses(info, cx, cz, fx, fz, w, tick) {
+		return 0, 0, false
+	}
+	e.guardPlaced(cx, cz, fx, fz)
+	return cx, cz, true
+}
+
 // Every building the Modern AI places keeps space around allied towers,
 // including a short outward firing lane. This is a player decision in every
 // rule set, not a placement privilege (docs/DESIGN_SURVIVAL.md §16.8).

@@ -63,6 +63,9 @@ func TestFinalPlacementCannotBypassAlliedTowerSpace(t *testing.T) {
 	if e.validAt(p, 64, 62) {
 		t.Fatal("canonical final predicate admitted reserved footprint")
 	}
+	if _, _, ok := e.exactSite(info, 1056, 1024, nil, 1); ok {
+		t.Fatal("exact wall placement relocated a refused site")
+	}
 }
 
 func TestFinishedFeatureComesFromAuthoredConversion(t *testing.T) {

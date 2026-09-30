@@ -31,6 +31,8 @@ var survivalDefaults = map[string]string{
 	"def_plan":    "0",
 	"w_scout":     "0",
 	"tech_time":   "8",
+	"tech_income": "60",
+	"w_tech":      "100",
 	"w_cons":      "120",
 	"w_assist":    "70",
 	"v_ref":       "350",

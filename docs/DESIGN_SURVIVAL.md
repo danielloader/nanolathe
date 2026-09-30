@@ -976,3 +976,49 @@ MODERN_AI_RESEARCH §3).
   playing human draws waves to its own buildings and fights beside the
   buddies; play-testing should decide the guard's share, the tower share
   and the human's reserved spots.
+
+### 16.8 Coordinated defence policy (2026-09-29)
+
+**Nanolathe Modern AI policy**, authorized by the maintainer's Survival
+play-test request. These are decisions of a Modern computer player in every
+rule set, including Strict 3.1; Classic players and the wave director retain
+their existing contracts. All work uses the fair observation, immutable
+content, integer decisions and ordinary player commands. It grants no income,
+extra visibility, damage, build membership or movement privilege.
+
+- **Distributed defence.** Keep persistent combat detachments on distinct
+  approaches rather than turning one entire army toward each new warning.
+  Use observed threats and public warnings to reinforce threatened approaches,
+  preserve a reserve and keep staging points clear of the core and factory
+  lanes. Retain the tactics layer's combat, retreat and reach checks; changing
+  a warning alone must not shuffle every unit across the base.
+- **Allied tower clearance.** Every Modern AI building-placement candidate,
+  including economy buildings and walls, must keep its entire footprint clear
+  of a reserved margin around allied defensive towers. The executor enforces
+  it on the final searched site so relocating a requested site cannot bypass
+  it. A cramped map may refuse a build. The Survival planner must not fall
+  back to a site inside this reservation. This also applies in skirmish.
+- **Reclamation and lanes.** Survival constructors proactively clear observed
+  reclaimable blockers from factory approaches and base movement corridors,
+  and collect safe nearby wreck metal. Reserve economic and defensive builders,
+  avoid duplicate targets, do not interrupt productive construction, and stop
+  sending builders into an observed threat. Walls already built for defence
+  are not cleanup targets. Use ordinary reclaim commands and their ordinary
+  resource effects.
+- **Defensive investment.** Spend more effectively on ground and anti-air
+  coverage, favour affordable heavier towers as the economy develops, and
+  build short, staggered wall segments with open corridors. Do not identify
+  towers or walls by stock names. Derive them from authored definitions and
+  build menus, and retain factory-exit checks.
+- **Earlier strength.** Advance through the authored factory and constructor
+  tree earlier in Survival, while retaining resource feasibility and an early
+  fighting force. Prefer advanced combat units and construction assistance
+  when their cost and the current economy support them. Do not bypass tech,
+  production or resource rules.
+
+Focused contracts cover stable detachment ownership, simultaneous approaches,
+whole-footprint tower clearance, safe cleanup with no duplicate assignments,
+wall gaps and authored tech admission. Comparative displayless battles use
+matching maps, seeds, pace and buddies with an idle human stand-in. Results
+must report survival, wave progress, investment and limitations; these policy
+choices are not retail findings. See §16.6 for isolation and async checks.

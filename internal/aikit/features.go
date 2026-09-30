@@ -88,6 +88,21 @@ func (e *executor) buildingAt(w *units.World, cell *world.PlotCell) *units.Unit 
 // blockers south of the factories), listed in row order. It runs on the
 // simulation thread when a batch is applied, so no think is reading the
 // observation then.
+// observedBlocker permits directed cleanup only for a reclaimable obstacle
+// in the last fair feature observation, never an unseen map feature.
+func (e *executor) observedBlocker(cx, cz int32) bool {
+	if e.obs == nil {
+		return false
+	}
+	for i := range e.obs.Features {
+		f := &e.obs.Features[i]
+		if f.Blocking && f.Reclaimable && !f.Defensive && (f.X-f.FootX*8)/16 == cx && (f.Z-f.FootZ*8)/16 == cz {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *executor) refreshFeatures(tick uint32) {
 	o, m, t := e.obs, e.mapInfo, e.m.Terrain
 	if o == nil || m == nil || t == nil || (o.FeaturesTick != 0 && tick-o.FeaturesTick < FeatureEvery) {
@@ -134,8 +149,9 @@ func (e *executor) refreshFeatures(tick uint32) {
 			if d > lim {
 				continue
 			}
+			defensive := e.table != nil && e.table.defensiveFeatures[def]
 			o.Features = append(o.Features, Feature{X: x, Z: z, FootX: fx, FootZ: fz, Metal: def.Metal, Energy: def.Energy,
-				Blocking: def.Blocking, Reclaimable: def.Reclaimable && !def.Indestructible})
+				Blocking: def.Blocking, Reclaimable: def.Reclaimable && !def.Indestructible, Defensive: defensive})
 			e.featDist = append(e.featDist, d)
 		}
 	}

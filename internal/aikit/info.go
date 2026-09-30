@@ -52,6 +52,10 @@ type UnitInfo struct {
 	Def   *content.UnitDef
 	Side  string
 	Role  Role
+	// FinishedFeature is the authored feature an IsFeature product becomes,
+	// for wall planning and preserving finished defences during cleanup
+	// (docs/DESIGN_SURVIVAL.md §16.8). It is immutable catalog data.
+	FinishedFeature *content.FeatureDef
 
 	Metal, Energy int32 // build cost
 	BuildTime     int32 // authored build time (work units)
@@ -98,9 +102,10 @@ func (u *UnitInfo) Strength() int64 { return int64(u.DPS) * int64(u.HP) / 16 }
 
 // Table is the catalog summarized for one session's build rules.
 type Table struct {
-	Units []*UnitInfo
-	byKey map[string]*UnitInfo // lookup only; never ranged in a decision path (I1)
-	byDef map[*content.UnitDef]*UnitInfo
+	Units             []*UnitInfo
+	byKey             map[string]*UnitInfo // lookup only; never ranged in a decision path (I1)
+	byDef             map[*content.UnitDef]*UnitInfo
+	defensiveFeatures map[*content.FeatureDef]bool
 }
 
 // Lookup returns the info for a canonical key.
@@ -122,7 +127,7 @@ func (t *Table) Of(def *content.UnitDef) *UnitInfo {
 // BuildTable summarizes cat under rules. The walk is in sorted key order and
 // the result is deterministic for a given catalog and rule set.
 func BuildTable(cat *content.Catalog, rules construction.Rules) *Table {
-	t := &Table{byKey: map[string]*UnitInfo{}, byDef: map[*content.UnitDef]*UnitInfo{}}
+	t := &Table{byKey: map[string]*UnitInfo{}, byDef: map[*content.UnitDef]*UnitInfo{}, defensiveFeatures: map[*content.FeatureDef]bool{}}
 	if cat == nil {
 		return t
 	}
@@ -135,6 +140,12 @@ func BuildTable(cat *content.Catalog, rules construction.Rules) *Table {
 			continue
 		}
 		info := summarize(key, def)
+		if def.IsFeature {
+			info.FinishedFeature = cat.Features[content.CanonicalKey(def.Corpse)]
+			if f := info.FinishedFeature; f != nil && f.Blocking && info.DPS == 0 {
+				t.defensiveFeatures[f] = true
+			}
+		}
 		info.Index = int32(len(t.Units))
 		t.Units = append(t.Units, info)
 		t.byKey[content.CanonicalKey(key)] = info

@@ -1972,11 +1972,18 @@ func (e *executor) execClear(c *Command, b *batch, tick uint32, w *units.World) 
 			if !ok || def == nil || !def.Reclaimable || def.Indestructible {
 				continue
 			}
+			if e.table != nil && e.table.defensiveFeatures[def] {
+				continue // preserve authored walls, docs/DESIGN_SURVIVAL.md §16.8
+			}
 			d := int64(Dist(cx*16+8, cz*16+8, ux, uz))
 			var sc int64
 			switch {
 			case def.Blocking && e.inFactoryLane(cx, cz):
 				sc = 1<<40 - d // in the way: first, nearest first
+			case def.Blocking && c.Count <= 96 && e.observedBlocker(cx, cz):
+				// A small, explicitly selected cleanup site also opens base
+				// corridors and allied exits (DESIGN_SURVIVAL §16.8).
+				sc = 1<<39 - d
 			case def.Metal > 0:
 				sc = int64(def.Metal) * 1000 / (d + 100)
 			default:

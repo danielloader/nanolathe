@@ -151,6 +151,9 @@ type Feature struct {
 	Metal, Energy int32 // what reclaiming it yields
 	Blocking      bool
 	Reclaimable   bool
+	// Defensive marks the authored finished feature of a wall product;
+	// proactive cleanup preserves it (docs/DESIGN_SURVIVAL.md §16.8).
+	Defensive bool
 }
 
 // Obs is one fair observation. The host rebuilds it into the same buffers

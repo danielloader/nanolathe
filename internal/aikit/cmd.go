@@ -124,6 +124,7 @@ type executor struct {
 	freeSlot    int                  // the slot freeKey chose
 	freeSeq     uint32               // freeKey calls, for the least recently used slot
 	lanes       []rowBld             // own factories' exit lanes for the placement being searched
+	allyTowers  []towerSpace         // allied tower reservations for this placement search
 	spotCover   []bool               // per plot cell: under some metal spot's footprint
 	featDist    []int64              // refreshFeatures scratch: squared distance per listed feature
 	featOrder   []int32              // refreshFeatures scratch: nearest first
@@ -178,6 +179,9 @@ func (e *executor) placement(info *UnitInfo) *placeDef {
 func (e *executor) validAt(p *placeDef, cx, cz int32) bool {
 	t := e.m.Terrain
 	if t == nil || cx < 1 || cz < 1 || cx+p.footX >= t.CellW-1 || cz+p.footZ >= t.CellH-1 {
+		return false
+	}
+	if !p.mobile && e.blocksAllyTower(cx, cz, p.footX, p.footZ) {
 		return false
 	}
 	rect, err := world.NewFootprintRect(world.NewFootprintAnchor(cx, cz), p.extent)
@@ -285,6 +289,7 @@ func (e *executor) findSite(info *UnitInfo, x, z, spacing int32, w *units.World,
 	}
 	extractor := info.Role.Has(RoleExtractor)
 	e.prepareLanes()
+	e.prepareTowerSpace()
 	if e.keep && !p.mobile && !extractor && p.rules.MinWaterDepth <= 0 {
 		// Land buildings under the layout rules (layout.go); a building
 		// that fits nowhere under them is not placed at all.
@@ -327,6 +332,7 @@ func (e *executor) spotSite(info *UnitInfo, spot int32, w *units.World, tick uin
 	if !p.ok {
 		return 0, 0, false
 	}
+	e.prepareTowerSpace()
 	s := &m.Spots[spot]
 	for r := int32(0); r <= 1; r++ {
 		for j := -r; j <= r; j++ {

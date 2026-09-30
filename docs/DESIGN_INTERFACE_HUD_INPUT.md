@@ -3823,7 +3823,12 @@ pixel size rather than the authored 640×480 canvas, `Draw` hands it the
 whole screen, it reads the pointer and keyboard itself, and the client is
 fed an idle sample so nothing underneath reacts. The client keeps stepping,
 so a content reload the screen requests still runs between host steps. The
-system pointer is shown in place of the retail software cursor. Closing
+screen draws the mounted game's software cursor last, with the authored GAF
+hotspot and playback cadence. Normal is used over settings, and Hourglass while
+the requested scene or content is loading. Its independent playback follows a
+content reload without changing the cursor beneath the screen. The native
+pointer is hidden while this art is available and remains the fallback when it
+is not. Closing
 waits until every key and button is up, keeping the last frame (the window
 is not cleared each frame), so the Enter or Esc that closed it never reaches
 the menu as a fresh press. `internal/platform/screenkit` holds its toolkit:
@@ -3843,6 +3848,15 @@ the focused one lifts. Arrow keys choose and change, Tab pages, Space
 compares, Enter applies, Esc goes back. The content list shows every
 installed mod with its version, its rule lock and whether it brings its own
 controls, and scrolls past five rows.
+Action buttons and key caps borrow the base game's `BUTTONS0` raised and pressed
+frames. Their borders retain their native proportions and their interiors fill
+the settings rectangles; caption placement and the existing hit targets survive.
+For this screen's darker gunmetal styling, the faces use 65% of their authored
+RGB brightness and the three-pixel bevels use 85%; this preserves the texture and
+raised/pressed geometry. Hover adds at most 8/255 white opacity. These are settings
+screen styling choices, not a claim about retail's palette or button painter;
+the game cursors keep their authored colours.
+This is Nanolathe presentation policy, user-authorized 2026-09-29.
 
 **Controls page.** Not a deck but a keyboard and mouse mapping view over
 the key map of §3.6 "Rebinding". A profile bar offers Retail 3.1, Community
@@ -3925,14 +3939,27 @@ switches of DESIGN_GPU_RENDERER §30, plus Commander arrival (§36) and Placemen
 weapon rings (§20), both default on and independent of gameplay mode. Their
 previews use the existing opening recorder and prospective-building ghost/range
 pass on a quiet Greenhaven skirmish; their compare renders each treatment on and
-off without touching authoritative state. The remaining cards share one scene: Water
+off without touching authoritative state. The placement example moves the
+prospective tower through validated footprint-grid sites on an eight-second loop;
+the ghost and its range overlay read the same site while the camera stays still.
+Hovercraft land wash controls the dry-ground dust independently of Water's shore
+and building foam. It defaults on, has an Enhanced-only On/Off compare using the
+circling hovercraft scene, and belongs to graphics presets. It changes only
+presentation; the existing wash history and shared terrain mask remain owned by
+DESIGN_GPU_RENDERER §§26.3 and 30.
+The grouped cards share one scene: Water
 (surface, motion, foam, reflections), Lighting (unit light, ground light and
 its strength), Metal (finish, glint), Smooth edges (the model supersampling
-of §17.5), Glow (strength), Heat (blast rings and their strength, fire
+of §17.5), Glow (overall, weapons/projectiles, explosion/fire and nanolathe
+amounts, plus the existing ground-light amount), Heat (blast rings and their strength, fire
 shimmer, wreck glow, wreck heat wave), Marks (scorch, trails) and Soft
-shadows. A grouped card has one row per switch; the focused row picks the
+shadows (switch and blur-width percentage). The independent glow amounts and
+shadow softness are user-authorized presentation preferences (2026-09-29), with
+their renderer boundaries and defaults in DESIGN_GPU_RENDERER §§19.4, 30 and 34.
+A grouped card has one row per switch or amount; the focused row picks the
 scene and the compare. Every switch is independent: there is no family
-master.
+master among the effect switches. The existing overall glow amount still scales
+the bloom layer, and the separate source amounts multiply their own families.
 
 **Demonstrations and numbers.** Sidebar (Original, 12 per page, Free flow)
 and Fullscreen draw a small demonstration over the preview
@@ -3950,6 +3977,17 @@ lead-in, restart and retirement. It has no playback binding and never changes th
 shared backend's configuration or battle preferences. Menu cues and the authored
 menu loop use 10% of their former cue amplitude; battle audio retains the player's
 FX/music settings. This is user-authorized host policy (2026-09-29).
+
+**Scene reuse.** The screen keeps recently viewed scenes paused, with their client,
+renderer source uploads and last pictures, so a revisit avoids both battle/client
+composition and the first-frame source upload. The cache is scoped to one
+content set and keyed by preset, rules, mutators, paired comparison and surface
+size. Current and cached scenes retain at most three battles in total; a paired
+comparison counts as two. The least recently used scene is retired first. Cached
+scenes do not step; a revisit resumes the same scene clock. Exhausted loops stage
+afresh, and closing the screen or reloading content retires every cached client
+and renderer source. First visits and uncached rule/mutator combinations still
+pay staging cost; this is a bounded recent-scene cache, not a preload of all maps.
 
 **Input and persistence.** A grouped-effects wheel changes only the selected row
 and stops at its endpoints. Controls wheel scrolling survives redraw; keyboard
@@ -3980,6 +4018,12 @@ PNGs with no visible window, each at a fixed second of its scene's clock
 changed pixels. `TestNLScreenApplyKeepsTouchedCardsOverProfile`
 (retail tier) and `TestModLockOverrideSurvivesStartupRaise` lock the Apply
 order and the override.
+`--nl-shot-only cache` captures a first visit, another scene and the revisit,
+logging the cache activation and first cached-frame time. Placement captures
+include a later sample to inspect the moving ghost and ring. Cache contracts
+verify composition-key isolation, paused clocks, eviction of paired/exhausted
+scenes and complete retirement; the placement contract validates each moved site
+and the fixed camera.
 
 **Open.** Mouse buttons are not rebindable: the Mouse tab offers the
 retail Interface Types and the existing switches. A mod's own key profile is

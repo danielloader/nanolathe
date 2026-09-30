@@ -19,6 +19,8 @@ type aircraftShadowLayer struct {
 	shader *ebiten.Shader
 	// disabled is the player's soft shadow switch, off (§30).
 	disabled bool
+	// Difference from the default radius multiplier; a fresh layer keeps 100%.
+	softnessOffset float32
 	// water is the retained uniform storage for the frame's water phase,
 	// integrated wind drift and mask step. One terrain command a frame sets
 	// them, so they are the same for every aircraft in the frame and need no
@@ -56,11 +58,11 @@ func (r *Renderer) setSoftShadows(on bool) { r.aircraftShadow.disabled = !on }
 
 func (r *Renderer) commitAircraftShadow(g *drawlist.ModelGeometry, body modelDirectRegion) bool {
 	st := &r.aircraftShadow
-	if st.disabled || st.shader == nil || g.AircraftShadowHeight <= 0 || g.AircraftShadowScale <= 0 || g.Shadow.SilhouetteClip != 0 {
+	if st.disabled || st.softnessOffset <= -1 || st.shader == nil || g.AircraftShadowHeight <= 0 || g.AircraftShadowScale <= 0 || g.Shadow.SilhouetteClip != 0 {
 		return false
 	}
 	scale := g.AircraftShadowScale
-	radius := aircraftShadowRadius(g.AircraftShadowHeight, scale)
+	radius := aircraftShadowRadius(g.AircraftShadowHeight, scale) * (1 + st.softnessOffset)
 	// The whole page binds and the silhouette's rectangle on it rides the custom
 	// lanes, which is how the projected shadow commit already samples a page
 	// (model_direct.go). The fragment clamps its own taps to that rectangle, so

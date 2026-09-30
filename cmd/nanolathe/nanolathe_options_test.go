@@ -123,7 +123,7 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	// The page's buttons are family shortcuts: each wrote every switch of its
 	// family off, Marks the trail strength too, while the glint, the soft
 	// shadows and the supersampling, in no family, keep theirs.
-	if got := host.Effects(); got != (drawlist.Effects{Glint: true, SoftShadows: true, Supersample: true}) || g.presentation.TrailStrength != 0 {
+	if got := host.Effects(); got != (drawlist.Effects{HovercraftLandWash: true, Glint: true, SoftShadows: true, Supersample: true, WeaponGlowStrength: 100, ExplosionGlowStrength: 100, NanoGlowStrength: 100, ShadowSoftness: 100}) || g.presentation.TrailStrength != 0 {
 		t.Fatalf("effect preview %+v, trail strength %d", got, g.presentation.TrailStrength)
 	}
 	if g.display.Glow != 0 || cl.Glow() {
@@ -272,7 +272,7 @@ func TestBattleNanolatheOptionsPointerAndLayout(t *testing.T) {
 	// every family is off, while the glint, the aircraft soft shadows and the
 	// supersampling, which belong to no family, keep their own
 	// (DESIGN_GPU_RENDERER §30).
-	if got := presentationEffects(g.presentation); got != (drawlist.Effects{Glint: true, SoftShadows: true, Supersample: true}) || g.presentation.TrailStrength != 0 {
+	if got := presentationEffects(g.presentation); got != (drawlist.Effects{HovercraftLandWash: true, Glint: true, SoftShadows: true, Supersample: true, WeaponGlowStrength: 100, ExplosionGlowStrength: 100, NanoGlowStrength: 100, ShadowSoftness: 100}) || g.presentation.TrailStrength != 0 {
 		t.Fatalf("pointer left effects at %+v, trail strength %d", got, g.presentation.TrailStrength)
 	}
 	if g.display.Glow != 0 {

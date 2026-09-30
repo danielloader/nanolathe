@@ -330,15 +330,21 @@ func (c *Client) drawTerrainPrep() {
 // waterSurfaceMetadata records the authored Enhanced water phase (GPU design
 // §26.1). Raw wind remains committed; only its visual response is filtered [I6].
 // With every water switch off (§30) no phase is recorded, so no water pass
-// opens in the executor and the water-motion history stays empty; any one
-// water switch records it, because every water treatment reads it.
+// opens in the executor and water-motion history stays empty. Any water
+// switch records the phase, because every water treatment reads it. Land wash
+// alone enables the shared wet/dry mask with no phase or motion history.
 func (c *Client) waterSurfaceMetadata() drawlist.WaterSurface {
-	if c == nil || !c.enhanced || !c.effects.WaterPhase() || c.strategicView() || c.buffer == nil {
+	if c == nil || !c.enhanced || (!c.effects.WaterPhase() && !c.effects.HovercraftLandWash) || c.strategicView() || c.buffer == nil {
 		return drawlist.WaterSurface{}
 	}
 	cur := c.committedFrame()
 	if cur == nil {
 		return drawlist.WaterSurface{}
+	}
+	// Dry wash needs the static wet/dry mask, without observing dynamic water
+	// history when all water treatments are off (§26.3, §30).
+	if !c.effects.WaterPhase() {
+		return drawlist.WaterSurface{Enabled: true}
 	}
 	if !c.observesInOrder() {
 		c.observeWaterMotion(cur)

@@ -66,6 +66,26 @@ func TestWaterMaskProjectionAndLiquidGate(t *testing.T) {
 	}
 }
 
+// Entirely dry maps still need the receiving mask for hovercraft wash; the
+// visible-water block index is independent of mask construction.
+func TestLandWashMaskOnEntirelyDryMap(t *testing.T) {
+	ter := waterFixtureTerrain()
+	ter.SeaLevel = 0
+	pixels, w, h, step, blocks, _, _ := waterMaskPixels(ter)
+	if w == 0 || h == 0 {
+		t.Fatal("dry map lost receiving mask")
+	}
+	i := ((80/step)*w + 48/step) * 4
+	if pixels[i] != 0 || pixels[i+2] != 255 {
+		t.Fatal("valid dry receiver missing or classified as water")
+	}
+	for _, wet := range blocks {
+		if wet {
+			t.Fatal("dry map has visible water block")
+		}
+	}
+}
+
 // Shore distance is measured from a rounded coast, not the strict wet set: on a
 // steep beach the strict boundary is a staircase of height cells, and every
 // wave front and the shallow tint would trace it (§26.3). So no water texel on
@@ -292,6 +312,20 @@ func checkWaterDevicePixels() error {
 	if err := checkWaterPartsDevicePixels(r, read); err != nil {
 		return err
 	}
+	// No wet block is needed for land wash: only the static receiving mask.
+	ter = waterFixtureTerrain()
+	ter.SeaLevel = 0
+	r.SetEffects(drawlist.Effects{HovercraftLandWash: true})
+	plainDry := read(30, 1, true, 0)
+	washDry := read(30, 1, true, 2)
+	if r.water.mask == nil || r.water.visibleWater(r.water.record) || bytes.Equal(plainDry, washDry) {
+		return fmt.Errorf("land wash failed on an entirely dry map")
+	}
+	r.SetEffects(drawlist.Effects{})
+	if !bytes.Equal(plainDry, read(30, 1, true, 2)) {
+		return fmt.Errorf("dry map retained disabled land wash")
+	}
+	r.SetEffects(drawlist.AllEffects())
 	r.ResetSources()
 	if r.water.mask != nil || r.water.source != nil {
 		return fmt.Errorf("coastal mask survived source reset")
@@ -302,8 +336,8 @@ func checkWaterDevicePixels() error {
 // checkWaterPartsDevicePixels locks the independent water switches of the
 // surface pass (§30), Nanolathe presentation policy. With motion off the open
 // water holds still across phases yet still shades, while shore foam keeps its
-// own clock; with foam off the shore differs and no foam or hover dust mark
-// draws; with the surface shading off the water keeps moving and foaming over
+// own clock; with foam off the shore differs and no wet foam mark draws,
+// while dry hover wash follows its independent switch; with the surface shading off the water keeps moving and foaming over
 // its painted colours, and the damp band leaves the dry shore; with only foam
 // on, open water is the painted frame exactly; with all three off the pass
 // draws nothing.
@@ -312,6 +346,7 @@ func checkWaterPartsDevicePixels(r *Renderer, read func(tick uint32, zoom float3
 	defer r.setWaterSurface(true)
 	defer r.setWaterMotion(true)
 	defer r.setWaterFoam(true)
+	defer r.setHovercraftLandWash(true)
 	differs := func(a, b []byte, x0, x1, y0, y1 int) bool {
 		for y := y0; y < y1; y++ {
 			for x := x0; x < x1; x++ {
@@ -348,10 +383,33 @@ func checkWaterPartsDevicePixels(r *Renderer, read func(tick uint32, zoom float3
 	if !differs(foamless, moving, 85, 105, 50, 80) {
 		return fmt.Errorf("water foam off left the shore foam")
 	}
-	if !bytes.Equal(foamless, read(30, 1, true, 1)) || !bytes.Equal(foamless, read(30, 1, true, 2)) {
-		return fmt.Errorf("water foam off still drew building foam or hover dust")
+	if !bytes.Equal(foamless, read(30, 1, true, 1)) {
+		return fmt.Errorf("water foam off still drew building foam")
+	}
+	if bytes.Equal(foamless, read(30, 1, true, 2)) {
+		return fmt.Errorf("water foam off removed independent land wash")
+	}
+	r.setHovercraftLandWash(false)
+	if !bytes.Equal(foamless, read(30, 1, true, 2)) {
+		return fmt.Errorf("land wash off still drew dry marks")
 	}
 	r.setWaterFoam(true)
+	wetOnly := read(30, 1, true, 0)
+	if bytes.Equal(wetOnly, read(30, 1, true, 1)) || !bytes.Equal(wetOnly, read(30, 1, true, 2)) {
+		return fmt.Errorf("land wash off suppressed wet foam or retained dry marks")
+	}
+	r.setHovercraftLandWash(true)
+
+	defaultDust := read(30, 1, true, 2)
+	r.SetEffects(drawlist.Effects{HovercraftLandWash: true})
+	plain := read(30, 1, true, 0)
+	if !bytes.Equal(plain, read(30, 1, false, 0)) || bytes.Equal(plain, read(30, 1, true, 2)) || !bytes.Equal(plain, read(30, 1, true, 1)) {
+		return fmt.Errorf("land wash alone lost its mask or enabled a water treatment")
+	}
+	r.SetEffects(drawlist.AllEffects())
+	if !bytes.Equal(defaultDust, read(30, 1, true, 2)) {
+		return fmt.Errorf("default water/wash appearance changed after restoring switches")
+	}
 
 	// The surface shading off alone: the painted water still moves and
 	// foams, but takes no ripple shade, crest or shallow tint, and the dry

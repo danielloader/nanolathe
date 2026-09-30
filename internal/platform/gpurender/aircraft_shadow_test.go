@@ -3,6 +3,8 @@ package gpurender
 import (
 	"bytes"
 	"fmt"
+	"image"
+	"math"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
@@ -88,6 +90,51 @@ func TestAircraftShadowUpperAltitudeSoftness(t *testing.T) {
 	}
 }
 
+// The player multiplier changes the filter and the admitted bounds together,
+// keeps the default bit for bit, and zero takes the ordinary shadow route.
+func TestAircraftShadowPlayerSoftness(t *testing.T) {
+	r, _ := schedulerFixture(t)
+	g, region := aircraftShadowCommitFixture()
+	e := drawlist.AllEffects()
+	for _, percent := range []int{100, 25, 50, 200, 900, 0, -20} {
+		e.ShadowSoftness = percent
+		r.SetEffects(e)
+		r.sched.resetFrame(64, 64)
+		got := r.commitAircraftShadow(g, region)
+		if percent <= 0 {
+			if got {
+				t.Fatalf("softness %d kept the soft commit", percent)
+			}
+			continue
+		}
+		if !got {
+			t.Fatalf("softness %d declined the aircraft", percent)
+		}
+		radius := aircraftShadowRadius(g.AircraftShadowHeight, g.AircraftShadowScale) * float32(min(percent, 200)) / 100
+		margin := int(math.Ceil(float64(radius + 2*g.AircraftShadowScale + 1)))
+		bounds := modelWorldBounds(g.Shadow).Inset(-margin).Intersect(image.Rect(0, 0, 64, 64))
+		found := false
+		for i := 0; i < r.sched.nphase; i++ {
+			v := r.sched.phases[i].batch[schedDest].verts
+			if len(v) == 0 {
+				continue
+			}
+			found = true
+			if v[0].ColorB != radius || v[0].DstX != float32(bounds.Min.X) || v[0].DstY != float32(bounds.Min.Y) || v[3].DstX != float32(bounds.Max.X) || v[3].DstY != float32(bounds.Max.Y) {
+				t.Fatalf("softness %d: radius/bounds %+v %+v, want %v %v", percent, v[0], v[3], radius, bounds)
+			}
+		}
+		if !found {
+			t.Fatal("eligible aircraft submitted no vertices")
+		}
+	}
+	e.ShadowSoftness, e.SoftShadows = 200, false
+	r.SetEffects(e)
+	if r.commitAircraftShadow(g, region) {
+		t.Fatal("softness enabled the switched-off treatment")
+	}
+}
+
 // These relationships lock the Enhanced filter, not a retail shadow contract.
 // Real GPU pixels cover atlas isolation, pause, receiving medium and zoom.
 func checkAircraftShadowDevicePixels() error {
@@ -135,6 +182,25 @@ func checkAircraftShadowDevicePixels() error {
 		high := render(200, false, 30, zoom, false)
 		if bytes.Equal(low, high) {
 			return fmt.Errorf("aircraft shadow failed height softening, zoom=%v", zoom)
+		}
+
+		selected := r.Effects()
+		selected.ShadowSoftness = 50
+		r.SetEffects(selected)
+		half := render(200, false, 30, zoom, false)
+		selected.ShadowSoftness = 200
+		r.SetEffects(selected)
+		double := render(200, false, 30, zoom, false)
+		selected.ShadowSoftness = 0
+		r.SetEffects(selected)
+		plain := render(200, false, 30, zoom, false)
+		if !bytes.Equal(plain, render(0, false, 30, zoom, false)) {
+			return fmt.Errorf("zero softness did not take ordinary shadow route, zoom=%v", zoom)
+		}
+		selected.ShadowSoftness = 100
+		r.SetEffects(selected)
+		if !bytes.Equal(high, render(200, false, 30, zoom, false)) || bytes.Equal(high, half) || bytes.Equal(high, double) || bytes.Equal(half, double) {
+			return fmt.Errorf("player softness lost default or failed to change width, zoom=%v", zoom)
 		}
 
 		// A normalized filter spreads the footprint without adding shadow mass.

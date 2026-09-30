@@ -75,24 +75,27 @@ func (g *gameShell) setPresentation(p settings.Presentation) {
 // conversion lives here so internal/settings stays a leaf the frontend converts
 // to and from rather than one that knows about the draw list. It is one field
 // for one field: every switch is independent. The strengths are not switches
-// and reach the client on their own (applyEffectStrengths).
+// and either travel in Effects or reach the client on their own (applyEffectStrengths).
 func presentationEffects(p settings.Presentation) drawlist.Effects {
 	return drawlist.Effects{
-		WaterSurface:     p.WaterSurface != 0,
-		WaterMotion:      p.WaterMotion != 0,
-		WaterFoam:        p.WaterFoam != 0,
-		WaterReflections: p.WaterReflections != 0,
-		ModelLight:       p.ModelLight != 0,
-		GroundLight:      p.GroundLight != 0,
-		Finish:           p.Finish != 0,
-		Glint:            p.Glint != 0,
-		BlastRings:       p.BlastRings != 0,
-		FireShimmer:      p.FireShimmer != 0,
-		WreckGlow:        p.WreckGlow != 0,
-		WreckShimmer:     p.WreckShimmer != 0,
-		Scorch:           p.Scorch != 0,
-		SoftShadows:      p.SoftShadows != 0,
-		Supersample:      p.Supersample != 0,
+		WaterSurface:       p.WaterSurface != 0,
+		WaterMotion:        p.WaterMotion != 0,
+		HovercraftLandWash: p.HovercraftLandWash != 0,
+		WaterFoam:          p.WaterFoam != 0,
+		WaterReflections:   p.WaterReflections != 0,
+		ModelLight:         p.ModelLight != 0,
+		GroundLight:        p.GroundLight != 0,
+		WeaponGlowStrength: p.WeaponGlowStrength, ExplosionGlowStrength: p.ExplosionGlowStrength, NanoGlowStrength: p.NanoGlowStrength,
+		ShadowSoftness: p.ShadowSoftness,
+		Finish:         p.Finish != 0,
+		Glint:          p.Glint != 0,
+		BlastRings:     p.BlastRings != 0,
+		FireShimmer:    p.FireShimmer != 0,
+		WreckGlow:      p.WreckGlow != 0,
+		WreckShimmer:   p.WreckShimmer != 0,
+		Scorch:         p.Scorch != 0,
+		SoftShadows:    p.SoftShadows != 0,
+		Supersample:    p.Supersample != 0,
 	}
 }
 
@@ -102,6 +105,7 @@ func presentationEffects(p settings.Presentation) drawlist.Effects {
 func storeEffects(p *settings.Presentation, e drawlist.Effects) {
 	p.WaterSurface, p.WaterMotion, p.WaterFoam, p.WaterReflections =
 		boolInt(e.WaterSurface), boolInt(e.WaterMotion), boolInt(e.WaterFoam), boolInt(e.WaterReflections)
+	p.HovercraftLandWash = boolInt(e.HovercraftLandWash)
 	p.ModelLight, p.GroundLight = boolInt(e.ModelLight), boolInt(e.GroundLight)
 	p.Finish, p.Glint = boolInt(e.Finish), boolInt(e.Glint)
 	p.BlastRings, p.FireShimmer = boolInt(e.BlastRings), boolInt(e.FireShimmer)
@@ -109,6 +113,8 @@ func storeEffects(p *settings.Presentation, e drawlist.Effects) {
 	p.Scorch = boolInt(e.Scorch)
 	p.SoftShadows = boolInt(e.SoftShadows)
 	p.Supersample = boolInt(e.Supersample)
+	p.WeaponGlowStrength, p.ExplosionGlowStrength, p.NanoGlowStrength = e.WeaponGlowStrength, e.ExplosionGlowStrength, e.NanoGlowStrength
+	p.ShadowSoftness = e.ShadowSoftness
 }
 
 // applyEffectStrengths hands the client the three Enhanced strengths the
@@ -130,7 +136,7 @@ func applyEffectStrengths(cl *client.Client, p settings.Presentation) {
 // writes every one of them. Marks also owns the trail strength, whose zero is
 // the trail layer's off; turning Marks on gives a zero strength the default
 // and leaves a chosen one as it was. Metal is the finishes alone, not the
-// glint, and the glint, the soft shadows and the supersampling belong to no
+// glint, and the glint, land wash, soft shadows and supersampling belong to no
 // family.
 type effectFamily struct {
 	gadget, command string

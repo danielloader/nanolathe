@@ -404,6 +404,23 @@ func (s *nlScreen) effectCards() []nlCard {
 			set:    func(d *nlDraft, v int) { *f(&d.pres) = strengths[v] },
 			render: func(r *nlRender, v int) { apply(r, strengths[v]) }}
 	}
+	// amount includes zero: a family may emit nothing while the overall glow
+	// and the neighbouring families remain at the player's chosen amounts.
+	amounts := []int{0, 25, 50, 100, 150, 200}
+	amount := func(key, label, sub string, f field, apply func(r *nlRender, pct int)) nlPart {
+		return nlPart{key: key, label: label, sub: sub, meter: true, steps: []string{"Off", "25%", "50%", "100%", "150%", "200%"},
+			get: func(d *nlDraft) int {
+				best := 3
+				for i, pct := range amounts {
+					if abs(pct-*f(&d.pres)) < abs(amounts[best]-*f(&d.pres)) {
+						best = i
+					}
+				}
+				return best
+			},
+			set:    func(d *nlDraft, v int) { *f(&d.pres) = amounts[v] },
+			render: func(r *nlRender, v int) { apply(r, amounts[v]) }}
+	}
 	pres := func(get func(p *settings.Presentation) *int) field { return get }
 	return []nlCard{
 		{key: "arrival", label: "Commander arrival", pics: []string{"armcom", "corcom"}, kind: nlSwitch, steps: []string{"Off", "On"},
@@ -432,18 +449,28 @@ func (s *nlScreen) effectCards() []nlCard {
 				func(r *nlRender, on bool) { r.effects.WaterSurface = on }),
 			sw("waterMotion", "Motion", "Drift, churn and hulls wavering below", pres(func(p *settings.Presentation) *int { return &p.WaterMotion }),
 				func(r *nlRender, on bool) { r.effects.WaterMotion = on }),
-			sw("waterFoam", "Foam", "Shore foam, wakes and hovercraft spray", pres(func(p *settings.Presentation) *int { return &p.WaterFoam }),
+			sw("waterFoam", "Foam", "Shore and building foam", pres(func(p *settings.Presentation) *int { return &p.WaterFoam }),
 				func(r *nlRender, on bool) { r.effects.WaterFoam = on }),
 			sw("waterReflections", "Reflections", "Ships, aircraft and blasts mirrored", pres(func(p *settings.Presentation) *int { return &p.WaterReflections }),
 				func(r *nlRender, on bool) { r.effects.WaterReflections = on }),
 		),
+		{key: "hovercraftLandWash", label: "Hovercraft land wash", pics: []string{"armanac", "corsnap"}, kind: nlSwitch, steps: []string{"Off", "On"},
+			get: func(d *nlDraft) int { return onOff(d.pres.HovercraftLandWash != 0) },
+			set: func(d *nlDraft, v int) { d.pres.HovercraftLandWash = v },
+			desc: func(*nlDraft, int) string {
+				return "The light spray hovercraft stir up as they move across dry ground. Shore and building foam have their own switch."
+			},
+			scene:   func(*nlDraft, int) string { return "metal" },
+			render:  func(_ *nlDraft, v int, r *nlRender) { r.effects.HovercraftLandWash = v != 0 },
+			compare: func(_ *nlDraft, v int) (int, bool) { return 1 - v, true }, enhanced: true,
+		},
 		s.groupCard("lighting", "Lighting", []string{"armllt", "corllt"}, "lighting",
 			"Light from explosions, fire, shots, hot wrecks and the nano spray, on units and on the ground.",
 			sw("modelLight", "Unit light", "On units and smoke", pres(func(p *settings.Presentation) *int { return &p.ModelLight }),
 				func(r *nlRender, on bool) { r.effects.ModelLight = on }),
 			sw("groundLight", "Ground light", "Pools and flashes on the terrain", pres(func(p *settings.Presentation) *int { return &p.GroundLight }),
 				func(r *nlRender, on bool) { r.effects.GroundLight = on }),
-			strength("groundLightStrength", "Ground light strength", "How bright the pools are", pres(func(p *settings.Presentation) *int { return &p.GroundLightStrength }),
+			amount("groundLightStrength", "Ground light strength", "How bright the pools are", pres(func(p *settings.Presentation) *int { return &p.GroundLightStrength }),
 				func(r *nlRender, pct int) { r.groundLightStrength = pct }),
 		),
 		blinking(s.groupCard("metal", "Metal", []string{"armmex", "armmoho"}, "metal",
@@ -469,29 +496,32 @@ func (s *nlScreen) effectCards() []nlCard {
 			enhanced: true,
 			blink:    true,
 		},
-		{
-			key: "glow", label: "Glow", pics: []string{"armanni", "corhlt"}, kind: nlMeter, steps: []string{"Off", "50%", "100%", "150%", "200%"},
-			get: func(d *nlDraft) int {
-				if d.glow == 0 {
-					return 0
-				}
-				return max(1, min(4, (d.glowStrength+25)/50))
-			},
-			set: func(d *nlDraft, v int) {
-				d.glow = onOff(v != 0)
-				if v != 0 {
-					d.glowStrength = v * 50
-				}
-			},
-			desc: func(*nlDraft, int) string {
-				return "A bloom halo on lasers, lightning, fire, blasts, shots and the nano spray, from half to twice the tuned strength."
-			},
-			chips:    []string{"Lasers", "Nano spray", "Fire", "Blasts"},
-			scene:    func(*nlDraft, int) string { return "glow" },
-			render:   func(d *nlDraft, v int, r *nlRender) { r.glow, r.glowStrength = v != 0, v*50 },
-			compare:  func(d *nlDraft, v int) (int, bool) { return 0, v != 0 },
-			enhanced: true,
-		},
+		s.groupCard("glow", "Glow", []string{"armanni", "corhlt"}, "glow",
+			"Tune each source separately. Overall controls bloom; nano spray also scales its local light, and ground light scales terrain pools.",
+			nlPart{key: "overall", label: "Overall", sub: "Bloom from every source", meter: true,
+				steps: []string{"Off", "50%", "100%", "150%", "200%"},
+				get: func(d *nlDraft) int {
+					if d.glow == 0 || d.glowStrength <= 0 {
+						return 0
+					}
+					return max(1, min(4, (d.glowStrength+25)/50))
+				},
+				set: func(d *nlDraft, v int) {
+					d.glow = onOff(v != 0)
+					if v != 0 {
+						d.glowStrength = v * 50
+					}
+				},
+				render: func(r *nlRender, v int) { r.glow, r.glowStrength = v != 0, v*50 }},
+			amount("weaponGlowStrength", "Weapon glow", "Lasers, lightning and projectile bodies", pres(func(p *settings.Presentation) *int { return &p.WeaponGlowStrength }),
+				func(r *nlRender, pct int) { r.effects.WeaponGlowStrength = pct }),
+			withScene(amount("explosionGlowStrength", "Explosions & fire", "Effect art, fire, flashes and halos", pres(func(p *settings.Presentation) *int { return &p.ExplosionGlowStrength }),
+				func(r *nlRender, pct int) { r.effects.ExplosionGlowStrength = pct }), "blast"),
+			withScene(amount("nanoGlowStrength", "Nano spray", "The spray's halo and local light", pres(func(p *settings.Presentation) *int { return &p.NanoGlowStrength }),
+				func(r *nlRender, pct int) { r.effects.NanoGlowStrength = pct }), "construct"),
+			withScene(amount("groundLightStrength", "Ground light", "Brightness of terrain pools", pres(func(p *settings.Presentation) *int { return &p.GroundLightStrength }),
+				func(r *nlRender, pct int) { r.groundLightStrength = pct }), "lighting"),
+		),
 		s.groupCard("heat", "Heat", []string{"corpyro", "armbrtha"}, "blast",
 			"Hot air bending the picture, and wrecks that glow as they cool.",
 			withScene(sw("blastRings", "Blast rings", "The ring of hot air round every blast", pres(func(p *settings.Presentation) *int { return &p.BlastRings }),
@@ -525,18 +555,13 @@ func (s *nlScreen) effectCards() []nlCard {
 				set:    func(d *nlDraft, v int) { d.pres.TrailStrength = [...]int{0, 25, 50, 100}[v] },
 				render: func(r *nlRender, v int) { r.trailStrength = [...]int{0, 25, 50, 100}[v] }}, "trails"),
 		),
-		{
-			key: "softshadows", label: "Soft shadows", pics: []string{"armhawk", "armthund"}, kind: nlSwitch, steps: []string{"Off", "On"},
-			get: func(d *nlDraft) int { return onOff(d.pres.SoftShadows != 0) },
-			set: func(d *nlDraft, v int) { d.pres.SoftShadows = v },
-			desc: func(*nlDraft, int) string {
-				return "Aircraft shadows that soften and spread the higher a plane flies, and waver on water. Off gives aircraft the plain shadow every other unit has."
-			},
-			scene:    func(*nlDraft, int) string { return "air" },
-			render:   func(d *nlDraft, v int, r *nlRender) { r.effects.SoftShadows = v != 0 },
-			compare:  func(d *nlDraft, v int) (int, bool) { return 0, v != 0 },
-			enhanced: true,
-		},
+		s.groupCard("softshadows", "Soft shadows", []string{"armhawk", "armthund"}, "air",
+			"Aircraft shadows soften and spread with altitude. Tune their width; Off keeps the ordinary silhouette shadow.",
+			sw("softShadows", "Soft shadows", "Altitude softening and waves on water", pres(func(p *settings.Presentation) *int { return &p.SoftShadows }),
+				func(r *nlRender, on bool) { r.effects.SoftShadows = on }),
+			amount("shadowSoftness", "Softness", "Smaller or larger blur radius", pres(func(p *settings.Presentation) *int { return &p.ShadowSoftness }),
+				func(r *nlRender, pct int) { r.effects.ShadowSoftness = pct }),
+		),
 	}
 }
 

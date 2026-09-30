@@ -58,14 +58,16 @@ func (s *nlScreen) draftOf(st settings.Settings) nlDraft {
 		unitLimit: st.UnitLimit, switchAlt: st.SwitchAltEnabled(), interfaceType: st.InterfaceType,
 		keys: keyMapFromSettings(st.KeyBindings),
 	}
-	if d.glowStrength <= 0 {
+	if d.glowStrength < 0 {
 		d.glowStrength = settings.DefaultGlowStrength
 	}
 	return d
 }
 
 // cardPaths finds the settings paths a card writes by changing it and
-// diffing: every part of a grouped card, every other card to its next value.
+// diffing: every value of every grouped part, every other card to its next value.
+// A next-value probe can miss a path that only another value changes, such as
+// Overall glow at 100%: 150% changes strength, while Off changes the switch.
 func (s *nlScreen) cardPaths(c nlCard, base settings.Settings) []string {
 	if c.key == "content" {
 		return nil
@@ -74,9 +76,11 @@ func (s *nlScreen) cardPaths(c nlCard, base settings.Settings) []string {
 	var probes []nlDraft
 	if c.kind == nlGroup {
 		for _, p := range c.parts {
-			d := from
-			p.set(&d, (p.get(&d)+1)%len(p.steps))
-			probes = append(probes, d)
+			for v := range p.steps {
+				d := from
+				p.set(&d, v)
+				probes = append(probes, d)
+			}
 		}
 	} else if len(c.steps) > 1 {
 		d := from

@@ -22,13 +22,21 @@ func (r *Renderer) SetEffects(e drawlist.Effects) {
 	if r == nil {
 		return
 	}
+	for _, percent := range []*int{&e.WeaponGlowStrength, &e.ExplosionGlowStrength, &e.NanoGlowStrength, &e.ShadowSoftness} {
+		*percent = min(max(*percent, 0), EffectStrengthMax)
+	}
 	r.effects = e
+	r.weaponGlowOffset = effectStrengthOffset(e.WeaponGlowStrength)
+	r.explosionGlowOffset = effectStrengthOffset(e.ExplosionGlowStrength)
+	r.nanoGlowOffset = effectStrengthOffset(e.NanoGlowStrength)
+	r.aircraftShadow.softnessOffset = effectStrengthOffset(e.ShadowSoftness)
 	// Water: the surface shading (§26.3, §32.3); the moving field and the
-	// underwater refraction (§26.5); shore foam, wakes and hover dust; and the
-	// screen-space reflections (§26.4, §32.2).
+	// underwater refraction (§26.5); shore and building foam; dry hover
+	// land wash; and the screen-space reflections (§26.4, §32.2).
 	r.setWaterSurface(e.WaterSurface)
 	r.setWaterMotion(e.WaterMotion)
 	r.setWaterFoam(e.WaterFoam)
+	r.setHovercraftLandWash(e.HovercraftLandWash)
 	r.setWaterReflections(e.WaterReflections)
 	// Light on models and smoke (§23), and the ground pools it reaches
 	// (§31.3, §31.6); one gather serves both.

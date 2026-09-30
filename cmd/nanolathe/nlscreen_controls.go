@@ -312,23 +312,14 @@ func (s *nlScreen) drawProfileBar(screen *ebiten.Image, x, y float64) float64 {
 	df.Draw(screen, "Profile", bx, y+4*u, screenkit.Style{Size: 11 * u, Tracking: 0.26, Top: nlKicker, Upper: true})
 	for i, p := range nlControlsPresets {
 		label := p.label
-		st := screenkit.Style{Size: 14 * u, Tracking: 0.08, Upper: true, Align: 1}
+		st := screenkit.Style{Size: max(8, 14*u), Tracking: 0.08, Upper: true, Align: 1}
 		w := df.Measure(label, st) + 34*u
 		r := screenkit.Rect{X: bx, Y: y + 12*u, W: w, H: 34 * u}
 		id := fmt.Sprintf("ctl-profile-%d", i)
 		on := s.draft.controls == i
-		hover := s.hits.HoverAmount(id)
-		screenkit.Fill(screen, r, color.RGBA{14, 16, 12, 220})
-		if on {
-			screenkit.VGradient(screen, r, color.RGBA{50, 110, 50, 230}, color.RGBA{20, 50, 22, 230})
-		}
-		border := lerpRGBA(color.RGBA{70, 70, 60, 255}, color.RGBA{160, 160, 140, 255}, hover)
-		if on {
-			border = color.RGBA{255, 227, 138, 255}
-		}
-		screenkit.Outline(screen, r, 1.5*u, border)
-		st.Top = map[bool]color.RGBA{false: {200, 192, 160, 255}, true: nlCream}[on]
-		df.Draw(screen, label, r.X+r.W/2, r.Y+23*u, st)
+		s.buttonPlate(screen, id, r, on, false)
+		st.Top = nlCream
+		s.buttonCaption(screen, label, r.X+r.W/2, r.Y+r.H/2+st.Size/2, st)
 		if recommend == i {
 			s.fonts.Body.Draw(screen, "Recommended by "+s.recommendedBy(), r.X+r.W/2, r.Y+r.H+14*u, screenkit.Style{Size: 10 * u, Top: nlGreenText, Align: 1})
 		}
@@ -483,31 +474,22 @@ func (s *nlScreen) drawKeyTable(screen *ebiten.Image, r screenkit.Rect) {
 // keyCapButton draws a key cap button and returns its width.
 func (s *nlScreen) keyCapButton(screen *ebiten.Image, id string, x, y, h float64, label string, add, capturing, fixed bool) float64 {
 	u := s.u()
-	st := screenkit.Style{Size: 13 * u, Tracking: 0.06, Top: nlCream, Align: 1}
+	st := screenkit.Style{Size: max(7, 13*u), Tracking: 0.06, Top: nlCream, Align: 1}
 	w := max(44*u, s.fonts.Display.Measure(label, st)+22*u)
 	r := screenkit.Rect{X: x, Y: y, W: w, H: h}
-	hover := s.hits.HoverAmount(id)
-	switch {
-	case capturing:
-		a := 0.55 + 0.45*math.Sin(s.clock*7)
-		screenkit.Glow(screen, screenkit.Rect{X: r.X - 16*u, Y: r.Y - 12*u, W: r.W + 32*u, H: r.H + 24*u}, alphaC(color.RGBA{255, 210, 90, 255}, 0.5*a))
-		screenkit.Fill(screen, r, color.RGBA{60, 50, 18, 255})
-		screenkit.Outline(screen, r, 1.5*u, alphaC(color.RGBA{255, 227, 138, 255}, a))
-		st.Top = nlAmber
-	case add:
-		screenkit.Outline(screen, r, 1*u, lerpRGBA(color.RGBA{60, 70, 56, 255}, color.RGBA{140, 160, 130, 255}, hover))
-		st.Top = lerpRGBA(nlDim, nlCream, hover)
-	default:
-		screenkit.Fill(screen, r.Inset(-1*u), color.RGBA{0, 0, 0, 255})
-		top, bottom := color.RGBA{96, 96, 90, 255}, color.RGBA{50, 50, 46, 255}
-		if fixed {
-			top, bottom = color.RGBA{56, 56, 52, 255}, color.RGBA{36, 36, 32, 255}
-			st.Top = nlDim
-		}
-		screenkit.VGradient(screen, r, lerpRGBA(top, color.RGBA{255, 255, 255, 255}, hover*0.15), bottom)
-		screenkit.Bevel(screen, r, 1.5*u, color.RGBA{190, 190, 182, 255}, color.RGBA{20, 20, 18, 255}, false)
+	s.buttonPlate(screen, id, r, capturing, fixed)
+	if fixed {
+		st.Top = nlDim
 	}
-	s.fonts.Display.Draw(screen, label, r.X+w/2, r.Y+h/2+5*u, st)
+	if add {
+		st.Top = nlGreenText
+	}
+	if capturing {
+		a := 0.55 + 0.45*math.Sin(s.clock*7)
+		screenkit.Outline(screen, r, max(1, 1.5*u), alphaC(nlAmber, a))
+		st.Top = nlAmber
+	}
+	s.buttonCaption(screen, label, r.X+w/2, r.Y+h/2+st.Size/2, st)
 	return w
 }
 
@@ -691,22 +673,14 @@ func (s *nlScreen) drawMouseRows(screen *ebiten.Image, r screenkit.Rect) {
 		}
 		bx := r.X + 250*u
 		for i, step := range c.steps {
-			st := screenkit.Style{Size: 12 * u, Tracking: 0.06, Upper: true, Align: 1}
+			st := screenkit.Style{Size: max(7, 12*u), Tracking: 0.06, Upper: true, Align: 1}
 			w := max(70*u, df.Measure(step, st)+24*u)
 			br := screenkit.Rect{X: bx, Y: y + 10*u, W: w, H: 32 * u}
 			id := fmt.Sprintf("ctl-%s-%d", c.key, i)
 			on := i == v
-			screenkit.Fill(screen, br, color.RGBA{14, 16, 12, 220})
-			if on {
-				screenkit.VGradient(screen, br, color.RGBA{50, 110, 50, 230}, color.RGBA{20, 50, 22, 230})
-			}
-			border := lerpRGBA(color.RGBA{70, 70, 60, 255}, color.RGBA{160, 160, 140, 255}, s.hits.HoverAmount(id))
-			if on {
-				border = color.RGBA{255, 227, 138, 255}
-			}
-			screenkit.Outline(screen, br, 1.5*u, border)
-			st.Top = map[bool]color.RGBA{false: {190, 182, 150, 255}, true: nlCream}[on]
-			df.Draw(screen, step, br.X+w/2, br.Y+21*u, st)
+			s.buttonPlate(screen, id, br, on, false)
+			st.Top = nlCream
+			s.buttonCaption(screen, step, br.X+w/2, br.Y+br.H/2+st.Size/2, st)
 			s.hits.Add(screenkit.Region{ID: id, Rect: br, Click: func() { s.setCard(c, i) }})
 			bx += w + 6*u
 		}

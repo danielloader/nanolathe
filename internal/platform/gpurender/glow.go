@@ -194,6 +194,29 @@ func (r *Renderer) SetGlowFamilies(weapons, nanolathe, ground int) {
 	}
 }
 
+// weaponGlowScale and effectGlowScale apply the player's independent amounts
+// on top of the content pack's shared weapons family (§19.4). Classification
+// uses recorder source tags, never the frame's name or pixels. All emissive
+// effect/strip art belongs to the effect family, including unclassified art.
+func (r *Renderer) weaponGlowScale() float32 {
+	return r.families.scale(glowFamilyWeapons) * (1 + r.weaponGlowOffset)
+}
+
+func (r *Renderer) effectGlowScale() float32 {
+	return r.families.scale(glowFamilyWeapons) * (1 + r.explosionGlowOffset)
+}
+
+func (r *Renderer) spriteGlowScale(kind drawlist.SpriteLightingKind) float32 {
+	if kind == drawlist.SpriteLightingProjectile {
+		return r.weaponGlowScale()
+	}
+	return r.effectGlowScale()
+}
+
+func (r *Renderer) nanoFamilyScale() float32 {
+	return r.families.scale(glowFamilyNanolathe) * (1 + r.nanoGlowOffset)
+}
+
 // glowRun is one device draw of the batch: the image bindings it needs and its
 // own vertex and index storage, which is retained with the run across frames.
 type glowRun struct {
@@ -440,7 +463,7 @@ func (g *glowLayer) rect(imgs [4]*ebiten.Image, dx0, dy0, dx1, dy1, sx0, sy0, sx
 // pixels wide along the stroke, extended by half its width at both ends so a
 // short stroke keeps its energy.
 func (r *Renderer) glowLine(l drawlist.Line) {
-	weapons := r.families.scale(glowFamilyWeapons)
+	weapons := r.weaponGlowScale()
 	if weapons <= 0 || !r.glowActive() {
 		return
 	}
@@ -465,8 +488,8 @@ func (r *Renderer) glowLine(l drawlist.Line) {
 // glowSprite appends a keyed GAF sprite whose top-left is (x, y) in record
 // space, over the same clip-intersected rectangle the sprite itself covered.
 // gain is the emission scale: 1 for an opaque sprite, ½ for a tinted one.
-func (r *Renderer) glowSprite(f *formats.GAFFrame, x, y, clipX, clipY, clipW, clipH int, gain float32) {
-	weapons := r.families.scale(glowFamilyWeapons)
+func (r *Renderer) glowSprite(f *formats.GAFFrame, x, y, clipX, clipY, clipW, clipH int, gain float32, kind drawlist.SpriteLightingKind) {
+	weapons := r.spriteGlowScale(kind)
 	if f == nil || weapons <= 0 || !r.glowActive() {
 		return
 	}
@@ -496,7 +519,7 @@ func (r *Renderer) glowSprite(f *formats.GAFFrame, x, y, clipX, clipY, clipW, cl
 // compiled, reading the composite under it. The rectangle and source span are
 // the ones Flash computed, in record space.
 func (r *Renderer) glowFlash(cx0, cy0, cx1, cy1 int, sx0, sy0, sx1, sy1 float32) {
-	weapons := r.families.scale(glowFamilyWeapons)
+	weapons := r.effectGlowScale()
 	if weapons <= 0 || !r.glowActive() || r.sched.flash.img == nil {
 		return
 	}
@@ -512,7 +535,7 @@ func (r *Renderer) glowFlash(cx0, cy0, cx1, cy1 int, sx0, sy0, sx1, sy1 float32)
 // composite under it, emitting the row's high lane. Arguments are the ones
 // Halo computed, in record space.
 func (r *Renderer) glowHalo(cx0, cy0, cx1, cy1 int, high, lx0, ly0, lx1, ly1, r2 float32) {
-	weapons := r.families.scale(glowFamilyWeapons)
+	weapons := r.effectGlowScale()
 	if weapons <= 0 || !r.glowActive() || high <= 0 {
 		return
 	}

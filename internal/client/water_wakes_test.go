@@ -432,3 +432,44 @@ func TestSurfaceWakeIdleStopAndResume(t *testing.T) {
 		t.Fatal("movement did not resume spray")
 	}
 }
+
+// History admission follows dry wash alone, while a toggle retires the marks
+// through the existing SetEffects seam instead of replaying hidden specks.
+func TestHovercraftLandWashHistoryIsIndependentOfFoam(t *testing.T) {
+	for _, tc := range []struct{ foam, wash bool }{{false, true}, {true, false}, {true, true}, {false, false}} {
+		c, f := wakeScene(t)
+		e := drawlist.AllEffects()
+		e.WaterFoam, e.HovercraftLandWash = tc.foam, tc.wash
+		c.SetEffects(e)
+		c.observeEffectHistories(f)
+		for range 3 {
+			f.Tick++
+			f.Units[0].X += numeric.FixedOne
+			c.observeEffectHistories(f)
+		}
+		if (len(c.wakes.marks) > 0) != tc.wash || (len(c.wakes.units) > 0) != tc.wash {
+			t.Fatalf("foam=%v wash=%v: %d marks, %d visual routines", tc.foam, tc.wash, len(c.wakes.marks), len(c.wakes.units))
+		}
+		if !tc.wash {
+			continue
+		}
+		e.HovercraftLandWash = false
+		c.SetEffects(e)
+		for range 3 {
+			f.Tick++
+			f.Units[0].X += numeric.FixedOne
+			c.observeEffectHistories(f)
+		}
+		if len(c.wakes.marks) != 0 || len(c.wakes.units) != 0 {
+			t.Fatal("disabled wash retained history")
+		}
+		e.HovercraftLandWash = true
+		c.SetEffects(e)
+		f.Tick++
+		f.Units[0].X += numeric.FixedOne
+		c.observeEffectHistories(f)
+		if len(c.wakes.marks) != 0 {
+			t.Fatal("reenabled wash replayed stale marks")
+		}
+	}
+}

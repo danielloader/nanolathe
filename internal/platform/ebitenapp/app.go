@@ -246,6 +246,7 @@ func (a *app) Update() error {
 		// The screen owns the pointer and keyboard; the client is sampled idle
 		// so nothing beneath it reacts, while host steps keep running.
 		a.options.Screen.Update()
+		a.syncPointerCapture()
 		a.hostInput.add(sampledInput{timestamp: a.scaledInputNow()})
 	} else {
 		a.hostInput.add(readInput(a.scaledInputNow()))
@@ -479,6 +480,9 @@ func (a *app) syncPointerCapture() {
 	want := ebiten.CursorModeHidden
 	if a.screenActive() {
 		want = ebiten.CursorModeVisible
+		if owner, ok := a.options.Screen.(FullScreenPointer); ok && owner.OwnsPointer() {
+			want = ebiten.CursorModeHidden
+		}
 	} else if a.c.PointerCaptured() {
 		want = ebiten.CursorModeCaptured
 	}
@@ -524,6 +528,7 @@ func (a *app) Draw(screen *ebiten.Image) {
 		// client's frame underneath it.
 		a.c.JoinPreRecord()
 		a.options.Screen.Draw(screen)
+		a.syncPointerCapture()
 		return
 	}
 	// The arrival is taken before the pre-record join: it is the refresh this

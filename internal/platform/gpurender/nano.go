@@ -52,7 +52,7 @@ func (r *Renderer) nanoInView(f drawlist.Fill) bool {
 func (r *Renderer) prepareNanoLighting(list *drawlist.List) {
 	l := &r.lighting
 	l.nanoCount = 0
-	family := r.families.scale(glowFamilyNanolathe)
+	family := r.nanoFamilyScale()
 	if family <= 0 {
 		return
 	}
@@ -126,7 +126,7 @@ func nanoLightColor(pal *[256][4]byte) (color [3]float32) {
 // glowNano widens the emission footprint around the existing two-pixel core.
 // The existing blur and fog composite soften it; the particle draw is untouched.
 func (r *Renderer) glowNano(f drawlist.Fill) {
-	family := r.families.scale(glowFamilyNanolathe)
+	family := r.nanoFamilyScale()
 	if family <= 0 || f.NanoSubmerged || !r.glowActive() || !r.nanoInView(f) {
 		return
 	}

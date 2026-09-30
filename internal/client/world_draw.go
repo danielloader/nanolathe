@@ -480,8 +480,8 @@ func (c *Client) drawCommittedWorld(cur *frame.Frame, ok bool) {
 	c.drawTerrainPrep()
 	c.drawDeveloperTerrain(cur)
 	// The ground marks and the water layers each follow their own switch
-	// (§30) — the scorch layer the scorch switch, the wakes, hover dust and
-	// building foam the water foam switch, the trails their strength alone;
+	// (§30) — scorch follows its switch, dry hover spray the land wash
+	// switch, building foam the water foam switch, trails their strength alone;
 	// each is gated here rather than inside its producer so the recording is
 	// identical to the one a build without the effect would make.
 	if c.effects.Scorch {
@@ -490,11 +490,13 @@ func (c *Client) drawCommittedWorld(cur *frame.Frame, ok bool) {
 	// Under the asynchronous simulation the host feeds these layers every
 	// publication in order when it joins a batch (ObserveCommittedFrame), so a
 	// pass places nothing itself (§13.13).
-	if c.effects.WaterFoam && !c.strategicView() {
+	if c.effects.HovercraftLandWash && !c.strategicView() {
 		if !c.observesInOrder() {
 			c.placeSurfaceWakes(c.committedFrame())
 		}
 		c.drawSurfaceWakes()
+	}
+	if c.effects.WaterFoam && !c.strategicView() {
 		c.drawBuildingFoam(c.committedFrame())
 	}
 	// The Enhanced trail layer lies on the terrain under every strip

@@ -67,7 +67,8 @@ func TestTrailStrengthZeroGatesTrailHistory(t *testing.T) {
 }
 
 // Every water switch reads the recorded water phase, so any one of them keeps
-// it; with all four off no phase is recorded and no reflection site admitted.
+// it; land wash alone retains only the static receiving mask, with no dynamic
+// phase or reflection site admitted.
 func TestWaterPhaseFollowsAnyWaterSwitch(t *testing.T) {
 	c := reflectionScene(t)
 	x, z := numeric.FixedFromInt(16), numeric.FixedFromInt(16)
@@ -81,8 +82,13 @@ func TestWaterPhaseFollowsAnyWaterSwitch(t *testing.T) {
 		e.WaterSurface, e.WaterMotion, e.WaterFoam, e.WaterReflections = false, false, false, false
 	})
 	c.SetEffects(allOff)
-	if c.reflectionWaterAt(x, z) || c.waterSurfaceMetadata().Enabled {
-		t.Fatal("every water switch off still recorded a phase or a reflection site")
+	if c.reflectionWaterAt(x, z) || !c.waterSurfaceMetadata().Enabled || c.waterMotion.valid {
+		t.Fatal("land wash alone lost its mask or observed dynamic water history")
+	}
+	allOff.HovercraftLandWash = false
+	c.SetEffects(allOff)
+	if c.waterSurfaceMetadata().Enabled || c.waterMotion.valid {
+		t.Fatal("all mask consumers off still recorded metadata/history")
 	}
 	for _, tc := range []struct {
 		name string
@@ -96,7 +102,7 @@ func TestWaterPhaseFollowsAnyWaterSwitch(t *testing.T) {
 		e := allOff
 		tc.set(&e)
 		c.SetEffects(e)
-		if !c.waterSurfaceMetadata().Enabled {
+		if !c.waterSurfaceMetadata().Enabled || !c.waterMotion.valid {
 			t.Fatalf("%s alone recorded no water phase", tc.name)
 		}
 	}
@@ -241,5 +247,19 @@ func TestHeatPartsGateTheirOwnMetadata(t *testing.T) {
 		if got := g.WreckHeatScale > 0; got != (tc.glow || tc.shimmer) {
 			t.Fatalf("%s: wreck scale = %v", tc.name, g.WreckHeatScale)
 		}
+	}
+}
+
+func TestLandWashOnlyMetadataOnEntirelyDryMap(t *testing.T) {
+	c := reflectionScene(t)
+	c.terrain.SeaLevel = 0
+	c.SetEffects(drawlist.Effects{HovercraftLandWash: true})
+	meta := c.waterSurfaceMetadata()
+	if meta != (drawlist.WaterSurface{Enabled: true}) || c.waterMotion.valid {
+		t.Fatalf("wash-only dry map recorded dynamic water metadata/history: %+v", meta)
+	}
+	c.SetEnhanced(false)
+	if c.waterSurfaceMetadata().Enabled {
+		t.Fatal("Classic recorded land wash mask metadata")
 	}
 }

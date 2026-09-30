@@ -148,12 +148,28 @@ type nlPreviewInstance struct {
 	focusSeen bool
 	// framed is set once the lead-in is over: the focus holds from then on.
 	framed bool
+	closed bool
+
+	placementDef           *content.UnitDef
+	placementX, placementZ int32
 }
 
 type nlPreviewResult struct {
 	inst *nlPreviewInstance
 	err  error
 }
+
+// A paused scene keeps its source uploads with its client. Reusing only the
+// session would still pay the first-frame upload cost on every revisit.
+type nlCachedPreview struct {
+	inst         *nlPreviewInstance
+	gpu, twinGPU nlGPU
+	frame, alt   *ebiten.Image
+}
+
+// Bound retained battles rather than cards: a paired mutator compare owns two.
+// The current scene and the recent-scene cache retain at most three sessions.
+const nlPreviewCacheSessions = 3
 
 type nlPreview struct {
 	opts Options
@@ -164,10 +180,14 @@ type nlPreview struct {
 	loading bool
 	loadKey nlSceneKey
 	// loadStarted is when the scene now arriving was asked for.
-	loadStarted time.Time
-	results     chan nlPreviewResult
-	lastErr     string
-	restarts    int
+	loadStarted        time.Time
+	results            chan nlPreviewResult
+	lastErr            string
+	restarts           int
+	cache              []nlCachedPreview // least recently used first; paused, never stepped
+	cacheHits          int
+	presentNeeded      bool
+	cacheResumeStarted time.Time
 
 	gpu     nlGPU // the scene's renderer
 	twinGPU nlGPU // the paired scene's own renderer: sources belong to one client
@@ -187,12 +207,20 @@ func newNLPreview(opts Options, cs *contentSet) *nlPreview {
 func (p *nlPreview) Ready() bool { return p != nil && p.cur != nil }
 
 // Loading reports whether a scene is being staged.
-func (p *nlPreview) Loading() bool { return p != nil && p.loading }
+func (p *nlPreview) Loading() bool { return p != nil && p.loading && p.loadKey == p.want }
 
 // request asks for a scene; the current one keeps playing until it arrives.
 func (p *nlPreview) request(key nlSceneKey) {
 	p.want = key
 	if p.cur != nil && p.cur.key == key {
+		return
+	}
+	if cached, ok := p.takeCached(key); ok {
+		started := time.Now()
+		p.activate(cached)
+		p.cacheHits++
+		p.cacheResumeStarted = started
+		fmt.Fprintf(os.Stderr, "nanolathe: preview: %s resumed cached scene in %v\n", key.preset, time.Since(started).Round(time.Millisecond))
 		return
 	}
 	if p.loading {
@@ -202,6 +230,9 @@ func (p *nlPreview) request(key nlSceneKey) {
 }
 
 func (p *nlPreview) startLoad(key nlSceneKey) {
+	if p.loading {
+		return // one outstanding result owns the retirement/wait handshake
+	}
 	p.loading, p.loadKey, p.loadStarted = true, key, time.Now()
 	opts, cs := p.opts, p.cs
 	go func() {
@@ -571,9 +602,10 @@ func (inst *nlPreviewInstance) applyCamera(zoomScale float64) {
 }
 
 func (inst *nlPreviewInstance) close() {
-	if inst == nil {
+	if inst == nil || inst.closed {
 		return
 	}
+	inst.closed = true
 	inst.twin.close()
 	inst.b.teardown(inst.cl)
 	inst.cl.Close()
@@ -609,7 +641,83 @@ func (inst *nlPreviewInstance) update(dt float64, zoomScale float64) (stepped bo
 			inst.opening = false
 		}
 	}
+	inst.movePlacement()
 	return stepped
+}
+
+func (c nlCachedPreview) sessions() int {
+	if c.inst == nil {
+		return 0
+	}
+	if c.inst.twin != nil {
+		return 2
+	}
+	return 1
+}
+
+func (c nlCachedPreview) close() {
+	c.inst.close()
+	c.gpu.resetSources()
+	c.twinGPU.resetSources()
+}
+
+func (p *nlPreview) takeCached(key nlSceneKey) (nlCachedPreview, bool) {
+	for i, c := range p.cache {
+		if c.inst.key == key {
+			p.cache = slices.Delete(p.cache, i, i+1)
+			return c, true
+		}
+	}
+	return nlCachedPreview{}, false
+}
+
+func (p *nlPreview) retain(c nlCachedPreview) {
+	if c.inst == nil {
+		return
+	}
+	// A scene near the end of its loop needs a fresh opening, not an exhausted
+	// fight from the cache. Never retain two clients for the same scene key.
+	if c.inst.seconds() >= c.inst.preset.loop || (p.cur != nil && c.inst.key == p.cur.key) {
+		c.close()
+		return
+	}
+	if old, ok := p.takeCached(c.inst.key); ok {
+		old.close()
+	}
+	p.cache = append(p.cache, c)
+	p.trimCache()
+}
+
+func (p *nlPreview) trimCache() {
+	n := (nlCachedPreview{inst: p.cur}).sessions()
+	for _, c := range p.cache {
+		n += c.sessions()
+	}
+	for n > nlPreviewCacheSessions && len(p.cache) > 0 {
+		old := p.cache[0]
+		p.cache = slices.Delete(p.cache, 0, 1)
+		n -= old.sessions()
+		old.close()
+	}
+}
+
+func (p *nlPreview) activate(next nlCachedPreview) {
+	old := nlCachedPreview{inst: p.cur, gpu: p.gpu, twinGPU: p.twinGPU, frame: p.frame, alt: p.alt}
+	if old.frame != nil && old.inst != nil {
+		if p.fade == nil || p.fade.Bounds() != old.frame.Bounds() {
+			p.fade = ebiten.NewImage(old.frame.Bounds().Dx(), old.frame.Bounds().Dy())
+		}
+		p.fade.Clear()
+		p.fade.DrawImage(old.frame, nil)
+		p.fadeLeft = 1
+	}
+	p.cur, p.gpu, p.twinGPU = next.inst, next.gpu, next.twinGPU
+	p.frame, p.alt = next.frame, next.alt
+	p.cur.started = time.Now()
+	p.lastDrawn, p.presentNeeded, p.lastErr = time.Time{}, true, ""
+	p.cacheResumeStarted = time.Time{}
+	p.retain(old)
+	p.trimCache()
 }
 
 // Frame advances the preview and renders it. primary is always drawn; alt,
@@ -621,28 +729,13 @@ func (p *nlPreview) Frame(dt float64, primary nlRender, alt *nlRender) {
 		if res.err != nil {
 			p.lastErr = res.err.Error()
 			fmt.Fprintf(os.Stderr, "%v\n", res.err)
-		} else if res.inst.key == p.want || p.cur == nil || p.cur.key.preset == res.inst.key.preset {
-			if p.frame != nil && p.cur != nil {
-				if p.fade == nil || p.fade.Bounds() != p.frame.Bounds() {
-					p.fade = ebiten.NewImage(p.frame.Bounds().Dx(), p.frame.Bounds().Dy())
-				}
-				p.fade.Clear()
-				p.fade.DrawImage(p.frame, nil)
-				p.fadeLeft = 1
-			}
-			p.cur.close()
-			// The new client uploads fresh source identities; the old ones
-			// would otherwise stay cached for the renderer's lifetime, one set
-			// per scene shown (DESIGN_GPU_RENDERER §2.3 "Source lifetime").
-			p.gpu.resetSources()
-			p.twinGPU.resetSources()
-			p.cur = res.inst
-			p.cur.started = time.Now()
+		} else if res.inst.key == p.want {
+			p.activate(nlCachedPreview{inst: res.inst})
 		} else {
-			res.inst.close()
+			p.retain(nlCachedPreview{inst: res.inst})
 		}
 		if p.cur == nil || p.cur.key != p.want {
-			p.startLoad(p.want)
+			p.request(p.want)
 		}
 	default:
 	}
@@ -667,13 +760,19 @@ func (p *nlPreview) Frame(dt float64, primary nlRender, alt *nlRender) {
 		p.startLoad(inst.key)
 	}
 	throttle := primary.fps > 0 && time.Since(p.lastDrawn) < time.Second/time.Duration(primary.fps)-2*time.Millisecond
-	if primary.classic && !stepped && p.frame != nil && alt == nil {
+	if primary.classic && !stepped && p.frame != nil && alt == nil && !p.presentNeeded {
 		throttle = true // Classic presents once per 30 Hz tick.
 	}
 	if !throttle {
 		drawStart := time.Now()
 		p.render(&p.gpu, inst, primary, &p.frame)
+		p.presentNeeded = false
 		p.lastDrawn = time.Now()
+		if !p.cacheResumeStarted.IsZero() {
+			fmt.Fprintf(os.Stderr, "nanolathe: preview: %s cached frame %v, %v after revisit\n", inst.key.preset,
+				p.lastDrawn.Sub(drawStart).Round(time.Millisecond), p.lastDrawn.Sub(p.cacheResumeStarted).Round(time.Millisecond))
+			p.cacheResumeStarted = time.Time{}
+		}
 		if !inst.firstDraw {
 			inst.firstDraw = true
 			fmt.Fprintf(os.Stderr, "nanolathe: preview: %s first frame %v, %v after it was requested\n", inst.key.preset,
@@ -784,6 +883,10 @@ func (p *nlPreview) Close() {
 	}
 	p.cur.close()
 	p.cur = nil
+	for _, c := range p.cache {
+		c.close()
+	}
+	p.cache = nil
 	p.gpu.resetSources()
 	p.twinGPU.resetSources()
 	p.gpu, p.twinGPU = nlGPU{}, nlGPU{}
@@ -818,7 +921,30 @@ func (inst *nlPreviewInstance) stagePlacement(st *nlStage) {
 		// in its viewport and preserve the validated site while the scene steps.
 		state.PointerX, state.PointerY = int32(inst.surfaceW/2), int32(inst.surfaceH/2)
 		inst.anchorX, inst.anchorZ = x, z
+		inst.placementDef, inst.placementX, inst.placementZ = def, x, z
 		inst.applyCamera(0)
 		return
 	}
+}
+
+// This is preview choreography. Move the prospective tower on the same
+// footprint grid and through the same placement validator used to stage it;
+// the ordinary ghost and range overlay read the one resulting site together.
+func (inst *nlPreviewInstance) movePlacement() {
+	def := inst.placementDef
+	if def == nil {
+		return
+	}
+	phase := (inst.seconds() + inst.acc/film.SimulationTPS) * math.Pi / 4
+	x := inst.placementX + int32(96*math.Sin(phase))
+	z := inst.placementZ + int32(48*math.Sin(2*phase))
+	ax, az := world.PlacementAnchor(nlFixed(x), nlFixed(z), def.FootprintX, def.FootprintZ)
+	fx, fz := world.PlacementCenter(ax, az, def.FootprintX, def.FootprintZ)
+	y, ok := nlPlacement(inst.sess, def, fx, fz)
+	if !ok {
+		return // hold the last valid preview site across blocked ground
+	}
+	state := &inst.b.battleState().Input
+	state.BuildCellX, state.BuildCellZ = ax, az
+	state.BuildSiteH, state.BuildOK = int32(y.Int()), true
 }

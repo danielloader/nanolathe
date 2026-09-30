@@ -34,9 +34,9 @@ var nlPresetScopes = []struct {
 func nlGraphicsPaths() []string {
 	var out []string
 	for _, k := range []string{"renderer", "fps", "expandedSidebar", "buildMenuPageSize", "trailStrength", "strategicIconConfig",
-		"waterSurface", "waterMotion", "waterFoam", "waterReflections", "modelLight", "groundLight", "groundLightStrength",
+		"waterSurface", "waterMotion", "waterFoam", "waterReflections", "hovercraftLandWash", "modelLight", "groundLight", "groundLightStrength",
 		"finish", "glint", "supersample", "blastRings", "blastRingStrength", "fireShimmer", "wreckGlow", "wreckShimmer", "scorch", "softShadows",
-		"arrival", "placementWeaponRanges"} {
+		"arrival", "placementWeaponRanges", "weaponGlowStrength", "explosionGlowStrength", "nanoGlowStrength", "shadowSoftness"} {
 		out = append(out, "presentation."+k)
 	}
 	return append(out, "display.glow", "display.glowStrength")

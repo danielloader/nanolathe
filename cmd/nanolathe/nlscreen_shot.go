@@ -91,10 +91,19 @@ type nlShotStep struct {
 	profile   int
 	// part is the grouped card's part to select, for a part with a scene of
 	// its own.
-	part int
+	part    int
+	seconds float64 // an extra fixed-time sample, e.g. the moving placement
+	resume  bool    // cache diagnostic: show a revisit without resetting its clock
 }
 
 func nlShotSteps(s *nlScreen, only string) []nlShotStep {
+	if only == "cache" {
+		return []nlShotStep{
+			{name: "cache-1-cold", page: 0, card: 0},
+			{name: "cache-2-arrival", page: 3, card: 0},
+			{name: "cache-3-revisit", page: 0, card: 0, resume: true},
+		}
+	}
 	want := map[string]bool{}
 	for _, key := range strings.Split(only, ",") {
 		if key = strings.TrimSpace(key); key != "" {
@@ -121,6 +130,9 @@ func nlShotSteps(s *nlScreen, only string) []nlShotStep {
 			}
 			base := fmt.Sprintf("%d-%s-%02d-%s", pi+1, page.key, ci+1, card.key)
 			steps = append(steps, nlShotStep{name: base, page: pi, card: ci})
+			if card.key == "placementWeaponRanges" {
+				steps = append(steps, nlShotStep{name: base + "-move", page: pi, card: ci, seconds: 5})
+			}
 			// A grouped card shows its selected part's scene, so each part
 			// that brings a scene of its own is captured too, named after the
 			// card so it sorts beside it.
@@ -245,12 +257,19 @@ func (g *nlShotGame) Draw(screen *ebiten.Image) {
 	s.Draw(g.target)
 	g.frames++
 	p := s.preview
+	seconds := 3.0
+	if p != nil && p.cur != nil {
+		seconds = nlShotSeconds(p.cur.preset)
+	}
+	if step.seconds > 0 {
+		seconds = step.seconds
+	}
 	// A capture is taken at a fixed point of its scene's own clock, so a
 	// scene with a rhythm (a shell landing, a wreck appearing) is caught at
 	// the same moment every run whatever the host's frame rate. A scene
 	// already past that point when the step begins — the step before it
 	// showed the same one — is staged afresh.
-	if g.frames == 1 && p != nil && p.cur != nil && p.cur.key == p.want && !p.loading && p.cur.seconds() >= nlShotSeconds(p.cur.preset) {
+	if g.frames == 1 && !step.resume && p != nil && p.cur != nil && p.cur.key == p.want && !p.loading && p.cur.seconds() >= seconds {
 		p.startLoad(p.want)
 	}
 	// Over the last second before the capture, a split compare's two
@@ -259,12 +278,12 @@ func (g *nlShotGame) Draw(screen *ebiten.Image) {
 	if g.frames == 1 {
 		g.diff = nlDiffStats{}
 	}
-	if step.compare && p != nil && p.cur != nil && p.cur.key == p.want && !p.loading && p.fadeLeft == 0 && p.cur.twin == nil &&
-		p.frame != nil && p.alt != nil && p.cur.seconds() >= nlShotSeconds(p.cur.preset)-1 {
+	if step.compare && p != nil && p.cur != nil && p.cur.key == p.want && !p.Loading() && p.fadeLeft == 0 && p.cur.twin == nil &&
+		p.frame != nil && p.alt != nil && p.cur.seconds() >= seconds-1 {
 		g.diff.add(p.frame, p.alt)
 	}
-	if p != nil && p.cur != nil && p.cur.key == p.want && !p.loading && p.fadeLeft == 0 && (!step.compare || p.alt != nil) &&
-		p.cur.seconds() >= nlShotSeconds(p.cur.preset) {
+	if p != nil && p.cur != nil && p.cur.key == p.want && !p.Loading() && p.fadeLeft == 0 && (!step.compare || p.alt != nil) &&
+		p.cur.seconds() >= seconds {
 		g.settle++
 	}
 	// A scene that never stages is captured as it stands after a long wait.

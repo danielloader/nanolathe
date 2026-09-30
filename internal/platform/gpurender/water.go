@@ -24,6 +24,8 @@ type waterLayer struct {
 	// while any of the three has something to draw and gates each lane on its
 	// own switch: the shading lane, the moving field, the shore foam lane.
 	surfaceDisabled, motionDisabled, foamDisabled bool
+	// landWashDisabled independently gates dry hover spray (§26.3, §30).
+	landWashDisabled bool
 	// shader is the moving surface and stillShader the same source compiled
 	// with the field frozen at phase zero and no displacement, which the
 	// water motion switch selects (§26.3, §30).
@@ -38,9 +40,10 @@ type waterLayer struct {
 
 // setWaterSurface, setWaterMotion and setWaterFoam are the executor gates of
 // the water surface shading, motion and foam switches (§30).
-func (r *Renderer) setWaterSurface(on bool) { r.water.surfaceDisabled = !on }
-func (r *Renderer) setWaterMotion(on bool)  { r.water.motionDisabled = !on }
-func (r *Renderer) setWaterFoam(on bool)    { r.water.foamDisabled = !on }
+func (r *Renderer) setWaterSurface(on bool)       { r.water.surfaceDisabled = !on }
+func (r *Renderer) setWaterMotion(on bool)        { r.water.motionDisabled = !on }
+func (r *Renderer) setWaterFoam(on bool)          { r.water.foamDisabled = !on }
+func (r *Renderer) setHovercraftLandWash(on bool) { r.water.landWashDisabled = !on }
 
 // seabedTreated reports whether the surface pass shades or moves the seabed,
 // which is when the promoted seabed decals are replayed beneath it
@@ -456,7 +459,7 @@ func (r *Renderer) drawWater(c drawlist.Terrain) {
 // scheduler preserves the under-object order and applies free zoom once.
 func (r *Renderer) SurfaceWakes(batch drawlist.SurfaceWakes) {
 	st := &r.water
-	if st.foamDisabled || !st.record.Water.Enabled || st.mask == nil || st.wakeShader == nil || len(batch.Marks) == 0 {
+	if !st.record.Water.Enabled || st.mask == nil || st.wakeShader == nil || len(batch.Marks) == 0 {
 		return
 	}
 	scale := float32(st.record.Scale.Float())
@@ -466,6 +469,15 @@ func (r *Renderer) SurfaceWakes(batch drawlist.SurfaceWakes) {
 	ox, oy := r.sched.inverseOrigin(float32(st.record.OriginX), float32(st.record.OriginY), scale)
 	mapping := [4]float32{ox, oy, 1 / scale, float32(st.step)}
 	for _, m := range batch.Marks {
+		// The emitted mark already identifies its receiving medium. Foam
+		// takes the wet shader lane; the existing Dust lane is dry land wash.
+		if m.Foam || !m.Dust {
+			if st.foamDisabled {
+				continue
+			}
+		} else if st.landWashDisabled {
+			continue
+		}
 		if m.Foam {
 			// The selected foam opacity is independent of surface opacity (§26).
 			m.Alpha *= 0.6

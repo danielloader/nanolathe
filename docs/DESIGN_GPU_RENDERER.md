@@ -4172,6 +4172,38 @@ light switches) and are not weighted by the glow strength; the ground family is
 weighted by the player's separate ground light strength instead (§30). The renderer's zero value is every family at
 100, so a host that never sets them draws the tuned look.
 
+**Player source amounts.** The Nanolathe Glow card has an Overall meter for
+`display.glow` / `display.glowStrength`, plus independent `presentation` meters:
+
+| key | source boundary | what it scales |
+|---|---|---|
+| `weaponGlowStrength` | beam and lightning strokes; projectile body sprites tagged by the recorder | glow emission |
+| `explosionGlowStrength` | all other emissive effect and strip sprites; explosion flash discs and halos | glow emission |
+| `nanoGlowStrength` | nanolathe spray | spray glow and local model, smoke and terrain illumination |
+| `groundLightStrength` | every terrain light pool | the existing ground strength of §30, shared with the Lighting card |
+
+These are authored presentation groupings, 0..200, default 100. The effect
+boundary includes fire, sparks, muzzle flashes and unclassified effect/strip
+art; it does not guess that every such sprite is an explosion. Projectile
+classification uses the recorded source tag, never a sprite name or bright
+pixels. The two weapon/effect player amounts both multiply the content pack's
+shared `weapons` percentage. Nano multiplies the content `nanolathe` value;
+ground keeps multiplying content `ground`. Overall further weights every bloom
+source but leaves local and terrain lighting alone. A zero amount admits no
+source in that family, and the other amounts are unchanged.
+
+The three new source percentages travel in `drawlist.Effects` through
+`presentationEffects` / `storeEffects` and `Renderer.SetEffects`, including the
+preview's independent executor selection. The recorder keeps the source tags
+and histories even at zero. Renderer storage is separate from the content
+family storage, so the host's per-frame `SetGlowFamilies` cannot replace a
+player amount. Source resets preserve both. Omitted settings keep 100,
+negative settings repair to 100, explicit zero remains zero, and values above
+200 cap at 200. `TestPlayerGlowAmountsStayIndependentOfContent` and
+`TestPlayerGlowZeroAndGain` lock multiplier composition and source admission;
+settings round trips, graphics preset scopes and mod-lock path discovery lock
+the UI wiring.
+
 `internal/client` parses the section beside `[materials]` when it installs the
 file (`SetMaterialTable`) and holds the result with the texture table; hosts
 read it through `Client.GlowFamilies()`. An override without `[materials]`
@@ -5486,9 +5518,36 @@ callbacks do not necessarily stop it. It retires when hidden,
 carried, airborne, incomplete or over water. Viewer/source changes and tick
 discontinuities clear all history. No distance-based fallback remains. Scatter,
 life and opacity are artistic constants; variation uses only a cue-local integer
-pattern. Existing Water and renderer controls apply, independently of gameplay
-Mode, so selecting Strict 3.1 does not change this renderer preference. Neither
-simulation stream, live COB state, resources nor retail water particles change.
+pattern. The independent **Hovercraft land wash** switch controls this existing
+dry spray, separately from the four water treatments, and the renderer control
+applies independently of gameplay Mode, so selecting Strict 3.1 does not
+change this renderer preference. Neither simulation stream, live COB state, resources nor retail water particles change.
+
+**Independent dry wash preference.** `presentation.hovercraftLandWash` is an
+On/Off renderer preference, default On. Its Effects card uses the dry hovercraft
+scene shared with Metal and compares the same recorded frame with the dry wash
+on and off. `Effects.HovercraftLandWash` is mapped by
+`presentationEffects` / `storeEffects` and applied by `Renderer.SetEffects`.
+Only this switch admits and records dry hover marks; the executor independently
+rejects the `SurfaceWake.Dust` lane with it off. WaterFoam continues to own shore
+and building foam and the `SurfaceWake.Foam` lane. Ordinary authored wet spray
+keeps its existing draw and lifetime (§26.1). The Water shortcut includes only
+its four water switches and leaves land wash unchanged.
+
+Off observes no dry-wash history. `Client.SetEffects` retains the existing
+selection-change retirement, so re-enabling starts the visual routine at the
+current tick without replaying old specks. Wash alone enables the shared static
+wet/dry mask without observing water motion; even an entirely dry map with no
+visible water retains that receiving mask. No particle geometry, shader tuning,
+script cadence, simulation state or RNG changes, and the default appearance and
+Classic pixels remain the same. Omitted settings keep On and explicit zero stays
+Off; a negative value repairs to On. The retired `water: 0` umbrella also turns
+wash off during migration, preserving that earlier explicit choice; current
+`waterFoam: 0` leaves an omitted land-wash field On.
+
+Tests cover foam Off/wash On and the inverse, history retirement on re-enable,
+the dry-only mask and device rendering, unchanged default pixel restoration,
+settings round trips, graphics preset scope, mod-lock paths and saved Apply.
 
 Verification covers script timing, moving/stopped/resumed output, authored/reversed emitter
 geometry, eligibility and reset boundaries, bounded storage, and fractional fade.
@@ -5869,9 +5928,10 @@ every mark expires.
 ## 30. Player controls for Enhanced effects
 
 The Enhanced effects reached this point as prototypes with executor comparison
-switches, environment variables, or nothing a player could reach. **Fifteen
-persisted switches** now cover them, with three strength percentages — the
-trail strength of §15 and the ground light and blast ring strengths below —
+switches, environment variables, or nothing a player could reach. **Sixteen
+persisted switches** now cover them, with seven amount percentages — the
+trail strength of §15, ground light and blast ring strengths below, three glow
+source amounts of §19.4 and the aircraft shadow softness of §34 —
 beside the glow switch and strength of §19.4. They are Nanolathe presentation preferences, not retail
 evidence: the classic executor composes identical pixels whatever they say, and
 nothing here is visible to the simulation or to any committed frame [I6].
@@ -5892,7 +5952,8 @@ are integers for the same reason the display bits are: a stored 0 is "off" and
 is kept, only a negative value is repaired, and a file that omits a key keeps
 the default because the loader decodes over the defaults [02 "Settings"].
 `internal/drawlist.Effects` is the value type both sides read, with one `bool`
-field per key; `drawlist.AllEffects()` turns every one on. `cmd/nanolathe`
+field per switch, plus integer source amounts and shadow softness;
+`drawlist.AllEffects()` turns every switch on and sets those amounts to 100. `cmd/nanolathe`
 converts the stored integers one field for one field (`presentationEffects`,
 and `storeEffects` back), so `internal/settings` remains a leaf.
 
@@ -5900,11 +5961,13 @@ and `storeEffects` back), so `internal/settings` remains a leaf.
 |---|---|---|
 | `waterSurface` | seabed decal promotion (§26.3), shared with `waterMotion` | the surface pass's shading lane: ripple shade and crest tint with their depth ramp, the damp shoreline band and the shallow tint (§26.3, §32.3); the water's shade over a refracted hull (§26.5); the seabed decal replay, shared with `waterMotion` |
 | `waterMotion` | seabed decal promotion, shared with `waterSurface` | the moving variant of the surface shader instead of the still one (field, drift, displacement); the underwater refraction (§26.5); the reflection ripple and vertex waves (§26.4, §26.6) and the wet aircraft shadow's waves (§34), held at phase zero when off |
-| `waterFoam` | the surface wake and hover dust producer and batch, and building foam (§26.1, §26.3) | the surface pass's shore foam lane, and the wake, dust and building-foam batch |
+| `waterFoam` | building foam (§26.1, §26.3); ordinary wet spray keeps its authored path | the surface pass's shore foam lane and wet foam marks |
+| `hovercraftLandWash` | dry hover spray admission, history and batch (§26.3) | the existing dry `SurfaceWake.Dust` mark lane |
 | `waterReflections` | reflection site admission for models, projectiles and explosion art (§26.4, §26.6, §32.2) | the reflection source pass and resolve |
 | `modelLight` | none: lighting kinds are always recorded | the battle light on models and smoke (§23, §31.1) |
 | `groundLight` | none | the ground pool pass (§31.3) with the short terrain flash (§31.6) |
 | `groundLightStrength` (a percentage) | none | multiplies every pool's terrain gain; 0 skips the ground pass as `groundLight` off does |
+| `weaponGlowStrength`, `explosionGlowStrength`, `nanoGlowStrength` (percentages) | none: source tags and spray histories stay recorded | independent source multipliers of §19.4 |
 | `finish` | none: face material and normals are always recorded | the metal/paint finishes (§29.1) |
 | `glint` | none | the metallic glint (§23.7) |
 | `blastRings` | blast ring metadata (§25) | ring admission to the shared distortion batch |
@@ -5914,6 +5977,7 @@ and `storeEffects` back), so `internal/settings` remains a leaf.
 | `wreckShimmer` | the fresh-wreck plume's strength and clock (§28), and the arriving commander's rising air (§36) | wreck plume admission to the same batch |
 | `scorch` | the scorch observer and draw (§29.2), the arrival landing scar that shares the layer included (§36) | the scorch layer |
 | `softShadows` | the aircraft clearance of §34; off, it records zero | the soft shadow commit; off, the ordinary silhouette route |
+| `shadowSoftness` (a percentage) | none: clearance stays recorded | scales the aircraft filter radius and its expanded bounds; zero takes the ordinary silhouette route (§34) |
 | `supersample` | the doubled lane of §17.2 (`supersampleGeometry`); off, none, as with the Anti-Alias option off | the single-sample resolve of every model commit (§17.5); on, the coverage resolve |
 | `trailStrength` (a percentage, not a switch) | the trail layer (§15): its observer and draw run while it is above zero | none: the layer draws what was recorded |
 
@@ -5925,8 +5989,11 @@ switch.
 * **The water phase and the water-motion history** (§26.1) are recorded while any
   water switch is on. Every water treatment reads them — the surface shading's
   damp-band pulse, the moving field, the shore foam's clock and wind energy, the
-  reflections' ripple and softening — so with all four off no phase is recorded
-  and no water pass opens.
+  reflections' ripple and softening — so with all four off no dynamic phase
+  is recorded and no water pass opens. Land wash alone records
+  `WaterSurface{Enabled: true}` for the shared receiving mask, with no tick,
+  wind, drift or motion observation. The mask is built for valid terrain
+  even on entirely dry maps with no visible-water blocks.
 * **Seabed decal promotion** (§26.3) runs while the surface pass shades or moves
   the seabed: `waterSurface` or `waterMotion`. Promotion is an ordering, not a
   treatment — it puts short submerged decals beneath the pass so the pass treats
@@ -5992,7 +6059,8 @@ lane added beside them:
   at phase zero, and the seabed sampled in place. The underwater commit takes the
   ordinary resolve.
 * **Foam alone** leaves open water and the dry shore exactly the painted frame and
-  draws only the lapping shore foam, and the wakes, dust and building foam.
+  draws only lapping shore foam, building foam and wet foam marks. Dry hovercraft wash follows
+  its independent switch.
 * **Reflections** read the shared coastal mask and the recorded phase, not the
   surface pass's output, so they draw over painted water with every surface lane
   off.
@@ -6023,7 +6091,8 @@ lane added beside them:
 `Presentation.UnmarshalJSON` after the ordinary decode over the defaults, and
 are never written again: they have no field, so the next save omits them. A
 stored 0 is honoured by turning every switch of that family off — `water` the four
-water switches, `lighting` both light switches, `distortion` the four heat
+water switches plus land wash (which the old umbrella covered), `lighting` both
+light switches, `distortion` the four heat
 switches (`blastRings`, `fireShimmer`, `wreckGlow`, `wreckShimmer`), and `marks`
 `scorch` together with `trailStrength` set to 0. The retired `hotWrecks` key is
 read the same way: a stored 0 turns `wreckGlow` and `wreckShimmer` off. Any other
@@ -6050,8 +6119,8 @@ yet, and a source reset preserves the selection.
 whenever the selection changes — any one switch — the way an executor swap does,
 so a switch that was off leaves no stale marks and a switch turned back on starts
 from the current tick. Each history's observer runs only under its own gate:
-trails under a non-zero trail strength, scorch under its switch, wakes and hover
-dust under the foam switch, water motion while any water switch is on. It also
+trails under a non-zero trail strength, scorch under its switch, dry hover
+spray under land wash, water motion while any water switch is on. It also
 advances the paused-world revision, because a changed selection is a different
 world raster (§13.10).
 
@@ -6073,8 +6142,8 @@ shows On while any of its switches is on, and pressing it writes every one of
 them to the new value. Water is the four water switches, Lights the two light
 switches, Metal the finishes alone (not the glint), Heat the four heat switches
 (the rings, the fire shimmer and both wreck switches), and Marks `scorch` with the trail strength — off sets the strength to 0, on gives
-a zero strength the default and leaves a chosen one as it was. The glint and the
-soft shadows and the supersampling belong to no family, and no shortcut moves the ground light or blast
+a zero strength the default and leaves a chosen one as it was. The glint, land wash,
+soft shadows and supersampling belong to no family, and no shortcut moves the ground light or blast
 ring strength, whose effects keep switches of their own. The shortcuts live in one table
 (`effectFamilies`, `cmd/nanolathe/nanolathe_options.go`) that both the page and
 the commands read.
@@ -6094,8 +6163,9 @@ lock the recorder side, `TestRetiredEffectMastersMigrate` the migration of each
 retired key, and `TestEffectFamiliesShowAnyAndSetAll` with the options and chat
 tests the shortcuts. On a device, the water fixture checks that a still surface
 still shades, holds still across phases away from the shore, and keeps its shore
-foam moving; that the foam switch removes shore foam, building foam and hover
-dust; that the surface switch alone removes the shading and the damp band while
+foam moving; that foam removes shore/building foam while dry hover wash keeps
+its independent switch and works with water treatments off on an entirely dry
+map; that the surface switch alone removes the shading and the damp band while
 the water keeps moving and foaming; that motion alone moves open water, foam alone
 leaves open water and the dry shore exactly painted, and all three off draw
 nothing. The underwater fixture checks that motion off takes the ordinary commit
@@ -6605,6 +6675,18 @@ writes zero clearance and the executor refuses the soft commit, so an aircraft
 takes the ordinary silhouette route every other mobile subject takes — the hard
 shadow the executor drew before this section existed. A recorded clearance of
 zero is what selects that route, and the paired capture fixture pairs on that.
+The player's **shadowSoftness** amount multiplies the altitude-dependent filter
+radius by `percent / 100`, 0..200, default 100. It travels in `Effects` and is
+applied by `SetEffects`; omitted settings keep 100, explicit zero remains zero,
+negative settings repair to 100, and larger values cap at 200. The expanded
+rectangle uses that same scaled radius, retaining the water displacement pad.
+At 100 the existing radius and pixels are identical; at zero the executor
+refuses the soft commit and takes the ordinary silhouette route. The switch
+still owns admission, so an amount never enables a switched-off treatment.
+Water opacity, wave displacement and the fixed 25-tap filter budget stay as
+above. `TestAircraftShadowPlayerSoftness` locks radius and bounds together;
+the device fixture compares 50, 100 and 200 and checks the zero bypass.
+
 The wet waves above are water motion: with the water motion switch off
 they hold phase zero and no drift, and the rest of the wet treatment — the weaker
 opacity and the wider filter — stays.

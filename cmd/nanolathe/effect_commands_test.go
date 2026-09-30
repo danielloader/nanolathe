@@ -36,7 +36,7 @@ func TestEffectChatCommandsToggleAndPersist(t *testing.T) {
 	// Every family switch is off, and Marks' trail strength with them; the
 	// glint, the soft shadows and the supersampling belong to no family and
 	// keep their values.
-	if want := (drawlist.Effects{Glint: true, SoftShadows: true, Supersample: true}); cl.Effects() != want || cl.TrailStrength() != 0 {
+	if want := (drawlist.Effects{HovercraftLandWash: true, Glint: true, SoftShadows: true, Supersample: true, WeaponGlowStrength: 100, ExplosionGlowStrength: 100, NanoGlowStrength: 100, ShadowSoftness: 100}); cl.Effects() != want || cl.TrailStrength() != 0 {
 		t.Fatalf("direct toggles left %+v, trail strength %d", cl.Effects(), cl.TrailStrength())
 	}
 	stored, err := settings.Load()

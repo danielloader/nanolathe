@@ -6,9 +6,10 @@ import "github.com/hajimehoshi/ebiten/v2"
 // is active: the Nanolathe screen (docs/DESIGN_INTERFACE_HUD_INPUT.md §3.17).
 // It is drawn at the display's own pixel size rather than the authored
 // 640×480 canvas, it receives the pointer and keyboard (the client sees an
-// idle sample, so nothing underneath reacts), and the system pointer is shown
-// in place of the retail software cursor. The client keeps stepping, so host
-// work such as a requested content reload still runs.
+// idle sample, so nothing underneath reacts). Screens may own a software
+// pointer through FullScreenPointer; otherwise the system pointer is shown.
+// The client keeps stepping, so host work such as a requested content reload
+// still runs.
 type FullScreen interface {
 	// Active reports whether the screen owns the window this frame.
 	Active() bool
@@ -16,6 +17,13 @@ type FullScreen interface {
 	Update()
 	// Draw presents the screen; it owns every pixel.
 	Draw(screen *ebiten.Image)
+}
+
+// FullScreenPointer optionally supplies the active screen's software pointer.
+// OwnsPointer is true only while usable art is installed; the host keeps the
+// native pointer visible when the screen cannot draw its own.
+type FullScreenPointer interface {
+	OwnsPointer() bool
 }
 
 func (a *app) screenActive() bool {

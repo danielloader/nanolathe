@@ -10,12 +10,16 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
+	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
+	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
+	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
@@ -33,13 +37,21 @@ var nlScreenInst *nlScreen
 type nlScreen struct {
 	host func() *gameShell
 
-	open    bool
-	closing bool // closed, waiting for the closing gesture to be released
-	ready   bool
-	fonts   screenkit.Fonts
-	art     *nlArt
-	preview *nlPreview
-	hits    screenkit.Hits
+	open          bool
+	closing       bool // closed, waiting for the closing gesture to be released
+	ready         bool
+	fonts         screenkit.Fonts
+	art           *nlArt
+	pointer       *client.Cursors
+	pointerCS     *contentSet
+	pointerPal    *palette.Tables
+	pointerImages map[*formats.GAFFrame]*ebiten.Image
+	pointerClock  time.Time
+	pointerTick   int64
+	pointerUnder  *ebiten.Image
+	pointerRect   image.Rectangle
+	preview       *nlPreview
+	hits          screenkit.Hits
 
 	page    int
 	focus   [5]int
@@ -135,6 +147,11 @@ func (s *nlScreen) show(g *gameShell) {
 	s.focus = [5]int{}
 	s.open = true
 	s.lastFrame = time.Time{}
+	s.pointerClock, s.pointerTick = time.Time{}, 0
+	s.pointerRect = image.Rectangle{}
+	if s.pointer != nil {
+		s.pointer.SetIndex(render.CursorNormal)
+	}
 	g.playMenuCue("BigButton")
 }
 
@@ -209,6 +226,7 @@ func (s *nlScreen) releasePreview(wait bool) {
 // screen.
 func (s *nlScreen) bindShell(g *gameShell) {
 	s.bound = g
+	s.bindPointer(g)
 	s.reloadMods(g)
 	if s.stats.base != nil && s.statsCS != g.cs {
 		s.stats = nlStats{}
@@ -269,6 +287,7 @@ func (s *nlScreen) hide() {
 // finishHide releases the previews once the closing gesture has ended.
 func (s *nlScreen) finishHide() {
 	s.open, s.closing = false, false
+	s.pointerRect = image.Rectangle{}
 	if s.preview != nil {
 		s.preview.Close()
 		s.preview = nil
@@ -298,7 +317,7 @@ func (s *nlScreen) snapshot(g *gameShell) nlDraft {
 		override:      g.lockOverridden(g.cs.mod),
 		interfaceType: g.interfaceType,
 	}
-	if d.glowStrength <= 0 {
+	if d.glowStrength < 0 {
 		d.glowStrength = settings.DefaultGlowStrength
 	}
 	for i, m := range s.mods {
@@ -671,7 +690,9 @@ func clamp(v, lo, hi float64) float64 { return math.Max(lo, math.Min(hi, v)) }
 
 // Draw implements ebitenapp.FullScreen.
 func (s *nlScreen) Draw(screen *ebiten.Image) {
+	s.restorePointer(screen)
 	if s.closing || (s.preview == nil && s.reload == nil) {
+		s.drawPointer(screen, time.Now())
 		return
 	}
 	now := time.Now()
@@ -680,6 +701,7 @@ func (s *nlScreen) Draw(screen *ebiten.Image) {
 		dt = min(0.1, now.Sub(s.lastFrame).Seconds())
 	}
 	s.lastFrame = now
+	defer s.drawPointer(screen, now)
 	s.clock += dt
 	s.dt = dt
 	s.heroT = min(1, s.heroT+dt/0.28)
@@ -1234,34 +1256,159 @@ func (s *nlScreen) buttonAuto(screen *ebiten.Image, id string, x, y float64, lab
 	return w
 }
 
-// button is the TA metal plate button; gold marks the committing action.
+// button is the mounted stock metal plate; gold marks the committing action.
 func (s *nlScreen) button(screen *ebiten.Image, id string, r screenkit.Rect, label string, gold, pulse bool, click func()) {
 	u := s.u()
-	hover := s.hits.HoverAmount(id)
-	pressed := s.hits.Active() == id && s.hits.Hot() == id
-	top, mid, bottom := color.RGBA{107, 107, 99, 255}, color.RGBA{70, 70, 63, 255}, color.RGBA{55, 55, 47, 255}
-	light, dark := color.RGBA{201, 201, 193, 255}, color.RGBA{30, 30, 27, 255}
-	text := color.RGBA{244, 236, 206, 255}
-	if gold {
-		top, mid, bottom = color.RGBA{138, 118, 50, 255}, color.RGBA{92, 75, 27, 255}, color.RGBA{69, 57, 15, 255}
-		light, dark = color.RGBA{243, 223, 144, 255}, color.RGBA{77, 63, 18, 255}
-		text = color.RGBA{255, 244, 200, 255}
-	}
 	if pulse {
 		a := 0.35 + 0.25*math.Sin(s.clock*4)
 		screenkit.Glow(screen, screenkit.Rect{X: r.X - 20*u, Y: r.Y - 16*u, W: r.W + 40*u, H: r.H + 32*u}, alphaC(color.RGBA{255, 205, 80, 255}, a))
 	}
-	top, mid = lerpRGBA(top, color.RGBA{255, 255, 255, 255}, hover*0.12), lerpRGBA(mid, color.RGBA{255, 255, 255, 255}, hover*0.08)
-	screenkit.Fill(screen, r.Inset(-1*u), color.RGBA{0, 0, 0, 255})
-	screenkit.VGradient(screen, screenkit.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H * 0.55}, top, mid)
-	screenkit.VGradient(screen, screenkit.Rect{X: r.X, Y: r.Y + r.H*0.55, W: r.W, H: r.H * 0.45}, mid, bottom)
-	screenkit.Bevel(screen, r, 2*u, light, dark, pressed)
-	off := 0.0
-	if pressed {
-		off = 1.5 * u
+	s.buttonPlate(screen, id, r, gold, false)
+	text := color.RGBA{244, 236, 206, 255}
+	if gold {
+		text = nlCream
 	}
-	s.fonts.Display.Draw(screen, label, r.X+r.W/2+off, r.Y+r.H/2+7*u+off, screenkit.Style{Size: 14 * u, Tracking: 0.12, Top: text, Upper: true, Align: 1, Shadow: 0.1})
+	size := max(8, 14*u)
+	st := screenkit.Style{Size: size, Tracking: 0.06, Top: text, Upper: true, Align: 1, Shadow: 0.1}
+	for st.Size > 6 && s.fonts.Display.Measure(label, st) > r.W-12*u {
+		st.Size -= 0.5
+	}
+	// The caption stays still while the authored plate changes [07 R-WGT-01 §3].
+	s.buttonCaption(screen, label, r.X+r.W/2, r.Y+r.H/2+st.Size/2, st)
 	s.hits.Add(screenkit.Region{ID: id, Rect: r, Click: click})
+}
+
+// buttonCaption retains readable stock-style pale lettering with a dark
+// outline over the textured face, including compact key caps.
+func (s *nlScreen) buttonCaption(screen *ebiten.Image, label string, x, y float64, st screenkit.Style) {
+	outline := st
+	outline.Top, outline.Bottom, outline.Shadow = color.RGBA{10, 12, 10, 235}, color.RGBA{}, 0
+	d := max(0.65, st.Size/14)
+	for _, off := range [4][2]float64{{-d, 0}, {d, 0}, {0, -d}, {0, d}} {
+		s.fonts.Display.Draw(screen, label, x+off[0], y+off[1], outline)
+	}
+	st.Shadow = 0
+	s.fonts.Display.Draw(screen, label, x, y, st)
+}
+
+// buttonPlate is shared by actions, profile choices and keyboard caps.
+func (s *nlScreen) buttonPlate(screen *ebiten.Image, id string, r screenkit.Rect, selected, disabled bool) {
+	u := s.u()
+	hover := s.hits.HoverAmount(id)
+	pressed := s.hits.Active() == id && s.hits.Hot() == id
+	if !s.art.drawButton(screen, r, pressed, disabled) {
+		screenkit.Fill(screen, r, color.RGBA{70, 70, 63, 255})
+		screenkit.Bevel(screen, r, max(1, 2*u), color.RGBA{201, 201, 193, 255}, color.RGBA{30, 30, 27, 255}, pressed)
+	}
+	if hover > 0 && !disabled {
+		screenkit.Fill(screen, r.Inset(max(1, 3*u)), color.RGBA{255, 255, 255, uint8(8 * hover)})
+	}
+	if selected {
+		screenkit.Outline(screen, r, max(1, u), color.RGBA{230, 206, 131, 255})
+	}
+}
+
+// bindPointer gives the screen its own playback from the currently mounted
+// cursor bank, never the underlying menu's or preview's mutable cursor.
+func (s *nlScreen) bindPointer(g *gameShell) {
+	if g == nil || g.cs == s.pointerCS {
+		return
+	}
+	s.pointerCS, s.pointer, s.pointerPal = g.cs, nil, nil
+	s.pointerImages = map[*formats.GAFFrame]*ebiten.Image{}
+	s.pointerClock, s.pointerTick = time.Time{}, 0
+	if g.cs == nil || g.cs.fs == nil {
+		return
+	}
+	s.pointer, _ = client.LoadCursors(g.cs.fs)
+	if g.assets != nil {
+		s.pointerPal = g.assets.pal
+	}
+}
+
+// OwnsPointer implements the optional FullScreen pointer contract. Missing art
+// leaves the native pointer visible, including after a content reload fails.
+func (s *nlScreen) OwnsPointer() bool {
+	f := s.pointer.Frame()
+	return s.Active() && s.pointerPal != nil && f != nil && f.Width > 0 && f.Height > 0
+}
+
+func (s *nlScreen) pointerShape() int {
+	if !s.closing && (s.reload != nil || s.preview.Loading()) {
+		return render.CursorHourglass
+	}
+	return render.CursorNormal
+}
+
+func (s *nlScreen) stepPointer(now time.Time) {
+	if s.pointer == nil {
+		return
+	}
+	s.pointer.SetIndex(s.pointerShape())
+	if s.pointerClock.IsZero() {
+		s.pointerClock = now
+	}
+	ticks := int64(now.Sub(s.pointerClock)) * 30 / int64(time.Second)
+	if ticks > s.pointerTick {
+		s.pointer.Step(int(ticks - s.pointerTick))
+		s.pointerTick = ticks
+	}
+}
+
+// nlPointerRect scales the authored hotspot along with the frame. The pointer
+// sample and destination are device pixels [03 R-FX-01 §5][fmt gaf].
+func nlPointerRect(f *formats.GAFFrame, x, y int, scale float64) screenkit.Rect {
+	return screenkit.Rect{X: float64(x) - float64(f.XOffset)*scale, Y: float64(y) - float64(f.YOffset)*scale, W: float64(f.Width) * scale, H: float64(f.Height) * scale}
+}
+
+func (s *nlScreen) restorePointer(screen *ebiten.Image) {
+	if s.pointerUnder == nil || s.pointerRect.Empty() {
+		return
+	}
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Translate(float64(s.pointerRect.Min.X), float64(s.pointerRect.Min.Y))
+	screen.DrawImage(s.pointerUnder, op)
+	s.pointerRect = image.Rectangle{}
+}
+
+// drawPointer is deferred until every overlay has drawn. A small saved region
+// also lets it keep moving while the closing gesture holds the last frame.
+func (s *nlScreen) drawPointer(screen *ebiten.Image, now time.Time) {
+	s.stepPointer(now)
+	if !s.OwnsPointer() {
+		return
+	}
+	f := s.pointer.Frame()
+	img := s.pointerImages[f]
+	if img == nil {
+		rgba := nlGAFImage(f, s.pointerPal)
+		if rgba == nil {
+			return
+		}
+		img = ebiten.NewImageFromImage(rgba)
+		s.pointerImages[f] = img
+	}
+	x, y := ebiten.CursorPosition()
+	k := max(1, math.Round(2*s.u()))
+	r := nlPointerRect(f, x, y, k)
+	clip := image.Rect(int(r.X), int(r.Y), int(r.X+r.W), int(r.Y+r.H)).Intersect(screen.Bounds())
+	if clip.Empty() {
+		return
+	}
+	if s.pointerUnder == nil || s.pointerUnder.Bounds().Dx() != clip.Dx() || s.pointerUnder.Bounds().Dy() != clip.Dy() {
+		if s.pointerUnder != nil {
+			s.pointerUnder.Deallocate()
+		}
+		s.pointerUnder = ebiten.NewImage(clip.Dx(), clip.Dy())
+	}
+	s.pointerUnder.Clear()
+	// Reuse the canvas identity; the small destination clips this translated
+	// copy without a moving source view (DESIGN_GPU_RENDERER §34).
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Translate(float64(-clip.Min.X), float64(-clip.Min.Y))
+	s.pointerUnder.DrawImage(screen, op)
+	s.pointerRect = clip
+	screenkit.Image(screen, img, r, 1, true)
 }
 
 // ---------------------------------------------------------------- hero
@@ -1616,7 +1763,9 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card nlCard, x, y, a float64)
 	u := s.u()
 	df, bf := s.fonts.Display, s.fonts.Body
 	sel := s.selectedPart(card)
-	rowH := 58 * u
+	// Leave room for the description, renderer/lock note and Compare above
+	// the carousel, including the five-row Glow and Heat cards at 16:9.
+	rowH := min(58*u, max(44*u, (float64(s.carouselTop())-y-150*u)/float64(len(card.parts))-6*u))
 	for i, p := range card.parts {
 		r := screenkit.Rect{X: x, Y: y + float64(i)*(rowH+6*u), W: 640 * u, H: rowH}
 		id := fmt.Sprintf("part-%s-%d", card.key, i)
@@ -1628,8 +1777,8 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card nlCard, x, y, a float64)
 		} else {
 			screenkit.Outline(screen, r, 1*u, alphaC(lerpRGBA(color.RGBA{58, 58, 51, 255}, color.RGBA{150, 150, 130, 255}, s.hits.HoverAmount(id)), a))
 		}
-		df.Draw(screen, strings.ToUpper(p.label), r.X+18*u, r.Y+25*u, screenkit.Style{Size: 16 * u, Tracking: 0.08, Top: alphaC(nlCream, a)})
-		bf.Draw(screen, p.sub, r.X+18*u, r.Y+45*u, screenkit.Style{Size: 11 * u, Top: alphaC(color.RGBA{169, 162, 131, 255}, a)})
+		df.Draw(screen, strings.ToUpper(p.label), r.X+18*u, r.Y+min(25*u, rowH-25*u), screenkit.Style{Size: 16 * u, Tracking: 0.08, Top: alphaC(nlCream, a)})
+		bf.Draw(screen, p.sub, r.X+18*u, r.Y+rowH-13*u, screenkit.Style{Size: 11 * u, Top: alphaC(color.RGBA{169, 162, 131, 255}, a)})
 		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: r.X, Y: r.Y, W: r.W - 230*u, H: r.H}, Click: func() { s.partSel[card.key] = i }})
 		// The control, right-aligned in the row.
 		cx := r.X + r.W - 16*u
@@ -1731,11 +1880,8 @@ func (s *nlScreen) heroMeter(screen *ebiten.Image, card nlCard, v int, x, y, a f
 
 // arrow is a TA green arrow button.
 func (s *nlScreen) arrow(screen *ebiten.Image, id string, r screenkit.Rect, left bool, enabled bool, click func()) {
-	u := s.u()
 	hover := s.hits.HoverAmount(id)
-	screenkit.Fill(screen, r, color.RGBA{0, 0, 0, 255})
-	screenkit.VGradient(screen, r.Inset(2*u), color.RGBA{78, 78, 72, 255}, color.RGBA{40, 40, 36, 255})
-	screenkit.Bevel(screen, r.Inset(2*u), 2*u, color.RGBA{190, 190, 182, 255}, color.RGBA{24, 24, 22, 255}, s.hits.Active() == id)
+	s.buttonPlate(screen, id, r, false, !enabled)
 	c := lerpRGBA(color.RGBA{40, 190, 60, 255}, color.RGBA{120, 255, 140, 255}, hover)
 	if !enabled {
 		c = color.RGBA{40, 70, 45, 255}
@@ -1998,10 +2144,7 @@ func (s *nlScreen) heroContent(screen *ebiten.Image, card nlCard, v int, x, y, a
 
 // arrowV is the arrow button pointing up or down.
 func (s *nlScreen) arrowV(screen *ebiten.Image, id string, r screenkit.Rect, up, enabled bool, click func()) {
-	u := s.u()
-	screenkit.Fill(screen, r, color.RGBA{0, 0, 0, 255})
-	screenkit.VGradient(screen, r.Inset(2*u), color.RGBA{78, 78, 72, 255}, color.RGBA{40, 40, 36, 255})
-	screenkit.Bevel(screen, r.Inset(2*u), 2*u, color.RGBA{190, 190, 182, 255}, color.RGBA{24, 24, 22, 255}, s.hits.Active() == id)
+	s.buttonPlate(screen, id, r, false, !enabled)
 	c := lerpRGBA(color.RGBA{40, 190, 60, 255}, color.RGBA{120, 255, 140, 255}, s.hits.HoverAmount(id))
 	if !enabled {
 		c = color.RGBA{40, 70, 45, 255}

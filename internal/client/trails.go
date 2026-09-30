@@ -232,8 +232,8 @@ func (c *Client) ObserveCommittedTick() {
 
 // observeEffectHistories feeds one committed frame to the Enhanced history
 // layers. Each observer is gated by its own switch (§30): the trails by a
-// non-zero trail strength, the scorch marks by the scorch switch, the wakes and
-// hover dust by the water foam switch, and the water motion by any water
+// non-zero trail strength, scorch marks by the scorch switch, dry hover spray
+// by the land wash switch, and water motion by any water
 // switch, because the surface shading, the moving field, the shore foam and
 // the reflections all read its wind energy and drift. A switch that is off
 // accumulates no history, so turning it back on starts from the current tick
@@ -245,7 +245,7 @@ func (c *Client) observeEffectHistories(f *frame.Frame) {
 	if c.effects.Scorch {
 		c.observeScorchMarks(f)
 	}
-	if c.effects.WaterFoam {
+	if c.effects.HovercraftLandWash {
 		c.placeSurfaceWakes(f)
 	}
 	if c.effects.WaterPhase() {

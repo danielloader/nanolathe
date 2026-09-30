@@ -48,8 +48,11 @@ func TestPresentationPreferencesLoadAndRoundTrip(t *testing.T) {
 		{"invalid preferences", `{"version":1,"presentation":{"renderer":"unknown","fps":-1}}`, want("modern", 60)},
 		// A file that omits the effect keys entirely still decodes to the
 		// defaults, and a stored 0 is "off" and survives the round trip.
-		{"effects off", `{"version":1,"presentation":{"renderer":"modern","fps":60,"waterSurface":0,"waterMotion":0,"waterFoam":0,"waterReflections":0,"modelLight":0,"groundLight":0,"finish":0,"glint":0,"blastRings":0,"fireShimmer":0,"wreckGlow":0,"wreckShimmer":0,"scorch":0,"softShadows":0,"supersample":0}}`,
+		{"effects off", `{"version":1,"presentation":{"renderer":"modern","fps":60,"waterSurface":0,"waterMotion":0,"waterFoam":0,"waterReflections":0,"hovercraftLandWash":0,"modelLight":0,"groundLight":0,"finish":0,"glint":0,"blastRings":0,"fireShimmer":0,"wreckGlow":0,"wreckShimmer":0,"scorch":0,"softShadows":0,"supersample":0}}`,
 			want("modern", 60, allOff)},
+		{"land wash off", `{"version":1,"presentation":{"hovercraftLandWash":0}}`, want("modern", 60, func(p *Presentation) { p.HovercraftLandWash = 0 })},
+		{"land wash repaired", `{"version":1,"presentation":{"hovercraftLandWash":-1}}`, want("modern", 60)},
+		{"foam off keeps land wash", `{"version":1,"presentation":{"waterFoam":0}}`, want("modern", 60, func(p *Presentation) { p.WaterFoam = 0 })},
 		{"one effect off", `{"version":1,"presentation":{"renderer":"modern","fps":60,"blastRings":0}}`,
 			want("modern", 60, func(p *Presentation) { p.BlastRings = 0 })},
 		{"surface off alone", `{"version":1,"presentation":{"waterSurface":0}}`,
@@ -82,6 +85,19 @@ func TestPresentationPreferencesLoadAndRoundTrip(t *testing.T) {
 			want("modern", 60)},
 		{"strengths kept", `{"version":1,"presentation":{"groundLightStrength":150,"blastRingStrength":25}}`,
 			want("modern", 60, func(p *Presentation) { p.GroundLightStrength, p.BlastRingStrength = 150, 25 })},
+		{"source amounts zero", `{"version":1,"presentation":{"weaponGlowStrength":0,"explosionGlowStrength":0,"nanoGlowStrength":0,"shadowSoftness":0}}`,
+			want("modern", 60, func(p *Presentation) {
+				p.WeaponGlowStrength, p.ExplosionGlowStrength, p.NanoGlowStrength, p.ShadowSoftness = 0, 0, 0, 0
+			})},
+		{"source amounts capped", `{"version":1,"presentation":{"weaponGlowStrength":250,"explosionGlowStrength":201,"nanoGlowStrength":500,"shadowSoftness":1000}}`,
+			want("modern", 60, func(p *Presentation) {
+				p.WeaponGlowStrength, p.ExplosionGlowStrength, p.NanoGlowStrength, p.ShadowSoftness = 200, 200, 200, 200
+			})},
+		{"source amounts repaired", `{"version":1,"presentation":{"weaponGlowStrength":-1,"explosionGlowStrength":-3,"nanoGlowStrength":-10,"shadowSoftness":-2}}`, want("modern", 60)},
+		{"source amounts independent", `{"version":1,"presentation":{"weaponGlowStrength":25,"explosionGlowStrength":150,"nanoGlowStrength":50,"shadowSoftness":200}}`,
+			want("modern", 60, func(p *Presentation) {
+				p.WeaponGlowStrength, p.ExplosionGlowStrength, p.NanoGlowStrength, p.ShadowSoftness = 25, 150, 50, 200
+			})},
 		{"trail strength zero", `{"version":1,"presentation":{"trailStrength":0}}`,
 			func() Presentation { p := want("modern", 60); p.TrailStrength = 0; return p }()},
 		{"trail strength capped", `{"version":1,"presentation":{"trailStrength":250}}`,
@@ -126,7 +142,7 @@ func TestRetiredEffectMastersMigrate(t *testing.T) {
 		off func(p *Presentation) []*int
 	}{
 		{"water", func(p *Presentation) []*int {
-			return []*int{&p.WaterSurface, &p.WaterMotion, &p.WaterFoam, &p.WaterReflections}
+			return []*int{&p.WaterSurface, &p.WaterMotion, &p.WaterFoam, &p.WaterReflections, &p.HovercraftLandWash}
 		}},
 		{"lighting", func(p *Presentation) []*int { return []*int{&p.ModelLight, &p.GroundLight} }},
 		{"distortion", func(p *Presentation) []*int {

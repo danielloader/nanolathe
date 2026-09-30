@@ -155,7 +155,9 @@ type Renderer struct {
 	// families is the per-family strength a content pack sets (glow.go,
 	// §19.4): the weapon and nanolathe glow and the terrain light.
 	families glowFamilies
-	lighting battleLighting
+	// Player amounts stay separate from the content values the host refreshes.
+	weaponGlowOffset, explosionGlowOffset, nanoGlowOffset float32
+	lighting                                              battleLighting
 	// ground is the Enhanced terrain illumination pass of §31: one clipped
 	// disc per battle light, drawn at the end of the terrain pass.
 	ground         groundLighting

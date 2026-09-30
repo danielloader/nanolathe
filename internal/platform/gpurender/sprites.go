@@ -115,7 +115,7 @@ func (r *Renderer) Sprite(sp drawlist.Sprite) {
 				// Effect and projectile art is a light source for the glow layer
 				// (§19); the sprite itself is drawn exactly as before.
 				r.glowSprite(sp.Frame, int(sp.X)-int(sp.Frame.XOffset), int(sp.Y)-int(sp.Frame.YOffset),
-					clipX, clipY, clipW, clipH, 1)
+					clipX, clipY, clipW, clipH, 1, sp.LightingKind)
 			}
 		} else {
 			// UIBlit: the rectangle is the contract, no offset [07 §4].
@@ -168,7 +168,7 @@ func (r *Renderer) Sprite(sp drawlist.Sprite) {
 			// Strip art (fire, explosion animation) is a light source for the glow
 			// layer at the half strength it is composited at (§19).
 			r.glowSprite(sp.Frame, int(sp.X)-int(sp.Frame.XOffset), int(sp.Y)-int(sp.Frame.YOffset),
-				clipX, clipY, clipW, clipH, 0.5)
+				clipX, clipY, clipW, clipH, 0.5, sp.LightingKind)
 		}
 	case drawlist.BlitFeatureShadow:
 		// Feature shadows select the ordinary keyed or ALP-tinted frame primitive.

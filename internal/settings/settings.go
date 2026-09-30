@@ -670,8 +670,10 @@ type Presentation struct {
 	// WaterMotion is the moving surface — drift, churn and gusts — and the
 	// underwater refraction; off leaves a still surface.
 	WaterMotion int `json:"waterMotion"`
-	// WaterFoam is shore and building foam, surface wakes and hover dust.
+	// WaterFoam is shore and building foam and wet foam marks.
 	WaterFoam int `json:"waterFoam"`
+	// HovercraftLandWash is the existing dry-ground hovercraft spray (§26.3).
+	HovercraftLandWash int `json:"hovercraftLandWash"`
 	// WaterReflections is the screen-space reflections, reflected explosions
 	// included.
 	WaterReflections int `json:"waterReflections"`
@@ -682,6 +684,11 @@ type Presentation struct {
 	// GroundLightStrength scales the ground pools' intensity, a percentage of
 	// the tuned look, 0..MaxEffectStrength; 0 draws none.
 	GroundLightStrength int `json:"groundLightStrength"`
+	// Player glow source amounts multiply the content families independently
+	// (DESIGN_GPU_RENDERER §19.4). Zero emits nothing; 100 is the tuned look.
+	WeaponGlowStrength    int `json:"weaponGlowStrength"`
+	ExplosionGlowStrength int `json:"explosionGlowStrength"`
+	NanoGlowStrength      int `json:"nanoGlowStrength"`
 	// Finish is the metal/paint material finishes.
 	Finish int `json:"finish"`
 	// Glint is the metallic glint.
@@ -703,6 +710,9 @@ type Presentation struct {
 	// SoftShadows is the aircraft soft shadows; off, aircraft keep the
 	// ordinary hard silhouette shadow.
 	SoftShadows int `json:"softShadows"`
+	// ShadowSoftness scales the altitude-dependent aircraft shadow radius,
+	// 0..MaxEffectStrength; zero keeps the ordinary silhouette (§34).
+	ShadowSoftness int `json:"shadowSoftness"`
 	// Supersample is the Enhanced model supersampling: every unit, structure
 	// and wreck rasterized at twice the resolution and resolved by coverage,
 	// so edges blend. Off, models are drawn at the native step with whole
@@ -751,13 +761,14 @@ func DefaultPresentation() Presentation {
 	return Presentation{
 		Renderer: "modern", FPS: 60, ExpandedSidebar: 1, GroupNumbers: 1, Arrival: 1, PlacementWeaponRanges: 1,
 		MexSnapRadius: -1, WreckSnapRadius: -1, BuildRotateKey: "/", ClickSnapOverrideKey: "alt", BuildRotationOverlay: 1, BuildDrag: 1,
-		WaterSurface: DefaultEffectSwitch, WaterMotion: DefaultEffectSwitch, WaterFoam: DefaultEffectSwitch, WaterReflections: DefaultEffectSwitch,
+		WaterSurface: DefaultEffectSwitch, WaterMotion: DefaultEffectSwitch, WaterFoam: DefaultEffectSwitch, HovercraftLandWash: DefaultEffectSwitch, WaterReflections: DefaultEffectSwitch,
 		ModelLight: DefaultEffectSwitch, GroundLight: DefaultEffectSwitch, GroundLightStrength: DefaultEffectStrength,
+		WeaponGlowStrength: DefaultEffectStrength, ExplosionGlowStrength: DefaultEffectStrength, NanoGlowStrength: DefaultEffectStrength,
 		Finish: DefaultEffectSwitch, Glint: DefaultEffectSwitch,
 		BlastRings: DefaultEffectSwitch, BlastRingStrength: DefaultEffectStrength,
 		FireShimmer: DefaultEffectSwitch, WreckGlow: DefaultEffectSwitch, WreckShimmer: DefaultEffectSwitch,
-		Scorch:        DefaultEffectSwitch,
-		SoftShadows:   DefaultEffectSwitch,
+		Scorch:      DefaultEffectSwitch,
+		SoftShadows: DefaultEffectSwitch, ShadowSoftness: DefaultEffectStrength,
 		Supersample:   DefaultEffectSwitch,
 		TrailStrength: DefaultTrailStrength,
 		MegamapWheel:  1, MegamapWheelMove: 1, MegamapFlash: 1,
@@ -828,7 +839,7 @@ func (p *Presentation) Normalize() {
 	} else if p.TrailStrength > MaxTrailStrength {
 		p.TrailStrength = MaxTrailStrength
 	}
-	for _, value := range []*int{&p.GroundLightStrength, &p.BlastRingStrength} {
+	for _, value := range []*int{&p.GroundLightStrength, &p.BlastRingStrength, &p.WeaponGlowStrength, &p.ExplosionGlowStrength, &p.NanoGlowStrength, &p.ShadowSoftness} {
 		if *value < 0 {
 			*value = DefaultEffectStrength
 		} else if *value > MaxEffectStrength {
@@ -843,7 +854,7 @@ func (p *Presentation) Normalize() {
 // own.
 func (p *Presentation) effectSwitches() []*int {
 	return []*int{
-		&p.WaterSurface, &p.WaterMotion, &p.WaterFoam, &p.WaterReflections,
+		&p.WaterSurface, &p.WaterMotion, &p.WaterFoam, &p.WaterReflections, &p.HovercraftLandWash,
 		&p.ModelLight, &p.GroundLight,
 		&p.Finish, &p.Glint,
 		&p.BlastRings, &p.FireShimmer, &p.WreckGlow, &p.WreckShimmer,
@@ -888,7 +899,7 @@ func (p *Presentation) UnmarshalJSON(data []byte) error {
 			*v = 0
 		}
 	}
-	off(retired.Water, &p.WaterSurface, &p.WaterMotion, &p.WaterFoam, &p.WaterReflections)
+	off(retired.Water, &p.WaterSurface, &p.WaterMotion, &p.WaterFoam, &p.WaterReflections, &p.HovercraftLandWash)
 	off(retired.Lighting, &p.ModelLight, &p.GroundLight)
 	off(retired.Distortion, &p.BlastRings, &p.FireShimmer, &p.WreckGlow, &p.WreckShimmer)
 	off(retired.Marks, &p.Scorch, &p.TrailStrength)

@@ -24,9 +24,12 @@ type Effects struct {
 	// aircraft shadows on water. Off, the surface is still — the field frozen
 	// at phase zero, the seabed undisplaced.
 	WaterMotion bool
-	// WaterFoam is shore foam, building foam, surface wakes and hover dust
+	// WaterFoam is shore foam, building foam and wet foam marks
 	// (§26.1, §26.3).
 	WaterFoam bool
+	// HovercraftLandWash is the existing dry-ground hovercraft spray (§26.3).
+	// It uses the shared wet/dry mask, independently of water treatments.
+	HovercraftLandWash bool
 	// WaterReflections is the screen-space reflections of models and
 	// projectiles (§26.4, §26.6) and the reflected explosions of §32.2.
 	WaterReflections bool
@@ -37,6 +40,13 @@ type Effects struct {
 	// GroundLight is the ground pools that light reaches and the short
 	// terrain flash (§31.3, §31.6).
 	GroundLight bool
+
+	// Glow amounts scale the player's source families independently (§19.4).
+	// WeaponGlowStrength covers beams, lightning and projectile body sprites;
+	// ExplosionGlowStrength covers effect and strip sprites, flashes and halos.
+	// NanoGlowStrength scales both the spray's glow and its local illumination.
+	// Percentages are 0..200, with 100 the tuned look; zero emits nothing.
+	WeaponGlowStrength, ExplosionGlowStrength, NanoGlowStrength int
 
 	// Finish is the metal/paint material finishes (§29.1).
 	Finish bool
@@ -66,6 +76,9 @@ type Effects struct {
 	// SoftShadows is the aircraft soft shadows of §34. Off, an aircraft takes
 	// the ordinary silhouette shadow route every other mobile subject takes.
 	SoftShadows bool
+	// ShadowSoftness scales the altitude-dependent aircraft filter radius
+	// (§34), 0..200, with 100 the tuned look. Zero keeps the ordinary shadow.
+	ShadowSoftness int
 
 	// Supersample is the model subjects' 2× raster and coverage resolve of
 	// §17. Off, the recorder builds no doubled lane — the subject keeps
@@ -76,15 +89,16 @@ type Effects struct {
 	Supersample bool
 }
 
-// AllEffects is the default selection: every switch on.
+// AllEffects is the default selection: every switch on and every amount at 100.
 func AllEffects() Effects {
 	return Effects{
-		WaterSurface: true, WaterMotion: true, WaterFoam: true, WaterReflections: true,
+		WaterSurface: true, WaterMotion: true, WaterFoam: true, HovercraftLandWash: true, WaterReflections: true,
 		ModelLight: true, GroundLight: true,
+		WeaponGlowStrength: 100, ExplosionGlowStrength: 100, NanoGlowStrength: 100,
 		Finish: true, Glint: true,
 		BlastRings: true, FireShimmer: true, WreckGlow: true, WreckShimmer: true,
 		Scorch:      true,
-		SoftShadows: true,
+		SoftShadows: true, ShadowSoftness: 100,
 		Supersample: true,
 	}
 }

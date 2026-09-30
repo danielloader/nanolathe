@@ -80,7 +80,7 @@ func (g *gameShell) openCampaignBriefing() {
 
 // installBriefingTextRegion resolves the TextRegion gadget's font and hands the
 // authored text, the gadget's own size and that font's metric to the pager. The
-// gadget's font index is the local side plus one, and a font index selects the
+// gadget's font index is the local side plus one when text loaded, and selects the
 // n-th kind-7 record of the window counting from zero — so Arm gets `armfont`
 // and Core `corefont` [08 R-CAMP-01 §2][07 R-WGT-01 §12].
 func (g *gameShell) installBriefingTextRegion() {
@@ -88,24 +88,18 @@ func (g *gameShell) installBriefingTextRegion() {
 		return
 	}
 	window := g.briefingPanel.Window
-	g.briefingFont = g.loadRetailWindowFont(window, g.missionSide+1)
+	if g.briefing.text != "" {
+		for _, name := range []string{"SOLARSYSTEM", "TextRegion"} {
+			if i := window.GadgetIndex(name); i >= 0 {
+				window.Gadgets[i].FontNumber = uint8(g.missionSide + 1)
+			}
+		}
+	}
 	if i := window.GadgetIndex("TextRegion"); i >= 0 {
+		g.briefingFont = g.windowGadgetFont(g.briefingPanel, window.Gadgets[i])
 		rect := window.PlacedRect(i)
 		g.briefing.SetTextRegion(g.briefing.text, int(rect.W), int(rect.H), g.briefingTextHeight(), g.briefingTextWidth)
 	}
-}
-
-// loadRetailWindowFont is the FNT of the window's n-th kind-7 font record,
-// counting from zero in index order — the screen writes `localSide + 1` into
-// the TextRegion gadget's font number at open, which is what the window's
-// per-gadget selector then walks. A missing record or an unreadable file
-// leaves the font null and the caller keeps the common font
-// [07 R-WGT-01 §6][07 R-WGT-01 §12][03 R-FONT-01 §5].
-func (g *gameShell) loadRetailWindowFont(window *gui.Window, index int) *formats.FNT {
-	if g == nil || g.cs == nil || g.cs.fs == nil || window == nil || index < 0 || index > 127 {
-		return nil
-	}
-	return window.Font(g.cs.fs, uint8(index))
 }
 
 // briefingTextWidth and briefingTextHeight are the TextRegion font's metrics.
@@ -260,7 +254,11 @@ func (g *gameShell) loadBriefingPanel(planet BriefingPlanet) *ui.Panel {
 	g.assets.briefing.art = loadBriefingArt(g.cs.fs, planet, g.assets.briefing.art)
 	window := gui.CloneWindow(g.assets.briefing.window)
 	g.installRetailWindowButtonArt(window, g.assets.briefing.art)
-	return ui.NewPanel(window)
+	panel := ui.NewPanel(window)
+	// Its custom conditions are painted by PANORAMA rather than by this
+	// gadget's ordinary painter [08 R-CAMP-01 §2].
+	panel.SetActive("SOLARSYSTEM", false)
+	return panel
 }
 
 // loadBriefingArt resolves the planet-specific GAF for every newly opened
@@ -413,8 +411,6 @@ func (g *gameShell) drawBriefing(c *client.Client) {
 			g.drawBriefingPanorama(c, b, r)
 		case "PLANET":
 			g.drawBriefingPlanet(c, b, r)
-		case "SOLARSYSTEM":
-			g.drawBriefingSolarSystem(c, b, r)
 		case "TextRegion":
 			g.drawBriefingText(c, b, r)
 		case "MOREBAR", "MORE":
@@ -507,7 +503,14 @@ func (g *gameShell) drawBriefingPanorama(c *client.Client, b *campaignBriefingCo
 		return
 	}
 	e, ok := g.assets.briefing.art.Find(b.planet.Panorama)
-	if !ok || len(e.Frames) == 0 {
+	if !ok {
+		return
+	}
+	// The bound panorama callback prints these conditions before testing
+	// its sequence, even though SOLARSYSTEM itself is hidden
+	// [08 R-CAMP-01 §2].
+	g.drawBriefingSolarSystem(c, b)
+	if len(e.Frames) == 0 {
 		return
 	}
 	total := 0
@@ -560,14 +563,37 @@ func (g *gameShell) drawBriefingPlanet(c *client.Client, b *campaignBriefingCont
 	blitRetailFrame(c, f, int(r.X)+int(r.W-int32(f.Width))/2, int(r.Y)+int(r.H-int32(f.Height))/2)
 }
 
-func (g *gameShell) drawBriefingSolarSystem(c *client.Client, b *campaignBriefingController, r gui.Rect) {
-	if b == nil || b.mission == nil || b.mission.OTA == nil {
+func (g *gameShell) drawBriefingSolarSystem(c *client.Client, b *campaignBriefingController) {
+	if b == nil || b.mission == nil || b.mission.OTA == nil || g.briefingPanel == nil || g.briefingPanel.Window == nil {
 		return
 	}
+	panel := g.briefingPanel
+	i := panel.Window.GadgetIndex("SOLARSYSTEM")
+	if i < 0 {
+		return
+	}
+	gadget := panel.Window.Gadgets[i]
+	r := panel.Window.PlacedRect(i)
+	font := g.windowGadgetFont(panel, gadget)
+	if font == nil && panel.Window.FontRecord(gadget.FontNumber) == gui.NoFontRecord && g.assets != nil {
+		font = g.assets.font // no matched record selects the common FNT [03 R-FONT-01 §5].
+	}
+	// TODO(question): retain the previous active FNT when a matching font
+	// record failed to load; the frontend does not model that history
+	// [03 R-FONT-01 §5]. A null selected font currently paints no text.
 	globals := mission.DecodeMissionGlobals(b.mission.OTA.Global)
 	x, y := int(r.X)+80, int(r.Y)+20
-	g.drawRetailString(c, fmt.Sprintf("Wind Speed : %d", b.windSpeed), x, y, int(r.W), g.guiColor(15))
-	g.drawRetailString(c, fmt.Sprintf("Gravity : %.1f", float32(globals.Gravity)), x, y+20, int(r.W), g.guiColor(15))
+	windLabel, gravityLabel := "Wind Speed", "Gravity"
+	if g.cs != nil && g.cs.translations != nil {
+		windLabel = g.cs.translations.Translate(windLabel)
+		gravityLabel = g.cs.translations.Translate(gravityLabel)
+	}
+	// The condition pen uses the remaining inclusive width; gravity is a
+	// display ratio over the raw header integer [08 R-CAMP-01 §2].
+	maxWidth := int(r.W) - 81
+	gravity := float64(globals.Gravity) * (1.0 / 112.0)
+	c.UITextWidthClipped(font, fmt.Sprintf("%s : %d", windLabel, b.windSpeed), x, y, maxWidth, b.PlainColor(), int(r.X), int(r.Y), int(r.W), int(r.H))
+	c.UITextWidthClipped(font, fmt.Sprintf("%s : %.1f", gravityLabel, gravity), x, y+20, maxWidth, b.PlainColor(), int(r.X), int(r.Y), int(r.W), int(r.H))
 }
 
 // drawBriefingText emits the current page's labels the way the pager creates

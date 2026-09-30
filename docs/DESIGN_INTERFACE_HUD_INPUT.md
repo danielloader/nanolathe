@@ -933,6 +933,14 @@ alone reads `[07 "The loading screen"]`; `loadgame.go` is the one
 the `RADAR` preview `[07 R-FE-01 §8]`; `postbattle.go` and `result.go` are the
 post-battle machine, its glamour fade and the score bars `[07 R-FE-01 §10]`.
 
+`briefing_render.go` paints wind and gravity from the panorama's custom path,
+using the hidden `SOLARSYSTEM` gadget's rectangle and selected FNT. It uses
+the controller's existing wind display without new random draws, translates
+both labels and converts authored gravity for the readout only
+`[08 R-CAMP-01 §2]`. Successful text installation assigns the side font to
+both text-region and conditions gadgets; missing text retains their authored
+font numbers. Condition text precedes panorama art and uses its own clip.
+
 Selecting a row fills the summary panel's text fields and its `RADAR` surface.
 `RADAR` shows the selected file's Summary `Radar Image` box — an 8-byte
 width/height header and then the rows of palette bytes — and nothing at all

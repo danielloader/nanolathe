@@ -2441,7 +2441,11 @@ the fetched artwork pokes the `PANORAMA` and `PLANET` GUI controls. When a
 Lunar override flag is set, the briefing name is rewritten through the
 `Lunar`/`Lunar2` string constants. Per-mission wind variance is seeded at
 briefing entry as `rand() % (maxWind-minWind+1) + minWind` with a second
-`rand() & 0x3F` draw. The briefing flow has explicit previous,
+`rand() & 0x3F` draw. **Established:** the hidden `SOLARSYSTEM` gadget supplies
+the rectangle and FNT for wind and gravity readouts painted by `PANORAMA`'s
+custom callback; hidden gadget activity does not suppress that callback's
+text. The display arithmetic, localized labels and width limit are
+[08 R-CAMP-01 §2]. The briefing flow has explicit previous,
 continue/start, more-text, and text-region states.
 
 #### Skirmish

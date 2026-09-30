@@ -713,24 +713,43 @@ step also sits behind a test of the scaled clock against a remembered value,
 but nothing ever writes that value, so the test always passes and it is not
 a second gate.)
 
-**Wind display.** At screen entry two CRT draws are taken (this is the
+**Wind display** (including gravity; Established). The briefing opener hides
+`SOLARSYSTEM`, suppressing its ordinary gadget paint and input. Its readouts
+belong to `PANORAMA`'s installed custom callback, before the panorama's
+sequence-null test, strip and mask. The callback is installed only after a
+successful briefing-GAF load and a found panorama sequence; once installed,
+its condition text does not depend on that sequence remaining non-null.
+At screen entry two CRT draws are taken (this is the
 [01 §7.3] pair): `speed = rand() % (maxwindspeed − minwindspeed + 1) +
 minwindspeed`, then `countdown = rand() & 0x3F`. Each draw of the
-`SOLARSYSTEM` region decrements the countdown; when it drops below 1 the
+panorama callback decrements the countdown; when it drops below 1 the
 speed changes by `rand() % 5 − 2`, is clamped to
 `[minwindspeed, maxwindspeed]`, and the countdown is re-seeded
 `rand() % 63`. The region shows the label `Wind Speed` (translated) as
-`"%s : %d"` at (x+80, y+20) and `Gravity` as `"%s : %.1f"` at (x+80, y+40).
+`"%s : %d"` at (x+80, y+20) and the translated `Gravity` as `"%s : %.1f"`
+at (x+80, y+40). Gravity is the mission header's raw integer multiplied in
+floating point by `1/112`, independently of terrain gravity conversion.
+The text selects the `SOLARSYSTEM` gadget's FNT, clips to its authored
+rectangle and uses plain side-text colour entry 0 (53 for Arm, 117 for Core)
+with transparent background. Both strings truncate trailing bytes until
+their measured width is at most `gadgetWidth - 81`; the stock rectangle
+`(415,0,225,107)` therefore yields pens `(495,20)` and `(495,40)` with a
+144-pixel width limit. The low wind clamp precedes the high wind clamp.
 These values never reach the mission record or the simulation; they are
 display state only, and every draw here is a **CRT** draw taken while the
 front end runs (no simulation is ticking).
 
 **Briefing text and narration.** After the gadgets are bound, the text
 loader reads slot 2 (`camps\briefs\<brief>.TXT`) into a scrolling text
-region (`TextRegion`, `MOREBAR` pages it); the `SOLARSYSTEM` and `TextRegion`
-gadgets are given font index `localSide + 1` — `armfont` for Arm, `corefont`
+region (`TextRegion`, `MOREBAR` pages it). When that loaded text buffer is
+non-null, the `SOLARSYSTEM` and `TextRegion` gadgets are given font index
+`localSide + 1` — `armfont` for Arm, `corefont`
 for Core, since `MSNBRIEF`'s kind-7 records are `smlfont`, `armfont`,
-`corefont` in that order ([07 R-WGT-01 §12]). The text is wrapped before it
+`corefont` in that order ([07 R-WGT-01 §12]). Without a loaded text buffer,
+the authored font numbers remain; stock uses 0, selecting `smlfont`.
+The loader allocates a terminated buffer only for a nonzero file length;
+a missing or successfully read zero-byte text file leaves that buffer null.
+The text is wrapped before it
 is paged: the wrapper of [07 R-FE-02 §6] is called with the `TextRegion`
 gadget and that gadget's authored **width**, so it measures through the
 gadget's own FNT; the blink-run pre-split of [07 R-FE-02 §7] then runs over
@@ -752,6 +771,15 @@ with background bitmap `mbrief<side>`; the stock GUI's gadgets are exactly
 **Confidence.** Established. The slot-2 text buffer, the 25 ms rotator gate,
 the scroll and mask arithmetic, and the countdown semantics are read from
 the callbacks.
+
+**Unknown — failed-font history.** A matching font record whose file failed
+to load yields a null font selection, which retains the previous active FNT
+[03 R-FONT-01 §5]. The previous font at every briefing callback entry is not
+established across repaint, pager/blink service, re-entry and replacement GUIs.
+Tracing those selectors and their service order would settle that history.
+The current condition painter suppresses these glyphs under `TODO(question)`
+until that retained-font state is modeled; a universal common-font fallback
+is not established.
 
 ### New-game panel: `CampaignKnob`, `MissionsKnob`, `playanygame4`, `newcampaign4x` [R-CAMP-01 §3]
 

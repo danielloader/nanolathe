@@ -576,7 +576,9 @@ func (s *Session) stepUnitPhase(tick uint32) {
 					// Park joins the move family: its phase 0 installs the
 					// rectangle goal that carries a no-rally factory product off
 					// its pad [04 R-ORD-01 §2][04 R-FAC-02 §4].
-					activeMove := activeName == "Move_Ground" || activeName == "VTOL_Move" || activeName == "QMove" || activeName == "Patrol" || activeName == "QPatrol" || activeName == "VTOL_Patrol" || activeName == "RepairPatrol" || activeName == "VTOL_RepairPatrol" || activeName == "Park"
+					// QMove/QPatrol only rotate rally markers; GetBuilt resolves
+					// their movement orders on the product [04 R-ORD-01 §2][04 §3.8].
+					activeMove := activeName == "Move_Ground" || activeName == "VTOL_Move" || activeName == "Patrol" || activeName == "VTOL_Patrol" || activeName == "RepairPatrol" || activeName == "VTOL_RepairPatrol" || activeName == "Park"
 					// The ground work family installs a movement goal and then
 					// waits behind gate 0xE0/0xE8 for the follower's outcome
 					// [04 R-ORD-01 §5]. Those records need the mover as much as

@@ -2721,7 +2721,7 @@ func (s *System) bindArrivalHandle(u *units.Unit, head *orders.Node) {
 	// game.
 	name := orders.DescriptorFor(head.ID).Name
 	switch name {
-	case "Move_Ground", "VTOL_Move", "QMove", "Patrol", "QPatrol", "VTOL_Patrol", "RepairPatrol", "VTOL_RepairPatrol", "Park",
+	case "Move_Ground", "VTOL_Move", "Patrol", "VTOL_Patrol", "RepairPatrol", "VTOL_RepairPatrol", "Park",
 		"HelpBuild", "RepairUnit", "Capture", "Reclaim", "Resurrect":
 	default:
 		// The name list is not the retail condition, and cannot be. The
@@ -2838,12 +2838,9 @@ func (s *System) bindArrivalHandle(u *units.Unit, head *orders.Node) {
 		ah.payload = payload
 	}
 	setHandleRow(&s.arrivalHandles, u.Handle, ah)
-	// [R-P0-01] initial gate must be 0 so phase 0 handler can arm 0xE0; otherwise static 0x402 would block.
-	if head.Phase == 0 && head.DynamicGate != 0 {
-		// Only clear initial static gate; preserve armed 0xE0 for re-binds after a replan where Phase already 1
-		head.DynamicGate = 0
-		head.Deadline = -1
-	}
+	// The constructor already supplies an empty gate. A phase-0 record may
+	// instead be waiting on a handler's deadline or the pump's retry; binding
+	// its arrival predicate must preserve that wait [04 §3.3][04 R-ORD-01 §1].
 }
 
 func (s *System) headingFor(h pool.Handle) uint16 {

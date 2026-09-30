@@ -462,7 +462,7 @@ func featureRectForGoal(mover *units.Unit, n *orders.Node) (cellX, cellZ, footX,
 //	and moving goals now own the zero-heuristic, unsatisfied surface [04 R-PATH-01 §9].
 //	  "Base/restored-from-save goals have identically-zero heuristic and a null
 //	  start predicate" [04 §7.2], used for save restore (GoalKind 3 in
-//	  internal/save/boxes.go). Patrol legs (Patrol/QPatrol/VTOL_Patrol etc) are
+//	  internal/save/boxes.go). Patrol legs (Patrol/VTOL_Patrol etc) are
 //	  queued as sequential PointGoals via the ordinary order queue [04 §3.3];
 //	  no bounded evidence shows patrol chaining via an air-goal surface, so leave that
 //	  path unwired rather than forcing it [04 §7.4] UNKNOWN frequency.

@@ -1055,6 +1055,17 @@ bound payload first and only falls back to a family when a record's payload is
 not bound — one restored from a save, or one re-activated after another record
 evicted the mover's single goal slot `[04 §7.2]` `[04 §7.4]` `[04 §3.5]`.
 
+Factory `QMove` and `QPatrol` records are rally markers with a 60-tick delayed
+rotate, not movement goals. Session activation excludes them; `GetBuilt`
+resolves their move/patrol operations against each product `[04 R-ORD-01 §2]`
+`[04 §3.8]`. Arrival-handle binding never clears an order's dynamic gate or
+deadline, including at phase 0: the constructor already starts ungated, and an
+armed wait belongs to the handler or pump `[04 §3.3]` `[04 R-ORD-01 §1]`.
+Clearing that wait after production cancellation made the rally queue rotate
+every tick and its displayed connectors jump. The factory-cancellation
+regression checks the committed queue and overlay across repeated deadline
+cycles in all three reserved modes.
+
 | Order | Family | Radii |
 |---|---|---|
 | `Move_Ground` | point at the order's goal | first general parameter plus 4; ordinary mouse move uses 4 `[04 R-ORD-01 §4]` |
@@ -1088,7 +1099,7 @@ established producer exists rather than because the work is outstanding:
   surface is owned by the two air goals, which is what the serialized air work
   and air moving forms are. Nothing else constructs it, and the withdrawn
   ground-side saved goal had no producer at all `[04 R-PATH-01 §9]`.
-* **Air-goal chaining for patrol.** Patrol legs — `Patrol`, `QPatrol`,
+* **Air-goal chaining for patrol.** Patrol legs — `Patrol`,
   `VTOL_Patrol` — are queued as sequential point goals through the ordinary
   order queue. No bounded evidence shows patrol chaining through an air-goal
   surface, so that path stays unwired rather than being forced `[04 §3.3]`

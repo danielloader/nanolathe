@@ -158,7 +158,7 @@ rather than about the scratch one, resolving
 `animatedFrame(SourceModel, piece.SourceIndex, primitive, ref)`. An ordinary
 unit or feature draw leaves the field nil, because its `Model` already is the
 loaded model. A battle standalone draw therefore follows the loaded primitive's
-cursor and shows the frame its living parent shows. The per-subject cursor
+cursor and shows the frame used by its living parent's live pass. The per-subject cursor
 survives only for standalone preview, where no registry exists and so no loaded
 cursor is available to share; a battle draw whose model the binder does not hold
 at all reads the entry's first frame, since no cursor for it exists anywhere and

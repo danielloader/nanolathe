@@ -60,6 +60,7 @@ type app struct {
 	gpu              *gpurender.Renderer
 	sourceGeneration uint64
 	sourcesPrepared  bool
+	reportedGraphics bool
 	// rendererToggles is the client's executor-swap request count this adapter
 	// has already acted on. Update compares it with the client's own count, so
 	// one F10 press swaps once (docs/DESIGN_GPU_RENDERER.md §14.6).
@@ -506,6 +507,18 @@ func (a *app) scaledInputNow() uint32 {
 // Draw presents one composed frame. The image is recreated only when the
 // logical size changes; WritePixels replaces its contents wholesale.
 func (a *app) Draw(screen *ebiten.Image) {
+	if !a.reportedGraphics {
+		a.reportedGraphics = true
+		var info ebiten.DebugInfo
+		ebiten.ReadDebugInfo(&info)
+		w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+		logicalW, logicalH := a.c.Size()
+		fmt.Fprintf(os.Stderr, "nanolathe: graphics: backend=%s renderer=%s output=%dx%d logical=%dx%d fullscreen=%t vsync=%t\n",
+			info.GraphicsLibrary.String(), rendererName(a.mode), w, h, logicalW, logicalH, a.fullscreen, ebiten.IsVsyncEnabled())
+		if output, ok := audio.GlobalOutput().(interface{ SampleRate() int }); ok {
+			fmt.Fprintf(os.Stderr, "nanolathe: audio: configured-output-rate=%d Hz\n", output.SampleRate())
+		}
+	}
 	if a.screenActive() {
 		// The screen owns every pixel; nothing may still be recording the
 		// client's frame underneath it.

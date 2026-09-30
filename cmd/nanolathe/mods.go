@@ -317,6 +317,7 @@ func (h *shellHost) step(delta float64, cl *client.Client) {
 // file as they were, releases what the attempt acquired, and says why where
 // the player is looking: on the Mods & Mutators screen, else on the main menu.
 func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
+	started := time.Now()
 	old := h.shell
 	// Loading a game leaves the battle it was loaded from, whatever mod
 	// the game needs; leave it before the switch so neither shell's battle
@@ -411,6 +412,7 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 	if request.loadSave != "" {
 		h.loadAfterReload(request.loadSave)
 	}
+	writeWindowStartupReport(os.Stderr, h.shell, time.Since(started))
 }
 
 // loadAfterReload loads the game a mod switch was made for. The new content

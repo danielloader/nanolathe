@@ -352,6 +352,7 @@ type directBattleView struct {
 // (docs/DESIGN_MODS_MUTATORS.md §4.3 "A missing mod at start"). launch is the
 // command line as given.
 func runBattleView(launch, opts Options, cs *contentSet) error {
+	started := time.Now()
 	view, running, err := startWithSavedModFallback(launch, opts, cs, func(opts Options, cs *contentSet) (directBattleView, error) {
 		shell, cl, err := newDirectBattleView(opts, cs)
 		return directBattleView{shell: shell, cl: cl}, err
@@ -363,6 +364,7 @@ func runBattleView(launch, opts Options, cs *contentSet) error {
 		defer running.Close()
 	}
 	shell, cl := view.shell, view.cl
+	writeWindowStartupReport(os.Stderr, shell, time.Since(started))
 	shell.settingsWritable = opts.LiveTrace == ""
 	defer shell.teardownBattle(cl)
 	options := shell.windowOptions()

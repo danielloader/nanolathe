@@ -85,7 +85,7 @@ func TestInstallerCheckUsesStartupValidation(t *testing.T) {
 		}
 	}
 	code, out, errOut = installerRun(t, "--check-install", "--root", root)
-	if code != 0 || out != "" || errOut != "" {
+	if code != 0 || out != "" || !strings.Contains(errOut, "archives=0 loose-roots=1") {
 		t.Fatalf("valid startup products = %d, stdout %q, stderr %q", code, out, errOut)
 	}
 	// The restart remount must keep content roots and save storage independent.

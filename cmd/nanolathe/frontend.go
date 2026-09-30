@@ -416,6 +416,7 @@ func runGameShell(launch, opts Options, cs *contentSet) error {
 	if opts.Map != "" {
 		return runBattleView(launch, opts, cs)
 	}
+	started := time.Now()
 
 	const winW, winH = 640, 480
 	buf := &frame.Buffer{}
@@ -470,7 +471,7 @@ func runGameShell(launch, opts Options, cs *contentSet) error {
 			return err
 		}
 	}
-	writeFrontendStartupReport(os.Stderr, shell)
+	writeWindowStartupReport(os.Stderr, shell, time.Since(started))
 	shell.queueStartupMovie()
 	defer func() { host.shell.closeIntro(cl) }()
 	options := host.windowOptions()
@@ -508,10 +509,12 @@ func startWithSavedModFallback[T any](launch, opts Options, cs *contentSet, star
 		return result, cs, err
 	}
 	var zero T
+	remountStarted := time.Now()
 	fresh, err := startWithoutSavedMod(launch, *cs.mod, err)
 	if err != nil {
 		return zero, cs, err
 	}
+	writeContentStartupReport(os.Stderr, fresh, time.Since(remountStarted))
 	_ = cs.Close()
 	opts.Root, opts.Roots, opts.ModConfig = fresh.root, fresh.roots, fresh.configPath
 	result, err = start(opts, fresh)
@@ -1326,9 +1329,8 @@ func skippedMapDiagnostic(entry vfs.EntryInfo, err error) string {
 }
 
 // writeFrontendStartupReport writes the windowed frontend's one startup
-// account of its content to w: every mount note the overlay recorded (a
-// rejected archive, a suppressed duplicate, the archive-count remark), every
-// map file the census skipped, and the skirmish map count with the providers
+// account of its maps to w: every map file the census skipped, and the
+// skirmish map count with the providers
 // that supplied it. The source installer's launcher appends standard error to
 // its run log, so a player reporting missing maps can send the lines that say
 // whether an archive was rejected or its maps failed to load
@@ -1336,11 +1338,6 @@ func skippedMapDiagnostic(entry vfs.EntryInfo, err error) string {
 func writeFrontendStartupReport(w io.Writer, shell *gameShell) {
 	if shell == nil {
 		return
-	}
-	if shell.cs != nil && shell.cs.unmappedMount != nil {
-		for _, note := range shell.cs.unmappedMount.Notes() {
-			fmt.Fprintf(w, "nanolathe: content mount: %s\n", strings.TrimPrefix(note, "nanolathe: "))
-		}
 	}
 	for _, line := range shell.mapCensus.skipped {
 		fmt.Fprintln(w, line)
@@ -1353,7 +1350,7 @@ func writeFrontendStartupReport(w io.Writer, shell *gameShell) {
 	if len(suppliers) != 0 {
 		from = " (" + strings.Join(suppliers, ", ") + ")"
 	}
-	fmt.Fprintf(w, "nanolathe: retail frontend: %d skirmish maps%s\n", len(shell.maps), from)
+	fmt.Fprintf(w, "nanolathe: maps: %d skirmish maps%s; skipped=%d\n", len(shell.maps), from, len(shell.mapCensus.skipped))
 }
 
 // retailStricmp is the comparison the retail string sorter uses. The helper folds

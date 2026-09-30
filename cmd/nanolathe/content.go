@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/community"
@@ -58,6 +59,10 @@ type contentSet struct {
 	roots        []string
 	notes        []string
 	translations *content.TranslationTable
+	// Reports follow the running set across saved-mod fallback and save-load
+	// mod switches, without repeating providers for a set already reported.
+	loadDuration    time.Duration
+	startupReported bool
 
 	// mod is the selected installed mod mounted as the last root, or nil.
 	// baseRoots are the roots without it, and manualRoots marks a command
@@ -162,6 +167,7 @@ func openContent(opts Options) (*contentSet, error) {
 // applies the running Nanolathe config's content section and checks the
 // required products.
 func mountContent(opts Options, baseRoots []string, selection modSelection) (*contentSet, error) {
+	started := time.Now()
 	roots := append([]string(nil), baseRoots...)
 	if selection.mod != nil {
 		roots = append(roots, selection.mod.Dir)
@@ -271,6 +277,7 @@ func mountContent(opts Options, baseRoots []string, selection modSelection) (*co
 		set.notes = append(set.notes, err.Error())
 		fmt.Fprintln(os.Stderr, err)
 	}
+	set.loadDuration = time.Since(started)
 	return set, nil
 }
 

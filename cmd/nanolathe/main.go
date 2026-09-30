@@ -10,7 +10,6 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/install"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/benchlock"
-	"github.com/nanolathe-gg/nanolathe/internal/version"
 )
 
 // BattleSeeds is the explicit pair selected at a battle boundary. The
@@ -87,6 +86,8 @@ func seedsFor(opts Options) (sim, crt uint32) {
 // the mod is reported as a warning on errOut rather than as a failure. A mod
 // named by --mod that fails stays an error.
 func checkInstall(opts Options, errOut io.Writer) error {
+	writeStartupSystemReport(errOut)
+	started := time.Now()
 	content, err := openContent(opts)
 	var saved *savedModError
 	if errors.As(err, &saved) {
@@ -98,6 +99,7 @@ func checkInstall(opts Options, errOut io.Writer) error {
 	if err != nil {
 		return err
 	}
+	writeContentStartupReport(errOut, content, time.Since(started))
 	if content.modNotice != "" && content.modNotice != content.configNotice {
 		fmt.Fprintf(errOut, "nanolathe: warning: %s, so the game would start without it\n", content.modNotice)
 	}
@@ -153,13 +155,8 @@ func run(opts Options, out, errOut *os.File) error {
 	if opts.LoadSave != "" && (opts.Map != "" || opts.Mission != "" || opts.Headless || opts.Shot != "") {
 		return fmt.Errorf("nanolathe: --load-save cannot be combined with --map, --mission, --headless, or --shot")
 	}
-	// A file-less headless report owns stdout as one JSON document. Windowed
-	// runs and headless runs with a separate report file retain the profile
-	// banner on stdout.
-	if (!opts.Headless || opts.Report != "") && opts.Shot == "" && opts.Film == "" && opts.NLShot == "" {
-		fmt.Fprintf(out, "%s\n", version.ProfileID())
-	}
-
+	writeStartupSystemReport(errOut)
+	started := time.Now()
 	content, err := openContent(opts)
 	if err != nil {
 		// Start-up never fails because of the saved mod choice
@@ -173,6 +170,7 @@ func run(opts Options, out, errOut *os.File) error {
 		}
 	}
 	defer content.Close()
+	writeContentStartupReport(errOut, content, time.Since(started))
 	// launch keeps the command line as given, for a start that must remount
 	// without the saved mod after mounting it.
 	launch := opts

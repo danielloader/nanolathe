@@ -74,6 +74,16 @@ shortcut, also uses the remembered folder while it still holds game data.
 `--check-install` validates startup mounts and required products, not
 every asset in the game. A later content error is recorded in the game log.
 
+When reporting a problem, attach the run log from `logs` (or paste the startup
+lines and the error). Startup records the build/source revision, OS and CPU
+architecture, Go runtime, content profile/mod, archive counts and provider
+precedence, map count and skipped maps, effective game/display settings, load
+times, heap allocation, graphics backend and configured audio rate. The source
+revision comes from the installed release manifest when VCS metadata is absent.
+Rejected archives and unreadable maps include their provider names. More than
+ten HPI archives is valid and does not produce a warning. Manual launches write
+these diagnostics to standard error; capture them with `2>nanolathe.log`.
+
 Existing retail saves and manual-build settings are not moved or overwritten.
 To import a save, copy its `.SAV` file into the new `saves` directory with the
 game closed. Save compatibility remains a work in progress. The launcher passes

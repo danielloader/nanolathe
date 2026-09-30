@@ -23,7 +23,7 @@ SC11–SC13; it always has.
 
 ---
 
-## SC1 — There is no ten-archive cap we can honor
+## SC1 — The ten-archive budget is per pass, not global
 
 **Status:** Closed.
 
@@ -46,8 +46,9 @@ budget, and an already-mounted archive never consumes it, so repeated
 invocations converge to every valid local archive mounted.
 
 **Decision:** mount every local HPI, which reproduces the converged retail
-state, and record the archive count as a mount note so the discrepancy stays
-visible.
+state. More than ten archives is ordinary content, not a discrepancy or a
+warning. Startup reports the mounted provider count and precedence as loading
+statistics, without suggesting a global retail cap.
 
 **Contract:** `[02 §2]`; DESIGN_CONTENT_VFS §5.
 

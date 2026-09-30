@@ -135,8 +135,16 @@ func TestDuplicateMountSuppressed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	var archive bytes.Buffer
+	if err := vfs.WriteArchive(&archive, []vfs.ArchiveFile{{Path: "file", Data: []byte("data")}}, vfs.ArchiveWriteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fixture.hpi"), archive.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	fileSystem := vfs.New()
-	if err := fileSystem.MountDirectory(dir, 10); err != nil {
+	defer fileSystem.Close()
+	if err := fileSystem.MountGameDirectory(dir); err != nil {
 		t.Fatal(err)
 	}
 	before := fileSystem.MountCount()
@@ -156,6 +164,10 @@ func TestDuplicateMountSuppressed(t *testing.T) {
 	}
 	if first != second {
 		t.Fatalf("manifest hash changed across a suppressed duplicate mount")
+	}
+	notes := strings.Join(fileSystem.Notes(), "\n")
+	if strings.Contains(notes, dir) || !strings.Contains(notes, "fixture.hpi") || !strings.Contains(notes, "loose root") {
+		t.Fatalf("duplicate diagnostics must use portable provider labels [C13]: %s", notes)
 	}
 }
 
@@ -220,10 +232,9 @@ func TestManifestHashPortable(t *testing.T) {
 	}
 }
 
-// TestTenHPIDiagnostic names the SC1 discrepancy when more than ten local
-// HPIs are present (PLAN_01 C2): every archive mounts, one diagnostic notes
-// the count.
-func TestTenHPIDiagnostic(t *testing.T) {
+// More than ten local HPIs are ordinary content: retail's budget is per
+// mount pass [02 §2], so all providers remain available without a warning.
+func TestMoreThanTenHPIsMountWithoutWarning(t *testing.T) {
 	dir := t.TempDir()
 	var archive bytes.Buffer
 	if err := vfs.WriteArchive(&archive, []vfs.ArchiveFile{{Path: "file", Data: []byte("data")}}, vfs.ArchiveWriteOptions{}); err != nil {
@@ -240,14 +251,11 @@ func TestTenHPIDiagnostic(t *testing.T) {
 	if err := fs.MountGameDirectoryWithPlan(dir, vfs.DefaultRetailMountPlan()); err != nil {
 		t.Fatal(err)
 	}
-	notesSeen := false
-	for _, note := range fs.Notes() {
-		if strings.Contains(note, "local HPI") && strings.Contains(note, "SC1") {
-			notesSeen = true
-		}
+	if len(fs.Notes()) != 0 {
+		t.Fatalf("valid archives produced mount warnings: %v", fs.Notes())
 	}
-	if !notesSeen {
-		t.Fatalf("no >10-HPI diagnostic among notes: %v", fs.Notes())
+	if sources := fs.Sources("file"); len(sources) != 11 {
+		t.Fatalf("available providers = %d, want all 11 archives", len(sources))
 	}
 }
 

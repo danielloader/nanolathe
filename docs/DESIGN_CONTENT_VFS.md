@@ -313,12 +313,11 @@ best smoke test is that `gamedata/sidedata.tdf`, `units/armcom.fbi` and
 `ai/default.txt` resolve to the patch archive on the reference install, the
 patch correctly beating the base archives.
 
-**C2 — every local HPI mounts.** The spec's ten-archive cap is a per-invocation
-budget, not a global limit, and the converged retail state is every valid
-local archive mounted (SC1). When more than ten local HPI archives are present
-the mount records one note naming the count, so the discrepancy stays visible
-rather than silent; `FS.Notes()` returns it. Count only newly successful mounts,
-excluding rejected candidates and duplicate paths.
+**C2 — every local HPI mounts.** Retail's ten-archive budget resets per
+invocation; it is not a global limit. The converged retail state is every valid
+local archive mounted (SC1). More than ten local HPI archives is ordinary
+content and produces no mount note. Startup reports successful provider counts
+as loading statistics; rejected candidates and duplicate paths are excluded.
 
 **C3 — mount dedup.** A provider is keyed by its canonicalized absolute path,
 compared case-insensitively; an equal path suppresses the second mount and
@@ -631,9 +630,6 @@ battle; that is the contract callers may rely on.
 
 ### 3.6 Not implemented
 
-* **The ten-archive mount cap** `[02 §2]`. Recorded, not implemented; the
-  budget is per-invocation and mounting every local archive reproduces the
-  converged retail state (SC1).
 * **The CD-ROM archive tier** `[02 §2]`. Not scanned. A CD install path is
   supplied as an explicit root overlay instead.
 * **Intra-tier enumeration order** `[02 §2]`. Retail inherits the host's
@@ -662,7 +658,7 @@ character, because a user comparing against retail is comparing strings.
 | `Hey!  Somebody forgot to set downloadable=1 for %s` | a download record's first product without the flag (two spaces after `Hey!`) | `[02 §5]`, `[02 R-CAT-01 §8]` |
 | `Can't load GAMEDATA.TDF` | raised by a missing `SIDEDATA.TDF`; the message text is simply misnamed and no file of that name is ever opened | `[02 R-MALF-01 §5]`, SC2 |
 
-Everything Nanolathe raises on its own account follows one shape:
+Errors Nanolathe raises on its own account follow one shape:
 
 ```
 nanolathe: <what failed>: logical path <path>, providers searched [<a>, <b>], expected <product>
@@ -672,23 +668,55 @@ nanolathe: <what failed>: logical path <path>, providers searched [<a>, <b>], ex
 it; the provider list comes from `FS.Sources` when the overlay offers it and
 from a single `Stat` otherwise, and each entry is a `ProviderID` — never a
 host path (C13). Mount-time observations that do not stop the mount — a
-suppressed duplicate mount, the archive-count remark, and an archive discovery
+suppressed duplicate mount and an archive discovery
 rejected (C5) — are collected on `FS.Notes()` for the caller to surface.
 Nothing in this area logs from inside a tick; the compile happens before the
 session exists.
 
-The windowed command surfaces them once, at startup, on standard error — which
-the source installer's launcher appends to its run log
+The command surfaces mount notes once after opening content, on standard
+error, which the source installer's launcher appends to its run log
 (`tools/installer/README.md`). Each note is written as
 `nanolathe: content mount: <note>`; then one line in the shape above for each
-map file the skirmish map census could not load, naming the archive that holds
-it; then the map count with the providers that supplied the listed maps, as
-`nanolathe: retail frontend: 96 skirmish maps (btmaps.ccx 6, ccmaps.ccx 53,
-totala2.hpi 37)`. The report never changes which maps are listed. It exists
-because a rejected archive and an unreadable one both leave the list short by
+map file the windowed skirmish map census could not load, naming the archive
+that holds it; then the map count with the providers that supplied the listed
+maps, as `nanolathe: maps: 96 skirmish maps (btmaps.ccx 6, ccmaps.ccx 53,
+totala2.hpi 37); skipped=0`. The report never changes which maps are listed.
+It exists because a rejected archive and an unreadable one both leave the list short by
 that archive's maps with no other sign, and they need different remedies
-(issue #50). `--check-install` and the displayless runner do not print the
-notes yet.
+(issue #50). The desktop command's `--check-install`, captures and `--headless`
+entry also surface mount notes. The separate displayless runner retains its
+own report interface.
+
+**Startup report (Nanolathe host policy).** A start writes a UTC timestamp,
+OS/architecture, logical CPU count, Go worker budget and compiler version before
+opening content, so these survive a load failure. Build context names the
+engine profile, VCS revision and modified flag when available, and Ebitengine
+version. Source installers omit VCS metadata; their adjacent `release.txt`
+supplies the source revision, explicitly labelled as release-manifest metadata.
+Missing metadata is reported as unavailable/unknown, never inferred from the
+working directory.
+
+After content opens, report its profile/mod, mounted archive and loose-root
+counts, indexed file-entry count (including shadowed entries), elapsed load
+time, and providers in precedence order with their file counts. Archive base
+names and loose-root mount ordinals keep host paths out of this report (C13).
+This is index metadata, not a checksum of every asset, and does not read all
+payloads. The windowed entry then reports the map census, effective gameplay,
+renderer, FPS cap, fullscreen and unit limit, its loading duration and Go heap
+allocation. On the first draw, report the actual graphics backend, renderer,
+output/logical sizes, fullscreen/VSync and configured audio output rate. The
+audio rate does not assert that asynchronous device bring-up has finished.
+
+All startup diagnostics go to standard error. `--list-installs` keeps its
+line-oriented output and no startup report; help also stays quiet. JSON reports
+and film streams retain ownership of standard output. Checks lock failure
+context, effective settings, metadata fallback, portable provider names,
+rejection/skip causes, and mounting more than ten archives without a warning.
+When saved-mod fallback or save loading replaces the content set, the report
+names the replacement when it becomes active, including a startup save whose
+mod switch is deferred to the first window step. A set already reported does
+not repeat its providers. Unit limits reflect the feature-resolved menu
+selection or the active battle's limit, including Strict restore behavior.
 
 ## 5. Divergences
 
@@ -718,10 +746,10 @@ behaviour.
   retains its own source; Modern save-limit selection is documented in
   DESIGN_SESSIONS_AI_SAVE "Modern save unit limits". The simulation
   benchmark keeps its explicit default of 400 for workload comparability.
-* **SC1 — the ten-archive cap.** The spec states a cap of ten local archives;
-  the reference install has thirteen and plays. The cap is real but
-  per-invocation, and repeated invocations converge to every valid local
-  archive mounted, so every local archive mounts and a note names the count.
+* **SC1 — resolved archive-budget interpretation** `[02 §2]`. The budget is
+  per-invocation and repeated invocations converge to every valid local archive
+  mounted. Mounting all local archives in one pass reproduces that state;
+  startup reports provider statistics without a cap warning.
 * **SC2 — `GAMEDATA.TDF` does not exist.** No file of that name exists in any
   mounted provider; the hard requirement is the `gamedata/` **directory**.
   `Validate` treats a missing `gamedata/`, `MOVEINFO.TDF` or `SIDEDATA.TDF` as

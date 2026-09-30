@@ -61,12 +61,13 @@ func TestFrontendStartupReportNamesMissingMapCauses(t *testing.T) {
 	}
 	shell := &gameShell{cs: &contentSet{unmappedMount: fs}, maps: census.names, mapCensus: census}
 	var report bytes.Buffer
+	writeContentStartupReport(&report, shell.cs, 0)
 	writeFrontendStartupReport(&report, shell)
 	got := report.String()
 	for _, want := range []string{
 		"nanolathe: content mount: archive rejected: logical path rejected.ccx, providers searched [rejected.ccx]",
 		"nanolathe: skirmish map census skipped a map: logical path maps/Damaged Map.ota, providers searched [damaged.ccx], expected a readable OTA file: ",
-		"nanolathe: retail frontend: 1 skirmish maps (good.ccx 1)\n",
+		"nanolathe: maps: 1 skirmish maps (good.ccx 1); skipped=1\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("startup report lacks %q:\n%s", want, got)

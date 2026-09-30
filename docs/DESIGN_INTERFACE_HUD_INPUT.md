@@ -4326,8 +4326,9 @@ Two open questions belong to the in-battle options window and are carried as
   nothing to restore. Copying them would be two dead fields. A writer reachable
   from the options family would settle it.
 
-The exit menu enables the authored `RESTART` control for campaign and
-skirmish. `battle_restart.go` owns its retained dialog state and request;
+The exit opener enables the first named, authored-inactive `RESTART` control
+for campaign and skirmish and installs the translated `Restart` caption before
+creating the retained widget panel [07 R-FE-01 §7]. `battle_restart.go` owns its retained dialog state and request;
 `RESTART.GUI` replaces `EXITMENU`, wraps the mission/map name to the authored
 label width, focuses the difficulty stage, and uses the shared indexed pointer
 service. It retains zero token mode, so Enter/Escape do not invoke header

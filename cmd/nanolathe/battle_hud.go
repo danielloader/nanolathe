@@ -600,13 +600,31 @@ func (h *retailBattleHUD) openOptionsWindow() {
 	}
 }
 
-func (h *retailBattleHUD) openExitWindow() {
+func (h *retailBattleHUD) openExitWindow(kind uint8) {
 	if h == nil || h.exitBuilt {
 		return
 	}
 	h.installWindow(h.exitWin, nil)
 	h.exitBuilt = true
 	if h.exitWin != nil {
+		// RESTART is authored inactive; the exit opener exposes it for the
+		// two single-player session kinds before widget state is captured
+		// [07 R-FE-01 §7].
+		if kind == 1 || kind == 2 {
+			if i := h.exitWin.GadgetIndex("RESTART"); i >= 0 {
+				gadget := &h.exitWin.Gadgets[i]
+				gadget.Active = 1
+				gadget.Text = "Restart"
+				if captions := hudCaptionTranslator(h); captions != nil {
+					gadget.Text = captions.Translate(gadget.Text)
+				}
+				if len(gadget.Text) > 128 {
+					gadget.Text = gadget.Text[:128]
+				}
+				gadget.Labels = nil
+				gui.AssignButtonQuickKey(h.exitWin, i)
+			}
+		}
 		h.exitPanel = ui.NewPanel(h.exitWin)
 	}
 }

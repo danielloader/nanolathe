@@ -70,7 +70,7 @@ func (b *battleSession) battleModalPanel() (*ui.Panel, *gui.Window, *formats.GAF
 		b.hud.openOptionsWindow()
 		return b.hud.optionsPanel, b.hud.optionsWin, b.hud.optionsGAF
 	case ui.BattleModalExit:
-		b.hud.openExitWindow()
+		b.hud.openExitWindow(battleSessionKind(b))
 		return b.hud.exitPanel, b.hud.exitWin, nil
 	case ui.BattleModalConfirmMain, ui.BattleModalConfirmExit:
 		b.hud.openConfirmWindow()

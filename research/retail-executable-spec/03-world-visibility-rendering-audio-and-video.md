@@ -1427,8 +1427,8 @@ else if (vertexCount != 4)        -> draw nothing
 else {
     if (resolve-at-draw-time) {
         if (team)  texture = LOGOS entry frame chosen by the owner's shade byte
-        else if (mode != cached-name-resolution) texture = entry frame 0
-        else                                     texture = resolve by authored name
+        else if (pieceSelector == live) texture = loaded primitive cursor's current frame
+        else                            texture = entry frame 0
     } else          texture = the image the loader already resolved
     -> textured quad mapper
 }
@@ -1441,6 +1441,35 @@ exactly the 6,598 primitives with no texture name and clear on exactly the
 43,845 with one, across all 608 base models — a perfect partition, so bit 0 is
 a sound flat/textured discriminator on stock content. The resolve-at-draw-time
 bit is **never** authored (0 of 50,443), confirming that the loader owns it.
+
+**Established (direct-static) — cached and live texture selection.** Both the
+shaded and unshaded composition entries use the same piece selector for the
+ordinary animated-texture lookup. The live selector reads the loaded
+primitive's current cursor frame; the cached selector and the all-piece
+composition selector read frame zero of that cursor's sequence. This lookup
+does not resolve the authored texture name again and does not reset or advance
+the cursor. Team-colour lookup continues to select the owner's colour in
+every selector, while single-frame textures and flat colours keep their
+ordinary dispatch. The direct unit-piece entry has the same frame-selection
+split; the standalone debris and projectile entries always read the current
+cursor [R-COMP-02 §6].
+
+An unfinished structure includes every visible piece in its cached composition
+and skips its live-piece pass [R-REN-03A §4]. Its ordinary multi-frame textures
+therefore stay on frame zero throughout construction, including after a
+progress-driven rebuild. Completion enables the live pieces to read the
+already-running shared cursor; it does not restart their texture animation.
+Phase 7 has no construction gate [R-COMP-02 §4]. These lamps are model-texture
+animations, rather than a rotation of the installed palette or a
+construction-specific COB animation command. **Established (asset census):**
+the stock `CORLAB` piece `blink` and `CORALAB` pieces `blinka` and `blinkb`
+reference the six-frame `flashing01` entry; `ARMESTOR` piece `texture` and
+`CORESTOR` piece `windows` reference the eight-frame `glow` entry. Every frame
+of those two entries holds for ten simulation ticks. Their stock `Create`
+scripts clear the cache bit on those named pieces. `CORALAB` also references
+`glow` on a cached piece, so those particular faces retain frame zero after
+completion as well. Cache membership, not the texture's name, chooses which
+completed faces animate.
 
 The textured quad mapper builds the ten-dword edge records of [03 §5.2] and,
 when the caller supplies no UV table, defaults the four corners to
@@ -2629,6 +2658,12 @@ advance of [06 R-WFX-01 §1] (countdown, then frame; wrap or detach by the
 entry's loop byte). Order matters only for determinism of the step count,
 which is one per cursor per sub-tick; no random draw is made. The step is the
 same one the effect strips use, which is why [01 §4.4] groups them.
+
+The registry step has no remaining-build or instance-liveness test. An
+unfinished structure displays frame zero through its cached composition
+selector while this shared cursor continues advancing; its completed live
+pieces later read the current phase [R-REN-03A §5]. **Established
+(direct-static).**
 
 ### 2.5 Orthographic screen projection
 
@@ -5923,14 +5958,16 @@ per-unit, per-debris, per-projectile or per-call copy of it exists anywhere.
 Both standalone entries are handed the **loaded model piece itself** — a debris
 record names the loaded piece it was thrown from, and the effect entry is
 likewise given a loaded model's piece — and they reach the frame through the
-identical read the unit composition renderer performs, the same accessor on the
+identical read the unit's live-piece renderer performs, the same accessor on the
 same primitive record. What is per-instance is only the *point workspace* —
 the debris record rebuilds its own rotated copy from the loaded piece's original
 vertices — never the cursor.
 
 Consequently a piece **detached** from a unit, whether by death debris or by a
 standalone effect draw, shares the living unit's cursor and shows the same
-animation frame at the same time; it does not restart, rest at frame zero, or
+animation frame as its live-piece pass at the same time; the cached unit
+composition instead selects frame zero [R-REN-03A §5]. A detached piece does
+not restart, rest at frame zero, or
 run on a cadence of its own. The phase-7 walk reinforces this: the registry is
 populated at **model load** ([R-COMP-02 §4]), one append per multi-frame
 non-team primitive of each loaded model, and the walk steps every registered

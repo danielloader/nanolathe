@@ -142,9 +142,9 @@ so projectiles are unaffected in practice.
 Which cursor a *detached* piece shares is now **settled** and is not the
 per-subject one: retail hands the standalone entry the loaded model piece
 itself and resolves the frame through the cursor living in that loaded
-primitive record — the identical read the unit renderer performs, at the same
-offset of the same record. A detached piece therefore shows the same frame as
-the living unit at every instant, and the phase-7 walk advances that cursor
+primitive record — the same read the unit's live-piece renderer performs.
+A detached piece therefore shows the same frame as the living unit's live
+pass, and the phase-7 walk advances that cursor
 from model load onwards whether or not anything is drawing the model
 `[03 R-COMP-02 §6]` "Which cursor a detached piece reads". The per-subject
 standalone cursor is a *substitute*, not the contract: in a battle it is never
@@ -495,6 +495,16 @@ with a per-pixel **height key**, and that image is blitted. The split across
   else is an animated sequence with per-frame holds `[03 §2.4.1]` `[03 §4.4]`
   `[03 R-CRD-005 §1]`. Decoded-frame adapters read `TexturePlayer.FrameIndex`
   directly; resolving a frame neither advances playback nor rebuilds asset IDs.
+  Ordinary multi-frame faces select frame zero in cached/all-piece composition
+  and the loaded cursor's current frame in live/direct drawing. Construction
+  admits every visible piece to the cached image and suppresses a structure's
+  live pass, so its lamps stay on frame zero until completion; phase 7 keeps
+  advancing the shared cursor throughout `[03 R-REN-03A §5]`.
+  Team textures keep their owner selection in either lane. Standalone debris
+  and projectile draws retain current-cursor selection. Explicit preview's
+  combined unit draw selects each piece's normal lane when complete and the
+  cached selector while unfinished. An inactive sequence remains absent at
+  Nanolathe's safe missing-art boundary rather than reviving its original entry.
   Feature models use the committed player-zero row's colour in both classic
   composition and modern geometry recording, independently of the feature's
   placer and the viewer `[03 R-RAST-01 §3]`. An absent committed row remains
@@ -1307,6 +1317,10 @@ the published offset to the camera.
 * **Every placed copy of an animating feature is on the same frame.** Retail
   initialises one rest cursor per *definition*, not per instance
   `[05 R-FEAT-01 §1]`.
+* **A structure's texture lamps stay at frame zero during construction.** The
+  cached composition includes its live pieces while unfinished; completion
+  enables their current-cursor live pass. The shared animation has advanced
+  all along, so completion joins its current phase `[03 R-REN-03A §5]`.
 * **The authored selection primitive is never drawn.** It is swapped to
   primitive zero at model load and the face walk starts at primitive one, for
   completed and under-construction models alike; what appears under a selected

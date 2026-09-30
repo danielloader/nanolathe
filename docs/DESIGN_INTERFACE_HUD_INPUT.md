@@ -1095,8 +1095,8 @@ localized possessive-tail question remains owned by `[08 R-CAMP-01 §9]`.
 block, the rail art, the GUI windows, the fonts, the radar surface and the
 display size. The rest is split by concern: `battle_hud_assets.go` is the asset
 resolution and its diagnostics; `battle_hud_pages.go` the command-window
-selection (`<prefix>gen.gui` for an empty selection, the per-unit window
-otherwise, the generated `<unit>N.GUI` numbered pages) and the gadget art and
+selection (closed for an empty selection, `<prefix>gen.gui` for generic orders
+or multiple selection, and the generated `<unit>N.GUI` numbered pages) and the gadget art and
 frame choice; `battle_hud_siderail.go` the rail draw, the command-button
 verdicts (staged, greyed, hidden) and the product captions and queue counts
 `[07 R-HUD-03 §6]` `[07 R-P0-11 §2]`; `battle_hud_input.go` the rail's click
@@ -1835,8 +1835,9 @@ the loaded stage at entry, with no per-frame preferences read `[07 R-CAM-01
 front-end root has no session to apply it to, and battle entry is the reader
 there.
 
-**C18 — the in-battle modal chain.** An empty selection activates the
-side-authored `<prefix>gen.gui`, not the underlying `<prefix>main.gui`. In a
+**C18 — the in-battle modal chain.** An empty selection closes the command
+window and its input; the retained side-authored `<prefix>main2.gui` root
+supplies the empty rail artwork `[07 §6]`. In a
 non-network battle the options window sets the single-player pause state and
 draws `igtitles.gaf:igpaused` at the live view centre using its authored GAF
 offsets `[07 R-HUD-05 "Centred in the view"]`; closing it unpauses. `EXIT`

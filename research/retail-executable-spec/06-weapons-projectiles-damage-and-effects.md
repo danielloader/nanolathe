@@ -3932,13 +3932,21 @@ still see the **previous** packet's kind and attacker-side snapshot):
    the stored attacker-side snapshot differs from the victim's owner byte or the
    stored last damage kind is 1, request the interface message of kind 2
    (`Under Attack`) for the victim. The message helper posts it only when the
-   victim is **not** in the current selection, is owned by the viewing player, is
-   alive and not death-latched; doc 07 owns the queue it enters (per-kind
-   throttle deadline, eight entries, duplicate-kind suppression). Because the
-   test precedes the field rewrite, the first hit on a fresh unit always
-   qualifies (its snapshot is seeded to the neutral value 10 at spawn), while
-   the hit that follows an own-side non-weapon packet (a reclaim pulse, a
-   cargo cascade) is silent once. Bit 7 of the gate mask is statically set on
+   victim is **absent from the retained on-screen unit list**, is owned by the
+   viewing player, is alive and not death-latched. This list is the
+   viewport-bound list of [07 R-REV-01 §5], not the selection: its producer
+   tests no selected bit. Damage during a host frame reads the list retained
+   from the preceding frame's rebuild [07 R-HUD-03 §14.1]. Doc 03 owns the
+   queue it enters (per-kind throttle deadline, eight entries, duplicate-kind
+   suppression). Because the provenance test precedes the field rewrite, a
+   fresh unit's neutral snapshot of 10 passes that test, but does **not**
+   guarantee a caption or sound: an on-screen victim is rejected before queue
+   admission. An own-building reclaim pulse therefore stays silent when the
+   building is in the retained list, whether selected or not. A first pulse
+   against a fresh off-screen building can request the warning; the next
+   pulse reads the recorded own-side reclaim provenance and does not request
+   it. The sound queue applies its ordinary preference and arbitration gates
+   without any further reclaim-specific test [03 §8.3]. Bit 7 of the gate mask is statically set on
    the `Attack_NoMove`, `Attack_Chase` and `AttackSpecial` descriptors and is
    also raised at runtime by the VTOL follow/guard phases (`[04 §3.1]`,
    `[R-ORD-02 §3]`), so a unit already attacking, and an aircraft in those

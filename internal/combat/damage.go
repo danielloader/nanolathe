@@ -427,7 +427,7 @@ type ReactionSeams struct {
 	// front primary order [06 R-WPN-04 §2 part 4].
 	UnderAttackSilenced func(victim *units.Unit) bool
 	// UnderAttackNotice requests the interface message of kind 2. The helper
-	// applies its own selection/ownership/liveness gates [06 R-WPN-04 §2 part 4].
+	// applies its own viewport/ownership/liveness gates [06 R-WPN-04 §2 part 4].
 	UnderAttackNotice func(victim *units.Unit)
 }
 
@@ -687,10 +687,10 @@ func (s *Service) slotKeepsPresentTarget(w *units.World, victim *units.Unit, slo
 // interface message of kind 2 (`Under Attack`) for the victim.
 //
 // Because the routine runs before the field rewrite, the two stored values are
-// the PREVIOUS packet's. The first hit on a fresh unit therefore always
-// qualifies (its snapshot is seeded to the neutral value 10 at spawn), while
-// the hit that follows an own-side non-weapon packet — a reclaim pulse, a cargo
-// cascade — is silent once.
+// the PREVIOUS packet's. A fresh unit's neutral snapshot passes the provenance
+// test, while the hit after own-side non-weapon damage does not. This requests
+// a notice; the interface helper still rejects an on-screen victim before
+// queue insertion [07 R-HUD-03 §14.1].
 func (s *Service) reactionUnderAttackNotice(victim *units.Unit) {
 	r := s.Reaction
 	if r == nil || r.UnderAttackNotice == nil {

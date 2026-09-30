@@ -9075,10 +9075,12 @@ closed:
   land impact variants, the burst clone, the named-alias forward, and the
   network replay.
 - **Named positional** (feature ignition): one site.
-- **Underattack**: one site, on the damage path — emitted once per
-  non-paralyzer normal damage event to a unit owned by the **view slot**
-  ([R-AUD-01 §7], which owns the sink's gate and distinguishes the view slot
-  from the local human's slot), gated on selection state, fixed category 2.
+- **Underattack**: one site, in the accepted non-heal damage reaction, except
+  kind 11. Its order-mask and previous-damage provenance tests are
+  [06 R-WPN-04 §2]'s. The sibling raiser accepts only a live, non-dying unit
+  owned by the **view slot** and absent from the retained on-screen unit list
+  [R-AUD-01 §7][07 R-HUD-03 §14.1]. This is a viewport-membership gate,
+  not a selection test, and the event slot is 2.
 - **Unit voice**: 82 sites across orders, AI, and selection — category mapping:
   1 select, 2 underattack, 3/4 activate/deactivate, 5 ok (about thirty
   order-acceptance sites, gated on a runtime status bit 0x2000), 6 arrived,
@@ -9869,10 +9871,13 @@ overrideText)`, which does exactly three things:
    insert after equal priorities. The entry copies the caption into its own
    allocation.
 
-Two sibling raisers share the gate and add one global flag test each (one
-requires it set and has no caller in the image; the other requires it clear
-and is the under-attack path's — §8.3's "gated on selection state"). The
-edge machine and the order handlers use the plain helper.
+Two sibling raisers share the gate and additionally test membership in the
+retained on-screen unit list [07 R-REV-01 §5]. The presence variant has no
+caller in the image; the absence variant is the under-attack path's. They
+read neither a global enable flag nor a selected status bit. The owning
+caption contract [07 R-HUD-03 §14.1] states the host-frame order: simulation
+damage reads the list retained from the preceding rebuild. The edge machine
+and ordinary order voices use the plain helper and have no viewport gate.
 
 **Synchronous, from inside the simulation.** The raise runs in the caller's
 own phase — the economy settlement for 14/15 ([05 R-ECO-01 §9]),
@@ -9891,6 +9896,13 @@ order — the insert's ordering rule and cooldown test depend on order and on
 the tick, not on wall-clock — and (iii) a unit removed in the same tick drops
 its pending entries. The observable difference from retail's synchronous
 insert is nil: nothing in the simulation observes the queue.
+
+The under-attack sibling additionally needs its presentation-owned retained
+viewport membership tested **before** queue insertion. Rejecting after
+insertion or resolution would consume arbitration, captions or variant draws
+that retail never consumes for an on-screen victim. A publication-boundary
+implementation may retain the preceding presentation list on the client;
+the simulation has no reader of that list or the queue [I6].
 
 **Random draws: none on the raise path.** The gate, the localisation lookup
 and the insert draw from neither stream. The only draw anywhere in the cue

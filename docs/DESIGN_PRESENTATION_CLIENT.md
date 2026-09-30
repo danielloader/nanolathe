@@ -1177,6 +1177,19 @@ document carries them.
   free its text and shift it out; then insert so the queue stays sorted by
   **descending priority**, placing the new entry *after* equals — which makes
   equal priorities FIFO `[03 §8.3]`.
+  The damage reaction carries slot 2 through the ordinary committed status
+  sink after its raise-time viewing-owner/live/death gates. The client rejects
+  that slot for identities in its retained on-screen unit list **before**
+  Insert; selection is irrelevant `[06 R-WPN-04 §2]`
+  `[07 R-HUD-03 §14.1]`. The list uses the published hull offsets and spans,
+  committed pose, immutable plot height, and presentation camera to reproduce
+  the inclusive definition-box overlap of `[07 R-REV-01 §5]`. The camera's
+  framebuffer-origin conversion and effective zoom keep overlap in the
+  presented viewport (DESIGN_INTERFACE_HUD_INPUT §2.3). `TickAudio` admits the
+  just-committed requests against the preceding list, then refreshes it for the
+  next batch; speculative model recording cannot advance admission. Snapshot
+  and terrain replacement clear it. This corrects a parity defect in every
+  rule set; it adds no Modern policy and feeds no camera state into simulation.
 * **C17 Resolve.** Look up the acting unit's category and its row; draw the
   variant with the **fifteen-bit CRT draw** scaled by the row's count. The draw
   is **unconditional** — it happens on every resolve, including silent ones and

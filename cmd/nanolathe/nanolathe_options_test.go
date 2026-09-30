@@ -488,3 +488,22 @@ func TestSupersampleSwitchMapsBothWays(t *testing.T) {
 		t.Fatalf("supersample off stored back as %+v", back)
 	}
 }
+
+func TestSavedArrivalHonorsExplicitCLIOnly(t *testing.T) {
+	saved := settings.DefaultPresentation()
+	saved.Arrival = 0
+	for _, tc := range []struct {
+		args []string
+		want int
+	}{
+		{nil, 0}, {[]string{"--arrival"}, 1}, {[]string{"--arrival=false"}, 0},
+	} {
+		opts, err := parseFlags(tc.args, io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := startupPresentation(opts, saved).Arrival; got != tc.want {
+			t.Fatalf("%v: arrival=%d", tc.args, got)
+		}
+	}
+}

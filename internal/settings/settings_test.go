@@ -40,6 +40,8 @@ func TestPresentationPreferencesLoadAndRoundTrip(t *testing.T) {
 		want Presentation
 	}{
 		{"older file", `{"version":1}`, want("modern", 60)},
+		{"opening and placement off", `{"version":1,"presentation":{"arrival":0,"placementWeaponRanges":0}}`, want("modern", 60, func(p *Presentation) { p.Arrival, p.PlacementWeaponRanges = 0, 0 })},
+		{"opening and placement repaired", `{"version":1,"presentation":{"arrival":-1,"placementWeaponRanges":-1}}`, want("modern", 60)},
 		{"missing fps", `{"version":1,"presentation":{"renderer":"classic"}}`, want("classic", 60)},
 		{"display refresh", `{"version":1,"presentation":{"renderer":"modern","fps":0}}`, want("modern", 0)},
 		{"arbitrary CLI cap", `{"version":1,"presentation":{"renderer":"classic","fps":90}}`, want("classic", 90)},

@@ -83,8 +83,8 @@ func (s *catalogServer) client(t *testing.T) *Client {
 
 func (s *catalogServer) entry(archivePath string, data []byte) Entry {
 	return Entry{
-		Metadata: modlibrary.Metadata{Schema: 1, ID: "sample", Name: "Sample", Version: "1.0"},
-		Archive:  Archive{URL: s.URL + archivePath, Size: int64(len(data)), SHA256: digest(data)},
+		ID: "sample", Name: "Sample", Version: "1.0",
+		Archive: Archive{URL: s.URL + archivePath, Size: int64(len(data)), SHA256: digest(data)},
 	}
 }
 
@@ -106,7 +106,7 @@ func manifestJSON(entries ...string) string {
 }
 
 func entryJSON(id, version, url string, size int, sha string) string {
-	return fmt.Sprintf(`{"id":%q,"name":"Mod %s","version":%q,"schema":1,"archive":{"url":%q,"size":%d,"sha256":%q}}`, id, id, version, url, size, sha)
+	return fmt.Sprintf(`{"id":%q,"name":"Mod %s","version":%q,"archive":{"url":%q,"size":%d,"sha256":%q}}`, id, id, version, url, size, sha)
 }
 
 func TestCatalogURLOverride(t *testing.T) {
@@ -279,15 +279,22 @@ func TestFetchManifestFallsBackToCache(t *testing.T) {
 func TestManifestValidation(t *testing.T) {
 	good := strings.Repeat("a", 64)
 	for name, body := range map[string]string{
-		"schema 2":         `{"schema":2,"mods":[]}`,
-		"not json":         `<html>`,
-		"bad id":           manifestJSON(entryJSON("Pro TA", "1", "a.zip", 1, good)),
-		"duplicate":        manifestJSON(entryJSON("a", "1", "a.zip", 1, good), entryJSON("a", "1", "b.zip", 1, good)),
-		"foreign archive":  manifestJSON(entryJSON("a", "1", "https://mirror.example/a.zip", 1, good)),
-		"no size":          manifestJSON(entryJSON("a", "1", "a.zip", 0, good)),
-		"short digest":     manifestJSON(entryJSON("a", "1", "a.zip", 1, "abc")),
-		"missing archive":  `{"schema":1,"mods":[{"schema":1,"id":"a","name":"A","version":"1"}]}`,
-		"bad minimum mode": `{"schema":1,"mods":[{"schema":1,"id":"a","name":"A","version":"1","minimumGameplay":"fast","archive":{"url":"a.zip","size":1,"sha256":"` + good + `"}}]}`,
+		"schema 2":          `{"schema":2,"mods":[]}`,
+		"not json":          `<html>`,
+		"bad id":            manifestJSON(entryJSON("Pro TA", "1", "a.zip", 1, good)),
+		"uppercase id":      manifestJSON(entryJSON("ProTA", "1", "a.zip", 1, good)),
+		"long id":           manifestJSON(entryJSON(strings.Repeat("a", 65), "1", "a.zip", 1, good)),
+		"empty name":        `{"schema":1,"mods":[{"id":"a","name":" ","version":"1","archive":{"url":"a.zip","size":1,"sha256":"` + good + `"}}]}`,
+		"empty version":     manifestJSON(entryJSON("a", "", "a.zip", 1, good)),
+		"escaping version":  manifestJSON(entryJSON("a", "../1", "a.zip", 1, good)),
+		"spaced version":    manifestJSON(entryJSON("a", "1 ", "a.zip", 1, good)),
+		"long version":      manifestJSON(entryJSON("a", strings.Repeat("1", 65), "a.zip", 1, good)),
+		"duplicate":         manifestJSON(entryJSON("a", "1", "a.zip", 1, good), entryJSON("a", "1", "b.zip", 1, good)),
+		"foreign archive":   manifestJSON(entryJSON("a", "1", "https://mirror.example/a.zip", 1, good)),
+		"archive user info": manifestJSON(entryJSON("a", "1", "https://user@nanolathe.gg/a.zip", 1, good)),
+		"no size":           manifestJSON(entryJSON("a", "1", "a.zip", 0, good)),
+		"short digest":      manifestJSON(entryJSON("a", "1", "a.zip", 1, "abc")),
+		"missing archive":   `{"schema":1,"mods":[{"id":"a","name":"A","version":"1"}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			server := newCatalogServer(t)
@@ -306,6 +313,54 @@ func TestManifestValidation(t *testing.T) {
 	server.route("/mods/manifest.json", serveJSON(`{"schema":1,"notice":"hello","mods":[{"schema":1,"id":"a","name":"A","version":"1","screenshot":"a.png","archive":{"url":"a.zip","size":1,"sha256":"`+good+`","mirror":"x"}}]}`))
 	if _, err := server.client(t).FetchManifest(context.Background()); err != nil {
 		t.Fatalf("unknown fields refused the catalogue: %v", err)
+	}
+}
+
+// Catalogue schema 1 describes downloads, independently of ZIP metadata and
+// config. Former metadata fields and unknown catalogue fields are ignored
+// even when their values would refuse a metadata document (§5.1).
+func TestManifestIgnoresMetadataFields(t *testing.T) {
+	server := newCatalogServer(t)
+	server.route("/mods/manifest.json", serveJSON(`{"schema":1,"notice":"hello","mods":[{
+		"id":"sample","name":"Sample","version":"1.0",
+		"summary":"Catalogue description","homepage":"https://example.invalid",
+		"schema":{"unsupported":true},"contentProfile":["missing"],
+		"minimumGameplay":"fast","controls":"fancy","requires":["../x"],
+		"buildMenuPageSize":-1,"rules":{"unknown":true},"screenshot":"a.png",
+		"archive":{"url":"sample.zip","size":1,"sha256":"`+strings.Repeat("a", 64)+`","mirror":"x"}
+	}]}`))
+	client := server.client(t)
+	result, err := client.FetchManifest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Entry{
+		ID: "sample", Name: "Sample", Version: "1.0",
+		Summary: "Catalogue description", Homepage: "https://example.invalid",
+		Archive: Archive{URL: server.URL + "/mods/sample.zip", Size: 1, SHA256: strings.Repeat("a", 64)},
+	}
+	if len(result.Manifest.Mods) != 1 || result.Manifest.Mods[0] != want {
+		t.Fatalf("catalogue entries = %+v, want %+v", result.Manifest.Mods, want)
+	}
+	raw, err := json.Marshal(result.Manifest.Mods[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"id", "name", "version", "summary", "homepage", "archive"} {
+		if _, ok := fields[field]; !ok {
+			t.Errorf("catalogue entry does not serialize %s", field)
+		}
+		delete(fields, field)
+	}
+	if len(fields) != 0 {
+		t.Fatalf("catalogue entry serialized metadata fields: %v", fields)
+	}
+	if cached, _, ok := client.CachedManifest(); !ok || !reflect.DeepEqual(cached, result.Manifest) {
+		t.Fatalf("cached catalogue = %+v, usable %v", cached, ok)
 	}
 }
 
@@ -497,13 +552,13 @@ func TestStalledDownloadKeepsItsPart(t *testing.T) {
 }
 
 // TestDownloadThenInstall runs the whole catalogue path against an authored
-// zip: fetch, download to staging, and install with the entry's options.
+// schema 2 zip with a minimal entry: fetch, download to staging, and install
+// with identity-only options. Configuration comes from the validated ZIP.
 func TestDownloadThenInstall(t *testing.T) {
-	meta := modlibrary.Metadata{Schema: 1, ID: "sample", Name: "Sample", Version: "1.0", Controls: "community"}
-	metaJSON, _ := json.Marshal(meta)
+	config := `{"schema":2,"id":"sample","name":"Packaged Sample","version":"1.0","requires":["maps/expansion.ota"],"rules":{"minimumGameplay":"community-3.9"},"keys":{"profile":"community"}}`
 	var buffer bytes.Buffer
 	writer := zip.NewWriter(&buffer)
-	for name, body := range map[string]string{modlibrary.MetadataFile: string(metaJSON), "sample.ufo": "authored"} {
+	for name, body := range map[string]string{modlibrary.MetadataFile: config, "sample.ufo": "authored"} {
 		w, _ := writer.Create(name)
 		_, _ = w.Write([]byte(body))
 	}
@@ -515,7 +570,7 @@ func TestDownloadThenInstall(t *testing.T) {
 	server := newCatalogServer(t)
 	server.route("/mods/sample/sample-1.0.zip", serveBytes(archive))
 	server.route("/mods/manifest.json", serveJSON(manifestJSON(
-		`{"schema":1,"id":"sample","name":"Sample","version":"1.0","controls":"community","archive":{"url":"sample/sample-1.0.zip","size":`+strconv.Itoa(len(archive))+`,"sha256":"`+digest(archive)+`"}}`)))
+		entryJSON("sample", "1.0", "sample/sample-1.0.zip", len(archive), digest(archive)))))
 
 	lib, err := modlibrary.Open(filepath.Join(t.TempDir(), "mods"))
 	if err != nil {
@@ -536,8 +591,16 @@ func TestDownloadThenInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts := entry.InstallOptions()
-	if opts.Expect == nil || opts.Expect.ID != "sample" || opts.SHA256 != entry.Archive.SHA256 || opts.Size != entry.Archive.Size || opts.Source != entry.Archive.URL {
+	if opts.Expect != nil || opts.ExpectIdentity == nil || *opts.ExpectIdentity != (modlibrary.ExpectedIdentity{ID: "sample", Version: "1.0"}) || opts.SHA256 != entry.Archive.SHA256 || opts.Size != entry.Archive.Size || opts.Source != entry.Archive.URL {
 		t.Fatalf("InstallOptions = %+v", opts)
+	}
+	validated := false
+	opts.Validate = func(root string, meta modlibrary.Metadata) error {
+		validated = true
+		if !meta.HasConfig() || meta.MinimumGameplay != "community-3.9" || meta.Controls != "community" || !reflect.DeepEqual(meta.Requires, []string{"maps/expansion.ota"}) {
+			t.Errorf("package validation received %+v", meta)
+		}
+		return nil
 	}
 	mod, err := lib.InstallArchive(dst, opts)
 	if err != nil {
@@ -545,6 +608,9 @@ func TestDownloadThenInstall(t *testing.T) {
 	}
 	if mod.Receipt.SHA256 != entry.Archive.SHA256 || mod.Receipt.Source != entry.Archive.URL {
 		t.Fatalf("receipt %+v", mod.Receipt)
+	}
+	if !validated || mod.Name != "Packaged Sample" || !mod.HasConfig() || mod.MinimumGameplay != "community-3.9" || mod.Controls != "community" || !reflect.DeepEqual(mod.Requires, []string{"maps/expansion.ota"}) {
+		t.Fatalf("installed package = %+v, content validation ran %v", mod.Metadata, validated)
 	}
 	mods, err := lib.Installed()
 	if err != nil || len(mods) != 1 {

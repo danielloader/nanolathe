@@ -406,6 +406,26 @@ func (s *nlScreen) effectCards() []nlCard {
 	}
 	pres := func(get func(p *settings.Presentation) *int) field { return get }
 	return []nlCard{
+		{key: "arrival", label: "Commander arrival", pics: []string{"armcom", "corcom"}, kind: nlSwitch, steps: []string{"Off", "On"},
+			get: func(d *nlDraft) int { return onOff(d.pres.Arrival != 0) },
+			set: func(d *nlDraft, v int) { d.pres.Arrival = v },
+			desc: func(*nlDraft, int) string {
+				return "The commander landing and map reveal before a battle. Off starts immediately. Escape skips an opening."
+			},
+			scene:   func(*nlDraft, int) string { return "arrival" },
+			render:  func(_ *nlDraft, v int, r *nlRender) { r.arrival = v != 0 },
+			compare: func(_ *nlDraft, v int) (int, bool) { return 1 - v, true }, enhanced: true,
+		},
+		{key: "placementWeaponRanges", label: "Placement weapon rings", pics: []string{"armllt", "corllt"}, kind: nlSwitch, steps: []string{"Off", "On"},
+			get: func(d *nlDraft) int { return onOff(d.pres.PlacementWeaponRanges != 0) },
+			set: func(d *nlDraft, v int) { d.pres.PlacementWeaponRanges = v },
+			desc: func(*nlDraft, int) string {
+				return "Weapon range rings around a building site while you place it. Off hides the automatic guide; Shift with +showranges still shows it."
+			},
+			scene:   func(*nlDraft, int) string { return "placement" },
+			render:  func(_ *nlDraft, v int, r *nlRender) { r.placementRanges = v != 0 },
+			compare: func(_ *nlDraft, v int) (int, bool) { return 1 - v, true }, enhanced: true,
+		},
 		s.groupCard("water", "Water", []string{"armsub", "corsub", "armship"}, "naval",
 			"The Enhanced water, part by part. Compare shows the part you pick switched off beside it on.",
 			sw("waterSurface", "Surface", "Depth tint, damp shores and the shallows", pres(func(p *settings.Presentation) *int { return &p.WaterSurface }),

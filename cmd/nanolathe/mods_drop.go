@@ -66,7 +66,7 @@ func startModDrop(job *modDownloadJob, state *modDropState, paths []string, base
 	name := filepath.Base(filepath.Clean(path))
 	// The job's entry names the package in the Get more mods dialog while it
 	// installs; there is nothing to download, so the install starts at once.
-	entry := modfetch.Entry{Metadata: modlibrary.Metadata{Name: name}}
+	entry := modfetch.Entry{Name: name}
 	base = append([]string(nil), base...)
 	started := job.start(entry, func(context.Context, func(done, total int64)) error { return nil }, func() error {
 		lib, err := openLibrary()

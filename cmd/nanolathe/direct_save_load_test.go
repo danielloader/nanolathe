@@ -28,6 +28,8 @@ func TestDirectBattleSaveLoadThroughWindowInput(t *testing.T) {
 	t.Setenv(settings.EnvPath, filepath.Join(t.TempDir(), "settings.json"))
 	prefs := settings.Defaults()
 	prefs.Gameplay = gameplay.Strict31
+	// This probe exercises battle dialogs; start without the optional opening.
+	prefs.Presentation.Arrival = 0
 	if err := prefs.Save(); err != nil {
 		t.Fatal(err)
 	}

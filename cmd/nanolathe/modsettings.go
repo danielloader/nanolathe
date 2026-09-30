@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
@@ -45,6 +46,18 @@ func modRecommendations(m *modlibrary.Mod) json.RawMessage {
 	if c.Keys != nil {
 		doc["keyBindings"] = c.Keys
 	}
+	if ranges := c.Content.Presentation.PlacementWeaponRanges; ranges != nil {
+		pres, _ := doc["presentation"].(map[string]any)
+		if pres == nil {
+			pres = map[string]any{}
+			doc["presentation"] = pres
+		}
+		// The content preference predates the settings layer. Keep it as a
+		// recommendation unless the mod authored the newer settings path.
+		if _, authored := pres["placementWeaponRanges"]; !authored {
+			pres["placementWeaponRanges"] = onOff(*ranges)
+		}
+	}
 	if len(doc) == 0 {
 		return nil
 	}
@@ -66,7 +79,7 @@ func (g *gameShell) effectiveSettings(file settings.Settings) settings.Settings 
 		return file
 	}
 	patch := file.ModSettings[key]
-	if locks := modLocks(g.contentMod()); len(locks) > 0 && !g.lockOverridden(g.contentMod()) {
+	if locks := modLocks(g.contentMod()); len(locks) > 0 && !slices.Contains(file.ModLockOverrides, key) {
 		// A locked setting plays the mod's value until the player overrides
 		// the mod's locks (§4.3 "Overriding a rule lock").
 		patch, _ = settings.Without(patch, locks)

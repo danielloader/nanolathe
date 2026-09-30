@@ -3921,7 +3921,11 @@ one half to the other.
 **Graphics and Effects pages.** Graphics holds the choices that shape the
 whole picture in either renderer: the renderer itself, the frame rate, the
 sidebar and fullscreen. Effects holds Enhanced's own looks, the player
-switches of DESIGN_GPU_RENDERER §30, in cards that share one scene: Water
+switches of DESIGN_GPU_RENDERER §30, plus Commander arrival (§36) and Placement
+weapon rings (§20), both default on and independent of gameplay mode. Their
+previews use the existing opening recorder and prospective-building ghost/range
+pass on a quiet Greenhaven skirmish; their compare renders each treatment on and
+off without touching authoritative state. The remaining cards share one scene: Water
 (surface, motion, foam, reflections), Lighting (unit light, ground light and
 its strength), Metal (finish, glint), Smooth edges (the model supersampling
 of §17.5), Glow (strength), Heat (blast rings and their strength, fire
@@ -3940,6 +3944,22 @@ units with the scaled value before and after, read from a clone of the
 catalog after `Catalog.ApplyMutators` with that one factor, so engine limits
 show (a Krogoth's hit points stop at 32767). Choosing a controls profile
 lists every row it would change, old then new.
+
+**Quiet audio.** Every settings preview is silent, including its visible battle,
+lead-in, restart and retirement. It has no playback binding and never changes the
+shared backend's configuration or battle preferences. Menu cues and the authored
+menu loop use 10% of their former cue amplitude; battle audio retains the player's
+FX/music settings. This is user-authorized host policy (2026-09-29).
+
+**Input and persistence.** A grouped-effects wheel changes only the selected row
+and stops at its endpoints. Controls wheel scrolling survives redraw; keyboard
+selection scrolls its row into view. Preset lists scroll by wheel and keyboard.
+Every key mutation, including clear and reset, waits for a locked mod's approval.
+The pending captured chord retains its action until that approval completes.
+Apply records approval before reloading layers; startup reads it before layering
+the player patch. Saving base content or applying a preset preserves the complete
+mod-settings table and preset library. Graphics preset scopes include Smooth
+edges, Commander arrival and Placement weapon rings.
 
 **Apply.** The screen edits a draft. Apply writes a chosen controls profile
 first, then only the cards the player touched, over the live state, so a

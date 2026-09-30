@@ -11,7 +11,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/clock"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
-	contentprofiles "github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/headless"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
@@ -31,6 +30,8 @@ import (
 // the integrated session (all twelve kernel phases) and the interaction state:
 // selection, order latch, and build placement.
 type battleSession struct {
+	// preview owns a silent, isolated Settings scene (interface design §3.17).
+	preview                                bool
 	hostPresentation                       *settings.Presentation
 	incomeMinimized, incomePointerCaptured bool
 	developer                              battleDeveloperState
@@ -44,6 +45,7 @@ type battleSession struct {
 	cat   *content.Catalog
 	cam   *camera.Camera
 	hud   *retailBattleHUD
+	cs    *contentSet
 	fs    vfs.FSOps
 	shell *gameShell
 
@@ -213,7 +215,6 @@ type battleSession struct {
 	// shell across battles and never written to settings [07 R-CAM-01 §6].
 	showRanges bool
 	// Placement guides are presentation preferences only (GPU design §20).
-	rangePreferences contentprofiles.Presentation
 	// modBuildPageSize is the running content's build page lock: the mod's
 	// metadata value, else its content profile's. Zero means none.
 	modBuildPageSize int
@@ -586,8 +587,8 @@ func composeBattleEntryDetached(sess *session.Session, cat *content.Catalog, cs 
 		return nil, err
 	}
 	b := &battleSession{
-		sess: sess, cat: cat, cam: cam, hud: hud, fs: cs.fs, shell: shell, iconRoots: strategicIconSearchRoots(cs),
-		showRanges: cs.presentation.ShowRanges, rangePreferences: cs.presentation, modBuildPageSize: cs.buildMenuPageSize(),
+		sess: sess, cat: cat, cam: cam, hud: hud, fs: cs.fs, cs: cs, shell: shell, iconRoots: strategicIconSearchRoots(cs),
+		showRanges: cs.presentation.ShowRanges, modBuildPageSize: cs.buildMenuPageSize(),
 		millisSource: newMonotonicMillisSource(), battleUI: ui.NewProductionBattleState(),
 	}
 	if savedCamera != nil {
@@ -656,7 +657,14 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 		return
 	}
 	b.cl = cl
-	p := loadedSettings().Presentation
+	s := settings.Defaults()
+	if !b.preview {
+		s = loadedSettings()
+		if b.shell == nil {
+			s = (&gameShell{cs: b.cs}).effectiveSettings(s)
+		}
+	}
+	p := s.Presentation
 	b.hostPresentation = &p
 	applyCommunityHUDOptions(cl, b.hostPreferences())
 	applyEffectStrengths(cl, b.hostPreferences())
@@ -705,15 +713,16 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 		cl.SetStrategicTeamArt(teamArt)
 	}
 	cl.SetRadarOptions(b.radarOptions)
-	s := loadedSettings()
 	gamma := s.Display.Gamma
 	if b.shell != nil {
 		gamma = b.shell.display.Gamma
 	}
 	b.gammaSetting = gamma
 	applyGammaOption(cl, gamma)
-	applyBattleAudioOptions(b, s)
-	applyDamageBarsSetting(s)
+	if !b.preview {
+		applyBattleAudioOptions(b, s)
+		applyDamageBarsSetting(s)
+	}
 	// A shell already holds the startup settings block and may carry its live
 	// value into a new battle. A direct --map battle has no shell, so its one
 	// install-time settings read supplies the same bit.
@@ -749,6 +758,12 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 	// catalog unit corpses and feature successors before any draw can use it.
 	if b.sess.Catalog != nil {
 		cl.WarmBattleFeatureSequences(b.sess.Catalog, b.sess.World.FeatureDefs)
+	}
+	if b.preview {
+		b.battleUI.SetPanelCue(nil)
+		cl.SetAudioService(nil)
+		cl.SetPresentationCRT(b.sess.PresentationCRT())
+		return
 	}
 	attachBattleAudio(cl, b.sess, b.fs)
 	prefs := s.Audio
@@ -811,7 +826,9 @@ func (b *battleSession) teardown(cl *client.Client) {
 	// load would otherwise hand the next battle a window built from the old
 	// battle's definition and art — one that keeps swallowing pointer input
 	// under its rectangle until `DONE` is clicked [07 §3][07 R-HUD-04 §3].
-	closeUnitInfo()
+	if !b.preview {
+		closeUnitInfo()
+	}
 	if b.sess != nil {
 		// The score teardown also runs for manual exits [08 R-CAMP-01 §7].
 		b.sess.CommitCampaignTeardown()
@@ -851,8 +868,10 @@ func (b *battleSession) teardown(cl *client.Client) {
 		// a fresh pool. Safe here because teardown never runs beside a frame.
 		cl.Close()
 	}
-	detachBattleAudio(cl, b.sess)
-	if b.shell == nil && b.sess != nil && b.sess.Audio != nil {
+	if !b.preview {
+		detachBattleAudio(cl, b.sess)
+	}
+	if !b.preview && b.shell == nil && b.sess != nil && b.sess.Audio != nil {
 		// A direct process exit has no continuing shell to service the fade.
 		b.sess.Audio.Close()
 	}
@@ -1042,7 +1061,7 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 	if b.handleDebugCapture(cl) {
 		return
 	}
-	if b.shell == nil && cl.IsFocused() && b.sess != nil && b.sess.Audio != nil && b.sess.Audio.Music != nil {
+	if !b.preview && b.shell == nil && cl.IsFocused() && b.sess != nil && b.sess.Audio != nil && b.sess.Audio.Music != nil {
 		serviceMusic(b.sess.Audio)
 	}
 	b.dragScrollStepped = false

@@ -36,7 +36,11 @@ func (b *battleSession) beginArrival(cl *client.Client) bool {
 // beginBattleArrival is shared by fresh entry, restart, and successful save
 // adoption. Restored frames are already published and must not be republished.
 func (b *battleSession) beginBattleArrival(opts Options, cl *client.Client, restored bool) {
-	if !opts.Arrival || !modernRenderer(opts) || cl == nil {
+	enabled := b.hostPreferences().Arrival != 0
+	if opts.ArrivalSet {
+		enabled = opts.Arrival
+	}
+	if !enabled || !modernRenderer(opts) || cl == nil {
 		return
 	}
 	if restored {

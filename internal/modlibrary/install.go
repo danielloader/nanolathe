@@ -17,14 +17,17 @@ import (
 )
 
 // InstallOptions carries what the caller knows about a package before it is
-// opened. A catalogue download fills Expect, SHA256, Size and Source from its
-// manifest entry; a dropped file or folder usually fills only Validate.
+// opened. A catalogue download fills ExpectIdentity, SHA256, Size and Source
+// from its manifest entry; a dropped file or folder usually fills only Validate.
 type InstallOptions struct {
-	// Expect, when non-nil, is the catalogue entry the archive must agree
-	// with on schema, id, version and minimumGameplay, and for schema 1 on
-	// contentProfile and controls (§5.1). A package without metadata cannot
-	// agree and is refused.
+	// Expect, when non-nil, requires agreement on schema, id, version and
+	// minimumGameplay, and for schema 1 on contentProfile and controls.
+	// A package without metadata cannot agree and is refused.
 	Expect *Metadata
+	// ExpectIdentity requires the package's own metadata to agree on id and
+	// version only. The ZIP parser owns its schema and config validation;
+	// catalogue display fields do not describe that config (§5.1).
+	ExpectIdentity *ExpectedIdentity
 	// SHA256, when non-empty, is verified before extraction (§5.3 step 2).
 	SHA256 string
 	// Size, when non-zero, is verified before extraction.
@@ -37,6 +40,12 @@ type InstallOptions struct {
 	Validate func(stagedRoot string, meta Metadata) error
 	// Progress reports extracted bytes against the package's total; may be nil.
 	Progress func(done, total int64)
+}
+
+// ExpectedIdentity is the package identity a catalogue download must carry.
+type ExpectedIdentity struct {
+	ID      string
+	Version string
 }
 
 // archiveExtensions are the HPI-family containers a content root holds at
@@ -198,11 +207,16 @@ func (l *Library) install(provider, baseName string, entries []sourceEntry, opts
 	if err != nil {
 		return Mod{}, err
 	}
+	if generated && (opts.Expect != nil || opts.ExpectIdentity != nil) {
+		return Mod{}, diagnostic("mod archive has no metadata to check against the catalogue", MetadataFile, []string{provider}, "a nanolathe-mod.json at the archive root")
+	}
 	if opts.Expect != nil {
-		if generated {
-			return Mod{}, diagnostic("mod archive has no metadata to check against the catalogue", MetadataFile, []string{provider}, "a nanolathe-mod.json at the archive root")
-		}
 		if err := expectMatches(provider, meta, *opts.Expect); err != nil {
+			return Mod{}, err
+		}
+	}
+	if opts.ExpectIdentity != nil {
+		if err := expectIdentityMatches(provider, meta, *opts.ExpectIdentity); err != nil {
 			return Mod{}, err
 		}
 	}
@@ -498,10 +512,8 @@ func packageMetadata(provider, baseName string, planned []plannedEntry) (Metadat
 	return localMetadata(baseName), true, nil
 }
 
-// expectMatches holds an archive's metadata to its catalogue entry (§5.1).
-// A schema 2 entry names no content profile or preset, because the zip's own
-// config is authoritative; its minimumGameplay is the config's, shown in the
-// catalogue before the download.
+// expectMatches preserves the strict metadata expectation for callers that
+// supply it. Catalogue downloads use expectIdentityMatches (§5.1).
 func expectMatches(provider string, got, want Metadata) error {
 	fields := []struct{ name, got, want string }{
 		{"schema", fmt.Sprint(got.Schema), fmt.Sprint(want.Schema)},
@@ -515,6 +527,20 @@ func expectMatches(provider string, got, want Metadata) error {
 			struct{ name, got, want string }{"controls", got.Controls, want.Controls})
 	}
 	for _, field := range fields {
+		if field.got != field.want {
+			return diagnostic(fmt.Sprintf("mod archive metadata disagrees with the catalogue on %s (%q, catalogue %q)", field.name, field.got, field.want), MetadataFile, []string{provider}, "archive metadata that matches its catalogue entry")
+		}
+	}
+	return nil
+}
+
+// expectIdentityMatches checks the catalogue's package identity after the
+// archive's own metadata and config have been parsed and validated (§5.3).
+func expectIdentityMatches(provider string, got Metadata, want ExpectedIdentity) error {
+	for _, field := range []struct{ name, got, want string }{
+		{"id", got.ID, want.ID},
+		{"version", got.Version, want.Version},
+	} {
 		if field.got != field.want {
 			return diagnostic(fmt.Sprintf("mod archive metadata disagrees with the catalogue on %s (%q, catalogue %q)", field.name, field.got, field.want), MetadataFile, []string{provider}, "archive metadata that matches its catalogue entry")
 		}

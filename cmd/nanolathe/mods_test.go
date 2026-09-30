@@ -275,7 +275,7 @@ func waitForJob(t *testing.T, job *modDownloadJob) modDownloadView {
 func TestModDownloadJobRunsOneAtATime(t *testing.T) {
 	var job modDownloadJob
 	entry := func(id string) modfetch.Entry {
-		return modfetch.Entry{Metadata: modlibrary.Metadata{Schema: 1, ID: id, Name: strings.ToUpper(id), Version: "1"}}
+		return modfetch.Entry{ID: id, Name: strings.ToUpper(id), Version: "1"}
 	}
 	started, release, installing, finish := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
 	if !job.start(entry("a"), func(context.Context, func(int64, int64)) error {

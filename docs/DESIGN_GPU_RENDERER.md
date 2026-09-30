@@ -4245,11 +4245,14 @@ including interceptors, matching the detailed `+showranges` weapon branch.
 NOWEAPON links are omitted. Equal radii retain their separate weapon-slot labels.
 Placement shows no sensor, jammer, build-distance or interception-coverage rings.
 
-A mod config's optional `content.presentation` block configures `show_ranges`
-(default false) and `placement_weapon_ranges` (default true when omitted).
-`show_ranges` seeds the shell or direct battle once; subsequent command toggles
-survive battles within that shell without settings writes. The placement flag
-controls the automatic exception; Shift with explicit `+showranges` still shows
+The Effects page's **Placement weapon rings** switch stores
+`presentation.placementWeaponRanges` (default on), through ordinary host settings,
+mod recommendations and presets. A mod config's `content.presentation.show_ranges`
+(default false) seeds the shell or direct battle once; subsequent command toggles
+survive battles within that shell without settings writes. The older
+`content.presentation.placement_weapon_ranges` remains a recommendation only when
+`settings.presentation.placementWeaponRanges` is absent. The player's effective
+presentation preference controls the automatic exception; Shift with explicit `+showranges` still shows
 the product's weapon rings. The hosted mods' configs use these defaults, which are
 Nanolathe UI policy rather than historical mod or retail claims.
 
@@ -6706,7 +6709,11 @@ back should be heard before the lane becomes permanent.
 
 User-requested artistic presentation, enabled by default for modern battle
 entry; not a retail behavioral claim. Fresh skirmishes and missions use the
-1.95-second commander arrival. `--arrival=false` disables the opening. Classic
+1.95-second commander arrival. The Effects page's **Commander arrival** switch
+stores `presentation.arrival` (default on), including the scene-only reveal on
+load. Explicit `--arrival=true` or `--arrival=false` overrides the saved preference
+at startup; an omitted flag preserves it. This is a host preference in every
+gameplay mode. Classic
 and ordinary captures retain their existing entry; an explicit
 `--shot-arrival-time` stages an arrival capture.
 

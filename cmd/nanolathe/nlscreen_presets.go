@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
+	"math"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -34,7 +35,8 @@ func nlGraphicsPaths() []string {
 	var out []string
 	for _, k := range []string{"renderer", "fps", "expandedSidebar", "buildMenuPageSize", "trailStrength", "strategicIconConfig",
 		"waterSurface", "waterMotion", "waterFoam", "waterReflections", "modelLight", "groundLight", "groundLightStrength",
-		"finish", "glint", "blastRings", "blastRingStrength", "fireShimmer", "wreckGlow", "wreckShimmer", "scorch", "softShadows"} {
+		"finish", "glint", "supersample", "blastRings", "blastRingStrength", "fireShimmer", "wreckGlow", "wreckShimmer", "scorch", "softShadows",
+		"arrival", "placementWeaponRanges"} {
 		out = append(out, "presentation."+k)
 	}
 	return append(out, "display.glow", "display.glowStrength")
@@ -142,6 +144,19 @@ func (s *nlScreen) applyPresetToDraft(e nlPresetEntry, scopes []bool) {
 		s.toast, s.toastLeft = "That preset has nothing in the chosen parts", 2.5
 		return
 	}
+	if s.sourceActive() && !s.src.overridden && !s.draft.override {
+		var doc map[string]any
+		_ = json.Unmarshal(patch, &doc)
+		var changedPaths []string
+		collectPaths(doc, "", func(path string) { changedPaths = append(changedPaths, path) })
+		if pathsLocked(changedPaths, s.src.locks) {
+			parts := slices.Clone(scopes)
+			s.capture = nlCapture{}
+			s.pendingAction = func() { s.applyPresetToDraft(e, parts) }
+			s.pendingWhat, s.dialog = "the preset's settings", "override"
+			return
+		}
+	}
 	before := s.draft
 	next, err := settings.Layer(s.draftSettings(), patch)
 	if err != nil {
@@ -204,6 +219,13 @@ func (s *nlScreen) savePreset(name string) {
 // updatePresets handles the panel's keys: typing names a new preset, Enter
 // saves it, Esc closes.
 func (s *nlScreen) updatePresets(in screenkit.Input) {
+	if in.WheelY != 0 && s.presetList.Contains(in.X, in.Y) {
+		s.wheel += in.WheelY
+		if math.Abs(s.wheel) >= 1 {
+			s.presetTop -= int(math.Copysign(1, s.wheel))
+			s.wheel = 0
+		}
+	}
 	for _, k := range in.Keys {
 		switch k {
 		case ebiten.KeyEscape:
@@ -219,12 +241,41 @@ func (s *nlScreen) updatePresets(in screenkit.Input) {
 				_, size := utf8.DecodeLastRuneInString(s.presetName)
 				s.presetName = s.presetName[:n-size]
 			}
+		case ebiten.KeyArrowDown:
+			s.selectPreset(s.presetSel + 1)
+		case ebiten.KeyArrowUp:
+			s.selectPreset(s.presetSel - 1)
+		case ebiten.KeyPageDown:
+			s.selectPreset(s.presetSel + s.presetVisible())
+		case ebiten.KeyPageUp:
+			s.selectPreset(s.presetSel - s.presetVisible())
+		case ebiten.KeyHome:
+			s.selectPreset(0)
+		case ebiten.KeyEnd:
+			s.selectPreset(len(s.presetEntries()) - 1)
 		}
 	}
 	for _, r := range ebiten.AppendInputChars(nil) {
 		if r >= ' ' && utf8.RuneCountInString(s.presetName) < 32 {
 			s.presetName += string(r)
 		}
+	}
+}
+
+func (s *nlScreen) presetVisible() int {
+	if s.u() <= 0 {
+		return 1
+	}
+	return max(1, int((s.presetList.H-12*s.u())/(40*s.u())))
+}
+
+func (s *nlScreen) selectPreset(row int) {
+	s.presetSel = max(0, min(row, len(s.presetEntries())-1))
+	if s.presetSel < s.presetTop {
+		s.presetTop = s.presetSel
+	}
+	if visible := s.presetVisible(); s.presetSel >= s.presetTop+visible {
+		s.presetTop = s.presetSel - visible + 1
 	}
 }
 
@@ -247,14 +298,16 @@ func (s *nlScreen) drawPresets(screen *ebiten.Image) {
 	entries := s.presetEntries()
 	s.presetSel = max(0, min(s.presetSel, len(entries)-1))
 	list := screenkit.Rect{X: r.X + 28*u, Y: r.Y + 100*u, W: 400 * u, H: h - 190*u}
+	s.presetList = list
+	visible := s.presetVisible()
+	s.presetTop = max(0, min(s.presetTop, len(entries)-visible))
 	screenkit.Fill(screen, list, color.RGBA{8, 12, 8, 220})
 	screenkit.Outline(screen, list, 1*u, color.RGBA{50, 60, 46, 255})
 	rowH := 40 * u
-	for i, e := range entries {
-		rr := screenkit.Rect{X: list.X + 6*u, Y: list.Y + 6*u + float64(i)*rowH, W: list.W - 12*u, H: rowH - 4*u}
-		if rr.Y+rr.H > list.Y+list.H {
-			break
-		}
+	for row := 0; row < visible && s.presetTop+row < len(entries); row++ {
+		i := s.presetTop + row
+		e := entries[i]
+		rr := screenkit.Rect{X: list.X + 6*u, Y: list.Y + 6*u + float64(row)*rowH, W: list.W - 12*u, H: rowH - 4*u}
 		id := fmt.Sprintf("preset-%d", i)
 		if i == s.presetSel {
 			screenkit.HGradient(screen, rr, color.RGBA{40, 100, 44, 220}, color.RGBA{16, 30, 16, 120})
@@ -264,7 +317,14 @@ func (s *nlScreen) drawPresets(screen *ebiten.Image) {
 		}
 		bf.Draw(screen, e.name, rr.X+12*u, rr.Y+rr.H/2+5*u, screenkit.Style{Size: 13.5 * u, Top: nlCream})
 		df.Draw(screen, e.source, rr.X+rr.W-10*u, rr.Y+rr.H/2+4*u, screenkit.Style{Size: 10 * u, Tracking: 0.14, Top: nlKicker, Upper: true, Align: 2})
-		s.hits.Add(screenkit.Region{ID: id, Rect: rr, Click: func() { s.presetSel = i }})
+		s.hits.Add(screenkit.Region{ID: id, Rect: rr, Click: func() { s.selectPreset(i) }})
+	}
+	if len(entries) > visible {
+		track := screenkit.Rect{X: list.X + list.W + 8*u, Y: list.Y, W: 5 * u, H: list.H}
+		screenkit.Fill(screen, track, color.RGBA{20, 24, 20, 200})
+		thumbH := track.H * float64(visible) / float64(len(entries))
+		thumbY := track.Y + (track.H-thumbH)*float64(s.presetTop)/float64(len(entries)-visible)
+		screenkit.Fill(screen, screenkit.Rect{X: track.X, Y: thumbY, W: track.W, H: thumbH}, color.RGBA{120, 200, 120, 220})
 	}
 	// The parts to apply.
 	px := list.X + list.W + 28*u
@@ -288,8 +348,8 @@ func (s *nlScreen) drawPresets(screen *ebiten.Image) {
 	if len(entries) > 0 {
 		e := entries[s.presetSel]
 		s.button(screen, "preset-apply", screenkit.Rect{X: px, Y: py + 6*u, W: 150 * u, H: 40 * u}, "Apply preset", true, false, func() {
-			s.applyPresetToDraft(e, s.presetScopes[:])
 			s.dialog = ""
+			s.applyPresetToDraft(e, s.presetScopes[:])
 		})
 		if e.user >= 0 {
 			s.button(screen, "preset-delete", screenkit.Rect{X: px + 162*u, Y: py + 6*u, W: 120 * u, H: 40 * u}, "Delete", false, false, func() {

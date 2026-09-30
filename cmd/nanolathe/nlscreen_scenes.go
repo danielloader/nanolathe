@@ -32,6 +32,14 @@ import (
 // kills and fires, and events scheduled on the scene's own tick count.
 
 var nlPresets = map[string]nlPreset{
+	"arrival": {
+		scene:  film.Scene{Kind: "skirmish", Map: "Greenhaven", Seed: 7, PreTicks: 1},
+		camera: still(0, 0, 1.6), loop: 6, shot: 1.45,
+	},
+	"placement": {
+		scene:  film.Scene{Kind: "skirmish", Map: "Greenhaven", Seed: 7, PreTicks: 1},
+		camera: still(0, 0, 0.9), loop: 60,
+	},
 	// armor is a tank battle on open grass, for the Game page and the
 	// combat mutators.
 	"armor": {

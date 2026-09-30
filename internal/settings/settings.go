@@ -630,6 +630,11 @@ type Presentation struct {
 	// ExpandedSidebar uses spare modern UI height for more authored controls.
 	// This is a Nanolathe presentation preference (interface design §3.3).
 	ExpandedSidebar int `json:"expandedSidebar"`
+	// Arrival enables the Enhanced battle opening (GPU design §36).
+	Arrival int `json:"arrival"`
+	// PlacementWeaponRanges shows authored weapon ranges at a prospective
+	// building site (GPU design §20).
+	PlacementWeaponRanges int `json:"placementWeaponRanges"`
 	// BuildMenuPageSize locks the expanded sidebar's build pages to at most
 	// this many product cells, overriding the running mod's own lock. Zero,
 	// the default, defers to the mod and otherwise fills every row that fits
@@ -744,7 +749,7 @@ type Presentation struct {
 // Enhanced effect on.
 func DefaultPresentation() Presentation {
 	return Presentation{
-		Renderer: "modern", FPS: 60, ExpandedSidebar: 1, GroupNumbers: 1,
+		Renderer: "modern", FPS: 60, ExpandedSidebar: 1, GroupNumbers: 1, Arrival: 1, PlacementWeaponRanges: 1,
 		MexSnapRadius: -1, WreckSnapRadius: -1, BuildRotateKey: "/", ClickSnapOverrideKey: "alt", BuildRotationOverlay: 1, BuildDrag: 1,
 		WaterSurface: DefaultEffectSwitch, WaterMotion: DefaultEffectSwitch, WaterFoam: DefaultEffectSwitch, WaterReflections: DefaultEffectSwitch,
 		ModelLight: DefaultEffectSwitch, GroundLight: DefaultEffectSwitch, GroundLightStrength: DefaultEffectStrength,
@@ -802,6 +807,13 @@ func (p *Presentation) Normalize() {
 	for _, value := range []*int{&p.FactoryHundredBatch, &p.DoubleClickSelection, &p.CommunityCounters, &p.ReloadBars, &p.VeteranLabels, &p.GroupNumbers, &p.AlliedResources, &p.WeatherReport, &p.BuildRotationOverlay, &p.QueuedOrderDrag, &p.BuildDrag, &p.TeamColorNanolathe, &p.VictoryCue, &p.AlliedDotSwatches} {
 		if *value < 0 {
 			*value = 0
+		} else {
+			*value &= 1
+		}
+	}
+	for _, value := range []*int{&p.Arrival, &p.PlacementWeaponRanges} {
+		if *value < 0 {
+			*value = 1
 		} else {
 			*value &= 1
 		}

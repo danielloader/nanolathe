@@ -336,6 +336,12 @@ func (a *Service) playAdmittedPositional(alias string, pos [3]numeric.Fixed) (Pa
 // PlayUICue resolves an unpositioned authored alias at the ordinary cue
 // attenuation [03 R-AUD-01 §1]. The backend applies the FX gain separately.
 func (a *Service) PlayUICue(alias string) bool {
+	return a.PlayUICueWithGain(alias, 1)
+}
+
+// PlayUICueWithGain applies a host presentation gain to this cue alone.
+// Menu feedback uses it without changing the shared battle service or FX gain.
+func (a *Service) PlayUICueWithGain(alias string, gain float64) bool {
 	if a == nil || strings.TrimSpace(alias) == "" {
 		return false
 	}
@@ -343,7 +349,7 @@ func (a *Service) PlayUICue(alias string) bool {
 	if err != nil || sample == nil {
 		return false
 	}
-	playRegistered(sample, VolumeFromCentibel(VolInView), 0)
+	playRegistered(sample, VolumeFromCentibel(VolInView)*max(0, min(gain, 1)), 0)
 	return true
 }
 
@@ -351,6 +357,11 @@ func (a *Service) PlayUICue(alias string) bool {
 // explicitly exposes the looping registered seam receives it; a missing seam
 // stays silent rather than changing this mode-0 request into a one-shot.
 func (a *Service) PlayLoopingUICue(alias string) bool {
+	return a.PlayLoopingUICueWithGain(alias, 1)
+}
+
+// PlayLoopingUICueWithGain is the menu-loop counterpart of PlayUICueWithGain.
+func (a *Service) PlayLoopingUICueWithGain(alias string, gain float64) bool {
 	if a == nil || strings.TrimSpace(alias) == "" {
 		return false
 	}
@@ -362,7 +373,7 @@ func (a *Service) PlayLoopingUICue(alias string) bool {
 	if !ok {
 		return false
 	}
-	_ = output.PlayLoopingRegisteredSample(sample, VolumeFromCentibel(VolInView), 0)
+	_ = output.PlayLoopingRegisteredSample(sample, VolumeFromCentibel(VolInView)*max(0, min(gain, 1)), 0)
 	return true
 }
 

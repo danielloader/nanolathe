@@ -78,12 +78,13 @@ func parseNLShotSize(text string) (int, int, error) {
 
 // nlShotStep is one capture: which card, and the state around it.
 type nlShotStep struct {
-	name    string
-	page    int
-	card    int
-	compare bool
-	dialog  string
-	draft   func(d *nlDraft)
+	name         string
+	page         int
+	card         int
+	compare      bool
+	presetScroll bool
+	dialog       string
+	draft        func(d *nlDraft)
 	// The Controls page: which tab, and a key cap waiting for a press.
 	ctlGroup  int
 	capturing bool
@@ -157,7 +158,8 @@ func nlShotSteps(s *nlScreen, only string) []nlShotStep {
 				steps = append(steps, nlShotStep{name: base + "-community", page: pi, card: ci, draft: func(d *nlDraft) { d.controls = 2 }})
 			}
 			if card.key == "content" {
-				steps = append(steps, nlShotStep{name: base + "-presets", page: pi, card: ci, dialog: "presets"})
+				steps = append(steps, nlShotStep{name: base + "-presets", page: pi, card: ci, dialog: "presets"},
+					nlShotStep{name: base + "-presets-scroll", page: pi, card: ci, dialog: "presets", presetScroll: true})
 			}
 			if card.key == "rules" {
 				steps = append(steps, nlShotStep{name: base + "-override", page: pi, card: ci, dialog: "override"})
@@ -217,6 +219,16 @@ func (g *nlShotGame) Draw(screen *ebiten.Image) {
 		s.compare = step.compare
 		s.dialog, s.pendingV = step.dialog, 0
 		s.presetScopes = [3]bool{true, true, true}
+		s.shell().presets = nil
+		s.presetSel, s.presetTop = 0, 0
+		if step.presetScroll {
+			// Authored diagnostic rows prove overflow remains accessible; these
+			// exist only in the isolated screenshot shell and are never saved.
+			for i := 1; i <= 20; i++ {
+				s.shell().presets = append(s.shell().presets, settings.Preset{Name: fmt.Sprintf("Saved preset %02d", i), Settings: []byte(`{"presentation":{"glint":0}}`)})
+			}
+			s.presetSel, s.presetTop = 15, 12
+		}
 		s.ctlGroup, s.ctlRow, s.ctlScroll, s.capture = step.ctlGroup, 1, 0, nlCapture{}
 		if step.profile != 0 {
 			s.chooseProfile(step.profile)

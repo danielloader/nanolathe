@@ -171,9 +171,12 @@ func (g *gameShell) playMenuCue(alias string) {
 		return
 	}
 	if svc := g.ensureFrontendAudio(); svc != nil {
-		_ = svc.PlayUICue(alias)
+		_ = svc.PlayUICueWithGain(alias, menuCueGain)
 	}
 }
+
+// Quiet menu feedback is Nanolathe host policy (interface design §3.17).
+const menuCueGain = 0.1
 
 const menuBGMAlias = "BGM"
 
@@ -189,7 +192,7 @@ func (g *gameShell) playPendingMenuBGM() {
 	}
 	g.menuBGMPending = false
 	if svc := g.ensureFrontendAudio(); svc != nil {
-		_ = svc.PlayLoopingUICue(menuBGMAlias)
+		_ = svc.PlayLoopingUICueWithGain(menuBGMAlias, menuCueGain)
 	}
 }
 

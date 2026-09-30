@@ -53,6 +53,9 @@ func applyGlowStrength(cl *client.Client, d settings.Display) {
 func (g *gameShell) applySettings(s settings.Settings) {
 	s.Normalize()
 	g.baseSettings = s
+	// Lock approval is part of the file, and must govern the layers loaded
+	// from that same file (DESIGN_MODS_MUTATORS §4.6).
+	g.lockOverrides = s.ModLockOverrides
 	s = g.effectiveSettings(s)
 	g.presets = s.Presets
 	g.missionDifficultyValue = s.Difficulty
@@ -72,7 +75,6 @@ func (g *gameShell) applySettings(s settings.Settings) {
 	g.modSetting, g.mutatorSetting = s.Mod, s.Mutators
 	g.modernAISetting = s.ModernAI
 	g.controlsOffered = s.ControlsOffered
-	g.lockOverrides = s.ModLockOverrides
 	// Unknown actions and unreadable chords are dropped here; the file keeps
 	// only what the key map can play (keymap.go).
 	g.keyMap = keyMapFromSettings(s.KeyBindings)
@@ -224,6 +226,8 @@ func (g *gameShell) liveSettings() settings.Settings {
 		ModernAI:         g.modernAISetting,
 		ControlsOffered:  g.controlsOffered,
 		ModLockOverrides: g.lockOverrides,
+		ModSettings:      g.baseSettings.ModSettings,
+		Presets:          g.presets,
 		// The keyboard profile and only the actions rebound from it.
 		KeyBindings: keyBindingsSetting(g.keyMap),
 		// The interface page's three message controls write into this block;

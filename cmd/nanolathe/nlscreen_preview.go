@@ -18,6 +18,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/gpurender"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
+	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
 
 // The Nanolathe screen's live background: a small real battle staged the way
@@ -98,11 +99,13 @@ func still(x, z, zoom float64) func(float64) (float64, float64, float64) {
 
 // nlRender is what one presented frame of the preview shows.
 type nlRender struct {
-	effects       drawlist.Effects
-	glow          bool
-	glowStrength  int
-	trailStrength int
-	classic       bool
+	effects         drawlist.Effects
+	glow            bool
+	glowStrength    int
+	trailStrength   int
+	arrival         bool
+	placementRanges bool
+	classic         bool
 	// fps throttles how often the picture changes, for the frame-rate
 	// preview; zero changes it on every display frame.
 	fps int
@@ -114,22 +117,23 @@ type nlRender struct {
 }
 
 type nlPreviewInstance struct {
-	key      nlSceneKey
-	preset   nlPreset
-	cl       *client.Client
-	b        *battleSession
-	advance  func()
-	anchorX  int32
-	anchorZ  int32
-	surfaceW int
-	surfaceH int
-	ticks    int
-	acc      float64
-	opening  bool
-	started  time.Time
-	effects  drawlist.Effects
-	enhanced bool
-	snap     bool // a Classic picture is wanted: hold the camera on a step
+	key         nlSceneKey
+	preset      nlPreset
+	cl          *client.Client
+	b           *battleSession
+	advance     func()
+	anchorX     int32
+	anchorZ     int32
+	surfaceW    int
+	surfaceH    int
+	ticks       int
+	acc         float64
+	arrivalUnit *frame.UnitView
+	opening     bool
+	started     time.Time
+	effects     drawlist.Effects
+	enhanced    bool
+	snap        bool // a Classic picture is wanted: hold the camera on a step
 
 	sess   *session.Session
 	twin   *nlPreviewInstance // the paired scene, when the key asks for one
@@ -291,11 +295,16 @@ func buildNLPreviewScene(opts Options, cs *contentSet, key nlSceneKey, mutators 
 	cl.SetInterpolation(true)
 	detailOpts := opts
 	detailOpts.Zoom = camera.Zoom(2 * camera.ZoomUnit)
-	b, err = composeBattleEntryWithDetail(sess, sess.Catalog, cs, cl, nil, captureDetailArt(detailOpts, cs, sess.World))
+	b, err = composeBattleEntryDetached(sess, sess.Catalog, cs, nil, nil)
 	if err != nil {
 		cl.Close()
 		return nil, err
 	}
+	b.preview = true
+	b.detail = captureDetailArt(detailOpts, cs, sess.World)
+	installBattleClient(cl, b)
+	cl.SetEffects(drawlist.AllEffects())
+	cl.SetFocused(true)
 	cl.ConfigureMessageLines(1, 0)
 	// The stand-alone battle clock is the player's preference for a battle,
 	// not part of a preview.
@@ -313,7 +322,16 @@ func buildNLPreviewScene(opts Options, cs *contentSet, key nlSceneKey, mutators 
 		step++
 		millis.step = step
 		nlScriptTick(inst.preset, events, sess, int(step))
+		// Preview choreography is applied only while recording, so stepping
+		// cannot hold gameplay or play the real arrival impact cue.
+		if inst.arrivalUnit != nil {
+			cl.ClearArrival()
+		}
+		placement := b.battleState().Input
 		cl.Step(1.0 / film.SimulationTPS)
+		if key.preset == "placement" {
+			b.battleState().Input = placement
+		}
 		cl.ObserveCommittedTick()
 		inst.track()
 		inst.mark()
@@ -335,6 +353,17 @@ func buildNLPreviewScene(opts Options, cs *contentSet, key nlSceneKey, mutators 
 	cl.SnapCameraBlend()
 	if scene.Opening && b.beginArrival(cl) {
 		inst.opening = true
+	}
+	if key.preset == "arrival" {
+		// A single host step can dispatch without producing a tick. Publish
+		// the ordinary opening frame before binding the commander.
+		sess.PublishOpeningFrame()
+		if u, ok := arrivalCommander(sess.Snapshot.Current(), sess.Catalog); ok {
+			inst.arrivalUnit = &u
+		}
+	}
+	if key.preset == "placement" {
+		inst.stagePlacement(st)
 	}
 	own, foe := 0, 0
 	for _, m := range inst.marks {
@@ -676,6 +705,14 @@ func (g *nlGPU) resetSources() {
 
 func (p *nlPreview) render(g *nlGPU, inst *nlPreviewInstance, r nlRender, into **ebiten.Image) {
 	cl := inst.cl
+	if u := inst.arrivalUnit; u != nil {
+		cl.ClearArrival()
+		if r.arrival {
+			cl.StartArrival(*u)
+			cl.SetArrivalSeconds(float32(inst.seconds() + inst.acc/film.SimulationTPS))
+		}
+	}
+	inst.b.hostPresentation.PlacementWeaponRanges = boolInt(r.placementRanges)
 	w, h := inst.key.w, inst.key.h
 	if *into == nil || (*into).Bounds().Dx() != w || (*into).Bounds().Dy() != h {
 		*into = ebiten.NewImage(w, h)
@@ -757,5 +794,31 @@ func (p *nlPreview) Close() {
 			}
 		}(p.results)
 		p.loading = false
+	}
+}
+
+// stagePlacement arms a real prospective tower at a validated, snapped site.
+// The battle's own ghost and shared range overlay draw the preview.
+func (inst *nlPreviewInstance) stagePlacement(st *nlStage) {
+	for _, name := range []string{"armllt", "corllt"} {
+		def, ok := st.s.Catalog.Unit(name)
+		if !ok || def == nil {
+			continue
+		}
+		x, z, y, ok := st.spot(def, st.cx+96, st.cz, 24)
+		if !ok {
+			continue
+		}
+		b := inst.b
+		b.armPlacement(def)
+		state := &b.battleState().Input
+		state.BuildCellX, state.BuildCellZ = world.PlacementAnchor(nlFixed(x), nlFixed(z), state.BuildFootX, state.BuildFootZ)
+		state.BuildSiteH, state.BuildOK = int32(y.Int()), true
+		// No physical pointer drives a preview. Keep the battle's admission gate
+		// in its viewport and preserve the validated site while the scene steps.
+		state.PointerX, state.PointerY = int32(inst.surfaceW/2), int32(inst.surfaceH/2)
+		inst.anchorX, inst.anchorZ = x, z
+		inst.applyCamera(0)
+		return
 	}
 }

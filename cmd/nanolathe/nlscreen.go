@@ -67,6 +67,8 @@ type nlScreen struct {
 	// The presets panel: the selected row, the parts to apply, the name
 	// being typed, and presets applied to the draft for Apply to write whole.
 	presetSel      int
+	presetTop      int
+	presetList     screenkit.Rect
 	presetScopes   [3]bool
 	presetName     string
 	pendingPresets []json.RawMessage
@@ -399,6 +401,7 @@ func (s *nlScreen) applyDraft(g *gameShell, draft nlDraft, touched map[string]bo
 		// values on locked paths (modsettings.go).
 		file := g.captureSettings()
 		g.setLockOverride(g.cs.mod, draft.override)
+		file.ModLockOverrides = g.lockOverrides
 		g.applySettings(file)
 	}
 	preset := nlControlsPresets[draft.controls].preset
@@ -566,6 +569,16 @@ func (s *nlScreen) Update() {
 }
 
 func (s *nlScreen) step(c nlCard, v, d int) {
+	if c.kind == nlGroup {
+		if len(c.parts) == 0 {
+			return
+		}
+		part := c.parts[s.selectedPart(c)]
+		next := s.draft
+		part.set(&next, max(0, min(len(part.steps)-1, part.get(&next)+d)))
+		s.setCard(c, c.get(&next))
+		return
+	}
 	next := v + d
 	if c.kind == nlLayers && next >= 0 {
 		if locked, _ := s.stageLocked(next); locked {

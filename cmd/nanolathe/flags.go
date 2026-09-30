@@ -69,6 +69,7 @@ type Options struct {
 	// modBaseRoots marks Roots as the base install only (an internal remount
 	// with a mod selected), so several roots are not a manual stack.
 	modBaseRoots       bool
+	ArrivalSet         bool    // explicit command-line override
 	Arrival            bool    // modern battle opening (GPU §36)
 	ShotArrivalTime    float64 // seconds into a reproducible opening capture; negative disables
 	UnitLimit          int     // zero uses the saved preference; explicit CLI values override it
@@ -385,6 +386,8 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 			opts.ModSet = true
 		case "renderer":
 			opts.RendererSet = true
+		case "arrival":
+			opts.ArrivalSet = true
 		case "fps":
 			opts.FPSSet = true
 		case "live-seconds":

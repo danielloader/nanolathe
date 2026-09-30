@@ -35,6 +35,17 @@ func (c *Client) StartArrival(unit frame.UnitView) {
 	c.BumpPresentationEpoch()
 }
 
+// ClearArrival retires the opening and its landing treatments. Settings
+// compares the same published scene with and without the opening (GPU §36).
+func (c *Client) ClearArrival() {
+	if c == nil {
+		return
+	}
+	c.CancelPreRecord()
+	c.arrival = arrivalPresentation{}
+	c.BumpPresentationEpoch()
+}
+
 // StartMapReveal fades and bounces the already-published scene around the
 // current camera, preserving saved unit poses and camera placement (GPU §36).
 func (c *Client) StartMapReveal() {

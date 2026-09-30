@@ -523,14 +523,11 @@ One JSON file at `https://nanolathe.gg/mods/manifest.json`:
   "schema": 1,
   "mods": [
     {
-      "schema": 2,
       "id": "prota", "name": "ProTA", "version": "4.8+nanolathe.1",
       "summary": "…", "homepage": "…",
-      "minimumGameplay": "community-3.9",
-      "requires": [],
       "archive": {
         "url": "https://github.com/nanolathe-gg/nanolathe-gg.github.io/releases/download/mods/prota-4.8+nanolathe.1.zip",
-        "size": 12440085,
+        "size": 12443167,
         "sha256": "…"
       }
     }
@@ -538,15 +535,15 @@ One JSON file at `https://nanolathe.gg/mods/manifest.json`:
 }
 ```
 
-An entry is the mod's identity, the `schema` of the metadata its zip
-carries, the minimum the catalogue shows before a download, and the archive.
-A schema 2 entry names no `contentProfile`, `controls` or
-`buildMenuPageSize`: the zip's own config is authoritative (§4.2), and such
-a key in a schema 2 entry refuses the catalogue. The zip's
-`nanolathe-mod.json` must agree with its entry on `schema`, `id`, `version`
-and `minimumGameplay` (the config's `rules.minimumGameplay`); a schema 1
-entry must also agree on `contentProfile` and `controls`. A disagreement
-refuses the install.
+An entry contains only `id`, `name`, `version`, `summary`, `homepage`, and
+`archive` (URL, byte size and SHA-256). The catalogue remains schema 1;
+its schema does not select the ZIP metadata format. Unknown entry fields,
+including old configuration fields (`schema`, `contentProfile`, `controls`,
+`minimumGameplay`, `requires`, `buildMenuPageSize`), are ignored. Configuration
+comes exclusively from the ZIP's `nanolathe-mod.json` (§4.2). Install validates
+that file's supported schema and complete config, then matches only `id` and
+`version` to the catalogue. Display text can differ between the catalogue and
+ZIP. Direct install callers may still request the stricter metadata match.
 
 An archive URL is either on the manifest's own origin (a relative URL
 resolves against the manifest) or a release asset of a `nanolathe-gg`
@@ -555,11 +552,12 @@ The website repository keeps one release, `mods`, whose assets are the hosted
 zips, one per mod version, named `<id>-<version>.zip`; its README describes
 packaging and upload.
 
-A build that predates schema 2 refuses a catalogue holding a schema 2 entry
-and refuses to install a schema 2 zip, so publishing schema 2 entries at the
-manifest URL a released build reads takes *Get more mods* away from that
-build. Until those builds are retired, schema 2 entries belong at a manifest
-URL only newer builds read.
+**Pre-release policy (user-authorized 2026-09-29).** Testing users update the
+engine to read schema 2 ZIP configs. Keep the same manifest URL and one current
+package per mod; no second catalogue, parallel archive fields or migration
+flags are needed. Already installed schema 1 packages remain readable. A
+packaging change gets a new version suffix and asset name; published archives
+are immutable, so old installations and partial downloads retain their identity.
 
 A minimum engine version is deliberately absent: the build carries no
 release version today (`internal/version` names a save profile, not a
@@ -601,8 +599,8 @@ release). Add `minimumEngine` once releases are stamped.
      overlay folds case and the winner would depend on the host filesystem;
    - cap total uncompressed bytes and entry count (4 GiB and
      100,000). A cap violation refuses the install.
-4. Validate: parse the metadata and config and check them against the
-   manifest; mount the base install plus the staged root in a scratch
+4. Validate: parse the metadata and config and match their `id` and
+   `version` against the manifest; mount the base install plus the staged root in a scratch
    `vfs.FS`, apply the config's content section (the base game's profile
    without one), require every directory its `detect` list names, and
    require the products `openContent` requires. A mod that would not start,

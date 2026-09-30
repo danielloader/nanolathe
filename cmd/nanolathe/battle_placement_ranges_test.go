@@ -8,6 +8,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/hud"
+	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
@@ -55,8 +56,9 @@ func TestPlacementRangeUsesShowRangesPrimitives(t *testing.T) {
 			t.Fatal("inactive placement emitted ranges")
 		}
 	}
-	disabled := false
-	b.rangePreferences.PlacementWeaponRanges = &disabled
+	prefs := settings.DefaultPresentation()
+	prefs.PlacementWeaponRanges = 0
+	b.hostPresentation = &prefs
 	noGuide()
 	b.dispatchLocalCommand("+showranges")
 	noGuide()
@@ -66,7 +68,7 @@ func TestPlacementRangeUsesShowRangesPrimitives(t *testing.T) {
 	}
 	b.dispatchLocalCommand("+showranges")
 	noGuide()
-	b.rangePreferences.PlacementWeaponRanges = nil
+	prefs.PlacementWeaponRanges = 1
 	cl.SetFocused(false)
 	noGuide()
 	cl.SetFocused(true)

@@ -42,11 +42,15 @@ type Archive struct {
 	SHA256 string `json:"sha256"`
 }
 
-// Entry is one downloadable mod version: its metadata, which the archive's
-// own nanolathe-mod.json must agree with, and its archive.
+// Entry is one downloadable mod version's identity, display text and archive.
+// The archive's own nanolathe-mod.json supplies its config (§5.1).
 type Entry struct {
-	modlibrary.Metadata
-	Archive Archive `json:"archive"`
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	Version  string  `json:"version"`
+	Summary  string  `json:"summary,omitempty"`
+	Homepage string  `json:"homepage,omitempty"`
+	Archive  Archive `json:"archive"`
 }
 
 // Manifest is the catalogue document. The entries' order is the display
@@ -346,12 +350,11 @@ func (c *Client) fetchLive(ctx context.Context, base *url.URL, allowed origin) (
 
 var sha256Pattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
-// parseManifest decodes and validates a catalogue. Each entry is held to the
-// metadata contract, may appear once, and must name an archive of positive
-// size and a SHA-256 on the catalogue's own origin; relative archive URLs are
-// resolved against the catalogue URL. Unknown fields are tolerated so the
-// hosted file can grow without breaking released clients; a change in
-// meaning is a new schema. One bad entry refuses the whole catalogue.
+// parseManifest decodes and validates a catalogue. Each entry has a safe id
+// and version, may appear once, and must name an archive of positive size and
+// a SHA-256 on an allowed origin; relative archive URLs are resolved against
+// the catalogue URL. Unknown fields, including former ZIP metadata fields,
+// are ignored. One bad entry refuses the whole catalogue (§5.1).
 func parseManifest(raw []byte, base *url.URL, allowed origin) (Manifest, error) {
 	fail := func(what string) error {
 		return &diagError{what: what, logical: base.String(), providers: []string{allowed.String()}, expected: "a schema 1 mod catalogue"}
@@ -366,8 +369,18 @@ func parseManifest(raw []byte, base *url.URL, allowed origin) (Manifest, error) 
 	seen := make(map[string]bool, len(manifest.Mods))
 	for i := range manifest.Mods {
 		entry := &manifest.Mods[i]
-		if err := entry.Metadata.Validate(); err != nil {
+		// The selector shares the installed library's safe identity grammar,
+		// without involving a ZIP metadata schema. Its CLI normalization must
+		// not change an identity supplied by the catalogue (§4.2, §5.1).
+		id, version, err := modlibrary.ParseSelector(entry.ID + "@" + entry.Version)
+		if err != nil {
 			return Manifest{}, fail(fmt.Sprintf("mod catalogue entry %d is invalid: %v", i, err))
+		}
+		if id != entry.ID || version != entry.Version {
+			return Manifest{}, fail(fmt.Sprintf("mod catalogue entry %d has an invalid id or version", i))
+		}
+		if strings.TrimSpace(entry.Name) == "" {
+			return Manifest{}, fail(fmt.Sprintf("mod catalogue entry %d has an empty name", i))
 		}
 		key := entry.ID + "@" + entry.Version
 		if seen[key] {
@@ -455,12 +468,13 @@ func (c *Client) readCache(base *url.URL, allowed origin) (Manifest, time.Time, 
 // library's staging directory: <id>-<version>.zip.
 func (e Entry) ArchiveName() string { return e.ID + "-" + e.Version + ".zip" }
 
-// InstallOptions are the library options a catalogue install needs: the
-// entry as the metadata its archive must match, and the archive identity.
-// The caller adds Validate and Progress.
+// InstallOptions are the library options a catalogue install needs: the id
+// and version its archive must match, and the archive's digest and size. The
+// ZIP parser validates its metadata and config; the caller adds Validate and
+// Progress (§5.3).
 func (e Entry) InstallOptions() modlibrary.InstallOptions {
-	expect := e.Metadata
-	return modlibrary.InstallOptions{Expect: &expect, SHA256: e.Archive.SHA256, Size: e.Archive.Size, Source: e.Archive.URL}
+	expect := modlibrary.ExpectedIdentity{ID: e.ID, Version: e.Version}
+	return modlibrary.InstallOptions{ExpectIdentity: &expect, SHA256: e.Archive.SHA256, Size: e.Archive.Size, Source: e.Archive.URL}
 }
 
 // Download fetches an entry's archive to dst (§5.3 steps 1–2). Bytes go to

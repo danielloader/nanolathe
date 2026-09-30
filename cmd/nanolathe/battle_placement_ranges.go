@@ -14,7 +14,7 @@ func (b *battleSession) placementRangesActive(c *client.Client) bool {
 		return false
 	}
 	state := b.battleState().Input
-	enabled := b.rangePreferences.PlacementWeaponRanges == nil || *b.rangePreferences.PlacementWeaponRanges
+	enabled := b.hostPreferences().PlacementWeaponRanges != 0
 	return state.BuildDef != "" && b.overWorld(state.PointerX, state.PointerY) && (enabled || state.ShiftHeld && b.rangesShown())
 }
 

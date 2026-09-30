@@ -54,12 +54,11 @@ const localMetadataSchema = schemaLegacy
 // metadata file.
 const maxMetadataBytes = 64 << 10
 
-// Metadata is one mod version's self-description: the identity every
-// nanolathe-mod.json and every catalogue entry carries (DESIGN_MODS_MUTATORS
-// §4.2, §5.1), and, for a schema 2 file, the mod's Config.
+// Metadata is one mod version's self-description from nanolathe-mod.json
+// (DESIGN_MODS_MUTATORS §4.2), including a schema 2 file's Config.
+// The catalogue has its own smaller record (§5.1).
 //
-// The JSON tags describe the catalogue entry and the schema 1 file, which
-// are flat. A schema 2 file is read by ParseMetadata into the same fields:
+// The JSON tags describe the flat schema 1 file. A schema 2 file is read by ParseMetadata into the same fields:
 // MinimumGameplay, Controls and BuildMenuPageSize are then filled from its
 // config, so every reader sees the running mod's one value.
 type Metadata struct {
@@ -84,7 +83,7 @@ type Metadata struct {
 	BuildMenuPageSize int `json:"buildMenuPageSize,omitempty"`
 	// Config is the mod's Nanolathe config, read from its own schema 2
 	// nanolathe-mod.json; nil for a schema 1 file, a generated local
-	// description and a catalogue entry, which carry none.
+	// description, which carry none.
 	Config *Config `json:"-"`
 }
 
@@ -159,9 +158,8 @@ func ParseMetadata(data []byte) (Metadata, error) {
 	return meta, nil
 }
 
-// Validate checks one metadata record against the §4.2 contract. The
-// catalogue fetcher applies it to every manifest entry, so a hosted entry and
-// the metadata inside its zip are held to the same rules.
+// Validate checks one ZIP or installed metadata record against §4.2.
+// Catalogue entries are validated separately and do not describe config.
 func (m Metadata) Validate() error {
 	fail := func(what, expected string) error {
 		return diagnostic(what, MetadataFile, nil, expected)
@@ -190,8 +188,8 @@ func (m Metadata) Validate() error {
 		return fail(fmt.Sprintf("mod controls preset %q is unknown", m.Controls), "community, retail, zero or omitted")
 	}
 	if m.Schema == schemaConfig {
-		// A schema 2 catalogue entry names no content profile or preset: the
-		// zip's own config is authoritative (§5.1). A parsed file's Controls
+		// A schema 2 file derives its content profile and preset from its
+		// own config (§4.2). A parsed file's Controls
 		// is derived from its config, never written.
 		if m.ContentProfile != "" {
 			return fail("mod contentProfile is a schema 1 field", "schema 2 metadata without contentProfile; the mod's config is its content section")

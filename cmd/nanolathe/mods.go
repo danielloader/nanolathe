@@ -1298,10 +1298,7 @@ func (g *gameShell) refreshModsFetch() {
 	if state.selected >= 0 && state.selected < len(state.entries) {
 		e := state.entries[state.selected]
 		description = e.Summary
-		detail = modRequirement(e.Version, e.MinimumGameplay)
-		if missing := modsUI.missingFor(e.Metadata); len(missing) > 0 {
-			detail = "Base install lacks " + missing[0]
-		}
+		detail = e.Homepage
 	}
 	p.SetText("DESCRIPTION", g.fitDetail(description, 230, 2))
 	p.SetText("SIZE", g.fitDetail(detail, 230, 1))

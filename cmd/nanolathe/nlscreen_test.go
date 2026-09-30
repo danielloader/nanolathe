@@ -196,13 +196,13 @@ func TestModConfigSettingsAndLocks(t *testing.T) {
 		t.Fatalf("a locked setting played the player's value: glint %d", g.presentation.Glint)
 	}
 	settled := g.captureSettings()
-	g.setLockOverride(mod, true)
+	settled.ModLockOverrides = []string{mod.ID}
 	g.applySettings(settled)
 	if g.presentation.Glint != 1 {
 		t.Fatalf("an overridden lock kept the mod's value: glint %d", g.presentation.Glint)
 	}
 	settled = g.captureSettings()
-	g.setLockOverride(mod, false)
+	settled.ModLockOverrides = nil
 	g.applySettings(settled)
 
 	s := newNLScreen(func() *gameShell { return g })

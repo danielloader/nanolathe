@@ -16,6 +16,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
+	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
@@ -167,5 +168,27 @@ func TestArrivalDefaultsDoNotAnimateOrdinaryCaptures(t *testing.T) {
 	opts, err := parseFlags([]string{"--arrival=false"}, io.Discard)
 	if err != nil || opts.Arrival {
 		t.Fatal("opening opt-out ignored")
+	}
+}
+
+func TestArrivalPreferenceAndExplicitCLIOverride(t *testing.T) {
+	for _, mode := range []string{"modern", "classic"} {
+		for _, explicit := range []bool{false, true} {
+			for _, enabled := range []bool{false, true} {
+				cl, err := client.New(client.Options{Width: 64, Height: 64})
+				if err != nil {
+					t.Fatal(err)
+				}
+				cl.SetCamera(&camera.Camera{})
+				p := settings.DefaultPresentation()
+				p.Arrival = 0
+				b := &battleSession{hostPresentation: &p}
+				b.beginBattleArrival(Options{Renderer: mode, ArrivalSet: explicit, Arrival: enabled}, cl, true)
+				if cl.ArrivalActive() != (mode == "modern" && explicit && enabled) {
+					t.Fatalf("%s explicit=%v enabled=%v: preference ignored", mode, explicit, enabled)
+				}
+				cl.Close()
+			}
+		}
 	}
 }

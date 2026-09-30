@@ -121,12 +121,7 @@ func (s *nlScreen) updateControls(in screenkit.Input) bool {
 				s.capture = nlCapture{}
 				return true
 			case ebiten.KeyBackspace:
-				keys := s.draft.keys.Keys(s.capture.id)
-				if s.capture.slot < len(keys) {
-					keys = slices.Delete(slices.Clone(keys), s.capture.slot, s.capture.slot+1)
-					s.draft.keys.Rebind(s.capture.id, keys)
-					s.touched["keys"] = true
-				}
+				s.clearKey(s.capture.id, s.capture.slot)
 				s.capture = nlCapture{}
 				return true
 			}
@@ -149,10 +144,10 @@ func (s *nlScreen) updateControls(in screenkit.Input) bool {
 	actions := s.controlActions()
 	switch {
 	case in.KeyPressed(ebiten.KeyArrowDown):
-		s.ctlRow = min(s.ctlRow+1, len(actions)-1)
+		s.selectControlRow(min(s.ctlRow+1, len(actions)-1))
 		return true
 	case in.KeyPressed(ebiten.KeyArrowUp):
-		s.ctlRow = max(s.ctlRow-1, 0)
+		s.selectControlRow(max(s.ctlRow-1, 0))
 		return true
 	case in.KeyPressed(ebiten.KeySpace):
 		if s.ctlRow < len(actions) && !actions[s.ctlRow].Fixed {
@@ -177,14 +172,17 @@ func (s *nlScreen) guardKeys(change func()) {
 // bindCaptured puts the captured chord in the capture's slot and says what,
 // if anything, lost it.
 func (s *nlScreen) bindCaptured(chord input.Chord) {
-	if s.keysLocked() {
-		s.guardKeys(func() { s.bindCaptured(chord) })
-		return
-	}
-	id := s.capture.id
+	capture := s.capture
+	s.guardKeys(func() { s.bindKey(capture, chord) })
+}
+
+// bindKey retains the action and slot across a lock confirmation, which
+// clears the capture so the confirmation key cannot become a binding.
+func (s *nlScreen) bindKey(capture nlCapture, chord input.Chord) {
+	id := capture.id
 	keys := slices.Clone(s.draft.keys.Keys(id))
-	if s.capture.slot < len(keys) {
-		keys[s.capture.slot] = chord
+	if capture.slot < len(keys) {
+		keys[capture.slot] = chord
 	} else {
 		keys = append(keys, chord)
 	}
@@ -209,6 +207,54 @@ func (s *nlScreen) bindCaptured(chord input.Chord) {
 	if !slices.Contains(s.draft.keys.Keys(id), chord) {
 		s.toast, s.toastLeft = fmt.Sprintf("%s cannot be bound to that action", chord.Label()), 3
 	}
+}
+
+func (s *nlScreen) clearKey(id string, slot int) {
+	if slot < 0 || slot >= len(s.draft.keys.Keys(id)) {
+		return
+	}
+	s.guardKeys(func() {
+		keys := slices.Clone(s.draft.keys.Keys(id))
+		s.draft.keys.Rebind(id, slices.Delete(keys, slot, slot+1))
+		s.touched["keys"] = true
+	})
+}
+
+func (s *nlScreen) resetKey(id string) {
+	s.guardKeys(func() {
+		s.draft.keys.Reset(id)
+		s.touched["keys"] = true
+	})
+}
+
+func (s *nlScreen) resetKeys() {
+	s.guardKeys(func() {
+		for _, a := range input.Actions() {
+			s.draft.keys.Reset(a.ID)
+		}
+		s.touched["keys"] = true
+		s.capture = nlCapture{}
+	})
+}
+
+// selectControlRow follows keyboard selection; drawing only clamps the
+// viewport, so a wheel scroll may leave the selected row out of view.
+func (s *nlScreen) selectControlRow(row int) {
+	s.ctlRow = max(0, min(row, len(s.controlActions())-1))
+	visible := s.controlVisible(s.ctlTable)
+	if s.ctlRow < s.ctlScroll {
+		s.ctlScroll = s.ctlRow
+	}
+	if s.ctlRow >= s.ctlScroll+visible {
+		s.ctlScroll = s.ctlRow - visible + 1
+	}
+}
+
+func (s *nlScreen) controlVisible(r screenkit.Rect) int {
+	if s.u() <= 0 {
+		return 1
+	}
+	return max(1, int((r.H-12*s.u())/(36*s.u())))
 }
 
 // drawControls draws the whole page in place of the hero and the cards.
@@ -291,13 +337,7 @@ func (s *nlScreen) drawProfileBar(screen *ebiten.Image, x, y float64) float64 {
 	}
 	// Reset keys.
 	rw := 190 * u
-	s.button(screen, "ctl-reset", screenkit.Rect{X: s.w() - 56*u - rw, Y: y + 12*u, W: rw, H: 34 * u}, "Reset keys", false, false, func() {
-		for _, a := range input.Actions() {
-			s.draft.keys.Reset(a.ID)
-		}
-		s.touched["keys"] = true
-		s.capture = nlCapture{}
-	})
+	s.button(screen, "ctl-reset", screenkit.Rect{X: s.w() - 56*u - rw, Y: y + 12*u, W: rw, H: 34 * u}, "Reset keys", false, false, s.resetKeys)
 	return y + 60*u
 }
 
@@ -355,14 +395,8 @@ func (s *nlScreen) drawKeyTable(screen *ebiten.Image, r screenkit.Rect) {
 	u := s.u()
 	actions := s.controlActions()
 	rowH := 36 * u
-	visible := max(1, int(r.H/rowH))
-	s.ctlRow = min(s.ctlRow, len(actions)-1)
-	if s.ctlRow < s.ctlScroll {
-		s.ctlScroll = s.ctlRow
-	}
-	if s.ctlRow >= s.ctlScroll+visible {
-		s.ctlScroll = s.ctlRow - visible + 1
-	}
+	visible := s.controlVisible(r)
+	s.ctlRow = max(0, min(s.ctlRow, len(actions)-1))
 	s.ctlScroll = max(0, min(s.ctlScroll, len(actions)-visible))
 	s.ctlTable = r
 	screenkit.Fill(screen, r, color.RGBA{8, 12, 8, 200})
@@ -410,15 +444,12 @@ func (s *nlScreen) drawKeyTable(screen *ebiten.Image, r screenkit.Rect) {
 			if !a.Fixed {
 				s.hits.Add(screenkit.Region{ID: cid, Rect: screenkit.Rect{X: kx, Y: rr.Y + 4*u, W: w, H: rr.H - 8*u},
 					Click: func() {
-						s.ctlRow = i
+						s.selectControlRow(i)
 						s.capture = nlCapture{id: a.ID, slot: slot}
 					},
 					Right: func() {
 						// Right-click clears a key.
-						if slot < len(keys) {
-							s.draft.keys.Rebind(a.ID, slices.Delete(slices.Clone(keys), slot, slot+1))
-							s.touched["keys"] = true
-						}
+						s.clearKey(a.ID, slot)
 					}})
 			}
 			kx += w + 8*u
@@ -430,11 +461,10 @@ func (s *nlScreen) drawKeyTable(screen *ebiten.Image, r screenkit.Rect) {
 			st := screenkit.Style{Size: 10 * u, Tracking: 0.12, Top: lerpRGBA(nlDim, nlCream, s.hits.HoverAmount(rid)), Upper: true, Align: 2}
 			df.Draw(screen, "Reset", rr.X+rr.W-10*u, rr.Y+rr.H/2+4*u, st)
 			s.hits.Add(screenkit.Region{ID: rid, Rect: screenkit.Rect{X: rr.X + rr.W - 48*u, Y: rr.Y, W: 46 * u, H: rr.H}, Click: func() {
-				s.draft.keys.Reset(a.ID)
-				s.touched["keys"] = true
+				s.resetKey(a.ID)
 			}})
 		}
-		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: rr.X, Y: rr.Y, W: 280 * u, H: rr.H}, Click: func() { s.ctlRow = i }})
+		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: rr.X, Y: rr.Y, W: 280 * u, H: rr.H}, Click: func() { s.selectControlRow(i) }})
 	}
 	if len(actions) > visible {
 		track := screenkit.Rect{X: r.X + r.W + 8*u, Y: r.Y, W: 5 * u, H: r.H}

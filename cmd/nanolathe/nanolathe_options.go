@@ -45,6 +45,9 @@ func startupPresentation(opts Options, saved settings.Presentation) settings.Pre
 	if opts.FPSSet {
 		saved.FPS = opts.FPS
 	}
+	if opts.ArrivalSet {
+		saved.Arrival = boolInt(opts.Arrival)
+	}
 	saved.Normalize()
 	return saved
 }
@@ -63,7 +66,7 @@ func validatePresentationZoom(opts Options) error {
 func (g *gameShell) setPresentation(p settings.Presentation) {
 	p.Normalize()
 	g.presentation = p
-	g.opts.Renderer, g.opts.FPS = p.Renderer, p.FPS
+	g.opts.Renderer, g.opts.FPS, g.opts.Arrival = p.Renderer, p.FPS, p.Arrival != 0
 	applyCommunityHUDOptions(clPtr, p)
 }
 

@@ -26,10 +26,19 @@ func TestFollowerRepathArmNeedsAnInstalledPayload(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		install bool
+		active  bool
+		count   uint8
+		blocked bool
+		reached bool
 		want    bool
 	}{
-		{"no payload in the controller slot", false, false},
-		{"payload installed", true, true},
+		{"no payload in the controller slot", false, true, 1, false, false, false},
+		{"payload installed", true, true, 1, false, false, true},
+		{"inactive with two stored points", true, false, 2, false, false, false},
+		{"inactive with one stored point", true, false, 1, false, false, true},
+		{"inactive and blocked", true, false, 2, true, false, true},
+		{"active with two stored points", true, true, 2, false, false, false},
+		{"inactive with a reached stored point", true, false, 2, false, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			system := NewSystem(syntheticTerrainForIntegrate(), wiringProfile, NewOccupancyGrid())
@@ -69,10 +78,16 @@ func TestFollowerRepathArmNeedsAnInstalledPayload(t *testing.T) {
 			setHandleRow(&system.activeOrders, h, &activeMove{order: head, token: 5})
 
 			route := handleRow(system.Routes, h)
-			route.Active = true
-			route.Count = 1 // the published prefix is exhausted: fewer than two points
+			route.Active = tc.active
+			route.Count = tc.count
+			// Pruning must not consume a point in the active two-point case.
+			route.Points[1] = Point{X: 128, Z: 16}
+			if tc.reached {
+				route.Points[1] = Point{X: int32(u.X >> 16), Z: int32(u.Z >> 16)}
+			}
 			route.WantsRepath = false
 			route.LastRequestTick = 0
+			handleRow(system.Collisions, h).Blocked = tc.blocked
 
 			system.serviceGroundFollower(u, head, route, 60)
 			if route.WantsRepath != tc.want {

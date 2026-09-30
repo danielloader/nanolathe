@@ -338,23 +338,15 @@ func (s *Service) mobilePlacementVisit(builder *units.Unit, node *orders.Node, t
 		node.DynamicGate = 0
 		node.Deadline = -1
 	}
-	// The approach is behind this phase, not inside it. State1 owns the walk and
-	// the `0xE0` wait; a record only reaches State2 once the movement outcome has
-	// retired it [05 R-WORK-01 §13] (approach.go). What survives here is the
-	// clear-the-site term, which is a placement question rather than a reach one:
-	// the builder's own footprint may still cover a cell of the site it is about
-	// to stamp [04 R-COLL-01 §2]. Factory-class builders are their own yard and
-	// are unaffected.
-	if isMobileBuilder(builder) && s.Movement != nil && builder.Def != nil && builder.Def.BuildDistance != 0 {
-		if !s.mustClearSite(builder, node) {
-			// Only stop moving once the builder's own footprint no longer
-			// covers the site; otherwise the walk installed above stays live
-			// while the validator below rejects on the builder's own
-			// occupancy and the blocked-area budget runs [R-ORDER-02 §1]
-			// [04 R-COLL-01 §2].
-			s.clearWalk(builder)
-			node.MoveState = orders.MoveArrived
-		}
+	// State1 owns the approach wake [05 R-WORK-01 §13]. A cannot-get-there
+	// wake within reach can advance here with its goal still bound and its
+	// route inactive. Preserve that follower binding: deactivating it makes
+	// the session install another synthetic straight route on the next work
+	// tick, which retail's phase advance never does [05 R-WORK-01 §14]. The
+	// placement validator below still rejects the builder's own footprint
+	// when it overlaps the site [04 R-COLL-01 §2].
+	if isMobileBuilder(builder) && s.Movement != nil && builder.Def != nil && builder.Def.BuildDistance != 0 && !s.mustClearSite(builder, node) {
+		node.MoveState = orders.MoveArrived
 	}
 	// Resolve and classify before arming any retry, exactly as the factory twin
 	// in handleState2 does. A product the catalog cannot resolve is a content

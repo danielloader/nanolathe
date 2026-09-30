@@ -2592,7 +2592,7 @@ func (s *System) serviceGroundFollower(u *units.Unit, head *orders.Node, route *
 	if route == nil {
 		return arrived
 	}
-	if route.Active && route.Count > 1 {
+	if route.Count > 1 {
 		route.Prune(Point{X: int32(int64(u.X) >> 16), Z: int32(int64(u.Z) >> 16)})
 		s.passWaypoint(u, route, tick)
 	}
@@ -2617,7 +2617,10 @@ func (s *System) serviceGroundFollower(u *units.Unit, head *orders.Node, route *
 	// installed no payload at all in this build. WU-19-97 gave `Move_Ground`
 	// phase 0 its point-goal install, so the condition is now true exactly
 	// where retail's is and the gate can be written as the section writes it.
-	if s.hasControllerGoal(u.Handle) && (blocked || !route.Active || route.Count < 2) {
+	// Inactivity is not another arm: an empty publication retains the stored
+	// count while clearing wants-repath [04 R-PATH-01 §7]. An unblocked mover
+	// with two stale points must not restart merely because that route ended.
+	if s.hasControllerGoal(u.Handle) && (blocked || route.Count < 2) {
 		route.WantsRepath = true
 	}
 	// The follower stages the current request payload once. Its poll at the

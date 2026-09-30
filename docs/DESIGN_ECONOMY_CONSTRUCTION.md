@@ -277,6 +277,15 @@ footprint by the mover's own footprint, a builder that arrives is standing clear
 of the site it is about to stamp; `mustClearSite` keeps the walk installed until
 it is.
 
+An in-range cannot-get-there wake can retire the approach while its rectangle
+goal remains bound. Placement preserves that follower binding and its inactive
+route; the ordinary follower owns any subsequent search and movement during
+work `[05 R-WORK-01 §14]`. Deactivating the walk at placement would make the
+session's next activation reinstall the goal and synthesize a new straight
+route. Phase advancement must not create that extra route. The retained goal
+is not an instruction to release movement when work starts: retail can resume
+movement during construction after a later ordinary search publication.
+
 A construction aircraft has a separate approach leg. Construction dispatches
 movement's `VisitAirBuildApproach` from the order record's phase 0 and phase 1.
 The saved phase distinguishes the takeoff outcome from the site outcome;

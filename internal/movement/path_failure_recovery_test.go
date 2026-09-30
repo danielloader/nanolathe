@@ -10,8 +10,8 @@ import (
 )
 
 // TestPathFailureRecoveryRearmsEverySixtyTicks locks the follower-owned
-// recovery state machine. A rejected publication clears wants-repath, the
-// next follower visit re-arms it, and the request is admitted at exactly
+// recovery state machine. A rejected publication clears wants-repath, a
+// blocked mover re-arms it on the next visit, and the request is admitted at exactly
 // lastRequestTick+60 with no retry ceiling [04 R-MOV-01 §7][04 R-PATH-01 §6,
 // §7–§8]. Replacing the order clears the old binding and prevents the old head
 // from submitting again.
@@ -55,11 +55,12 @@ func TestPathFailureRecoveryRearmsEverySixtyTicks(t *testing.T) {
 		t.Fatalf("initial requests = %d, want 1", len(first))
 	}
 
-	// Fail the initial request. The publisher clears wants-repath; the next
-	// follower visit re-arms it, but the request remains throttled until tick 60.
+	// Fail the initial request of a blocked mover. The publisher clears
+	// wants-repath; blockage re-arms it, but admission waits until tick 60.
 	system.tick = 0
 	system.CancelPathRequest(h)
 	system.publishFunc(first[0], nil, path.StatusRejected)
+	handleRow(system.Collisions, h).Blocked = true
 	route := handleRow(system.Routes, h)
 	if route == nil || route.WantsRepath {
 		t.Fatalf("failed publication wants-repath=%v, want false before follower visit", route != nil && route.WantsRepath)

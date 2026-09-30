@@ -660,6 +660,32 @@ available without enabling historical tracing; past search results and
 collision histories still require that opt-in. Reading a snapshot neither
 advances a request nor changes the route or its binding.
 
+The follower arms a retry for a bound goal only when blocked or when its
+stored point count is below two `[04 R-MOV-03 §2]`. Route inactivity alone
+does not arm it: an empty publication clears the retry flag while retaining
+the old count and points `[04 §7.3]` C14. In particular, an unblocked mobile
+builder may proceed from an in-range failure to work with two stale points
+and an inactive route; work must not restart that route at the next poll
+`[05 R-WORK-01 §14]`. Modern changes the delay through `Rules.RepathDelay`,
+while retaining this arming predicate.
+Waypoint pruning also reads the stored count regardless of inactivity and
+precedes the arming test; reaching a stale point can reduce the count below
+two and legitimately re-arm the follower `[04 R-MOV-03 §2]`.
+
+**Measured follower correction (2026-09-30).** Both full path matrices passed
+543 case/rule/size combinations with three deterministic timed repeats each.
+Of 541 combinations with matching inputs, Strict and Community outcomes were
+unchanged; 22 Modern outcomes changed, including four crowd cases with fewer
+proximity hits. Some affected units stopped short and others remained pending;
+the reports do not identify every completion branch. Aggregate median cost
+was roughly unchanged, but Modern `traffic/choke_wide` at size 64 had 15 to 10
+proximity hits and median thread CPU of 0.282 to 0.423 ms per tick, with noisy
+candidate repeats. These are quality and local cost limits of the correction,
+not evidence for an inactive-route retry condition. Two Modern wave cases
+(sizes 256 and 1500) derive later single-unit goals from current positions;
+their changed runtime inputs prevent a direct cost comparison. See
+[PATH_BENCHMARK](PATH_BENCHMARK.md) for the reporting-radius and timing limits.
+
 **C12 — full or empty.** Requests are full-or-empty. Budget exhaustion leaves
 the heap and the request active and publishes nothing — never a partial prefix.
 Heap exhaustion publishes an empty route, and carries no charge `[04 §7.3]`

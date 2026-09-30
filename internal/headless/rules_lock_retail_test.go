@@ -127,6 +127,16 @@ import (
 // launches and cancelled pellets retain their RNG/resource effects. The
 // initial and 6000-tick Modern states, and every Strict/Community lock, stay
 // unchanged. The long Modern battle now ends at tick 40830.
+//
+// Preserving MobileBuild's follower through placement [05 R-WORK-01 §14]
+// and using the stored point count for pruning/retry arming [04 R-MOV-03 §2]
+// correct the shared retail mechanics. An inactive route no longer causes an
+// extra goal install or an unblocked retry, while a reached stale point still
+// prunes. This moves the Community benchmark final lock, the Modern warm/final
+// locks and its long ending (now 42600). Every Strict lock, every initial lock,
+// the Community ashap/warm locks and the Modern 6000-tick lock stay unchanged.
+// Modern traffic and its fifteen-tick retry admission delay are preserved
+// (DESIGN_MOVEMENT_PATH "Modern prompt re-routing").
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
@@ -137,10 +147,10 @@ const (
 	lockAshapModern6000            = "partial-v1:824232669152f4bf"
 	lockAshapStrict54000           = "partial-v1:4baa308e5eba5d5e"
 	lockAshapCommunity54000        = "partial-v1:2ce958e331ce6a19"
-	lockAshapModern54000           = "partial-v1:3139c95784893f7b"
+	lockAshapModern54000           = "partial-v1:496c4259db863cd6"
 	lockAshapStrictEnd      uint32 = 28680
 	lockAshapCommunityEnd   uint32 = 30660
-	lockAshapModernEnd      uint32 = 40830
+	lockAshapModernEnd      uint32 = 42600
 
 	lockBenchSeed             uint32 = 7
 	lockBenchWarmupTicks             = 600
@@ -150,10 +160,10 @@ const (
 	lockBenchModernInitial           = "partial-v1:55165c066f8b6eaa"
 	lockBenchStrictWarm              = "partial-v1:5afe0089d8db02b8"
 	lockBenchCommunityWarm           = "partial-v1:32013bdf5ea1c7ef"
-	lockBenchModernWarm              = "partial-v1:76246534482f54e2"
+	lockBenchModernWarm              = "partial-v1:2f4b37955edc5891"
 	lockBenchStrictFinal             = "partial-v1:2ccfe9ca8e307df2"
-	lockBenchCommunityFinal          = "partial-v1:5575c03c3bd46d32"
-	lockBenchModernFinal             = "partial-v1:5d142bed50cf6c9d"
+	lockBenchCommunityFinal          = "partial-v1:67c87da793a68133"
+	lockBenchModernFinal             = "partial-v1:8d095ca94d08fe55"
 )
 
 // TestStrictFingerprintIsLocked holds the retail baseline. Nothing in a Modern

@@ -4344,6 +4344,27 @@ reaches the rectangle border while the centre-minus-pads value still exceeds
 it walking. Removing the approximation needs the `0x20`/`0x40`/`0x80` wake
 delivered to the construction step, not a second reach rule.
 
+#### A retained approach goal can move a working builder [R-WORK-01 §14]
+
+**Established.** An empty route publication can raise the cannot-get-there
+wake while leaving the builder's rectangle goal bound. If the reach test of
+[R-WORK-01 §12] passes, `MobileBuild` proceeds to placement and work without
+releasing or reinstalling that goal: neither successful placement, the
+build-stance wait nor the work body contains a movement-goal release
+([04 R-ORD-01 §5]). An empty publication leaves the existing route inactive;
+it does not construct a new straight route ([04 R-PATH-01 §7],
+[04 R-PATH-01 §8]).
+
+The follower still services the retained goal. A blocked mover or a stored
+point count below two can arm its ordinary search poll ([04 R-MOV-03 §2]);
+a later route publication can therefore move the builder during work. An
+inactive route alone does not arm that poll: two or more stale points and
+an unblocked mover leave the cleared retry flag clear.
+Neither the ground mover's speed update nor the build-stance helper adds a
+movement prohibition ([04 R-MOV-01 §4], [04 R-ORD-01 §1]). Since the work
+body has no reach test, construction continues if that route takes the
+builder farther from the product.
+
 ### Stockpile production
 
 **Established fact — state machine and progress.** A stockpile queue node

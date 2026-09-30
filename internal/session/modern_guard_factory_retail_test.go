@@ -17,8 +17,9 @@ import (
 // A commander guarding a vehicle plant stays with the plant while it has
 // production queued, the gaps between products included, even with a
 // construction vehicle building solar collectors inside its sight radius. Once
-// the plant's queue empties it helps that nearby work. The play-test report of
-// 2026-09-25 was a commander leaving the plant in those gaps.
+// the plant's queue empties it helps unfinished work placed at its current
+// post. The play-test report of 2026-09-25 was a commander leaving the plant
+// in those gaps.
 func TestModernGuardStaysWithAProducingFactoryRetail(t *testing.T) {
 	sess := aiE2ESkirmishAtMode(t, "ashap plateau", aiE2ESeed, SkirmishDefaultDifficulty, gameplay.Modern)
 	driver := int32(1 << 20)
@@ -107,12 +108,26 @@ func TestModernGuardStaysWithAProducingFactoryRetail(t *testing.T) {
 		return false
 	}
 	drained := -1
+	observedProduction := false
 	for tick := 0; tick < 4000; tick++ {
 		fund()
 		step()
 		busy := producing()
+		observedProduction = observedProduction || busy
 		if !busy && drained < 0 {
+			if !observedProduction {
+				t.Fatal("fixture: production drained before the guard observation")
+			}
 			drained = tick
+			// Direct factory assistance can move the guard to the other side
+			// of the plant. The original row may then be outside sight, or
+			// completed before production drains. Supply visible unfinished
+			// work here so the idle-factory assertion tests guard assistance
+			// independently of those movement and construction timings.
+			x, z := com.X+world.CellToWorld(6), com.Z
+			if _, err := sess.Units.CreateNanoframe(solarDef, uint8(local), x, sess.World.HeightAt(x, z), z); err != nil {
+				t.Fatalf("place nearby unfinished collector: %v", err)
+			}
 		}
 		head := orders.QueueForUnit(com).Head()
 		if head == nil {

@@ -813,7 +813,10 @@ the drained factory and the Strict bypass.
 `session.TestModernGuardStaysWithAProducingFactoryRetail` locks the play-test
 scene on retail content: a commander guarding an ARMVP with six Flashes queued,
 beside an ARMCV building a row of solar collectors, never works on a collector
-while the plant has production queued. It helps one once the queue empties.
+while the plant has production queued. Once the queue empties, the fixture
+allocates an unfinished collector beside the guard's current post and checks
+that it takes nearby work. This keeps the idle-work assertion independent of
+where factory assistance leaves the guard or how soon the original row finishes.
 
 ### 2.3 `internal/cob`
 

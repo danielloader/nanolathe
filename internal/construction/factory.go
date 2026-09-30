@@ -720,15 +720,6 @@ func (s *Service) ensureWalk(builder *units.Unit, node *orders.Node) {
 	s.Movement.ActivateMove(builder, node)
 }
 
-// clearWalk cancels any walk route/request for the builder after it arrives
-// within nano range, so the builder stops once construction begins.
-func (s *Service) clearWalk(builder *units.Unit) {
-	if s == nil || s.Movement == nil {
-		return
-	}
-	s.Movement.DeactivateMove(builder.Handle)
-}
-
 // NeedsWalk reports whether a mobile builder needs to walk toward the site
 // before construction can begin [04 §3.4][05][R-P0-06].
 // Factory-class builders never need walk. The condition itself lives in

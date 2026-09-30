@@ -201,7 +201,7 @@ func emitStartBuildingAbsolute(u *units.Unit, n *Node, target *units.Unit) {
 	n.Flags |= FlagStopBuildingPending
 }
 
-// The repair admission `VTOL_RepairUnit` phase 0 and the repair-patrol scan
+// The repair admission `VTOL_RepairUnit` phase 0 and repair-patrol's post-pick check
 // share is `nanoReach` in resolve.go. [04 R-ORD-02 §7] establishes that it is
 // ONE function — the command resolver's codes 1, 2 and 8 call the same one —
 // so the copy that stood here (`repairAdmission` plus `repairWaterClause`) is
@@ -614,16 +614,13 @@ func vtolRepairPatrolHandler(u *units.Unit, n *Node, satisfied uint32, tick uint
 			}
 			if resources, ok := playerResources(u); ok && resourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1]) {
 				candidates := scanRepairCandidates(u, u.Def.SightDistance)
-				// "A complete `u` reaches the issue helper for command code 8:
-				// acceptance → *rotate*, refusal → *wait*. An unfinished `u`
-				// releases the payload, explicitly spawns `VTOL_HelpBuild` on `u`
-				// at the head, gate = 0, and returns *wait*" [04 R-ORD-01 §7].
-				// Step 4 therefore ENDS the visit whenever the bounded pick
-				// returned a candidate; only an empty list falls through to step
-				// 5's feature pairing. A refusal that fell through would draw that
-				// pairing's six bounded picks [01 §7.5] and shift the authoritative
-				// stream permanently (I4). Unlike the ground twin, this path does
-				// not repeat the scanner-to-candidate diplomacy read.
+				// Admission follows the bounded pick. The visitor keeps submerged
+				// targets, but an inadmissible winner falls through to feature
+				// pairing; only an admitted candidate reaches either work branch
+				// [04 R-ORD-01 §7]. Pre-filtering changes the candidate draw and
+				// stopping on admission failure skips the feature draws [I4].
+				// A completed candidate refused by the issue helper instead waits.
+				// Unlike ground patrol, diplomacy is not read again after the pick.
 				//
 				// The two arms are different routes, not one route with two return
 				// codes. The unfinished arm names its own record, so it does not
@@ -634,7 +631,7 @@ func vtolRepairPatrolHandler(u *units.Unit, n *Node, satisfied uint32, tick uint
 				// Routing it through the helper made a stance-3 flyer refuse an
 				// assist the row issues unconditionally, and left the old goal
 				// payload bound under the spawned record.
-				if target := pickRepairCandidate(u, candidates); target != nil {
+				if target := pickRepairCandidate(u, candidates); target != nil && nanoReach(u, target) {
 					if target.Remaining != 0 {
 						releaseGoalPayload(u, n)
 						spawnPatrolHelpBuild(u, target, tick)

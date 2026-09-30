@@ -23,12 +23,27 @@ type Receipt struct {
 	Installed time.Time `json:"installed"`
 }
 
-// Mod is one installed mod version.
+// Mod is one installed mod version. Its Metadata carries the mod's Config
+// when its nanolathe-mod.json is schema 2; without one it is plain content:
+// the schema 1 recommendation fields are not applied (installedMod), and the
+// mount shows NoConfigNotice (§4.5).
 type Mod struct {
 	Metadata
 	Dir     string // the extracted content root: pass this as an extra --root
 	Receipt Receipt
 	Local   bool // installed without metadata (P11)
+}
+
+// installedMod is the library's view of one committed install. A mod
+// without a config contributes its identity and its content and nothing
+// else: its schema 1 contentProfile, minimumGameplay, controls and
+// buildMenuPageSize named engine data that no longer exists, so none of them
+// selects anything (§4.5).
+func installedMod(meta Metadata, dir string, receipt Receipt) Mod {
+	if meta.Config == nil {
+		meta.ContentProfile, meta.MinimumGameplay, meta.Controls, meta.BuildMenuPageSize = "", "", "", 0
+	}
+	return Mod{Metadata: meta, Dir: dir, Receipt: receipt, Local: meta.isLocal()}
 }
 
 // Extraction caps (§5.3 step 3, P12). A violation refuses the install.
@@ -219,7 +234,7 @@ func (l *Library) readMod(id, version string) (Mod, bool) {
 	if err := json.Unmarshal(receiptBytes, &receipt); err != nil {
 		return Mod{}, false
 	}
-	return Mod{Metadata: meta, Dir: dir, Receipt: receipt, Local: meta.isLocal()}, true
+	return installedMod(meta, dir, receipt), true
 }
 
 // Lookup finds an installed version. An empty version selects the most

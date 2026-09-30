@@ -130,6 +130,7 @@ func (g *modelFixtureGame) Draw(screen *ebiten.Image) {
 		checkModelQuadMapperDevicePixels,
 		checkModelOutlineDevicePixels,
 		checkModelDirectDevicePixels,
+		checkModelSingleSampleDevicePixels,
 		checkModelDirectFallbackCloak,
 		checkModelRetainDevicePixels,
 		checkModelCloakDevicePixels,

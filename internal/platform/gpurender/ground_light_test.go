@@ -99,7 +99,7 @@ func checkProjectedGroundLightDevicePixels() error {
 		list.RecordSprite(drawlist.Sprite{Frame: art, X: int32(120 * scale), Y: int32(50 * scale), Kind: drawlist.BlitKeyed, Anchored: true, LightingKind: drawlist.SpriteLightingExplosion, WorldHeight: 48 * float32(scale), LightingScale: float32(scale)})
 		list.RecordExpand()
 		read := func(on bool) []byte {
-			r.setBattleLighting(on)
+			r.setLights(on)
 			p := make([]byte, w*h*4)
 			r.Execute(&list, w, h).ReadPixels(p)
 			return p
@@ -199,7 +199,7 @@ func checkExplosionGroundFlashDevicePixels() error {
 		l.RecordModel(drawlist.Model{Geometry: directSubject(62, 48, 18, 18, face)})
 		l.RecordLightSource(drawlist.Sprite{Frame: art, X: 105, Y: 65, WorldHeight: 12, LightingScale: 1, LightingSize: 66, LightingKind: drawlist.SpriteLightingExplosion, LightingAge: age, HasLightingAge: true})
 		l.RecordExpand()
-		r.setBattleLighting(lighting)
+		r.setLights(lighting)
 		p := make([]byte, w*h*4)
 		r.Execute(&l, w, h).ReadPixels(p)
 		return p

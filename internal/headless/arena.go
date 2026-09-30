@@ -12,6 +12,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/aikit"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
@@ -902,10 +903,8 @@ func RunArenaMatch(req ArenaRequest) (ArenaResult, error) {
 		return ArenaResult{}, err
 	}
 	defer fs.Close()
-	view, profile, err := contentProfileView(fs, "")
-	if err != nil {
-		return ArenaResult{}, err
-	}
+	// The arena plays the base game: its profile, and no content source.
+	view, profile := contentView(fs, profiles.Retail())
 	catalog, err := content.CompileWithOptions(view, content.Options{Limits: content.LimitsFromProfile(profile.Limits)})
 	if err != nil {
 		return ArenaResult{}, diagnostic("catalog compile failed: "+err.Error(), req.Map, fs.ProviderIDs(), "a complete compiled catalog")
@@ -947,9 +946,8 @@ func RunArenaMatch(req ArenaRequest) (ArenaResult, error) {
 		return ArenaResult{}, fmt.Errorf("arena: unknown score %q (have default, invested)", req.Score)
 	}
 	composed, err := ComposeFreshBattle(FreshBattleRequest{
-		Gameplay:         req.Gameplay,
-		CommunitySources: session.CommunitySources{Content: profile.GameplaySources()},
-		Kind:             ScenarioDirectOTA, Map: req.Map, LocalOwner: -1,
+		Gameplay: req.Gameplay,
+		Kind:     ScenarioDirectOTA, Map: req.Map, LocalOwner: -1,
 		Difficulty: difficulty, Skirmish: cfg,
 		SimulationSeed: seed, CRTSeed: crtSeed,
 		FS: view, Catalog: catalog, AutomatedPlayers: true,

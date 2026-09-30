@@ -20,44 +20,55 @@ type treeHeatSource struct {
 }
 
 type treeHeat struct {
-	sources  []treeHeatSource
-	disabled bool
+	sources []treeHeatSource
+	// treeDisabled and wreckDisabled are the fire shimmer and wreck shimmer
+	// switches (§30). The two kinds of plume share this preparation and the
+	// distortion draw, but each is admitted here on its own switch, so either
+	// can be off alone.
+	treeDisabled, wreckDisabled bool
 }
 
-// setTreeHeat is the second executor gate the Distortion switch drives (§30).
-func (r *Renderer) setTreeHeat(on bool) { r.heat.disabled = !on }
+// setTreeHeat is the executor gate of the fire shimmer switch: the
+// burning-vegetation plumes of §27 (§30).
+func (r *Renderer) setTreeHeat(on bool) { r.heat.treeDisabled = !on }
+
+// setWreckShimmer is the executor gate of the wreck shimmer switch: the
+// fresh-wreck plumes of §28 (§30). The wreck's cooling emission colour is the
+// wreck glow switch's (setWreckGlow).
+func (r *Renderer) setWreckShimmer(on bool) { r.heat.wreckDisabled = !on }
 
 func (r *Renderer) prepareTreeHeat(list *drawlist.List) {
 	d := &r.heat
 	d.sources = d.sources[:0]
-	if d.disabled {
-		return
-	}
 	// Wrecks precede trees in the shared draw, preserving tree priority.
-	list.VisitModels(func(cmd drawlist.Model) {
-		g := cmd.Geometry
-		if cmd.ShadowOnly || g == nil || !g.Eligible || g.Fallback != drawlist.ModelFallbackNone || g.WreckHeatStrength <= 0 || g.WreckHeatScale <= 0 {
-			return
-		}
-		b := modelWorldBounds(g)
-		d.sources = append(d.sources, treeHeatSource{
-			x: float32(b.Min.X), y: float32(b.Min.Y), width: float32(b.Dx()), height: float32(b.Dy()),
-			time: g.WreckHeatTime, scale: g.WreckHeatScale, strength: g.WreckHeatStrength, wreck: true,
-		})
-	})
-	list.VisitSprites(func(sp drawlist.Sprite) {
-		if sp.HeatSource && sp.Frame != nil && sp.LightingScale > 0 {
+	if !d.wreckDisabled {
+		list.VisitModels(func(cmd drawlist.Model) {
+			g := cmd.Geometry
+			if cmd.ShadowOnly || g == nil || !g.Eligible || g.Fallback != drawlist.ModelFallbackNone || g.WreckHeatStrength <= 0 || g.WreckHeatScale <= 0 {
+				return
+			}
+			b := modelWorldBounds(g)
 			d.sources = append(d.sources, treeHeatSource{
-				x: float32(sp.X), y: float32(sp.Y), width: float32(sp.Frame.Width), height: float32(sp.Frame.Height),
-				time: sp.HeatTime, scale: sp.LightingScale, strength: 1, clip: sp.Clip, hasClip: sp.HasClip,
+				x: float32(b.Min.X), y: float32(b.Min.Y), width: float32(b.Dx()), height: float32(b.Dy()),
+				time: g.WreckHeatTime, scale: g.WreckHeatScale, strength: g.WreckHeatStrength, wreck: true,
 			})
-		}
-	})
+		})
+	}
+	if !d.treeDisabled {
+		list.VisitSprites(func(sp drawlist.Sprite) {
+			if sp.HeatSource && sp.Frame != nil && sp.LightingScale > 0 {
+				d.sources = append(d.sources, treeHeatSource{
+					x: float32(sp.X), y: float32(sp.Y), width: float32(sp.Frame.Width), height: float32(sp.Frame.Height),
+					time: sp.HeatTime, scale: sp.LightingScale, strength: 1, clip: sp.Clip, hasClip: sp.HasClip,
+				})
+			}
+		})
+	}
 }
 
 // Append after blast geometry so heat wins only where its shader covers pixels.
 func (r *Renderer) appendTreeHeat() {
-	if r.heat.disabled {
+	if r.heat.treeDisabled && r.heat.wreckDisabled {
 		return
 	}
 	d := &r.distortion

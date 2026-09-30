@@ -14,8 +14,9 @@ import (
 // the texels the colour pass marked submerged are refracted and shaded by the
 // same water field the water pass draws around them (water_field.go), so a
 // hull below the surface moves with the water instead of sitting on top of it.
-// Above-water texels resolve exactly as the ordinary commit does. The Water
-// switch gates it with the rest of the water treatment (§30).
+// Above-water texels resolve exactly as the ordinary commit does. The water
+// motion switch gates the refraction, and the water surface switch the shade
+// the water field lays over the refracted hull, each on its own (§30).
 type underwaterLayer struct {
 	water []float32
 }
@@ -51,7 +52,7 @@ func (r *Renderer) commitUnderwater(g *drawlist.ModelGeometry, region modelDirec
 	st := &r.underwater
 	water := &r.water
 	if g.Waterline != drawlist.ModelWaterlineBlue ||
-		g.WreckEmission != [3]float32{} || water.disabled || !water.record.Water.Enabled ||
+		r.wreckEmission(g) != [3]float32{} || water.motionDisabled || !water.record.Water.Enabled ||
 		water.mask == nil || water.source == nil || water.source.LavaWorld || water.source != water.record.Terrain {
 		return false
 	}
@@ -81,6 +82,16 @@ func (r *Renderer) commitUnderwater(g *drawlist.ModelGeometry, region modelDirec
 	if g.Cloaked {
 		opacity = 0.5
 	}
+	// The shading lane: the water surface switch decides whether the refracted
+	// hull also takes the water's ripple shade and crest tint, as the terrain
+	// around it does (§30).
+	shading := float32(0)
+	if !water.surfaceDisabled {
+		shading = 1
+	}
+	// The single-sample resolve of the Supersample switch off rides the same
+	// lane at weight two (§17.5).
+	shading += 2 * r.modelSampleLane()
 	rx, ry := float32(region.x), float32(region.y)
 	// The subject's page rectangle, packed x·4096 + y: its origin and its
 	// size, both below 4,096 and so exact in a float lane.
@@ -98,7 +109,7 @@ func (r *Renderer) commitUnderwater(g *drawlist.ModelGeometry, region modelDirec
 		vertices[i] = ebiten.Vertex{DstX: x, DstY: y,
 			SrcX: rx + 2*(x-float32(b.Min.X)), SrcY: ry + 2*(y-float32(b.Min.Y)),
 			ColorR: ox + x/scale, ColorG: oy + y/scale, ColorB: 2 * scale, ColorA: opacity,
-			Custom0: lo, Custom1: size, Custom3: sceneOpUnderwaterCommit}
+			Custom0: lo, Custom1: size, Custom2: shading, Custom3: sceneOpUnderwaterCommit}
 	}
 	r.sched.tris(schedOpaque, vertices[:], underwaterIndices[:])
 	r.modelStats.UnderwaterCommits++
@@ -107,7 +118,11 @@ func (r *Renderer) commitUnderwater(g *drawlist.ModelGeometry, region modelDirec
 
 // underwaterCommitSource is spliced into the scene shader (scene2DShaderSource).
 // Lanes: colour RG the world map pixel, B page texels per world pixel, A the
-// opacity; Custom0 the page rectangle's origin and Custom1 its size, packed.
+// opacity; Custom0 the page rectangle's origin and Custom1 its size, packed;
+// Custom2 the water surface shading, 0 or 1, plus 2 for the single-sample
+// resolve of the Supersample switch off (§17.5). The submerged gather keeps its
+// area weighting either way: its offset is the water's fractional refraction,
+// not the subject's raster (§26.5).
 var underwaterCommitSource = `
 // The frame's water phase, tidal drift and mask step.
 var UnderwaterWater vec4
@@ -134,18 +149,28 @@ func underwaterCommit(srcPos vec2, color vec4, custom vec4) vec4 {
  src := srcPos-imageSrc0Origin()
  lo := vec2(floor(custom.x/4096.0), custom.x-floor(custom.x/4096.0)*4096.0)
  hi := lo+vec2(floor(custom.y/4096.0), custom.y-floor(custom.y/4096.0)*4096.0)
- // Above-water texels resolve in place, as the ordinary commit does.
+ // Above-water texels resolve in place, as the ordinary commit does: the
+ // four by coverage, or with the Supersample switch off (Custom2 at two or
+ // more) the block's top-left texel alone at four times its weight.
+ point := custom.z >= 1.5
  start := floor(src-vec2(0.5))
  aboveSum := vec3(0)
  aboveCover := 0.0
  for j := 0; j < 2; j++ {
   for i := 0; i < 2; i++ {
+   if point && i+j > 0 {
+    continue
+   }
    c := uwTexel(start+vec2(float(i)+0.5,float(j)+0.5),lo,hi)
    if c.a > 0.999 {
     aboveSum += c.rgb
     aboveCover += 1.0
    }
   }
+ }
+ if point {
+  aboveSum *= 4.0
+  aboveCover *= 4.0
  }
  // Submerged texels are gathered from the refracted position, with the same
  // field, depth ramp and coast fade the water pass applies to the terrain.
@@ -179,7 +204,10 @@ func underwaterCommit(srcPos vec2, color vec4, custom vec4) vec4 {
   return vec4(0)
  }
  sub := subSum/max(subCover,1e-4)
- surface := mix(sub,mix(sub,waterShade(sub,broad,fine,gust,deep,1.0),coverage),surfaceOpacity)
+ surface := sub
+ if mod(custom.z, 2.0) > 0.5 {
+  surface = mix(sub,mix(sub,waterShade(sub,broad,fine,gust,deep,1.0),coverage),surfaceOpacity)
+ }
  fa := aboveCover/4.0
  fs := (1.0-fa)*subCover/4.0
  return vec4(aboveSum/4.0+surface*fs,fa+fs)*color.a

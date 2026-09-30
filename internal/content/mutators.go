@@ -537,11 +537,16 @@ const (
 //     veterancy tier. That product is retail arithmetic and is not guarded.
 //
 // Sight scales every unit's SightDistance, saturating at the signed 16-bit
-// store. The sight-shape index and the terrain-ray group both clamp at their
-// table's last entry, so large factors saturate for long-sighted units
-// [03 §3.2]. The fire-at-will opportunity scan, the standing-move leash and
-// the patrol and VTOL work scans also read sightdistance and widen with it
-// [04 R-STANCE-01 §3][04 R-STANCE-01 §4][04 R-ORD-01 §4][04 R-ORD-01 §7].
+// store. Both rasters quantize the live value at each publication, so no LOS
+// table needs recomputing, and each clamps at its table's last entry: the
+// terrain-ray group at sightdistance 256 with the stock tables, which 110 of
+// the 278 stock definitions already reach at x1, and the sight-shape index at
+// 448 [03 §3.2][03 R-COMP-02 §1]. Under True line of sight, factors above one
+// therefore barely widen what units see (docs/DESIGN_MODS_MUTATORS.md §6.5).
+// The fire-at-will opportunity scan, the standing-move leash and the patrol
+// and VTOL work scans also read sightdistance and widen with it at every
+// factor [04 R-STANCE-01 §3][04 R-STANCE-01 §4][04 R-ORD-01 §4]
+// [04 R-ORD-01 §7].
 //
 // Radar scales every unit's RadarDistance, SonarDistance, RadarDistanceJam and
 // SonarDistanceJam, saturating at the signed 16-bit store. All four are plain

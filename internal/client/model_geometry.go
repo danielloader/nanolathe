@@ -145,7 +145,9 @@ func (c *Client) setModelLightingHeight(g *drawlist.ModelGeometry, draw *present
 	scale := float32(c.modelScale().Float())
 	g.WorldHeight = float32(draw.WorldPos[1].Raw()) / 65536 * scale
 	g.AircraftShadowHeight, g.AircraftShadowScale = 0, scale
-	if c.enhanced && draw.Airborne {
+	// A zero clearance selects the ordinary silhouette route, which is the
+	// shadow the player's soft shadow switch asks for when it is off (§34).
+	if c.enhanced && draw.Airborne && c.effects.SoftShadows {
 		receiver := max(draw.GroundY, c.seaLevel())
 		g.AircraftShadowHeight = max(0, float32(draw.WorldPos[1].Sub(receiver).Raw())/65536*scale)
 	}

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
+	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/ebitenapp"
@@ -69,14 +70,123 @@ func (g *gameShell) setPresentation(p settings.Presentation) {
 // presentationEffects converts the persisted switches into the value both the
 // recorder and the modern executor read (DESIGN_GPU_RENDERER §30). The
 // conversion lives here so internal/settings stays a leaf the frontend converts
-// to and from rather than one that knows about the draw list.
+// to and from rather than one that knows about the draw list. It is one field
+// for one field: every switch is independent. The strengths are not switches
+// and reach the client on their own (applyEffectStrengths).
 func presentationEffects(p settings.Presentation) drawlist.Effects {
 	return drawlist.Effects{
-		Water:      p.Water != 0,
-		Lighting:   p.Lighting != 0,
-		Finish:     p.Finish != 0,
-		Distortion: p.Distortion != 0,
-		Marks:      p.Marks != 0,
+		WaterSurface:     p.WaterSurface != 0,
+		WaterMotion:      p.WaterMotion != 0,
+		WaterFoam:        p.WaterFoam != 0,
+		WaterReflections: p.WaterReflections != 0,
+		ModelLight:       p.ModelLight != 0,
+		GroundLight:      p.GroundLight != 0,
+		Finish:           p.Finish != 0,
+		Glint:            p.Glint != 0,
+		BlastRings:       p.BlastRings != 0,
+		FireShimmer:      p.FireShimmer != 0,
+		WreckGlow:        p.WreckGlow != 0,
+		WreckShimmer:     p.WreckShimmer != 0,
+		Scorch:           p.Scorch != 0,
+		SoftShadows:      p.SoftShadows != 0,
+		Supersample:      p.Supersample != 0,
+	}
+}
+
+// storeEffects writes a live selection back into the persisted switches, the
+// inverse of presentationEffects. A direct battle's write-all and its family
+// commands use it, because there the client holds the live values.
+func storeEffects(p *settings.Presentation, e drawlist.Effects) {
+	p.WaterSurface, p.WaterMotion, p.WaterFoam, p.WaterReflections =
+		boolInt(e.WaterSurface), boolInt(e.WaterMotion), boolInt(e.WaterFoam), boolInt(e.WaterReflections)
+	p.ModelLight, p.GroundLight = boolInt(e.ModelLight), boolInt(e.GroundLight)
+	p.Finish, p.Glint = boolInt(e.Finish), boolInt(e.Glint)
+	p.BlastRings, p.FireShimmer = boolInt(e.BlastRings), boolInt(e.FireShimmer)
+	p.WreckGlow, p.WreckShimmer = boolInt(e.WreckGlow), boolInt(e.WreckShimmer)
+	p.Scorch = boolInt(e.Scorch)
+	p.SoftShadows = boolInt(e.SoftShadows)
+	p.Supersample = boolInt(e.Supersample)
+}
+
+// applyEffectStrengths hands the client the three Enhanced strengths the
+// presentation block stores beside the switches (DESIGN_GPU_RENDERER §30): the
+// trail strength, which the recorder reads, and the ground light and blast ring
+// strengths, which the host passes on to the executor.
+func applyEffectStrengths(cl *client.Client, p settings.Presentation) {
+	if cl == nil {
+		return
+	}
+	cl.SetTrailStrength(p.TrailStrength)
+	cl.SetGroundLightStrength(p.GroundLightStrength)
+	cl.SetBlastRingStrength(p.BlastRingStrength)
+}
+
+// effectFamily is one of the five Enhanced shortcuts the battle options page
+// and the message line share (DESIGN_INTERFACE_HUD_INPUT §3.4.1). It is not a
+// stored switch: it reads On while any of its switches is on, and setting it
+// writes every one of them. Marks also owns the trail strength, whose zero is
+// the trail layer's off; turning Marks on gives a zero strength the default
+// and leaves a chosen one as it was. Metal is the finishes alone, not the
+// glint, and the glint, the soft shadows and the supersampling belong to no
+// family.
+type effectFamily struct {
+	gadget, command string
+	switches        func(p *settings.Presentation) []*int
+	trails          bool
+}
+
+// effectFamilies is the page order of the shortcuts.
+var effectFamilies = [...]effectFamily{
+	{gadget: "NWATER", command: "water", switches: func(p *settings.Presentation) []*int {
+		return []*int{&p.WaterSurface, &p.WaterMotion, &p.WaterFoam, &p.WaterReflections}
+	}},
+	{gadget: "NLIGHTS", command: "lights", switches: func(p *settings.Presentation) []*int {
+		return []*int{&p.ModelLight, &p.GroundLight}
+	}},
+	{gadget: "NFINISH", command: "finish", switches: func(p *settings.Presentation) []*int {
+		return []*int{&p.Finish}
+	}},
+	{gadget: "NHEAT", command: "heat", switches: func(p *settings.Presentation) []*int {
+		return []*int{&p.BlastRings, &p.FireShimmer, &p.WreckGlow, &p.WreckShimmer}
+	}},
+	{gadget: "NMARKS", command: "marks", switches: func(p *settings.Presentation) []*int {
+		return []*int{&p.Scorch}
+	}, trails: true},
+}
+
+// on reports whether any of the family's switches is on.
+func (f effectFamily) on(p settings.Presentation) bool {
+	for _, v := range f.switches(&p) {
+		if *v != 0 {
+			return true
+		}
+	}
+	return f.trails && p.TrailStrength > 0
+}
+
+// set writes every one of the family's switches.
+func (f effectFamily) set(p *settings.Presentation, on bool) {
+	for _, v := range f.switches(p) {
+		*v = boolInt(on)
+	}
+	if f.trails {
+		switch {
+		case !on:
+			p.TrailStrength = 0
+		case p.TrailStrength <= 0:
+			p.TrailStrength = settings.DefaultTrailStrength
+		}
+	}
+}
+
+// restore copies the family's switches, and Marks' trail strength, from src.
+func (f effectFamily) restore(dst *settings.Presentation, src settings.Presentation) {
+	from := f.switches(&src)
+	for i, v := range f.switches(dst) {
+		*v = *from[i]
+	}
+	if f.trails {
+		dst.TrailStrength = src.TrailStrength
 	}
 }
 
@@ -107,15 +217,22 @@ func (g *gameShell) rendererChanged(mode ebitenapp.RendererMode) {
 }
 
 // Extend the authored category column with Nanolathe's host pages. Keeping
-// its size and art selector reuses the same game-data button family.
-func addNanolatheOptionsCategory(window *gui.Window) {
+// its size and art selector reuses the same game-data button family. The
+// front end's options leave the Nanolathe page to the Nanolathe screen on the
+// main menu (DESIGN_INTERFACE_HUD_INPUT §3.17); the battle's options keep it,
+// since that screen does not open over a battle.
+func addNanolatheOptionsCategory(window *gui.Window, inBattle bool) {
 	visual, speeds := window.GadgetIndex("VISUALS"), window.GadgetIndex("SPEEDS")
 	if visual < 0 || speeds < 0 {
 		return
 	}
 	button := window.Gadgets[visual]
 	pitch := button.Rect.Y - window.Gadgets[speeds].Rect.Y
-	for _, name := range []string{"NANOLATHE", "BUILDERS", "COMMUNITYHUD", "PLACEMENT"} {
+	pages := []string{"NANOLATHE", "BUILDERS", "COMMUNITYHUD", "PLACEMENT"}
+	if !inBattle {
+		pages = pages[1:]
+	}
+	for _, name := range pages {
 		button.Rect.Y += pitch
 		button.Name, button.SourceName = name, name+"_CATEGORY"
 		button.Art, button.Text, button.QuickKey = "", name, 0
@@ -231,25 +348,6 @@ func nanolatheOptionsPage(window *gui.Window) error {
 	return nil
 }
 
-type nanolatheEffectSwitch struct {
-	name  string
-	value *int
-}
-
-// nanolatheEffectSwitches is the page order of the presentation switches,
-// paired with the persisted field each one writes. `NGLOW` is not among them:
-// glow stays in the display block, where the chat command and the capture route
-// already read it (DESIGN_GPU_RENDERER §19.4).
-func nanolatheEffectSwitches(p *settings.Presentation) [5]nanolatheEffectSwitch {
-	return [5]nanolatheEffectSwitch{
-		{"NWATER", &p.Water},
-		{"NLIGHTS", &p.Lighting},
-		{"NFINISH", &p.Finish},
-		{"NHEAT", &p.Distortion},
-		{"NMARKS", &p.Marks},
-	}
-}
-
 var nanolatheFPSChoices = [...]int{30, 60, 120}
 
 func (g *gameShell) syncNanolatheOptions() {
@@ -269,9 +367,11 @@ func (g *gameShell) syncNanolatheOptions() {
 	// read the presentation block (DESIGN_GPU_RENDERER §30).
 	optionsPanel.SetStageAt(optionsPanel.Index("NGLOW"), boolInt(g.display.Glow != 0))
 	optionsPanel.SetStageAt(optionsPanel.Index("NSIDEBAR"), boolInt(g.presentation.ExpandedSidebar != 0))
-	p := g.presentation
-	for _, sw := range nanolatheEffectSwitches(&p) {
-		optionsPanel.SetStageAt(optionsPanel.Index(sw.name), boolInt(*sw.value != 0))
+	// The five family shortcuts show On while any of their switches is on.
+	// `NGLOW` is not among them: glow stays in the display block, where the
+	// chat command and the capture route already read it (§19.4).
+	for _, f := range effectFamilies {
+		optionsPanel.SetStageAt(optionsPanel.Index(f.gadget), boolInt(f.on(g.presentation)))
 	}
 }
 
@@ -335,13 +435,14 @@ func (g *gameShell) activateNanolatheOption(name string) bool {
 		g.applyRetailVisualOptions(clPtr)
 		return true
 	default:
-		// The presentation switches. The host polls the shell's committed
-		// preference each update, so writing it here is the live preview (§30).
-		for _, sw := range nanolatheEffectSwitches(&p) {
-			if sw.name != name {
+		// The family shortcuts: pressing one writes every switch of its family
+		// to the new stage. The host polls the shell's committed preference
+		// each update, so writing it here is the live preview (§30).
+		for _, f := range effectFamilies {
+			if f.gadget != name {
 				continue
 			}
-			*sw.value = g.retailOptionsStage(name, 2, boolInt(*sw.value != 0))
+			f.set(&p, g.retailOptionsStage(name, 2, boolInt(f.on(p))) != 0)
 			g.setPresentation(p)
 			g.syncNanolatheOptions()
 			return true
@@ -382,10 +483,15 @@ func gameplayOptionStage(mode gameplay.Mode) int {
 }
 
 // Each options page restores only fields it owns; host input preferences live
-// on the Orders page and share the ordinary options transaction.
+// on the Orders page and share the ordinary options transaction. This page's
+// family shortcuts write every switch of their families, and Marks the trail
+// strength, so those are what its Cancel, Undo and Restore Defaults take back;
+// the glint and the soft shadows are no shortcut's and stay as they are.
 func (g *gameShell) setNanolathePreferences(p settings.Presentation) {
 	next := g.presentation
 	next.Renderer, next.FPS, next.ExpandedSidebar = p.Renderer, p.FPS, p.ExpandedSidebar
-	next.Water, next.Lighting, next.Finish, next.Distortion, next.Marks = p.Water, p.Lighting, p.Finish, p.Distortion, p.Marks
+	for _, f := range effectFamilies {
+		f.restore(&next, p)
+	}
 	g.setPresentation(next)
 }

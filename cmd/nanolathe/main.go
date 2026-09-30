@@ -98,9 +98,11 @@ func checkInstall(opts Options, errOut io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if content.modNotice != "" {
+	if content.modNotice != "" && content.modNotice != content.configNotice {
 		fmt.Fprintf(errOut, "nanolathe: warning: %s, so the game would start without it\n", content.modNotice)
 	}
+	// Content without a Nanolathe config still starts, as plain content
+	// (docs/DESIGN_MODS_MUTATORS.md §4.5); the mount already said so.
 	return content.Close()
 }
 
@@ -154,7 +156,7 @@ func run(opts Options, out, errOut *os.File) error {
 	// A file-less headless report owns stdout as one JSON document. Windowed
 	// runs and headless runs with a separate report file retain the profile
 	// banner on stdout.
-	if (!opts.Headless || opts.Report != "") && opts.Shot == "" && opts.Film == "" {
+	if (!opts.Headless || opts.Report != "") && opts.Shot == "" && opts.Film == "" && opts.NLShot == "" {
 		fmt.Fprintf(out, "%s\n", version.ProfileID())
 	}
 
@@ -175,10 +177,10 @@ func run(opts Options, out, errOut *os.File) error {
 	// without the saved mod after mounting it.
 	launch := opts
 	opts.Root, opts.Roots = content.root, content.roots
-	// The mount boundary owns profile selection, so the resolved name — not
-	// the selector the command line carried — is what the reports state
-	// (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
-	opts.ContentProfile = content.profile
+	// The mount boundary owns config selection, so the file it read — not
+	// only what the command line carried — is what a remount passes back
+	// (docs/DESIGN_MODS_MUTATORS.md §4.3).
+	opts.ModConfig = content.configPath
 	// Mutators and the running mod's gameplay minimum
 	// (docs/DESIGN_MODS_MUTATORS.md §4.3, §6). Captures, benchmarks and
 	// displayless runs take neither the saved mod nor the saved mutators.
@@ -198,6 +200,10 @@ func run(opts Options, out, errOut *os.File) error {
 
 	if opts.Film != "" {
 		return runFilm(opts, content)
+	}
+
+	if opts.NLShot != "" {
+		return runNLScreenShot(opts, content)
 	}
 
 	if opts.ShotDebris != "" {

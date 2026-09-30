@@ -93,6 +93,22 @@ func checkBlastDistortionDevicePixels() error {
 	if !bytes.Equal(before, read(&expired)) {
 		return fmt.Errorf("expired blast left distortion")
 	}
+	// The player's ring strength (§30): 0 is the ring off, and a stronger ring
+	// moves the picture further while staying inside the same clip.
+	r.SetBlastRingStrength(0)
+	none := read(&l)
+	r.SetBlastRingStrength(200)
+	strong := read(&l)
+	r.SetBlastRingStrength(EffectStrengthDefault)
+	if !bytes.Equal(before, none) {
+		return fmt.Errorf("blast ring strength 0 still distorted")
+	}
+	if bytes.Equal(strong, after) || bytes.Equal(strong, before) {
+		return fmt.Errorf("blast ring strength 200 drew the default ring or none")
+	}
+	if !bytes.Equal(after, read(&l)) {
+		return fmt.Errorf("restoring the default ring strength did not restore the ring")
+	}
 	if dir := os.Getenv("NANOLATHE_BLAST_SHOTS"); dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err

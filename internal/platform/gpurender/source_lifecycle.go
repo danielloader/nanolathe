@@ -84,9 +84,10 @@ func (r *Renderer) resetSources(release func(*ebiten.Image)) {
 	}
 	r.textureAtlas = modelTextureAtlas{}
 	r.modelPrep = modelPrepScratch{}
-	r.lighting = battleLighting{disabled: r.lighting.disabled}
-	r.heat = treeHeat{disabled: r.heat.disabled}
-	r.water = waterLayer{disabled: r.water.disabled, shader: r.water.shader, wakeShader: r.water.wakeShader}
+	r.lighting = battleLighting{modelDisabled: r.lighting.modelDisabled, groundDisabled: r.lighting.groundDisabled, groundStrengthOffset: r.lighting.groundStrengthOffset}
+	r.heat = treeHeat{treeDisabled: r.heat.treeDisabled, wreckDisabled: r.heat.wreckDisabled}
+	r.water = waterLayer{surfaceDisabled: r.water.surfaceDisabled, motionDisabled: r.water.motionDisabled, foamDisabled: r.water.foamDisabled,
+		shader: r.water.shader, stillShader: r.water.stillShader, wakeShader: r.water.wakeShader}
 	r.reflections = waterReflections{disabled: r.reflections.disabled, sourceShader: r.reflections.sourceShader, resolveShader: r.reflections.resolveShader, softResolveShader: r.reflections.softResolveShader}
 	r.modelDirect = modelDirectLane{keyShader: r.modelDirect.keyShader, colourShader: r.modelDirect.colourShader, shaderErr: r.modelDirect.shaderErr, groups: modelGroupMergeLane{shader: r.modelDirect.groups.shader}}
 	r.fog = fogPass{shader: r.fog.shader, shaderErr: r.fog.shaderErr, compiled: r.fog.compiled}

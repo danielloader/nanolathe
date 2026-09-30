@@ -17,11 +17,17 @@ type RepairRateOverrides struct {
 	SelfHealMultiplier *int  `json:"selfHealMultiplier,omitempty"`
 }
 
-// Overrides is one feature-table source. Table, when present, replaces the
-// current value before the remaining fields in this source are applied.
-// Pointer fields preserve explicit false and zero values from JSON.
+// Overrides is one feature-table source. Table or Base, when present,
+// replaces the current value before the remaining fields in this source are
+// applied: Table by the named engine table (only Mainline), Base by a
+// complete value such as a mod config's communityFeatures (ParseFeatures).
+// A source naming both is refused. Base is how a mod's table reaches a
+// session and a save sidecar self-contained, without an engine-side name
+// (DESIGN_COMMUNITY_PATCH §3.2). Pointer fields preserve explicit false and
+// zero values from JSON.
 type Overrides struct {
-	Table string `json:"table,omitempty"`
+	Table string    `json:"table,omitempty"`
+	Base  *Features `json:"base,omitempty"`
 
 	ConstructionKickout      *bool `json:"constructionKickout,omitempty"`
 	GuardingBuildersHold     *bool `json:"guardingBuildersHold,omitempty"`
@@ -122,11 +128,20 @@ func Resolve(strict bool, sources ...Overrides) (Features, error) {
 
 func apply(base Features, o Overrides, logicalPath string) (Features, error) {
 	var err error
+	if o.Table != "" && o.Base != nil {
+		return Features{}, featureError("apply community feature overrides", logicalPath, "community feature table", "a source naming either a table or a base value, not both", nil)
+	}
 	if o.Table != "" {
 		base, err = Table(o.Table)
 		if err != nil {
 			return Features{}, err
 		}
+	}
+	if o.Base != nil {
+		if err := validateComplete(*o.Base); err != nil {
+			return Features{}, featureError("apply community feature overrides", logicalPath, "community feature table", "a base value within the documented feature bounds", err)
+		}
+		base = *o.Base
 	}
 
 	applyBool(&base.ConstructionKickout, o.ConstructionKickout)

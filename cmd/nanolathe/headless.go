@@ -78,9 +78,8 @@ func installHeadlessModelTextureRegistry(sess *session.Session, fs *vfs.FS, team
 func headlessFreshBattleRequest(opts Options, cs *contentSet, source BattleSeedSource) (freshBattleRequest, headless.Request, error) {
 	reportRequest := headless.Request{
 		Gameplay: opts.Gameplay,
-		// run replaced the selector with the name the mount boundary
-		// resolved, so this is the profile the run actually used.
-		ContentProfile: opts.ContentProfile,
+		// The report names the content the mount boundary actually applied.
+		ContentProfile: cs.contentProfileName(),
 		Map:            opts.Map,
 		Mission:        opts.Mission,
 		Difficulty:     opts.Difficulty,

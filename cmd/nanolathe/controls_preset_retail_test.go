@@ -6,7 +6,6 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -68,13 +67,14 @@ func presetCapture(t *testing.T, cl *client.Client, name string) {
 	}
 }
 
-// TestProTARecommendedSettingsAreOfferedOnce installs the ProTA package as a
-// metadata-less local mod, as a drop or --install-mod does. Its content
-// profile supplies the preset and the gameplay minimum (§4.3, §4.5): the Mods
-// & Mutators screen offers the preset when switching to it, and a start
-// with --mod offers it once on the main menu, remembered in the settings.
-// The loading screen names the unit limit ProTA's feature table sets.
-func TestProTARecommendedSettingsAreOfferedOnce(t *testing.T) {
+// TestProTARecommendedSettingsAreItsLayer installs the ProTA package with its
+// repository config, as a download or a drop of the hosted zip does. The
+// config's settings, keys and recommended rules are ProTA's settings layer
+// (DESIGN_MODS_MUTATORS §4.6): a start with --mod plays them with nothing
+// offered, a change made while ProTA runs is kept for ProTA alone, and the
+// original game keeps the base settings. The loading screen names the unit
+// limit ProTA's feature table sets.
+func TestProTARecommendedSettingsAreItsLayer(t *testing.T) {
 	prota := os.Getenv("NANOLATHE_MOD_ROOTS_PROTA")
 	if prota == "" {
 		t.Skip("NANOLATHE_MOD_ROOTS_PROTA is unset")
@@ -86,76 +86,45 @@ func TestProTARecommendedSettingsAreOfferedOnce(t *testing.T) {
 	t.Cleanup(func() { applyRetailAudioOptions(settings.DefaultAudio()) })
 	devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	defer devnull.Close()
-	if err := runInstallMod(Options{Root: retail, InstallMod: filepath.SplitList(prota)[0]}, devnull); err != nil {
+	if err := runInstallMod(Options{Root: retail, InstallMod: stageModPackage(t, filepath.SplitList(prota)[0], "prota-4.8")}, devnull); err != nil {
 		t.Fatal(err)
 	}
-	if dir := os.Getenv("NANOLATHE_MODS_CAPTURE"); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Switching from the Mods & Mutators screen offers the preset.
-	shell, cl := presetRetailShell(t, Options{Root: retail})
-	shell.openMenu(modeMenuMain)
-	shell.pollControlsOffer()
-	if controlsOfferUI != nil {
-		t.Fatal("the original game offered a preset")
-	}
-	if err := shell.openModsScreen(); err != nil {
+	lib, err := openModLibrary()
+	if err != nil {
 		t.Fatal(err)
 	}
-	shell.setGameplay(gameplay.Strict31)
-	shell.selectModsRow(1)
-	if !modsPanel.ActiveOf("PRESET") {
-		t.Fatal("the local ProTA package's preset is not offered on the Mods & Mutators screen")
+	installed, err := lib.Installed()
+	if err != nil || len(installed) != 1 {
+		t.Fatalf("installed %v, %v", installed, err)
 	}
-	presetCapture(t, cl, "mods-preset")
-	shell.applyModsScreen()
-	request := pendingContentReload
-	pendingContentReload = nil
-	if request == nil || request.controls != "community" || request.offered == "" || request.gameplay != gameplay.Community39 {
-		t.Fatalf("the switch request = %+v, want the preset, the offer and the Community 3.9 minimum", request)
-	}
-	shell.closeModsScreen()
+	id := installed[0].ID
 
-	// A start that names the mod on the command line offers it on the main
-	// menu instead, once.
-	shell, cl = presetRetailShell(t, Options{Root: retail, Mod: request.offered, ModSet: true})
+	shell, cl := presetRetailShell(t, Options{Root: retail, Mod: id, ModSet: true})
 	if shell.cs.mod == nil || shell.cs.mod.Controls != "community" || shell.cs.mod.MinimumGameplay != string(gameplay.Community39) {
-		t.Fatalf("the mounted local package = %+v, gameplay %s", shell.cs.mod, shell.gameplay)
+		t.Fatalf("the mounted package = %+v", shell.cs.mod)
 	}
-	shell.openMenu(modeMenuMain)
-	shell.pollControlsOffer()
-	if controlsOfferUI == nil || controlsOfferUI.key != request.offered {
-		t.Fatal("the main menu did not offer the running mod's preset")
+	if shell.presentation.CommunitySelection != 1 || !shell.switchAlt || shell.audioPrefs.SoundMode != settings.SoundMode3D || shell.gameplay != gameplay.Community39 {
+		t.Fatalf("ProTA's recommendations are not its layer: selection %d, switchAlt %v, sound %d, gameplay %s",
+			shell.presentation.CommunitySelection, shell.switchAlt, shell.audioPrefs.SoundMode, shell.gameplay)
 	}
-	presetCapture(t, cl, "offer")
-	// The table's last rows, scrolled into view: the dot colour table reads
-	// as one named choice.
-	rows, _ := shell.controlsOfferRows(controlsOfferUI.preset)
-	if !slices.Contains(rows, "Dot colours: ProTA (now Default)") {
-		t.Fatalf("the offer's rows %q do not name the ProTA dot colours", rows)
+	if shell.liveKeyMap().Profile() != "community" {
+		t.Fatalf("keyboard profile %q, want ProTA's community", shell.liveKeyMap().Profile())
 	}
-	controlsOfferUI.selected = len(rows) - 1
-	shell.refreshControlsOffer()
-	presetCapture(t, cl, "offer-end")
-	shell.activateGadget("LOAD")
-	if controlsOfferUI != nil {
-		t.Fatal("Apply did not close the offer")
-	}
+	shell.presentation.CommunitySelection = 2
+	shell.saveSettings()
 	stored, err := settings.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !settings.ControlsWereOffered(stored.ControlsOffered, request.offered) || stored.SwitchAlt != 1 || stored.Presentation.CommunitySelection != 1 || stored.Audio.SoundMode != settings.SoundMode3D {
-		t.Fatalf("the accepted preset was not saved: offered %q, switchAlt %d", stored.ControlsOffered, stored.SwitchAlt)
+	if stored.Presentation.CommunitySelection != 0 || stored.SwitchAlt != 0 || len(stored.ModSettings[id]) == 0 {
+		t.Fatalf("the base took ProTA's settings: selection %d, switchAlt %d, patch %s", stored.Presentation.CommunitySelection, stored.SwitchAlt, stored.ModSettings[id])
+	}
+	plain, _ := presetRetailShell(t, Options{Root: retail, Mod: "none", ModSet: true})
+	if plain.presentation.CommunitySelection != 0 || plain.switchAlt {
+		t.Fatal("the original game plays ProTA's settings")
 	}
 	shell.openMenu(modeMenuMain)
-	shell.pollControlsOffer()
-	if controlsOfferUI != nil {
-		t.Fatal("the preset was offered twice")
-	}
+	presetCapture(t, cl, "prota-menu")
 
 	shell.loading = newLoadingState("Comet Catcher")
 	shell.frontend.SetMode(modeLoading)

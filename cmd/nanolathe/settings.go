@@ -48,9 +48,13 @@ func applyGlowStrength(cl *client.Client, d settings.Display) {
 	cl.SetGlowStrength(d.GlowStrength)
 }
 
-// applySettings installs a loaded block over the shell's default setup.
+// applySettings installs a loaded block over the shell's default setup: the
+// base block with the running mod's layers over it (modsettings.go).
 func (g *gameShell) applySettings(s settings.Settings) {
 	s.Normalize()
+	g.baseSettings = s
+	s = g.effectiveSettings(s)
+	g.presets = s.Presets
 	g.missionDifficultyValue = s.Difficulty
 	// Scroll speed is the persisted scrollspeed byte [02 "Settings"] [07 §10] C2.
 	// It is presentation-only and never touches sim [I6].
@@ -68,6 +72,10 @@ func (g *gameShell) applySettings(s settings.Settings) {
 	g.modSetting, g.mutatorSetting = s.Mod, s.Mutators
 	g.modernAISetting = s.ModernAI
 	g.controlsOffered = s.ControlsOffered
+	g.lockOverrides = s.ModLockOverrides
+	// Unknown actions and unreadable chords are dropped here; the file keeps
+	// only what the key map can play (keymap.go).
+	g.keyMap = keyMapFromSettings(s.KeyBindings)
 	g.builderOptions = s.BuilderOptions
 	g.fullscreen = s.Fullscreen
 	// The message-column ring configuration is the interface page's
@@ -176,7 +184,17 @@ func (g *gameShell) syncMapIndex() {
 
 // captureSettings reads the shell's live frontend state back into the
 // persisted block.
+// captureSettings is the block a save writes: the live settings split back
+// into the base block and the running mod's patch (modsettings.go).
 func (g *gameShell) captureSettings() settings.Settings {
+	out := g.fileSettings(g.liveSettings())
+	out.Presets = g.presets
+	return out
+}
+
+// liveSettings is the shell's live preferences as one block, the effective
+// settings of the running content.
+func (g *gameShell) liveSettings() settings.Settings {
 	// While the Survival screen is open its rows sit in g.setup; the file
 	// records the skirmish rows set aside for it.
 	setup, controllers := g.persistedSkirmishSetup(), g.persistedSkirmishControllers()
@@ -205,6 +223,9 @@ func (g *gameShell) captureSettings() settings.Settings {
 		Mutators:         g.mutatorSetting,
 		ModernAI:         g.modernAISetting,
 		ControlsOffered:  g.controlsOffered,
+		ModLockOverrides: g.lockOverrides,
+		// The keyboard profile and only the actions rebound from it.
+		KeyBindings: keyBindingsSetting(g.keyMap),
 		// The interface page's three message controls write into this block;
 		// `screenchat` rides through unchanged [02 §3][07 R-CAM-01 §7].
 		Messages: g.messages,

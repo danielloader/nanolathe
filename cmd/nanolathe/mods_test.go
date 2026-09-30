@@ -80,6 +80,25 @@ func installFixtureMod(t *testing.T, lib *modlibrary.Library, folder string, met
 	return mod
 }
 
+// installFixtureConfig installs a folder holding one loose file and a raw
+// nanolathe-mod.json, for a schema 2 config. No content validation runs.
+func installFixtureConfig(t *testing.T, lib *modlibrary.Library, folder, config string) modlibrary.Mod {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), folder)
+	writeModFixtureFile(t, dir, "units/fixture.fbi", "[UNITINFO] { }\n")
+	writeModFixtureFile(t, dir, modlibrary.MetadataFile, config)
+	mod, err := lib.InstallDirectory(dir, modlibrary.InstallOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mod
+}
+
+// brokenConfig is a mod whose config sends gamedata to a directory it does
+// not ship, so it mounts but cannot start: the required products are
+// missing through its layout.
+const brokenConfig = `{"schema":2,"id":"broken","name":"Broken","version":"2","content":{"layout":{"gamedata":"gamedatMissing"}}}`
+
 func saveModChoice(t *testing.T, mod settings.ModSelection, mutators map[string]string, profile string) {
 	t.Helper()
 	s := settings.Defaults()
@@ -211,7 +230,7 @@ func TestBattleRestartRemountsTheRunningModNotTheSavedOne(t *testing.T) {
 // by --mod stays an error.
 func TestSavedModThatFailsToOpenStartsWithoutIt(t *testing.T) {
 	base, lib := modFixture(t)
-	mod := installFixtureMod(t, lib, "broken", &modlibrary.Metadata{Schema: 1, ID: "broken", Name: "Broken", Version: "2", ContentProfile: "profiles/missing.json"})
+	mod := installFixtureConfig(t, lib, "broken", brokenConfig)
 	var saved *savedModError
 	if _, err := openContent(Options{Root: base, Mod: mod.ID, ModSet: true}); err == nil || errors.As(err, &saved) {
 		t.Fatalf("--mod naming a mod that does not open = %v, want a plain error", err)
@@ -226,7 +245,7 @@ func TestSavedModThatFailsToOpenStartsWithoutIt(t *testing.T) {
 		t.Fatalf("the start without the saved mod failed: %v", err)
 	}
 	defer cs.Close()
-	if cs.mod != nil || cs.savedMod || !strings.Contains(cs.modNotice, "Broken 2") || !strings.Contains(cs.modNotice, "content profile") {
+	if cs.mod != nil || cs.savedMod || !strings.Contains(cs.modNotice, "Broken 2") || !strings.Contains(cs.modNotice, "gamedata/moveinfo.tdf") {
 		t.Fatalf("fallback mod %v, notice %q", cs.mod, cs.modNotice)
 	}
 	if stored, err := settings.Load(); err != nil || stored.Mod.ID != mod.ID {

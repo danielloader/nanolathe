@@ -103,8 +103,9 @@ Consequences for the mechanism, each a deliberate change to
 
 The name is the patch line's public version family, not a build: the seven
 `tdraw` build profiles are feature *tables* under the one set (§3.3), and a
-content profile selects its table. A registered set remains the way to change
-an *answer* the tables cannot express.
+mod's own config declares the table its content was authored for. A
+registered set remains the way to change an *answer* the tables cannot
+express.
 
 ## 3. The feature table
 
@@ -146,8 +147,8 @@ type Features struct {
     ScriptPorts               bool // recorder ports 32 and 69–75 (the eight content uses; §4.5)
     MexSnap, WreckSnap        bool // click snap (command-time, CP-CON-6, §4.6)
 
-    // ProTA 4.8 package switches (§4.7): false in every shipped table,
-    // enabled only by a content profile's gameplay block or a player override.
+    // ProTA 4.8 package switches (§4.7): false in the mainline table,
+    // enabled only by a mod config's communityFeatures or a player override.
     AIDifficultyIncome        bool // computer-player Easy/Medium/Hard 0.5/1/4 income
     AIStockpileProducts       bool // armed-building record on the resource/queue task
     TargetLockRelease         bool // retained-target release in the maintenance scan
@@ -192,15 +193,19 @@ override earlier ones field by field; an absent field means "keep":
 
 1. **The reserved set's base table.** Strict 3.1 is the zero table. Community
    3.9 and Modern start from the *mainline* table (§3.3, D2).
-2. **The content profile's `gameplay` block.** A content profile
-   ([DESIGN_CONTENT_VFS §5 "Content profiles"](DESIGN_CONTENT_VFS.md)) may
-   carry a `gameplay` object naming the build profile its content was
-   authored for (`"table": "escalation"`) and overriding individual fields.
-   This is how a content set declares what it needs. Gold 10.2.0 starts from
-   `escalation`, then selects its historical HealTime caller and overrides
-   both repair multipliers to one. The named current-source table retains
-   its multipliers of three; a table name alone does not identify an older
+2. **The mod's config.** A mod's own `nanolathe-mod.json` carries
+   `rules.communityFeatures`, the complete table its content was authored
+   for ([DESIGN_MODS_MUTATORS §4.2](DESIGN_MODS_MUTATORS.md#42-mod-metadata-and-config)),
+   decoded over the mainline table (`community.ParseFeatures`) and handed to
+   the session as one source whose `base` replaces the value
+   (`community.Overrides.Base`). This is how a content set declares what it
+   needs; the engine carries no mod's table. Gold 10.2.0's config carries the
+   `escalation` build profile's matrix with its historical HealTime caller
+   and both repair multipliers at one: the current-source table's
+   multipliers are three, and a table alone does not identify an older
    package's engine. See [passive generator healing](../research/extensions/escalation-shields.md#passive-generator-healing).
+   A config named by `--mod-config` for a manual root stack is the same
+   source.
 3. **The settings file.** `gameplayFeatures` — a JSON object of the same
    shape — is the player's persistent override, written by the options page
    and hand-editable.
@@ -212,9 +217,10 @@ joins sources 3 and 4 through `settings.UnitLimitSources`: a saved top-level
 `unitLimit` fills `gameplayFeatures.unitLimit` when the player's block names
 none, and `--unit-limit` is the last command-line layer. A limit the player
 chose therefore beats the table of every earlier source (CP-LIM-2, §4.1). A
-source that names a `table` still starts again from that table, discarding
-every earlier source, so `--gameplay-feature table=…` without `--unit-limit`
-returns to the table's limit.
+source that names a `table` (only `prota`, the mainline, exists) or a `base`
+still starts again from that value, discarding every earlier source, so
+`--gameplay-feature table=prota` without `--unit-limit` returns to the
+mainline table's limit.
 
 Under **Strict 3.1 every source is ignored** and the table is zero: the
 retail baseline cannot be configured, which is the whole point of having it.
@@ -222,47 +228,53 @@ The composer reports the resolved table's digest beside `rules` in the
 headless, benchmark and capture reports, so a run is reproducible from its
 report alone.
 
-*Why the content profile is allowed to say this.* The profile is load-time
-data and by the existing rule must not become a hidden gameplay selector
-([DESIGN_GAMEPLAY_RULES §9](DESIGN_GAMEPLAY_RULES.md#9-extending-the-existing-mechanism)
-"Content profiles are a separate input"). That rule protects Strict 3.1, and
-Strict still ignores the block. Within the community set the block is not
-hidden: it is a named, reported, overridable declaration of the build profile
-the content was authored for, which is the one fact the patch itself makes
-compile-time. A content set authored against Escalation's 3× repair simply
+*Why a mod's config is allowed to say this.* The config's content section is
+load-time data and by the existing rule must not become a hidden gameplay
+selector ([DESIGN_GAMEPLAY_RULES §9](DESIGN_GAMEPLAY_RULES.md#9-extending-the-existing-mechanism)
+"Content profiles are a separate input"); the table therefore lives in the
+separate `rules` section. That rule protects Strict 3.1, and Strict still
+ignores the table. Within the community set the table is not hidden: it is a
+named, reported, overridable declaration of the build profile the content was
+authored for, which is the one fact the patch itself makes compile-time. A content set authored against Escalation's 3× repair simply
 does not play right without it, and asking every player to hand-configure it
 would reproduce the patch's "mixed fleet" problem in single player. See D1.
 
-### 3.3 The shipped tables
+### 3.3 The tables
 
-`internal/community/tables.go` embeds one table per `tdraw` build profile at
-the pinned revision, transcribed from the source's feature matrix
-([community patch engine behavior](../research/extensions/community-patch-engine.md) §3.1)
-and the shipped preference defaults (§4.1): `ota`, `prota`, `escalation`,
-`tazero`, `bta`, `mayhem`, `twilight`. The **mainline** table is `prota` —
-the maintainers' "all features enabled" build and the one the ProTA package
-ships for otherwise-retail content — and it is what Community 3.9 and Modern
-start from for retail content (D2). The shipped content profiles gain a
-`gameplay` block: `escalation.json` → `escalation`, `prota.json` → `prota`,
-`zero.json` → `tazero`, `mayhem.json` → `mayhem`, `retail.json` → nothing
-(the set's base table applies). The two tables Nanolathe ships no content
-profile for (`bta`, `twilight`) are selectable by name from the settings file
-or a user-authored profile. The `mayhem` table comes from the pinned current
-source profile; equivalence to the DLL bundled in Total Mayhem 11.3.0 remains
-unverified ([Total Mayhem package](../research/extensions/total-mayhem-engine.md#executable-and-runtime)).
+`internal/community/tables.go` carries one table: the **mainline** `prota`
+build profile at the pinned revision, transcribed from the source's feature
+matrix ([community patch engine behavior](../research/extensions/community-patch-engine.md) §3.1)
+and the shipped preference defaults (§4.1) — the maintainers' "all features
+enabled" build and the one the ProTA package ships for otherwise-retail
+content. It is what Community 3.9 and Modern start from for the base game
+(D2), and it is the base a mod config's `communityFeatures` is decoded over.
+The base game is not a mod, so its table stays in the engine.
 
-The five ProTA 4.8 package switches of §4.7 are false in **every** shipped
-table, `prota` included. They are behaviours of that historical package's
-engine loader, not of any `tdraw` build profile, so enabling them in the
-mainline table would change the computer player for retail content under
-Community 3.9 and Modern. The fields are omitted from the canonical JSON while
-false, so every shipped table keeps its digest; an enabled switch enters the
-digest by name.
+Every other build profile belongs to the mod authored for it, as that mod's
+own `rules.communityFeatures` (source 2). The engine carried per-mod tables
+(`ota`, `escalation`, `tazero`, `bta`, `mayhem`, `twilight`) and profile
+`gameplay` blocks until 2026-09-29; the four hosted mods' configs in the
+repository's `modconfigs/` carry exactly the values those produced — each
+table's matrix plus its profile's overrides and legacy limit parameters —
+and a test proves each resolves to the same `Features` value and digest
+(`internal/modlibrary/shipped_configs_test.go`). The Total Mayhem config's
+matrix is the pinned current source profile; equivalence to the DLL bundled
+in Total Mayhem 11.3.0 remains unverified ([Total Mayhem package](../research/extensions/total-mayhem-engine.md#executable-and-runtime)).
+A save sidecar written before the move records a removed table's name as its
+content source and no longer resolves; see
+[DESIGN_MODS_MUTATORS §7.2](DESIGN_MODS_MUTATORS.md#72-contents).
+
+The ProTA 4.8 package switches of §4.7 are false in the mainline table. They
+are behaviours of that historical package's engine loader, not of any `tdraw`
+build profile, so enabling them in the mainline table would change the
+computer player for retail content under Community 3.9 and Modern. The fields
+are omitted from the canonical JSON while false, so the mainline table keeps
+its digest; an enabled switch enters the digest by name.
 
 Two rows of the matrix are not table fields because they are not gameplay:
 the weather-report and megamap rows (host presentation, §7) and the
-compile-time "extended weapon IDs" flag, which the content profile's
-`limits.weapons` already expresses (§5).
+compile-time "extended weapon IDs" flag, which a mod config's
+`content.limits.weapons` already expresses (§5).
 
 ## 4. The feature catalogue
 
@@ -412,9 +424,9 @@ key (default Alt) suppresses it for one click, as in the patch.
 The shipped ProTA 4.8 package's engine loader patches the computer player,
 its income and the weapon-maintenance scan
 ([ProTA 4.8 engine package, "AI and economy evidence audit"](../research/extensions/prota-engine.md#ai-and-economy-evidence-audit)).
-Each contract is a table switch that no shipped table enables. The ProTA
-content profile turns them on through its `gameplay` block's field overrides
-(§3.2 source 2), so they apply only when that package's content is mounted and
+Each contract is a table switch the mainline table leaves off. ProTA's config
+turns them on in its `communityFeatures` (§3.2 source 2), so they apply only
+when that package's content is mounted and
 Community 3.9 or Modern is selected; Strict 3.1 resolves the zero table and
 ignores them, and a player may switch any of them off field by field. The
 retail baseline of every row is the existing implementation. Modern embeds
@@ -465,7 +477,7 @@ pseudo-product each. The shipped package adds no route for mobile anti-nuke
 generation (`ARMSCAB`, `CORMABM`) and no CANBUILD membership for the Core
 east/west shipyards, so neither is implemented
 ([ProTA 4.8 engine package](../research/extensions/prota-engine.md#unknown)).
-The ProTA content profile enables all five switches in its `gameplay` block.
+ProTA's config enables all five switches in its `communityFeatures`.
 
 ## 5. Content interface
 
@@ -487,15 +499,14 @@ record authors one, so a retail catalog's hash is unchanged.
 | Unit FBI categories | `CTRL_F`, `CTRL_B`, `CTRL_W` | already compiled as ordinary categories; consumed by the host selection shortcuts (§7) with the patch's heuristic fallback; pinned Ctrl-S filters by `canfly`, not a `NOTAIR`/`NAIR` lookup |
 | Animation | `anims/buildrotate.gaf`, `anims/buildrotateclick.gaf` | rotation overlay art; loaded by the placement input (§7) with a built-in fallback |
 
-The content profile's `limits` already carries the definition-table and
+A mod config's `content.limits` carries the definition-table and
 weapon-table sizes the `UnitType` setting and the extended-ID module provide.
-`unit_limit` and `search_entries`, carried today but unconsumed, become the
-per-profile defaults for the table's `UnitLimit` and `PathStepAllowance`
-fields, which is what they were added for. The retail profile retains its historical
-limit metadata for content diagnostics but does not project those words into
-the feature table: otherwise its old 1333-step value would replace the
-approved mainline default. Within a mod profile the named table applies first,
-legacy parameter defaults second, and explicit `gameplay` fields last.
+The per-player unit limit and the path step allowance a content set expects
+are the table's own `unitLimit` and `pathStepAllowance` in the config's
+`communityFeatures`; the removed profiles carried them as `unit_limit` and
+`search_entries` and projected them onto their named table, and the configs
+carry the projected values. The base game projects nothing: the mainline
+default applies.
 
 ## 6. Configuration, in one place
 
@@ -504,7 +515,7 @@ legacy parameter defaults second, and explicit `gameplay` fields last.
 | Player | options page (three-stage Gameplay control), settings `gameplay` | which reserved set, or a registered name |
 | Player | settings `gameplayFeatures`, `--gameplay-feature` | field-level overrides of the table |
 | Player | settings, in-battle command | the per-player builder options (CP-CON-2/3) |
-| Content author | content profile `gameplay` block | the build profile its content was authored for and any field overrides |
+| Content author | the mod's `nanolathe-mod.json` `rules.communityFeatures` | the complete table its content was authored for |
 | Content author | FBI / TDF / OTA keys | per-definition behaviour (§5) |
 | Engine developer | `mods/<name>` | a registered rule set that changes an *answer*, deriving from any reserved set |
 | Host | settings `presentation`, HUD options | every Tier-4 feature (§7); never gameplay |
@@ -594,11 +605,11 @@ reads the service's projected table copy. Modern embeds Community.
   initial, warm and final fingerprints per reserved set.
 - **Table identity locks.** The resolved table for retail content under
   Community 3.9 equals the embedded `prota` table; under Strict it is zero
-  whatever the sources say; a content profile's `gameplay` block resolves to
-  the named embedded table with its overrides applied; a settings override
-  wins over the profile and the command line over both.
-- **ProTA package switches (§4.7).** Every shipped table leaves them false and
-  keeps its digest; a content-profile block enables them and a later source
+  whatever the sources say; a mod config's `communityFeatures` resolves to
+  exactly the value the removed table and profile produced (digests locked);
+  a settings override wins over the config and the command line over both.
+- **ProTA package switches (§4.7).** The mainline table leaves them false and
+  keeps its digest; a config's `communityFeatures` enables them and a later source
   disables them field by field; Strict projects zero onto the economy, combat
   and every computer player. Per-contract tests lock the three income forms
   and the unchanged unit-reclaim refund, the `+30` armed-building task and its
@@ -663,7 +674,9 @@ kickout, no builder options, no area-damage overflow, no tie-break) and
 `prota` as the mainline "all features" build. *Recommendation:* `prota`,
 because it is what players actually install to play retail content today and
 the features it adds are the reason to select the profile; `ota` remains
-selectable by name for anyone wanting the minimal patch.
+selectable by name for anyone wanting the minimal patch. (2026-09-29: the
+engine now carries only the mainline table; a minimal-patch table is a
+config's `communityFeatures`, §3.3.)
 
 **D3 — Kickout versus Modern construction-site yielding.** Both act at the
 "waiting for the target area to clear" moment. Under Community 3.9 the
@@ -856,7 +869,7 @@ says so.
 
 ### Historical Zero package configuration
 
-The Zero profile combines current `tazero` table defaults with two explicit
+TA Zero's config combines the `tazero` build profile's matrix with two explicit
 historical package declarations: `HealTimeBitmask=true` for the passive caller
 and `AIBuilderPlacementLimit=127` for the Classic construction placement pass.
 Both pass through the existing override resolution, digest and owner projection;

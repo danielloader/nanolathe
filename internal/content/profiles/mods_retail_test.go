@@ -13,9 +13,9 @@ import (
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
-// modRootsEnvPrefix is followed by the profile's upper-case name. The value is
-// a host path list — the mod's own roots in load order, appended after the
-// retail install. The paths are never committed: this check skips when the
+// modRootsEnvPrefix is followed by the content set's upper-case name. The
+// value is a host path list — the mod's own roots in load order, appended
+// after the retail install. The paths are never committed: this check skips when the
 // variable is unset, which is how it behaves on every machine but the one that
 // has the content.
 //
@@ -56,6 +56,17 @@ func mountWithMod(t *testing.T, profile string) *vfs.FS {
 	return fs
 }
 
+// modContent is the content section of the content set's repository config,
+// after checking the mounted content presents every tree its markers name.
+func modContent(t *testing.T, fs vfs.FSOps, dir string) profiles.Profile {
+	t.Helper()
+	profile := shippedContent(t, dir)
+	if missing := profile.MissingMarkers(fs); len(missing) != 0 {
+		t.Fatalf("the mounted content lacks the %s config's trees %v", dir, missing)
+	}
+	return profile
+}
+
 // unitDefinitionFiles counts the unit definitions the profile's directory
 // table makes visible under the retail name. It is the measurement that does
 // not depend on the definition domain or the read caps, so it holds for all
@@ -80,18 +91,12 @@ func unitDefinitionFiles(t *testing.T, view vfs.FSOps) int {
 }
 
 // TestZeroContentSetCompilesThroughItsDirectoryTable is the end-to-end proof
-// on real content: TA Zero's trees are all renamed, and with the profile's
+// on real content: TA Zero's trees are all renamed, and with its config's
 // table in place the whole catalog compiles, at the definition count the
 // inventory recorded, with retail-named provenance.
 func TestZeroContentSetCompilesThroughItsDirectoryTable(t *testing.T) {
 	fs := mountWithMod(t, "zero")
-	profile, err := profiles.Resolve(fs, "")
-	if err != nil {
-		t.Fatalf("detect: %v", err)
-	}
-	if profile.Name != "zero" {
-		t.Fatalf("detected %q, want zero", profile.Name)
-	}
+	profile := modContent(t, fs, "ta-zero-alpha5-20241224")
 	view := profile.Layout().Apply(fs)
 	if got := unitDefinitionFiles(t, view); got != 269 {
 		t.Fatalf("unit definition files = %d, want the inventory's 269", got)
@@ -115,17 +120,11 @@ func TestZeroContentSetCompilesThroughItsDirectoryTable(t *testing.T) {
 
 // TestProTAContentSetCompilesUnderItsProfile is the end-to-end proof on real
 // content: ProTA renames five trees and ships a ninety-table LOS file, and
-// under its profile's directory table and read caps the whole catalog compiles
+// under its config's directory table and read caps the whole catalog compiles
 // at the definition count the inventory recorded.
 func TestProTAContentSetCompilesUnderItsProfile(t *testing.T) {
 	fs := mountWithMod(t, "prota")
-	profile, err := profiles.Resolve(fs, "")
-	if err != nil {
-		t.Fatalf("detect: %v", err)
-	}
-	if profile.Name != "prota" {
-		t.Fatalf("detected %q, want prota", profile.Name)
-	}
+	profile := modContent(t, fs, "prota-4.8")
 	view := profile.Layout().Apply(fs)
 	if got := unitDefinitionFiles(t, view); got != 317 {
 		t.Fatalf("unit definition files = %d, want the inventory's 317", got)
@@ -161,13 +160,7 @@ func TestProTAContentSetCompilesUnderItsProfile(t *testing.T) {
 // definitions do not require their model until a caller requests the feature.
 func TestEscalationReadCapsAdmitItsMapAndLOSTable(t *testing.T) {
 	fs := mountWithMod(t, "escalation")
-	profile, err := profiles.Resolve(fs, "")
-	if err != nil {
-		t.Fatalf("detect: %v", err)
-	}
-	if profile.Name != "escalation" {
-		t.Fatalf("detected %q, want escalation", profile.Name)
-	}
+	profile := modContent(t, fs, "escalation-10.2.0")
 	view := profile.Layout().Apply(fs)
 	limits := content.LimitsFromProfile(profile.Limits)
 
@@ -226,10 +219,7 @@ func TestEscalationReadCapsAdmitItsMapAndLOSTable(t *testing.T) {
 // request for one of those definitions still fails [02 R-MAP-01 §8].
 func TestEscalationContentSetCompilesWithoutUnusedFeatureModels(t *testing.T) {
 	fs := mountWithMod(t, "escalation")
-	profile, err := profiles.Resolve(fs, "")
-	if err != nil {
-		t.Fatalf("detect: %v", err)
-	}
+	profile := modContent(t, fs, "escalation-10.2.0")
 	view := profile.Layout().Apply(fs)
 	catalog, err := content.CompileWithOptions(view, content.Options{Limits: content.LimitsFromProfile(profile.Limits)})
 	if err != nil {

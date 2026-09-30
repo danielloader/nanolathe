@@ -139,12 +139,20 @@ func (light *battleLight) foldGroundFamily(ground float32) {
 }
 
 type battleLighting struct {
-	disabled  bool
-	lights    []battleLight
-	counts    [lightKindCount]int
-	colors    map[*formats.GAFFrame][3]float32
-	nano      [battleLightLimit]nanoLightCluster
-	nanoCount int
+	// modelDisabled and groundDisabled are the model light and ground light
+	// switches (§30), each independent. One gather serves both, so it runs
+	// while either is on; near hands models and smoke no source while model
+	// light is off, and the ground pass draws no pool while ground light is.
+	modelDisabled  bool
+	groundDisabled bool
+	// groundStrengthOffset is the player's ground light strength less one
+	// (SetGroundLightStrength), so the zero value is the tuned look.
+	groundStrengthOffset float32
+	lights               []battleLight
+	counts               [lightKindCount]int
+	colors               map[*formats.GAFFrame][3]float32
+	nano                 [battleLightLimit]nanoLightCluster
+	nanoCount            int
 	// groundOffset is the ground family's strength for this frame's gather
 	// less one (§19.4), so the zero value is the default; add folds it into
 	// each source's terrain-only fade.
@@ -155,9 +163,14 @@ type battleLighting struct {
 	recordW, recordH float32
 }
 
-// setBattleLighting is the executor gate the player's Lighting switch drives
-// (§30). It changes only this executor's presentation.
-func (r *Renderer) setBattleLighting(on bool) { r.lighting.disabled = !on }
+// setModelLight is the executor gate of the model light switch: the battle
+// light on models and smoke (§23, §30). It changes only this executor's
+// presentation.
+func (r *Renderer) setModelLight(on bool) { r.lighting.modelDisabled = !on }
+
+// setGroundLight is the executor gate of the ground light switch: the terrain
+// pools of §31.3 and the short terrain flash of §31.6 (§30).
+func (r *Renderer) setGroundLight(on bool) { r.lighting.groundDisabled = !on }
 
 // prepareBattleLighting gathers explicitly classified, visible emitter art
 // before any model is rasterized. Smoke and generic bloom flags are never
@@ -166,15 +179,15 @@ func (r *Renderer) setBattleLighting(on bool) { r.lighting.disabled = !on }
 // Six families reach the budget: named explosion art, nanolathe clusters
 // (§23.5), standing flame strips, flame-stream TRAIL sparks (§31.7), emissive
 // projectile bodies and emissive strokes, and cooling fresh wrecks (§31). Every one of them is already
-// visibility-admitted by its producer, and the player's Lighting switch gates
-// the whole gather.
+// visibility-admitted by its producer. The gather runs while either receiver's
+// switch — model light or ground light — is on, and is skipped with both off.
 func (r *Renderer) prepareBattleLighting(list *drawlist.List) {
 	l := &r.lighting
 	l.lights = l.lights[:0]
 	l.counts = [lightKindCount]int{}
 	r.modelStats.BattleLights = 0
 	r.modelStats.BattleLightKinds = [lightKindCount]int{}
-	if l.disabled {
+	if l.modelDisabled && l.groundDisabled {
 		return
 	}
 	if l.colors == nil {
@@ -339,8 +352,12 @@ func (r *Renderer) prepareStrokeLighting(list *drawlist.List) {
 // prepareWreckLighting admits a fresh wreck's own cooling emission as light.
 // The emission and its cooling curve belong to the wreck prototype (§28); this
 // only borrows the colour, so a wreck that has cooled emits nothing and no new
-// clock is read (§31).
+// clock is read (§31). With the wreck glow off there is no colour to borrow
+// (§30), whatever the recorder wrote.
 func (r *Renderer) prepareWreckLighting(list *drawlist.List) {
+	if r.wreckGlowDisabled {
+		return
+	}
 	l := &r.lighting
 	list.VisitModels(func(cmd drawlist.Model) {
 		g := cmd.Geometry
@@ -505,7 +522,12 @@ type subjectLights struct {
 
 // near chooses local sources once per subject. A screen-space bound is
 // conservative for our half-height shear; final falloff uses unsheared distance.
+// Models and smoke are the model light switch's receivers, so with it off a
+// subject is handed no source even while the gather runs for the ground (§30).
 func (l *battleLighting) near(x, y, extent float32) (out subjectLights) {
+	if l.modelDisabled {
+		return out
+	}
 	var scores [subjectLightLimit]float32
 	for _, light := range l.lights {
 		dx := light.position[0] - x

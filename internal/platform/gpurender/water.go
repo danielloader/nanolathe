@@ -2,6 +2,7 @@ package gpurender
 
 import (
 	"math"
+	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
@@ -16,22 +17,73 @@ import (
 const waterBlockSize = 128
 
 type waterLayer struct {
-	bedSprites         []drawlist.Sprite
-	bedDrawn           bool
-	disabled           bool
-	shader, wakeShader *ebiten.Shader
-	source             *world.Terrain
-	mask               *ebiten.Image
-	step, w, h         int
-	blocks             []bool
-	blockW, blockH     int
-	record             drawlist.Terrain
+	bedSprites []drawlist.Sprite
+	bedDrawn   bool
+	// surfaceDisabled, motionDisabled and foamDisabled are the water surface,
+	// motion and foam switches (§30), each independent. The surface pass runs
+	// while any of the three has something to draw and gates each lane on its
+	// own switch: the shading lane, the moving field, the shore foam lane.
+	surfaceDisabled, motionDisabled, foamDisabled bool
+	// shader is the moving surface and stillShader the same source compiled
+	// with the field frozen at phase zero and no displacement, which the
+	// water motion switch selects (§26.3, §30).
+	shader, stillShader, wakeShader *ebiten.Shader
+	source                          *world.Terrain
+	mask                            *ebiten.Image
+	step, w, h                      int
+	blocks                          []bool
+	blockW, blockH                  int
+	record                          drawlist.Terrain
 }
 
-// setWaterEffects is the executor gate the player's Water switch drives (§30).
-func (r *Renderer) setWaterEffects(on bool) { r.water.disabled = !on }
+// setWaterSurface, setWaterMotion and setWaterFoam are the executor gates of
+// the water surface shading, motion and foam switches (§30).
+func (r *Renderer) setWaterSurface(on bool) { r.water.surfaceDisabled = !on }
+func (r *Renderer) setWaterMotion(on bool)  { r.water.motionDisabled = !on }
+func (r *Renderer) setWaterFoam(on bool)    { r.water.foamDisabled = !on }
+
+// seabedTreated reports whether the surface pass shades or moves the seabed,
+// which is when the promoted seabed decals are replayed beneath it
+// (drawlist.Effects.SeabedTreated).
+func (st *waterLayer) seabedTreated() bool { return !st.surfaceDisabled || !st.motionDisabled }
+
+// Surface shading lane values (§30): the fourth custom lane of the surface
+// pass. Off leaves the painted colour; water shades with the ripple, crest
+// tint, damp band and shallow tint; a liquid that takes no water colour (lava)
+// keeps the ripple shade alone.
+const (
+	waterShadingOff    = 0
+	waterShadingWater  = 1
+	waterShadingNoTint = 2
+)
+
+// waterMotionLine is the surface shader's motion constant; the still variant
+// replaces it with waterStillMotion.
+const (
+	waterMotionLine  = "const surfaceMotion = 1.0"
+	waterStillMotion = "const surfaceMotion = 0.0"
+)
 
 func newWaterShader() (*ebiten.Shader, error) { return ebiten.NewShader([]byte(waterShaderSource)) }
+
+// newStillWaterShader compiles the surface with its motion constant at zero:
+// the field is evaluated at phase zero with no drift, so it shades exactly as
+// the moving surface does at that instant and then never moves, and the seabed
+// is sampled in place (§26.3, §30).
+func newStillWaterShader() (*ebiten.Shader, error) {
+	return ebiten.NewShader([]byte(strings.Replace(waterShaderSource, waterMotionLine, waterStillMotion, 1)))
+}
+
+// motionPhase is the water phase in seconds the moving treatments read: the
+// reflections' ripple and the wet aircraft shadow's waves. It is zero while the
+// water motion switch is off, which freezes them at phase zero the way a pause
+// freezes them at the paused phase (§26.4, §34).
+func (st *waterLayer) motionPhase(c drawlist.WaterSurface) float32 {
+	if st.motionDisabled {
+		return 0
+	}
+	return (float32(c.Tick) + float32(c.Fraction16)/65536) / 30
+}
 func newSurfaceWakeShader() (*ebiten.Shader, error) {
 	return ebiten.NewShader([]byte(surfaceWakeShaderSource))
 }
@@ -350,14 +402,44 @@ func (st *waterLayer) visibleWater(c drawlist.Terrain) bool {
 
 func (r *Renderer) drawWater(c drawlist.Terrain) {
 	st := &r.water
-	if st.disabled || !c.Water.Enabled || st.shader == nil || st.mask == nil || !st.visibleWater(c) {
+	if !c.Water.Enabled || st.mask == nil {
+		return
+	}
+	// Each lane is its own switch (§30). The shore foam lane is the foam
+	// switch as well as the medium's own admission; the shading lane carries
+	// the medium's colour rule beside the surface switch.
+	shoreFoam, shading := float32(1), float32(waterShadingWater)
+	if st.foamDisabled {
+		shoreFoam = 0
+	}
+	if c.Terrain != nil {
+		if c.Terrain.LavaWorld || (c.Terrain.WaterDoesDamage != 0 && c.Terrain.WaterDamage != 0) {
+			shoreFoam = 0
+		}
+		if c.Terrain.LavaWorld {
+			shading = waterShadingNoTint
+		}
+	}
+	if st.surfaceDisabled {
+		shading = waterShadingOff
+	}
+	// With no shading, no motion and no foam this medium admits, every lane
+	// is empty and the pass would return the painted pixels unchanged.
+	if shading == waterShadingOff && st.motionDisabled && shoreFoam == 0 {
+		return
+	}
+	shader := st.shader
+	if st.motionDisabled {
+		shader = st.stillShader
+	}
+	if shader == nil || !st.visibleWater(c) {
 		return
 	}
 	w, h := min(int(c.DstW), r.clipW()), min(int(c.DstH), r.clipH())
 	if w <= 0 || h <= 0 {
 		return
 	}
-	if !r.sched.beginBlended(schedDest, 0, 0, w, h, [4]*ebiten.Image{1: st.mask}, st.shader, blendComposite, 0) {
+	if !r.sched.beginBlended(schedDest, 0, 0, w, h, [4]*ebiten.Image{1: st.mask}, shader, blendComposite, 0) {
 		return
 	}
 	scale := float32(c.Scale.Float())
@@ -366,24 +448,15 @@ func (r *Renderer) drawWater(c drawlist.Terrain) {
 		effective *= r.sched.worldScale
 	}
 	time := (float32(c.Water.Tick) + float32(c.Water.Fraction16)/65536) / 30
-	shoreFoam, waterColour := float32(1), float32(1)
-	if c.Terrain != nil {
-		if c.Terrain.LavaWorld || (c.Terrain.WaterDoesDamage != 0 && c.Terrain.WaterDamage != 0) {
-			shoreFoam = 0
-		}
-		if c.Terrain.LavaWorld {
-			waterColour = 0
-		}
-	}
 	r.sched.quad(schedDest, 0, 0, float32(w), float32(h), float32(c.OriginX), float32(c.OriginY), float32(c.OriginX)+float32(w)/scale, float32(c.OriginY)+float32(h)/scale,
-		[4]float32{time, c.Water.TidalDriftX, c.Water.TidalDriftZ, c.Water.Energy}, [4]float32{float32(st.step), effective, shoreFoam, waterColour})
+		[4]float32{time, c.Water.TidalDriftX, c.Water.TidalDriftZ, c.Water.Energy}, [4]float32{float32(st.step), effective, shoreFoam, shading})
 }
 
 // SurfaceWakes shares the projected wet/dry mask with the water surface. The
 // scheduler preserves the under-object order and applies free zoom once.
 func (r *Renderer) SurfaceWakes(batch drawlist.SurfaceWakes) {
 	st := &r.water
-	if st.disabled || !st.record.Water.Enabled || st.mask == nil || st.wakeShader == nil || len(batch.Marks) == 0 {
+	if st.foamDisabled || !st.record.Water.Enabled || st.mask == nil || st.wakeShader == nil || len(batch.Marks) == 0 {
 		return
 	}
 	scale := float32(st.record.Scale.Float())
@@ -429,6 +502,9 @@ package main
 // Selected presentation values (GPU design §26.3).
 const shoreFoamOpacity = 0.6
 const edgeFadePixels = 11.2
+// The player's water motion switch (§30): newStillWaterShader compiles this at
+// zero, freezing the field at phase zero with no displacement.
+` + waterMotionLine + `
 ` + waterFieldSource + `
 func terrainLinear(p vec2) vec4 {
  a := floor(p-vec2(0.5))
@@ -464,6 +540,13 @@ func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
  pattern := world/patternSize
  shoreDistance := mask.y
  original := base
+ // The shading lane (§30): custom.w is 0 with the surface shading off, 1 for
+ // water, and 2 for a liquid that takes no water colour (lava), which keeps
+ // the ripple shade but not the crest tint, damp band or shallow tint. With
+ // it off the pass still moves the painted colour and draws the shore foam
+ // when their own switches are on.
+ shading := min(custom.w,1.0)
+ waterColour := shading*clamp(2.0-custom.w,0.0,1.0)
  // Damp shoreline band (§32). Ground the water has just washed keeps a darker
  // tone, so dry pixels within about eight world pixels of water lose up to
  // twelve percent of their brightness, pulsing on the phase the shore foam
@@ -474,7 +557,7 @@ func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
  // ground and excluded liquid carry no dry flag at all — so it stays well below
  // the boundary's own bilinear ramp, which is where the band belongs.
  dry := smoothstep(0.05,0.5,mask.z)*(1.0-coverage)
- damp := mask.w*dry*custom.w
+ damp := mask.w*dry*waterColour
  if damp>0.0 {
   lapDry := pow(max(0.0,sin(t*1.6+noise(pattern*0.025)*3.0)),2.0)
   base = vec4(base.rgb*(1.0-0.12*damp*(0.5+0.5*lapDry)),base.a)
@@ -489,13 +572,19 @@ func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
  // Current translates a fixed world-space lattice; it never rotates the
  // texture when wind changes. Three drift multiples give surface parallax.
  // The current is integrated from tidal speed and eased wind direction (§26).
- broad, fine, gust := waterField(pattern, drift, t)
+ // The still variant evaluates the field at phase zero with no drift and
+ // takes no displacement; the damp band and the shore foam keep the real
+ // clock in t and color.r.
+ broad, fine, gust := waterField(pattern, drift*surfaceMotion, t*surfaceMotion)
  deep := smoothstep(0.05,0.55,mask.y)
- offset := waterOffset(broad, fine, gust)*custom.y*deep*coverage
+ offset := waterOffset(broad, fine, gust)*custom.y*deep*coverage*surfaceMotion
  sample := clamp(screen+offset,vec2(0.5),imageSrc0Size()-vec2(0.5))
  // Subpixel filtering prevents nearest-neighbour displacement from snapping.
  warped := terrainLinear(sample)
- result := waterShade(warped.rgb, broad, fine, gust, deep, custom.w)
+ result := warped.rgb
+ if shading > 0.0 {
+  result = waterShade(warped.rgb, broad, fine, gust, deep, waterColour)
+ }
  // Shore foam keeps the original world-space pattern and clock. Surface
  // current, in-place deformation, size and opacity must not change its pace
  // or base opacity. The common soft edge still fades it at the shoreline.
@@ -507,7 +596,7 @@ func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
  // It rises from nothing at the rounded coast the distance is measured from,
  // like every other term here, so the strict wet boundary — a staircase on a
  // steep beach — is never the edge of anything drawn.
- result = mix(result,vec3(0.62,0.80,0.84),clamp(custom.w*0.08*smoothstep(0.0,0.10,shoreDistance)*(1.0-smoothstep(0.10,0.40,shoreDistance)),0,1))
+ result = mix(result,vec3(0.62,0.80,0.84),clamp(waterColour*0.08*smoothstep(0.0,0.10,shoreDistance)*(1.0-smoothstep(0.10,0.40,shoreDistance)),0,1))
  effect := mix(base.rgb,min(result,vec3(base.a)),coverage)
  surface := clamp(mix(original.rgb,effect,surfaceOpacity),vec3(0),vec3(base.a))
  surface = mix(surface,vec3(0.72,0.84,0.87)*base.a,clamp(foam*shoreFoamOpacity*coverage,0,1))
@@ -562,7 +651,7 @@ func (r *Renderer) prepareWaterBed(list *drawlist.List) {
 	st := &r.water
 	st.bedDrawn = false
 	st.bedSprites = st.bedSprites[:0]
-	if st.disabled {
+	if !st.seabedTreated() {
 		return
 	}
 	list.VisitSprites(func(sp drawlist.Sprite) {
@@ -575,7 +664,7 @@ func (r *Renderer) prepareWaterBed(list *drawlist.List) {
 
 func (r *Renderer) drawWaterBed(c drawlist.Terrain) {
 	st := &r.water
-	if st.disabled || !c.Water.Enabled || st.shader == nil || st.mask == nil || !st.visibleWater(c) {
+	if !st.seabedTreated() || !c.Water.Enabled || st.shader == nil || st.mask == nil || !st.visibleWater(c) {
 		return
 	}
 	for _, sp := range st.bedSprites {

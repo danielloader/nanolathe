@@ -32,7 +32,7 @@ func TestRetailOversizedModMenus(t *testing.T) {
 				if len(roots) == 0 {
 					t.Skip("installed mod roots not supplied")
 				}
-				opts := Options{Root: testsupport.RetailRoot(t), Roots: append([]string{testsupport.RetailRoot(t)}, roots...), Map: "ashap plateau", Seed: 7}
+				opts := Options{Root: testsupport.RetailRoot(t), Roots: append([]string{testsupport.RetailRoot(t)}, roots...), Map: "ashap plateau", Seed: 7, ModConfig: modRootsConfigPath(t, profile)}
 				cs, err := openContent(opts)
 				if err != nil {
 					t.Fatal(err)

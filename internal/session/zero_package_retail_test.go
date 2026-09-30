@@ -11,7 +11,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/cob"
 	"github.com/nanolathe-gg/nanolathe/internal/construction"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
-	"github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
@@ -26,7 +25,7 @@ type zeroPackageFixture struct {
 	fs      vfs.FSOps
 	cat     *content.Catalog
 	limits  content.Limits
-	profile profiles.Profile
+	profile modContent
 	sources CommunitySources
 }
 
@@ -44,13 +43,8 @@ func loadZeroPackage(t *testing.T) zeroPackageFixture {
 	if err := fs.MountGameDirectories(roots); err != nil {
 		t.Fatal(err)
 	}
-	profile, err := profiles.Resolve(fs, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if profile.Name != "zero" {
-		t.Fatalf("detected profile %q, want zero", profile.Name)
-	}
+	profile := loadModContent(t, fs, "ta-zero-alpha5-20241224")
+	var err error
 	f := zeroPackageFixture{fs: profile.Layout().Apply(fs), profile: profile,
 		limits: content.LimitsFromProfile(profile.Limits), sources: CommunitySources{Content: profile.GameplaySources()}}
 	f.cat, err = content.CompileWithOptions(f.fs, content.Options{Limits: f.limits})
@@ -67,7 +61,7 @@ func (f zeroPackageFixture) enter(t *testing.T, mapName string, side int) *Sessi
 	cfg.Gameplay = gameplay.Modern
 	cfg.RNGSimSeed, cfg.RNGCrtSeed = 7, 7
 	cfg.Players[0].Side, cfg.Players[1].Side = side, side
-	cfg.UnitLimit = f.profile.Limits.UnitLimit
+	cfg.UnitLimit = f.profile.unitLimit()
 	s, err := NewSkirmishWithEntryOptions(f.fs, f.cat, cfg, SkirmishEntryOptions{
 		ContentLimits: f.limits, CommunitySources: f.sources,
 	})

@@ -182,6 +182,25 @@ func checkAircraftShadowDevicePixels() error {
 		if dryDark <= 0 || wetDark >= dryDark*3/4 {
 			return fmt.Errorf("water shadow not weaker: dry=%d wet=%d zoom=%v", dryDark, wetDark, zoom)
 		}
+		// The waves are water motion (§30): with that part off they hold
+		// still while the shadow keeps its wet treatment.
+		r.setWaterMotion(false)
+		stillA, stillB := render(200, true, 30, zoom, false), render(200, true, 80, zoom, false)
+		r.setWaterMotion(true)
+		if !bytes.Equal(stillA, stillB) || bytes.Equal(stillA, high) {
+			return fmt.Errorf("water motion off: shadow moved or lost its wet treatment, zoom=%v", zoom)
+		}
+		// The player's soft shadow switch off (§30): an aircraft takes the
+		// ordinary silhouette route, the shadow a zero clearance selects.
+		r.setSoftShadows(false)
+		hard, hardWet := render(200, false, 30, zoom, false), render(200, true, 30, zoom, false)
+		r.setSoftShadows(true)
+		if !bytes.Equal(hard, render(0, false, 30, zoom, false)) || !bytes.Equal(hardWet, render(0, true, 30, zoom, false)) {
+			return fmt.Errorf("soft shadows off did not take the silhouette route, zoom=%v", zoom)
+		}
+		if bytes.Equal(hard, high) {
+			return fmt.Errorf("soft shadow switch changed nothing, zoom=%v", zoom)
+		}
 	}
 	return nil
 }

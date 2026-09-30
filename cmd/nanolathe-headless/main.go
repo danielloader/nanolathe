@@ -7,19 +7,19 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/nanolathe-gg/nanolathe/internal/session"
-	"github.com/nanolathe-gg/nanolathe/internal/survival"
 	"io"
 	"os"
 	"runtime"
 	"runtime/pprof"
 	"time"
 
+	"github.com/nanolathe-gg/nanolathe/internal/session"
+	"github.com/nanolathe-gg/nanolathe/internal/survival"
+
 	"strings"
 
 	"github.com/nanolathe-gg/nanolathe/internal/community"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
-	contentprofiles "github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/headless"
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
@@ -161,7 +161,7 @@ func parse(args []string, output io.Writer) (headless.Request, string, profileOp
 	var ticks int64
 	var unitLimit int
 	var warmup, measured int64
-	var contentProfile string
+	var modConfig string
 	flags := flag.NewFlagSet("nanolathe-headless", flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.Func("root", "content root; repeat in load order (later roots win); omitted uses $NANOLATHE_TA_ROOT or installation discovery", func(root string) error {
@@ -201,7 +201,7 @@ func parse(args []string, output io.Writer) (headless.Request, string, profileOp
 		modSelector = text
 		return nil
 	})
-	flags.StringVar(&contentProfile, "content-profile", "", "content profile: "+strings.Join(contentprofiles.Names(), ", ")+", or the path of a profile JSON file; omitted detects it from the mounted content set (docs/DESIGN_CONTENT_VFS.md §5)")
+	flags.StringVar(&modConfig, "mod-config", "", "path of a nanolathe-mod.json whose content layout, limits and rules apply to a manual --root stack, or replace an installed --mod's own; omitted uses the mod's own config, then the saved preference, then plain content (docs/DESIGN_MODS_MUTATORS.md §4.3)")
 	flags.StringVar(&request.Map, "map", "", "map name without extension")
 	var survivalPace string
 	flags.BoolVar(&request.Survival.Enabled, "survival", false, "run a Survival battle on --map (docs/DESIGN_SURVIVAL.md)")
@@ -270,6 +270,13 @@ func parse(args []string, output io.Writer) (headless.Request, string, profileOp
 	if err != nil {
 		return request, reportPath, profiles, bench, err
 	}
+	config, notice, err := headlessMountConfig(modConfig, mod)
+	if err != nil {
+		return request, reportPath, profiles, bench, err
+	}
+	if notice != "" {
+		fmt.Fprintln(os.Stderr, "nanolathe: "+notice)
+	}
 	if mod != nil {
 		// The simulation-cost benchmark measures a fixed retail scene.
 		if bench.OutputDir != "" {
@@ -287,18 +294,6 @@ func parse(args []string, output io.Writer) (headless.Request, string, profileOp
 	if unitLimitSet && (unitLimit < settings.MinUnitLimit || unitLimit > settings.MaxUnitLimit) {
 		return request, reportPath, profiles, bench, fmt.Errorf("nanolathe: invalid unit limit: logical path <command line>, providers searched [unit-limit], expected %d..%d", settings.MinUnitLimit, settings.MaxUnitLimit)
 	}
-	// Precedence is explicit flag, stored preference, then detection — the
-	// same order the unit limit follows. An unknown selector is rejected at
-	// the mount boundary, where the mounted providers can be named.
-	// A selected mod names its own profile, or means detection when it names
-	// none; the saved preference never applies another content set's table
-	// to a mod (docs/DESIGN_MODS_MUTATORS.md §4.3, D12).
-	if contentProfile == "" && mod != nil {
-		contentProfile = mod.mod.ContentProfileSelector()
-	} else if contentProfile == "" {
-		stored, _ := settings.Load()
-		contentProfile = stored.ContentProfile
-	}
 	storedFeatures, _ := settings.Load()
 	request.GameplayFeatures = storedFeatures.GameplayFeatures
 	bench.GameplayFeatures = storedFeatures.GameplayFeatures
@@ -307,8 +302,8 @@ func parse(args []string, output io.Writer) (headless.Request, string, profileOp
 		return request, reportPath, profiles, bench, err
 	}
 	request.Mutators = mutators
-	request.ContentProfile = contentProfile
-	bench.ContentProfile = contentProfile
+	request.Content, request.ProfileFeatures = config.Content(), config.CommunitySources()
+	bench.Content, bench.ProfileFeatures = config.Content(), config.CommunitySources()
 	bench.UnitLimit = headless.SimBenchDefaultUnitLimit
 	// A limit the player chose beats a feature table's, as on the desktop
 	// (settings.UnitLimitSources). The benchmark's own default of 400 is a

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"io"
 	"os"
@@ -56,6 +57,19 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	t.Cleanup(g.closeRetailOptionsScreen)
 	g.openMenu(modeMenuSingle)
 	g.activateGadget("Options")
+	// The front end's options leave the page to the Nanolathe screen; the
+	// battle's options keep it (DESIGN_INTERFACE_HUD_INPUT §3.17).
+	if optionsPanel.Index("NANOLATHE") >= 0 {
+		t.Fatal("front-end options still offer the Nanolathe page")
+	}
+	g.closeRetailOptionsScreen()
+	openOptions := func() {
+		t.Helper()
+		if err := g.openRetailOptionsScreen(true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	openOptions()
 	g.activateRetailOptionsGadget("NANOLATHE")
 	if optionsState.page != "nanolathe" {
 		t.Fatal("new category did not open")
@@ -106,8 +120,11 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	if (&battleSession{shell: g}).expandedSidebarEnabled() {
 		t.Fatal("sidebar preference did not preview immediately")
 	}
-	if got := host.Effects(); got != (drawlist.Effects{}) {
-		t.Fatalf("effect preview %+v", got)
+	// The page's buttons are family shortcuts: each wrote every switch of its
+	// family off, Marks the trail strength too, while the glint, the soft
+	// shadows and the supersampling, in no family, keep theirs.
+	if got := host.Effects(); got != (drawlist.Effects{Glint: true, SoftShadows: true, Supersample: true}) || g.presentation.TrailStrength != 0 {
+		t.Fatalf("effect preview %+v, trail strength %d", got, g.presentation.TrailStrength)
 	}
 	if g.display.Glow != 0 || cl.Glow() {
 		t.Fatalf("glow preview: stored %d live %v", g.display.Glow, cl.Glow())
@@ -122,7 +139,7 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	if g.display.Glow != settings.DefaultGlow || !cl.Glow() {
 		t.Fatalf("cancel left glow at %d (live %v)", g.display.Glow, cl.Glow())
 	}
-	g.activateGadget("Options")
+	openOptions()
 	g.activateRetailOptionsGadget("NANOLATHE")
 	g.activateRetailOptionsGadget("NRENDER")
 	g.activateRetailOptionsGadget("NFPS")
@@ -138,7 +155,8 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	if saved.Presentation != g.presentation || saved.Presentation.FPS != 120 {
 		t.Fatalf("saved %+v", saved.Presentation)
 	}
-	if saved.Presentation.Water != 0 || saved.Presentation.Marks != 0 || saved.Presentation.Lighting != 1 {
+	if saved.Presentation.WaterSurface != 0 || saved.Presentation.WaterMotion != 0 || saved.Presentation.WaterFoam != 0 || saved.Presentation.WaterReflections != 0 ||
+		saved.Presentation.Scorch != 0 || saved.Presentation.TrailStrength != 0 || saved.Presentation.ModelLight != 1 || saved.Presentation.GroundLight != 1 {
 		t.Fatalf("saved effects %+v", saved.Presentation)
 	}
 	if saved.Display.Glow != 0 {
@@ -152,7 +170,7 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	if next.presentation != g.presentation {
 		t.Fatal("restart lost selection")
 	}
-	g.activateGadget("Options")
+	openOptions()
 	g.activateRetailOptionsGadget("NANOLATHE")
 	g.activateRetailOptionsGadget("RESTORE")
 	if g.presentation != settings.DefaultPresentation() {
@@ -250,8 +268,12 @@ func TestBattleNanolatheOptionsPointerAndLayout(t *testing.T) {
 	if b.expandedSidebarEnabled() {
 		t.Fatal("pointer did not disable expanded sidebar")
 	}
-	if got := presentationEffects(g.presentation); got != (drawlist.Effects{}) {
-		t.Fatalf("pointer left effects at %+v", got)
+	// The page's five buttons are family shortcuts: off, every switch of
+	// every family is off, while the glint, the aircraft soft shadows and the
+	// supersampling, which belong to no family, keep their own
+	// (DESIGN_GPU_RENDERER §30).
+	if got := presentationEffects(g.presentation); got != (drawlist.Effects{Glint: true, SoftShadows: true, Supersample: true}) || g.presentation.TrailStrength != 0 {
+		t.Fatalf("pointer left effects at %+v, trail strength %d", got, g.presentation.TrailStrength)
 	}
 	if g.display.Glow != 0 {
 		t.Fatalf("pointer left glow at %d", g.display.Glow)
@@ -263,6 +285,97 @@ func TestBattleNanolatheOptionsPointerAndLayout(t *testing.T) {
 	if g.presentation != settings.DefaultPresentation() {
 		t.Fatalf("battle cancel %+v", g.presentation)
 	}
+}
+
+// A family shortcut is not a stored switch (DESIGN_GPU_RENDERER §30): it reads
+// On while any of its switches is, and setting it writes every one. Marks owns
+// the trail strength as well: off is zero, and on gives a zero strength the
+// default while a chosen strength stays.
+func TestEffectFamiliesShowAnyAndSetAll(t *testing.T) {
+	byGadget := func(name string) effectFamily {
+		for _, f := range effectFamilies {
+			if f.gadget == name {
+				return f
+			}
+		}
+		t.Fatalf("no family %s", name)
+		return effectFamily{}
+	}
+	water := byGadget("NWATER")
+	p := settings.DefaultPresentation()
+	p.WaterSurface, p.WaterMotion, p.WaterReflections = 0, 0, 0
+	if !water.on(p) {
+		t.Fatal("water with foam alone on reads Off")
+	}
+	water.set(&p, false)
+	if water.on(p) || p.WaterFoam != 0 {
+		t.Fatalf("water off left %+v", p)
+	}
+	water.set(&p, true)
+	if p.WaterSurface != 1 || p.WaterMotion != 1 || p.WaterFoam != 1 || p.WaterReflections != 1 {
+		t.Fatalf("water on left %+v", p)
+	}
+	marks := byGadget("NMARKS")
+	p = settings.DefaultPresentation()
+	p.Scorch = 0
+	if !marks.on(p) {
+		t.Fatal("marks with trails alone reads Off")
+	}
+	p.TrailStrength = 100
+	marks.set(&p, true)
+	if p.Scorch != 1 || p.TrailStrength != 100 {
+		t.Fatalf("marks on changed a chosen trail strength: %+v", p)
+	}
+	marks.set(&p, false)
+	if marks.on(p) || p.TrailStrength != 0 {
+		t.Fatalf("marks off left %+v", p)
+	}
+	marks.set(&p, true)
+	if p.TrailStrength != settings.DefaultTrailStrength {
+		t.Fatalf("marks on gave trail strength %d", p.TrailStrength)
+	}
+	// Heat is both wreck switches with the rings and the fire shimmer.
+	heat := byGadget("NHEAT")
+	p = settings.DefaultPresentation()
+	p.BlastRings, p.FireShimmer, p.WreckShimmer = 0, 0, 0
+	if !heat.on(p) {
+		t.Fatal("heat with the wreck glow alone reads Off")
+	}
+	heat.set(&p, false)
+	if p.WreckGlow != 0 || p.WreckShimmer != 0 || heat.on(p) {
+		t.Fatalf("heat off left %+v", p)
+	}
+	// Metal is the finishes alone; the glint, the soft shadows and the
+	// supersampling are no family's, so no shortcut moves them, and no
+	// shortcut moves the ground light or blast ring strengths, which have
+	// switches of their own.
+	p = settings.DefaultPresentation()
+	p.GroundLightStrength, p.BlastRingStrength = 150, 40
+	for _, f := range effectFamilies {
+		f.set(&p, false)
+	}
+	if p.Glint != 1 || p.SoftShadows != 1 || p.Supersample != 1 || p.Finish != 0 || p.GroundLightStrength != 150 || p.BlastRingStrength != 40 {
+		t.Fatalf("family shortcuts moved an unowned value: %+v", p)
+	}
+}
+
+// The ground light and blast ring strengths reach the client with the trail
+// strength, from the same presentation block (DESIGN_GPU_RENDERER §30).
+func TestEffectStrengthsReachTheClient(t *testing.T) {
+	cl, err := client.New(client.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cl.GroundLightStrength() != settings.DefaultEffectStrength || cl.BlastRingStrength() != settings.DefaultEffectStrength {
+		t.Fatalf("new client strengths %d/%d", cl.GroundLightStrength(), cl.BlastRingStrength())
+	}
+	p := settings.DefaultPresentation()
+	p.TrailStrength, p.GroundLightStrength, p.BlastRingStrength = 25, 0, 200
+	applyEffectStrengths(cl, p)
+	if cl.TrailStrength() != 25 || cl.GroundLightStrength() != 0 || cl.BlastRingStrength() != 200 {
+		t.Fatalf("client strengths %d/%d/%d", cl.TrailStrength(), cl.GroundLightStrength(), cl.BlastRingStrength())
+	}
+	applyEffectStrengths(nil, p)
 }
 
 func TestSavedRendererControlsZoomValidation(t *testing.T) {
@@ -350,5 +463,28 @@ func TestGameplayOptionShowsTheSelectedSet(t *testing.T) {
 	}
 	if _, err := parseFlags([]string{"--gameplay=modern-ai"}, io.Discard); err == nil || !strings.Contains(err.Error(), "--ai-player all=modern") {
 		t.Fatalf("the retired modern-ai selection was not refused with its replacement: %v", err)
+	}
+}
+
+// The supersampling switch (DESIGN_GPU_RENDERER §17.5), a Nanolathe
+// presentation choice, maps one field for one field like every other switch:
+// on by default, a stored 0 reaches the recorder and executor as off, and the
+// live value is written back unchanged.
+func TestSupersampleSwitchMapsBothWays(t *testing.T) {
+	p := settings.DefaultPresentation()
+	if !presentationEffects(p).Supersample || presentationEffects(p) != drawlist.AllEffects() {
+		t.Fatalf("default presentation effects %+v", presentationEffects(p))
+	}
+	p.Supersample = 0
+	e := presentationEffects(p)
+	want := drawlist.AllEffects()
+	want.Supersample = false
+	if e != want {
+		t.Fatalf("supersample 0 converted to %+v", e)
+	}
+	back := settings.DefaultPresentation()
+	storeEffects(&back, e)
+	if back != p {
+		t.Fatalf("supersample off stored back as %+v", back)
 	}
 }

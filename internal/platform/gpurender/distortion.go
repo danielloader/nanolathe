@@ -21,12 +21,15 @@ type blastWave struct {
 type worldDistortion struct {
 	candidates              []blastWave
 	blastDisabled, resolved bool
-	shader                  *ebiten.Shader
-	waves                   [blastLimit]blastWave
-	count                   int
-	verts                   []ebiten.Vertex
-	indices                 []uint32
-	opts                    ebiten.DrawTrianglesShaderOptions
+	// ringStrengthOffset is the player's blast ring strength less one
+	// (SetBlastRingStrength), so the zero value is the tuned look.
+	ringStrengthOffset float32
+	shader             *ebiten.Shader
+	waves              [blastLimit]blastWave
+	count              int
+	verts              []ebiten.Vertex
+	indices            []uint32
+	opts               ebiten.DrawTrianglesShaderOptions
 	// read is the union of the regions the refraction samples. Unlike the
 	// ground pools a refraction reads away from its own fragment, so each quad
 	// widens the region by the bound on its own displacement (readcopy.go).
@@ -54,7 +57,7 @@ const (
 // displaced sample point.
 const bilinearPad = 1
 
-// setBlastDistortion is the executor gate the player's Distortion switch drives (§30).
+// setBlastDistortion is the executor gate of the blast rings switch (§30).
 func (r *Renderer) setBlastDistortion(on bool) { r.distortion.blastDisabled = !on }
 
 // dynamicBlastShape is modern artistic tuning, not retail damage arithmetic.
@@ -98,7 +101,10 @@ func (r *Renderer) prepareBlastDistortion(list *drawlist.List) {
 	d := &r.distortion
 	d.count, d.resolved = 0, false
 	d.candidates = d.candidates[:0]
-	if d.blastDisabled {
+	// The player's ring strength (§30) scales every ring's amplitude alike;
+	// the displacement bound and the read region follow the scaled strength.
+	scale := 1 + d.ringStrengthOffset
+	if d.blastDisabled || scale <= 0 {
 		return
 	}
 	list.VisitLightSources(func(sp drawlist.Sprite) {
@@ -106,6 +112,7 @@ func (r *Renderer) prepareBlastDistortion(list *drawlist.List) {
 			return
 		}
 		radius, width, strength := dynamicBlastShape(sp.BlastAge, sp.BlastSize, sp.LightingScale, sp.BlastAreaOfEffect, sp.BlastDamage, sp.HasBlastProfile)
+		strength *= scale
 		if strength <= 0 {
 			return
 		}

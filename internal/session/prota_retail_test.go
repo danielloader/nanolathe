@@ -11,7 +11,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/community"
 	"github.com/nanolathe-gg/nanolathe/internal/construction"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
-	"github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/mission"
@@ -26,7 +25,7 @@ import (
 // loadProTAArchive mounts the original assets followed by the explicitly
 // supplied ProTA roots. The environment variable has the same path-list shape
 // as internal/content/profiles' corpus check; CI without the package skips.
-func loadProTAArchive(t *testing.T) (vfs.FSOps, *content.Catalog, content.Limits, profiles.Profile) {
+func loadProTAArchive(t *testing.T) (vfs.FSOps, *content.Catalog, content.Limits, modContent) {
 	t.Helper()
 	value := strings.TrimSpace(os.Getenv("NANOLATHE_MOD_ROOTS_PROTA"))
 	if value == "" {
@@ -43,13 +42,7 @@ func loadProTAArchive(t *testing.T) (vfs.FSOps, *content.Catalog, content.Limits
 	if err := fs.MountGameDirectories(roots); err != nil {
 		t.Fatalf("mount ProTA over retail: %v", err)
 	}
-	profile, err := profiles.Resolve(fs, "")
-	if err != nil {
-		t.Fatalf("resolve ProTA profile: %v", err)
-	}
-	if profile.Name != "prota" {
-		t.Fatalf("resolved profile %q, want prota", profile.Name)
-	}
+	profile := loadModContent(t, fs, "prota-4.8")
 	view := profile.Layout().Apply(fs)
 	limits := content.LimitsFromProfile(profile.Limits)
 	cat, err := content.CompileWithOptions(view, content.Options{Limits: limits})

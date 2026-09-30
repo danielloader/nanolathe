@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
@@ -56,9 +55,10 @@ func TestCommunityControlsPresetContents(t *testing.T) {
 	if p.AlliedResources != 0 || p.Renderer != settings.DefaultPresentation().Renderer || g.audioPrefs.FXVol != settings.DefaultFXVol {
 		t.Error("the preset wrote a setting outside its table")
 	}
-	rows, changes := g.controlsOfferRows(controlsPresetCommunity)
-	if len(rows) != len(controlsPresetRows) || changes != 0 {
-		t.Errorf("after applying, the offer lists %d rows with %d changes; want %d and 0", len(rows), changes, len(controlsPresetRows))
+	for _, row := range controlsPresetRows {
+		if want := row.presetValue(controlsPresetCommunity); want != presetUnchanged && row.get(g) != want {
+			t.Errorf("%s = %s after applying, want %s", row.label, row.valueText(row.get(g)), row.valueText(want))
+		}
 	}
 }
 
@@ -133,10 +133,6 @@ func TestDotColoursRowRoundTrip(t *testing.T) {
 	if got := row.get(g); got != presetCustom || row.valueText(got) != "Custom" {
 		t.Fatalf("an edited table reads %d", got)
 	}
-	rows, _ := g.controlsOfferRows(controlsPresetCommunity)
-	if !slices.Contains(rows, "Dot colours: ProTA (now Custom)") {
-		t.Fatalf("offer rows %q", rows)
-	}
 }
 
 // Zero's Alpha 5 INI differs from ProTA's in the dot palette and independent
@@ -171,72 +167,8 @@ func TestZeroControlsPresetContents(t *testing.T) {
 	if p.VeteranLabels != 1 || p.WeatherReport != 1 || p.VictoryCue != 1 || p.QueuedOrderDrag != 1 || !g.clockVisible {
 		t.Fatal("Zero changed a preference outside its documented recommendation")
 	}
-	rows, changes := g.controlsOfferRows(controlsPresetZero)
-	if changes != 0 || !slices.Contains(rows, "Dot colours: TA Zero") || !slices.Contains(rows, "Megamap sonar minimum: 500") || !slices.Contains(rows, "Megamap anti-nuke minimum: 512") {
-		t.Fatalf("Zero offer rows=%v, changes=%d", rows, changes)
-	}
-}
-
-func TestZeroControlsOfferKeepMine(t *testing.T) {
-	g := presetTestShell(t)
-	g.presentation.CommunitySelection = 1
-	g.presentation.FactoryHundredBatch = 0
-	before := g.presentation
-	controlsOfferUI = &controlsOfferDialog{preset: controlsPresetZero, key: "profile:zero"}
-	t.Cleanup(g.releaseControlsOffer)
-	g.answerControlsOffer(false)
-	if g.presentation != before || !settings.ControlsWereOffered(g.controlsOffered, "profile:zero") {
-		t.Fatal("Keep mine changed preferences or failed to remember refusal")
-	}
-}
-
-// TestControlsOfferIsRememberedPerMod: the offer's key is the mod id, or the
-// content profile when no mod is mounted; once recorded it is not due again,
-// and the saved list survives a settings round trip without duplicates.
-func TestControlsOfferIsRememberedPerMod(t *testing.T) {
-	mod := &modlibrary.Mod{Metadata: modlibrary.Metadata{ID: "local-prota-4-8", Name: "ProTA4.8", Controls: "community"}}
-	for _, tc := range []struct {
-		cs      *contentSet
-		preset  string
-		wantKey string
-	}{
-		{&contentSet{mod: mod, profile: "prota", profileControls: "community"}, "community", "local-prota-4-8"},
-		{&contentSet{mod: &modlibrary.Mod{Metadata: modlibrary.Metadata{ID: "plain"}}, profileControls: "community"}, "", ""},
-		{&contentSet{profile: "prota", profileControls: "community"}, "community", "profile:prota"},
-		{&contentSet{profile: "retail"}, "", ""},
-	} {
-		g := &gameShell{cs: tc.cs}
-		preset, key, _ := g.controlsPresetOffer()
-		if preset != tc.preset || key != tc.wantKey {
-			t.Errorf("offer = %q/%q, want %q/%q", preset, key, tc.preset, tc.wantKey)
-		}
-	}
-
-	g := &gameShell{cs: &contentSet{mod: mod}}
-	g.markControlsOffered("local-prota-4-8")
-	g.markControlsOffered("local-prota-4-8")
-	if len(g.controlsOffered) != 1 || !settings.ControlsWereOffered(g.controlsOffered, "local-prota-4-8") || settings.ControlsWereOffered(g.controlsOffered, "prota") {
-		t.Fatalf("offered = %q", g.controlsOffered)
-	}
-	path := filepath.Join(t.TempDir(), "settings.json")
-	t.Setenv(settings.EnvPath, path)
-	stored := settings.Defaults()
-	stored.ControlsOffered = []string{"prota", " prota", "", "local-prota-4-8"}
-	if err := stored.Save(); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := settings.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := loaded.ControlsOffered; len(got) != 2 || got[0] != "prota" || got[1] != "local-prota-4-8" {
-		t.Fatalf("round trip = %q", got)
-	}
-	// A shell that cannot write its settings never offers: the answer could
-	// not be remembered.
-	g.settingsWritable = false
-	if g.wantsControlsOffer() {
-		t.Fatal("an unwritable shell wants to offer")
+	if p.MegamapSonarMinimum != 500 || p.MegamapAntiNukeMinimum != 512 {
+		t.Fatalf("Zero ring minimums sonar %d, anti-nuke %d", p.MegamapSonarMinimum, p.MegamapAntiNukeMinimum)
 	}
 }
 
@@ -295,40 +227,6 @@ func TestStrategicIconDiscoveryOrder(t *testing.T) {
 	}
 }
 
-// TestRestoreControlsPresetUndoesOnlyThePresetsRows: leaving ProTA for
-// content with no preset returns the rows ProTA still holds to their retail
-// defaults, so the wheel zooms and Tab opens the menu again (issue #19). A row
-// the player changed after applying it, and a row the retail preset leaves
-// alone, stay.
-func TestRestoreControlsPresetUndoesOnlyThePresetsRows(t *testing.T) {
-	g := presetTestShell(t)
-	g.applyControlsPreset(controlsPresetCommunity)
-	g.audioPrefs.CDMode = 3 // the player's own choice after the preset
-	g.restoreControlsPreset(controlsPresetCommunity)
-	if g.presentation.Overview != settings.OverviewZoom {
-		t.Errorf("overview = %d, want the zoom overview", g.presentation.Overview)
-	}
-	for _, row := range controlsPresetRows {
-		if row.retail == presetUnchanged || row.label == "Music" {
-			continue
-		}
-		if got := row.get(g); got != row.retail {
-			t.Errorf("%s = %s after the restore, want its retail %s", row.label, row.valueText(got), row.valueText(row.retail))
-		}
-	}
-	if g.audioPrefs.CDMode != 3 {
-		t.Errorf("music mode = %d, want the player's 3", g.audioPrefs.CDMode)
-	}
-	if g.setup.NumPlayers != settings.MaxPlayers || g.presentation.MegamapWheel != 1 {
-		t.Error("the restore wrote a row the retail preset leaves alone")
-	}
-	before := g.presentation
-	g.restoreControlsPreset(controlsPresetRetail)
-	if g.presentation != before {
-		t.Error("restoring the retail preset changed a row")
-	}
-}
-
 // TestRetailPresetColumnIsTheDefaults: each row's retail value is the value a
 // fresh settings file holds, so *Restore default settings* restores the
 // defaults, and a player who never took a preset has nothing to restore.
@@ -341,55 +239,5 @@ func TestRetailPresetColumnIsTheDefaults(t *testing.T) {
 		if got := row.get(g); row.retail != presetUnchanged && got != row.retail {
 			t.Errorf("%s: retail column %s, but the default is %s", row.label, row.valueText(row.retail), row.valueText(got))
 		}
-	}
-	for _, preset := range []string{controlsPresetCommunity, controlsPresetZero, controlsPresetRetail} {
-		if n := g.restorableControlsRows(preset); n != 0 {
-			t.Errorf("default settings: restoring from %s would change %d rows", preset, n)
-		}
-	}
-}
-
-// TestSwitchControlsPresetOffersRestoreOnlyWhenLeaving: the Mods & Mutators
-// screen offers a target's own preset, and the running preset's restore only
-// when the target recommends none and a row still holds the running preset's
-// value. A player who declined it, or has changed every row since, is not
-// offered one.
-func TestSwitchControlsPresetOffersRestoreOnlyWhenLeaving(t *testing.T) {
-	prota := &modlibrary.Mod{Metadata: modlibrary.Metadata{ID: "prota", Controls: controlsPresetCommunity}}
-	plain := &modlibrary.Mod{Metadata: modlibrary.Metadata{ID: "plain"}}
-	zero := &modlibrary.Mod{Metadata: modlibrary.Metadata{ID: "zero", Controls: controlsPresetZero}}
-	for _, c := range []struct {
-		running *modlibrary.Mod
-		profile string
-		applied string // the preset the player took, "" for none
-		target  *modlibrary.Mod
-		preset  string
-		restore bool
-	}{
-		{running: prota, applied: controlsPresetCommunity, target: nil, preset: controlsPresetCommunity, restore: true},
-		{running: prota, applied: controlsPresetCommunity, target: plain, preset: controlsPresetCommunity, restore: true},
-		{running: prota, applied: controlsPresetCommunity, target: zero, preset: controlsPresetZero},
-		{running: prota, target: nil},
-		{running: zero, applied: controlsPresetZero, target: nil, preset: controlsPresetZero, restore: true},
-		{running: zero, applied: controlsPresetZero, target: prota, preset: controlsPresetCommunity},
-		{running: nil, profile: controlsPresetCommunity, applied: controlsPresetCommunity, target: plain, preset: controlsPresetCommunity, restore: true},
-		{running: nil, target: prota, preset: controlsPresetCommunity},
-		{running: plain, applied: controlsPresetCommunity, target: nil},
-	} {
-		g := presetTestShell(t)
-		g.cs = &contentSet{mod: c.running, profileControls: c.profile}
-		g.applyControlsPreset(c.applied)
-		preset, restore := g.switchControlsPreset(c.target)
-		if preset != c.preset || restore != c.restore {
-			t.Errorf("running %v (took %q), target %v: got %q restore %v, want %q restore %v", c.running, c.applied, c.target, preset, restore, c.preset, c.restore)
-		}
-	}
-	// Every row the preset wrote changed back by hand: nothing to restore.
-	g := presetTestShell(t)
-	g.cs = &contentSet{mod: prota}
-	g.applyControlsPreset(controlsPresetCommunity)
-	g.applyControlsPreset(controlsPresetRetail)
-	if preset, restore := g.switchControlsPreset(nil); preset != "" || restore {
-		t.Errorf("after the player restored every row: got %q restore %v", preset, restore)
 	}
 }

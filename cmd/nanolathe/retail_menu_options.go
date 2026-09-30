@@ -459,7 +459,7 @@ func (g *gameShell) openRetailOptionsScreen(inBattle bool) error {
 	if inBattle {
 		widenRetailBattleOptionsRoot(window)
 	}
-	addNanolatheOptionsCategory(window)
+	addNanolatheOptionsCategory(window, inBattle)
 	logicalW, logicalH := ebitenapp.DesktopSize()
 	nativeW, nativeH := ebitenapp.DesktopPixelSize()
 	logical, native := retailDisplayMode{logicalW, logicalH}, retailDisplayMode{nativeW, nativeH}

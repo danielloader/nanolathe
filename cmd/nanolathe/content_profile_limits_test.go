@@ -10,6 +10,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
@@ -107,21 +108,22 @@ func authoredScratchModel(t *testing.T) []byte {
 }
 
 // TestWindowedCompileUsesTheProfileLimits is the contract this unit exists
-// for: the graphical command compiles the one catalog under the resolved
-// content profile's table limits, so a content set built for a patched
-// executable admits every definition it ships instead of stopping at retail's
-// 512-bit domain (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles"). The
-// retail baseline is locked on the same bytes, so the test also proves the
-// fixture really is past the retail domain rather than merely compiling.
+// for: the graphical command compiles the one catalog under the running
+// config's content limits, so a content set built for a patched executable
+// admits every definition it ships instead of stopping at retail's 512-bit
+// domain (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles"). The retail
+// baseline is locked on the same bytes, so the test also proves the fixture
+// really is past the retail domain rather than merely compiling.
 func TestWindowedCompileUsesTheProfileLimits(t *testing.T) {
-	cs, err := openContent(Options{Roots: []string{authorWideInstall(t)}})
+	t.Setenv(settings.EnvPath, filepath.Join(t.TempDir(), "settings.json"))
+	cs, err := openContent(Options{Roots: []string{authorWideInstall(t)}, ModConfig: shippedConfigPath(t, "ta-zero-alpha5-20241224")})
 	if err != nil {
 		t.Fatalf("mount the authored wide install: %v", err)
 	}
 	defer cs.Close()
 
-	if cs.profile != "zero" {
-		t.Fatalf("resolved profile = %q, want zero", cs.profile)
+	if cs.profile != "ta-zero" {
+		t.Fatalf("mounted config = %q, want ta-zero", cs.profile)
 	}
 	if cs.limits == content.RetailLimits() {
 		t.Fatalf("resolved limits = %+v, want the profile's raised tables", cs.limits)

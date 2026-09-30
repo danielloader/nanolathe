@@ -8,10 +8,15 @@ reimplemented as switches, listed below.
 
 ## Installing
 
-Drop the ProTA 4.8 zip or folder onto the Nanolathe window at the main menu,
-then choose it on the **Mods & Mutators** screen. A package without Nanolathe
-metadata installs as a *Local* mod with the `prota` content profile detected
-([DESIGN_MODS_MUTATORS §4.5](DESIGN_MODS_MUTATORS.md#45-manual-installs)).
+Install ProTA from **Get more mods**, or drop Nanolathe's ProTA zip onto the
+window at the main menu, then choose it on the **Mods & Mutators** screen.
+The zip carries ProTA's Nanolathe config — its renamed directories, content
+limits, main-menu version, Community table and recommended settings — in
+`nanolathe-mod.json` (`modconfigs/prota-4.8/` in this repository;
+[DESIGN_MODS_MUTATORS §4.2](DESIGN_MODS_MUTATORS.md#42-mod-metadata-and-config)).
+The upstream ProTA 4.8 package has no such file: dropped as it is, it
+installs as a *Local* mod that mounts as plain content and does not load
+correctly ([DESIGN_MODS_MUTATORS §4.5](DESIGN_MODS_MUTATORS.md#45-manual-installs)).
 The desktop command's `--install-mod <path>` does the same from a shell, and
 `--mod <id>` selects an installed mod for one run.
 
@@ -21,23 +26,23 @@ choice:
 ```sh
 go build -o nanolathe ./cmd/nanolathe
 ./nanolathe --root "/path/to/Total Annihilation" \
-  --root "/path/to/ProTA4.8" --content-profile prota \
+  --root "/path/to/ProTA4.8" --mod-config modconfigs/prota-4.8/nanolathe-mod.json \
   --gameplay community-3.9 --save-dir "/path/to/prota-saves"
 ```
 
 Keep the base game and expansion archives in the first root: the package
-overlays their maps and campaigns. The content profile selects ProTA's renamed
-directories and content limits.
+overlays their maps and campaigns. The config names ProTA's renamed
+directories and content limits; without it the stack mounts as plain content.
 
-Load saved battles with the same mod, or the same roots, profile and gameplay
+Load saved battles with the same mod, or the same roots, config and gameplay
 selection. A save made with a library mod records it and switches to it on
 load ([DESIGN_MODS_MUTATORS §7](DESIGN_MODS_MUTATORS.md#7-the-save-sidecar)).
 
 ## Main menu
 
 ProTA's title box shows its version, **4.8**, under the word *ProTA*, centred
-the way ProTA's own window places it. The version comes from the `prota`
-content profile's `presentation.main_menu_version`, which records the
+the way ProTA's own window places it. The version comes from ProTA's config,
+`content.presentation.main_menu_version`, which records the
 version string ProTA 4.8's patch list configures. The original game keeps
 its `v3.1`
 ([the extension reference](../research/extensions/prota-engine.md#main-menu-version-label)).
@@ -48,18 +53,19 @@ seen on a capture.
 
 ProTA requires **Community 3.9** or **Modern**: while it is selected the
 gameplay option skips Strict 3.1, and a command line naming `--mod` and
-Strict 3.1 together is rejected. Both select the Community `prota` feature table, which
-follows the pinned current source
+Strict 3.1 together is rejected. Both use the Community table in ProTA's config,
+`rules.communityFeatures`: the mainline `prota` build profile, which follows
+the pinned current source
 ([extension reference](../research/extensions/prota-engine.md#current-source-profile-is-a-separate-target));
 Modern adds Nanolathe's documented Modern policies on top. The table sets the
 unit limit to 1500, which the loading screen shows as *Unit limit 1500 (set by …)*,
 naming the source; a limit the player chose (`--unit-limit` or a saved
 `unitLimit`) replaces it.
 
-The `prota` content profile also turns on nine switches for the historical 4.8
-package's engine changes
+ProTA's config also turns on nine switches for the historical 4.8 package's
+engine changes
 ([DESIGN_COMMUNITY_PATCH §4.7](DESIGN_COMMUNITY_PATCH.md#47-prota-48-package-behaviours)).
-They are off in every shipped table, so no other content sees them:
+They are off in the engine's mainline table, so no other content sees them:
 
 | Switch | Effect |
 |---|---|
@@ -79,8 +85,9 @@ The switches can be overridden one at a time through the settings file's
 ## Recommended settings
 
 The first time ProTA is selected — from the Mods & Mutators screen, by
-`--mod`, by loading a save, or as a manual `--content-profile prota` stack —
-Nanolathe offers ProTA's recommended settings once. The window lists each
+`--mod`, by loading a save, or as a manual stack named with `--mod-config` —
+Nanolathe offers ProTA's recommended settings once. They are the `settings`
+and `keys` sections of ProTA's config. The window lists each
 setting with its new value and your current one; **Apply** writes them and
 **Keep mine** leaves yours. Either answer is remembered. Every row is an
 ordinary option you can change later

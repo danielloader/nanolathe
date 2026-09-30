@@ -104,20 +104,20 @@ func TestEntryZoomAppliesToTheSelectedCanvas(t *testing.T) {
 func TestHostWindowOptionsFollowTheSwappedShell(t *testing.T) {
 	t.Setenv(settings.EnvPath, filepath.Join(t.TempDir(), "settings.json"))
 	first := &gameShell{presentation: settings.DefaultPresentation()}
-	first.presentation.FPS, first.presentation.Water, first.presentation.Renderer = 60, 1, "classic"
+	first.presentation.FPS, first.presentation.WaterSurface, first.presentation.Renderer = 60, 1, "classic"
 	host := &shellHost{shell: first}
 	options := host.windowOptions()
 
 	second := &gameShell{presentation: settings.DefaultPresentation(), windowSize: retailDisplayMode{1024, 768}}
-	second.presentation.FPS, second.presentation.Water, second.presentation.Renderer = 144, 0, "classic"
+	second.presentation.FPS, second.presentation.WaterSurface, second.presentation.Renderer = 144, 0, "classic"
 	second.opts.Renderer = "classic"
 	host.shell = second
 
 	if mode, fps := options.PresentationSettings(); fps != 144 || mode != ebitenapp.RendererClassic {
 		t.Fatalf("presentation settings = %v/%d, want the swapped shell's classic/144", mode, fps)
 	}
-	if options.Effects().Water {
-		t.Fatal("effects read the start-up shell's Water switch")
+	if options.Effects().WaterSurface {
+		t.Fatal("effects read the start-up shell's water surface switch")
 	}
 	if w, h := options.WindowSize(); w != 1024 || h != 768 {
 		t.Fatalf("window size %dx%d, want the swapped shell's 1024x768", w, h)

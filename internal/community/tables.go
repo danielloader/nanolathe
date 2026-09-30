@@ -2,15 +2,33 @@ package community
 
 import (
 	"fmt"
-	"strings"
 )
 
+// Mainline names the one feature table the engine carries: the tdraw build
+// profile its maintainers ship with every feature enabled, which Community
+// 3.9 and Modern start from for the base game (community-patch-engine.md
+// sections 3.1 and 4.1; DESIGN_COMMUNITY_PATCH §3.3, D2). The word is the
+// build profile's name in the pinned source, not a mod selector.
+//
+// The engine carries no other table. A mod declares the complete value its
+// content was authored for in its own nanolathe-mod.json
+// (`rules.communityFeatures`, read by ParseFeatures), and a session receives
+// it as a content source whose Base replaces the mainline value
+// (docs/DESIGN_MODS_MUTATORS.md §4.2).
 const Mainline = "prota"
 
-var common = Features{
+// mainline is the Mainline table: the effective compile-time matrix and the
+// shipped simulation preference defaults of that build profile
+// (community-patch-engine.md sections 3.1 and 4.1).
+var mainline = Features{
+	ConstructionKickout:      true,
+	GuardingBuildersHold:     true,
+	PatrollingBuilderFilters: true,
 	ReclaimToggleKeepsBuild:  true,
 	StructureRotation:        true,
+	AreaDamageOverflow:       true,
 	AreaDamageDedupCap:       true,
+	GridClaimTieBreak:        true,
 	TransportedExplosions:    true,
 	AntinukeCircularCoverage: true,
 	AlliedJammingIgnored:     true,
@@ -19,88 +37,38 @@ var common = Features{
 	Veterancy:                true,
 	SchemaUnits:              true,
 	ScriptPorts:              true,
+	MexSnap:                  true,
+	WreckSnap:                true,
 
 	RepairRate: RepairRate{
 		RepairMultiplier:   1,
 		SelfHealMultiplier: 1,
 	},
-	ProjectileCapacity: 3000,
-	ExplosionCapacity:  3000,
-	DebrisCapacity:     1000,
-	SfxLimit:           20480,
-	PathStepAllowance:  66650,
-	UnitLimit:          1500,
+	OffMapAircraftMarginTiles: 1,
+	ProjectileCapacity:        3000,
+	ExplosionCapacity:         3000,
+	DebrisCapacity:            1000,
+	SfxLimit:                  20480,
+	PathStepAllowance:         66650,
+	UnitLimit:                 1500,
+	MexSnapRadius:             3,
+	WreckSnapRadius:           1,
+	MexSnapRadiusMax:          3,
+	WreckSnapRadiusMax:        1,
 }
 
-// Table returns one shipped tdraw build profile. The constants are the
-// effective compile-time matrix and shipped simulation preference defaults in
-// community-patch-engine.md sections 3.1 and 4.1.
+// Table returns the named feature table. Only Mainline exists, so a source's
+// `table` key means "start again from the mainline table", discarding every
+// earlier source (DESIGN_COMMUNITY_PATCH §3.2).
 func Table(name string) (Features, error) {
-	f := common
-	switch name {
-	case "prota":
-		f.ConstructionKickout = true
-		f.GuardingBuildersHold = true
-		f.PatrollingBuilderFilters = true
-		f.AreaDamageOverflow = true
-		f.GridClaimTieBreak = true
-		f.OffMapAircraftMarginTiles = 1
-		setSnap(&f, 3, 3, 1, 1)
-	case "escalation":
-		f.ConstructionKickout = true
-		f.GuardingBuildersHold = true
-		f.PatrollingBuilderFilters = true
-		f.AreaDamageOverflow = true
-		f.GridClaimTieBreak = true
-		f.BuildWeaponSlotGuard = true
-		f.AirCorpseFall = true
-		f.RepairRate = RepairRate{Enabled: true, RepairMultiplier: 3, SelfHealMultiplier: 3}
-		f.OffMapAircraftMarginTiles = 32
-		setSnap(&f, 0, 0, 1, 1)
-	case "ota":
-		f.OffMapAircraftMarginTiles = 1
-		setSnap(&f, 0, 0, 0, 0)
-	case "tazero":
-		f.ConstructionKickout = true
-		f.GuardingBuildersHold = true
-		f.PatrollingBuilderFilters = true
-		f.OffMapAircraftMarginTiles = 1
-		setSnap(&f, 3, 3, 1, 1)
-	case "bta":
-		f.ConstructionKickout = true
-		f.GuardingBuildersHold = true
-		f.PatrollingBuilderFilters = true
-		f.OffMapAircraftMarginTiles = 1
-		setSnap(&f, 1, 1, 1, 1)
-	case "mayhem", "twilight":
-		f.ConstructionKickout = true
-		f.GuardingBuildersHold = true
-		f.PatrollingBuilderFilters = true
-		f.AreaDamageOverflow = true
-		f.GridClaimTieBreak = true
-		f.OffMapAircraftMarginTiles = 32
-		setSnap(&f, 3, 3, 1, 1)
-	default:
+	if name != Mainline {
 		return Features{}, featureError(
 			"resolve community features",
 			fmt.Sprintf("<table %q>", name),
 			"embedded community tables",
-			"one of "+strings.Join(tableNames(), ", "),
+			Mainline+" (a mod's own table is rules.communityFeatures in its nanolathe-mod.json)",
 			nil,
 		)
 	}
-	return f, nil
-}
-
-func setSnap(f *Features, mexDefault, mexMax, wreckDefault, wreckMax int) {
-	f.MexSnap = mexMax != 0
-	f.WreckSnap = wreckMax != 0
-	f.MexSnapRadius = mexDefault
-	f.WreckSnapRadius = wreckDefault
-	f.MexSnapRadiusMax = mexMax
-	f.WreckSnapRadiusMax = wreckMax
-}
-
-func tableNames() []string {
-	return []string{"ota", "prota", "escalation", "tazero", "bta", "mayhem", "twilight"}
+	return mainline, nil
 }

@@ -1,6 +1,6 @@
 package gpurender
 
-// setMetalGlint is the executor gate the player's Finish switch drives
+// setMetalGlint is the executor gate the player's Glint switch drives
 // (GPU design §23.7, §30). It never changes a draw list.
 func (r *Renderer) setMetalGlint(on bool) { r.metalGlint = on }
 

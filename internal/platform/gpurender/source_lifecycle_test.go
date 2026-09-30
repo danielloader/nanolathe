@@ -19,7 +19,7 @@ func TestLifecycleResetSourcesReleasesBattleResources(t *testing.T) {
 		tileAtlases:  map[tileAtlasKey]*tileAtlas{{terrain: &world.Terrain{}}: {pages: []*ebiten.Image{tile}}},
 		gafImages:    map[*formats.GAFFrame]*ebiten.Image{frame: shared},
 		scene:        sceneAtlas{pages: []*scenePage{{img: shared}}, frames: map[*formats.GAFFrame]sceneEntry{frame: {}}, pcx: map[*formats.PCX]sceneEntry{{}: {}}, fonts: map[*formats.FNT]*fntAtlas{{}: {}}},
-		heat:         treeHeat{sources: []treeHeatSource{{width: 32}}, disabled: true},
+		heat:         treeHeat{sources: []treeHeatSource{{width: 32}}, treeDisabled: true, wreckDisabled: true},
 		textureAtlas: modelTextureAtlas{slots: map[*formats.GAFFrame]modelTextureSlot{frame: {img: shared}}, page: shared},
 		fog:          fogPass{shader: shader, compiled: true, atlas: shared, atlasGray: [4]*formats.GAFEntry{{}}},
 		scene2D:      shader, surfaces: [2]*ebiten.Image{output}, w: 640, h: 480,
@@ -44,7 +44,7 @@ func TestLifecycleResetSourcesReleasesBattleResources(t *testing.T) {
 	if r.fog.atlas != nil || r.fog.atlasGray[0] != nil || r.sceneOpts.Images[0] != nil || r.surfaceCache[0].identity != 0 {
 		t.Fatal("compiled or paused-source dependencies retained")
 	}
-	if r.heat.sources != nil || !r.heat.disabled {
+	if r.heat.sources != nil || !r.heat.treeDisabled || !r.heat.wreckDisabled {
 		t.Fatal("source reset retained heat sources or lost its comparison control")
 	}
 	if r.modelDirect.groups.key != nil || r.modelDirect.groups.colour != nil || r.modelDirect.groups.shader != shader {

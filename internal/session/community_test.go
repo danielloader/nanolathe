@@ -28,7 +28,7 @@ func TestCommunityCompositionPrecedenceAndStrictBypass(t *testing.T) {
 	margin := 3
 	override := 7
 	sources := CommunitySources{
-		Content:     []community.Overrides{{Table: "escalation"}},
+		Content:     loadModContent(t, nil, "escalation-10.2.0").GameplaySources(),
 		Player:      community.Overrides{WeaponTargetKeys: &flag, OffMapAircraftMarginTiles: &margin},
 		CommandLine: []community.Overrides{{OffMapAircraftMarginTiles: &override}},
 	}
@@ -44,7 +44,7 @@ func TestCommunityCompositionPrecedenceAndStrictBypass(t *testing.T) {
 		t.Fatalf("strict: %+v, %v", strict, err)
 	}
 	name := communityCompositionTestName
-	got, err = ResolveCommunity(gameplay.Mode(name), CommunitySources{Content: []community.Overrides{{Table: "escalation"}}})
+	got, err = ResolveCommunity(gameplay.Mode(name), CommunitySources{Content: loadModContent(t, nil, "escalation-10.2.0").GameplaySources()})
 	if err != nil || got.OffMapAircraftMarginTiles != margin {
 		t.Fatalf("registered declaration: %+v, %v", got, err)
 	}
@@ -90,7 +90,7 @@ func TestCommunityRebindingAndInvalidSwitch(t *testing.T) {
 func TestCommunityFreshAndRestoredEntryShareConfiguration(t *testing.T) {
 	f := loadRetailFixture(t)
 	limit := 60
-	sources := CommunitySources{Content: []community.Overrides{{Table: "escalation"}}, CommandLine: []community.Overrides{{UnitLimit: &limit}}}
+	sources := CommunitySources{Content: loadModContent(t, nil, "escalation-10.2.0").GameplaySources(), CommandLine: []community.Overrides{{UnitLimit: &limit}}}
 	f.cfg.Gameplay = gameplay.Community39
 	initialOptions := orders.DefaultBuilderOptions()
 	initialOptions.Guard[1] = orders.GuardStay

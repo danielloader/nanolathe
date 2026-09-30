@@ -18,6 +18,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/community"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
@@ -56,13 +57,16 @@ const (
 type SimBenchOptions struct {
 	GameplayFeatures  community.Overrides   `json:"gameplayFeatures,omitempty"`
 	GameplayOverrides []community.Overrides `json:"gameplayOverrides,omitempty"`
-	ProfileFeatures   []community.Overrides `json:"-"`
-	Gameplay          gameplay.Mode         `json:"gameplay"`
-	Root              string
-	Roots             []string
-	// ContentProfile selects the mounted content set's directory table by
-	// name or profile path; empty detects it from the mounted markers
-	// (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
+	// ProfileFeatures is the running config's Community declaration; the
+	// benchmark scene runs on the base game, so the command leaves it nil.
+	ProfileFeatures []community.Overrides `json:"-"`
+	Gameplay        gameplay.Mode         `json:"gameplay"`
+	Root            string
+	Roots           []string
+	// Content is the content section the mount applies; the zero value is
+	// the base game's profile. ContentProfile is its report name, set by the
+	// run (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
+	Content        profiles.Profile `json:"-"`
 	ContentProfile string
 	OutputDir      string
 	Map            string
@@ -299,12 +303,8 @@ func RunSimBenchmark(opts SimBenchOptions) (SimBenchReport, error) {
 	}
 	defer fs.Close()
 
-	view, profile, err := contentProfileView(fs, opts.ContentProfile)
-	if err != nil {
-		return SimBenchReport{}, err
-	}
+	view, profile := contentView(fs, opts.Content)
 	opts.ContentProfile = profile.Name
-	opts.ProfileFeatures = profile.GameplaySources()
 
 	catalog, err := content.CompileWithOptions(view, content.Options{Limits: content.LimitsFromProfile(profile.Limits)})
 	if err != nil {

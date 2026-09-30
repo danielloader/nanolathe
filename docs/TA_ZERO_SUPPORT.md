@@ -27,8 +27,12 @@ For a library installation, combine the packages in one folder in this order:
    `nanolathe --install-mod "/path/to/TA Zero"`.
 5. Select the installed package in **Mods & Mutators**.
 
-The package is detected through its content and receives the `zero` profile.
-A folder without Nanolathe metadata appears as a Local mod. Nanolathe ignores
+Nanolathe's TA Zero zip carries its Nanolathe config in `nanolathe-mod.json`
+(`modconfigs/ta-zero-alpha5-20241224/` in this repository): the renamed
+directories, the `tamus` soundtrack, the front-end art and team logos, the
+Community table and the recommended settings. Nothing detects the content, so
+a folder without that file appears as a Local mod that mounts as plain
+content and does not load correctly. Nanolathe ignores
 Windows executables and DLLs; it uses its own engine. Base's
 `TA_Features_2013.ccx`, `ZIcon` and `tamus`, Alpha 5's `TAZ31.gp3`, and the
 map pack's `TA_Zero_Maps.ufo` provide the content for this composition.
@@ -48,7 +52,8 @@ Separate roots also work without installing into the library:
   --root "/path/to/TA Zero Base/TA Zero" \
   --root "/path/to/TA Zero Alpha 5" \
   --root "/path/to/TA Zero Map Pack 1f" \
-  --content-profile zero --gameplay community-3.9 \
+  --mod-config modconfigs/ta-zero-alpha5-20241224/nanolathe-mod.json \
+  --gameplay community-3.9 \
   --save-dir "/path/to/zero-saves"
 ```
 

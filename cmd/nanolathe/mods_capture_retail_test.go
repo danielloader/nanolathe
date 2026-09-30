@@ -166,14 +166,14 @@ func TestModsHotReloadSwitchesContent(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err := runInstallMod(Options{Root: retail, InstallMod: filepath.SplitList(prota)[0]}, devnull); err != nil {
+	if err := runInstallMod(Options{Root: retail, InstallMod: stageModPackage(t, filepath.SplitList(prota)[0], "prota-4.8")}, devnull); err != nil {
 		t.Fatal(err)
 	}
 	cs, err := openContent(Options{Root: retail})
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{Root: cs.root, Roots: cs.roots, ContentProfile: cs.profile}
+	opts := Options{Root: cs.root, Roots: cs.roots, ModConfig: cs.configPath}
 	shell, err := newGameShell(opts, cs)
 	if err != nil {
 		t.Fatal(err)
@@ -191,22 +191,15 @@ func TestModsHotReloadSwitchesContent(t *testing.T) {
 	if err := bindShellContent(shell, cl); err != nil {
 		t.Fatal(err)
 	}
-	switchTo := func(row int, label string) {
+	// Each mod's recommended settings are its settings layer (§4.6): a
+	// switch writes nothing on top of them and a switch back plays the base.
+	switchTo := func(row int) {
 		t.Helper()
 		before := host.shell
 		if err := before.openModsScreen(); err != nil {
 			t.Fatal(err)
 		}
 		before.selectModsRow(row)
-		// The toggle is offered, Yes by default, under a caption that fits
-		// its gadget in the front-end font.
-		caption := modsPanel.TextOf("PRESETLABEL")
-		if !modsPanel.ActiveOf("PRESET") || modsPanel.TextOf("PRESET") != "Yes" || caption != label {
-			t.Fatalf("row %d: preset toggle active %v reading %q, caption %q; want Yes, %q", row, modsPanel.ActiveOf("PRESET"), modsPanel.TextOf("PRESET"), caption, label)
-		}
-		if w, room := before.retailTextWidth(caption), modsPanel.Window.Gadgets[modsPanel.Index("PRESETLABEL")].Rect.W; w > int(room) {
-			t.Fatalf("caption %q is %d pixels wide in a %d-pixel label", caption, w, room)
-		}
 		before.applyModsScreen()
 		if pendingContentReload == nil {
 			t.Fatal("applying a different mod requested no reload")
@@ -219,7 +212,7 @@ func TestModsHotReloadSwitchesContent(t *testing.T) {
 			t.Fatal("the old shell's Mods screen survived the reload")
 		}
 	}
-	switchTo(1, "Use recommended settings")
+	switchTo(1)
 	if host.shell.cs.mod == nil || host.shell.cs.profile != "prota" {
 		t.Fatalf("after switching to ProTA: mod %v, profile %q", host.shell.cs.mod, host.shell.cs.profile)
 	}
@@ -232,7 +225,7 @@ func TestModsHotReloadSwitchesContent(t *testing.T) {
 		_ = png.Encode(f, img)
 		f.Close()
 	}
-	switchTo(0, "Restore default settings")
+	switchTo(0)
 	if host.shell.cs.mod != nil || host.shell.cs.profile != "retail" {
 		t.Fatalf("after switching back: mod %v, profile %q", host.shell.cs.mod, host.shell.cs.profile)
 	}
@@ -262,7 +255,7 @@ func TestFailedModSwitchChangesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cs.Close()
-	shell, err := newGameShell(Options{Root: cs.root, Roots: cs.roots, ContentProfile: cs.profile}, cs)
+	shell, err := newGameShell(Options{Root: cs.root, Roots: cs.roots, ModConfig: cs.configPath}, cs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,9 +288,8 @@ func TestFailedModSwitchChangesNothing(t *testing.T) {
 	if err := modsUI.mutators.SetFactor("health", content.MutatorSteps[len(content.MutatorSteps)-1]); err != nil {
 		t.Fatal(err)
 	}
-	modsUI.usePreset = true
 	shell.applyModsScreen()
-	if pendingContentReload == nil || pendingContentReload.gameplay != gameplay.Community39 || pendingContentReload.controls != "community" {
+	if pendingContentReload == nil || pendingContentReload.selector == "none" || pendingContentReload.mutators.IsZero() {
 		t.Fatalf("the reload request does not carry the pending selection: %+v", pendingContentReload)
 	}
 	check := func(when string) {
@@ -332,7 +324,7 @@ func TestFailedModSwitchChangesNothing(t *testing.T) {
 func installBadCursorMod(t *testing.T, retail string) {
 	t.Helper()
 	pack := t.TempDir()
-	meta := `{"schema":1,"id":"badcursors","name":"Bad Cursors","version":"1","minimumGameplay":"community-3.9","controls":"community"}`
+	meta := `{"schema":2,"id":"badcursors","name":"Bad Cursors","version":"1","rules":{"minimumGameplay":"community-3.9"},"keys":{"profile":"community"}}`
 	for name, body := range map[string]string{modlibrary.MetadataFile: meta, client.CursorGAFPath: "not a GAF bank"} {
 		path := filepath.Join(pack, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -380,7 +372,7 @@ func TestSavedModThatFailsToBindStartsWithoutIt(t *testing.T) {
 			t.Fatalf("the mod was not selected: %+v", cs.mod)
 		}
 		opts := launch
-		opts.Root, opts.Roots, opts.ContentProfile = cs.root, cs.roots, cs.profile
+		opts.Root, opts.Roots, opts.ModConfig = cs.root, cs.roots, cs.configPath
 		shell, err := startWindowedShell(launch, opts, cs, cl)
 		if err != nil {
 			_ = cs.Close()

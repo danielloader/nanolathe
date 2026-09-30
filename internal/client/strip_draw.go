@@ -206,7 +206,7 @@ func (c *Client) blitStripFrame(v frame.StripView) bool {
 	scale := float32(c.viewScale().Float())
 	// Only an emitter has a use for the receiver height, and this runs for every
 	// strip blit in the frame — the smoke puffs included — on both executors and
-	// with the Lighting switch off, so the terrain sample is taken only when
+	// with both light switches off, so the terrain sample is taken only when
 	// something will read it (§31.7).
 	var lightingGround float32
 	if lightingKind.Emitter() {

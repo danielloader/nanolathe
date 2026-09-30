@@ -30,12 +30,20 @@ const (
 
 // SetTrailStrength selects the player's ground-trail intensity. Existing marks
 // keep their age and dimensions; only their recorded opacity changes [I6].
+//
+// Zero is the trail layer's off (GPU design §30): no marks are laid while it
+// holds. A change to or from zero retires the trail history the way an
+// effect switch retires its own, so a layer turned off leaves no stale marks
+// and one turned back on starts from the current tick.
 func (c *Client) SetTrailStrength(percent int) {
 	if c == nil {
 		return
 	}
 	percent = min(max(percent, 0), 100)
 	if c.trailStrength != percent {
+		if (c.trailStrength == 0) != (percent == 0) {
+			c.trails = trailState{}
+		}
 		c.trailStrength = percent
 		c.pausedWorldRevision++
 	}
@@ -219,16 +227,29 @@ func (c *Client) ObserveCommittedTick() {
 	if c == nil {
 		return
 	}
-	// Each observer is gated by its player switch (§30). A switch that is off
-	// accumulates no history, so turning it back on starts from the current
-	// tick instead of replaying marks that were never drawn.
-	if c.effects.Marks {
-		c.placeTrails(c.buffer.Current())
-		c.observeScorchMarks(c.buffer.Current())
+	c.observeEffectHistories(c.buffer.Current())
+}
+
+// observeEffectHistories feeds one committed frame to the Enhanced history
+// layers. Each observer is gated by its own switch (§30): the trails by a
+// non-zero trail strength, the scorch marks by the scorch switch, the wakes and
+// hover dust by the water foam switch, and the water motion by any water
+// switch, because the surface shading, the moving field, the shore foam and
+// the reflections all read its wind energy and drift. A switch that is off
+// accumulates no history, so turning it back on starts from the current tick
+// instead of replaying marks that were never drawn.
+func (c *Client) observeEffectHistories(f *frame.Frame) {
+	if c.trailStrength > 0 {
+		c.placeTrails(f)
 	}
-	if c.effects.Water {
-		c.placeSurfaceWakes(c.buffer.Current())
-		c.observeWaterMotion(c.buffer.Current())
+	if c.effects.Scorch {
+		c.observeScorchMarks(f)
+	}
+	if c.effects.WaterFoam {
+		c.placeSurfaceWakes(f)
+	}
+	if c.effects.WaterPhase() {
+		c.observeWaterMotion(f)
 	}
 }
 

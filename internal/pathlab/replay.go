@@ -240,7 +240,7 @@ func Replay(c *Content, s *Snippet, opt ReplayOptions) (*ReplayResult, error) {
 	fb, err := headless.ComposeFreshBattle(headless.FreshBattleRequest{
 		Kind: headless.ScenarioDirectOTA, Map: cfg.MapName, LocalOwner: -1, Gameplay: mode, Difficulty: 1,
 		Skirmish: cfg, SimulationSeed: opt.Seed, CRTSeed: opt.Seed, FS: c.View, Catalog: c.Catalog,
-		CommunitySources: session.CommunitySources{Content: c.Profile.GameplaySources()},
+		CommunitySources: session.CommunitySources{Content: c.Features},
 	})
 	if err != nil {
 		return nil, err

@@ -71,12 +71,13 @@ func RetailLimits() Limits {
 	}
 }
 
-// LimitsFromProfile converts a content profile's limits into the subset the
-// catalog compile enforces. A profile that leaves a count unset keeps the
-// retail value, so a partial profile is a partial override rather than a
-// catalog with no domain at all. The host limits the profile also carries —
-// the per-player unit limit and the pathfinding step allowance — belong to
-// their own consumers and are not read here.
+// LimitsFromProfile converts a content profile's limits — a mod config's
+// `content.limits` — into the limits the catalog compile enforces. A profile
+// that leaves a count unset keeps the retail value, so a partial profile is a
+// partial override rather than a catalog with no domain at all, and the base
+// game's profile (profiles.Retail, no counts) is exactly RetailLimits. The
+// per-player unit limit and the pathfinding step allowance a content set
+// expects are Community feature values, not content limits.
 func LimitsFromProfile(p profiles.Limits) Limits {
 	limits := RetailLimits()
 	if p.Units > 0 {

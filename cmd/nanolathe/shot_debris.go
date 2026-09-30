@@ -112,8 +112,12 @@ func runDebrisShot(opts Options, cs *contentSet) error {
 	cl.SetModelFS(cs.unmappedMount, cs.presentation.TeamLogos)
 	applyVisualOptions(cl, loadedSettings().Display)
 	applyCommunityHUDOptions(cl, loadedSettings().Presentation)
-	// Every Enhanced switch on: the point of the capture is the lighting pass.
-	cl.SetEffects(drawlist.Effects{Water: true, Lighting: opts.ShotDebrisLighting, Finish: true, Distortion: true, Marks: true})
+	// Every Enhanced switch on: the point of the capture is the lighting pass,
+	// and --shot-debris-lighting turns both of its receivers, models and
+	// ground, on or off together.
+	effects := drawlist.AllEffects()
+	effects.ModelLight, effects.GroundLight = opts.ShotDebrisLighting, opts.ShotDebrisLighting
+	cl.SetEffects(effects)
 	cl.SetGlow(opts.ShotDebrisGlow)
 	cl.SetEnhanced(true)
 	b, err = composeBattleEntryWithDetail(sess, cat, cs, cl, nil, captureDetailArt(opts, cs, sess.World))
@@ -236,6 +240,8 @@ func (g *debrisShotGame) Draw(screen *ebiten.Image) {
 	g.gpu.SetGlowStrength(g.cl.GlowStrength())
 	g.gpu.SetGlowFamilies(g.cl.GlowFamilies())
 	g.gpu.SetEffects(g.cl.Effects())
+	g.gpu.SetGroundLightStrength(g.cl.GroundLightStrength())
+	g.gpu.SetBlastRingStrength(g.cl.BlastRingStrength())
 	img := g.gpu.Execute(list, g.w, g.h)
 	if img == nil {
 		g.err = fmt.Errorf("nanolathe: shot debris: frame %d composed no surface", g.drawn)

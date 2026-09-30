@@ -79,6 +79,8 @@ type app struct {
 	// cursorMode is the mode last set on the window. The adapter is its only
 	// writer, so it stands in for querying the main thread every step.
 	cursorMode ebiten.CursorModeType
+	// screenWasActive is the FullScreen state the last Update saw.
+	screenWasActive bool
 	// presentPending is set by the 30 Hz update and consumed by Draw. Draw can
 	// still be called at the monitor's refresh rate, so the retained-screen
 	// mode configured by Run lets those extra calls leave the frame untouched.
@@ -201,6 +203,8 @@ type RunOptions struct {
 	FullscreenChanged func(bool)
 	// FrameTrace enables the live window's frame trace; nil leaves it off.
 	FrameTrace *FrameTraceOptions
+	// Screen is the optional host-owned full-window screen; see FullScreen.
+	Screen FullScreen
 }
 
 // Update refreshes input once per display frame. The separate host clock runs
@@ -231,7 +235,20 @@ func (a *app) Update() error {
 	if a.options.Stats {
 		pollStart = time.Now()
 	}
-	a.hostInput.add(readInput(a.scaledInputNow()))
+	screenActive := a.screenActive()
+	if screenActive != a.screenWasActive {
+		a.screenWasActive = screenActive
+		a.syncPointerCapture()
+		a.presentPending = true
+	}
+	if screenActive {
+		// The screen owns the pointer and keyboard; the client is sampled idle
+		// so nothing beneath it reacts, while host steps keep running.
+		a.options.Screen.Update()
+		a.hostInput.add(sampledInput{timestamp: a.scaledInputNow()})
+	} else {
+		a.hostInput.add(readInput(a.scaledInputNow()))
+	}
 	a.inputPolls++
 	if a.options.Stats {
 		a.inputPollTime += time.Since(pollStart)
@@ -257,7 +274,7 @@ func (a *app) Update() error {
 		sample := a.hostInput.take()
 		sample.due = a.hostClock.stepDue(stepAt, steps, i)
 		a.hostSamples = append(a.hostSamples, sample)
-		for range a.ledger.call(a.mode == RendererModern && a.gpu != nil) {
+		for range a.ledger.call(a.mode == RendererModern && a.gpu != nil && !screenActive) {
 			if a.exitPending {
 				break
 			}
@@ -459,7 +476,9 @@ func (a *app) stepClient() {
 // cannot reproduce a historical queued pointer record's position exactly.
 func (a *app) syncPointerCapture() {
 	want := ebiten.CursorModeHidden
-	if a.c.PointerCaptured() {
+	if a.screenActive() {
+		want = ebiten.CursorModeVisible
+	} else if a.c.PointerCaptured() {
 		want = ebiten.CursorModeCaptured
 	}
 	if a.cursorMode != want {
@@ -487,6 +506,13 @@ func (a *app) scaledInputNow() uint32 {
 // Draw presents one composed frame. The image is recreated only when the
 // logical size changes; WritePixels replaces its contents wholesale.
 func (a *app) Draw(screen *ebiten.Image) {
+	if a.screenActive() {
+		// The screen owns every pixel; nothing may still be recording the
+		// client's frame underneath it.
+		a.c.JoinPreRecord()
+		a.options.Screen.Draw(screen)
+		return
+	}
 	// The arrival is taken before the pre-record join: it is the refresh this
 	// Draw belongs to, and the join's wait is not part of it.
 	arrived := time.Now()
@@ -666,6 +692,8 @@ func (a *app) drawModern(screen *ebiten.Image, width, height int, showFPS bool) 
 		a.gpu.SetGlowStrength(a.c.GlowStrength())
 		a.gpu.SetGlowFamilies(a.c.GlowFamilies())
 		a.gpu.SetEffects(a.c.Effects())
+		a.gpu.SetGroundLightStrength(a.c.GroundLightStrength())
+		a.gpu.SetBlastRingStrength(a.c.BlastRingStrength())
 		// Place only the cursor from a fresh host sample after the recorder
 		// joins. Command input remains on the ordinary host step [07 §8].
 		x, y := ebiten.CursorPosition()
@@ -1038,6 +1066,9 @@ func (a *app) Layout(outsideWidth, outsideHeight int) (int, int) {
 	a.beganAt = time.Now()
 	a.paceHeld = a.beganAt.Sub(arrived)
 	a.c.SetOutsideSize(outsideWidth, outsideHeight)
+	if a.screenActive() {
+		return screenLayout(outsideWidth, outsideHeight)
+	}
 	w, h := a.c.Size()
 	if outsideWidth > 0 && outsideHeight > 0 {
 		a.scrollPointScale = max(float64(w)/float64(outsideWidth), float64(h)/float64(outsideHeight))

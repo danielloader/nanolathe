@@ -13,9 +13,10 @@ import (
 // exactly as the map painted it. This pass gives every selected source a pool
 // of light on the composite the terrain pass has just finished.
 //
-// It is presentation only, Enhanced only, and gated by the same Lighting switch
-// as every other source (§30): with the switch off nothing is copied, nothing
-// is batched and the composite is byte-identical to the executor without it.
+// It is presentation only, Enhanced only, and gated by the ground light switch
+// alone (§30): with the switch off nothing is copied, nothing is batched and
+// the composite is byte-identical to the executor without it, whatever the
+// model light switch says.
 
 // groundLightGain is the pool's peak strength as a multiple of the ground's own
 // albedo. It stays well below the model-face gain of §23.2 — terrain already
@@ -99,7 +100,7 @@ type groundLighting struct {
 // one batch holding every light's clipped disc.
 func (r *Renderer) drawGroundLighting() {
 	g := &r.ground
-	if r.lighting.disabled || len(r.lighting.lights) == 0 || g.shader == nil || r.surfaces[0] == nil || r.surfaces[1] == nil {
+	if r.lighting.groundDisabled || 1+r.lighting.groundStrengthOffset <= 0 || len(r.lighting.lights) == 0 || g.shader == nil || r.surfaces[0] == nil || r.surfaces[1] == nil {
 		return
 	}
 	r.appendGroundLights()
@@ -123,9 +124,11 @@ func (r *Renderer) appendGroundLights() {
 	// the distortion batch: the lights are in record coordinates and the quads
 	// this pass submits are device geometry.
 	k := r.sched.txf(1)
+	// The player's ground light strength (§30) multiplies every pool alike.
+	strength := 1 + l.groundStrengthOffset
 	for i := range l.lights {
 		light := &l.lights[i]
-		gain := groundScale(light)
+		gain := groundScale(light) * strength
 		if gain <= 0 {
 			continue
 		}

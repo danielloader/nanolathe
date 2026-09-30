@@ -264,7 +264,7 @@ func (r *Renderer) decideLane(p *modelPlacePacket) {
 	nox := float32(rx) - float32(local.Min.X)*2
 	noy := float32(ry) - float32(local.Min.Y)*2
 	ox, oy := nox, noy
-	reflecting := !p.shadow && g.ReflectWater && !r.reflections.disabled && !r.water.disabled
+	reflecting := !p.shadow && g.ReflectWater && !r.reflections.disabled
 	e, body, keyed := r.retainedEntry(g, p.keyDelta, p.group, p.solo, reflecting)
 	hit := e != nil && e.captured && e.matches(g)
 	if hit {

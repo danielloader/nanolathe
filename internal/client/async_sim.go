@@ -156,14 +156,7 @@ func (c *Client) ObserveCommittedFrame(f *frame.Frame) {
 	if c == nil || f == nil {
 		return
 	}
-	if c.effects.Marks {
-		c.placeTrails(f)
-		c.observeScorchMarks(f)
-	}
-	if c.effects.Water {
-		c.placeSurfaceWakes(f)
-		c.observeWaterMotion(f)
-	}
+	c.observeEffectHistories(f)
 }
 
 // deferredCaption is one caption held by DeferCaptions.

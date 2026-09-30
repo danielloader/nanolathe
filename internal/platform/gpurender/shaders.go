@@ -86,7 +86,8 @@ const (
 	// sceneOpModelDirectCommit commits one model lane subject from the lane's
 	// 2× colour page bound in source 2: the four texels under the pixel are
 	// box-resolved, colour the mean of the covered ones and alpha their share,
-	// which is §17's coverage resolve done in the commit (§22).
+	// which is §17's coverage resolve done in the commit (§22). Custom1 set is
+	// the Supersample switch off: the block's top-left texel alone (§17.5).
 	sceneOpModelDirectCommit = 10
 	// sceneOpTint composites each opaque source texel over what is already there
 	// as the ALP table's own arithmetic, floor((src + dst)/2) per channel: the
@@ -349,13 +350,19 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 	} else if op == ` + fmt.Sprint(sceneOpModelDirectCommit) + ` {
 		// The direct lane's commit: srcPos interpolates the 2× atlas texel of
 		// the pixel, one texel into its block; floor back to the block and
-		// resolve the four texels by coverage (§22).
+		// resolve the four texels by coverage (§22). With the Supersample
+		// switch off (Custom1) the block's top-left texel, the native raster's
+		// sample, stands for the whole pixel (§17.5).
 		rel := srcPos - imageSrc0Origin()
 		b := floor(rel/2.0) * 2.0
+		point := custom.y > 0.5
 		sum := vec3(0.0)
 		cover := 0.0
 		for j := 0; j < 2; j++ {
 			for i := 0; i < 2; i++ {
+				if point && i+j > 0 {
+					continue
+				}
 				c := imageSrc2AtFromSrc0Pos(imageSrc0Origin() + b + vec2(float(i)+0.5, float(j)+0.5))
 				if c.a > 0.5 {
 					sum += c.rgb
@@ -365,6 +372,10 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 		}
 		if cover == 0.0 {
 			return vec4(0.0)
+		}
+		if point {
+			sum *= 4.0
+			cover *= 4.0
 		}
 		// Cooling rides the existing body composite: no extra samples or pass.
 		// Screen blend preserves texture contrast and premultiplied coverage.
@@ -379,6 +390,9 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 	} else if op == ` + fmt.Sprint(sceneOpModelDirectShadow) + ` {
 		rel := srcPos - imageSrc0Origin()
 		b := floor(rel/2.0) * 2.0
+		// Custom2 selects the single-sample resolve (§17.5): the silhouette
+		// and the body's punch both read the block's top-left texel alone.
+		point := custom.z > 0.5
 		sum := vec3(0.0)
 		cover := 0.0
 		body := 0.0
@@ -386,6 +400,9 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 		inside := bb.x >= color.r && bb.y >= color.g && bb.x < color.b && bb.y < color.a
 		for j := 0; j < 2; j++ {
 			for i := 0; i < 2; i++ {
+				if point && i+j > 0 {
+					continue
+				}
 				o := vec2(float(i)+0.5, float(j)+0.5)
 				c := imageSrc3AtFromSrc0Pos(imageSrc0Origin() + b + o)
 				if c.a > 0.5 {
@@ -397,6 +414,11 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 				}
 			}
 		}
+		if point {
+			sum *= 4.0
+			cover *= 4.0
+			body *= 4.0
+		}
 		if cover == 0.0 || body >= 4.0 {
 			return vec4(0.0)
 		}
@@ -404,9 +426,14 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 	} else if op == ` + fmt.Sprint(sceneOpModelSilhouetteShadow) + ` {
 		rel := srcPos - imageSrc0Origin()
 		b := floor(rel/2.0) * 2.0
+		// Custom0 selects the single-sample resolve (§17.5).
+		point := custom.x > 0.5
 		cover := 0.0
 		for j := 0; j < 2; j++ {
 			for i := 0; i < 2; i++ {
+				if point && i+j > 0 {
+					continue
+				}
 				o := vec2(float(i)+0.5, float(j)+0.5)
 				if imageSrc3AtFromSrc0Pos(imageSrc0Origin()+b+o).a <= 0.5 {
 					continue
@@ -422,6 +449,9 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 		}
 		if cover == 0.0 {
 			return vec4(0.0)
+		}
+		if point {
+			cover *= 4.0
 		}
 		return vec4(palAt(0.0)*cover/4.0*0.5, cover/4.0*0.5)
 	} else if op == ` + fmt.Sprint(sceneOpUnderwaterCommit) + ` {

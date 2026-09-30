@@ -289,9 +289,9 @@ func (c *Client) DrawEffectViews(effects []frame.EffectView, options EffectDrawO
 		if visibleExplosionSource(view, options.LightingFrame) {
 			lightingKind = drawlist.SpriteLightingExplosion
 		}
-		// The blast ring metadata is the player's Distortion switch (§25, §30);
-		// zero extent admits no ring. The lighting kind is recorded either way
-		// — the executor gates the lighting pass itself.
+		// The blast ring metadata is the blast rings switch (§25, §30); zero
+		// extent admits no ring. The lighting kind is recorded
+		// either way — the executor gates the lighting pass itself.
 		var blastAge, blastSize, lightingSize, lightingAge float32
 		hasLightingAge := c.enhanced && lightingKind == drawlist.SpriteLightingExplosion
 		if hasLightingAge {
@@ -304,7 +304,7 @@ func (c *Client) DrawEffectViews(effects []frame.EffectView, options EffectDrawO
 			// The tiny opening frame must illuminate the same region as the
 			// rest of its flash; frame bounds grow after the brightest phase.
 			lightingSize = options.BlastSize(view)
-			if c.effects.Distortion {
+			if c.effects.BlastRings {
 				blastSize = lightingSize
 				blastAge = lightingAge
 			}
@@ -319,7 +319,8 @@ func (c *Client) DrawEffectViews(effects []frame.EffectView, options EffectDrawO
 		// Enhanced water reflection for effect art (§32): a fireball over water
 		// mirrors about its own anchor's water-plane projection, so a surface
 		// impact throws its upper half back into the sea. reflectionWaterAt
-		// already returns false when the player's Water switch is off (§30).
+		// already returns false when the water reflections switch is off
+		// (§30).
 		c.emitSprite(drawlist.Sprite{Frame: c.viewFrame(frame), X: x - 128, Y: y - 32, Kind: drawlist.BlitKeyed, Anchored: true, Emissive: true,
 			BlastAge: blastAge, BlastSize: blastSize,
 			HasBlastProfile: view.HasBlastProfile, BlastAreaOfEffect: view.BlastAreaOfEffect, BlastDamage: view.BlastDamage,

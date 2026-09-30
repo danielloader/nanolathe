@@ -2,6 +2,7 @@ package modlibrary
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -75,12 +76,12 @@ func TestSelectResolvesCommandLineSelectors(t *testing.T) {
 	}
 }
 
-// A metadata-less local package takes its content profile's controls preset
-// and gameplay minimum (§4.3, §4.5); metadata that names either keeps its
-// own, and Select hands the command the filled-in mod.
-func TestLocalPackageTakesItsProfileRecommendations(t *testing.T) {
+// A metadata-less local package has no config: it installs, lists and is
+// selected as plain content with no recommendations, whatever directories
+// it ships, because nothing detects content any more (§4.5).
+func TestLocalPackageIsPlainContent(t *testing.T) {
 	base := t.TempDir()
-	writeTree(t, base, map[string]string{"units/a.fbi": "a"})
+	writeTree(t, base, map[string]string{"gamedata/moveinfo.tdf": "[CLASS0]{}", "gamedata/sidedata.tdf": "[SIDE0]{}"})
 	lib := openTestLibrary(t)
 	folder := filepath.Join(t.TempDir(), "ProTA4.8")
 	writeTree(t, folder, map[string]string{
@@ -91,23 +92,14 @@ func TestLocalPackageTakesItsProfileRecommendations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if local.Controls != "" || local.MinimumGameplay != "" {
-		t.Fatalf("the installed metadata was written with recommendations: %+v", local.Metadata)
-	}
-	resolved := ResolveProfileDefaults([]string{base}, local)
-	if resolved.Controls != "community" || resolved.MinimumGameplay != "community-3.9" {
-		t.Fatalf("detected prota package = controls %q, minimum %q", resolved.Controls, resolved.MinimumGameplay)
+	if local.HasConfig() || local.Controls != "" || local.MinimumGameplay != "" || local.Content().Name != "retail" {
+		t.Fatalf("a configless package gained a config or recommendations: %+v", local.Metadata)
 	}
 	selected, ok, err := lib.Select(local.ID, []string{base})
-	if !ok || err != nil || selected.Controls != "community" || selected.MinimumGameplay != "community-3.9" {
+	if !ok || err != nil || selected.HasConfig() || selected.Controls != "" || selected.MinimumGameplay != "" {
 		t.Fatalf("Select = %+v, %v, %v", selected.Metadata, ok, err)
 	}
-	own := local
-	own.Controls, own.MinimumGameplay = "retail", "modern"
-	if kept := ResolveProfileDefaults([]string{base}, own); kept.Controls != "retail" || kept.MinimumGameplay != "modern" {
-		t.Fatalf("metadata lost to the profile: %+v", kept.Metadata)
-	}
-	if plain := ResolveProfileDefaults([]string{base}, Mod{Dir: t.TempDir()}); plain.Controls != "" || plain.MinimumGameplay != "" {
-		t.Fatalf("a retail-layout package gained recommendations: %+v", plain.Metadata)
+	if kept := ResolveProfileDefaults([]string{base}, selected); !reflect.DeepEqual(kept, selected) {
+		t.Fatalf("ResolveProfileDefaults changed the mod: %+v", kept.Metadata)
 	}
 }

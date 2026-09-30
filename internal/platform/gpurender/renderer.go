@@ -36,11 +36,19 @@ type Renderer struct {
 	effects          drawlist.Effects
 	materialsEnabled bool
 	scorchEnabled    bool
-	scorchShader     *ebiten.Shader
-	metalGlint       bool
-	modelPrep        modelPrepScratch
-	tables           tables
-	displayPalette   [256][4]byte
+	// wreckGlowDisabled is the wreck glow switch's executor half (§28, §30):
+	// a recorded cooling emission is neither composed on the body nor lent to
+	// the battle light while it is set.
+	wreckGlowDisabled bool
+	// modelSingleSample is the Supersample switch off (§17.5): every model
+	// commit takes the one texel at its pixel's block top left, the native
+	// raster's sample, instead of the coverage resolve of the four.
+	modelSingleSample bool
+	scorchShader      *ebiten.Shader
+	metalGlint        bool
+	modelPrep         modelPrepScratch
+	tables            tables
+	displayPalette    [256][4]byte
 	// scene2D is the one opaque pass and sceneDest the one destination-compositing
 	// pass (§11.2 "One scene shader for the 2D families").
 	scene2D                   *ebiten.Shader
@@ -260,6 +268,7 @@ func NewChecked(pal *palette.Tables, w, h int) (*Renderer, error) {
 	compile(&r.scorchShader, newScorchShader)
 	compile(&r.aircraftShadow.shader, newAircraftShadowShader)
 	compile(&r.water.shader, newWaterShader)
+	compile(&r.water.stillShader, newStillWaterShader)
 	compile(&r.water.wakeShader, newSurfaceWakeShader)
 	compile(&r.reflections.sourceShader, newReflectionSourceShader)
 	compile(&r.reflections.resolveShader, newReflectionResolveShader)

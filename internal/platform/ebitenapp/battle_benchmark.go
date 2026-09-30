@@ -281,8 +281,11 @@ func (g *battleBenchmark) Draw(screen *ebiten.Image) {
 		g.gpu.SetDisplayPalette(g.c.DisplayPalette())
 		g.gpu.SetGlow(g.c.Glow())
 		// The benchmark scene is fixed: every Enhanced effect stays on so two
-		// runs measure the same work (§30).
+		// runs measure the same work (§30), and the strengths are the client's,
+		// which the benchmark leaves at the tuned look.
 		g.gpu.SetEffects(g.c.Effects())
+		g.gpu.SetGroundLightStrength(g.c.GroundLightStrength())
+		g.gpu.SetBlastRingStrength(g.c.BlastRingStrength())
 		g.img = g.gpu.Execute(list, g.options.Width, g.options.Height)
 		if err := g.gpu.FogContentError(); err != nil {
 			g.err = err

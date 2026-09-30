@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
-	"github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/save"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
@@ -19,7 +18,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
-func loadEscalationAdjacency(t *testing.T) (vfs.FSOps, *content.Catalog, content.Limits, profiles.Profile) {
+func loadEscalationAdjacency(t *testing.T) (vfs.FSOps, *content.Catalog, content.Limits, modContent) {
 	t.Helper()
 	value := strings.TrimSpace(os.Getenv("NANOLATHE_MOD_ROOTS_ESCALATION"))
 	if value == "" {
@@ -31,10 +30,7 @@ func loadEscalationAdjacency(t *testing.T) (vfs.FSOps, *content.Catalog, content
 	if err := fs.MountGameDirectories(roots); err != nil {
 		t.Fatal(err)
 	}
-	profile, err := profiles.Resolve(fs, "escalation")
-	if err != nil {
-		t.Fatal(err)
-	}
+	profile := loadModContent(t, fs, "escalation-10.2.0")
 	view := profile.Layout().Apply(fs)
 	limits := content.LimitsFromProfile(profile.Limits)
 	cat, err := content.CompileWithOptions(view, content.Options{Limits: limits})
@@ -196,7 +192,7 @@ func TestEscalationResourceRuleModes(t *testing.T) {
 	}
 }
 
-func newEscalationAdjacencySession(t *testing.T, fs vfs.FSOps, cat *content.Catalog, limits content.Limits, profile profiles.Profile, mode gameplay.Mode) *Session {
+func newEscalationAdjacencySession(t *testing.T, fs vfs.FSOps, cat *content.Catalog, limits content.Limits, profile modContent, mode gameplay.Mode) *Session {
 	t.Helper()
 	cfg := DirectSkirmishConfig("ashap plateau")
 	cfg.ApplyDefaults()

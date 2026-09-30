@@ -57,6 +57,8 @@ func TestGeometryOnlyModelRecordsStructureResolveWithoutCPUCommit(t *testing.T) 
 	c.geometryOnlyModels = true
 	c.antiAlias = true
 	c.pal = &palette.Tables{}
+	// The doubled lane also needs the player's supersampling on (§17.5).
+	c.effects = drawlist.AllEffects()
 	draw := testPrimitiveDraw(presentationrender.PrimitiveDraw{
 		IsColored:     1,
 		ColorIndex:    7,
@@ -92,6 +94,47 @@ func TestGeometryOnlyModelRecordsStructureResolveWithoutCPUCommit(t *testing.T) 
 	clone.Shadow.Faces[0].Vertices[0].X++
 	if clone.Shadow.Faces[0].Vertices[0].X == g.Shadow.Faces[0].Vertices[0].X {
 		t.Fatal("cloned shadow aliases source vertices")
+	}
+}
+
+// The player's supersampling off (GPU design §17.5, a Nanolathe presentation
+// choice) records the subject as the Anti-Alias option off does: no doubled
+// lane for the body or its shadow, retail's anchor with no half-pixel offset,
+// and a cache identity that no longer claims the doubled lane, so the retained
+// lane rebuilds when the switch moves.
+func TestSupersampleOffRecordsNoDoubledLane(t *testing.T) {
+	c := testModelTextureClient()
+	c.geometryOnlyModels = true
+	c.antiAlias = true
+	c.pal = &palette.Tables{}
+	c.effects = drawlist.AllEffects()
+	c.effects.Supersample = false
+	draw := testPrimitiveDraw(presentationrender.PrimitiveDraw{
+		IsColored:     1,
+		ColorIndex:    7,
+		VertexIndices: []uint16{0, 1, 2, 3},
+	}, [][3]numeric.Fixed{
+		fixedVertex(0, 1, 0), fixedVertex(8, 1, 0), fixedVertex(8, 1, -8), fixedVertex(0, 1, -8),
+	})
+	draw.Structure, draw.KeyPlane, draw.CastsShadow = true, true, true
+	if c.cachedBodyInputs(draw).geometrySupersampled || c.cachedShadowInputs(draw).doubled {
+		t.Fatal("supersampling off still claims the doubled lane in the cache identity")
+	}
+	if !c.drawModel(draw, 0, teamColor{}, 1, modelCursorUnit, nil, 0) {
+		t.Fatal("geometry-only structure was not recorded")
+	}
+	models := c.list.ModelCommands()
+	if len(models) != 1 || models[0].Geometry == nil || !models[0].Geometry.Eligible || len(models[0].Geometry.Faces) == 0 {
+		t.Fatalf("supersampling off record = %#v, want eligible native geometry", models)
+	}
+	g := models[0].Geometry
+	if g.Supersample != nil || g.Shadow == nil || g.Shadow.Supersample != nil {
+		t.Fatal("supersampling off recorded a doubled lane")
+	}
+	ax, ay, hx, hy := c.modelPlacement(draw)
+	rx, ry := c.modelAnchor(draw)
+	if ax != rx || ay != ry || hx != 0 || hy != 0 {
+		t.Fatalf("supersampling off placed the body at %d,%d+%d,%d, want retail's %d,%d", ax, ay, hx, hy, rx, ry)
 	}
 }
 

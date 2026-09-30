@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	contentprofiles "github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
@@ -133,7 +132,7 @@ func TestParseMetadata(t *testing.T) {
 		t.Fatalf("relative profile path refused: %v", err)
 	}
 	for name, doc := range map[string]string{
-		"schema 2":          `{"schema":2,"id":"a","name":"A","version":"1"}`,
+		"schema 3":          `{"schema":3,"id":"a","name":"A","version":"1"}`,
 		"uppercase id":      `{"schema":1,"id":"ProTA","name":"A","version":"1"}`,
 		"empty name":        `{"schema":1,"id":"a","name":" ","version":"1"}`,
 		"empty version":     `{"schema":1,"id":"a","name":"A","version":""}`,
@@ -271,9 +270,9 @@ func TestOpenDuringAnInstallLeavesItToFinish(t *testing.T) {
 
 func TestInstallArchiveWithMetadata(t *testing.T) {
 	lib := openTestLibrary(t)
-	meta := Metadata{Schema: 1, ID: "prota", Name: "ProTA", Version: "4.8", ContentProfile: "prota", MinimumGameplay: "community-3.9", Controls: "community"}
+	config := `{"schema":2,"id":"prota","name":"ProTA","version":"4.8","rules":{"minimumGameplay":"community-3.9"},"keys":{"profile":"community"}}`
 	archive := writeZip(t, t.TempDir(), "prota-4.8.zip",
-		zipItem{name: MetadataFile, body: metadataJSON(t, meta)},
+		zipItem{name: MetadataFile, body: config},
 		zipItem{name: "units/", mode: fs.ModeDir},
 		zipItem{name: "units\\armcom.fbi", body: "[UNITINFO]{}"},
 		zipItem{name: "prota.ufo", body: "authored archive stand-in"},
@@ -283,7 +282,7 @@ func TestInstallArchiveWithMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mod.Dir != filepath.Join(lib.Root, "prota", "4.8") || mod.Local || !reflect.DeepEqual(mod.Metadata, meta) {
+	if mod.Dir != filepath.Join(lib.Root, "prota", "4.8") || mod.Local || !mod.HasConfig() || mod.MinimumGameplay != "community-3.9" || mod.Controls != "community" {
 		t.Fatalf("installed %+v", mod)
 	}
 	for _, name := range []string{MetadataFile, ReceiptFile, "prota.ufo", filepath.Join("units", "armcom.fbi")} {
@@ -302,6 +301,32 @@ func TestInstallArchiveWithMetadata(t *testing.T) {
 	mods, err := lib.Installed()
 	if err != nil || len(mods) != 1 || !reflect.DeepEqual(mods[0], mod) {
 		t.Fatalf("Installed = %+v, %v; want the one install", mods, err)
+	}
+}
+
+// A schema 1 mod carries no config: it installs and lists as plain content,
+// and the recommendations its metadata names select nothing (§4.5).
+func TestSchemaOneModIsPlainContent(t *testing.T) {
+	lib := openTestLibrary(t)
+	meta := Metadata{Schema: 1, ID: "prota", Name: "ProTA", Version: "4.8", ContentProfile: "prota", MinimumGameplay: "community-3.9", Controls: "community", BuildMenuPageSize: 12}
+	archive := writeZip(t, t.TempDir(), "prota-4.8.zip", zipItem{name: MetadataFile, body: metadataJSON(t, meta)}, zipItem{name: "prota.ufo", body: "a"})
+	mod, err := lib.InstallArchive(archive, InstallOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Metadata{Schema: 1, ID: "prota", Name: "ProTA", Version: "4.8"}
+	if mod.HasConfig() || !reflect.DeepEqual(mod.Metadata, want) {
+		t.Fatalf("installed %+v, want plain %+v", mod.Metadata, want)
+	}
+	if got := mod.Content(); got.Name != "retail" || len(got.Directories) != 0 || mod.CommunitySources() != nil {
+		t.Fatalf("a configless mod mounts %+v with sources %v, want the base game's profile and none", got, mod.CommunitySources())
+	}
+	listed, ok, err := lib.Lookup("prota", "")
+	if err != nil || !ok || !reflect.DeepEqual(listed.Metadata, want) {
+		t.Fatalf("Lookup = %+v, %v, %v", listed.Metadata, ok, err)
+	}
+	if notice := NoConfigNotice(mod.Name); !strings.Contains(notice, "ProTA has no Nanolathe config file") || !strings.Contains(notice, "Get more mods") {
+		t.Fatalf("notice = %q", notice)
 	}
 }
 
@@ -521,6 +546,7 @@ func TestExpectMismatchRefusesInstall(t *testing.T) {
 		"contentProfile":  func(m *Metadata) { m.ContentProfile = "" },
 		"minimumGameplay": func(m *Metadata) { m.MinimumGameplay = "modern" },
 		"controls":        func(m *Metadata) { m.Controls = "retail" },
+		"schema":          func(m *Metadata) { m.Schema, m.ContentProfile, m.Controls = 2, "", "" },
 	} {
 		t.Run(field, func(t *testing.T) {
 			lib := openTestLibrary(t)
@@ -548,6 +574,35 @@ func TestExpectMismatchRefusesInstall(t *testing.T) {
 		}
 		assertNothingInstalled(t, lib)
 	})
+	// A schema 2 entry names neither a content profile nor a preset: the
+	// zip's config is authoritative, and only the minimum it shows before
+	// the download must agree (§5.1).
+	config := `{"schema":2,"id":"prota","name":"ProTA","version":"4.8+nanolathe.1","rules":{"minimumGameplay":"community-3.9"},"keys":{"profile":"community"}}`
+	configured := writeZip(t, t.TempDir(), "prota-2.zip", zipItem{name: MetadataFile, body: config}, zipItem{name: "a.ufo", body: "a"})
+	entry := Metadata{Schema: 2, ID: "prota", Name: "ProTA", Version: "4.8+nanolathe.1", MinimumGameplay: "community-3.9"}
+	if err := entry.Validate(); err != nil {
+		t.Fatalf("a schema 2 catalogue entry = %v", err)
+	}
+	lib := openTestLibrary(t)
+	if _, err := lib.InstallArchive(configured, InstallOptions{Expect: &entry}); err != nil {
+		t.Fatalf("a schema 2 catalogue install = %v", err)
+	}
+	stale := entry
+	stale.MinimumGameplay = ""
+	if _, err := openTestLibrary(t).InstallArchive(configured, InstallOptions{Expect: &stale}); err == nil || !strings.Contains(err.Error(), "minimumGameplay") {
+		t.Fatalf("a schema 2 minimum disagreement = %v", err)
+	}
+	for field, mutate := range map[string]func(*Metadata){
+		"contentProfile":    func(m *Metadata) { m.ContentProfile = "prota" },
+		"controls":          func(m *Metadata) { m.Controls = "community" },
+		"buildMenuPageSize": func(m *Metadata) { m.BuildMenuPageSize = 12 },
+	} {
+		bad := entry
+		mutate(&bad)
+		if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), field) {
+			t.Errorf("a schema 2 catalogue entry naming %s = %v, want it refused", field, err)
+		}
+	}
 }
 
 func TestArchiveIdentityIsVerifiedBeforeExtraction(t *testing.T) {
@@ -772,35 +827,34 @@ func TestContentValidator(t *testing.T) {
 		}
 		assertNothingInstalled(t, lib)
 	})
-	t.Run("shipped profile reads its renamed directory", func(t *testing.T) {
-		meta := sampleMetadata()
-		meta.ContentProfile = "prota"
-		// The prota table sends gamedata to gamedatP, which the base lacks.
-		if _, err := install(t, []string{base}, meta, map[string]string{"units/a.fbi": "a"}); err == nil {
-			t.Fatal("a prota-profile mod without gamedatP validated")
+	t.Run("config content reads its renamed directory", func(t *testing.T) {
+		config := `{"schema":2,"id":"sample","name":"Sample","version":"1.0","content":{"detect":["gamedatX"],"layout":{"gamedata":"gamedatX"}}}`
+		installConfig := func(t *testing.T, baseRoots []string, files map[string]string) (*Library, error) {
+			lib := openTestLibrary(t)
+			items := []zipItem{{name: MetadataFile, body: config}}
+			for name, body := range files {
+				items = append(items, zipItem{name: name, body: body})
+			}
+			archive := writeZip(t, t.TempDir(), "sample.zip", items...)
+			_, err := lib.InstallArchive(archive, InstallOptions{Validate: ContentValidator(baseRoots)})
+			return lib, err
 		}
-		if _, err := install(t, []string{base}, meta, map[string]string{
-			"gamedatP/moveinfo.tdf": "[CLASS0]{}", "gamedatP/sidedata.tdf": "[SIDE0]{}",
-		}); err != nil {
-			t.Fatal(err)
+		// The layout sends gamedata to gamedatX, which the base lacks, and
+		// the detect marker names it: content without it is not this mod.
+		lib, err := installConfig(t, []string{base}, map[string]string{"units/a.fbi": "a"})
+		if err == nil || !strings.Contains(err.Error(), "does not match its config") || !strings.Contains(err.Error(), "gamedatX") {
+			t.Fatalf("a config whose detect directory is absent = %v", err)
 		}
-	})
-	t.Run("profile path inside the mod", func(t *testing.T) {
-		meta := sampleMetadata()
-		meta.ContentProfile = "profiles/custom.json"
-		lib, err := install(t, []string{emptyBase}, meta, map[string]string{
-			"profiles/custom.json":  `{"name":"custom","detect":["gamedatX"],"layout":{"gamedata":"gamedatX"},"limits":{}}`,
+		assertNothingInstalled(t, lib)
+		lib, err = installConfig(t, []string{emptyBase}, map[string]string{
 			"gamedatX/moveinfo.tdf": "[CLASS0]{}", "gamedatX/sidedata.tdf": "[SIDE0]{}",
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		mod, ok, err := lib.Lookup("sample", "")
-		if err != nil || !ok {
-			t.Fatalf("Lookup = %v, %v", ok, err)
-		}
-		if got, want := mod.ContentProfileSelector(), filepath.Join(mod.Dir, "profiles", "custom.json"); got != want {
-			t.Fatalf("ContentProfileSelector = %q, want %q", got, want)
+		if err != nil || !ok || mod.Content().Directories["gamedata"] != "gamedatX" || mod.Content().Name != "sample" {
+			t.Fatalf("Lookup = %+v, %v, %v", mod.Content(), ok, err)
 		}
 	})
 
@@ -814,31 +868,26 @@ func TestContentValidator(t *testing.T) {
 	if got, want := MissingRequirements(baseFS, meta), []string{"maps/absent.tnt", "maps/also-absent.tnt"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("MissingRequirements = %v, want %v", got, want)
 	}
-	for selector, want := range map[string]string{"": "", "PROTA": "PROTA"} {
-		meta := sampleMetadata()
-		meta.ContentProfile = selector
-		if got := (Mod{Metadata: meta, Dir: "/mods/sample/1.0"}).ContentProfileSelector(); got != want {
-			t.Errorf("ContentProfileSelector(%q) = %q, want %q", selector, got, want)
-		}
-	}
 }
 
-// A mod's build page lock is presentation metadata: negative is refused, and
-// an omitted value takes the content profile's while an authored one wins.
+// A mod's build page lock is presentation metadata: negative is refused, a
+// config carries it as content.presentation.build_menu_page_size, and a
+// config named by --mod-config brings its own (WithConfig).
 func TestBuildMenuPageSizeMetadata(t *testing.T) {
 	meta := sampleMetadata()
 	meta.BuildMenuPageSize = -1
 	if err := meta.Validate(); err == nil {
 		t.Fatal("negative buildMenuPageSize validated")
 	}
-	var profile contentprofiles.Profile
-	profile.Presentation.BuildMenuPageSize = 12
-	if got := (Mod{Metadata: sampleMetadata()}).WithProfileDefaults(profile).BuildMenuPageSize; got != 12 {
-		t.Fatalf("omitted lock took %d, want the profile's 12", got)
+	configured, err := ParseMetadata([]byte(`{"schema":2,"id":"paged","name":"Paged","version":"1","content":{"presentation":{"build_menu_page_size":12}}}`))
+	if err != nil || configured.BuildMenuPageSize != 12 {
+		t.Fatalf("config lock = %d, %v; want 12", configured.BuildMenuPageSize, err)
 	}
-	meta = sampleMetadata()
-	meta.BuildMenuPageSize = 6
-	if got := (Mod{Metadata: meta}).WithProfileDefaults(profile).BuildMenuPageSize; got != 6 {
-		t.Fatalf("authored lock became %d, want 6", got)
+	if _, err := ParseMetadata([]byte(`{"schema":2,"id":"paged","name":"Paged","version":"1","content":{"presentation":{"build_menu_page_size":-1}}}`)); err == nil {
+		t.Fatal("a negative config lock parsed")
+	}
+	mod := Mod{Metadata: sampleMetadata(), Dir: "/mods/sample/1.0"}
+	if got := mod.WithConfig(configured); got.BuildMenuPageSize != 12 || got.Config != configured.Config || got.ID != "sample" || got.Dir != mod.Dir {
+		t.Fatalf("WithConfig = %+v", got)
 	}
 }

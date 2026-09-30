@@ -450,6 +450,9 @@ type Client struct {
 	effectStats             EffectDrawStats
 	stripStats              StripDrawStats
 	blastSizes              map[*formats.GAFEntry]float32
+	// effectArtLimit is the host's cap on effect art, in authored pixels
+	// (SetEffectArtLimit); zero draws every entry.
+	effectArtLimit int
 
 	// flash holds the generated calculated-explosion tables [06 R-WFX-01 §2].
 	flash flashTables
@@ -477,6 +480,10 @@ type Client struct {
 	// trailStrength is the player's 0..100 percentage over the content pack's
 	// footprint and track strengths (DESIGN_GPU_RENDERER §15).
 	trailStrength int
+	// groundLightStrength and blastRingStrength are the player's percentages
+	// of the tuned ground light pools and blast ring amplitude
+	// (DESIGN_GPU_RENDERER §30). They only reach the executor.
+	groundLightStrength, blastRingStrength int
 	// effects is the player's Enhanced effect selection
 	// (docs/DESIGN_GPU_RENDERER.md §30), persisted in the presentation block.
 	// The recorder gates the producers that cost work to record; the executor
@@ -624,6 +631,10 @@ func New(opts Options) (*Client, error) {
 		// renderer's GlowStrengthDefault and settings.DefaultGlowStrength.
 		glowStrength:  100,
 		trailStrength: 50,
+		// The ground light and blast ring strengths start at the tuned look:
+		// the renderer's EffectStrengthDefault and settings.DefaultEffectStrength.
+		groundLightStrength: 100,
+		blastRingStrength:   100,
 		// Every Enhanced effect is on until the player turns it off (§30).
 		effects: drawlist.AllEffects(),
 		// Restore-defaults sets the Shading bit, so shading is on unless the
@@ -1121,12 +1132,53 @@ func (c *Client) GlowStrength() int {
 	return c.glowStrength
 }
 
+// SetGroundLightStrength selects the ground light pools' strength as a
+// percentage of the tuned look (DESIGN_GPU_RENDERER §30). Like the glow
+// strength it only reaches the executor, through GroundLightStrength, and a
+// changed strength is a different paused world raster (§13.10).
+func (c *Client) SetGroundLightStrength(percent int) {
+	if c == nil || c.groundLightStrength == percent {
+		return
+	}
+	c.groundLightStrength = percent
+	c.pausedWorldRevision++
+}
+
+// GroundLightStrength returns the ground light strength percentage.
+func (c *Client) GroundLightStrength() int {
+	if c == nil {
+		return 0
+	}
+	return c.groundLightStrength
+}
+
+// SetBlastRingStrength selects the blast rings' amplitude as a percentage of
+// the tuned look (DESIGN_GPU_RENDERER §30). It only reaches the executor,
+// through BlastRingStrength, and a changed strength is a different paused
+// world raster (§13.10).
+func (c *Client) SetBlastRingStrength(percent int) {
+	if c == nil || c.blastRingStrength == percent {
+		return
+	}
+	c.blastRingStrength = percent
+	c.pausedWorldRevision++
+}
+
+// BlastRingStrength returns the blast ring strength percentage.
+func (c *Client) BlastRingStrength() int {
+	if c == nil {
+		return 0
+	}
+	return c.blastRingStrength
+}
+
 // SetEffects selects the player's Enhanced effects (§30). A changed selection
-// retires the transient histories the same way an executor swap does: the
-// trail, wake, water-motion and scorch states are accumulated per committed
-// tick while their producer runs, so a switch that was off left gaps in them
-// and a switch turned off must not leave stale marks behind. Nothing here
-// touches simulation state [I6].
+// — any one switch — retires the transient histories the same way an executor
+// swap does: the trail, wake, water-motion
+// and scorch states are accumulated per committed tick while their producer
+// runs, so a switch that was off left gaps in them and a switch turned off
+// must not leave stale marks behind. Nothing here touches simulation state
+// [I6].
 func (c *Client) SetEffects(e drawlist.Effects) {
 	if c == nil || c.effects == e {
 		return

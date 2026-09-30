@@ -103,9 +103,9 @@ package implements.
 | `formats` | Lossless readers and writers for the authored formats — TDF (comments blanked with byte offsets preserved), GAF, TNT, 3DO, OTA, PAL, PCX, FNT, WAV, GUI, SCT, BMP | DESIGN_CONTENT_VFS |
 | `formats/zrb` | Stateful Smacker 2 movie decoder: indexed frames, palette deltas, PCM soundtrack and authored cadence | DESIGN_CONTENT_VFS |
 | `internal/content` | Compiles authored data into immutable definitions with defaults and conversions applied once: units, weapons, features, movement classes, sides, sounds, maps, AI profiles, battle tables; the catalog hash; and the authored animation metadata the SIMULATION depends on — a feature's burn/die/reclaim frame geometry and lifetimes in visits, an effect entry's frame count (`CompileSimArt`), compiled before the session's features and strips exist so headless and windowed battles run one simulation | DESIGN_CONTENT_VFS |
-| `internal/content/profiles` | Content profiles: the embedded per-content-set directory tables and limits, marker detection and selection by name or authored JSON file, applied as a `vfs.Layout` at the mount boundary | DESIGN_CONTENT_VFS §5 |
+| `internal/content/profiles` | Content profiles: the content section of a mod's `nanolathe-mod.json` (directory table, limits, front-end art) and the base game's built-in profile, applied as a `vfs.Layout` at the mount boundary. No per-mod data and no detection | DESIGN_CONTENT_VFS §5 |
 | `internal/settings` | Front-end preferences that survive a restart (last skirmish setup, per-slot side/colour/ally, difficulty, the selected mod and mutators) | DESIGN_CONTENT_VFS |
-| `internal/modlibrary` | The installed-mod library: data directory, `nanolathe-mod.json` metadata, mod selection, and zip or folder install with extraction and validation. No network | DESIGN_MODS_MUTATORS §4 |
+| `internal/modlibrary` | The installed-mod library: data directory, `nanolathe-mod.json` metadata and the mod's Nanolathe config (content, rules, settings, keys, locks), mod selection, and zip or folder install with extraction and validation. No network | DESIGN_MODS_MUTATORS §4 |
 | `internal/modfetch` | The nanolathe.gg mod manifest and resumable, SHA-256-verified downloads. The only package that imports `net/http`, and only `cmd/nanolathe` imports it | DESIGN_MODS_MUTATORS §5 |
 
 ### Runtime core
@@ -174,6 +174,7 @@ package implements.
 | `internal/debugcapture` | Host-only on-demand bundle writer: runtime profiles, own-process memory counters, file status manifest; receives detached engine projections from the battle owner | DESIGN_PRESENTATION_CLIENT, DEBUG_CAPTURE |
 | `internal/platform/benchlock` | Host file lock serializing benchmark startup and execution across worktrees | BATTLE_BENCHMARK, SIM_BENCHMARK |
 | `internal/drawlist` | The recorded committed-frame draw list: command families carrying physical palette indices, the `Sink` executor interface, ordered replay and model packet boundary | DESIGN_GPU_RENDERER |
+| `internal/platform/screenkit` | Device-resolution toolkit for the Nanolathe screen: film typefaces as glyph mip levels, paint helpers, hit regions | DESIGN_INTERFACE_HUD_INPUT §3.17 |
 | `internal/platform/gpurender` | The modern executor: replays a draw list through Ebitengine in palette-index space, table textures, atlases, per-subject GPU model prototypes, expansion to RGB | DESIGN_GPU_RENDERER |
 | `internal/upscale` | Load-time 2× synthesis of terrain tiles and feature sprite banks from the map's own pixels, with the on-disk cache; the `tools/mapupscale` synthesizers are wrappers over it | DESIGN_GPU_RENDERER §14 |
 
@@ -251,8 +252,8 @@ Four boundaries in this graph are enforced by tests in `internal/architecture`
 rather than by convention:
 
 * **Only the platform adapter reaches Ebitengine.** `internal/platform/ebitenapp`,
-  `internal/platform/gpurender`, `internal/audiobackend` and
-  `cmd/nanolathe` are the only packages whose
+  `internal/platform/gpurender`, `internal/platform/screenkit`,
+  `internal/audiobackend` and `cmd/nanolathe` are the only packages whose
   import closure (including their test binaries) may contain the Ebitengine
   modules. Every other package, and every other test, stands up with no
   window and no audio device.

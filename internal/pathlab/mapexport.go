@@ -63,7 +63,7 @@ func ExportMap(c *Content, mapName, dir string, picture bool) (*MapGrid, error) 
 	fb, err := headless.ComposeFreshBattle(headless.FreshBattleRequest{
 		Kind: headless.ScenarioDirectOTA, Map: cfg.MapName, LocalOwner: -1, Gameplay: gameplay.Strict31, Difficulty: 1,
 		Skirmish: cfg, SimulationSeed: 7, CRTSeed: 7, FS: c.View, Catalog: c.Catalog,
-		CommunitySources: session.CommunitySources{Content: c.Profile.GameplaySources()},
+		CommunitySources: session.CommunitySources{Content: c.Features},
 	})
 	if err != nil {
 		return nil, err

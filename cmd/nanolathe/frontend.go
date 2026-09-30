@@ -19,6 +19,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
+	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/mission"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/ebitenapp"
@@ -182,6 +183,19 @@ type gameShell struct {
 	// settings have been offered, so each is offered once
 	// (docs/DESIGN_MODS_MUTATORS.md §4.3).
 	controlsOffered []string
+	// lockOverrides is the saved list of mod ids whose rule lock the player
+	// overrode (docs/DESIGN_MODS_MUTATORS.md §4.3 "Overriding a rule lock").
+	lockOverrides []string
+	// baseSettings is the settings file's base block as last loaded, with
+	// every mod's patch, and presets the player's saved presets
+	// (modsettings.go, docs/DESIGN_MODS_MUTATORS.md §4.6).
+	baseSettings settings.Settings
+	presets      []settings.Preset
+	// keyMap is the player's battle keyboard: the saved keyBindings profile
+	// with their rebound actions (keymap.go,
+	// docs/DESIGN_INTERFACE_HUD_INPUT.md §3.6 "Rebinding"). Nil plays the
+	// retail keys.
+	keyMap *input.KeyMap
 	// messages is the message-column ring configuration (`textlines`,
 	// `textscroll`, `screenchat`, `unitchattext`). The options family's
 	// interface page writes `textscroll`, `textlines` and `unitchattext`;
@@ -460,6 +474,8 @@ func runGameShell(launch, opts Options, cs *contentSet) error {
 	shell.queueStartupMovie()
 	defer func() { host.shell.closeIntro(cl) }()
 	options := host.windowOptions()
+	nlScreenInst = newNLScreen(func() *gameShell { return host.shell })
+	options.Screen = nlScreenInst
 	// A trace of menu play is the player's own session, not a benchmark: it
 	// takes no benchmark lock (a game should not wait on one) and saves
 	// settings as usual. It starts at the first battle.
@@ -497,7 +513,7 @@ func startWithSavedModFallback[T any](launch, opts Options, cs *contentSet, star
 		return zero, cs, err
 	}
 	_ = cs.Close()
-	opts.Root, opts.Roots, opts.ContentProfile = fresh.root, fresh.roots, fresh.profile
+	opts.Root, opts.Roots, opts.ModConfig = fresh.root, fresh.roots, fresh.configPath
 	result, err = start(opts, fresh)
 	if err != nil {
 		_ = fresh.Close()
@@ -985,10 +1001,16 @@ func (g *gameShell) step(delta float64, cl *client.Client) {
 	// dialog never reports a drop install as its own download.
 	g.pollModDrop(cl)
 	g.pollModsFetch()
-	// A mod's recommended settings are offered once, over the bare main
-	// menu, however the mod came to be running (docs/DESIGN_MODS_MUTATORS.md
-	// §4.3).
-	g.pollControlsOffer()
+	// The Nanolathe screen gets ready while the main menu idles, so it opens
+	// onto a staged scene (nlscreen.go).
+	if nlScreenInst != nil && g.frontend != nil {
+		if g.frontend.Mode == modeMenuMain {
+			nlScreenInst.warm(g)
+		} else if !nlScreenInst.open && nlScreenInst.warmed != nil {
+			// Leaving the main menu another way releases the staged scene.
+			nlScreenInst.releasePreview(false)
+		}
+	}
 	if cl != nil && cl.IsFocused() && g.audioOwner != nil && g.audioOwner.Music != nil {
 		serviceMusic(g.audioOwner)
 	}

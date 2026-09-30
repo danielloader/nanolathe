@@ -410,11 +410,39 @@ func (c *Client) EffectEntryFrameCount(bank, entry string) (int, bool) {
 	return len(e.Frames), true
 }
 
+// SetEffectArtLimit caps the effect art this client draws: an entry with a
+// frame wider or taller than px authored pixels draws nothing, lends no light
+// and leaves no scorch. Zero, the default, draws every entry. It is a host
+// presentation choice, never set for a battle: the Nanolathe screen's preview
+// sets it so that a content pack whose explosion entries are sized for
+// something else — TA: Escalation's shield bubbles, 760–1140 pixels, which
+// its stock weapons' hits and deaths also name — cannot cover the preview
+// and stall it (DESIGN_INTERFACE_HUD_INPUT §3.17). Nothing here touches
+// simulation state [I6].
+func (c *Client) SetEffectArtLimit(px int) {
+	if c != nil {
+		c.effectArtLimit = max(px, 0)
+	}
+}
+
+// effectArtAdmitted reports whether an entry lies within the art limit.
+func (c *Client) effectArtAdmitted(entry *formats.GAFEntry) bool {
+	if c == nil || c.effectArtLimit <= 0 || entry == nil {
+		return true
+	}
+	for _, ref := range entry.Frames {
+		if f := ref.Frame; f != nil && (int(f.Width) > c.effectArtLimit || int(f.Height) > c.effectArtLimit) {
+			return false
+		}
+	}
+	return true
+}
+
 // resolveBlastSize measures immutable authored art, not the tiny opening frame
 // of a growing fireball. This modern-only size cache is retired with the bank.
 func (c *Client) resolveBlastSize(view frame.EffectView) float32 {
 	entry, ok := c.effectEntry(view.AssetID, view.Graphic)
-	if !ok {
+	if !ok || !c.effectArtAdmitted(entry) {
 		return 0
 	}
 	if size, ok := c.blastSizes[entry]; ok {

@@ -92,13 +92,18 @@ const (
 	// and 200 is the most the preference stores (DESIGN_GPU_RENDERER §19.4).
 	DefaultGlowStrength = 100
 	MaxGlowStrength     = 200
-	// DefaultEffectSwitch is the shared default of the five Enhanced effect
+	// DefaultEffectSwitch is the shared default of the Enhanced effect
 	// switches in the presentation block (DESIGN_GPU_RENDERER §30). Like Glow
 	// they have no retail bit and start on.
 	DefaultEffectSwitch = 1
 	// TrailStrength scales the existing footprint and track darkening only.
 	DefaultTrailStrength = 50
 	MaxTrailStrength     = 100
+	// DefaultEffectStrength and MaxEffectStrength bound the Enhanced ground
+	// light and blast ring strengths, percentages of the tuned look
+	// (DESIGN_GPU_RENDERER §30); 0 is off.
+	DefaultEffectStrength = 100
+	MaxEffectStrength     = 200
 
 	DefaultGamma = 12
 	// `VISUALS` `GAMMA` is a kind-4 slider whose maximum is 20; the stored
@@ -443,11 +448,13 @@ type Settings struct {
 	Gameplay         gameplay.Mode       `json:"gameplay"`
 	GameplayFeatures community.Overrides `json:"gameplayFeatures,omitempty"`
 	BuilderOptions   BuilderOptions      `json:"builderOptions"`
-	// ContentProfile is the selected content profile: a shipped profile's
-	// name, the path of a user-authored profile JSON file, or empty to detect
-	// the profile from the mounted content set's own markers. It is a
-	// load-time content fact, not a gameplay rule set
-	// (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
+	// ContentProfile is the saved form of --mod-config: the path of a
+	// nanolathe-mod.json whose content section and rules apply when no mod is
+	// selected (a manual --root stack, or the base install), or empty for
+	// none. A selected mod's own config always wins. A value naming one of
+	// the removed built-in profiles (prota, zero, escalation, mayhem, retail)
+	// is ignored with a notice; nothing detects content
+	// (docs/DESIGN_MODS_MUTATORS.md §4.3).
 	ContentProfile string `json:"contentProfile,omitempty"`
 	// Mutators is the selected mutator set, each key mapped to its canonical
 	// factor spelling, e.g. {"buildSpeed": "2"} (docs/DESIGN_MODS_MUTATORS.md
@@ -473,7 +480,24 @@ type Settings struct {
 	// (docs/DESIGN_MODS_MUTATORS.md §4.3). The offer is made once per entry,
 	// whatever the answer.
 	ControlsOffered []string `json:"controlsOffered,omitempty"`
-	Version         int      `json:"version"`
+	// ModLockOverrides lists the mod ids whose rule lock the player has
+	// overridden on the Nanolathe screen, accepting the warning that a future
+	// network game may refuse the combination (docs/DESIGN_MODS_MUTATORS.md
+	// §4.3 "Overriding a rule lock"). A listed mod no longer raises the rules
+	// to its minimum.
+	ModLockOverrides []string `json:"modLockOverrides,omitempty"`
+	// KeyBindings is the player's keyboard profile and rebound actions
+	// (keybindings.go).
+	KeyBindings KeyBindings `json:"keyBindings,omitzero"`
+	// ModSettings holds, per mod id, the player's own changes while playing
+	// that mod: a patch over the base block and the mod's recommendations,
+	// limited to the mod-scoped paths (layers.go,
+	// docs/DESIGN_MODS_MUTATORS.md §4.6). The base block above is what the
+	// original game plays.
+	ModSettings map[string]json.RawMessage `json:"modSettings,omitempty"`
+	// Presets are the player's saved sets of mod-scoped settings (layers.go).
+	Presets []Preset `json:"presets,omitempty"`
+	Version int      `json:"version"`
 	// Fullscreen is Nanolathe's desktop presentation preference, independent of
 	// retail display options. Absent in older settings files means windowed.
 	Fullscreen bool `json:"fullscreen"`
@@ -578,17 +602,21 @@ func (m *Messages) Normalize() {
 // positive values cap modern presentation without changing the simulation.
 type Presentation struct {
 	// Negative snap radii select the content table's default; zero disables.
-	MexSnapRadius        int        `json:"mexSnapRadius"`
-	WreckSnapRadius      int        `json:"wreckSnapRadius"`
-	BuildRotateKey       string     `json:"buildRotateKey"`
-	ClickSnapOverrideKey string     `json:"clickSnapOverrideKey"`
-	BuildRotationOverlay int        `json:"buildRotationOverlay"`
-	NanoframePreview     int        `json:"nanoframePreview"` // 0 pulse, 1 full, 2 wire, 3 off (DESIGN_GPU_RENDERER §37).
-	QueuedOrderDrag      int        `json:"queuedOrderDrag"`
-	StrategicIconConfig  string     `json:"strategicIconConfig"`
-	TeamColorNanolathe   int        `json:"teamColorNanolathe"`
-	PlayerStreamColors   [10]string `json:"playerStreamColors"`
-	PlayerFrameColors    [10]string `json:"playerFrameColors"`
+	MexSnapRadius        int    `json:"mexSnapRadius"`
+	WreckSnapRadius      int    `json:"wreckSnapRadius"`
+	BuildRotateKey       string `json:"buildRotateKey"`
+	ClickSnapOverrideKey string `json:"clickSnapOverrideKey"`
+	BuildRotationOverlay int    `json:"buildRotationOverlay"`
+	NanoframePreview     int    `json:"nanoframePreview"` // 0 pulse, 1 full, 2 wire, 3 off (DESIGN_GPU_RENDERER §37).
+	QueuedOrderDrag      int    `json:"queuedOrderDrag"`
+	// BuildDrag lets a left drag while placing a structure lay a row, and
+	// Alt a grid, in the Enhanced renderer (DESIGN_INTERFACE_HUD_INPUT §3.11);
+	// off, each click places one site. On by default.
+	BuildDrag           int        `json:"buildDrag"`
+	StrategicIconConfig string     `json:"strategicIconConfig"`
+	TeamColorNanolathe  int        `json:"teamColorNanolathe"`
+	PlayerStreamColors  [10]string `json:"playerStreamColors"`
+	PlayerFrameColors   [10]string `json:"playerFrameColors"`
 
 	CommunityCounters int `json:"communityCounters"`
 	ReloadBars        int `json:"reloadBars"`
@@ -618,27 +646,65 @@ type Presentation struct {
 	// DoubleClickSelection enables the community patch's on-screen same-type
 	// selection for a native left- or right-double-click record.
 	DoubleClickSelection int `json:"doubleClickSelection"`
-	// The five Enhanced effect switches (DESIGN_GPU_RENDERER §30). They are
+	// The Enhanced effect switches (DESIGN_GPU_RENDERER §30). They are
 	// Nanolathe options with no retail bit, read only by the modern recorder
 	// and executor, and stored as integers for the same reason the display
 	// bits are: a stored 0 is "off" and is kept, so only a negative value is
 	// repaired. A file that omits a key keeps the default, because the loader
 	// decodes over the defaults [02 "Settings"].
 	//
-	// Water is the coastal water surface, wakes and hover dust, building foam,
-	// water motion and the screen-space reflections.
-	Water int `json:"water"`
-	// Lighting is the battle lighting of models and smoke.
-	Lighting int `json:"lighting"`
-	// Finish is the metallic glint and the metal/paint material finishes.
+	// Every switch is independent and toggles exactly one treatment; none is
+	// off because another is. The keys an earlier build wrote for the retired
+	// family masters (`water`, `lighting`, `distortion`, `marks`) and for the
+	// combined `hotWrecks` switch are read once, by UnmarshalJSON, and never
+	// written again.
+	//
+	// WaterSurface is the surface shading: tint, depth, damp shore band,
+	// shallow tint, and the seabed decals it shades.
+	WaterSurface int `json:"waterSurface"`
+	// WaterMotion is the moving surface — drift, churn and gusts — and the
+	// underwater refraction; off leaves a still surface.
+	WaterMotion int `json:"waterMotion"`
+	// WaterFoam is shore and building foam, surface wakes and hover dust.
+	WaterFoam int `json:"waterFoam"`
+	// WaterReflections is the screen-space reflections, reflected explosions
+	// included.
+	WaterReflections int `json:"waterReflections"`
+	// ModelLight is the battle light on models and smoke.
+	ModelLight int `json:"modelLight"`
+	// GroundLight is the ground light pools and the short terrain flash.
+	GroundLight int `json:"groundLight"`
+	// GroundLightStrength scales the ground pools' intensity, a percentage of
+	// the tuned look, 0..MaxEffectStrength; 0 draws none.
+	GroundLightStrength int `json:"groundLightStrength"`
+	// Finish is the metal/paint material finishes.
 	Finish int `json:"finish"`
-	// Distortion is the blast rings, the burning-vegetation heat shimmer and
-	// the fresh-wreck shimmer with its cooling emission colour.
-	Distortion int `json:"distortion"`
-	// Marks is the scorch marks and the trail layer of footprints and tracks.
-	Marks int `json:"marks"`
+	// Glint is the metallic glint.
+	Glint int `json:"glint"`
+	// BlastRings is the explosion distortion rings.
+	BlastRings int `json:"blastRings"`
+	// BlastRingStrength scales the rings' distortion amplitude, a percentage
+	// of the tuned look, 0..MaxEffectStrength; 0 draws none.
+	BlastRingStrength int `json:"blastRingStrength"`
+	// FireShimmer is the burning-vegetation heat shimmer.
+	FireShimmer int `json:"fireShimmer"`
+	// WreckGlow is a fresh wreck's cooling emission colour and the light it
+	// gives off.
+	WreckGlow int `json:"wreckGlow"`
+	// WreckShimmer is the heat-wave distortion plume above a fresh wreck.
+	WreckShimmer int `json:"wreckShimmer"`
+	// Scorch is the fading scorch marks.
+	Scorch int `json:"scorch"`
+	// SoftShadows is the aircraft soft shadows; off, aircraft keep the
+	// ordinary hard silhouette shadow.
+	SoftShadows int `json:"softShadows"`
+	// Supersample is the Enhanced model supersampling: every unit, structure
+	// and wreck rasterized at twice the resolution and resolved by coverage,
+	// so edges blend. Off, models are drawn at the native step with whole
+	// pixel edges, as Classic draws its mobile units.
+	Supersample int `json:"supersample"`
 	// TrailStrength is a percentage of the trail layer's tuned peak opacity.
-	// Zero hides trails while leaving the Marks switch's scorch layer intact.
+	// It alone governs the trail layer: zero is off.
 	TrailStrength int `json:"trailStrength"`
 
 	// Overview and the Megamap* keys are the optional megamap overview
@@ -679,9 +745,15 @@ type Presentation struct {
 func DefaultPresentation() Presentation {
 	return Presentation{
 		Renderer: "modern", FPS: 60, ExpandedSidebar: 1, GroupNumbers: 1,
-		MexSnapRadius: -1, WreckSnapRadius: -1, BuildRotateKey: "/", ClickSnapOverrideKey: "alt", BuildRotationOverlay: 1,
-		Water: DefaultEffectSwitch, Lighting: DefaultEffectSwitch, Finish: DefaultEffectSwitch,
-		Distortion: DefaultEffectSwitch, Marks: DefaultEffectSwitch,
+		MexSnapRadius: -1, WreckSnapRadius: -1, BuildRotateKey: "/", ClickSnapOverrideKey: "alt", BuildRotationOverlay: 1, BuildDrag: 1,
+		WaterSurface: DefaultEffectSwitch, WaterMotion: DefaultEffectSwitch, WaterFoam: DefaultEffectSwitch, WaterReflections: DefaultEffectSwitch,
+		ModelLight: DefaultEffectSwitch, GroundLight: DefaultEffectSwitch, GroundLightStrength: DefaultEffectStrength,
+		Finish: DefaultEffectSwitch, Glint: DefaultEffectSwitch,
+		BlastRings: DefaultEffectSwitch, BlastRingStrength: DefaultEffectStrength,
+		FireShimmer: DefaultEffectSwitch, WreckGlow: DefaultEffectSwitch, WreckShimmer: DefaultEffectSwitch,
+		Scorch:        DefaultEffectSwitch,
+		SoftShadows:   DefaultEffectSwitch,
+		Supersample:   DefaultEffectSwitch,
 		TrailStrength: DefaultTrailStrength,
 		MegamapWheel:  1, MegamapWheelMove: 1, MegamapFlash: 1,
 		PlayerDotColors:     DefaultPlayerDotColors,
@@ -727,14 +799,14 @@ func (p *Presentation) Normalize() {
 	if p.CommunitySelection < 0 || p.CommunitySelection > 2 {
 		p.CommunitySelection = 0
 	}
-	for _, value := range []*int{&p.FactoryHundredBatch, &p.DoubleClickSelection, &p.CommunityCounters, &p.ReloadBars, &p.VeteranLabels, &p.GroupNumbers, &p.AlliedResources, &p.WeatherReport, &p.BuildRotationOverlay, &p.QueuedOrderDrag, &p.TeamColorNanolathe, &p.VictoryCue, &p.AlliedDotSwatches} {
+	for _, value := range []*int{&p.FactoryHundredBatch, &p.DoubleClickSelection, &p.CommunityCounters, &p.ReloadBars, &p.VeteranLabels, &p.GroupNumbers, &p.AlliedResources, &p.WeatherReport, &p.BuildRotationOverlay, &p.QueuedOrderDrag, &p.BuildDrag, &p.TeamColorNanolathe, &p.VictoryCue, &p.AlliedDotSwatches} {
 		if *value < 0 {
 			*value = 0
 		} else {
 			*value &= 1
 		}
 	}
-	for _, value := range []*int{&p.Water, &p.Lighting, &p.Finish, &p.Distortion, &p.Marks} {
+	for _, value := range p.effectSwitches() {
 		if *value < 0 {
 			*value = DefaultEffectSwitch
 		}
@@ -744,7 +816,72 @@ func (p *Presentation) Normalize() {
 	} else if p.TrailStrength > MaxTrailStrength {
 		p.TrailStrength = MaxTrailStrength
 	}
+	for _, value := range []*int{&p.GroundLightStrength, &p.BlastRingStrength} {
+		if *value < 0 {
+			*value = DefaultEffectStrength
+		} else if *value > MaxEffectStrength {
+			*value = MaxEffectStrength
+		}
+	}
 	p.normalizeMegamap()
+}
+
+// effectSwitches lists every Enhanced effect switch Normalize repairs
+// (DESIGN_GPU_RENDERER §30). The strengths are percentages, repaired on their
+// own.
+func (p *Presentation) effectSwitches() []*int {
+	return []*int{
+		&p.WaterSurface, &p.WaterMotion, &p.WaterFoam, &p.WaterReflections,
+		&p.ModelLight, &p.GroundLight,
+		&p.Finish, &p.Glint,
+		&p.BlastRings, &p.FireShimmer, &p.WreckGlow, &p.WreckShimmer,
+		&p.Scorch,
+		&p.SoftShadows,
+		&p.Supersample,
+	}
+}
+
+// presentationFields decodes a Presentation with the ordinary field rules;
+// UnmarshalJSON wraps it so the retired effect keys can be read beside it.
+type presentationFields Presentation
+
+// UnmarshalJSON decodes the block over the values already in p — the loader
+// starts from the defaults, so an omitted key keeps its default — and then
+// applies the retired effect keys (DESIGN_GPU_RENDERER §30). An earlier build
+// stored `water`, `lighting`, `distortion` and `marks` as family masters whose
+// 0 turned the whole family off, and `hotWrecks` as one switch for the wreck
+// glow and shimmer. A stored 0 is honoured once, by turning every switch the
+// key covered off (`marks` also sets the trail strength to 0, the trail
+// layer's off); any other value was "on" and changes nothing. The keys have no
+// field, so the next save does not write them.
+func (p *Presentation) UnmarshalJSON(data []byte) error {
+	if err := json.Unmarshal(data, (*presentationFields)(p)); err != nil {
+		return err
+	}
+	var retired struct {
+		Water      *int `json:"water"`
+		Lighting   *int `json:"lighting"`
+		Distortion *int `json:"distortion"`
+		Marks      *int `json:"marks"`
+		HotWrecks  *int `json:"hotWrecks"`
+	}
+	if err := json.Unmarshal(data, &retired); err != nil {
+		return err
+	}
+	off := func(master *int, family ...*int) {
+		if master == nil || *master != 0 {
+			return
+		}
+		for _, v := range family {
+			*v = 0
+		}
+	}
+	off(retired.Water, &p.WaterSurface, &p.WaterMotion, &p.WaterFoam, &p.WaterReflections)
+	off(retired.Lighting, &p.ModelLight, &p.GroundLight)
+	off(retired.Distortion, &p.BlastRings, &p.FireShimmer, &p.WreckGlow, &p.WreckShimmer)
+	off(retired.Marks, &p.Scorch, &p.TrailStrength)
+	off(retired.HotWrecks, &p.WreckGlow, &p.WreckShimmer)
+	return nil
 }
 
 // Display is the `VISUALS` page's persisted block. The two size values are
@@ -982,6 +1119,7 @@ func (s *Settings) Normalize() {
 	// checks them; only empty maps are folded to absent.
 	s.ModernAI.normalize()
 	s.ControlsOffered = normalizeOffered(s.ControlsOffered)
+	s.ModLockOverrides = normalizeOffered(s.ModLockOverrides)
 	if s.Version == 0 {
 		s.Version = FileVersion
 	}

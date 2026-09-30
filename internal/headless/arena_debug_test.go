@@ -8,6 +8,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/aikit"
 	"github.com/nanolathe-gg/nanolathe/internal/construction"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 )
 
 func TestArenaDumpTable(t *testing.T) {
@@ -19,7 +20,7 @@ func TestArenaDumpTable(t *testing.T) {
 		t.Skip(err)
 	}
 	defer fs.Close()
-	view, profile, _ := contentProfileView(fs, "")
+	view, profile := contentView(fs, profiles.Retail())
 	cat, err := content.CompileWithOptions(view, content.Options{Limits: content.LimitsFromProfile(profile.Limits)})
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +51,7 @@ func TestArenaDumpWeapons(t *testing.T) {
 		t.Skip(err)
 	}
 	defer fs.Close()
-	view, profile, _ := contentProfileView(fs, "")
+	view, profile := contentView(fs, profiles.Retail())
 	cat, err := content.CompileWithOptions(view, content.Options{Limits: content.LimitsFromProfile(profile.Limits)})
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +80,7 @@ func TestArenaDumpMaps(t *testing.T) {
 		t.Skip(err)
 	}
 	defer fs.Close()
-	view, profile, _ := contentProfileView(fs, "")
+	view, profile := contentView(fs, profiles.Retail())
 	cat, err := content.CompileWithOptions(view, content.Options{Limits: content.LimitsFromProfile(profile.Limits)})
 	if err != nil {
 		t.Fatal(err)

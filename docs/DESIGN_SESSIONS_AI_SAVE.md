@@ -788,9 +788,9 @@ won mission 1.
 The shipped ProTA 4.8 loader changes the computer player in four places, all
 **Established** for that package
 ([ProTA 4.8 engine package, "AI and economy evidence audit"](../research/extensions/prota-engine.md#ai-and-economy-evidence-audit)).
-Each is a Community feature-table switch that no shipped table enables; the
-ProTA content profile's `gameplay` block turns them on, and Strict 3.1
-ignores them. Selection, the table and the combat half are
+Each is a Community feature-table switch the mainline table leaves off;
+ProTA's mod config turns them on in its `rules.communityFeatures`, and Strict
+3.1 ignores them. Selection, the table and the combat half are
 [DESIGN_COMMUNITY_PATCH §4.7](DESIGN_COMMUNITY_PATCH.md#47-prota-48-package-behaviours).
 The session projects the three AI switches onto every manager's `Community`
 field at binding and at construction, beside `Planner`; the think step reads

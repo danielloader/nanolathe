@@ -479,16 +479,18 @@ func (c *Client) drawCommittedWorld(cur *frame.Frame, ok bool) {
 	// unconditional. Radar and clip have no concrete frame input yet.
 	c.drawTerrainPrep()
 	c.drawDeveloperTerrain(cur)
-	// The ground marks and the water layers are the player's Marks and Water
-	// switches (§30); each is gated here rather than inside its producer so the
-	// recording is identical to the one a build without the effect would make.
-	if c.effects.Marks {
+	// The ground marks and the water layers each follow their own switch
+	// (§30) — the scorch layer the scorch switch, the wakes, hover dust and
+	// building foam the water foam switch, the trails their strength alone;
+	// each is gated here rather than inside its producer so the recording is
+	// identical to the one a build without the effect would make.
+	if c.effects.Scorch {
 		c.drawScorchMarks(c.committedFrame())
 	}
 	// Under the asynchronous simulation the host feeds these layers every
 	// publication in order when it joins a batch (ObserveCommittedFrame), so a
 	// pass places nothing itself (§13.13).
-	if c.effects.Water && !c.strategicView() {
+	if c.effects.WaterFoam && !c.strategicView() {
 		if !c.observesInOrder() {
 			c.placeSurfaceWakes(c.committedFrame())
 		}
@@ -499,8 +501,9 @@ func (c *Client) drawCommittedWorld(cur *frame.Frame, ok bool) {
 	// (DESIGN_GPU_RENDERER §15). Marks are placed from the committed tick, not
 	// the blended view, so the layer never moves with the blend fraction.
 	// Below the strategic cut the marks are smaller than a pixel and cost more
-	// than they show, so they are one of the layers §16.10 drops.
-	if c.effects.Marks && !c.strategicView() {
+	// than they show, so they are one of the layers §16.10 drops. A strength
+	// of zero is the layer off (§30).
+	if c.trailStrength > 0 && !c.strategicView() {
 		if !c.observesInOrder() {
 			c.placeTrails(c.committedFrame())
 		}
@@ -954,10 +957,12 @@ func (c *Client) drawFeature(f *frame.FeatureView) {
 	if !f.RuntimeLive || f.EventSeqName != "" {
 		normalFrame = c.viewFrame(c.featureFrameFor(*f, false))
 	}
-	// Enhanced water distorts seabed decals with terrain (GPU design §26). Limit
-	// promotion to short, nonblocking static sprite features fully below sea;
-	// taller objects and runtime fire/death cursors keep their ordinary order.
-	submerged := c.enhanced && c.effects.Water && !c.strategicView() &&
+	// Enhanced water shades and distorts seabed decals with terrain (GPU design
+	// §26), so they are promoted beneath the surface pass whenever the water
+	// surface or motion switch has it treat the seabed (§30). Limit promotion
+	// to short, nonblocking static sprite features fully below sea; taller
+	// objects and runtime fire/death cursors keep their ordinary order.
+	submerged := c.enhanced && c.effects.SeabedTreated() && !c.strategicView() &&
 		c.terrain != nil && !c.terrain.LavaWorld && c.terrain.SeaLevel != 0 &&
 		!f.Blocking && !f.RuntimeLive && !f.IsBurning && f.Height < 10 &&
 		f.Y >= 0 && int64(f.Y)+int64(max(f.Height, 0))*65536 < int64(c.terrain.SeaLevelWorld())
@@ -987,8 +992,8 @@ func (c *Client) drawFeature(f *frame.FeatureView) {
 		// [03 R-RAST-01 §6].
 		normalTrans := f.AnimTrans && !f.RuntimeLive
 		// A burning feature is both a refraction source (GPU design §27, under
-		// the player's Distortion switch) and a light source (§31, under the
-		// Lighting switch). Both need the same extra LOS gate, which prevents an
+		// the fire shimmer switch) and a light source (§31, under the model
+		// and ground light switches). Both need the same extra LOS gate, which prevents an
 		// unseen fire from refracting or lighting visible ground, so it is taken
 		// once here. The lighting kind is recorded whatever the switches say;
 		// the executor gates the lighting pass itself (§30).
@@ -997,7 +1002,7 @@ func (c *Client) drawFeature(f *frame.FeatureView) {
 			cur := c.committedFrame()
 			burning = cur != nil && SnapshotPointVisible(cur.Visibility, f.X, f.Y, f.Z, cur.ViewingPlayer)
 		}
-		heat := burning && c.effects.Distortion
+		heat := burning && c.effects.FireShimmer
 		var heatTime float32
 		if heat {
 			heatTime = float32(c.frameTick % 3600)

@@ -194,7 +194,7 @@ func TestBlastMetadataUsesAdmissionAgeAndAuthoredSize(t *testing.T) {
 	}
 	// Disabling refraction must not defer illumination to the larger late
 	// frames. The source extent stays in native units at either record scale.
-	c.effects.Distortion = false
+	c.effects.BlastRings = false
 	for _, scale := range []camera.ViewScale{camera.ViewScaleNative, camera.ViewScaleDetail} {
 		c.cam.Scale = scale
 		for _, seq := range []int32{0, 2} {
@@ -205,7 +205,7 @@ func TestBlastMetadataUsesAdmissionAgeAndAuthoredSize(t *testing.T) {
 			c.list.VisitLightSources(func(sp drawlist.Sprite) {
 				count++
 				if !sp.HasLightingAge || sp.LightingAge != 5.5 || sp.LightingSize != 80 || sp.BlastSize != 0 || sp.BlastAge != 0 {
-					t.Fatalf("Distortion off changed lighting extent: %+v", sp)
+					t.Fatalf("blast rings off changed lighting extent: %+v", sp)
 				}
 			})
 			if count != 1 {

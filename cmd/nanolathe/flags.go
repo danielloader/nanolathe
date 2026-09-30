@@ -7,7 +7,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/community"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
-	contentprofiles "github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
@@ -32,14 +31,14 @@ type Options struct {
 	Gameplay          gameplay.Mode
 	GameplaySet       bool
 	GameplayOverrides []community.Overrides
-	// ContentProfile selects the mounted content set's directory table. The
-	// flag takes a shipped profile's name or the path of a profile JSON file;
-	// an omitted flag falls back to the saved preference and then to
-	// detection. openContent resolves it and run replaces this field with the
-	// resolved name, so everything downstream — the headless report among it —
-	// reports the profile the mount actually used
-	// (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
-	ContentProfile string
+	// ModConfig is the path of a nanolathe-mod.json whose content section
+	// and rules apply to the mount: the config for a manual --root stack or a
+	// benchmark run, or a config tried against an installed --mod in place of
+	// its own. Empty means the selected mod's own config, else the saved
+	// preference (settings contentProfile), else plain content
+	// (docs/DESIGN_MODS_MUTATORS.md §4.3). After the mount, run sets it to the
+	// file the mount actually read, "" when none, so a remount keeps it.
+	ModConfig string
 	// Mod selects an installed mod ("id", "id@version" or "none"); ModSet
 	// records that the flag was given, so it wins over the saved choice
 	// (docs/DESIGN_MODS_MUTATORS.md §4.3).
@@ -139,6 +138,9 @@ type Options struct {
 	Film               string      // film script path for the --film sequence capture; empty runs no film
 	FilmOut            string      // --film destination: a directory of PNGs, or "-" for raw RGBA on stdout
 	FilmFrames         int         // stop a --film capture after this many frames; 0 captures the whole script
+	NLShot             string      // directory for --nl-shot, the Nanolathe screen's page captures; empty runs none
+	NLShotSize         string      // "WxH" canvas for --nl-shot
+	NLShotOnly         string      // comma-separated card keys --nl-shot limits itself to; empty captures every card
 	ShotModal          string      // battle modal to open before --shot captures: "options", "exit", "confirm", "settings", "help" or "briefing"
 	ShotMegamap        bool        // show the megamap overview in --shot (DESIGN_INTERFACE_HUD_INPUT §3.15)
 	ShotSpace          bool        // hold Space for --shot captures, so the bottom slide strip is fully raised
@@ -273,22 +275,22 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	set.StringVar(&opts.Film, "film", "", "compose the scripted sequence in this film script (docs/FILM_CAPTURE.md)")
 	set.StringVar(&opts.FilmOut, "film-out", "", "where --film writes: a directory of PNG frames, or \"-\" for a raw RGBA stream on stdout")
 	set.IntVar(&opts.FilmFrames, "film-frames", 0, "stop a --film capture after this many frames (0 captures the whole script)")
+	set.StringVar(&opts.NLShot, "nl-shot", "", "render every card of the Nanolathe screen to PNGs in this directory, with no visible window")
+	set.StringVar(&opts.NLShotSize, "nl-shot-size", "1920x1080", "canvas size for --nl-shot, as WxH")
+	set.StringVar(&opts.NLShotOnly, "nl-shot-only", "", "comma-separated card keys (or page:card) --nl-shot captures; empty captures every card")
 	set.StringVar(&opts.ShotModal, "shot-modal", "", "open a battle modal before --shot captures: \"options\" (Tab), \"exit\", \"confirm\", \"settings\", \"help\", or \"briefing\" (needs --mission)")
 	set.BoolVar(&opts.ShotMegamap, "shot-megamap", false, "select the Megamap overview and show it before --shot captures")
 	set.BoolVar(&opts.ShotSpace, "shot-space", false, "hold Space for --shot captures, so the bottom slide strip (Game Time / Total Units / Game Speed) is fully raised")
 	set.StringVar(&opts.CPUProfile, "cpuprofile", "", "write a pprof CPU profile of the --shot compose path to this file")
 	set.StringVar(&opts.MemProfile, "memprofile", "", "write a pprof allocation profile of the --shot compose path to this file")
 	set.IntVar(&opts.ProfileSeconds, "profile-seconds", 0, "with classic --shot, run the CPU viewer loop headlessly for this many seconds of battle time and report ms per frame")
-	set.Func("content-profile", "content profile: "+strings.Join(contentprofiles.Names(), ", ")+", or the path of a profile JSON file; omitted uses the saved preference, then detection (docs/DESIGN_CONTENT_VFS.md §5)", func(text string) error {
-		// Resolve here only to reject an unusable selector while the command
-		// line is still the thing being read. The selector itself is what
-		// travels: the mount boundary resolves it again so a path-selected
-		// profile is read from the file the user named, and it is the mount
-		// boundary that reports the name it settled on.
-		if _, err := contentprofiles.Lookup(text); err != nil {
+	set.Func("mod-config", "path of a nanolathe-mod.json whose content layout, limits and rules apply to a manual --root stack or benchmark run, or replace an installed --mod's own; omitted uses the mod's own config, then the saved preference, then plain content (docs/DESIGN_MODS_MUTATORS.md §4.3)", func(text string) error {
+		// Read here only to reject an unusable file while the command line is
+		// still the thing being read; the mount boundary reads it again.
+		if _, err := modlibrary.ReadConfigFile(text); err != nil {
 			return err
 		}
-		opts.ContentProfile = text
+		opts.ModConfig = text
 		return nil
 	})
 	set.Func("mod", "installed mod to mount after the base install: id, id@version or none; omitted uses the saved choice in the window, and none for --shot, --film, --battle-benchmark and --headless (docs/DESIGN_MODS_MUTATORS.md §4.3)", func(text string) error {

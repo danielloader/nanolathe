@@ -27,7 +27,7 @@ func TestEscalationAegisUpgradeFromAuthoredMenu(t *testing.T) {
 	if len(roots) == 0 {
 		t.Skip("Escalation content roots not supplied")
 	}
-	opts := Options{Root: testsupport.RetailRoot(t), Roots: append([]string{testsupport.RetailRoot(t)}, roots...), Map: "expanded confluence", Seed: 7}
+	opts := Options{Root: testsupport.RetailRoot(t), Roots: append([]string{testsupport.RetailRoot(t)}, roots...), Map: "expanded confluence", Seed: 7, ModConfig: modRootsConfigPath(t, "escalation")}
 	cs, err := openContent(opts)
 	if err != nil {
 		t.Fatal(err)

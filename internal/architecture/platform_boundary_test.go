@@ -7,11 +7,12 @@ import (
 )
 
 // platformOnly are the packages allowed to reach Ebitengine: the concrete
-// window/loop/device adapter, the PCM device boundary, and the desktop binary
-// that links them.
+// window/loop/device adapter, the device-resolution screen toolkit, the PCM
+// device boundary, and the desktop binary that links them.
 var platformOnly = map[string]bool{
 	"github.com/nanolathe-gg/nanolathe/internal/platform/ebitenapp": true,
 	"github.com/nanolathe-gg/nanolathe/internal/platform/gpurender": true,
+	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit": true,
 	"github.com/nanolathe-gg/nanolathe/internal/audiobackend":       true,
 	"github.com/nanolathe-gg/nanolathe/cmd/nanolathe":               true,
 }

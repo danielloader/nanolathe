@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 )
 
 // RepairRate configures the proportional repair helper. A disabled helper in
@@ -19,9 +20,10 @@ type RepairRate struct {
 // zero value is the retail identity used by Strict 3.1.
 //
 // Snap maxima are part of the value because the patch's per-profile maximum
-// bounds the player-configured radius. They are selected only by Table; an
-// Overrides value may change a radius but cannot change its evidence-backed
-// cap (community-patch-engine.md CP-CON-6).
+// bounds the player-configured radius. They come only from a complete value
+// — the mainline Table or a mod config's ParseFeatures, carried as an
+// Overrides Base; a field-level override may change a radius but cannot
+// change its evidence-backed cap (community-patch-engine.md CP-CON-6).
 type Features struct {
 	ConstructionKickout      bool `json:"constructionKickout"`
 	GuardingBuildersHold     bool `json:"guardingBuildersHold"`
@@ -47,10 +49,10 @@ type Features struct {
 	// The ProTA 4.8 package switches are historical behaviours of that
 	// package's engine loader, not of any tdraw build profile
 	// (research/extensions/prota-engine.md "AI and economy evidence audit").
-	// Every shipped table leaves them false, including prota, so only a
-	// content profile's gameplay block or a player override enables them
+	// The mainline table leaves them false, so only a mod config's
+	// communityFeatures or a player override enables them
 	// (DESIGN_COMMUNITY_PATCH §4.7). They are omitted from the canonical JSON
-	// while false, so each shipped table keeps its established digest; an
+	// while false, so the mainline table keeps its established digest; an
 	// enabled switch enters the digest by name.
 	AIDifficultyIncome     bool `json:"aiDifficultyIncome,omitempty"`
 	AIStockpileProducts    bool `json:"aiStockpileProducts,omitempty"`
@@ -64,7 +66,7 @@ type Features struct {
 	AttackSingleSlotTake     bool `json:"attackSingleSlotTake,omitempty"`
 	MapFeatureOwnerEleven    bool `json:"mapFeatureOwnerEleven,omitempty"`
 	ResurrectionTextFix      bool `json:"resurrectionTextFix,omitempty"`
-	// Historical executable caller, selected by a content profile separately
+	// Historical executable caller, selected by a mod config separately
 	// from the repair helper's contribution and multiplier configuration.
 	HealTimeBitmask bool `json:"healTimeBitmask,omitempty"`
 	// Zero leaves the reposition threshold unchanged; zero preserves the
@@ -96,4 +98,46 @@ func (f Features) Digest() string {
 	b, _ := json.Marshal(f) // Features contains only JSON's primitive value kinds.
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// ParseFeatures reads a complete feature value as a mod config's
+// `rules.communityFeatures` spells it (docs/DESIGN_MODS_MUTATORS.md §4.2):
+// the Features JSON shape, decoded over the mainline table, so a field the
+// document omits keeps its mainline value. Unknown keys are refused, every
+// value must lie within the feature bounds, and a snap radius may not exceed
+// its own maximum, because a complete value is the one place a cap is
+// declared and a silently clamped radius would describe a table nobody
+// wrote. origin names the document for the diagnostic.
+func ParseFeatures(data []byte, origin string) (Features, error) {
+	f := mainline
+	if err := decodeClosed(data, &f); err != nil {
+		return Features{}, featureError("decode community features", origin, "JSON", "known lowerCamelCase feature fields", err)
+	}
+	if err := validateComplete(f); err != nil {
+		return Features{}, featureError("decode community features", origin, "community feature table", "values within the documented feature bounds", err)
+	}
+	return f, nil
+}
+
+// validateComplete is validate plus the two rules a complete value owes:
+// representable snap maxima, and radii within them.
+func validateComplete(f Features) error {
+	if err := validate(f); err != nil {
+		return err
+	}
+	for _, snap := range []struct {
+		name          string
+		radius, limit int
+	}{
+		{"mexSnapRadius", f.MexSnapRadius, f.MexSnapRadiusMax},
+		{"wreckSnapRadius", f.WreckSnapRadius, f.WreckSnapRadiusMax},
+	} {
+		if snap.limit < 0 {
+			return fmt.Errorf("%sMax %d: expected a non-negative integer", snap.name, snap.limit)
+		}
+		if snap.radius > snap.limit {
+			return fmt.Errorf("%s %d exceeds %sMax %d", snap.name, snap.radius, snap.name, snap.limit)
+		}
+	}
+	return nil
 }

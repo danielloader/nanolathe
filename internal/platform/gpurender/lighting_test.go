@@ -57,10 +57,26 @@ func TestBattleLightSourcesAndReset(t *testing.T) {
 	if len(r.lighting.lights) != 1 {
 		t.Fatal("clone lost lighting metadata")
 	}
-	r.setBattleLighting(false)
+	// One gather serves both receivers (§30): it runs while either light
+	// switch is on, and model light off hands models and smoke no source.
+	r.setModelLight(false)
+	r.prepareBattleLighting(&clone)
+	if len(r.lighting.lights) != 1 {
+		t.Fatal("model light off stopped the gather the ground reads")
+	}
+	if near := r.lighting.near(0, 0, 64); near.count != 0 {
+		t.Fatalf("model light off handed a subject %d sources", near.count)
+	}
+	r.setModelLight(true)
+	r.setGroundLight(false)
+	r.prepareBattleLighting(&clone)
+	if near := r.lighting.near(0, 0, 64); len(r.lighting.lights) != 1 || near.count != 1 {
+		t.Fatalf("ground light off: %d lights, %d near a subject", len(r.lighting.lights), near.count)
+	}
+	r.setLights(false)
 	r.prepareBattleLighting(&clone)
 	if len(r.lighting.lights) != 0 {
-		t.Fatal("disabled prototype emitted light")
+		t.Fatal("both light switches off still gathered light")
 	}
 }
 
@@ -108,7 +124,7 @@ func checkBattleLightingDevicePixels() error {
 	list.RecordSprite(drawlist.Sprite{Frame: art, X: 105, Y: 65, WorldHeight: 12, LightingScale: 1, Kind: drawlist.BlitKeyed, Anchored: true, LightingKind: drawlist.SpriteLightingExplosion})
 	list.RecordExpand()
 	read := func(on bool) []byte {
-		r.setBattleLighting(on)
+		r.setLights(on)
 		out := r.Execute(&list, w, h)
 		pixels := make([]byte, w*h*4)
 		out.ReadPixels(pixels)

@@ -158,17 +158,25 @@ func (c *Client) applyArrivalHeat(g *drawlist.ModelGeometry, v frame.UnitView) {
 	}
 	g.WreckEmission = [3]float32{}
 	g.WreckHeatStrength, g.WreckHeatTime, g.WreckHeatScale = 0, 0, 0
-	if !c.enhanced || !c.effects.Distortion || !c.arrival.cooling || v.Slot != c.arrival.unit.Slot || v.InstanceID != c.arrival.unit.InstanceID || c.arrival.seconds < drawlist.ArrivalDropSeconds {
+	// The arriving commander's heat is the fresh-wreck treatment and uses both
+	// of its parts: the emission colour follows the wreck glow switch and the
+	// plume the wreck shimmer switch, each on its own (§30, §36).
+	glow, shimmer := c.effects.WreckGlow, c.effects.WreckShimmer
+	if !c.enhanced || (!glow && !shimmer) || !c.arrival.cooling || v.Slot != c.arrival.unit.Slot || v.InstanceID != c.arrival.unit.InstanceID || c.arrival.seconds < drawlist.ArrivalDropSeconds {
 		return
 	}
 	age := max(0, c.arrival.seconds-drawlist.ArrivalImpactSeconds)
 	cool := max(0, 1-age/4)
-	red, amber := cool*cool, cool*cool*cool*cool
-	flash := max(0, 1-age/0.3)
-	g.WreckEmission = [3]float32{0.95*red + 0.15*flash, 0.30*amber + 0.55*flash, 0.025*amber + 0.42*flash}
-	g.WreckHeatStrength = 0.85 * cool * cool
 	g.WreckHeatScale = float32(c.viewScale().Float())
-	g.WreckHeatTime = c.arrival.seconds * 30
+	if glow {
+		red, amber := cool*cool, cool*cool*cool*cool
+		flash := max(0, 1-age/0.3)
+		g.WreckEmission = [3]float32{0.95*red + 0.15*flash, 0.30*amber + 0.55*flash, 0.025*amber + 0.42*flash}
+	}
+	if shimmer {
+		g.WreckHeatStrength = 0.85 * cool * cool
+		g.WreckHeatTime = c.arrival.seconds * 30
+	}
 }
 
 // Measure only the chunks the player can actually see. Using the viewport's

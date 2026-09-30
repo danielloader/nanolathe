@@ -662,9 +662,10 @@ to ask for the same approval again.
 `internal/content/profiles` selects load-time directory layout and content
 limits through `vfs.Layout`; see [DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md).
 It does not select `session.RuleSet`. The bounded exception is the Community
-profile declaration of DESIGN_COMMUNITY_PATCH §3.2: content may name one
-closed feature table, which composition resolves only after the host has
-selected Community 3.9 or Modern. That declaration never selects the gameplay
+declaration of DESIGN_COMMUNITY_PATCH §3.2: a mod's config may carry one
+closed feature table (`rules.communityFeatures`, kept apart from its content
+section), which composition resolves only after the host has selected
+Community 3.9 or Modern. That declaration never selects the gameplay
 mode, and Strict 3.1 ignores all of its overrides. A patch or content pack may
 require both a load-time profile and separately authorized gameplay support;
 record those two requirements independently. A detected marker, install name,

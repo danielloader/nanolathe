@@ -62,7 +62,7 @@ func TestArrivalTimeInvalidatesSpeculativeRecord(t *testing.T) {
 func TestArrivalHeatCoolsDuringGameplayAndDoesNotFollowReusedSlot(t *testing.T) {
 	c, buffer := pipelineClient(t)
 	c.SetEnhanced(true)
-	c.effects.Distortion = true
+	c.effects.WreckGlow, c.effects.WreckShimmer = true, true
 	c.SetFocused(true)
 	u := buffer.Current().Units[0]
 	c.StartArrival(u)
@@ -72,6 +72,22 @@ func TestArrivalHeatCoolsDuringGameplayAndDoesNotFollowReusedSlot(t *testing.T) 
 	hot := g.WreckEmission[0]
 	if hot <= 0 || g.WreckHeatStrength <= 0 {
 		t.Fatal("landing is cold")
+	}
+	// The arrival uses both wreck parts, each under its own switch (§30, §36):
+	// the glow alone writes the emission and no plume, the shimmer alone the
+	// plume and no emission; both keep the shared view scale.
+	c.effects.WreckShimmer = false
+	var glowOnly drawlist.ModelGeometry
+	c.applyArrivalHeat(&glowOnly, u)
+	c.effects.WreckGlow, c.effects.WreckShimmer = false, true
+	var shimmerOnly drawlist.ModelGeometry
+	c.applyArrivalHeat(&shimmerOnly, u)
+	c.effects.WreckGlow = true
+	if glowOnly.WreckEmission != g.WreckEmission || glowOnly.WreckHeatStrength != 0 || glowOnly.WreckHeatScale != g.WreckHeatScale {
+		t.Fatalf("arrival glow alone: %+v", glowOnly)
+	}
+	if shimmerOnly.WreckEmission != ([3]float32{}) || shimmerOnly.WreckHeatStrength != g.WreckHeatStrength || shimmerOnly.WreckHeatTime != g.WreckHeatTime {
+		t.Fatalf("arrival shimmer alone: %+v", shimmerOnly)
 	}
 	c.SetArrivalSeconds(drawlist.ArrivalDurationSeconds)
 	if c.ArrivalActive() {

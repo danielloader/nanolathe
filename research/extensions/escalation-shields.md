@@ -200,6 +200,28 @@ rendered capture with the authored effect bank and a manual historical Gold
 comparison would settle those visual claims. The current port-75 contract
 must not be replaced by an invented owner-only query to match prose.
 
+**Established — the explosion entries are shield-sized, and ordinary
+weapons name them.** Gold 10.2.0's `anims/FX.gaf` (in `TAESC.gp3`) replaces
+the stock effect bank. Its `Explode4`, `Explode3` and `Explode2` entries have
+frames up to 760, 1024 and 1140 pixels square, where the largest stock effect
+frame is the commander death blast's 252×227. The weapons of the mounted
+Escalation catalog still name these entries for ordinary impacts and deaths:
+for example the light cannon (`explode4`), `CORE_THUD` (`explode3`), and the
+`SMALL_UNIT` and `BIG_UNIT` death blasts (`explode2`). Mounted with the
+Escalation content profile, Nanolathe therefore draws a shield-sized sprite
+for each such hit or death (inspected 2026-09-29).
+
+**Supported inference — the entries are the shield bubbles.** The three frame
+sizes are close to the diameters of the three shield radii above (755, 1010
+and 1140), and the generators' hit callbacks request exactly these entries.
+
+**Unknown — ordinary hits in Gold.** Whether the Gold engine drew these
+entries at full size for ordinary weapon impacts, or resolved those
+weapons' art some other way, is not established. A manual Gold capture of a
+light cannon hit would settle it. Until then battles draw the authored
+entries as named; only the Nanolathe screen's preview caps effect art, as
+presentation (DESIGN_INTERFACE_HUD_INPUT §3.17).
+
 ## Save state and verified host paths
 
 **Established — current-host persistence.** Coverage flags and scan delays

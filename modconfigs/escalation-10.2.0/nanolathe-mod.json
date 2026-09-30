@@ -1,0 +1,81 @@
+{
+  "schema": 2,
+  "id": "escalation",
+  "name": "TA: Escalation",
+  "version": "10.2.0+nanolathe.2",
+  "summary": "Experimental Gold 10.2.0 compatibility.",
+  "homepage": "https://taesc.tauniverse.com/?p=downloads",
+  "requires": [],
+  "content": {
+    "detect": ["aE", "downloadsE", "gamedatE", "guiE", "unitpicE", "unitsE", "weaponE"],
+    "layout": {
+      "ai": "aE",
+      "download": "downloadsE",
+      "gamedata": "gamedatE",
+      "guis": "guiE",
+      "unitpics": "unitpicE",
+      "units": "unitsE",
+      "weapons": "weaponE"
+    },
+    "limits": {
+      "units": 16000,
+      "weapons": 16000,
+      "tnt_bytes": 67108864,
+      "los_bytes": 8388608
+    }
+  },
+  "rules": {
+    "minimumGameplay": "community-3.9",
+    "gameplay": "community-3.9",
+    "communityFeatures": {
+      "constructionKickout": true,
+      "guardingBuildersHold": true,
+      "patrollingBuilderFilters": true,
+      "reclaimToggleKeepsBuild": true,
+      "structureRotation": true,
+      "areaDamageOverflow": true,
+      "areaDamageDedupCap": true,
+      "gridClaimTieBreak": true,
+      "transportedExplosions": true,
+      "buildWeaponSlotGuard": true,
+      "antinukeCircularCoverage": true,
+      "alliedJammingIgnored": true,
+      "resurrectionFinalization": true,
+      "weaponTargetKeys": true,
+      "veterancy": true,
+      "schemaUnits": true,
+      "airCorpseFall": true,
+      "scriptPorts": true,
+      "mexSnap": false,
+      "wreckSnap": true,
+      "aiDifficultyIncome": false,
+      "aiStockpileProducts": false,
+      "targetLockRelease": false,
+      "aiApplianceEnergy": false,
+      "aiBuilderStopThreshold": false,
+      "workingWeaponsAutonomous": false,
+      "attackSingleSlotTake": false,
+      "mapFeatureOwnerEleven": false,
+      "resurrectionTextFix": false,
+      "healTimeBitmask": true,
+      "aiBuilderPlacementLimit": 0,
+      "repairRate": {
+        "enabled": true,
+        "repairMultiplier": 1,
+        "selfHealMultiplier": 1
+      },
+      "offMapAircraftMarginTiles": 32,
+      "projectileCapacity": 3000,
+      "explosionCapacity": 3000,
+      "debrisCapacity": 1000,
+      "sfxLimit": 20480,
+      "pathStepAllowance": 66650,
+      "unitLimit": 1000,
+      "mexSnapRadius": 0,
+      "wreckSnapRadius": 1,
+      "mexSnapRadiusMax": 0,
+      "wreckSnapRadiusMax": 1
+    }
+  },
+  "locks": []
+}

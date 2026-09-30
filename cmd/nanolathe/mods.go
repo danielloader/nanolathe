@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -67,7 +68,7 @@ func modSettingSelector(s settings.ModSelection) string { return modSelectorOf(s
 // never from the saved choice, so a run reproduces from its flags
 // (docs/DESIGN_MODS_MUTATORS.md §4.3, §6.6).
 func (o Options) ignoresSavedSelection() bool {
-	return o.Headless || o.Shot != "" || o.ShotModel != "" || o.ShotDebris != "" || o.Film != "" || o.BattleBenchmark != ""
+	return o.Headless || o.Shot != "" || o.ShotModel != "" || o.ShotDebris != "" || o.Film != "" || o.NLShot != "" || o.BattleBenchmark != ""
 }
 
 // resolveModSelection applies §4.3's precedence: several explicit roots are
@@ -250,11 +251,28 @@ func (g *gameShell) enforceModGameplayMinimum() {
 		return
 	}
 	minimum, ok := modMinimumGameplay(g.cs.mod)
-	if !ok || !gameplayBelow(g.gameplay, minimum) {
+	if !ok || !gameplayBelow(g.gameplay, minimum) || g.lockOverridden(g.cs.mod) {
 		return
 	}
 	g.setGameplay(minimum)
 	g.cs.modNotice = fmt.Sprintf("%s requires %s or Modern: gameplay set to %s", g.cs.mod.Name, gameplayLabel(minimum), gameplayLabel(minimum))
+}
+
+// lockOverridden reports whether the player overrode mod's rule lock.
+func (g *gameShell) lockOverridden(mod *modlibrary.Mod) bool {
+	return mod != nil && slices.Contains(g.lockOverrides, mod.ID)
+}
+
+// setLockOverride records or clears the player's override of mod's lock.
+func (g *gameShell) setLockOverride(mod *modlibrary.Mod, on bool) {
+	if mod == nil || on == g.lockOverridden(mod) {
+		return
+	}
+	if on {
+		g.lockOverrides = append(slices.Clone(g.lockOverrides), mod.ID)
+		return
+	}
+	g.lockOverrides = slices.DeleteFunc(slices.Clone(g.lockOverrides), func(id string) bool { return id == mod.ID })
 }
 
 // ---------------------------------------------------------------------------
@@ -269,14 +287,6 @@ type contentReloadRequest struct {
 	mod      settings.ModSelection // the saved choice the switch writes
 	mutators content.Mutators
 	gameplay gameplay.Mode // the gameplay selection raised to the mod's minimum, "" to keep it
-	controls string        // the controls preset to write once (§4.3, P10), "" for none
-	// offered is the mod whose preset the switch offered, accepted or not;
-	// the main menu does not offer it again (§4.3).
-	offered string
-	// restoreControls is the running content's preset whose rows return to
-	// their retail defaults, when the switch leaves it for content that
-	// recommends none (§4.3); "" for none.
-	restoreControls string
 	// loadSave is a save to load once the new content is bound: a game saved
 	// under another mod switches to it first (§7.3 step 2).
 	loadSave string
@@ -334,9 +344,9 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 	if len(opts.Roots) > 0 {
 		opts.Root = opts.Roots[0]
 	}
-	// The running set's resolved profile must not follow it to another mod;
-	// the new selection resolves its own (D12).
-	opts.ContentProfile, opts.LoadSave, opts.Map = "", "", ""
+	// The running set's config file must not follow it to another mod; the
+	// new selection mounts its own (D12).
+	opts.ModConfig, opts.LoadSave, opts.Map = "", "", ""
 	cs, err := openContent(opts)
 	if err != nil {
 		fail(err)
@@ -351,7 +361,7 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 		}
 		fail(err)
 	}
-	opts.Root, opts.Roots, opts.ContentProfile = cs.root, cs.roots, cs.profile
+	opts.Root, opts.Roots, opts.ModConfig = cs.root, cs.roots, cs.configPath
 	shell, err := newGameShell(opts, cs)
 	if err != nil {
 		abandon(err)
@@ -378,15 +388,9 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 		abandon(err)
 		return
 	}
-	// Committed. The controls preset and the settings file follow the new
-	// shell from here.
-	if request.controls != "" {
-		shell.applyControlsPreset(request.controls)
-	}
-	if request.restoreControls != "" {
-		shell.restoreControlsPreset(request.restoreControls)
-	}
-	shell.markControlsOffered(request.offered)
+	// Committed. The settings file follows the new shell from here; the
+	// mod's recommended settings are already its layer (modsettings.go,
+	// §4.6), so nothing is offered or written on top of them.
 	shell.saveSettings()
 	// Release the old set only now: its dialogs, its voices and music, and
 	// its archive handles.
@@ -398,9 +402,6 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 	}
 	if modsUI != nil {
 		old.closeModsScreen()
-	}
-	if controlsOfferUI != nil {
-		old.releaseControlsOffer()
 	}
 	optionsPanel, optionsAssets, optionsState = nil, nil, nil
 	saveLoadUI, saveLoadPanel, saveLoadAssets = nil, nil, nil
@@ -460,14 +461,16 @@ func (g *gameShell) modStatusLine() string {
 
 // installMainMenuModsButton appends the Nanolathe-owned MODS button and
 // status line to a fresh MAINMENU clone, above the logo (D11 places it at a
-// fixed position; the position is a capture-review choice).
+// fixed position; the position is a capture-review choice). The button reads
+// NANOLATHE: it opens the Nanolathe screen, which owns mods, mutators, rules
+// and presentation (DESIGN_INTERFACE_HUD_INPUT §3.17).
 func installMainMenuModsButton(window *gui.Window) {
 	single, status := window.GadgetIndex("SINGLE"), window.GadgetIndex("DebugString")
 	if single < 0 {
 		return
 	}
 	button := window.Gadgets[single]
-	button.Name, button.SourceName, button.Text, button.QuickKey = "MODS", "MODS", "MODS", 0
+	button.Name, button.SourceName, button.Text, button.QuickKey = "MODS", "MODS", "NANOLATHE", 0
 	button.Rect.X, button.Rect.Y = (retailScreenW-button.Rect.W)/2, 8
 	window.Gadgets = append(window.Gadgets, button)
 	if status >= 0 {
@@ -522,11 +525,9 @@ type modsScreen struct {
 	installed []modlibrary.Mod
 	selected  int // list row; row 0 is the original game
 	mutators  content.Mutators
-	usePreset bool
 	notice    string
-	// recommended caches each listed mod's controls preset and gameplay
-	// minimum with its content profile's filled in (§4.3), keyed by
-	// id@version, so a row's profile is resolved once per screen.
+	// recommended caches each listed mod as its recommendations read, keyed
+	// by id@version (§4.3); a mod's own config supplies them.
 	recommended map[string]modlibrary.Mod
 	// installs is the download job's install count the list was read at; a
 	// later count means a download joined the library (§8.2).
@@ -688,8 +689,6 @@ func modsPanelAssets(p *ui.Panel) *retailPanelAssets {
 		return modsFetchAssets
 	case p != nil && p == mutatorsPanel:
 		return mutatorsAssets
-	case p != nil && p == controlsOfferPanel:
-		return controlsOfferAssets
 	}
 	return nil
 }
@@ -728,15 +727,14 @@ func modsBackdrop(from vfs.FSOps) (*formats.PCX, error) {
 }
 
 // modsWindowKind names the four Nanolathe windows built on the SELMAP
-// template: the Mods & Mutators screen, the Get more mods dialog, the
-// Mutators dialog and the recommended-settings offer.
+// template: the Mods & Mutators screen, the Get more mods dialog and the
+// Mutators dialog.
 type modsWindowKind int
 
 const (
 	modsWindowMain modsWindowKind = iota
 	modsWindowFetch
 	modsWindowMutators
-	modsWindowOffer
 )
 
 // mutatorSummaryLines is how many active mutators the main screen lists
@@ -769,8 +767,6 @@ func buildModsWindow(window *gui.Window, kind modsWindowKind) {
 		title.Text = "GET MORE MODS"
 	case modsWindowMutators:
 		title.Text = "MUTATORS"
-	case modsWindowOffer:
-		title.Text = "RECOMMENDED SETTINGS"
 	}
 	kept = append(kept, title)
 	button := func(name, text string, x, y int32) {
@@ -790,10 +786,6 @@ func buildModsWindow(window *gui.Window, kind modsWindowKind) {
 		caption("STATUS", "", 352, 150, 116, 48)
 		caption("STATUS2", "", 352, 206, 116, 16)
 		caption("STATUS3", "", 352, 222, 116, 16)
-	case modsWindowOffer:
-		// The list names every setting, the right-hand column explains the
-		// offer, and the two buttons answer it.
-		caption("OFFERTEXT", "", 352, 150, 116, 112)
 	case modsWindowMutators:
 		// The selected mutator's value and its controls. The list on the
 		// left scrolls, so the catalogue can grow without a layout change.
@@ -817,10 +809,6 @@ func buildModsWindow(window *gui.Window, kind modsWindowKind) {
 		}
 		button("MUTEDIT", "Change...", 357, 228)
 		button("MUTRESET", "Reset", 357, 252)
-		// The preset toggle and its caption read as a checkbox: Yes writes
-		// the selected mod's recommended settings on Apply (§4.3, P10).
-		button("PRESET", "Yes", 60, 366)
-		caption("PRESETLABEL", "Use recommended settings", 164, 370, 200, 16)
 	}
 	window.Gadgets = kept
 }
@@ -833,9 +821,6 @@ func buildModsWindow(window *gui.Window, kind modsWindowKind) {
 func (g *gameShell) modsTemplateFS() vfs.FSOps {
 	if modsUI != nil && modsUI.base != nil {
 		return modsUI.base
-	}
-	if controlsOfferUI != nil && controlsOfferUI.base != nil {
-		return controlsOfferUI.base
 	}
 	return g.cs.fs
 }
@@ -879,7 +864,7 @@ func (g *gameShell) openModsScreen() error {
 		base.Close()
 		base = nil
 	}
-	modsUI = &modsScreen{lib: lib, base: base, baseRoots: append([]string(nil), g.cs.baseRoots...), mutators: g.opts.Mutators, usePreset: true, installs: modDownload.view().installs}
+	modsUI = &modsScreen{lib: lib, base: base, baseRoots: append([]string(nil), g.cs.baseRoots...), mutators: g.opts.Mutators, installs: modDownload.view().installs}
 	panel, assets, err := g.loadModsPanel(modsWindowMain)
 	if err != nil {
 		if base != nil {
@@ -973,8 +958,8 @@ func (g *gameShell) refreshModsPanel() {
 	if g.activePanel() == p {
 		g.setListItems("MAPNAMES", items, modsUI.selected)
 	}
-	// The selected mod as the mount will see it: a controls preset or
-	// gameplay minimum its metadata lacks comes from its content profile.
+	// The selected mod as the mount will see it: its config's controls
+	// preset and gameplay minimum, or none for a mod without a config.
 	selected := modsUI.modRecommendations(modsUI.selectedMod())
 	description, detail := "The original game with no mod mounted.", "Any gameplay mode"
 	if selected != nil {
@@ -985,6 +970,10 @@ func (g *gameShell) refreshModsPanel() {
 		detail = modRequirement(selected.Version, selected.MinimumGameplay)
 		if minimum, ok := modMinimumGameplay(selected); ok && gameplayBelow(g.gameplay, minimum) {
 			detail += " (will switch)"
+		}
+		if !selected.HasConfig() {
+			// A mod without a config mounts as plain content (§4.5).
+			detail = "No Nanolathe config: may not load correctly"
 		}
 		if missing := modsUI.missingFor(selected.Metadata); len(missing) > 0 {
 			detail = "Base install lacks " + missing[0]
@@ -1010,22 +999,6 @@ func (g *gameShell) refreshModsPanel() {
 		p.SetText(fmt.Sprintf("MUTSUM%d", i), g.fitDetail(line, 118, 1))
 	}
 	retailGreyGadget(p.Window, "MUTRESET", len(active) == 0)
-	// A mod's recommended settings are offered only when switching to a mod
-	// that names a preset, and taken back only when switching from one to
-	// content that names none while a row still holds the preset's value
-	// (§4.3, P10); the button toggles whether Apply writes them.
-	preset, restore := g.switchControlsPreset(selected)
-	offer := preset != "" && !sameMod(selected, g.cs.mod)
-	p.SetActive("PRESET", offer)
-	p.SetActive("PRESETLABEL", offer)
-	if offer {
-		p.SetText("PRESET", presetToggleText(modsUI.usePreset))
-		label := "Use recommended settings"
-		if restore {
-			label = "Restore default settings"
-		}
-		p.SetText("PRESETLABEL", label)
-	}
 	running := sameMod(selected, g.cs.mod)
 	// A mod whose base requirements are unmet is listed but not selectable.
 	retailGreyGadget(p.Window, "LOAD", selected != nil && len(modsUI.missingFor(selected.Metadata)) > 0)
@@ -1059,21 +1032,9 @@ func (g *gameShell) applyModsScreen() {
 		return
 	}
 	request := contentReloadRequest{selector: "none", mutators: modsUI.mutators}
-	if preset, restore := g.switchControlsPreset(target); restore && modsUI.usePreset {
-		request.restoreControls = preset
-	}
 	if target != nil {
 		request.selector = modSelectorOf(target.ID, target.Version)
 		request.mod = settings.ModSelection{ID: target.ID, Version: target.Version}
-		if minimum, ok := modMinimumGameplay(target); ok && gameplayBelow(g.gameplay, minimum) {
-			request.gameplay = minimum
-		}
-		if target.Controls != "" {
-			request.offered = target.ID
-			if modsUI.usePreset {
-				request.controls = target.Controls
-			}
-		}
 	}
 	pendingContentReload = &request
 }
@@ -1092,9 +1053,6 @@ func (g *gameShell) removeSelectedMod() {
 
 // activateModsGadget routes a button on either Nanolathe window.
 func (g *gameShell) activateModsGadget(name string) bool {
-	if g.activateControlsOfferGadget(name) {
-		return true
-	}
 	if g.mutatorsPanelActive() {
 		g.activateMutatorsGadget(name)
 		return true
@@ -1136,8 +1094,6 @@ func (g *gameShell) activateModsGadget(name string) bool {
 		}
 	case "MUTRESET":
 		modsUI.mutators = content.Mutators{}
-	case "PRESET":
-		modsUI.usePreset = !modsUI.usePreset
 	}
 	g.refreshModsPanel()
 	return true
@@ -1146,11 +1102,6 @@ func (g *gameShell) activateModsGadget(name string) bool {
 func (g *gameShell) commitModsListSelection(name string, index int) bool {
 	if name != "MAPNAMES" {
 		return false
-	}
-	if g.controlsOfferActive() {
-		controlsOfferUI.selected = index
-		g.refreshControlsOffer()
-		return true
 	}
 	if g.mutatorsPanelActive() {
 		g.selectMutatorRow(index)

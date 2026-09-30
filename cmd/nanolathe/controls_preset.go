@@ -6,15 +6,12 @@ package main
 // lists the same rows.
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/nanolathe-gg/nanolathe/internal/audio"
 	contentprofiles "github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
-	"github.com/nanolathe-gg/nanolathe/internal/ui"
-	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
 // The preset names mod metadata and content profiles may carry.
@@ -85,6 +82,25 @@ func selectionPresetRow() controlsPresetRow {
 	return row
 }
 
+// keyboardPresetRow selects the keyboard profile of the same name and keeps
+// every action the player rebound (DESIGN_INTERFACE_HUD_INPUT §3.6
+// "Rebinding"). Community's keys are retail's, since ProTA's controls change
+// what Ctrl+B/F/S do rather than which keys do it
+// (research/extensions/prota-engine.md, "Shipped selection and hotkey
+// audit"); Zero adds its documented Z for the previous build page.
+func keyboardPresetRow() controlsPresetRow {
+	return controlsPresetRow{
+		label: "Keyboard", community: 1, retail: 0, zero: 2,
+		names: []string{"Retail", "Community", "Zero"},
+		get:   func(g *gameShell) int { return g.keyProfileIndex() },
+		set: func(g *gameShell, value int) {
+			if value >= 0 && value < len(keyProfiles) {
+				g.setKeyProfile(keyProfiles[value])
+			}
+		},
+	}
+}
+
 // controlsPresetRows is the whole content of the presets. The `community`
 // column is ProTA 4.8's recommended settings: the Community host options
 // (DESIGN_COMMUNITY_PATCH §7), the preferences ProTA's `ProTA.ini` pins
@@ -97,6 +113,7 @@ func selectionPresetRow() controlsPresetRow {
 // (research/extensions/ta-zero-engine.md, "Documented engine-level behavior").
 var controlsPresetRows = []controlsPresetRow{
 	selectionPresetRow(),
+	keyboardPresetRow(),
 	// The pinned source's quick-key handler, which the Community selection
 	// row already follows, makes Shift's factory step 100 while Ctrl is held;
 	// ProTA 4.8's recorder lists "Queue 100 units" among the interface-upgrade
@@ -252,44 +269,6 @@ func (g *gameShell) applyControlsPreset(name string) {
 	g.finishControlsPreset()
 }
 
-// restoreControlsPreset undoes a preset when the player switches from the
-// content that recommends it to content that recommends none (§4.3): each
-// row still holding the value the preset writes returns to its retail
-// default. A row the player has since changed stays theirs, and a row the
-// retail preset leaves alone stays as it is.
-func (g *gameShell) restoreControlsPreset(from string) {
-	if !knownControlsPreset(from) || from == controlsPresetRetail {
-		return
-	}
-	for _, row := range controlsPresetRows {
-		if g.restoresRow(row, from) {
-			row.set(g, row.retail)
-		}
-	}
-	g.finishControlsPreset()
-}
-
-// restoresRow reports whether restoring from the preset changes the row: the
-// preset and the retail preset both assign it, differently, and it still
-// holds the preset's value.
-func (g *gameShell) restoresRow(row controlsPresetRow, from string) bool {
-	value := row.presetValue(from)
-	return value != presetUnchanged && row.retail != presetUnchanged && value != row.retail && row.get(g) == value
-}
-
-// restorableControlsRows counts the rows restoring from the preset would
-// change. Zero means the player never took the preset or has since changed
-// every row it wrote, so there is nothing to offer back.
-func (g *gameShell) restorableControlsRows(from string) int {
-	n := 0
-	for _, row := range controlsPresetRows {
-		if g.restoresRow(row, from) {
-			n++
-		}
-	}
-	return n
-}
-
 // finishControlsPreset brings the live audio in line with rows a preset wrote.
 func (g *gameShell) finishControlsPreset() {
 	g.audioPrefs.Normalize()
@@ -298,215 +277,6 @@ func (g *gameShell) finishControlsPreset() {
 		music := g.audioOwner.Music
 		music.Configure(audio.PlayMode(g.audioPrefs.CDMode), music.DesiredCategory())
 	}
-}
-
-// ---------------------------------------------------------------------------
-// The one-time offer on the main menu (§4.3).
-
-// controlsPresetOffer names the preset the running content recommends and
-// the key its offer is remembered under: the mod's id, or `profile:<name>`
-// for a content profile mounted without a mod. A mod carries its content
-// profile's preset when its metadata names none (§4.5).
-func (g *gameShell) controlsPresetOffer() (preset, key, name string) {
-	if g == nil || g.cs == nil {
-		return "", "", ""
-	}
-	if mod := g.cs.mod; mod != nil {
-		if mod.Controls == "" {
-			return "", "", ""
-		}
-		return mod.Controls, mod.ID, mod.Name
-	}
-	if g.cs.profileControls == "" {
-		return "", "", ""
-	}
-	return g.cs.profileControls, "profile:" + g.cs.profile, "The " + g.cs.profile + " content"
-}
-
-// runningControlsPreset is the preset the running content recommends: the
-// mod's, else the content profile's when no mod is mounted.
-func (g *gameShell) runningControlsPreset() string {
-	if g == nil || g.cs == nil {
-		return ""
-	}
-	if g.cs.mod != nil {
-		return g.cs.mod.Controls
-	}
-	return g.cs.profileControls
-}
-
-// switchControlsPreset is what a switch to target offers on the Mods &
-// Mutators screen (§4.3): the target's own preset, or, when the target
-// recommends none, the running content's preset to undo (restore) if any row
-// still holds a value it wrote that differs from retail. A player who
-// declined the preset is therefore not offered a restore. A switch that
-// offers neither returns "".
-func (g *gameShell) switchControlsPreset(target *modlibrary.Mod) (preset string, restore bool) {
-	if target != nil && target.Controls != "" {
-		return target.Controls, false
-	}
-	if running := g.runningControlsPreset(); g.restorableControlsRows(running) > 0 {
-		return running, true
-	}
-	return "", false
-}
-
-// markControlsOffered records an offer, answered either way.
-func (g *gameShell) markControlsOffered(key string) {
-	g.controlsOffered = settings.MarkControlsOffered(g.controlsOffered, key)
-}
-
-// wantsControlsOffer reports whether the main menu should offer the running
-// content's preset now. It is asked once per mod, only where the answer can
-// be remembered, and never by a capture or benchmark.
-func (g *gameShell) wantsControlsOffer() bool {
-	if g == nil || !g.settingsWritable || g.opts.ignoresSavedSelection() || controlsOfferUI != nil {
-		return false
-	}
-	// Only over the bare main menu: no child window or message is open.
-	if g.frontend == nil || g.frontend.Mode != modeMenuMain || g.frontend.Panels.Len() != 1 || g.activePanel() == nil {
-		return false
-	}
-	preset, key, _ := g.controlsPresetOffer()
-	return preset != "" && !settings.ControlsWereOffered(g.controlsOffered, key)
-}
-
-// controlsOfferDialog is the offer's window state: which preset, for which
-// content, and the base install its window template is read from.
-type controlsOfferDialog struct {
-	preset, key, name string
-	base              *vfs.FS
-	selected          int
-}
-
-var (
-	controlsOfferUI     *controlsOfferDialog
-	controlsOfferPanel  *ui.Panel
-	controlsOfferAssets *retailPanelAssets
-)
-
-func (g *gameShell) controlsOfferActive() bool {
-	return g != nil && controlsOfferUI != nil && controlsOfferPanel != nil && g.activePanel() == controlsOfferPanel
-}
-
-// pollControlsOffer opens the offer over the main menu when it is due.
-func (g *gameShell) pollControlsOffer() {
-	if !g.wantsControlsOffer() {
-		return
-	}
-	if err := g.openControlsOffer(); err != nil {
-		// The offer is a convenience; a missing template must not trap the
-		// menu in a retry loop, so it counts as made.
-		_, key, _ := g.controlsPresetOffer()
-		g.markControlsOffered(key)
-		g.saveSettings()
-		reportRetailMessageError(g.showRetailMessage(err.Error()))
-	}
-}
-
-func (g *gameShell) openControlsOffer() error {
-	preset, key, name := g.controlsPresetOffer()
-	if preset == "" {
-		return nil
-	}
-	base := vfs.New()
-	if err := base.MountGameDirectories(g.cs.baseRoots); err != nil {
-		base.Close()
-		base = nil
-	}
-	controlsOfferUI = &controlsOfferDialog{preset: preset, key: key, name: name, base: base}
-	panel, assets, err := g.loadModsPanel(modsWindowOffer)
-	if err != nil {
-		g.releaseControlsOffer()
-		return err
-	}
-	controlsOfferPanel, controlsOfferAssets = panel, assets
-	g.frontend.Panels.Push(panel)
-	flushWindowTokens(clPtr)
-	g.refreshControlsOffer()
-	return nil
-}
-
-// releaseControlsOffer drops the dialog's state without answering it.
-func (g *gameShell) releaseControlsOffer() {
-	if g != nil && controlsOfferPanel != nil && g.frontend.Panels.Top() == controlsOfferPanel {
-		g.frontend.Panels.Pop()
-	}
-	if controlsOfferUI != nil && controlsOfferUI.base != nil {
-		controlsOfferUI.base.Close()
-	}
-	controlsOfferUI, controlsOfferPanel, controlsOfferAssets = nil, nil, nil
-}
-
-// answerControlsOffer applies the preset when accepted, remembers the offer
-// either way and closes the dialog.
-func (g *gameShell) answerControlsOffer(accept bool) {
-	if controlsOfferUI == nil {
-		return
-	}
-	if accept {
-		g.applyControlsPreset(controlsOfferUI.preset)
-	}
-	g.markControlsOffered(controlsOfferUI.key)
-	g.saveSettings()
-	g.releaseControlsOffer()
-}
-
-// controlsOfferRows lists every row the preset assigns, each with its new
-// value and, where it differs, the player's current one.
-func (g *gameShell) controlsOfferRows(preset string) (rows []string, changes int) {
-	for _, row := range controlsPresetRows {
-		value := row.presetValue(preset)
-		if value == presetUnchanged {
-			continue
-		}
-		text := row.label + ": " + row.valueText(value)
-		if current := row.get(g); current != value {
-			text += " (now " + row.valueText(current) + ")"
-			changes++
-		}
-		rows = append(rows, text)
-	}
-	return rows, changes
-}
-
-func (g *gameShell) refreshControlsOffer() {
-	state, p := controlsOfferUI, controlsOfferPanel
-	if state == nil || p == nil {
-		return
-	}
-	rows, changes := g.controlsOfferRows(state.preset)
-	if g.activePanel() == p {
-		g.setListItems("MAPNAMES", rows, state.selected)
-	}
-	explanation := state.name + " recommends these settings. Apply sets them now; Keep mine leaves yours. This is asked once."
-	description := "Any of them can be changed later in Options."
-	detail := fmt.Sprintf("%d of %d differ from yours", changes, len(rows))
-	if changes == 0 {
-		detail = "All already match yours"
-	}
-	p.SetText("OFFERTEXT", g.fitDetail(explanation, 116, 8))
-	p.SetText("DESCRIPTION", g.fitDetail(description, 230, 2))
-	p.SetText("SIZE", g.fitDetail(detail, 230, 1))
-	p.SetText("LOAD", "Apply")
-	p.SetText("PREVMENU", "Keep mine")
-}
-
-// activateControlsOfferGadget routes the dialog's buttons; the list only
-// moves its highlight.
-func (g *gameShell) activateControlsOfferGadget(name string) bool {
-	if !g.controlsOfferActive() {
-		return false
-	}
-	switch name {
-	case "LOAD":
-		g.answerControlsOffer(true)
-	case "PREVMENU":
-		g.answerControlsOffer(false)
-	default:
-		g.refreshControlsOffer()
-	}
-	return true
 }
 
 // modRecommendations is a mod's controls preset and gameplay minimum as the
@@ -525,13 +295,4 @@ func (s *modsScreen) modRecommendations(mod *modlibrary.Mod) *modlibrary.Mod {
 	resolved := modlibrary.ResolveProfileDefaults(s.baseRoots, *mod)
 	s.recommended[key] = resolved
 	return &resolved
-}
-
-// presetToggleText is the Mods & Mutators screen's preset toggle caption
-// (§8.2): whether Apply also writes the mod's recommended settings.
-func presetToggleText(use bool) string {
-	if use {
-		return "Yes"
-	}
-	return "No"
 }

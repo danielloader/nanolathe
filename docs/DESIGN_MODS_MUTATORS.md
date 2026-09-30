@@ -18,9 +18,10 @@ itself (§7.3 step 2). The maintainer's decisions of 2026-09-23 are in §2. The
 proposals this document made were confirmed the same day and are listed in
 §12.
 
-This document owns the mod library, the remote catalogue, the mutator
-transform and the save sidecar. It builds on mechanisms owned elsewhere and
-restates none of them: the overlay and content profiles
+This document owns the mod library, the mod config every mod ships in its
+own `nanolathe-mod.json` (§4.2), the remote catalogue, the mutator transform
+and the save sidecar. It builds on mechanisms owned elsewhere and restates
+none of them: the overlay and content profiles
 ([DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md#5-divergences) "Content
 profiles"), the gameplay rule sets and their registry
 ([DESIGN_GAMEPLAY_RULES](DESIGN_GAMEPLAY_RULES.md)), the Community feature
@@ -35,9 +36,10 @@ set of choices that decides what a battle is:
 
 1. **The mod library.** Mods live in a Nanolathe data directory, one extracted
    content root per mod version. Selecting one mounts it as the last content
-   root, exactly as a second `--root` does today, and selects its content
-   profile explicitly. A catalogue hosted on nanolathe.gg lists downloadable
-   mods; manual installs remain possible.
+   root, exactly as a second `--root` does today, and applies the Nanolathe
+   config the mod ships in its own `nanolathe-mod.json` (§4.2). A catalogue
+   hosted on nanolathe.gg lists downloadable mods; manual installs remain
+   possible.
 2. **Mutators.** A closed set of global multipliers applied to the per-battle
    catalog clone at battle entry and fixed for that battle.
 3. **Match identity.** A Nanolathe sidecar file beside every save records the
@@ -74,23 +76,27 @@ To keep the two apart, code for this feature never uses the bare identifier
 | D10 | Applying a different mod reloads the content in process, from the menu, with no restart (§4.4). |
 | D11 | The main-menu entry is a Nanolathe-owned chip in a fixed position, not a gadget positioned against authored menu art (§8.1). |
 | D12 | A selected mod passes its content profile explicitly, so a saved `contentProfile` preference cannot apply one mod's directory table to another. |
-| D13 | A mod may recommend a controls preset (the Community host options). It is offered when switching, never forced over the player's own choices (§4.3). |
+| D13 | A mod may recommend a controls preset (the Community host options). Superseded 2026-09-29 by D16: a mod's recommendations are its settings layer, not an offer. |
 | D14 | The Mods & Mutators screen shows the installed mods and the mutators side by side. Mods that can be downloaded appear only in a separate *Get more mods* dialog (§8.2). |
+
+| D16 | (2026-09-29) Each mod gets its own settings by default and the player can change them: the settings a battle plays are the base settings, then the running mod's recommendations, then the player's own changes for that mod, kept per mod. Saved presets let the player apply a set of settings to any mod (§4.6). |
+| D15 | (2026-09-29) Each mod's own `nanolathe-mod.json` is the single source of its Nanolathe configuration — content layout, limits, front-end art, rules, recommended settings, keys and locks (§4.2). The engine carries no per-mod data: the built-in content profiles and per-mod Community tables are removed, and the base game's defaults stay in the engine because the base game is not a mod. A mod without a config mounts as plain content with a notice; nothing detects content. A mod may choose Strict 3.1, Community 3.9 or Modern as a whole and set Community 3.9 feature values; it may not switch off an individual Modern policy. |
 
 D9–D13 were proposed in review and accepted with the rest of the design
 direction. D14 is the maintainer's layout for the screen. D13's offer was
 extended on 2026-09-24: a mod that starts by any other route is offered its
 preset once on the main menu, and the preset became the mod's full recommended
-settings (§4.3).
+settings (§4.3). D15 supersedes D12's content profile: a mod's config is its
+own, so no preference can apply one mod's table to another.
 
 ## 3. The match selection
 
 | Part | Chosen by | Fixed at | Recorded in |
 |---|---|---|---|
 | Mod (id, version, archive SHA-256) | Mods & Mutators screen, `--mod`, settings `mod` | process start (mount) | sidecar |
-| Content profile | the mod's metadata; with no mod, today's precedence | mount | sidecar, existing reports |
+| Content config | the mod's own `nanolathe-mod.json`; with no mod, `--mod-config` or the saved `contentProfile` path | mount | sidecar (`contentProfile`, the config's id), existing reports |
 | Gameplay rule set (name and base) | options control, `--gameplay`, settings `gameplay` | battle entry, and the phase-1 command boundary thereafter ([DESIGN_GAMEPLAY_RULES §5](DESIGN_GAMEPLAY_RULES.md#5-switch-timing)) | sidecar records the set bound when saving |
-| Community sources and entry table | content profile, settings, `--gameplay-feature` ([DESIGN_COMMUNITY_PATCH §3.2](DESIGN_COMMUNITY_PATCH.md#32-sources-and-precedence)) | battle entry | sidecar |
+| Community sources and entry table | the config's `rules.communityFeatures`, settings, `--gameplay-feature` ([DESIGN_COMMUNITY_PATCH §3.2](DESIGN_COMMUNITY_PATCH.md#32-sources-and-precedence)) | battle entry | sidecar |
 | Unit limit | settings `unitLimit`, `--unit-limit` | battle entry | sidecar |
 | Mutators | Mods & Mutators screen, `--mutator`, settings `mutators` | battle entry, for the whole battle | sidecar, catalog hash, reports |
 
@@ -107,7 +113,7 @@ one documented layout on every platform:
 ```
 $XDG_DATA_HOME/nanolathe/mods/      default ~/.local/share/nanolathe/mods
   <id>/<version>/                   one extracted content root, mounted as a root
-    nanolathe-mod.json              the mod's metadata (§4.2)
+    nanolathe-mod.json              the mod's metadata and Nanolathe config (§4.2)
     install.json                    receipt: archive SHA-256, size, source URL, time
   manifest.json                     last fetched catalogue, for offline display (§5.2)
   .downloads/                       <id>-<version>.zip.part: partial downloads, kept so a later attempt resumes
@@ -123,50 +129,127 @@ whose metadata parses and whose receipt exists; there is no separate index
 file to drift out of step. Installing a new version leaves older versions in
 place until the player removes them, because saves name a version (§7).
 
-### 4.2 Mod metadata
+### 4.2 Mod metadata and config
 
 `nanolathe-mod.json` sits at the root of every hosted zip and every installed
-mod:
+mod. It is the mod's own **Nanolathe config** (D15): everything Nanolathe
+needs to know about the mod that the mod's authored content does not say.
+The engine carries none of it. Schema 2:
 
 ```json
 {
-  "schema": 1,
-  "id": "prota",
-  "name": "ProTA",
-  "version": "4.8",
-  "summary": "One line for the mod lists.",
-  "homepage": "https://…",
-  "contentProfile": "prota",
-  "minimumGameplay": "community-3.9",
-  "controls": "community",
-  "requires": ["<logical path the base install must supply>"]
+  "schema": 2,
+  "id": "prota", "name": "ProTA", "version": "4.8+nanolathe.1",
+  "summary": "One line for the mod lists.", "homepage": "https://…",
+  "requires": ["<logical path the base install must supply>"],
+  "content": {
+    "detect": ["downloadP", "gamedatP", "guiP", "unitpicsP", "weaponP"],
+    "layout": {"weapons": "weaponP", "gamedata": "gamedatP", "…": "…"},
+    "limits": {"units": 16000, "weapons": 16000, "tnt_bytes": 67108864, "los_bytes": 8388608},
+    "presentation": {"main_menu_version": "4.8"}
+  },
+  "rules": {
+    "minimumGameplay": "community-3.9",
+    "gameplay": "community-3.9",
+    "communityFeatures": {"constructionKickout": true, "…": "…", "unitLimit": 1500}
+  },
+  "settings": {"presentation": {"overview": 1, "…": "…"}, "switchAlt": 1, "audio": {"soundMode": 2}},
+  "keys": {"profile": "community", "bindings": {}},
+  "locks": []
 }
 ```
 
-- `id` is lowercase `[a-z0-9-]`, stable across versions. `version` is opaque
-  and compared for equality only; the manifest's order is the display order.
-- `contentProfile` names a shipped profile or a profile JSON path relative to
-  the mod root. Omitted means detection, exactly as today.
-- `minimumGameplay` is a reserved word; omitted means none.
-- `controls` names a controls preset (§4.3); omitted means none.
-- `buildMenuPageSize` (optional, not shown above; no hosted mod sets it)
-  locks the Modern expanded sidebar to at most that many
-  build products per page, keeping a mod's hand-placed paging; omitted or zero
-  keeps auto-flow, and a negative value is refused. A content profile carries
-  the same lock as `presentation.build_menu_page_size`, which a mod naming
-  none inherits, and the player's settings file overrides both
-  (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock").
-- A mod that omits `minimumGameplay` or `controls` takes the value its
-  resolved content profile names, if any: shipped and user profiles carry the
-  same two optional keys (`internal/content/profiles`; the shipped `prota`
-  profile names `community` and `community-3.9`, and `escalation` requires
-  `community-3.9` without imposing ProTA's controls preset). The metadata always wins.
-  This is what gives a metadata-less local package (§4.5) its content set's
-  recommendations.
-- `requires` lists logical paths that the **base** install must resolve, for
-  example a map from an expansion the mod overlays. A mod whose requirements
-  fail is listed but cannot be selected, and the screen names the missing
-  paths.
+Every object is closed: an unknown key anywhere is refused with the standard
+diagnostic, so a misspelling is reported rather than ignored.
+
+- **Identity.** `id` is lowercase `[a-z0-9-]`, stable across versions.
+  `version` is opaque and compared for equality only; the manifest's order is
+  the display order. `requires` lists logical paths that the **base**
+  install must resolve, for example a map from an expansion the mod overlays.
+  A mod whose requirements fail is listed but cannot be selected, and the
+  screen names the missing paths.
+- **`content`** is the load-time content description
+  ([DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md#5-divergences) "Content
+  profiles"): `layout` is the directory table, `limits` the definition-table
+  sizes and read caps (an omitted count keeps the retail value), and
+  `presentation` the front-end art, main-menu version text, team logos,
+  range-guide defaults and the `build_menu_page_size` build page lock
+  (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock"; the player's settings
+  value overrides it). `detect` selects nothing: the install check (§5.3
+  step 4) refuses a package whose content lacks a directory it names, so a
+  config paired with other content is caught. Omitted, the mod is
+  retail-shaped. The section is kept apart from `rules` in code
+  (`profiles.Profile`), because load-time content facts are not gameplay
+  selection.
+- **`rules`** are gameplay declarations. `minimumGameplay` and `gameplay`
+  are reserved words only — a mod chooses Strict 3.1, Community 3.9 or
+  Modern as a whole — and the recommendation is never below the minimum.
+  `communityFeatures` is the complete Community 3.9 table the content was
+  authored for, in the `community.Features` JSON shape, decoded over the
+  mainline table (an omitted field keeps its mainline value), bounded as
+  every source is, and the one place a snap-radius maximum may be declared
+  ([DESIGN_COMMUNITY_PATCH §3.2](DESIGN_COMMUNITY_PATCH.md#32-sources-and-precedence)
+  source 2). Strict 3.1 ignores it. No field can switch off an individual
+  Nanolathe Modern policy; a mod that wants the retail rules chooses Strict.
+- **`settings`** is a partial settings document in the settings file's own
+  JSON shape: the preferences the mod recommends. It is decoded over the
+  settings defaults exactly as the settings file is read, closed. It may not
+  carry the match selection or bookkeeping: `gameplay` and
+  `gameplayFeatures` (they are `rules`), `unitLimit` (a table field),
+  `keyBindings` (the `keys` section), `mod`, `mutators`, `contentProfile`,
+  `modernAI`, `controlsOffered`, `modLockOverrides` and `version`.
+- **`keys`** is the settings file's `keyBindings` block: a keyboard profile
+  (`retail`, `community` or `zero`) and rebound actions, each a catalogued,
+  rebindable action with chords the battle can deliver.
+- **`locks`** are dotted paths into the settings document (`gameplay`,
+  `presentation.waterSurface`) the mod asks the player not to change; each must name
+  a setting.
+
+`modlibrary.Metadata.Config` carries the parsed config: `Content`, `Rules`,
+the validated `Settings` document with `ApplySettings` (an overlay onto a
+settings value) and `SettingsPaths` (the leaf paths it sets), `Keys` and
+`Locks`. The mount applies the content section and the Community table;
+layering the settings, keys and locks is the shell's. A mod's `Controls` is
+its keyboard profile when that names a preset (§4.3); the config's settings,
+recommended rules and keys are the mod's settings layer (§4.6), and its
+`MinimumGameplay` and
+`BuildMenuPageSize` are its config's. `--mod-config <path>` reads a
+stand-alone config (`modlibrary.ReadConfigFile`) for a manual root stack or a
+displayless run, or in place of an installed mod's own to try a config before
+it is packaged; the settings key `contentProfile` is its saved form.
+
+**Schema 1** (`contentProfile`, `minimumGameplay`, `controls` and
+`buildMenuPageSize` beside the identity) stays readable, as identity only:
+the profiles it named no longer exist, so a schema 1 mod mounts as plain
+content like a package without metadata (§4.5), and its recommendation
+fields select nothing. **A mod without a config** — schema 1 metadata, or the
+generated description of a package that had none — mounts under the base
+game's profile (retail layout, retail limits, no Community source), and the
+main menu shows "*name* has no Nanolathe config file; it may not load
+correctly. Re-download it from Get more mods."; the Mods & Mutators screen
+marks the row. There is no detection or fingerprinting fallback.
+
+**The hosted mods' configs** are authored in the repository, one per release,
+as `modconfigs/<release>/nanolathe-mod.json`: `prota-4.8`,
+`ta-zero-alpha5-20241224`, `escalation-10.2.0` and `mayhem-11.3.0`. They are
+packaging, not engine data: nothing embeds them, and future mod authors write
+their own. Their content sections and tables are exactly the removed built-in
+profiles and tables, whose evidence is the packages' own archives,
+configuration files and the pinned patch source
+([mod engine-package compatibility](../research/extensions/mod-engine-compatibility.md),
+[community patch engine behavior](../research/extensions/community-patch-engine.md) §3.1
+and §4.1, [ProTA engine package](../research/extensions/prota-engine.md),
+[TA Zero engine](../research/extensions/ta-zero-engine.md),
+[Escalation shields](../research/extensions/escalation-shields.md#passive-generator-healing),
+[Total Mayhem package](../research/extensions/total-mayhem-engine.md)). A
+test proves each table resolves to the value and digest the removed table and
+profile produced (`internal/modlibrary/shipped_configs_test.go`). ProTA's and
+TA Zero's `settings` and `keys` are exactly the `community` and `zero`
+columns of the controls preset (§4.3), which a test locks against
+`controlsPresetRows`; Escalation and Mayhem name no preset and carry
+neither. All four keep the Community 3.9 minimum and recommend it, and none
+locks a setting. Their versions carry a `+nanolathe.N` suffix because a
+rebuilt zip is a new file (§5.5).
 
 ### 4.3 Selection and precedence
 
@@ -188,13 +271,16 @@ mod:
   diagnostic, the chip reads *Custom content*, and the Mods & Mutators screen
   explains why it cannot switch. [PROTA_SUPPORT](PROTA_SUPPORT.md) remains
   valid.
-- **Content profile.** A selected mod's `contentProfile` is passed as the
-  explicit selector, so it wins over a saved `contentProfile` preference
-  (D12). A mod that names none, such as a local package (§4.5), is detected;
-  the saved preference never applies to a mod. With no mod, today's
-  precedence (flag, saved preference, detection) is unchanged.
-- **Gameplay minimum.** While a mod with `minimumGameplay` (its own or its
-  content profile's, §4.2) is selected, the
+- **Config.** A selected mod applies its own config (§4.2); a
+  `--mod-config` file named beside it stands in for it. With no mod, the
+  config is `--mod-config`, else the saved `contentProfile` path, else none.
+  Content without a config mounts as plain content and says so: a mod
+  without one, a manual root stack without one, and a saved `contentProfile`
+  naming one of the removed built-in profiles (`prota`, `zero`,
+  `escalation`, `mayhem`; `retail` is simply none). Nothing detects a
+  layout, and mounting never writes the preference.
+- **Gameplay minimum.** While a mod with a `rules.minimumGameplay` (§4.2) is
+  selected, the
   options control skips the reserved sets below it in the derivation order
   Strict 3.1 → Community 3.9 → Modern. A registered set qualifies when its base
   does (`session.BaseModeOf`). If the current selection is below the minimum
@@ -205,6 +291,17 @@ mod:
   is rejected. The minimum is a visible constraint on the player's selection,
   never a hidden selector ([DESIGN_GAMEPLAY_RULES §9](DESIGN_GAMEPLAY_RULES.md#9-extending-the-existing-mechanism)
   "Content profiles are a separate input").
+- **Overriding a rule lock** (user-authorized 2026-09-28). On the Nanolathe
+  screen ([DESIGN_INTERFACE_HUD_INPUT §3.17](DESIGN_INTERFACE_HUD_INPUT.md#317-the-nanolathe-screen))
+  the layers below a mod's minimum show a padlock. Choosing one asks first:
+  the mod is built for its minimum, a lower layer may change how its units
+  play, and a future network game may refuse the combination. Accepting adds
+  the mod's id to the settings key `modLockOverrides`; from then on the
+  start-up raise and a switch to that mod leave the selection where the
+  player put it, and the screen says the lock is overridden. Returning to or
+  above the minimum does not clear the entry; nothing else writes it. A
+  command line that names a mod and a mode below its minimum is still
+  rejected: the override is a saved choice, not a flag.
 - **Controls preset.** A preset is a named assignment of existing host
   options: a mod's recommended settings. Each row writes a value the player
   can already change on an options page or with a chat command; a preset adds
@@ -224,6 +321,7 @@ mod:
   | Setting | Where the player changes it | `community` | `retail` |
   |---|---|---|---|
   | `presentation.communitySelection` (idle unit keys) | Options → Orders | 1 | 0 |
+  | `keyBindings.profile` (one row, *Keyboard*; Zero's is `zero`) | Nanolathe screen → Controls | community | retail |
   | `presentation.doubleClickSelection` | Options → Orders | 1 | 0 |
   | `presentation.factoryHundredBatch` (Ctrl+Shift factory batch of 100) | Options → Orders | 1 | 0 |
   | `presentation.queuedOrderDrag` | Options → Placement | 1 | 0 |
@@ -272,11 +370,12 @@ mod:
   The unit limit is not in the preset, because the Community feature table
   already sets it (§8.3).
 
-  **TA Zero recommendation.** The `zero` profile names `controls: "zero"`
-  and the Community 3.9 minimum, so a library install offers its own settings
-  and requires Community 3.9 or Modern. This selects the already implemented
-  `tazero` feature table through the existing gameplay composition; it does
-  not introduce another rule set or claim historical Alpha 5 parity.
+  **TA Zero recommendation.** TA Zero's config names the `zero` keyboard
+  profile and the Community 3.9 minimum, so a library install offers its own
+  settings and requires Community 3.9 or Modern. Its `communityFeatures`
+  carry the `tazero` build profile's table through the existing gameplay
+  composition; it does not introduce another rule set or claim historical
+  Alpha 5 parity.
   `TAZero.ini` in Alpha 5 and the author's controls page supply the preferences
   ([TA Zero engine](../research/extensions/ta-zero-engine.md#documented-engine-level-behavior)).
   The preset enables double-click selection, group digits, the megamap,
@@ -289,43 +388,19 @@ mod:
   boundaries in [DESIGN_INTERFACE_HUD_INPUT §3.13](DESIGN_INTERFACE_HUD_INPUT.md#313-optional-community-selection-controls).
   The Community preset enables the hundred-unit batch too; the Retail preset
   disables it. All other Zero rows are unchanged, including options whose historical
-  behavior is not established. It follows the same one-time Apply/Keep mine offer. Tests
+  behavior is not established. Tests
   lock the independent thresholds, palette, unchanged preferences and
   persisted colour-table identity.
 
-  A preset is **offered, never forced**, and each mod's offer is made once.
-  When the player switches to a mod that names a preset (or whose content
-  profile does), the Mods & Mutators screen shows a *Yes / No* toggle
-  captioned *Use recommended settings*, *Yes* by default (P10); *Apply*
-  writes the rows once when it is *Yes*. A mod that starts by any other route
-  — `--mod`, the saved choice, a save that switches mod (§7.3), a local
-  install selected later — is offered its preset once on the main menu, in a
-  *Recommended settings* window built like the Mods & Mutators screen: it
-  lists every row with its new value and, where different, the player's
-  current one, and offers *Apply* and *Keep mine*. The offer is never shown
-  during a battle, by a capture or benchmark, or where the settings file
-  cannot be written. A content profile mounted without a mod
-  (`--root … --content-profile prota`, or detection) is offered its profile's
-  preset the same way. Either answer, and either way of offering, records the
-  mod id — `profile:<name>` for a profile without a mod — in the settings
-  key `controlsOffered`, so it is not asked again. Later changes by the
-  player stick.
-
-  Switching away is offered the same way, never done automatically. When
-  the Mods & Mutators screen switches from content that names a preset to
-  content that names none (the original game, or a mod without one), and at
-  least one row still holds a value the leaving preset writes that differs
-  from its `retail` value, the same toggle reads *Restore default settings*,
-  *Yes* by default; *Apply* then returns each such row to its `retail`
-  value. A row the player changed since, and a row the `retail` preset
-  leaves alone, keep their values. A player who kept their own settings when
-  the preset was offered, or has since changed every row it wrote, is not
-  offered a restore. The comparison is by value: a row the player happened
-  to set to the preset's value themselves is restored with the rest.
-  Without this, a player who took ProTA's settings kept its megamap
-  overview, so the wheel no longer zoomed and Tab no longer opened the menu,
-  in every mod after it (issue #19). A switch to a mod with its own preset
-  offers that preset instead.
+  A preset is a named column of these rows. A mod's config states the
+  values its column recommends in its `settings` and `keys` sections (§4.2),
+  and they reach the player as the mod's settings layer (§4.6): nothing is
+  offered, and switching back to the original game plays the base settings,
+  so no restore is needed. The presets remain the Controls page's profiles
+  on the Nanolathe screen (DESIGN_INTERFACE_HUD_INPUT §3.17), which apply a
+  column to the running content's settings. The settings key
+  `controlsOffered`, written by the one-time offer this replaced, is kept
+  and written back unchanged.
 - **A missing mod at start.** If the saved mod's directory has gone, its base
   requirements (§4.2) are unmet, or it fails to open, build or bind, the game
   starts with no mod and the main menu shows one message naming the mod and
@@ -348,8 +423,8 @@ menu, carrying the whole pending selection (mod, mutators, any gameplay raise
 and the controls preset), and performed after the current step returns,
 never inside one. The reload:
 
-1. mounts the base install plus the chosen mod, with the mod's own content
-   profile (D12);
+1. mounts the base install plus the chosen mod, with the mod's own config
+   (§4.2);
 2. builds a fresh shell on that content from the running shell's
    preferences, applies the pending selection to it and enforces the mod's
    gameplay minimum (§4.3);
@@ -385,19 +460,57 @@ the process's one mod install, so it never overlaps a catalogue download
 (§8.2), and its outcome is shown on the Mods & Mutators screen when it is
 open, whose list then includes the mod, else as the main-menu notice. The
 installed mod is not selected. A package with `nanolathe-mod.json` installs
-as that mod.
+as that mod, with the config it carries (§4.2).
 Without metadata, it installs as `local-<sanitized name>` with version
-`local` and a detected content profile, and the Mods & Mutators screen marks
-it *Local*. Its gameplay minimum and controls preset are its detected
-profile's, if the profile names them (§4.2): a ProTA package dropped without
-metadata gets ProTA's. Copying a prepared directory into the
-data directory by hand also works; it needs a metadata file and a receipt,
-which the screen can write with *Adopt*.
+`local` and no config, and the Mods & Mutators screen marks it *Local*. It
+mounts as plain content — the base game's layout and limits, no rules, no
+recommended settings — with the no-config notice (§4.2): a ProTA package
+dropped without metadata is not recognised as ProTA, and nothing detects its
+renamed trees. The same holds for a package whose metadata is schema 1.
+Copying a prepared directory into the data directory by hand also works; it
+needs a metadata file and a receipt, which the screen can write with *Adopt*.
 
 Escalation Gold 10.2.0's package and tested capability boundaries are recorded
 in [Escalation support](ESCALATION_SUPPORT.md). Its catalog summary exposes the
-known passive-healing limitation, and its profile supplies the Community 3.9
-minimum without selecting the unrelated ProTA controls preset.
+known passive-healing limitation, and its config supplies the Community 3.9
+minimum without naming the unrelated ProTA controls preset.
+
+### 4.6 Settings per mod
+
+**Layers.** The settings a battle plays are built in three layers, each a
+partial settings document in the settings file's own shape
+(`internal/settings/layers.go`): the base block, the file's top level, which
+the original game plays as it is; the running mod's recommendations from its
+config (its `settings` document, its `rules.gameplay` as `gameplay` and its
+`keys` as `keyBindings`); and the player's own changes for that mod, the
+settings key `modSettings.<mod id>`. Objects merge key by key and other
+values replace; `keyBindings` and `gameplayFeatures` replace whole, so a layer
+can drop a binding a lower one set. Only the mod-scoped paths
+(`settings.ModScoped`: rules, the presentation block, glow, digit keys,
+interface type, clock, sound mode, voices, music mode, keys, skirmish rows)
+take part; window, volume, mod and mutator choices are the player's alone.
+A save while a mod runs keeps the base block's mod-scoped values, takes the
+global ones from the live settings, and stores the difference between the
+live settings and base-plus-recommendations as that mod's patch. A manual
+root stack and the original game have no layers.
+
+**Locks.** A config's `locks` name settings paths the mod asks the player not
+to change. Until the player overrides the mod's locks (the rule-lock override
+of §4.3, one per mod in `modLockOverrides`), a locked path plays the mod's
+value whatever the player's patch says, and the player's own value there is
+kept in the patch for when they override. The Nanolathe screen marks a locked
+setting with a padlock and asks before changing it, with the network-play
+warning; overriding unlocks all of the mod's settings.
+
+**Presets.** The settings key `presets` holds the player's named sets of
+mod-scoped settings. The Nanolathe screen lists them beside the original
+game's settings and each installed mod's recommendations; applying one can be
+limited to its rules, its graphics and effects, or its controls and
+interface, and writes to the running content's layer.
+
+**On the screen.** Each card says whether the running mod's recommendation
+sets its value (*Set by ProTA*) or the player changed it for that mod
+(*Changed for ProTA*, with a link back to the mod's value).
 
 ## 5. The remote catalogue
 
@@ -410,21 +523,30 @@ One JSON file at `https://nanolathe.gg/mods/manifest.json`:
   "schema": 1,
   "mods": [
     {
-      "id": "prota", "name": "ProTA", "version": "4.8",
+      "schema": 2,
+      "id": "prota", "name": "ProTA", "version": "4.8+nanolathe.1",
       "summary": "…", "homepage": "…",
+      "minimumGameplay": "community-3.9",
+      "requires": [],
       "archive": {
-        "url": "https://github.com/nanolathe-gg/nanolathe-gg.github.io/releases/download/mods/prota-4.8.zip",
+        "url": "https://github.com/nanolathe-gg/nanolathe-gg.github.io/releases/download/mods/prota-4.8+nanolathe.1.zip",
         "size": 12440085,
         "sha256": "…"
-      },
-      "contentProfile": "prota",
-      "minimumGameplay": "community-3.9",
-      "controls": "community",
-      "requires": []
+      }
     }
   ]
 }
 ```
+
+An entry is the mod's identity, the `schema` of the metadata its zip
+carries, the minimum the catalogue shows before a download, and the archive.
+A schema 2 entry names no `contentProfile`, `controls` or
+`buildMenuPageSize`: the zip's own config is authoritative (§4.2), and such
+a key in a schema 2 entry refuses the catalogue. The zip's
+`nanolathe-mod.json` must agree with its entry on `schema`, `id`, `version`
+and `minimumGameplay` (the config's `rules.minimumGameplay`); a schema 1
+entry must also agree on `contentProfile` and `controls`. A disagreement
+refuses the install.
 
 An archive URL is either on the manifest's own origin (a relative URL
 resolves against the manifest) or a release asset of a `nanolathe-gg`
@@ -433,11 +555,15 @@ The website repository keeps one release, `mods`, whose assets are the hosted
 zips, one per mod version, named `<id>-<version>.zip`; its README describes
 packaging and upload.
 
-The zip's own `nanolathe-mod.json` must agree with its manifest entry on `id`,
-`version`, `contentProfile`, `minimumGameplay` and `controls`; a disagreement
-refuses the install. A minimum engine version is deliberately absent: the
-build carries no release version today (`internal/version` names a save
-profile, not a release). Add `minimumEngine` once releases are stamped.
+A build that predates schema 2 refuses a catalogue holding a schema 2 entry
+and refuses to install a schema 2 zip, so publishing schema 2 entries at the
+manifest URL a released build reads takes *Get more mods* away from that
+build. Until those builds are retired, schema 2 entries belong at a manifest
+URL only newer builds read.
+
+A minimum engine version is deliberately absent: the build carries no
+release version today (`internal/version` names a save profile, not a
+release). Add `minimumEngine` once releases are stamped.
 
 ### 5.2 When the client talks to the network
 
@@ -475,10 +601,12 @@ profile, not a release). Add `minimumEngine` once releases are stamped.
      overlay folds case and the winner would depend on the host filesystem;
    - cap total uncompressed bytes and entry count (4 GiB and
      100,000). A cap violation refuses the install.
-4. Validate: parse the metadata and check it against the manifest; mount the
-   base install plus the staged root in a scratch `vfs.FS`, resolve the
-   content profile, and require the products `openContent` requires. A mod
-   that would not start is never installed.
+4. Validate: parse the metadata and config and check them against the
+   manifest; mount the base install plus the staged root in a scratch
+   `vfs.FS`, apply the config's content section (the base game's profile
+   without one), require every directory its `detect` list names, and
+   require the products `openContent` requires. A mod that would not start,
+   or whose config describes other content, is never installed.
 5. Write `install.json`, then rename the staged directory to
    `<id>/<version>/`. The rename is on one filesystem, so an interrupted
    install leaves nothing half-installed. Delete the zip.
@@ -511,7 +639,8 @@ For whoever builds the hosted zips:
   `--root`: HPI-family archives (`*.hpi`, `*.ufo`, `*.ccx`, `*.gp3` and the
   other patch-tier extensions) and loose content directories. There is no
   wrapping top-level folder.
-- `nanolathe-mod.json` is at the root.
+- `nanolathe-mod.json` is at the root, and it is the mod's schema 2 config
+  (§4.2): the zip carries everything Nanolathe needs to run the mod.
 - No executables, DLLs, installers, `ddraw` wrappers, launcher INIs or
   base-game archives.
 - A new version is a new file. Old versions stay hosted, because saves name
@@ -528,9 +657,9 @@ For whoever builds the hosted zips:
 **Total Mayhem 11.3.0.** Its one upstream ZIP contains authored archives
 `mayhem.gp3` and `TADemoM.ufo`, icons and changelogs alongside the retail
 `TotalA.exe`, engine DLLs and Windows renderer files. The hosted package keeps
-the authored archives, icons and changelogs only. Its `mayhem` content profile
-maps the four renamed content trees, carries the limits documented in
-`mayhem.ini`, and selects the existing `mayhem` Community table. The catalogue
+the authored archives, icons and changelogs only. Its config maps the four
+renamed content trees, carries the limits documented in `mayhem.ini`, and
+carries the pinned source's `mayhem` build profile as its Community table. The catalogue
 marks compatibility experimental because exact equivalence to its shipped
 runtime DLL and all gameplay/controls paths is not established
 ([Total Mayhem package](../research/extensions/total-mayhem-engine.md)).
@@ -662,7 +791,7 @@ product exact.
 | Health | unit `MaxDamage` | k× hit points | Retail repair and self-heal restore exactly 1 HP per accepted visit ([05 R-WORK-01 §3]), so repairing to full takes about k× as long. The unit-reclaim pulse is proportional to `maxdamage` ([05 R-WORK-01 §4]). Feature `damage` (wreck hit points) is unchanged. |
 | Damage | every weapon's `DamageDefault` and `Damage` entries (the default scaled from its stored 16-bit value) | k× damage | Includes death explosions, self-destruct, burn and meteor weapons, and damage to features, whose hit points are not scaled, so features die faster. Health and Damage at the same factor roughly cancel between units, apart from truncation and the thresholds. A hit of 30,000 or more skips the armored-state reduction ([06 §9.2]); the commanders' disintegrators already do at ×1. |
 | Blast size | every weapon's `AreaOfEffect` above 16, from its stored unsigned 16-bit value, never scaled below 17 | every blast reaches k× as far | A projectile that meets a unit with an area of 16 or less damages that unit alone and skips the area sweep ([06 §9.1]), and Modern's reliable direct-fire class uses the same bound, so a direct-hit weapon is left alone and a splash weapon never scales into that class: a laser gains no splash, and the smallest stock splash (30) floors at 17 at ×0.25 instead of becoming a direct hit. Death, self-destruct, burn and meteor weapons are included. The radius is the area halved and the falloff reads distance over radius, so a recipient at the same fraction of the radius takes the same share ([06 §9.3]). The broad phase visits about k² times the cells ([06 §9.3]); the stock largest area, 950, is 3,800 at ×4. The sweep remembers twenty units and processes a unit met again after that ([06 §9.3]), so a wider blast re-hits large multi-cell units sooner. Interceptors catch within k× the distance, because their catch test uses the same field ([06 R-WPN-05 §10]). The kamikaze pulse ring and the area-of-effect range ring widen with it ([04 R-SPEC-01 §1], [07 R-P0-11 §3]). Explosion art is not scaled. |
-| Sight | unit `SightDistance` | k× sight | Both sight lookups clamp at their table's last entry, so large factors saturate for long-sighted units ([03 §3.2]). The ranges that read `sightdistance` widen with it: the fire-at-will opportunity scan and hold-position leash ([04 R-STANCE-01 §3], [04 R-STANCE-01 §4]) and the patrol and VTOL work scans ([04 R-ORD-01 §4], [04 R-ORD-01 §7]). |
+| Sight | unit `SightDistance` | k× sight, up to each raster's limit | Both rasters quantize `sightdistance` whenever a unit publishes its sight, so no table derives from it ([03 §3.2]). Each stops at a fixed limit the mutator does not move. True line of sight stops at the last reachable LOS.TDF table, 8 cells or `sightdistance` 256 with the stock nine tables ([03 R-COMP-02 §1], SC9); Circular stops at the last visibility-mask frame, 14 cells or 448. At ×1, 110 of the 278 stock definitions (82 of the 152 mobile ones) already reach the True limit and 46 more are one cell short, so under True line of sight, the skirmish default and the only raster a campaign battle uses ([08 R-SKIR-01 §4]), factors above 1 barely widen what units see while factors below 1 shrink it. Under Circular only one stock definition starts at the limit. The ranges that read `sightdistance` widen at every factor: the fire-at-will opportunity scan and hold-position leash ([04 R-STANCE-01 §3], [04 R-STANCE-01 §4]) and the patrol and VTOL work scans ([04 R-ORD-01 §4], [04 R-ORD-01 §7]). |
 | Radar | unit `RadarDistance`, `SonarDistance`, `RadarDistanceJam`, `SonarDistanceJam` by the same factor | k× radar and sonar | All four are plain search radii, so detection and jamming stay in proportion ([03 R-VIS-01 §5]). The emitter's height bonus is not scaled ([03 R-VIS-01 §4]); `mincloakdistance` is left alone. |
 | Income | unit `MetalMake`, `ExtractsMetal`, `WindGenerator`, `TidalGenerator`; the magnitude of a negative `EnergyUse`; and `EnergyMake`'s surplus over a positive `EnergyUse`: with `sm`, `se` the stored singles, `sm > se` becomes `float32(se + float64((sm − se)·k))` (the conversion keeps the product from fusing into the sum) | every unit produces k× what it makes beyond its own upkeep while that upkeep is charged | Each settlement contribution is the field times something the mutator leaves alone — the wind scalar, the tidal strength, the footprint's metal sum — so output scales by k ([05 R-ECO-01 §2], [05 R-PROD-01 §3], [05 R-PROD-01 §4], [05 R-PROD-01 §6]). A negative `energyuse` is not a malformed value here: it is the production arm the stock solar collectors author (−20), whose negation is added to production, so its magnitude scales and its sign and arm are kept ([05 R-ECO-01 §2]). 126 stock units author `energymake` equal to `energyuse` (radar and sonar towers, jammers, most mobile units); scaling `energymake` alone would make them net drains below ×1 and generators above it, so only the surplus scales: a fusion plant makes exactly k×, a self-powered radar stays neutral while its upkeep is charged, CORCOM's 25 for an upkeep of 1 becomes 1 + 24k, and ARMCOM, with no upkeep, makes 25k. Positive `energyuse`, `makesmetal`, storage and costs are unchanged: a metal maker keeps its authored conversion ([05 R-PROD-01 §5]), and more energy runs more makers. Upkeep is charged only while a building is activated or a mobile unit is activated or moving, and `energymake` is paid whenever the unit is complete ([05 R-ECO-01 §2]), so a switched-off radar or a parked mobile unit keeps its unscaled make at every factor. Storage fills sooner and production beyond it is wasted at the settlement clamp ([05 R-ECO-01 §6]). The computer players' difficulty discount multiplies each contribution and composes with Income ([05 R-ECO-01 §3]). An extractor samples its rate at creation ([05 R-PROD-01 §6]), and a save carries it. The HUD rates are settlement values and show the scaled output. The Classic AI's class vector clamps `energymake` at 30 ([08 R-P0-05 §5]), and the Modern AI's integer summaries round small scaled values. |
 | Salvage | feature `Metal`, `Energy` of every definition that is not `indestructible`: wrecks, heaps, rocks and trees, whether a map, a mission or a death places them. A corpse-chain feature takes Build cost × Salvage, rounded once | reclaim pays k× | Map features resolve to catalog definitions when the terrain loads, after battle entry has applied the mutators, so one transform reaches every placement. The deposit pass writes the low byte of an indestructible definition's `metal` into the extraction grid ([05 R-FEAT-01 §7]); scaling it would wrap that byte (250 × 2 is 244), so deposits are excluded. No stock indestructible definition is reclaimable. Feature reclaim counts down `trunc(15 + (energy + metal)/2)` work at a fixed rate and pays the whole pool on the removing visit ([05 R-WORK-01 §5]), so a builder earns at about the same rate for about k× as long. Repair patrol's reclaim scan ranks by value and admits a metal feature only when it fits under storage, inclusively ([05 R-FEAT-01 §6], [04 R-ORD-01 §4]), so large pools are passed over sooner when storage is nearly full. The HUD footer shows the scaled pools ([07 R-HUD-03 §3]). The computer players' discount applies to the payout ([05 R-ECO-01 §3]). Resurrection reads no pool ([05 R-WORK-01 §7]). The largest stock pool, 40,100, saturates at 65,535 from ×2. |
@@ -691,7 +820,10 @@ products, because the retail arithmetic stays retail.
 derived from a field it changes. A search of the unit compiler found these
 fields assigned and not otherwise derived from. The implementing unit confirms
 the same for AI profiles, build menus, the weapon linker and the LOS tables,
-and lists anything it finds here.
+and lists anything it finds here. The LOS tables and the visibility-mask
+frames derive nothing from `sightdistance`: both rasters quantize the
+definition's live value each time a unit publishes its sight ([03 §3.2]), so
+Sight needs no recompute.
 
 ### 6.6 Identity and reports
 
@@ -761,10 +893,19 @@ root stack. `unitLimit` is the configured unit-limit word, the one that sizes
 a battle. `catalog` and `contentManifest` are the battle catalog's identity
 after mutators and the mounted set's manifest hash. A sidecar with another
 `schema`, or one that does not parse, refuses the load rather than being read
-as absent, which would silently drop the selection it records. `community` records the session's Community sources and its
+as absent, which would silently drop the selection it records. `contentProfile`
+is the mounted content's report name: the running config's id, or `retail`
+for content without one. `community` records the session's Community sources and its
 battle-entry table (`Session.CommunitySources`, `Session.EntryCommunity`), so
 a restored battle resolves and switches exactly as the saved one did, whatever
-the host's current settings are. `ai`, present when the battle had a computer
+the host's current settings are. A mod config's table is recorded as a
+content source whose `base` is the complete value, so a sidecar needs no
+engine-side table name. A sidecar written before 2026-09-29 names the
+removed per-mod tables (`{"table": "escalation"}`, `tazero`, `mayhem`) as its
+content source; this build no longer resolves those names, so such a source
+is replaced on load by one whose `base` is the sidecar's recorded `entry`
+table, the complete value the battle ran under, and the battle restores
+exactly as saved (`main.TestSidecarRemovedTableUsesEntry`). `ai`, present when the battle had a computer
 player, is the Modern AI controllers' record (the battle seed, each
 controller's generator position, each computer player's configured brain
 parameters, `overrides`, and the computer players marked Modern, `modern`;
@@ -839,9 +980,13 @@ resolves the host's, as every new battle does.
 ### 8.1 The main-menu chip
 
 A Nanolathe-owned control drawn by the host over the authored `MAINMENU`, in a
-fixed position on the logical 640×480 surface. It reads, for example,
-*ProTA 4.8 · Community 3.9 · 2 mutators*, and opens the Mods & Mutators
-screen. Mods repaint the front end, so its position is chosen by `--shot`
+fixed position on the logical 640×480 surface. Its button reads *NANOLATHE*
+and its status line, for example, *ProTA 4.8 · Community 3.9 · 2 mutators*.
+In the window it opens the Nanolathe screen
+([DESIGN_INTERFACE_HUD_INPUT §3.17](DESIGN_INTERFACE_HUD_INPUT.md#317-the-nanolathe-screen)),
+which chooses the mod, the rules and the mutators together; a shell with no
+window opens the Mods & Mutators screen, which the Nanolathe screen's
+*Manage mods* button also opens for installing, downloading and removing. Mods repaint the front end, so its position is chosen by `--shot`
 review against the retail, ProTA and Escalation menus rather than relative to
 any authored art. With a manual root stack it reads *Custom content*.
 
@@ -930,14 +1075,14 @@ leaves the line empty (DESIGN_INTERFACE_HUD_INPUT §2.6).
 
 | Package | Owns | Imported by |
 |---|---|---|
-| `internal/modlibrary` | data directory layout, metadata, installed listing, selection resolution (mod → root, profile, minimum, preset), extraction and validation, receipts. No network. | both commands |
+| `internal/modlibrary` | data directory layout, metadata and the mod's config (§4.2), installed listing, selection resolution (mod → root, config, minimum, preset), extraction and validation, receipts. No network. | both commands |
 | `internal/modfetch` | manifest fetch and cache, downloads with resume and progress. The only package that imports `net/http`. | `cmd/nanolathe` only |
 | `internal/content` | `Factor`, `Mutators`, `ApplyMutators`, the mutated catalog identity | session, commands |
 | `internal/save` | the sidecar type and its read/write, separate from the bank's bytes | session, commands |
 | `internal/session` | mutators and recorded Community sources in battle-entry and restore requests; building the sidecar value; reports | commands |
 | `internal/settings` | the `mod` and `mutators` keys | commands |
 | `cmd/nanolathe` | chip, screen, in-process reload, loading-screen lines, drop-to-install, `--mod`, `--mutator` | — |
-| `cmd/nanolathe-headless` | `--mutator` and `--mod` (flags only, never the settings file). `--mod` mounts an installed mod from the library as the last root with its content profile, through `modlibrary`'s command-line selection; it is refused beside several `--root` flags, and the command never fetches | — |
+| `cmd/nanolathe-headless` | `--mutator` and `--mod` (flags only, never the settings file). `--mod` mounts an installed mod from the library as the last root with its own config, through `modlibrary`'s command-line selection; it is refused beside several `--root` flags, and the command never fetches. `--mod-config` names a config file for a manual stack or in place of the mod's own | — |
 
 **Guards.** New architecture tests: only `internal/modfetch` imports
 `net/http`; only `cmd/nanolathe` imports `internal/modfetch`; no simulation
@@ -953,12 +1098,14 @@ dependencies.
 |---|---|
 | Extraction refuses absolute paths, `..`, symlinks and case-folded duplicates; skips executables and `__MACOSX`; enforces the caps; an interrupted install leaves nothing installed | `modlibrary` tests on authored fixture zips |
 | Metadata disagreeing with the manifest refuses the install; unmet `requires` block selection | `modlibrary` |
-| A negative `buildMenuPageSize` is refused; a mod naming none takes its profile's, its own wins, and the player's settings value wins over both | `modlibrary.TestBuildMenuPageSizeMetadata`, `main.TestContentBuildMenuPageSize`, `main.TestExpandedSidebarBuildPageLock` |
-| Precedence: `--mod` over setting, a manual stack disables both, a mod's profile beats a saved `contentProfile`, a command line below the minimum is rejected | `modlibrary`, `cmd/nanolathe` |
-| A mod without `controls` or `minimumGameplay` takes its content profile's; metadata wins; ProTA recommends controls and a minimum, Escalation a minimum only | `modlibrary.TestLocalPackageTakesItsProfileRecommendations`, `profiles.TestProfileRecommendations` |
-| Preset contents, and the retail preset keeping skirmish rows; the offer key and its once-only record | `main.TestCommunityControlsPresetContents`, `main.TestRetailControlsPresetKeepsSkirmishRows`, `main.TestControlsOfferIsRememberedPerMod` |
-| A local ProTA package is offered its preset on the Mods & Mutators screen and once on the main menu after `--mod`; the loading line names the effective unit limit | `main.TestProTARecommendedSettingsAreOfferedOnce` (retail tier) |
-| Switching from a preset's content to content with none offers the restore only when a row still holds the preset's value; it returns those rows to `retail`, which is each setting's default, and keeps the player's later changes; a switch to ProTA and back through two reloads leaves the settings file at the defaults | `main.TestRestoreControlsPresetUndoesOnlyThePresetsRows`, `main.TestRetailPresetColumnIsTheDefaults`, `main.TestSwitchControlsPresetOffersRestoreOnlyWhenLeaving`, `main.TestModsHotReloadSwitchesContent` (retail tier, `NANOLATHE_MOD_ROOTS_PROTA`) |
+| A negative build page lock is refused; a config carries it as `content.presentation.build_menu_page_size`, and the player's settings value wins | `modlibrary.TestBuildMenuPageSizeMetadata`, `main.TestContentBuildMenuPageSize`, `main.TestExpandedSidebarBuildPageLock` |
+| Precedence: `--mod` over setting, a manual stack disables both, a mod's own config beats a saved `contentProfile`, `--mod-config` beats both, a removed profile name is ignored with the notice, a command line below the minimum is rejected | `modlibrary`, `main.TestContentConfigPrecedenceWithoutAMod`, `main.TestManualStackWithoutAConfigShowsTheNotice` |
+| Every config section is closed and validated (content, reserved gameplay words, feature bounds, settings keys and types, reserved settings keys, keyboard actions and chords, lock paths); the settings layer applies only what it names | `modlibrary.TestParseConfigDocument`, `modlibrary.TestParseConfigDocumentRefusals`, `modlibrary.TestConfigSettingsLayer` |
+| A schema 1 or metadata-less mod is plain content with the notice and no recommendations | `modlibrary.TestSchemaOneModIsPlainContent`, `modlibrary.TestLocalPackageIsPlainContent` |
+| The four repository configs reproduce the removed tables and profiles exactly (value and digest); ProTA's and TA Zero's settings and keys are their preset columns; Escalation and Mayhem carry a minimum only | `modlibrary.TestShippedConfigsReproduceTheRemovedTables`, `modlibrary.TestShippedConfigsCarryTheRemovedProfiles`, `main.TestShippedConfigSettingsAreThePresetRows` |
+| Preset contents, and the retail preset keeping skirmish rows | `main.TestCommunityControlsPresetContents`, `main.TestRetailControlsPresetKeepsSkirmishRows`, `main.TestRetailPresetColumnIsTheDefaults` |
+| A ProTA package's recommendations are its settings layer after `--mod`; a change under ProTA stays ProTA's and the original game plays the base; the loading line names the effective unit limit | `main.TestProTARecommendedSettingsAreItsLayer` (retail tier) |
+| Layers, diffs and atomic subtrees; a change is kept per mod; locked paths play the mod's value until overridden and keep the player's; presets save and apply by part | `settings.TestLayers*`, `main.TestModSettingsKeepChangesPerMod`, `main.TestModConfigSettingsAndLocks`, `main.TestNLScreenPresetsSaveAndApplyPart` (retail tier) |
 | SHA-256 and size mismatch, truncated download, resume, off-origin redirect refused, offline cache shown | `modfetch` against `httptest` |
 | Zero mutators leave the clone deep-equal with an equal `Hash`; each mutator changes exactly its fields; rounding, minimum-one, saturation and `v ≤ 0` boundaries; the hash is independent of field order | `content` |
 | Mutators reach fresh skirmish, mission entry and restore; all six fingerprint locks unchanged | `session`, `headless` |

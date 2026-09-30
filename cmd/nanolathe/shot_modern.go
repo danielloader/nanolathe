@@ -168,6 +168,8 @@ func (g *modernShotGame) Draw(screen *ebiten.Image) {
 	g.gpu.SetGlowStrength(g.cl.GlowStrength())
 	g.gpu.SetGlowFamilies(g.cl.GlowFamilies())
 	g.gpu.SetEffects(g.cl.Effects())
+	g.gpu.SetGroundLightStrength(g.cl.GroundLightStrength())
+	g.gpu.SetBlastRingStrength(g.cl.BlastRingStrength())
 	img := g.gpu.Execute(g.list, g.w, g.h)
 	if img == nil {
 		g.err = fmt.Errorf("nanolathe: shot: modern executor returned no surface for %dx%d", g.w, g.h)

@@ -41,9 +41,12 @@ func (a *app) drawPaused(screen *ebiten.Image, width, height int, timing bool) (
 	a.gpu.SetGlow(a.c.Glow())
 	a.gpu.SetGlowStrength(a.c.GlowStrength())
 	a.gpu.SetGlowFamilies(a.c.GlowFamilies())
-	// A changed effect selection advances the client's paused-world revision,
-	// so the digest below already rejects the cached raster (§30).
+	// A changed effect selection or strength advances the client's
+	// paused-world revision, so the digest below already rejects the cached
+	// raster (§30).
 	a.gpu.SetEffects(a.c.Effects())
+	a.gpu.SetGroundLightStrength(a.c.GroundLightStrength())
+	a.gpu.SetBlastRingStrength(a.c.BlastRingStrength())
 	if !a.paused.valid || a.paused.inputs != inputs {
 		var started time.Time
 		if timing {

@@ -16,17 +16,20 @@ import (
 // Nanolathe preferences migrate independently of the retail display block
 // (DESIGN_GPU_RENDERER §13.5, §14.6).
 func TestPresentationPreferencesLoadAndRoundTrip(t *testing.T) {
-	one := DefaultEffectSwitch
-	// The five effect switches default on, so a value the case does not name is
-	// the default. want builds a block from the two named fields plus overrides.
-	want := func(renderer string, fps int, effects ...int) Presentation {
+	// The effect switches default on, so a value the case does not name is the
+	// default. want builds a block from the two named fields plus overrides.
+	want := func(renderer string, fps int, set ...func(*Presentation)) Presentation {
 		p := DefaultPresentation()
 		p.Renderer, p.FPS = renderer, fps
-		fields := []*int{&p.Water, &p.Lighting, &p.Finish, &p.Distortion, &p.Marks}
-		for i, v := range effects {
-			*fields[i] = v
+		for _, f := range set {
+			f(&p)
 		}
 		return p
+	}
+	allOff := func(p *Presentation) {
+		for _, v := range p.effectSwitches() {
+			*v = 0
+		}
 	}
 	if got := Defaults().Presentation; got != want("modern", 60) {
 		t.Fatalf("default presentation = %+v", got)
@@ -43,12 +46,40 @@ func TestPresentationPreferencesLoadAndRoundTrip(t *testing.T) {
 		{"invalid preferences", `{"version":1,"presentation":{"renderer":"unknown","fps":-1}}`, want("modern", 60)},
 		// A file that omits the effect keys entirely still decodes to the
 		// defaults, and a stored 0 is "off" and survives the round trip.
-		{"effects off", `{"version":1,"presentation":{"renderer":"modern","fps":60,"water":0,"lighting":0,"finish":0,"distortion":0,"marks":0}}`,
-			want("modern", 60, 0, 0, 0, 0, 0)},
-		{"one effect off", `{"version":1,"presentation":{"renderer":"modern","fps":60,"distortion":0}}`,
-			want("modern", 60, one, one, one, 0)},
-		{"negative effect repaired", `{"version":1,"presentation":{"renderer":"modern","fps":60,"marks":-3}}`,
+		{"effects off", `{"version":1,"presentation":{"renderer":"modern","fps":60,"waterSurface":0,"waterMotion":0,"waterFoam":0,"waterReflections":0,"modelLight":0,"groundLight":0,"finish":0,"glint":0,"blastRings":0,"fireShimmer":0,"wreckGlow":0,"wreckShimmer":0,"scorch":0,"softShadows":0,"supersample":0}}`,
+			want("modern", 60, allOff)},
+		{"one effect off", `{"version":1,"presentation":{"renderer":"modern","fps":60,"blastRings":0}}`,
+			want("modern", 60, func(p *Presentation) { p.BlastRings = 0 })},
+		{"surface off alone", `{"version":1,"presentation":{"waterSurface":0}}`,
+			want("modern", 60, func(p *Presentation) { p.WaterSurface = 0 })},
+		{"model light off alone", `{"version":1,"presentation":{"modelLight":0}}`,
+			want("modern", 60, func(p *Presentation) { p.ModelLight = 0 })},
+		{"one part off", `{"version":1,"presentation":{"waterFoam":0,"glint":0,"softShadows":0}}`,
+			want("modern", 60, func(p *Presentation) { p.WaterFoam, p.Glint, p.SoftShadows = 0, 0, 0 })},
+		{"negative effect repaired", `{"version":1,"presentation":{"renderer":"modern","fps":60,"scorch":-3,"wreckShimmer":-1,"softShadows":-2}}`,
 			want("modern", 60)},
+		{"wreck glow off alone", `{"version":1,"presentation":{"wreckGlow":0}}`,
+			want("modern", 60, func(p *Presentation) { p.WreckGlow = 0 })},
+		// Supersampling is a switch like the others: a file from before it
+		// keeps it on, a stored 0 is kept, and a negative value is repaired.
+		{"supersample off alone", `{"version":1,"presentation":{"supersample":0}}`,
+			want("modern", 60, func(p *Presentation) { p.Supersample = 0 })},
+		{"supersample repaired", `{"version":1,"presentation":{"supersample":-1}}`,
+			want("modern", 60)},
+		{"supersample before the key", `{"version":1,"presentation":{"renderer":"modern","fps":60,"softShadows":1,"glint":1}}`,
+			want("modern", 60)},
+		// The strengths are percentages: 0 is off and kept, a negative value is
+		// repaired to the tuned look, and anything past the maximum is capped.
+		{"strengths zero", `{"version":1,"presentation":{"groundLightStrength":0,"blastRingStrength":0}}`,
+			want("modern", 60, func(p *Presentation) { p.GroundLightStrength, p.BlastRingStrength = 0, 0 })},
+		{"strengths capped", `{"version":1,"presentation":{"groundLightStrength":350,"blastRingStrength":201}}`,
+			want("modern", 60, func(p *Presentation) {
+				p.GroundLightStrength, p.BlastRingStrength = MaxEffectStrength, MaxEffectStrength
+			})},
+		{"strengths repaired", `{"version":1,"presentation":{"groundLightStrength":-1,"blastRingStrength":-40}}`,
+			want("modern", 60)},
+		{"strengths kept", `{"version":1,"presentation":{"groundLightStrength":150,"blastRingStrength":25}}`,
+			want("modern", 60, func(p *Presentation) { p.GroundLightStrength, p.BlastRingStrength = 150, 25 })},
 		{"trail strength zero", `{"version":1,"presentation":{"trailStrength":0}}`,
 			func() Presentation { p := want("modern", 60); p.TrailStrength = 0; return p }()},
 		{"trail strength capped", `{"version":1,"presentation":{"trailStrength":250}}`,
@@ -77,6 +108,78 @@ func TestPresentationPreferencesLoadAndRoundTrip(t *testing.T) {
 			}
 			if s.Presentation != tc.want {
 				t.Fatalf("round-trip presentation = %+v, want %+v", s.Presentation, tc.want)
+			}
+		})
+	}
+}
+
+// The four family masters and the combined hot wrecks switch an earlier build
+// stored are read once (DESIGN_GPU_RENDERER §30): a stored 0 turns every
+// switch the key covered off, marks the trail strength too, and any other
+// value changes nothing. None is written again, so the migrated switches are
+// what the next load reads.
+func TestRetiredEffectMastersMigrate(t *testing.T) {
+	for _, tc := range []struct {
+		key string
+		off func(p *Presentation) []*int
+	}{
+		{"water", func(p *Presentation) []*int {
+			return []*int{&p.WaterSurface, &p.WaterMotion, &p.WaterFoam, &p.WaterReflections}
+		}},
+		{"lighting", func(p *Presentation) []*int { return []*int{&p.ModelLight, &p.GroundLight} }},
+		{"distortion", func(p *Presentation) []*int {
+			return []*int{&p.BlastRings, &p.FireShimmer, &p.WreckGlow, &p.WreckShimmer}
+		}},
+		{"marks", func(p *Presentation) []*int { return []*int{&p.Scorch, &p.TrailStrength} }},
+		{"hotWrecks", func(p *Presentation) []*int { return []*int{&p.WreckGlow, &p.WreckShimmer} }},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			load := func(body string) (Presentation, []byte) {
+				t.Helper()
+				path := filepath.Join(t.TempDir(), "settings.json")
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				s, err := LoadFrom(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := s.SaveTo(path); err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				again, err := LoadFrom(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if again.Presentation != s.Presentation {
+					t.Fatalf("migrated %s did not survive its own round trip", tc.key)
+				}
+				return s.Presentation, data
+			}
+			want := DefaultPresentation()
+			for _, v := range tc.off(&want) {
+				*v = 0
+			}
+			got, data := load(`{"version":1,"presentation":{"` + tc.key + `":0}}`)
+			if got != want {
+				t.Fatalf("%s 0 loaded %+v, want %+v", tc.key, got, want)
+			}
+			if bytes.Contains(data, []byte(`"`+tc.key+`"`)) {
+				t.Fatalf("the retired %q key was written back:\n%s", tc.key, data)
+			}
+			// On, or repaired from a negative, the master was "on": the parts
+			// keep what the file says, here one part off beside it.
+			for _, value := range []string{"1", "-2"} {
+				body := `{"version":1,"presentation":{"` + tc.key + `":` + value + `,"softShadows":0}}`
+				on := DefaultPresentation()
+				on.SoftShadows = 0
+				if got, _ := load(body); got != on {
+					t.Fatalf("%s %s loaded %+v, want %+v", tc.key, value, got, on)
+				}
 			}
 		})
 	}

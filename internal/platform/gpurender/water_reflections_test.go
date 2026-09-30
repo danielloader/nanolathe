@@ -79,6 +79,18 @@ func checkWaterReflectionDevicePixels() error {
 		if !bytes.Equal(on, read(g, true, 30, zoom, false, false)) {
 			return fmt.Errorf("reflection phase replay differs")
 		}
+		// Reflections are their own switch (§30): with every lane of the
+		// surface pass off they still draw over the painted water.
+		r.setWaterSurface(false)
+		r.setWaterMotion(false)
+		r.setWaterFoam(false)
+		bareOff, bareOn := read(g, false, 30, zoom, false, false), read(g, true, 30, zoom, false, false)
+		r.setWaterSurface(true)
+		r.setWaterMotion(true)
+		r.setWaterFoam(true)
+		if bytes.Equal(bareOff, bareOn) {
+			return fmt.Errorf("reflections vanished with the surface pass off, zoom=%v", zoom)
+		}
 		// Ordinary water also animates; compare the reflected/off pair at each phase.
 		late, lateOff := read(g, true, 45, zoom, false, false), read(g, false, 45, zoom, false, false)
 		same := true

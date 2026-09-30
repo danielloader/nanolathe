@@ -27,7 +27,7 @@ func TestRetailZeroFrontendResourcesAndFactions(t *testing.T) {
 		t.Skip("NANOLATHE_MOD_ROOTS_ZERO is unset")
 	}
 	retail := testsupport.RetailRoot(t)
-	opts := Options{Root: retail, Roots: append([]string{retail}, roots...), Map: "ashap plateau", Seed: 7}
+	opts := Options{Root: retail, Roots: append([]string{retail}, roots...), Map: "ashap plateau", Seed: 7, ModConfig: modRootsConfigPath(t, "zero")}
 	cs, err := openContent(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +37,7 @@ func TestRetailZeroFrontendResourcesAndFactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cs.profile != "zero" || shell.skirmishSideCount() != 3 {
+	if cs.profile != "ta-zero" || shell.skirmishSideCount() != 3 {
 		t.Fatalf("profile/sides = %s/%d", cs.profile, shell.skirmishSideCount())
 	}
 	for _, tc := range []struct {

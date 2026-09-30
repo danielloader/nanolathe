@@ -158,7 +158,7 @@ func (r *Renderer) Sprite(sp drawlist.Sprite) {
 		// tintedBlitAnchor: each opaque source texel resolves the destination to
 		// ALP[src*256 + dst]; anchored and destination-reading [03 R-COMP-01 §2].
 		clipX, clipY, clipW, clipH := r.spriteClip(sp.HasClip, sp.Clip)
-		if sp.LightingKind == drawlist.SpriteLightingSmoke && sp.Frame != nil && len(r.lighting.lights) > 0 {
+		if sp.LightingKind == drawlist.SpriteLightingSmoke && sp.Frame != nil && !r.lighting.modelDisabled && len(r.lighting.lights) > 0 {
 			near := r.lighting.near(float32(sp.X), float32(sp.Y), float32(max(sp.Frame.Width, sp.Frame.Height)))
 			r.drawTintLight(sp.Frame, int(sp.X), int(sp.Y), clipX, clipY, clipW, clipH, &near, sp.WorldHeight)
 		} else {

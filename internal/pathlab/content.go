@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/nanolathe-gg/nanolathe/internal/community"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/install"
@@ -17,9 +18,12 @@ type Content struct {
 	FS      *vfs.FS
 	View    vfs.FSOps
 	Profile profiles.Profile
-	Catalog *content.Catalog
-	Roots   []string
-	Mod     string // "<id>@<version>", empty for the base install
+	// Features is the mod config's Community declaration, the session's
+	// content source; nil for the base install or a mod without a config.
+	Features []community.Overrides
+	Catalog  *content.Catalog
+	Roots    []string
+	Mod      string // "<id>@<version>", empty for the base install
 }
 
 // Close releases the mounted overlay.
@@ -31,16 +35,16 @@ func (c *Content) Close() {
 
 // LoadContent mounts the base install found from roots (or discovered when
 // roots is empty), then the installed mod named by mod ("" or "none" for
-// none) as the last root, resolves the content profile and compiles the
-// catalog. The settings file is never read, so a run reproduces from its
+// none) as the last root, applies the mod's own config — its content section
+// and Community table, or the base game's profile for a mod without one —
+// and compiles the catalog. The settings file is never read, so a run reproduces from its
 // arguments.
 func LoadContent(roots []string, mod string) (*Content, error) {
 	base, err := install.Resolve(roots)
 	if err != nil {
 		return nil, err
 	}
-	c := &Content{Roots: append([]string(nil), base...)}
-	selector := ""
+	c := &Content{Roots: append([]string(nil), base...), Profile: profiles.Retail()}
 	if strings.TrimSpace(mod) == "" {
 		mod = "none"
 	}
@@ -64,17 +68,12 @@ func LoadContent(roots []string, mod string) (*Content, error) {
 		}
 		c.Roots = append(c.Roots, m.Dir)
 		c.Mod = m.ID + "@" + m.Version
-		selector = m.ContentProfileSelector()
+		c.Profile, c.Features = m.Content(), m.CommunitySources()
 	}
 	c.FS = vfs.New()
 	if err := c.FS.MountGameDirectories(c.Roots); err != nil {
 		c.FS.Close()
 		return nil, fmt.Errorf("nanolathe: mounting content failed: logical path <content roots>, providers searched [%s], expected readable Total Annihilation content directories: %w", strings.Join(c.Roots, ", "), err)
-	}
-	c.Profile, err = profiles.Resolve(c.FS, selector)
-	if err != nil {
-		c.FS.Close()
-		return nil, err
 	}
 	c.View = c.Profile.Layout().Apply(c.FS)
 	c.Catalog, err = content.CompileWithOptions(c.View, content.Options{Limits: content.LimitsFromProfile(c.Profile.Limits)})

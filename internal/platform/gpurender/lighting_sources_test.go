@@ -53,14 +53,14 @@ func TestAddedLightKindsAdmittedAndRejected(t *testing.T) {
 		if r.modelStats.BattleLightKinds[tc.want] != 1 {
 			t.Fatalf("kind %d: diagnostics %v", tc.kind, r.modelStats.BattleLightKinds)
 		}
-		// The Lighting switch gates every added family exactly as it gates the
-		// explosion prototype (§30).
-		r.setBattleLighting(false)
+		// With both light switches off the gather is skipped for every added
+		// family exactly as for the explosion prototype (§30).
+		r.setLights(false)
 		r.prepareBattleLighting(&list)
 		if len(r.lighting.lights) != 0 || r.modelStats.BattleLights != 0 {
 			t.Fatalf("kind %d emitted with lighting off", tc.kind)
 		}
-		r.setBattleLighting(true)
+		r.setLights(true)
 	}
 }
 
@@ -248,6 +248,15 @@ func TestFreshWreckLights(t *testing.T) {
 	if len(r.lighting.lights) != 0 {
 		t.Fatal("a shadow packet emitted light")
 	}
+	// The light borrows the wreck glow's colour (§30): with that switch off a
+	// recorded emission lends none, as a host whose recorder keeps every
+	// effect on hands the executor.
+	r.setWreckGlow(false)
+	r.prepareBattleLighting(&hot)
+	r.setWreckGlow(true)
+	if len(r.lighting.lights) != 0 {
+		t.Fatal("wreck glow off still lit the wreck")
+	}
 }
 
 // Sources whose reach misses the recorded viewport never reach the budget, so a
@@ -292,15 +301,16 @@ func TestGroundLightQuadsCulledToViewport(t *testing.T) {
 	if r.modelStats.GroundLights != 1 || r.ground.verts[0].DstX != 0 {
 		t.Fatalf("edge clip %v", r.ground.verts[0])
 	}
-	// With the switch off the pass builds nothing, so it copies and submits
-	// nothing either; the retained batch from the previous frame is never drawn.
-	r.lighting.disabled = true
+	// With the ground switch off the pass builds nothing, so it copies and
+	// submits nothing either; the retained batch from the previous frame is
+	// never drawn.
+	r.setGroundLight(false)
 	r.modelStats.GroundLights = 0
 	r.drawGroundLighting()
 	if r.modelStats.GroundLights != 0 {
-		t.Fatal("disabled lighting reached the ground pass")
+		t.Fatal("ground light off reached the ground pass")
 	}
-	r.lighting.disabled = false
+	r.setGroundLight(true)
 	r.lighting.lights = r.lighting.lights[:0]
 	r.drawGroundLighting()
 	if r.modelStats.GroundLights != 0 {
@@ -328,8 +338,10 @@ func groundFixtureTerrain(index byte) *world.Terrain {
 
 // checkGroundAndSourceLightingDevicePixels is the real-device half of §31: a
 // stroke lights the ground beneath it, a flame sprite lights a facing model
-// face, and with the Lighting switch off every pixel returns to the composite
-// the executor draws without the pass.
+// face, and with both light switches off every pixel returns to the composite
+// the executor draws without the pass. Each switch alone removes only its own
+// receiver: model light off keeps the ground pool, ground light off keeps the
+// light on the model face.
 func checkGroundAndSourceLightingDevicePixels() error {
 	if err := checkStrokeGroundLightDevicePixels(); err != nil {
 		return err
@@ -357,7 +369,7 @@ func checkStrokeGroundLightDevicePixels() error {
 	list.RecordLine(drawlist.Line{X0: 48, Y0: 40, X1: 128, Y1: 40, Index: 250, Emissive: true, LightingScale: 1})
 	list.RecordExpand()
 	read := func(on bool) ([]byte, error) {
-		r.setBattleLighting(on)
+		r.setLights(on)
 		img := r.Execute(&list, w, h)
 		if img == nil {
 			return nil, fmt.Errorf("ground light fixture returned no image")
@@ -401,6 +413,50 @@ func checkStrokeGroundLightDevicePixels() error {
 	if !bytes.Equal(off, again) {
 		return fmt.Errorf("disabling ground lighting did not restore the composite")
 	}
+	// Each light switch alone (§30). read turns both, so these set one after.
+	only := func(model, ground bool) ([]byte, ModelStats) {
+		r.setModelLight(model)
+		r.setGroundLight(ground)
+		pixels := make([]byte, w*h*4)
+		r.Execute(&list, w, h).ReadPixels(pixels)
+		stats := r.ModelStats()
+		r.setLights(true)
+		return pixels, stats
+	}
+	// Ground light off: the light is still gathered for models and smoke, but
+	// no pool reaches the terrain.
+	pools, stats := only(true, false)
+	if stats.GroundLights != 0 || stats.BattleLights == 0 {
+		return fmt.Errorf("ground light off: ground lights %d, battle lights %d", stats.GroundLights, stats.BattleLights)
+	}
+	if !bytes.Equal(off, pools) {
+		return fmt.Errorf("ground light off still lit the terrain")
+	}
+	// Model light off: the pool is drawn exactly as with both on; this fixture
+	// has no model or smoke for the switch to darken.
+	ground, stats := only(false, true)
+	if stats.GroundLights != 1 {
+		return fmt.Errorf("model light off: ground lights %d, want 1", stats.GroundLights)
+	}
+	if !bytes.Equal(on, ground) {
+		return fmt.Errorf("model light off changed the ground pool")
+	}
+	// The ground light strength (§30): 200 lights the pool more brightly, 0
+	// is the pass off, and the default restores the tuned pool exactly.
+	r.SetGroundLightStrength(200)
+	bright, _ := only(true, true)
+	r.SetGroundLightStrength(0)
+	dark, stats := only(true, true)
+	r.SetGroundLightStrength(EffectStrengthDefault)
+	if int(at(bright, 88, 55)[0]) <= int(at(on, 88, 55)[0]) {
+		return fmt.Errorf("ground strength 200 did not brighten the pool: %v vs %v", at(bright, 88, 55), at(on, 88, 55))
+	}
+	if stats.GroundLights != 0 || !bytes.Equal(off, dark) {
+		return fmt.Errorf("ground strength 0 still drew %d pools", stats.GroundLights)
+	}
+	if restored, _ := only(true, true); !bytes.Equal(on, restored) {
+		return fmt.Errorf("the default ground strength did not restore the pool")
+	}
 	return nil
 }
 
@@ -426,7 +482,7 @@ func checkFlameLightDevicePixels() error {
 		Kind: drawlist.BlitTinted, LightingKind: drawlist.SpriteLightingFire})
 	list.RecordExpand()
 	read := func(on bool) []byte {
-		r.setBattleLighting(on)
+		r.setLights(on)
 		out := r.Execute(&list, w, h)
 		pixels := make([]byte, w*h*4)
 		out.ReadPixels(pixels)
@@ -443,6 +499,22 @@ func checkFlameLightDevicePixels() error {
 	}
 	if !bytes.Equal(off, read(false)) {
 		return fmt.Errorf("disabling lighting retained the flame source")
+	}
+	// The model light switch alone (§30): the gather still runs for the
+	// ground, but no model face or smoke takes the light. This fixture has no
+	// terrain, so no pool is drawn either and the frame is the unlit one.
+	r.setLights(true)
+	r.setModelLight(false)
+	faces := r.Execute(&list, w, h)
+	facePixels := make([]byte, w*h*4)
+	faces.ReadPixels(facePixels)
+	stats := r.ModelStats()
+	r.setModelLight(true)
+	if stats.BattleLights == 0 || stats.LitModelFaces != 0 {
+		return fmt.Errorf("model light off: battle lights %d, lit faces %d", stats.BattleLights, stats.LitModelFaces)
+	}
+	if !bytes.Equal(off, facePixels) {
+		return fmt.Errorf("model light off still lit a model face")
 	}
 	return nil
 }

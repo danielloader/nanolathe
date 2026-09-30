@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/nanolathe-gg/nanolathe/internal/community"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
@@ -164,6 +165,21 @@ func resolveSidecarSelection(sc save.Sidecar) (sidecarSelection, error) {
 		return sidecarSelection{}, refuseLoad("This game was saved with mutators this build does not know: %v", err)
 	}
 	out := sidecarSelection{mutators: mutators, sources: session.SidecarCommunitySources(sc.Community), entry: sc.Community}
+	// A sidecar written before mod configs names the per-mod tables this
+	// build no longer carries. Its recorded entry table is the complete
+	// value the battle ran under, so it stands in as that source's base and
+	// the restored battle resolves exactly as saved (DESIGN_MODS_MUTATORS
+	// §7.2).
+	for i, src := range out.sources.Content {
+		if src.Table == "" || src.Table == community.Mainline {
+			continue
+		}
+		if _, err := community.Table(src.Table); err == nil {
+			continue
+		}
+		entry := sc.Community.Entry
+		out.sources.Content[i] = community.Overrides{Base: &entry}
+	}
 	if mode, err := gameplay.Parse(sc.Rules); err == nil {
 		out.gameplay = mode
 		return out, nil

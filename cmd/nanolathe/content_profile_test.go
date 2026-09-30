@@ -9,7 +9,9 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	contentprofiles "github.com/nanolathe-gg/nanolathe/internal/content/profiles"
+	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
+	"github.com/nanolathe-gg/nanolathe/internal/testsupport"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
@@ -63,21 +65,36 @@ func authoredSideAnchors() string {
 	return b.String()
 }
 
+// shippedConfigPath is one of the repository's authored mod configs.
+func shippedConfigPath(t *testing.T, dir string) string {
+	t.Helper()
+	return testsupport.ModConfigPath(t, dir)
+}
+
 // TestWindowedMountAppliesTheContentProfileTable is the contract this unit
-// exists for: the graphical command's one mount boundary resolves the profile
-// and hands every content reader the view that carries its directory table, so
-// a loader asking for a retail directory reaches the tree the content set
-// actually ships (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
+// exists for: the graphical command's one mount boundary applies the running
+// config's content section and hands every content reader the view that
+// carries its directory table, so a loader asking for a retail directory
+// reaches the tree the content set actually ships
+// (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles"). TA Zero's config is
+// named with --mod-config, as a manual stack names one.
 func TestWindowedMountAppliesTheContentProfileTable(t *testing.T) {
 	t.Setenv(settings.EnvPath, filepath.Join(t.TempDir(), "settings.json"))
-	cs, err := openContent(Options{Roots: []string{authorRenamedInstall(t)}})
+	config := shippedConfigPath(t, "ta-zero-alpha5-20241224")
+	cs, err := openContent(Options{Roots: []string{authorRenamedInstall(t)}, ModConfig: config})
 	if err != nil {
 		t.Fatalf("mount renamed install: %v", err)
 	}
 	defer cs.Close()
 
-	if cs.profile != "zero" {
-		t.Fatalf("resolved profile = %q, want zero", cs.profile)
+	if cs.profile != "ta-zero" || cs.configPath != config || cs.config == nil || cs.modNotice != "" {
+		t.Fatalf("mounted config = %q from %q (notice %q)", cs.profile, cs.configPath, cs.modNotice)
+	}
+	// The config's rules ride with the mount, apart from its content: the
+	// Community table as the content source, and the controls preset a
+	// manual stack is offered (docs/DESIGN_MODS_MUTATORS.md §4.3).
+	if len(cs.gameplayFeatures) != 1 || cs.gameplayFeatures[0].Base == nil || cs.gameplayFeatures[0].Base.AIBuilderPlacementLimit != 127 || cs.profileControls != "zero" {
+		t.Fatalf("config rules = %+v, controls %q", cs.gameplayFeatures, cs.profileControls)
 	}
 	if cs.fs == vfs.FSOps(cs.unmappedMount) {
 		t.Fatal("a profile with a directory table left the mount unwrapped")
@@ -133,9 +150,9 @@ func TestWindowedMountAppliesTheContentProfileTable(t *testing.T) {
 }
 
 // TestRetailMountKeepsTheConcreteOverlay locks the no-change half: an install
-// with no markers resolves `retail`, whose table is empty, and an empty table
-// returns the mounted overlay itself — so a retail run reads exactly what it
-// read before content profiles existed.
+// without a config mounts the base game's profile, whose table is empty, and
+// an empty table returns the mounted overlay itself — so a retail run reads
+// exactly what it read before content profiles existed.
 func TestRetailMountKeepsTheConcreteOverlay(t *testing.T) {
 	t.Setenv(settings.EnvPath, filepath.Join(t.TempDir(), "settings.json"))
 	root := t.TempDir()
@@ -158,6 +175,9 @@ func TestRetailMountKeepsTheConcreteOverlay(t *testing.T) {
 	if cs.fs != vfs.FSOps(cs.unmappedMount) {
 		t.Fatal("an empty directory table wrapped the mounted overlay")
 	}
+	if cs.config != nil || cs.gameplayFeatures != nil || cs.modNotice != "" {
+		t.Fatalf("the base game mounted a config %+v, sources %v, notice %q", cs.config, cs.gameplayFeatures, cs.modNotice)
+	}
 }
 
 // TestConcreteMountFamiliesAreNeverRedirected guards the readers this mount
@@ -170,69 +190,135 @@ func TestRetailMountKeepsTheConcreteOverlay(t *testing.T) {
 // test turns that into a failure rather than into missing art.
 func TestConcreteMountFamiliesAreNeverRedirected(t *testing.T) {
 	concrete := []string{"objects3d", "textures", "anims", "maps"}
-	for _, name := range contentprofiles.Names() {
-		profile, err := contentprofiles.Lookup(name)
+	for _, dir := range []string{"prota-4.8", "escalation-10.2.0", "ta-zero-alpha5-20241224", "mayhem-11.3.0"} {
+		meta, err := modlibrary.ReadConfigFile(shippedConfigPath(t, dir))
 		if err != nil {
-			t.Fatalf("lookup %s: %v", name, err)
+			t.Fatal(err)
 		}
-		for _, row := range profile.Layout().Names() {
+		for _, row := range meta.Content().Layout().Names() {
 			for _, family := range concrete {
 				if strings.EqualFold(row[0], family) {
-					t.Fatalf("profile %s redirects %s, which the windowed command still reads through the concrete mount", name, family)
+					t.Fatalf("config %s redirects %s, which the windowed command still reads through the concrete mount", dir, family)
 				}
 			}
 		}
 	}
 }
 
-func TestContentSelectorPrecedenceAndDetectionDoesNotPersist(t *testing.T) {
+// With no mod, the config comes from --mod-config, else the saved
+// contentProfile preference, else nowhere: nothing detects a layout, a
+// saved name of a removed built-in profile is ignored with the notice, and
+// mounting never writes the preference (docs/DESIGN_MODS_MUTATORS.md §4.3).
+func TestContentConfigPrecedenceWithoutAMod(t *testing.T) {
 	root := authorRenamedInstall(t)
 	settingsPath := filepath.Join(t.TempDir(), "settings.json")
 	t.Setenv(settings.EnvPath, settingsPath)
-	cs, err := openContent(Options{Root: root})
-	if err != nil {
-		t.Fatal(err)
+	// Without a config a renamed layout is not recognised: the required
+	// products are under ZGameDat, so the plain mount cannot start.
+	if cs, err := openContent(Options{Root: root}); err == nil {
+		cs.Close()
+		t.Fatal("a renamed install mounted without a config, so something detected its layout")
+	} else if !strings.Contains(err.Error(), "gamedata/moveinfo.tdf") {
+		t.Fatalf("plain mount = %v, want the missing product named", err)
 	}
-	cs.Close()
 	if _, err := os.Stat(settingsPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("automatic detection wrote settings: %v", err)
+		t.Fatalf("mounting wrote settings: %v", err)
 	}
-	// A saved selector is intentional, even if these new roots would detect
-	// another layout. The explicit flag remains the strongest override.
+	zero := shippedConfigPath(t, "ta-zero-alpha5-20241224")
 	stored := settings.Defaults()
-	stored.ContentProfile = "retail"
+	stored.ContentProfile = zero
 	if err := stored.Save(); err != nil {
 		t.Fatal(err)
 	}
-	if cs, err := openContent(Options{Root: root}); err == nil {
-		cs.Close()
-		t.Fatal("saved retail selection was silently replaced by detection")
+	cs, err := openContent(Options{Root: root})
+	if err != nil {
+		t.Fatalf("saved config path: %v", err)
 	}
-	cs, err = openContent(Options{Root: root, ContentProfile: "zero"})
+	if cs.profile != "ta-zero" || cs.configPath != zero {
+		t.Fatalf("saved config mounted %q from %q", cs.profile, cs.configPath)
+	}
+	cs.Close()
+
+	// A removed built-in profile's name reads as no config, with the notice.
+	base := t.TempDir()
+	writeRetailGamedata(t, base)
+	stored.ContentProfile = "zero"
+	if err := stored.Save(); err != nil {
+		t.Fatal(err)
+	}
+	cs, err = openContent(Options{Root: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cs.profile != contentprofiles.RetailName || !strings.Contains(cs.modNotice, `"zero" was removed`) {
+		t.Fatalf("removed profile preference mounted %q with notice %q", cs.profile, cs.modNotice)
+	}
+	cs.Close()
+
+	// The explicit file wins over the saved preference.
+	stored.ContentProfile = filepath.Join(t.TempDir(), "absent.json")
+	if err := stored.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if cs, err := openContent(Options{Root: base}); err == nil {
+		cs.Close()
+		t.Fatal("an unreadable saved config path mounted")
+	}
+	cs, err = openContent(Options{Root: root, ModConfig: zero})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cs.Close()
-	if cs.profile != "zero" {
-		t.Fatalf("explicit profile = %q", cs.profile)
+	if cs.profile != "ta-zero" {
+		t.Fatalf("explicit config = %q", cs.profile)
+	}
+}
+
+// A manual root stack names its config explicitly; without one it mounts as
+// plain content and the main menu says so.
+func TestManualStackWithoutAConfigShowsTheNotice(t *testing.T) {
+	t.Setenv(settings.EnvPath, filepath.Join(t.TempDir(), "settings.json"))
+	base, extra := t.TempDir(), t.TempDir()
+	writeRetailGamedata(t, base)
+	cs, err := openContent(Options{Roots: []string{base, extra}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	if !cs.manualRoots || cs.profile != contentprofiles.RetailName || !strings.Contains(cs.modNotice, "no Nanolathe config file") {
+		t.Fatalf("manual stack mounted %q with notice %q", cs.profile, cs.modNotice)
+	}
+}
+
+// writeRetailGamedata authors the two required retail-named products.
+func writeRetailGamedata(t *testing.T, root string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "gamedata"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"moveinfo.tdf", "sidedata.tdf"} {
+		if err := os.WriteFile(filepath.Join(root, "gamedata", name), []byte("[TEST] { value=base; }"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
 func TestContentProfileRangePreferences(t *testing.T) {
 	t.Setenv(settings.EnvPath, filepath.Join(t.TempDir(), "settings.json"))
-	path := filepath.Join(t.TempDir(), "profile.json")
-	// This authored install uses the Zero directory names; the custom profile
-	// carries UI policy through the same mount boundary as its layout.
-	err := os.WriteFile(path, []byte(`{"name":"custom","layout":{"gamedata":"ZGameDat"},"presentation":{"show_ranges":true,"placement_weapon_ranges":false}}`), 0600)
+	path := filepath.Join(t.TempDir(), "nanolathe-mod.json")
+	// This authored install uses the Zero directory names; the config's
+	// content section carries UI policy through the same mount boundary as
+	// its layout.
+	err := os.WriteFile(path, []byte(`{"schema":2,"id":"custom","name":"Custom","version":"1","content":{"layout":{"gamedata":"ZGameDat"},"presentation":{"show_ranges":true,"placement_weapon_ranges":false}}}`), 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs, err := openContent(Options{Roots: []string{authorRenamedInstall(t)}, ContentProfile: path})
+	cs, err := openContent(Options{Roots: []string{authorRenamedInstall(t)}, ModConfig: path})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cs.Close()
 	if !cs.presentation.ShowRanges || cs.presentation.PlacementWeaponRanges == nil || *cs.presentation.PlacementWeaponRanges {
-		t.Fatalf("profile lost UI defaults: %+v", cs.presentation)
+		t.Fatalf("config lost UI defaults: %+v", cs.presentation)
 	}
 }

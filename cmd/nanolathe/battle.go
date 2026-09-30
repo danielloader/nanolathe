@@ -659,7 +659,7 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 	p := loadedSettings().Presentation
 	b.hostPresentation = &p
 	applyCommunityHUDOptions(cl, b.hostPreferences())
-	cl.SetTrailStrength(b.hostPreferences().TrailStrength)
+	applyEffectStrengths(cl, b.hostPreferences())
 	b.placeEntryCamera(cl.Size())
 	// Every successful battle rebuild, including a load, empties the visible
 	// message span before old source handles can be reused [08 R-ENTRY-01 §3].
@@ -1113,6 +1113,7 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 	// the bit's clearer, but token 0xE3 is F2, not Escape
 	// [07 R-CAM-01 §2 "Escape versus F2"].
 	if modalAtFrameStart {
+		b.serviceKeyMapModal(in) // a rebound options key closes the window (keymap.go)
 		pendingBeforeModal := in.PendingTokens()
 		defer func() {
 			// A modal's unclaimed event has no battle action, but must still
@@ -1175,6 +1176,11 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 		b.palettePointerOwned = unitInfoAtFrameStart && !unitInfoOpen()
 		if !unitInfoAtFrameStart && !tokenClaimed {
 			tokenClaimed = b.serviceZeroDragKey(in)
+		}
+		// The player's key map rewrites the token everything below reads
+		// (keymap.go, DESIGN_INTERFACE_HUD_INPUT §3.6 "Rebinding").
+		if !tokenClaimed {
+			tokenClaimed = b.serviceKeyMap(in)
 		}
 		if b.hud != nil && !unitInfoAtFrameStart {
 			result, owned := b.hud.servicePaletteFrame(b, in, !tokenClaimed)

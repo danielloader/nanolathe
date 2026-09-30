@@ -96,7 +96,11 @@ func checkScorchDevicePixels() error {
 	for _, waterEnabled := range []bool{true, false} {
 		// Clearing source caches exercises mask preparation without earlier water draws.
 		r.ResetSources()
-		r.setWaterEffects(waterEnabled)
+		// Every lane of the surface pass together: the scorch layer reads the
+		// shared mask, not the surface pass's output (§30).
+		r.setWaterSurface(waterEnabled)
+		r.setWaterMotion(waterEnabled)
+		r.setWaterFoam(waterEnabled)
 		for _, zoom := range []camera.Zoom{camera.ZoomUnit, camera.ZoomUnit * 3 / 4} {
 			early := makeList(8, zoom)
 			base, bs := read(&early, false)

@@ -203,7 +203,7 @@ func TestLoadingAnotherModsSaveSwitchesToItFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shell, err := newGameShell(Options{Root: cs.root, Roots: cs.roots, ContentProfile: cs.profile}, cs)
+	shell, err := newGameShell(Options{Root: cs.root, Roots: cs.roots, ModConfig: cs.configPath}, cs)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -108,5 +108,26 @@ func checkUnderwaterDevicePixels() error {
 	if eo := render(false, 30, drawlist.ModelWaterlineErase); !bytes.Equal(eo.pix, erased.pix) || erased.stats.UnderwaterCommits != 0 {
 		return fmt.Errorf("underwater refraction touched an erased hull")
 	}
+	// The refraction is the water motion switch (§30): off, the hull takes
+	// the ordinary commit on a live water frame.
+	r.setWaterMotion(false)
+	still := render(true, 30, drawlist.ModelWaterlineBlue)
+	r.setWaterMotion(true)
+	if still.stats.UnderwaterCommits != 0 || !bytes.Equal(still.pix, off.pix) {
+		return fmt.Errorf("water motion off still refracted the hull (%d commits)", still.stats.UnderwaterCommits)
+	}
+	// The water's shade over the refracted hull is the surface switch's: off,
+	// the hull still moves with the water but takes no ripple shade, so the
+	// frame differs from both the shaded refraction and the ordinary commit,
+	// and still moves with the phase.
+	r.setWaterSurface(false)
+	plain, plainLater := render(true, 30, drawlist.ModelWaterlineBlue), render(true, 90, drawlist.ModelWaterlineBlue)
+	r.setWaterSurface(true)
+	if plain.stats.UnderwaterCommits != 1 {
+		return fmt.Errorf("water surface off stopped the refraction (%d commits)", plain.stats.UnderwaterCommits)
+	}
+	if bytes.Equal(plain.pix, a.pix) || bytes.Equal(plain.pix, off.pix) || bytes.Equal(plain.pix, plainLater.pix) {
+		return fmt.Errorf("water surface off: the hull kept the shade, lost the refraction, or stopped moving")
+	}
 	return nil
 }

@@ -13,7 +13,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/combat"
 	"github.com/nanolathe-gg/nanolathe/internal/community"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
-	"github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
@@ -25,7 +24,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
-func loadEscalationCommanderAircraft(t *testing.T) (vfs.FSOps, *content.Catalog, content.Limits, profiles.Profile) {
+func loadEscalationCommanderAircraft(t *testing.T) (vfs.FSOps, *content.Catalog, content.Limits, modContent) {
 	t.Helper()
 	value := strings.TrimSpace(os.Getenv("NANOLATHE_MOD_ROOTS_ESCALATION"))
 	if value == "" {
@@ -42,13 +41,7 @@ func loadEscalationCommanderAircraft(t *testing.T) (vfs.FSOps, *content.Catalog,
 	if err := fs.MountGameDirectories(roots); err != nil {
 		t.Fatal(err)
 	}
-	profile, err := profiles.Resolve(fs, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if profile.Name != "escalation" {
-		t.Fatalf("profile = %s", profile.Name)
-	}
+	profile := loadModContent(t, fs, "escalation-10.2.0")
 	view := profile.Layout().Apply(fs)
 	limits := content.LimitsFromProfile(profile.Limits)
 	cat, err := content.CompileWithOptions(view, content.Options{Limits: limits})
@@ -58,7 +51,7 @@ func loadEscalationCommanderAircraft(t *testing.T) (vfs.FSOps, *content.Catalog,
 	return view, cat, limits, profile
 }
 
-func newEscalationCommanderAircraft(t *testing.T, fs vfs.FSOps, cat *content.Catalog, limits content.Limits, profile profiles.Profile) *Session {
+func newEscalationCommanderAircraft(t *testing.T, fs vfs.FSOps, cat *content.Catalog, limits content.Limits, profile modContent) *Session {
 	t.Helper()
 	cfg := DirectSkirmishConfig("ashap plateau")
 	cfg.ApplyDefaults()

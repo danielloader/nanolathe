@@ -2,8 +2,15 @@
 
 Escalation is available as an experimental content package. Use Community
 3.9 or Modern gameplay; its scripts require extension queries that Strict 3.1
-deliberately disables. The catalog declares this minimum and does not apply
-ProTA's distinct controls preset.
+deliberately disables. Its Nanolathe config (`nanolathe-mod.json` in the
+hosted zip, `modconfigs/escalation-10.2.0/` in this repository) declares this
+minimum, carries the renamed directories and raised limits, and recommends no
+settings, so ProTA's distinct controls preset is never offered. Its Community
+table is the `escalation` build profile's matrix with Gold's historical
+HealTime caller and both repair multipliers at one
+([passive generator healing](../research/extensions/escalation-shields.md#passive-generator-healing)).
+The upstream Gold package has no such file; installed as it is, it mounts as
+plain content and does not load correctly.
 
 The package preserves all eight upstream content archives, icons, active
 intro and local music. It excludes the historical engine executables and
@@ -57,7 +64,9 @@ The detailed evidence and remaining boundaries are in
 
 Set `NANOLATHE_MOD_ROOTS_ESCALATION` to the extracted Gold content directory
 or the installed package directory. `tools/check-retail` selects the retail
-reference install, and runs the asset-gated checks when this variable is set.
+reference install, and runs the asset-gated checks when this variable is set;
+they read Escalation's config from `modconfigs/`. A manual stack names the
+same file with `--mod-config modconfigs/escalation-10.2.0/nanolathe-mod.json`.
 For a focused session check:
 
 ```sh

@@ -785,22 +785,25 @@ unitpicsP downloadP`, TA Zero `ZUnits ZWeapon ZGameDat ZGui ZUnitPic
 ZBuildMenu ZI`. The replaced retail tree is not read at all. The evidence is
 those content sets' own archives, readmes and `.ini` files; no patched
 executable was examined.
-**Nanolathe answers with a content profile**: a named, load-time description
-of a mounted content set carrying a directory table and the limits its content
-needs. `internal/content/profiles` embeds five — `retail` (empty), `escalation`,
-`prota`, `zero`, `mayhem` — as JSON, so adding one is a data edit. After mounting and
-before anything reads content, detection checks each known layout's complete
-set of renamed directories in the mounted logical namespace. It does not
-require a particular archive filename or version. One complete layout selects
-its preset; multiple complete layouts produce an ambiguity error requesting an
-explicit selector; no matching layout uses `retail`. The fixed preset order
-only orders diagnostics. Ordinary launches need no `--content-profile` flag:
-retail-layout mods use the ordinary mounted overlay, and known renamed layouts
-are detected automatically. Unknown renamed layouts remain selectable through
-an authored JSON table; directory prefixes and suffixes are not enough evidence
-to infer which families they contain. Mayhem keeps `units` and `gamedata` but
-ships `weaponM`, `guiM`, `unitpicM`, and `downloadsM`; their complete marker set
-selects its profile. The selected profile's table becomes a
+**Nanolathe answers with a content profile**: a load-time description of a
+mounted content set carrying a directory table, the limits its content needs
+and its front-end art. The engine carries exactly one, the base game's
+(`profiles.Retail`: an empty table and the retail limits,
+`content.RetailLimits`). A mod's profile is the `content` section of its own
+`nanolathe-mod.json` ([DESIGN_MODS_MUTATORS §4.2](DESIGN_MODS_MUTATORS.md#42-mod-metadata-and-config)),
+read by `profiles.Parse`; the built-in `escalation`, `prota`, `zero` and
+`mayhem` profiles were removed on 2026-09-29 and live on as the hosted mods'
+configs in the repository's `modconfigs/`. Nothing detects a layout: a mod
+applies its own config, `--mod-config <path>` names one for a manual root
+stack or a displayless run (and may stand in for a mod's own), and content
+without a config mounts under the base game's profile with a notice that it
+may not load correctly. A config's `detect` list selects nothing either: the
+mod install check refuses a package whose mounted content lacks a directory
+it names, and a mount that lacks one records a note and continues. Directory
+prefixes and suffixes are not evidence of which families a tree contains,
+which is why the table is authored rather than inferred. Mayhem keeps `units`
+and `gamedata` but ships `weaponM`, `guiM`, `unitpicM` and `downloadsM`, and
+its config maps exactly those four. The profile's table becomes a
 `vfs.Layout`, a read view over the mounted overlay that rewrites the first path segment on the way down and reverses it on
 the way back, so the compiler keeps asking for `units/` and provenance, the
 catalog hash inputs and every diagnostic stay retail-named. An empty table
@@ -808,18 +811,20 @@ returns the overlay unchanged.
 
 A content profile is not a gameplay rule set. It is chosen before a session
 exists, it never reaches a tick, and it is orthogonal to Modern and Strict 3.1
-[I11]. `--content-profile <name|path>` overrides detection on both commands, a
-path selecting a user-authored profile JSON file; the settings key
-`contentProfile` is the saved preference, and the precedence is explicit flag,
-saved preference, detection. Detection does not save its result as a preference,
-so switching mounted roots does not retain an automatically selected preset.
-An intentionally saved selector continues to override detection. The presets
-describe loading and optional presentation defaults; no named-mod check selects
-simulation behavior.
+[I11]; a mod config keeps its gameplay declarations in a separate `rules`
+section that never passes through `internal/content/profiles`. The settings
+key `contentProfile` is the saved form of `--mod-config` and applies only
+when no mod is selected; the precedence is the selected mod's own config,
+then the explicit flag, then the saved path, then the base game's profile. A
+saved value naming a removed built-in profile is ignored with the notice, and
+mounting never writes the preference. No named-mod check selects simulation
+behavior.
 The displayless report, the simulation benchmark report, the windowed battle benchmark's scene metadata and the inventory probe
-carry the resolved name as `content_profile`.
+carry the mounted profile's name as `content_profile`: the config's id, or
+`retail`.
 
-*Mod range-guide defaults (Nanolathe UI policy).* A profile may also include:
+*Mod range-guide defaults (Nanolathe UI policy).* A config's content section
+may also include:
 
 ```json
 "presentation": {
@@ -838,12 +843,11 @@ or the catalog hash. See DESIGN_GPU_RENDERER §20 for the display contract.
 *Build page lock (Nanolathe UI policy).* The same block may carry
 `"build_menu_page_size": 12`, a positive number of products on each Modern
 expanded-sidebar build page; omitted or zero keeps auto-flow and a negative
-value refuses the profile. A mod's own `buildMenuPageSize` metadata and the
-player's settings value take precedence, in that order; no shipped profile sets
-it. DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock" owns the layout contract
+value refuses the config. The player's settings value takes precedence; no
+hosted mod's config sets it. DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock" owns the layout contract
 and precedence.
 
-*TA Zero presentation resources.* The `zero` profile additionally maps
+*TA Zero presentation resources.* TA Zero's config additionally maps
 `music` to the Base package's `tamus` directory. The existing audio enumerator
 keeps physical tracks 2–17 and excludes the bonus intro, with logical paths
 still under `music`. Its optional `presentation` fields
@@ -864,7 +868,7 @@ setup and compatibility boundaries are in [TA_ZERO_SUPPORT](TA_ZERO_SUPPORT.md).
 *Main-menu version text.* The optional `presentation.main_menu_version`
 replaces the `v3.1` literal the main menu writes into its `DebugString`
 label, for a package whose engine replaces that literal. Empty keeps `v3.1`.
-The `prota` profile names `4.8`, the version string ProTA 4.8's patch list
+ProTA's config names `4.8`, the version string ProTA 4.8's patch list
 configures
 ([ProTA engine package](../research/extensions/prota-engine.md#main-menu-version-label));
 the front-end contract is DESIGN_INTERFACE_HUD_INPUT C16.
@@ -894,14 +898,14 @@ sound aliases, GUI, translations, pictures, build menus, maps and saves. Two
 surfaces there are still typed on the concrete overlay rather than on a read
 view and therefore read unmapped: the presentation model cache
 (`objects3d`, `textures`, `anims`) and the skirmish OTA map census (`maps`).
-The menu's TNT preview now reads through the layout view. No shipped profile
-renames those four families, and a test
+The menu's TNT preview now reads through the layout view. No hosted mod's
+config renames those four families, and a test
 fails if one ever does, which is what would force those surfaces to be widened
 first. The concrete overlay is also what still answers the questions that are
 about the disk rather than about content — mounting an override, listing
 providers for a diagnostic, and closing.
 
-*Which limits are live.* A profile's `limits` block is read by the compile it
+*Which limits are live.* A config's `content.limits` block is read by the compile it
 belongs to, one count at a time as the units that consume them land. Live now:
 `units`, the size of the unit-definition ID domain; `weapons`, the size of the
 weapon record table; `tnt_bytes`, the largest whole map terrain file a loader
@@ -927,8 +931,11 @@ a filesystem instead of a catalog compiles under the same policy instead of
 falling back to the retail tables. The catalog retains these limits, and both
 `world.Load` (shared by skirmish, mission and save entry) and the battle minimap
 read its `TNTBytes` cap. The menu preview takes the same limit from the mounted
-content set before a catalog exists. Carried in profiles but not yet consumed:
-`unit_limit` and `search_entries`.
+content set before a catalog exists. The per-player unit limit and the path
+step allowance a content set expects are Community feature values
+(`rules.communityFeatures.unitLimit` and `pathStepAllowance`), not content
+limits; the removed profiles carried them as `unit_limit` and
+`search_entries`.
 
 *What the read caps are and are not.* They are host byte budgets, not authored
 table sizes. `tnt_bytes` bounds every whole-file terrain read: the catalog's
@@ -936,7 +943,7 @@ fallback census, battle terrain, battle minimap and menu preview. A ranged
 catalog census is unaffected, because it reads two short header ranges and
 never the whole terrain. Consequently a listed map can still exceed the cap
 when opened; range support must not bypass the full-load cap. The resolved
-retail profile uses 16 MiB and the four shipped mod profiles use 64 MiB.
+base game's profile uses 16 MiB and the four hosted mods' configs use 64 MiB.
 Applying this existing profile policy to runtime readers replaces their former
 independent 32 MiB terrain/radar and 1 GiB menu limits. Detached callers with
 no catalog limit retain the bounded 32 MiB terrain/radar fallback; a menu
@@ -988,29 +995,30 @@ at 256 records and the record a section fills is chosen by its own ID [02
 defines no outcome for it.
 
 *Verification.* The graphical command locks its own mount boundary: an
-authored install published under TA Zero's directory names is detected as
-`zero`, its catalog, sound-alias and GUI loaders resolve the retail names
-through the view while the raw mount does not, provenance stays retail-named,
-and a marker-free install resolves `retail` and keeps the mounted overlay
-itself. `vfs` locks the redirection both ways, the untouched later
+authored install published under TA Zero's directory names mounts through TA
+Zero's config named with `--mod-config`, its catalog, sound-alias and GUI
+loaders resolve the retail names through the view while the raw mount does
+not, provenance stays retail-named, the same install without a config does
+not start (nothing detects it), and an install without a config mounts the
+base game's profile and keeps the mounted overlay itself. `vfs` locks the redirection both ways, the untouched later
 segment, the two optional reports with and without them underneath, the
 unchanged view for an empty table, and one short concatenation per redirected
-lookup. `internal/content/profiles` locks the four shipped tables against the
-inventory, complete logical-tree detection without archive-name markers,
-ambiguous-layout rejection, the override and
-user-authored-profile paths, and — on an authored fixture install published
-twice, once retail-named and once under TA: Escalation's names — an identical
-catalog hash and retail-named provenance. The retail tier adds the real
+lookup. `internal/modlibrary` locks the four hosted configs' content sections
+against the inventory; `internal/content/profiles` locks the content section's
+closed parse, the markers as complete logical trees without archive-name
+markers, and — on an authored fixture install published twice, once
+retail-named and once under TA: Escalation's names, read through Escalation's
+config — an identical catalog hash and retail-named provenance. The retail tier adds the real
 content sets when their roots are given by environment variable: TA Zero and
-ProTA and Escalation compile through their directory tables and profile limits.
+ProTA and Escalation compile through their configs' directory tables and limits.
 Escalation's unused corpse sections do not request their absent models;
 requested features retain the fatal model policy described below. This is not
 a claim of complete historical engine equivalence for any mod. The Escalation
 test separately exercises ranged header reads and the deliberately range-less
 fallback's rejection under retail caps. Synthetic terrain, menu and radar
 fixtures lock exact-size admission, smaller-cap rejection and authored versus
-generated minimap selection. A retail install detects `retail` and its catalog
-hash is unchanged. `internal/content`
+generated minimap selection. A retail install mounts the base game's profile
+and its catalog hash is unchanged. `internal/content`
 locks the domain itself: an authored set of 600 definitions is refused under
 `RetailLimits()` with the unchanged retail diagnostic and compiles under a
 profile domain of 16000, with identity, membership and intersection holding on

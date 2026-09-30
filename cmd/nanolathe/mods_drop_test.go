@@ -14,17 +14,24 @@ import (
 // writeDropZip writes an authored mod zip holding its metadata and one file.
 func writeDropZip(t *testing.T, meta modlibrary.Metadata) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), meta.ID+".zip")
+	data, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return writeDropZipConfig(t, meta.ID, string(data))
+}
+
+// writeDropZipConfig writes a dropped package holding one loose unit file and
+// the given nanolathe-mod.json text.
+func writeDropZipConfig(t *testing.T, id, metadata string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), id+".zip")
 	file, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writer := zip.NewWriter(file)
-	data, err := json.Marshal(meta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, body := range map[string]string{modlibrary.MetadataFile: string(data), "units/drop.fbi": "[UNITINFO] { }\n"} {
+	for name, body := range map[string]string{modlibrary.MetadataFile: metadata, "units/drop.fbi": "[UNITINFO] { }\n"} {
 		w, err := writer.Create(name)
 		if err != nil {
 			t.Fatal(err)
@@ -69,7 +76,7 @@ func TestDroppedZipInstallsThroughTheContentCheck(t *testing.T) {
 		t.Fatalf("the install count the Mods screen refreshes from = %d", v.installs)
 	}
 
-	broken := writeDropZip(t, modlibrary.Metadata{Schema: 1, ID: "broken", Name: "Broken", Version: "1", ContentProfile: "profiles/missing.json"})
+	broken := writeDropZipConfig(t, "broken", brokenConfig)
 	if _, outcome := drop(broken); !strings.HasPrefix(outcome, "Install failed: ") {
 		t.Fatalf("a package that would not start: outcome %q", outcome)
 	}

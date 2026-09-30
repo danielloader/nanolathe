@@ -4,19 +4,15 @@ import (
 	"math"
 	"testing"
 
-	"github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 )
 
-// The shipped profile must select the historical caller without selecting the
+// TA Zero's config must select the historical caller without selecting the
 // unrelated proportional repair module. Strict retains its retail caller.
 // [research/extensions/ta-zero-engine.md "Historical passive self-repair caller"]
 func TestZeroPassiveRepairProfile(t *testing.T) {
-	profile, err := profiles.Lookup("zero")
-	if err != nil {
-		t.Fatal(err)
-	}
+	profile := loadModContent(t, nil, "ta-zero-alpha5-20241224")
 	for _, mode := range []gameplay.Mode{gameplay.Strict31, gameplay.Community39, gameplay.Modern} {
 		t.Run(string(mode), func(t *testing.T) {
 			s, def := healTimeFixture(t, 3)

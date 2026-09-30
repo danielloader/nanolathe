@@ -84,10 +84,9 @@ type Report struct {
 	// (docs/DESIGN_MODS_MUTATORS.md §6.6), spelled as the battle benchmark's
 	// scene metadata spells it.
 	Mod string `json:"mod"`
-	// ContentProfile is the resolved content profile: `retail` for an
-	// unmodified install, otherwise the profile whose markers the mounted
-	// overlay presented or the one the host selected explicitly
-	// (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
+	// ContentProfile names the content section the run applied: `retail`
+	// for content without a Nanolathe config, otherwise the id of the mod
+	// config it came from (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
 	ContentProfile            string           `json:"content_profile,omitempty"`
 	ScenarioKind              ScenarioKind     `json:"scenario_kind"`
 	ScenarioIdentity          string           `json:"scenario_identity"`

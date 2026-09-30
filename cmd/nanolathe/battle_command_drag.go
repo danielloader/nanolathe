@@ -86,7 +86,9 @@ func (b *battleSession) beginCommandDrag(cl *client.Client, mouse input.MouseSta
 	button := input.MouseButtonLeft
 	switch state.Latch {
 	case input.LatchMobileBuild:
-		if !b.battleState().PlacementArmed() {
+		// Rows and grids are the player's choice; off, the click places one
+		// site through the ordinary path.
+		if !b.battleState().PlacementArmed() || b.hostPreferences().BuildDrag == 0 {
 			return false
 		}
 	case input.LatchRepair, input.LatchReclaim, input.LatchMove:

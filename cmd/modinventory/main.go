@@ -18,6 +18,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/install"
+	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
@@ -118,14 +119,15 @@ func compileTolerant(inv *inventory, roots []string) (*vfs.FS, *content.Catalog,
 	return nil, nil, fmt.Errorf("gave up after 400 substitutions")
 }
 
-// contentView applies the selected content profile's directory table to a
-// mounted overlay, so the catalog keeps asking for the retail directory names
-// while a content set that renames its trees still answers
-// (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles"). The selected profile is
-// resolved once in main and shared by every mount this probe makes.
+// contentLayout applies the selected config's directory table to a mounted
+// overlay, so the catalog keeps asking for the retail directory names while a
+// content set that renames its trees still answers
+// (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles"). The config is read
+// once in main and shared by every mount this probe makes; without one the
+// mod roots are inventoried as plain content.
 var contentLayout vfs.Layout
 
-// contentLimits are the selected profile's table limits, resolved beside the
+// contentLimits are the selected config's table limits, read beside the
 // directory table and handed to every catalog compile this probe makes.
 var contentLimits = content.RetailLimits()
 
@@ -477,20 +479,28 @@ func reportUnknown(title string, mod, base map[string][]string) {
 	}
 }
 
-// resolveContentProfile mounts the roots once, resolves the content profile
-// against them, installs its directory table for every later mount, and
-// returns the resolved name.
-func resolveContentProfile(roots []string, selector string) (string, int) {
+// applyModConfig reads the --mod-config file, if one is named, installs its
+// content section's directory table and limits for every later mount, and
+// returns the section's name and the definition count visible under units/
+// with the roots mounted once. Without a file the roots are plain content.
+func applyModConfig(roots []string, path string) (string, int) {
+	profile := profiles.Retail()
+	if path != "" {
+		meta, err := modlibrary.ReadConfigFile(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		profile = meta.Content()
+	}
 	fs, err := mount(roots)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	defer fs.Close()
-	profile, err := profiles.Resolve(fs, selector)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if missing := profile.MissingMarkers(fs); len(missing) > 0 {
+		fmt.Fprintf(os.Stderr, "modinventory: the %s config names content directories the roots lack: %s\n", profile.Name, strings.Join(missing, ", "))
 	}
 	contentLayout = profile.Layout()
 	contentLimits = content.LimitsFromProfile(profile.Limits)
@@ -514,7 +524,7 @@ func main() {
 	label := flag.String("label", "mod", "label for the report")
 	tree := flag.Bool("tree", false, "only print per-directory file counts of the -root roots mounted alone")
 	dump := flag.String("dump", "", "UNIT:SCRIPT — print a linear listing of one script from the mod roots, then exit")
-	profile := flag.String("content-profile", "", "content profile applied to the mod build: "+strings.Join(profiles.Names(), ", ")+", or a profile JSON path; omitted detects it from the mod roots")
+	modConfig := flag.String("mod-config", "", "path of a nanolathe-mod.json whose content layout and limits apply to the mod build; omitted inventories the roots as plain content")
 	flag.Parse()
 	if *tree {
 		fs, err := mount(modRoots)
@@ -567,7 +577,7 @@ func main() {
 		os.Exit(1)
 	}
 	all := append(append(rootList{}, baseRoots...), modRoots...)
-	profileName, profileUnits := resolveContentProfile(all, *profile)
+	profileName, profileUnits := applyModConfig(all, *modConfig)
 	if *dump != "" {
 		unit, script, _ := strings.Cut(*dump, ":")
 		fs, err := mount(all)

@@ -11,10 +11,12 @@ func (c *Client) applyWreckHeat(g *drawlist.ModelGeometry, f frame.FeatureView) 
 	// Packets may reuse storage, so clear even when the source stops qualifying.
 	g.WreckEmission = [3]float32{}
 	g.WreckHeatStrength, g.WreckHeatTime, g.WreckHeatScale = 0, 0, 0
-	// The cooling emission and the shimmer are one prototype, so they share the
-	// player's Distortion switch (§30): off, a fresh wreck keeps its ordinary
-	// palette colour and refracts nothing.
-	if !c.enhanced || !c.effects.Distortion || !f.WreckHeatKnown || c.buffer == nil {
+	// The cooling emission and the shimmer are two switches (§30): the wreck
+	// glow writes the emission colour, which the wreck light borrows, and the
+	// wreck shimmer writes the plume's strength and clock. With both off a
+	// fresh wreck keeps its ordinary palette colour and refracts nothing.
+	glow, shimmer := c.effects.WreckGlow, c.effects.WreckShimmer
+	if !c.enhanced || (!glow && !shimmer) || !f.WreckHeatKnown || c.buffer == nil {
 		return
 	}
 	cur := c.committedFrame()
@@ -29,15 +31,21 @@ func (c *Client) applyWreckHeat(g *drawlist.ModelGeometry, f frame.FeatureView) 
 	if c.interpolation {
 		age += c.TickFraction()
 	}
-	flash := max(1-age/6, 0)
-	cool := max(1-age/180, 0)
-	red, amber := cool*cool, cool*cool*cool*cool
-	g.WreckEmission = [3]float32{0.75*red + 0.15*flash, 0.20*amber + 0.55*flash, 0.015*amber + 0.42*flash}
-	heat := max(1-age/300, 0)
-	g.WreckHeatStrength = 0.55 * heat * heat
+	// The view scale is shared: the plume's size and the wreck light's reach
+	// both read it.
 	g.WreckHeatScale = float32(c.viewScale().Float())
-	g.WreckHeatTime = float32(cur.Tick%3600) + float32((f.CX*13+f.CZ*7)&255)
-	if c.interpolation {
-		g.WreckHeatTime += c.TickFraction()
+	if glow {
+		flash := max(1-age/6, 0)
+		cool := max(1-age/180, 0)
+		red, amber := cool*cool, cool*cool*cool*cool
+		g.WreckEmission = [3]float32{0.75*red + 0.15*flash, 0.20*amber + 0.55*flash, 0.015*amber + 0.42*flash}
+	}
+	if shimmer {
+		heat := max(1-age/300, 0)
+		g.WreckHeatStrength = 0.55 * heat * heat
+		g.WreckHeatTime = float32(cur.Tick%3600) + float32((f.CX*13+f.CZ*7)&255)
+		if c.interpolation {
+			g.WreckHeatTime += c.TickFraction()
+		}
 	}
 }

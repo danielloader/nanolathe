@@ -11,12 +11,14 @@ import (
 
 // Aircraft soft shadows are an authored Enhanced treatment, not retail optics
 // (GPU design §34). Filtering covers only each aircraft's expanded rectangle.
-// The treatment is always on in Enhanced: it softens a shadow the executor
-// draws either way, so it is a quality of the existing shadow rather than an
-// effect family with a switch of its own (§30, §34). Ground units, structures,
-// clipped silhouettes and Original keep the ordinary silhouette route.
+// The player's soft shadow switch turns it off (§30); an aircraft then takes
+// the ordinary silhouette route, which is the shadow it would have without the
+// treatment. Ground units, structures, clipped silhouettes and Original always
+// keep that route.
 type aircraftShadowLayer struct {
 	shader *ebiten.Shader
+	// disabled is the player's soft shadow switch, off (§30).
+	disabled bool
 	// water is the retained uniform storage for the frame's water phase,
 	// integrated wind drift and mask step. One terrain command a frame sets
 	// them, so they are the same for every aircraft in the frame and need no
@@ -48,9 +50,13 @@ func aircraftShadowRadius(height, scale float32) float32 {
 	return (min(clearance/60, 3) + 1.5*t*t*(3-2*t)) * scale
 }
 
+// setSoftShadows is the executor gate the player's soft shadow switch drives
+// (§30, §34). It is in no family.
+func (r *Renderer) setSoftShadows(on bool) { r.aircraftShadow.disabled = !on }
+
 func (r *Renderer) commitAircraftShadow(g *drawlist.ModelGeometry, body modelDirectRegion) bool {
 	st := &r.aircraftShadow
-	if st.shader == nil || g.AircraftShadowHeight <= 0 || g.AircraftShadowScale <= 0 || g.Shadow.SilhouetteClip != 0 {
+	if st.disabled || st.shader == nil || g.AircraftShadowHeight <= 0 || g.AircraftShadowScale <= 0 || g.Shadow.SilhouetteClip != 0 {
 		return false
 	}
 	scale := g.AircraftShadowScale
@@ -77,8 +83,11 @@ func (r *Renderer) commitAircraftShadow(g *drawlist.ModelGeometry, body modelDir
 	step, phase, driftX, driftZ := float32(0), float32(0), float32(0), float32(0)
 	if water.source != nil && !water.source.LavaWorld && water.source == water.record.Terrain && water.mask != nil {
 		mask, step = water.mask, float32(water.step)
-		if water.record.Water.Enabled && !water.disabled {
-			phase = (float32(water.record.Water.Tick) + float32(water.record.Water.Fraction16)/65536) / 30
+		// The waves move with the water motion switch (§30): off, they
+		// hold phase zero and no drift, the shape a frame with no water
+		// phase recorded draws.
+		if water.record.Water.Enabled && !water.motionDisabled {
+			phase = water.motionPhase(water.record.Water)
 			driftX, driftZ = water.record.Water.DriftX, water.record.Water.DriftZ
 		}
 	}

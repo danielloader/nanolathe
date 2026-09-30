@@ -1352,10 +1352,11 @@ func (r *Renderer) commitModelDirect(g *drawlist.ModelGeometry) {
 	if g.Cloaked {
 		cloak = 1
 	}
+	emission := r.wreckEmission(g)
 	r.sched.quad(schedOpaque,
 		float32(x0), float32(y0), float32(x1), float32(y1),
 		sx0, sy0, sx0+2*float32(x1-x0), sy0+2*float32(y1-y0),
-		[4]float32{g.WreckEmission[0], g.WreckEmission[1], g.WreckEmission[2], 0}, [4]float32{cloak, 0, 0, sceneOpModelDirectCommit})
+		[4]float32{emission[0], emission[1], emission[2], 0}, [4]float32{cloak, r.modelSampleLane(), 0, sceneOpModelDirectCommit})
 }
 
 // commitModelDirectShadow compiles one subject's shadow commit: a command
@@ -1401,7 +1402,7 @@ func (r *Renderer) commitModelDirectShadow(g *drawlist.ModelGeometry) {
 		float32(x0), float32(y0), float32(x1), float32(y1),
 		sx0, sy0, sx0+2*float32(x1-x0), sy0+2*float32(y1-y0),
 		[4]float32{float32(body.x), float32(body.y), float32(body.x) + 2*float32(bb.Dx()), float32(body.y) + 2*float32(bb.Dy())},
-		[4]float32{kx, ky, 0, sceneOpModelDirectShadow})
+		[4]float32{kx, ky, r.modelSampleLane(), sceneOpModelDirectShadow})
 	r.modelStats.Shadows++
 }
 
@@ -1460,7 +1461,7 @@ func (r *Renderer) commitModelSilhouetteShadow(g *drawlist.ModelGeometry) {
 	r.sched.quad(schedOpaque,
 		float32(x0), float32(y0), float32(x1), float32(y1),
 		sx0, sy0, sx0+2*float32(x1-x0), sy0+2*float32(y1-y0),
-		[4]float32{}, [4]float32{0, 0, float32(sg.SilhouetteClip), sceneOpModelSilhouetteShadow})
+		[4]float32{}, [4]float32{r.modelSampleLane(), 0, float32(sg.SilhouetteClip), sceneOpModelSilhouetteShadow})
 	r.modelStats.Shadows++
 	r.modelStats.Silhouettes++
 }

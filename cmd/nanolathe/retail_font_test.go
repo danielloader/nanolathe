@@ -9,6 +9,7 @@ import (
 	contentprofiles "github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
+	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
 )
 
@@ -82,25 +83,23 @@ func TestMainMenuVersionPlacementOnReopen(t *testing.T) {
 	}
 }
 
-// A content profile's `main_menu_version` replaces the retail literal, and
-// the replacement is shifted by its own primary-font width, exactly as
-// retail shifts the literal [07 R-FE-01 §3]. The shipped `prota` profile
-// names 4.8, the version string ProTA 4.8's patch list configures, and the
-// layout is ProTA's: its label sits at x 323 so that `4.8` lands under its
-// title art (research/extensions/prota-engine.md "Main-menu version label").
-// The retail profile names none, so stock keeps `v3.1`.
+// A config's `content.presentation.main_menu_version` replaces the retail
+// literal, and the replacement is shifted by its own primary-font width,
+// exactly as retail shifts the literal [07 R-FE-01 §3]. ProTA's config names
+// 4.8, the version string ProTA 4.8's patch list configures, and the layout
+// is ProTA's: its label sits at x 323 so that `4.8` lands under its title
+// art (research/extensions/prota-engine.md "Main-menu version label"). The
+// base game's profile names none, so stock keeps `v3.1`.
 func TestMainMenuVersionFromContentProfile(t *testing.T) {
-	retail, err := contentprofiles.Lookup(contentprofiles.RetailName)
-	if err != nil {
-		t.Fatal(err)
-	}
+	retail := contentprofiles.Retail()
 	if got := (&gameShell{cs: &contentSet{presentation: retail.Presentation}}).mainMenuVersion(); got != "v3.1" {
 		t.Fatalf("retail profile version = %q, want the retail literal", got)
 	}
-	profile, err := contentprofiles.Lookup("prota")
+	prota, err := modlibrary.ReadConfigFile(shippedConfigPath(t, "prota-4.8"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	profile := prota.Content()
 	font := syntheticRetailGAFFont()
 	for code, width := range map[byte]uint16{'4': 9, '.': 5, '8': 7} {
 		font.Frames[code] = formats.GAFFrameRef{Frame: &formats.GAFFrame{Width: width}}

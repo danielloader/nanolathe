@@ -21,8 +21,9 @@ import (
 // manifest entry; a dropped file or folder usually fills only Validate.
 type InstallOptions struct {
 	// Expect, when non-nil, is the catalogue entry the archive must agree
-	// with on id, version, contentProfile, minimumGameplay and controls
-	// (§5.1). A package without metadata cannot agree and is refused.
+	// with on schema, id, version and minimumGameplay, and for schema 1 on
+	// contentProfile and controls (§5.1). A package without metadata cannot
+	// agree and is refused.
 	Expect *Metadata
 	// SHA256, when non-empty, is verified before extraction (§5.3 step 2).
 	SHA256 string
@@ -274,7 +275,9 @@ func (l *Library) install(provider, baseName string, entries []sourceEntry, opts
 		return Mod{}, diagnostic("committing the mod failed: "+err.Error(), target, []string{l.Root}, "a writable mod library")
 	}
 	committed = true
-	return Mod{Metadata: meta, Dir: target, Receipt: receipt, Local: generated}, nil
+	mod := installedMod(meta, target, receipt)
+	mod.Local = generated
+	return mod, nil
 }
 
 func (l *Library) refuseExisting(target string, meta Metadata) error {
@@ -496,14 +499,22 @@ func packageMetadata(provider, baseName string, planned []plannedEntry) (Metadat
 }
 
 // expectMatches holds an archive's metadata to its catalogue entry (§5.1).
+// A schema 2 entry names no content profile or preset, because the zip's own
+// config is authoritative; its minimumGameplay is the config's, shown in the
+// catalogue before the download.
 func expectMatches(provider string, got, want Metadata) error {
-	for _, field := range [...]struct{ name, got, want string }{
+	fields := []struct{ name, got, want string }{
+		{"schema", fmt.Sprint(got.Schema), fmt.Sprint(want.Schema)},
 		{"id", got.ID, want.ID},
 		{"version", got.Version, want.Version},
-		{"contentProfile", got.ContentProfile, want.ContentProfile},
 		{"minimumGameplay", got.MinimumGameplay, want.MinimumGameplay},
-		{"controls", got.Controls, want.Controls},
-	} {
+	}
+	if want.Schema == schemaLegacy {
+		fields = append(fields,
+			struct{ name, got, want string }{"contentProfile", got.ContentProfile, want.ContentProfile},
+			struct{ name, got, want string }{"controls", got.Controls, want.Controls})
+	}
+	for _, field := range fields {
 		if field.got != field.want {
 			return diagnostic(fmt.Sprintf("mod archive metadata disagrees with the catalogue on %s (%q, catalogue %q)", field.name, field.got, field.want), MetadataFile, []string{provider}, "archive metadata that matches its catalogue entry")
 		}

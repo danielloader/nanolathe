@@ -61,6 +61,13 @@ func filmRoster(name string) ([2][]string, error) {
 			{"armpw", "armrock", "armham", "armwar", "armzeus", "armjeth"},
 			{"corak", "corstorm", "corthud", "corpyro", "corcan", "corcrash"},
 		}, nil
+	case "glow":
+		// Emissive weapons for the glow preview: lightning, flame and the
+		// light lasers, with nothing that only fires shells.
+		return [2][]string{
+			{"armzeus", "armfav", "armwar", "armzeus"},
+			{"corpyro", "corfav", "corak", "corpyro"},
+		}, nil
 	case "flame":
 		return [2][]string{
 			{"armpw", "armham", "armflash", "armwar"},

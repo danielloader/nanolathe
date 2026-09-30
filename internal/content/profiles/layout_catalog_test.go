@@ -142,10 +142,11 @@ func mountArchive(t *testing.T, name string, files []vfs.ArchiveFile) *vfs.FS {
 
 // TestRenamedTreesCompileToTheRetailCatalogHash is the contract E1 exists for:
 // the catalog is a function of the definitions, not of the directories they
-// were shipped in. It also locks detection — the renamed install presents TA:
-// Escalation's complete directory layout without an archive-name marker — and the
-// provenance rule, because a logical path that leaked a mod directory name
-// would reach every diagnostic and every manifest built from it.
+// were shipped in. It uses TA: Escalation's config from the repository, locks
+// its install check — the renamed install presents every tree the config's
+// markers name, without an archive-name marker — and the provenance rule,
+// because a logical path that leaked a mod directory name would reach every
+// diagnostic and every manifest built from it.
 func TestRenamedTreesCompileToTheRetailCatalogHash(t *testing.T) {
 	retail := authoredInstall(t)
 	retailCatalog, err := content.Compile(mountArchive(t, "authored-retail.hpi", retail))
@@ -153,23 +154,16 @@ func TestRenamedTreesCompileToTheRetailCatalogHash(t *testing.T) {
 		t.Fatalf("compile retail-named fixture: %v", err)
 	}
 
-	escalation, err := profiles.Lookup("escalation")
-	if err != nil {
-		t.Fatalf("look up the escalation profile: %v", err)
-	}
+	escalation := shippedContent(t, "escalation-10.2.0")
 	// Only logical content proves the layout; the archive's arbitrary host
 	// filename is deliberately different from the original distribution.
 	renamedFS := mountArchive(t, "authored-renamed.hpi", renameTrees(retail, escalation.Directories))
 
-	detected, err := profiles.Detect(renamedFS)
-	if err != nil {
-		t.Fatalf("detect the renamed fixture's profile: %v", err)
-	}
-	if detected.Name != "escalation" {
-		t.Fatalf("detected profile = %q, want escalation", detected.Name)
+	if missing := escalation.MissingMarkers(renamedFS); len(missing) != 0 {
+		t.Fatalf("the renamed fixture lacks the config's trees %v", missing)
 	}
 
-	view := detected.Layout().Apply(renamedFS)
+	view := escalation.Layout().Apply(renamedFS)
 	renamedCatalog, err := content.Compile(view)
 	if err != nil {
 		t.Fatalf("compile renamed fixture through the profile's directory table: %v", err)
@@ -200,18 +194,14 @@ func TestRenamedTreesCompileToTheRetailCatalogHash(t *testing.T) {
 		t.Fatalf("script provenance = %q, want scripts/armcom.cob", got)
 	}
 
-	// A retail-named install is not a mod: detection answers `retail` and the
-	// layout it carries wraps nothing, so the overlay reaches the compiler as
-	// the concrete type its optional views are asserted for.
+	// A retail-named install does not match the config's markers, and the
+	// base game's layout wraps nothing, so the overlay reaches the compiler
+	// as the concrete type its optional views are asserted for.
 	retailFS := mountArchive(t, "authored-retail-detect.hpi", retail)
-	plain, err := profiles.Detect(retailFS)
-	if err != nil {
-		t.Fatalf("detect the retail-named fixture's profile: %v", err)
+	if missing := escalation.MissingMarkers(retailFS); len(missing) != len(escalation.Detect) {
+		t.Fatalf("the retail-named fixture matched config markers: missing only %v", missing)
 	}
-	if plain.Name != profiles.RetailName {
-		t.Fatalf("detected profile = %q, want %s", plain.Name, profiles.RetailName)
-	}
-	if applied := plain.Layout().Apply(retailFS); applied != vfs.FSOps(retailFS) {
+	if applied := profiles.Retail().Layout().Apply(retailFS); applied != vfs.FSOps(retailFS) {
 		t.Fatal("the retail profile wrapped the overlay; an empty layout must return it unchanged")
 	}
 }

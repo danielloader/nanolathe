@@ -60,14 +60,14 @@ func TestSavedModBuildFailureFallsBackButModFlagDoesNot(t *testing.T) {
 // check (§4.3).
 func TestCheckInstallWarnsAboutTheSavedModOnly(t *testing.T) {
 	base, lib := modFixture(t)
-	mod := installFixtureMod(t, lib, "broken", &modlibrary.Metadata{Schema: 1, ID: "broken", Name: "Broken", Version: "2", ContentProfile: "profiles/missing.json"})
+	mod := installFixtureConfig(t, lib, "broken", brokenConfig)
 	saveModChoice(t, settings.ModSelection{ID: mod.ID, Version: mod.Version}, nil, "")
 	code, out, errOut := installerRun(t, "--check-install", "--root", base)
 	if code != 0 || out != "" || !strings.Contains(errOut, "nanolathe: warning: the saved mod broken@2 does not start") {
 		t.Fatalf("broken saved mod: exit %d, stdout %q, stderr %q", code, out, errOut)
 	}
 	code, _, errOut = installerRun(t, "--check-install", "--root", base, "--mod", mod.ID)
-	if code != 1 || strings.Contains(errOut, "warning") || !strings.Contains(errOut, "content profile") {
+	if code != 1 || strings.Contains(errOut, "warning") || !strings.Contains(errOut, "gamedata/moveinfo.tdf") {
 		t.Fatalf("broken --mod: exit %d, stderr %q", code, errOut)
 	}
 

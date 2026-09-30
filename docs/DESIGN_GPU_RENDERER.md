@@ -2947,7 +2947,7 @@ executor presents, absent from Original, never a simulation input [I6]. The
 marks are geometry, not art: an oval and a segment whose coverage the shader
 evaluates, darkening whatever terrain is under them, so there is nothing to
 author and the look is right on every tile set because the terrain's own colour
-is what fades. The Marks switch gates the layer (§30).
+is what fades. The trail strength alone gates the layer: zero is off (§30).
 
 ### 15.2 Placement — contract T1
 
@@ -3547,7 +3547,9 @@ modern it decides only whether the **recorder** builds the doubled lane
 about the subject); the model lane doubles the native corners itself when there
 is no doubled lane, so **every subject is rasterized at 2× either way**. What
 the option actually changes in modern is which corners the 2× raster comes from
-— the recorder's exact doubled projection, or the native corners times two.
+— the recorder's exact doubled projection, or the native corners times two. The
+player's **Supersample** switch (§17.5, §30) is what turns the coverage resolve
+off.
 
 MSAA was considered and rejected: Ebitengine exposes no multisampled render
 target, its `AntiAlias` draw option is a stencil path for solid vector fills, and
@@ -3628,6 +3630,47 @@ blend restores the shadowed ground in proportion — the composite the byte
 writers' opaque punch approximated [03 R-REN-03D §4–§5]. A group composes at its
 parent's scale in one region and resolves once at its commit.
 
+### 17.5 The Supersample switch
+
+A Nanolathe presentation preference, on by default: `drawlist.Effects.Supersample`,
+stored as `settings.Presentation.Supersample` (`"supersample"`) with the other
+Enhanced switches (§30). On is everything above. Off, the subject is drawn as the
+native raster would draw it, with whole-pixel edges like the classic executor's
+mobile units, by reusing two paths the lane already has rather than adding one:
+
+* **The recorder** builds no doubled lane (`Client.supersampleGeometry` is false),
+  which is exactly the recording the Anti-Alias option off makes: retail's anchor
+  and native corners with no half-pixel offset, the shadow likewise. The geometry
+  caches carry that result in their identities (§17.2), so moving the switch
+  rebuilds the lane; the executor's retained store already refuses an entry whose
+  doubled flag differs (§22).
+* **The executor** keeps the 2× page, the key and colour passes, the verdicts and
+  the outline, and changes only the resolve: every model commit takes the one
+  texel at its pixel's block top left, at four times the weight, instead of the
+  four under it. That texel is the native raster's sample, because the lane biases
+  its corners half a texel so a texel is covered exactly when the span writer
+  covers its corner point, and a block's top-left corner is the native pixel's own
+  point; it is also the texel the verdicts already read as the pixel's key (§22).
+  So with native corners the coverage is the native raster's exactly, and an edge
+  pixel is covered or not. The switch rides a free lane of each commit: the body
+  commit's Custom1, the projected shadow's Custom2, the silhouette shadow's
+  Custom0, and the underwater commit's shading lane at weight two.
+
+What it leaves alone: the doubled page is still allocated and drawn at 2× (the
+cost is unchanged; the switch is a look, not a saving); the outline already draws
+whole native pixel blocks; the live lane and a group's children are part of the
+raster the commit reads, so they follow it; the fallback for a subject no page
+holds was always native. Three treatments keep their own filtering because it
+belongs to them rather than to the raster: the aircraft soft shadow (§34, its own
+switch), the submerged part of a refracted hull, whose gather is displaced by the
+water's fractional offset (§26.5), and the screen-space reflections (§26.4).
+Classic is unaffected.
+
+Either half alone still gives whole-pixel edges: a host that applies the
+selection to the executor alone — the Nanolathe screen's preview keeps its
+recorder on every effect — gets the single-sample resolve of the recorder's
+doubled lane, which is the native raster at the subject's half-pixel position.
+
 ### 17.6 Divergences
 
 * Edge pixels of every subject are blended with the composite by coverage; face
@@ -3648,6 +3691,13 @@ parent's scale in one region and resolves once at its commit.
    resolves three covered samples at three-quarter coverage over the background
    after the child merge and the carrier's waterline; the one-sample edge subject
    resolves at a quarter over the background with no fringe.
+   `model_supersample_test.go` locks the switch of §17.5: with supersampling on,
+   a subject covering one doubled texel resolves at a quarter over the field, a
+   block split between two colours resolves their mean, and a one-texel projected
+   or silhouette shadow composites an eighth; off, the top-left texel alone gives
+   the face's exact colour, a texel elsewhere in the block gives none, and each
+   shadow composites its whole half-blend.
+   `TestSupersampleOffRecordsNoDoubledLane` locks the recorder half.
 2. **CI tier.** `go test ./...` green; the recorder's direct-route tests assert
    the tight box and screen anchor.
 3. **Captures.** Model-rich scenes through `--renderer=modern`, magnified:
@@ -4083,7 +4133,7 @@ copies the client's switch to the renderer (`Renderer.SetGlow`) before `Execute`
 next to the display palette and the effect selection. A settings file that omits
 the key keeps the default because the loader decodes over the defaults
 [02 "Settings"]. Off, no source appends and the resolve is a no-op. It is
-deliberately **not** one of the five `Effects` families of §30.
+deliberately **not** one of the `Effects` switches of §30.
 
 **Strength.** `settings.Display.GlowStrength` (`display.glowStrength`, default
 100, stored 0..200) is the player's halo strength as a percentage of the tuned look,
@@ -4117,8 +4167,9 @@ terrain pass through the one per-source multiplier only the terrain reads, the
 source's fade (§31.7), so the ground pass needs no switch of its own. The
 player's `display.glowStrength` weights the whole glow layer, so it multiplies
 the weapons and nanolathe glow on top of the pack's percentages; the nanolathe
-light and the ground family belong to battle lighting (§30's Lighting switch)
-and take the pack's value alone. The renderer's zero value is every family at
+light and the ground family belong to battle lighting (§30's model and ground
+light switches) and are not weighted by the glow strength; the ground family is
+weighted by the player's separate ground light strength instead (§30). The renderer's zero value is every family at
 100, so a host that never sets them draws the tuned look.
 
 `internal/client` parses the section beside `[materials]` when it installs the
@@ -4194,12 +4245,12 @@ including interceptors, matching the detailed `+showranges` weapon branch.
 NOWEAPON links are omitted. Equal radii retain their separate weapon-slot labels.
 Placement shows no sensor, jammer, build-distance or interception-coverage rings.
 
-The optional content-profile `presentation` block configures `show_ranges`
+A mod config's optional `content.presentation` block configures `show_ranges`
 (default false) and `placement_weapon_ranges` (default true when omitted).
 `show_ranges` seeds the shell or direct battle once; subsequent command toggles
 survive battles within that shell without settings writes. The placement flag
 controls the automatic exception; Shift with explicit `+showranges` still shows
-the product's weapon rings. Shipped profiles use these defaults, which are
+the product's weapon rings. The hosted mods' configs use these defaults, which are
 Nanolathe UI policy rather than historical mod or retail claims.
 
 Placement uses the prospective definition, footprint centre and validated site
@@ -4399,8 +4450,8 @@ captures the cold append, and every later one replays, so a subject that rebuild
 every frame — a turning turret, a walking kbot — costs a stub and nothing else.
 The replay is byte-for-byte what the cold path would have produced, because the
 integer-valued lanes are exact in binary32 and the light is the same function of
-the same operands. A finish switch change (§30) or a source reset drops the
-store. This is **CPU-side** retention of preparation work; the atlas regions
+the same operands. A finish or glint switch change (§30) or a source reset drops
+the store. This is **CPU-side** retention of preparation work; the atlas regions
 themselves are still per-frame and carry no residency.
 
 **The warm path: a body across its revisions.** A key that never returns gets
@@ -4921,7 +4972,7 @@ diffuse light to model faces and soft illumination to smoke around visible
 explosions and weapon impacts, keeping the projection, existing shade,
 silhouette, composition key, fog, effect lifetime and simulation unchanged.
 Shadows from point lights, terrain relighting from geometry, material masks and
-reflections are not part of it. The player's Lighting switch (§30) is its only
+reflections are not part of it. The player's model light switch (§30) is its only
 control and defaults on; `BattleLights`, `LitModelFaces` and `LitSmokeSprites`
 are frame diagnostics.
 
@@ -5067,8 +5118,8 @@ each particle's instantaneous palette entry made the factory faces and ground
 pools flash. The particle cores and their small glow retain that shimmer. No
 temporal history or delayed extinction is introduced; particle count, grouping
 and motion still affect illumination, and an overloaded scene may drop distant
-construction sources. The Lighting switch disables both explosion and nano
-lighting; glow remains independent.
+construction sources. The model and ground light switches remove explosion and
+nano light from their own receivers; glow remains independent.
 
 ### 23.6 Community team-coloured nanospray
 
@@ -5108,7 +5159,8 @@ one and keeps the original coverage. These are tunable artistic choices, not
 authored metalness or roughness — neutral painted panels can look metallic too,
 and there is no shadow occlusion or map-specific sun direction. No passes,
 textures, uniforms, normal buffers or per-frame allocations are added. The
-player's **Finish** switch (§30) turns it on or off everywhere.
+player's **Glint** switch (§30) turns it on or off everywhere; it is independent
+of the Finish switch, which owns §29.1's finishes alone.
 
 Content controls it by texture name: the `[glint]` section of the annotation
 file of §29.1 sets a textured unit face's glint as a whole percentage of the
@@ -5165,7 +5217,10 @@ untouched; sampling is clamped to the source's world clip; overlapping bands rea
 the same snapshot and the last submitted band wins, without recursive
 refraction. There is no extra copy or draw in a frame without visible active
 rings or heat, and no new full-frame image. `BlastWaves` reports the submitted
-ring count. The player's **Distortion** switch (§30) is its only control.
+ring count. The **blastRings** switch (§30) turns the rings on and off, and the
+player's **blastRingStrength** percentage (§30) multiplies every admitted ring's
+displacement strength on top of the shape above — the read region's pad follows
+the scaled strength, and 0 admits no ring.
 
 ### 25.2 Dynamic ordinary blast
 
@@ -5204,8 +5259,8 @@ special-explosion treatment. For smaller art:
 
 These two independent boosts use authored values as visual signals, not a
 calculation of damage dealt: armor overrides, victim counts, falloff and overkill
-do not affect the visual. This is the one blast shape; the player's Distortion
-switch decides whether any wave is drawn. The admission rules, including the
+do not affect the visual. This is the one blast shape; the player's blast ring
+switch (§30) decides whether any wave is drawn. The admission rules, including the
 artwork-only fallback for a missing profile and for art of at least 128 pixels,
 are locked by the shape's own unit checks, and the device-only square roots are
 listed explicitly in I2.
@@ -5220,7 +5275,8 @@ wakes. The treatment adds quiet drifting water, soft shoreline and building foam
 land hovercraft particles that lightly brighten the ground, and faint rippled
 reflections of above-water model pieces and admitted projectiles. The player's
 **Water** switch (§30) gates all of it: with it off the recorder marks no water
-surface and admits no reflection site.
+surface and admits no reflection site. Its motion, foam and reflections parts
+each remove their own share.
 
 ### 26.1 Public API and ownership
 
@@ -5323,7 +5379,8 @@ shore/building foam opacity 0.6, and an 11.2-map-pixel inward edge fade (the
 selected 0.7 factor in 16-pixel units). Distortion, contrast, tint, damp edge,
 foam width, building ring size and both animation clocks retain their original
 unit multipliers. There is no tuning command, mode selector or preset file;
-the normal Water option (§30) controls the treatment.
+the water surface, motion and foam switches (§30) control the treatment, each
+its own lane of the one pass.
 
 The edge fade uses the existing rounded distance field and does not expand
 water onto dry terrain. It softens disagreement between height and painted
@@ -5494,8 +5551,9 @@ approximation. Shore foam has its own selected opacity (§26.3).
 Retail tints the part of a model at and below the waterline through BLUE TABLE
 when the viewer holds sonar contact, and erases it otherwise
 [03 R-WATER-01 §2]; the tinted part then sits on top of a water surface that
-refracts the seabed around it. In Enhanced with Water on, that part is refracted
-and shaded by the same field. This is authored presentation: the tint, the
+refracts the seabed around it. In Enhanced with the water motion switch on,
+that part is refracted by the same field, and shaded by it while the water
+surface switch is on too (§30). This is authored presentation: the tint, the
 erase, the key test and every simulation value are unchanged.
 
 **Field.** `water_field.go` owns one Kage definition of the surface field —
@@ -5512,7 +5570,8 @@ transparent fragments; every fragment it keeps is opaque, so this stores what
 source-over stored, and keeps the marker exact where two faces tie on a key.
 
 **Commit.** A subject whose waterline mode is blue, with no wreck emission, on a
-non-lava map whose water record is enabled and not switched off, commits
+non-lava map whose water phase is recorded, while the water motion switch is on,
+commits
 through scene op `sceneOpUnderwaterCommit` instead of the plain resolve. Its
 page binds slot 2 as the ordinary commit does and the water mask binds slot 3,
 which no model command uses, so the subject joins the open opaque run and adds
@@ -5528,11 +5587,12 @@ shadows' `AircraftWater`, §34). Per pixel:
   texels per axis so the hull slides rather than stepping a texel at a time;
   taps outside the subject's page rectangle are transparent;
 - the gathered colour takes the water's shade and crest at the surface
-  opacity, and fills whatever the above-water texels leave uncovered.
+  opacity while the water surface switch is on (the vertex's third custom
+  lane), and fills whatever the above-water texels leave uncovered.
 
 The quad is padded by the bounded offset (`underwaterMaxOffset` × 0.5, 1.32
 world pixels) plus one, so displaced edges are not clipped. Erased hulls, lava,
-Original and Water off take the ordinary commit. Shadows of submerged subjects
+Original and water motion off take the ordinary commit. Shadows of submerged subjects
 and glow do not follow the displacement.
 
 **Verification and cost.** `checkUnderwaterDevicePixels` locks, on a device,
@@ -5611,8 +5671,8 @@ The executor culls against the world viewport before admitting at most 128 plume
 in source order. Bilinear sampling is clamped to the source clip; outside the
 soft plume envelope pixels are untouched; overlaps read the same snapshot and the
 last plume wins rather than recursively amplifying displacement. `HeatPlumes`
-counts the submitted plumes. The player's **Distortion** switch gates the plumes
-beside the blast rings (§30). Preparation copies only scalar geometry, clip, time
+counts the submitted plumes. The **fireShimmer** switch gates
+the plumes, independently of the blast rings (§30). Preparation copies only scalar geometry, clip, time
 and scale into its scratch buffer, so no GAF-frame reference escapes the borrowed
 list and a retained heat source cannot keep decoded art alive across a map reset;
 source reset clears that buffer.
@@ -5667,8 +5727,20 @@ three families share the existing world copy and single distortion draw; a frame
 containing only wreck shimmer still needs that copy and draw pair. Distortion
 amplitude is encoded with a positive bias so a nearly cold source cannot round
 into the explosion selector. No GPU readback or extra full-screen pass is added.
-The **Distortion** switch owns it (§30), which is why a wreck emits no light
-(§31.1) when Distortion is off even if Lighting is on.
+Two switches own it (§30): **wreckGlow** the cooling emission colour, and with
+it the wreck light that borrows the colour (§31.1), so a wreck emits no light with
+that switch off even if the light switches are on; and **wreckShimmer** the plume.
+The recorder writes the emission only under the glow and the plume's strength and
+clock only under the shimmer; the view scale both read (the plume's size, the
+light's reach) is written under either. The executor gates both as well: its
+plume admission follows the shimmer switch, and with the glow off it composes no
+recorded emission on the body and lends the battle light none
+(`Renderer.wreckEmission`). The executor half matters because a host may keep
+its recorder on every effect and apply the player's selection to the executor
+alone — the Nanolathe screen's preview does, so its histories survive a compare —
+and a recorder-only gate left the preview's fresh wrecks red with the switch off.
+The explosion and fire art of the death itself is the content's own and follows
+no wreck switch.
 
 ## 29. Metal/paint finishes and fading scorch marks
 
@@ -5774,7 +5846,7 @@ the GPU caps externally supplied batches to 256 marks per frame.
 A smooth uneven procedural quad draws immediately above terrain, below objects
 and fog. It reuses the coastal mask's dry channel, including when water animation
 is disabled, and has no persistent GPU history or additional render target. The
-**Marks** switch owns it (§30); `ModelStats.MaterialFaces` and `ScorchQuads`
+**scorch** switch owns it (§30); `ModelStats.MaterialFaces` and `ScorchQuads`
 report the submitted workload.
 
 ### 29.3 Verification
@@ -5794,47 +5866,191 @@ every mark expires.
 ## 30. Player controls for Enhanced effects
 
 The Enhanced effects reached this point as prototypes with executor comparison
-switches, environment variables, or nothing a player could reach. **Five
-persisted switches** now cover them, beside the glow switch of §19.4. They are
-Nanolathe presentation preferences, not retail evidence: the classic executor
-composes identical pixels whatever they say, and nothing here is visible to the
-simulation or to any committed frame [I6].
+switches, environment variables, or nothing a player could reach. **Fifteen
+persisted switches** now cover them, with three strength percentages — the
+trail strength of §15 and the ground light and blast ring strengths below —
+beside the glow switch and strength of §19.4. They are Nanolathe presentation preferences, not retail
+evidence: the classic executor composes identical pixels whatever they say, and
+nothing here is visible to the simulation or to any committed frame [I6].
 
-`settings.Presentation` stores them as `water`, `lighting`, `finish`,
-`distortion` and `marks`, each defaulting to 1. They are integers for the same
-reason the display bits are: a stored 0 is "off" and is kept, only a negative
-value is repaired, and a file that omits a key keeps the default because the
-loader decodes over the defaults [02 "Settings"]. `internal/drawlist.Effects` is
-the value type both sides read, with one `bool` field per switch;
-`drawlist.AllEffects()` enables those five families. `cmd/nanolathe` converts
-the stored integers, so `internal/settings` remains a leaf.
+**Every switch is independent and toggles exactly one visible treatment.** No
+switch contains another, and none is off because some other switch is. An
+earlier round had four family masters (`water`, `lighting`, `distortion`,
+`marks`) that each turned off their own treatment *and* all their parts; that
+read as confusing next to the parts themselves, so the masters are gone. The
+master's own treatment became a switch of its own where it had one (`water` →
+`waterSurface`, `lighting` → `modelLight`) and vanished where it had none
+(`distortion`, `marks`). The combined `hotWrecks` switch split the same way,
+into `wreckGlow` and `wreckShimmer`. The family is kept only as a shortcut on the battle
+options page and the message line, described below; it is never stored.
 
-| Switch | Recorder gate | Executor gate |
+`settings.Presentation` stores each switch as an integer defaulting to 1. They
+are integers for the same reason the display bits are: a stored 0 is "off" and
+is kept, only a negative value is repaired, and a file that omits a key keeps
+the default because the loader decodes over the defaults [02 "Settings"].
+`internal/drawlist.Effects` is the value type both sides read, with one `bool`
+field per key; `drawlist.AllEffects()` turns every one on. `cmd/nanolathe`
+converts the stored integers one field for one field (`presentationEffects`,
+and `storeEffects` back), so `internal/settings` remains a leaf.
+
+| Key | Recorder gate | Executor gate |
 |---|---|---|
-| Water | the water phase (§26.1), the wake, foam and water-motion producers, and reflection site admission (§26.4) | the water surface, the screen-space reflections and the underwater refraction (§26.5) |
-| Lighting | none — lighting kinds are always recorded | the battle light pass and its ground pools (§23, §31) |
-| Finish | none — face material and normals are always recorded | the metallic glint (§23.7) and the metal/paint finishes (§29.1) |
-| Distortion | blast ring metadata (§25), the burning-feature heat tag (§27), and the fresh-wreck emission and shimmer (§28) | the blast rings and the vegetation heat shimmer |
-| Marks | the scorch observer and draw (§29.2) and the trail layer (§15) | the fading scorch layer |
+| `waterSurface` | seabed decal promotion (§26.3), shared with `waterMotion` | the surface pass's shading lane: ripple shade and crest tint with their depth ramp, the damp shoreline band and the shallow tint (§26.3, §32.3); the water's shade over a refracted hull (§26.5); the seabed decal replay, shared with `waterMotion` |
+| `waterMotion` | seabed decal promotion, shared with `waterSurface` | the moving variant of the surface shader instead of the still one (field, drift, displacement); the underwater refraction (§26.5); the reflection ripple and vertex waves (§26.4, §26.6) and the wet aircraft shadow's waves (§34), held at phase zero when off |
+| `waterFoam` | the surface wake and hover dust producer and batch, and building foam (§26.1, §26.3) | the surface pass's shore foam lane, and the wake, dust and building-foam batch |
+| `waterReflections` | reflection site admission for models, projectiles and explosion art (§26.4, §26.6, §32.2) | the reflection source pass and resolve |
+| `modelLight` | none: lighting kinds are always recorded | the battle light on models and smoke (§23, §31.1) |
+| `groundLight` | none | the ground pool pass (§31.3) with the short terrain flash (§31.6) |
+| `groundLightStrength` (a percentage) | none | multiplies every pool's terrain gain; 0 skips the ground pass as `groundLight` off does |
+| `finish` | none: face material and normals are always recorded | the metal/paint finishes (§29.1) |
+| `glint` | none | the metallic glint (§23.7) |
+| `blastRings` | blast ring metadata (§25) | ring admission to the shared distortion batch |
+| `blastRingStrength` (a percentage) | none | multiplies every admitted ring's displacement strength; 0 admits no ring as `blastRings` off does |
+| `fireShimmer` | the burning-feature heat tag (§27) | vegetation plume admission to the same batch |
+| `wreckGlow` | the fresh-wreck cooling emission colour (§28), which the wreck light borrows (§31.1), and the arriving commander's glow (§36) | a recorded emission is neither composed on the body nor lent to the wreck light (`wreckEmission`), so the switch holds for a host that gates the executor alone |
+| `wreckShimmer` | the fresh-wreck plume's strength and clock (§28), and the arriving commander's rising air (§36) | wreck plume admission to the same batch |
+| `scorch` | the scorch observer and draw (§29.2), the arrival landing scar that shares the layer included (§36) | the scorch layer |
+| `softShadows` | the aircraft clearance of §34; off, it records zero | the soft shadow commit; off, the ordinary silhouette route |
+| `supersample` | the doubled lane of §17.2 (`supersampleGeometry`); off, none, as with the Anti-Alias option off | the single-sample resolve of every model commit (§17.5); on, the coverage resolve |
+| `trailStrength` (a percentage, not a switch) | the trail layer (§15): its observer and draw run while it is above zero | none: the layer draws what was recorded |
 
-These five families are the executor **effect** surface. `Renderer.SetEffects` is its only
-entry point: the per-family setters are package-internal, each is set from the
-selection and from nothing else, and there are no environment overrides, no
-window chords and no prototype comparison switches beside them — the package
-reads no environment variable at runtime at all. Two exported switches sit
-outside the five and are set beside them on every present: `SetGlow` (§19.4) and
-`SetDisplayPalette`. Treatments with no switch of their own — the aircraft soft
-shadows of §34, the trail layer's executor half — are on whenever the executor
-that draws them is; §34's shadows soften a shadow the executor draws either way,
-so they belong to the shadow rather than to a family. `New` applies the all-on
-selection at construction, so a renderer is in the same state whether or not the
-host has presented a frame yet, and a source reset preserves the selection.
+**Shared inputs.** Two things several switches read are produced while any of
+their readers is on. They are named by `Effects.WaterPhase` and
+`Effects.SeabedTreated` so the recorder and the executor agree; neither is a
+switch.
+
+* **The water phase and the water-motion history** (§26.1) are recorded while any
+  water switch is on. Every water treatment reads them — the surface shading's
+  damp-band pulse, the moving field, the shore foam's clock and wind energy, the
+  reflections' ripple and softening — so with all four off no phase is recorded
+  and no water pass opens.
+* **Seabed decal promotion** (§26.3) runs while the surface pass shades or moves
+  the seabed: `waterSurface` or `waterMotion`. Promotion is an ordering, not a
+  treatment — it puts short submerged decals beneath the pass so the pass treats
+  them with the terrain they lie on — so it follows the switches whose lanes treat
+  them. Foam alone leaves the decals in their ordinary order.
+* **The battle light gather** (§23, §31) runs while `modelLight` or `groundLight`
+  is on. Model light off hands models and smoke no source; ground light off draws
+  no pool. With both off the gather is skipped.
+
+**Strengths.** `groundLightStrength` and `blastRingStrength` are percentages of
+the tuned look, 0–200, default 100, stored beside the switches and repaired like
+the trail strength: a negative value takes the default and anything above 200 is
+capped. They are Nanolathe presentation choices, and the curve is **linear**: the
+executor multiplies by `percent / 100` (`effectStrengthOffset`, with
+`EffectStrengthDefault` = 100 and `EffectStrengthMax` = 200). The ground strength
+multiplies each pool's terrain gain after the family share and envelope of §31.6
+and §31.7 and the content pack's ground family (§19.4), so models, smoke and the
+glow layer are untouched; the pass's own clamp against 1 − base still bounds a
+strong pool. The ring strength multiplies each admitted ring's displacement
+strength after the shape of §25 and §25.2 — radius and width are unchanged, and
+the read region's pad and the 32-ring budget both use the scaled value, whose
+order a common factor does not change. At 0 either is off exactly as its switch
+off is (the ground pass is skipped; no ring is admitted), and at 100 either
+composes the tuned look byte for byte. The switch stays the on/off; the strength
+is not a switch, is not part of `drawlist.Effects`, and does not retire any
+history. The client holds both (`SetGroundLightStrength`, `SetBlastRingStrength`)
+and the host passes them to the executor's setters of the same names beside
+`SetEffects` on the running, paused and benchmark paths and in every capture,
+the way the glow strength travels (§19.4). The renderer stores each as its scale
+less one, so a renderer never handed a strength draws the tuned look, and a
+source reset keeps both.
+
+**One pass, independent lanes.** None of the splits restructures a pass; each
+switch is a gate that already existed, a lane that already carried a zero, or a
+lane added beside them:
+
+* **The surface pass** runs while shading, motion or shore foam has something to
+  draw — with the surface and motion switches off and foam either off or refused
+  by the medium (lava, damaging water), it does not open at all. Inside it:
+  * The **shading lane** is the pass's fourth custom lane: 0 with the surface
+    switch off, 1 for water, 2 for a liquid that takes no water colour (lava, which
+    keeps the ripple shade but not the crest tint, damp band or shallow tint). With
+    it at 0 the ripple shade, crest, damp band and shallow tint are all skipped and
+    the refracted painted colour is used as it is.
+  * The **moving field** is the shader's compile-time motion constant, as before:
+    the moving variant, or the still variant — the same source with the constant at
+    zero, which evaluates the field at phase zero with no drift and takes no
+    displacement. The damp band's pulse and the shore foam keep the real clock, so
+    a still surface with foam on still laps at the shore. The motion switch also
+    holds the reflections' ripple and the wet aircraft shadow's waves at phase zero,
+    the shape a paused frame holds at its phase.
+  * The **shore foam lane** writes zero when the foam switch is off, the lane that
+    already turned foam off for lava, damaging water and void liquid.
+* **Motion with the surface shading off** is drawn as the displacement alone: the
+  moving field refracts the painted seabed and the result is mixed at the
+  surface's usual opacity over the painted colour, with no ripple shade, crest,
+  damp band or shallow tint. That is the moving surface with nothing recoloured —
+  the nearest faithful reading of "motion on, surface off", since the ripple shade
+  is colour and belongs to the surface switch. A submerged hull likewise refracts
+  without the water's shade (the underwater commit's shading lane).
+* **The surface shading with motion off** is the still surface as before: tint,
+  ripple shade and crest as a fixed image, the field the moving surface would show
+  at phase zero, and the seabed sampled in place. The underwater commit takes the
+  ordinary resolve.
+* **Foam alone** leaves open water and the dry shore exactly the painted frame and
+  draws only the lapping shore foam, and the wakes, dust and building foam.
+* **Reflections** read the shared coastal mask and the recorded phase, not the
+  surface pass's output, so they draw over painted water with every surface lane
+  off.
+* **The three heat switches share one refraction batch** (§27.2). Each admits its
+  own sources into it, so any one can be off alone; a frame with only one kind
+  admitted still pays the one copy and draw, as before.
+* **The wreck glow and shimmer** are one recorded prototype with two switches
+  (§28). The glow writes the emission colour, and the wreck light borrows it, so
+  with `wreckGlow` off a wreck emits no light even with both light switches on
+  (§31.5); the shimmer writes the plume's strength and clock. The view scale both
+  read is written under either, so the light keeps its reach with the shimmer off.
+  The arriving commander (§36) uses both parts and follows each switch alone.
+* **Trails** are governed by `trailStrength` alone (§15): zero is the layer's off,
+  laying no marks, and a change to or from zero retires the trail history the way
+  a switch retires its own. A change between two non-zero strengths keeps the
+  marks and changes only their recorded opacity.
+* **Soft shadows** switch the existing treatment of §34 only. The recorder writes
+  zero clearance, which is what already selects the silhouette route; the
+  executor gate also refuses the soft commit, so a renderer handed a clearance
+  with the switch off still draws the hard shadow.
+* **Supersampling** switches between the two resolves the model commits already
+  had the inputs for (§17.5). The recorder builds no doubled lane, the path the
+  Anti-Alias option off already takes; the executor reads each pixel's top-left
+  texel instead of the four. Each half alone still draws whole-pixel edges, so a
+  host that gates only the executor gets them too.
+
+**Settings migration.** The retired keys are read once, by
+`Presentation.UnmarshalJSON` after the ordinary decode over the defaults, and
+are never written again: they have no field, so the next save omits them. A
+stored 0 is honoured by turning every switch of that family off — `water` the four
+water switches, `lighting` both light switches, `distortion` the four heat
+switches (`blastRings`, `fireShimmer`, `wreckGlow`, `wreckShimmer`), and `marks`
+`scorch` together with `trailStrength` set to 0. The retired `hotWrecks` key is
+read the same way: a stored 0 turns `wreckGlow` and `wreckShimmer` off. Any other
+value was "on" (a negative one was repaired to on) and changes nothing, so the
+parts keep what the file says. A file that omits the new keys keeps their
+defaults. An old file with a master at 0 therefore composes exactly what the old
+build composed with it. `supersample` postdates every retired key: a file written before
+it omits the key and so keeps it on, and no retired key turns it off.
+
+These switches are the executor **effect** surface. `Renderer.SetEffects` is its
+only entry point: the per-switch setters are package-internal, each is set from
+its own switch and from nothing else, and there are no environment overrides, no
+window chords and no prototype comparison switches beside them; the package reads
+no environment variable at runtime at all. Other exported setters sit outside and
+are set beside them on every present: `SetGlow` and `SetGlowStrength` (§19.4),
+`SetGroundLightStrength` and `SetBlastRingStrength` (above), and
+`SetDisplayPalette`.
+The trail layer's executor half has no switch of its own and is on whenever the
+executor that draws it is. `New` applies the all-on selection at construction, so
+a renderer is in the same state whether or not the host has presented a frame
+yet, and a source reset preserves the selection.
 
 `Client.SetEffects` retires the trail, wake, water-motion and scorch histories
-whenever the selection changes, the way an executor swap does, so a switch that
-was off leaves no stale marks and a switch turned back on starts from the current
-tick. It also advances the paused-world revision, because a changed selection is
-a different world raster (§13.10).
+whenever the selection changes — any one switch — the way an executor swap does,
+so a switch that was off leaves no stale marks and a switch turned back on starts
+from the current tick. Each history's observer runs only under its own gate:
+trails under a non-zero trail strength, scorch under its switch, wakes and hover
+dust under the foam switch, water motion while any water switch is on. It also
+advances the paused-world revision, because a changed selection is a different
+world raster (§13.10).
 
 The host calls `Renderer.SetEffects` once per presented frame. Re-applying an
 unchanged selection is a no-op by construction — every switch is assigned from
@@ -5843,17 +6059,65 @@ calls. The window polls the shell's committed preference each update
 (`RunOptions.Effects`) and hands the executor the client's selection on the
 running, paused and benchmark paths; the benchmark keeps every effect on so two
 runs measure the same work. A `--shot` capture reads the same settings file, so
-it composes under the player's switches. The options page rows and the `+water`,
-`+lights`, `+finish`, `+heat` and `+marks` chat commands are described in
-[DESIGN_INTERFACE_HUD_INPUT.md](DESIGN_INTERFACE_HUD_INPUT.md) §3.4.1.
+it composes under the player's switches; `--shot-debris` keeps every switch on and
+its `--shot-debris-lighting` flag turns both light switches together.
+
+**Family shortcuts.** The battle options page's Water, Lights, Metal, Heat and
+Marks buttons and the `+water`, `+lights`, `+finish`, `+heat` and `+marks` chat
+commands are shortcuts over these switches, described in
+[DESIGN_INTERFACE_HUD_INPUT.md](DESIGN_INTERFACE_HUD_INPUT.md) §3.4.1: a family
+shows On while any of its switches is on, and pressing it writes every one of
+them to the new value. Water is the four water switches, Lights the two light
+switches, Metal the finishes alone (not the glint), Heat the four heat switches
+(the rings, the fire shimmer and both wreck switches), and Marks `scorch` with the trail strength — off sets the strength to 0, on gives
+a zero strength the default and leaves a chosen one as it was. The glint and the
+soft shadows and the supersampling belong to no family, and no shortcut moves the ground light or blast
+ring strength, whose effects keep switches of their own. The shortcuts live in one table
+(`effectFamilies`, `cmd/nanolathe/nanolathe_options.go`) that both the page and
+the commands read.
+
+**Verification.** `TestEachSwitchOwnsOneGate` locks that each switch, flipped
+from all on or from all off, moves exactly its own executor gate;
+`TestFreshWreckLights` that the wreck glow off lends no light;
+`TestEffectStrengthsScaleClampAndPersist` and
+`TestEffectStrengthsReachRingsAndPools` lock the strengths' linear scale, clamp,
+persistence across a selection and a source reset, and their reach into the
+rings and pools;
+`TestWaterPhaseFollowsAnyWaterSwitch`, `TestWaterSwitchesGateOnlyTheirProducers`,
+`TestHeatPartsGateTheirOwnMetadata` (the wreck emission, plume and shared scale
+included), `TestSoftShadowsSwitchRecordsNoClearance`,
+`TestTrailStrengthZeroGatesTrailHistory` and `TestSwitchChangesRetireHistories`
+lock the recorder side, `TestRetiredEffectMastersMigrate` the migration of each
+retired key, and `TestEffectFamiliesShowAnyAndSetAll` with the options and chat
+tests the shortcuts. On a device, the water fixture checks that a still surface
+still shades, holds still across phases away from the shore, and keeps its shore
+foam moving; that the foam switch removes shore foam, building foam and hover
+dust; that the surface switch alone removes the shading and the damp band while
+the water keeps moving and foaming; that motion alone moves open water, foam alone
+leaves open water and the dry shore exactly painted, and all three off draw
+nothing. The underwater fixture checks that motion off takes the ordinary commit
+and surface off keeps the refraction without the shade; the reflection fixture
+that reflections draw with every surface lane off; the aircraft fixture that
+motion off freezes the wet waves and that soft shadows off is byte-identical to a
+zero-clearance shadow; and the lighting fixtures that ground light off removes the
+pool while the light is still gathered and model light off removes the light from
+a model face while the pool stays. The ground fixture also checks that strength
+200 brightens the pool, 0 draws none and 100 restores it exactly; the blast
+fixture that ring strength 0 is the ring off, 200 differs from the default, and
+100 restores it; and the wreck fixture that shimmer off keeps the glow exactly
+with no plume while a plume without emission still draws, and that the glow off
+composes a recorded emission exactly as the cold hull, with or without its
+plume.
 
 ## 31. Fire, projectile and ground lighting (Enhanced)
 
 Two extensions of §23, both Enhanced presentation design rather than retail
 evidence: more of the world's light sources emit, and the light they emit now
 reaches the ground. Classic composes the same pixels whatever this section says,
-nothing here is visible to the simulation or a committed frame [I6], and the
-player's Lighting switch gates every source and the ground pass with it.
+nothing here is visible to the simulation or a committed frame [I6]. The
+player's model light switch removes the light from models and smoke and the
+ground light switch removes the ground pass; the gather runs while either is on
+(§30).
 
 ### 31.1 The added sources — contract BL5
 
@@ -5926,7 +6190,8 @@ record extent is wider than the framebuffer below a rest factor (§16.3).
 The terrain pass ends, after the water surface and the reflection resolve, with
 one pass over the visible lights:
 
-1. if no light is selected, or the Lighting switch is off, nothing happens at all
+1. if no light is selected, the ground light switch is off, or the player's
+   ground light strength is 0 (§30), nothing happens at all
    — no copy, no batch, no cost;
 2. otherwise the scheduler is submitted (one barrier), the region the batch
    samples is copied into the read surface (`readcopy.go`), and one clipped quad
@@ -5988,8 +6253,8 @@ water surface included, and never to the objects over it. Terrain receiver heigh
 reaches this pass from the producers as of §31.7, so a source resting on high ground
 is no longer suppressed by the sea datum; a producer that carries none still is.
 A fresh wreck's light borrows the §28
-cooling emission, which the Distortion switch owns: with Distortion off a wreck
-emits no light even when Lighting is on. The flicker's phase hash is a position
+cooling emission, which the wreck glow switch owns: with it off a wreck emits no
+light even when both light switches are on. The flicker's phase hash is a position
 hash, so two fires at one recorded position pulse together and a moving fire
 changes phase.
 
@@ -6113,8 +6378,8 @@ source of §23.2 exactly as before.
 Three producers carry it: effect art (`effect_draw.go`), every strip family
 (`strip_draw.go`) and the burning feature (`world_draw.go`), and each takes the
 sample only for a kind that emits, so the terrain is not sampled for smoke, for a
-non-emitting effect, on the classic executor's behalf, or with the Lighting switch
-off. Four do NOT carry it and still measure from the datum: projectile body
+non-emitting effect, on the classic executor's behalf, or with both light
+switches off. Four do NOT carry it and still measure from the datum: projectile body
 sprites, emissive strokes (`drawlist.Line` has no such field), cooling wrecks and
 nanolathe clusters. A plasma shell over a plateau is therefore still suppressed —
 the projectile clamp is 56..96 record pixels, the same order as the elevation that
@@ -6131,7 +6396,7 @@ Every constant here is artistic, and both the gain and the hue mix reach the
 fragment by formatting the Go constants into the shader source once at package
 init, so there is no second hand-written copy of either number to drift. The
 classic executor composes identical pixels — no field it reads changed value — the
-player's Lighting switch still gates the whole gather and pass, and there is no new
+player's light switches still gate the gather and pass, and there is no new
 shader, texture, pass, clock, RNG consumer or authoritative state.
 
 One wording caution, since the paragraphs above are read separately: "model and
@@ -6144,7 +6409,9 @@ because it is a different family now, not because the receivers changed.
 
 Additions to §26's coastal water, authored presentation choices rather than
 retail behavioral claims: every constant is artistic, the classic executor
-composes identical pixels, and the player's Water switch gates the surviving two.
+composes identical pixels, and the player's water switches gate the surviving two —
+the reflected explosions the reflections switch, the damp band and shallow tint
+the surface switch.
 
 ### 32.1 Sun glitter
 
@@ -6163,7 +6430,7 @@ ripples, a rotated fine lattice, and coarse patches.
 
 Named explosion and impact art records `ReflectWater` and `ReflectionHeight` like
 a projectile billboard does, from the same `reflectionWaterAt`/`reflectionHeight`
-pair, so the Water switch already governs admission. The reflection preparation
+pair, so the water reflections switch already governs admission. The reflection preparation
 admits a billboard at height **zero**, where it previously required a strictly
 positive height, and the source shader's waterline clip makes the same
 distinction: a model face or beam stroke carries per-fragment physical height and
@@ -6329,10 +6596,15 @@ values in place. Their storage — a four-float slice and its one-entry map — 
 retained and written in place, so the layer still allocates nothing in a
 steady-state frame.
 
-The treatment has no switch of its own: it softens a shadow the executor draws
-either way, so in Enhanced it is always on (§30). A recorded clearance of zero is
-what selects the ordinary silhouette route, and the paired capture fixture pairs
-on that.
+The player's **softShadows** switch (§30) turns the treatment off; it belongs
+to no effect family. It gates this existing treatment only: off, the recorder
+writes zero clearance and the executor refuses the soft commit, so an aircraft
+takes the ordinary silhouette route every other mobile subject takes — the hard
+shadow the executor drew before this section existed. A recorded clearance of
+zero is what selects that route, and the paired capture fixture pairs on that.
+The wet waves above are water motion: with the water motion switch off
+they hold phase zero and no drift, and the rest of the wet treatment — the weaker
+opacity and the wider filter — stays.
 
 Verification: pixel relationships verify wider spread without extra integrated
 shadow mass, water attenuation, dry stability, frozen replay, neighbouring atlas
@@ -6500,8 +6772,9 @@ The falling commander starts hot, reusing wreck emission, nearby lighting and
 rising air distortion (§28) on outgoing model packets. A warm orange glow cools
 to the ordinary texture over four seconds after impact; the heat follows the
 same unit identity as it moves. Gameplay resumes at 1.95 seconds while cooling
-continues on a small presentation clock, frozen on pause or focus loss. Both
-glow and shimmer respect the existing Distortion switch. No texture is replaced
+continues on a small presentation clock, frozen on pause or focus loss. The
+arrival uses both wreck parts, each under its own switch (§30): the orange glow
+and the light it gives follow **wreckGlow**, the rising air **wreckShimmer**. No texture is replaced
 and no additional model shader is needed. The shared diagnostics count this
 source with wreck heat/lights, an intentional prototype shortcut.
 
@@ -6509,7 +6782,8 @@ Impact also leaves one small dry-ground landing scar. A 38-world-pixel radius
 quad reuses the scorch layer beneath objects and fog, with a ragged charcoal
 patch and short trailing burn. It cools with the arrival, then stays at the
 original landing point for the rest of the battle, outside the fading blast
-mark FIFO. It respects the Marks switch and the dry terrain mask. This is a
+mark FIFO. It respects the scorch switch (§30) and the dry
+terrain mask. This is a
 cosmetic ground mark: no height, collision, pathing, damage or reclaim value.
 It resets on terrain/session replacement and is not serialized in saves in
 this prototype. The existing scorch shader's landing variant keeps the scar

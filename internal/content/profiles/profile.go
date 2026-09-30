@@ -1,7 +1,8 @@
-// Package profiles describes a mounted content set: which directories hold
-// each authored family, and how large its tables and files may be.
+// Package profiles describes a mounted content set's load-time facts: which
+// directories hold each authored family, how large its tables and files may
+// be, and which front-end art it replaces.
 //
-// A content profile is load-time data, not a gameplay rule set. It is selected
+// A content profile is load-time data, not a gameplay rule set. It is chosen
 // before the catalog compiles and, by itself, never changes what a tick does:
 // the catalog keeps asking for `units/`, `weapons/` and the rest, and the
 // profile's directory table answers with whatever the content set actually
@@ -9,37 +10,29 @@
 // docs/DESIGN_CONTENT_VFS.md §5 "Content profiles" and listed in
 // docs/INVARIANTS.md I11.
 //
-// The shipped profiles are embedded JSON, so adding one is a data edit.
-// Their evidence is the content sets' own documentation and configuration
-// files, recorded in the E1 inventory; no third-party executable was examined.
+// The engine carries no mod's profile. The base game's is Retail; a mod's is
+// the `content` section of its own nanolathe-mod.json, which the mod library
+// reads through Parse (docs/DESIGN_MODS_MUTATORS.md §4.2). Rule declarations
+// in the same file — the gameplay minimum and the Community feature table —
+// are not part of a profile and never pass through this package.
 package profiles
 
 import (
 	"bytes"
-	"embed"
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"strings"
 
-	"github.com/nanolathe-gg/nanolathe/internal/community"
-	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
-//go:embed *.json
-var shipped embed.FS
-
-// detectionOrder is the order detection walks the shipped profiles. It is an
-// explicit list rather than a directory listing so ambiguity diagnostics have
-// a stable order [I1]. Retail is the fallback when no renamed layout matches.
-var detectionOrder = [...]string{"escalation", "prota", "zero", "mayhem", "retail"}
-
-// RetailName is the profile every unmodified install resolves to.
+// RetailName is the name every content set without a Nanolathe config
+// reports: the base game, and a mod mounted as plain content.
 const RetailName = "retail"
 
-// The controls presets a profile, like mod metadata, may recommend
-// (docs/DESIGN_MODS_MUTATORS.md §4.3).
+// The controls presets the running content may recommend, spelled as the
+// keyboard profiles are (docs/DESIGN_MODS_MUTATORS.md §4.3).
 const (
 	ControlsCommunity = "community"
 	ControlsRetail    = "retail"
@@ -47,22 +40,19 @@ const (
 )
 
 // Limits records the table sizes and read caps a content set needs. The
-// catalog compile reads Units, Weapons, TNTBytes and LOSBytes through
-// content.LimitsFromProfile; UnitLimit and SearchEntries are carried for the
-// consumers that will read them, so a profile is one complete description of a
-// content set rather than several half-descriptions landing a unit apart.
+// catalog compile reads all four through content.LimitsFromProfile, which
+// keeps the retail value for any count left zero.
 //
 // Units and Weapons are definition-table sizes; TNTBytes and LOSBytes are the
-// largest map and LOS table a loader may read; UnitLimit is the per-player
-// unit limit the content set is authored for; SearchEntries is the
-// pathfinding step allowance it expects.
+// largest map and LOS table a loader may read. The per-player unit limit and
+// the pathfinding step allowance a content set expects are Community feature
+// values (`rules.communityFeatures.unitLimit` and `pathStepAllowance`), not
+// content facts.
 type Limits struct {
-	Units         int   `json:"units"`
-	Weapons       int   `json:"weapons"`
-	TNTBytes      int64 `json:"tnt_bytes"`
-	LOSBytes      int64 `json:"los_bytes"`
-	UnitLimit     int   `json:"unit_limit"`
-	SearchEntries int   `json:"search_entries"`
+	Units    int   `json:"units,omitempty"`
+	Weapons  int   `json:"weapons,omitempty"`
+	TNTBytes int64 `json:"tnt_bytes,omitempty"`
+	LOSBytes int64 `json:"los_bytes,omitempty"`
 }
 
 // Presentation carries optional mod-authored UI defaults, never simulation rules.
@@ -74,10 +64,11 @@ type Presentation struct {
 	SinglePlayerBackground string `json:"single_player_background,omitempty"`
 	LoadingBackground      string `json:"loading_background,omitempty"`
 	TeamLogos              string `json:"team_logos,omitempty"`
-	ShowRanges             bool   `json:"show_ranges"`
+	ShowRanges             bool   `json:"show_ranges,omitempty"`
 	PlacementWeaponRanges  *bool  `json:"placement_weapon_ranges,omitempty"`
-	// BuildMenuPageSize is the content set's build page lock, spelled and
-	// applied as mod metadata's buildMenuPageSize; the mod's own value wins.
+	// BuildMenuPageSize is the content set's build page lock: at most this
+	// many products on each Modern expanded-sidebar build page
+	// (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock").
 	BuildMenuPageSize int `json:"build_menu_page_size,omitempty"`
 	// MainMenuVersion is the text the main menu writes into its `DebugString`
 	// version label in place of the executable's `v3.1` literal, for a
@@ -87,182 +78,86 @@ type Presentation struct {
 
 // Profile is one content set's load-time description.
 type Profile struct {
-	// Name is the profile's selector: the word `--content-profile` takes and
-	// the word the reports carry.
-	Name string `json:"name"`
-	// Detect is the marker set. A profile is detected when every marker
-	// resolves in the mounted overlay. Shipped presets name all their renamed
-	// directories; the empty retail marker list denotes the fallback.
-	Detect []string `json:"detect"`
+	// Name is what the reports carry as `content_profile`: RetailName, or the
+	// id of the mod config the profile was read from. It is set by the
+	// reader, never authored.
+	Name string `json:"-"`
+	// Detect lists logical directories the content set is known to ship. It
+	// selects nothing: an install check refuses a package whose mounted
+	// overlay lacks one (MissingMarkers), so a config paired with the wrong
+	// content is caught before it is installed.
+	Detect []string `json:"detect,omitempty"`
 	// Directories maps the retail directory the loaders ask for to the
 	// directory this content set ships. Keys are the retail names in lower
 	// case; values are spelled as the content set spells them, though every
 	// lookup is case-insensitive anyway [02 §2].
-	Directories  map[string]string   `json:"layout"`
-	Limits       Limits              `json:"limits"`
-	Presentation Presentation        `json:"presentation"`
-	Gameplay     community.Overrides `json:"gameplay,omitempty"`
-	// Controls and MinimumGameplay are the content set's recommended
-	// controls preset and gameplay minimum, spelled as in mod metadata. A
-	// mounted mod's own metadata wins; these apply only where it names none,
-	// as a metadata-less local package does, and Controls also offers the
-	// preset when the profile is mounted without a mod
-	// (docs/DESIGN_MODS_MUTATORS.md §4.3).
-	Controls        string `json:"controls,omitempty"`
-	MinimumGameplay string `json:"minimumGameplay,omitempty"`
+	Directories  map[string]string `json:"layout,omitempty"`
+	Limits       Limits            `json:"limits,omitzero"`
+	Presentation Presentation      `json:"presentation,omitzero"`
 }
+
+// Retail is the base game's profile: no directory table, the retail limits
+// (content.RetailLimits, which a zero Limits selects) and the retail
+// front-end art. A mod without a Nanolathe config mounts under it too.
+func Retail() Profile { return Profile{Name: RetailName} }
 
 // Layout returns the first-segment redirection this profile applies. The
 // retail profile's layout is empty, and an empty layout wraps nothing.
 func (p Profile) Layout() vfs.Layout { return vfs.NewLayout(p.Directories) }
 
-// Names lists the shipped profile names in detection order, for flag help and
-// diagnostics.
-func Names() []string {
-	return append([]string(nil), detectionOrder[:]...)
-}
-
-// load reads one shipped profile. The embedded set is compiled in, so a
-// failure here is a repository defect rather than a host condition.
-func load(name string) (Profile, error) {
-	data, err := shipped.ReadFile(name + ".json")
-	if err != nil {
-		return Profile{}, fmt.Errorf("nanolathe: content profile is missing from the embedded set: logical path %s.json, providers searched [internal/content/profiles], expected a shipped profile", name)
+// MissingMarkers lists the Detect directories the mounted overlay does not
+// resolve as directories, in the profile's order. An empty result means the
+// content matches every marker the profile names.
+func (p Profile) MissingMarkers(mounted vfs.FSOps) []string {
+	var missing []string
+	for _, marker := range p.Detect {
+		if mounted == nil {
+			missing = append(missing, marker)
+			continue
+		}
+		if info, err := mounted.Stat(marker); err != nil || !info.IsDir {
+			missing = append(missing, marker)
+		}
 	}
-	return parse(data, name+".json")
+	return missing
 }
 
-// parse decodes one profile document and rejects a shape no loader could use.
-// Unknown fields are refused so a typo in a hand-written profile is reported
-// instead of silently ignored.
-func parse(data []byte, origin string) (Profile, error) {
+// Parse decodes one `content` section and rejects a shape no loader could
+// use. Unknown fields are refused so a typo in a hand-written config is
+// reported instead of silently ignored. name becomes the profile's Name and
+// origin names the document in a diagnostic.
+func Parse(data []byte, name, origin string) (Profile, error) {
+	fail := func(what, expected string) error {
+		return fmt.Errorf("nanolathe: %s: logical path %s, providers searched [%s], expected %s", what, origin, origin, expected)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var profile Profile
 	if err := decoder.Decode(&profile); err != nil {
-		return Profile{}, fmt.Errorf("nanolathe: reading content profile failed: logical path %s, providers searched [%s], expected a content profile document: %v", origin, origin, err)
+		return Profile{}, fail("reading the content section failed: "+err.Error(), "a content section of detect, layout, limits and presentation")
 	}
-	profile.Name = strings.ToLower(strings.TrimSpace(profile.Name))
-	if profile.Name == "" {
-		return Profile{}, fmt.Errorf("nanolathe: content profile has no name: logical path %s, providers searched [%s], expected a named content profile", origin, origin)
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return Profile{}, fail("the content section has trailing data", "exactly one JSON object")
 	}
+	profile.Name = name
 	if profile.Presentation.BuildMenuPageSize < 0 {
-		return Profile{}, fmt.Errorf("nanolathe: content profile build_menu_page_size %d is negative: logical path %s, providers searched [%s], expected a positive number of products per build page or omitted", profile.Presentation.BuildMenuPageSize, origin, origin)
+		return Profile{}, fail(fmt.Sprintf("content presentation build_menu_page_size %d is negative", profile.Presentation.BuildMenuPageSize), "a positive number of products per build page or omitted")
 	}
-	switch profile.Controls {
-	case "", ControlsCommunity, ControlsRetail, ControlsZero:
-	default:
-		return Profile{}, fmt.Errorf("nanolathe: content profile controls preset %q is unknown: logical path %s, providers searched [%s], expected %s, %s, %s or omitted", profile.Controls, origin, origin, ControlsCommunity, ControlsRetail, ControlsZero)
+	if profile.Limits.Units < 0 || profile.Limits.Weapons < 0 || profile.Limits.TNTBytes < 0 || profile.Limits.LOSBytes < 0 {
+		return Profile{}, fail("a content limit is negative", "non-negative limits, or omitted for the retail value")
 	}
-	switch gameplay.Mode(profile.MinimumGameplay) {
-	case "", gameplay.Strict31, gameplay.Community39, gameplay.Modern:
-	default:
-		return Profile{}, fmt.Errorf("nanolathe: content profile minimumGameplay %q is not a reserved gameplay word: logical path %s, providers searched [%s], expected %s, %s, %s or omitted", profile.MinimumGameplay, origin, origin, gameplay.Strict31, gameplay.Community39, gameplay.Modern)
+	for _, marker := range profile.Detect {
+		if strings.TrimSpace(marker) == "" || strings.ContainsAny(marker, "/\\") {
+			return Profile{}, fail(fmt.Sprintf("content detect marker %q is not a single directory", marker), "top-level directory names without separators")
+		}
 	}
 	for retail, target := range profile.Directories {
 		if strings.TrimSpace(retail) == "" || strings.TrimSpace(target) == "" {
-			return Profile{}, fmt.Errorf("nanolathe: content profile directory row is empty: logical path %s, providers searched [%s], expected a retail directory name and the directory this content set ships", origin, origin)
+			return Profile{}, fail("a content layout row is empty", "a retail directory name and the directory this content set ships")
 		}
 		if strings.ContainsAny(retail, "/\\") || strings.ContainsAny(target, "/\\") {
-			return Profile{}, fmt.Errorf("nanolathe: content profile directory row is not a single directory: logical path %s, providers searched [%s], expected two top-level directory names without separators", origin, origin)
+			return Profile{}, fail("a content layout row is not a single directory", "two top-level directory names without separators")
 		}
 	}
 	return profile, nil
-}
-
-// Lookup selects a profile by name from the shipped set, or reads one from a
-// JSON file when the selector names no shipped profile. A user-authored
-// profile is the escape hatch for a content set Nanolathe does not ship a
-// table for.
-func Lookup(selector string) (Profile, error) {
-	trimmed := strings.TrimSpace(selector)
-	if trimmed == "" {
-		return Profile{}, fmt.Errorf("nanolathe: content profile selector is empty: logical path <content-profile>, providers searched [%s], expected a profile name or the path of a profile JSON file", strings.Join(Names(), ", "))
-	}
-	folded := strings.ToLower(trimmed)
-	for _, name := range detectionOrder {
-		if folded == name {
-			return load(name)
-		}
-	}
-	data, err := os.ReadFile(trimmed)
-	if err != nil {
-		return Profile{}, fmt.Errorf("nanolathe: content profile is unknown and not readable as a file: logical path %s, providers searched [%s], expected a shipped profile name or a readable profile JSON file", trimmed, strings.Join(Names(), ", "))
-	}
-	return parse(data, trimmed)
-}
-
-// Detect selects a complete known directory layout in the mounted namespace.
-// Archive filenames are packaging, not content: an archive need not expose its
-// host filename through Stat. Multiple matching layouts require an explicit
-// selector rather than silently choosing one content set by preset order.
-// An empty marker list never auto-detects a profile.
-func Detect(mounted vfs.FSOps) (Profile, error) {
-	if mounted == nil {
-		return load(RetailName)
-	}
-	var matches []Profile
-	for _, name := range detectionOrder {
-		if name == RetailName {
-			continue
-		}
-		profile, err := load(name)
-		if err != nil {
-			return Profile{}, err
-		}
-		if len(profile.Detect) == 0 {
-			continue
-		}
-		matched := true
-		for _, marker := range profile.Detect {
-			if info, err := mounted.Stat(marker); err != nil || !info.IsDir {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			matches = append(matches, profile)
-		}
-	}
-	if len(matches) > 1 {
-		names := make([]string, len(matches))
-		for i, profile := range matches {
-			names[i] = profile.Name
-		}
-		return Profile{}, fmt.Errorf("nanolathe: content layout is ambiguous: logical path <content-profile>, providers searched [%s], expected one mounted content layout or an explicit --content-profile selector", strings.Join(names, ", "))
-	}
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-	return load(RetailName)
-}
-
-// Resolve is the mount-time entry point: an explicit selector overrides
-// detection, and an empty selector detects. The caller applies the returned
-// profile's layout to the mounted overlay and reports its name.
-func Resolve(mounted vfs.FSOps, selector string) (Profile, error) {
-	if strings.TrimSpace(selector) != "" {
-		return Lookup(selector)
-	}
-	return Detect(mounted)
-}
-
-// GameplaySources carries the authored table and legacy parameter defaults.
-// Strict ignores these declarations (DESIGN_COMMUNITY_PATCH §3.2 and §5).
-// TODO(question): Does Total Mayhem 11.3.0's bundled tdraw.dll match the
-// pinned Mayhem table exactly? A matching licensed source revision or
-// versioned release record would settle it; the catalogue labels this
-// package experimental until then (research/extensions/total-mayhem-engine.md).
-func (p Profile) GameplaySources() []community.Overrides {
-	legacy := community.Overrides{}
-	if p.Name != RetailName && p.Limits.UnitLimit != 0 {
-		legacy.UnitLimit = &p.Limits.UnitLimit
-	}
-	if p.Name != RetailName && p.Limits.SearchEntries != 0 {
-		legacy.PathStepAllowance = &p.Limits.SearchEntries
-	}
-	table := community.Overrides{Table: p.Gameplay.Table}
-	explicit := p.Gameplay
-	explicit.Table = ""
-	return []community.Overrides{table, legacy, explicit}
 }

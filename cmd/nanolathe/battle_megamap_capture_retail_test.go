@@ -39,15 +39,19 @@ func TestRetailMegamapOverlayCapture(t *testing.T) {
 		if !ok {
 			continue
 		}
+		config := ""
+		if name == "prota" {
+			config = modRootsConfigPath(t, "prota")
+		}
 		for _, mapName := range []string{"ashap plateau", "great divide"} {
-			megamapOverlayCapture(t, roots, mapName, filepath.Join(dir, "overlay-"+name+"-"+strings.ReplaceAll(mapName, " ", "-")+".png"))
+			megamapOverlayCapture(t, roots, config, mapName, filepath.Join(dir, "overlay-"+name+"-"+strings.ReplaceAll(mapName, " ", "-")+".png"))
 		}
 	}
 }
 
-func megamapOverlayCapture(t *testing.T, roots []string, mapName, out string) {
+func megamapOverlayCapture(t *testing.T, roots []string, config, mapName, out string) {
 	t.Helper()
-	opts := Options{Roots: roots, Map: mapName, Seed: 7}
+	opts := Options{Roots: roots, Map: mapName, Seed: 7, ModConfig: config}
 	cs, err := openContent(opts)
 	if err != nil {
 		t.Fatal(err)

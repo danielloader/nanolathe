@@ -103,6 +103,9 @@ func TestLimitsFromProfileKeepsRetailForUnsetCounts(t *testing.T) {
 	if got := LimitsFromProfile(profiles.Limits{}); got != RetailLimits() {
 		t.Fatalf("empty profile limits = %+v, want the retail baseline %+v", got, RetailLimits())
 	}
+	if got := LimitsFromProfile(profiles.Retail().Limits); got != RetailLimits() {
+		t.Fatalf("the base game's profile limits = %+v, want the retail baseline %+v", got, RetailLimits())
+	}
 	got := LimitsFromProfile(profiles.Limits{Units: 16000})
 	if got.Units != 16000 || got.Weapons != RetailWeaponSlots {
 		t.Fatalf("partial profile limits = %+v, want a raised domain and the retail weapon table", got)

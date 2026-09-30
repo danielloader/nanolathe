@@ -8,6 +8,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/install"
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
+	"github.com/nanolathe-gg/nanolathe/internal/settings"
 )
 
 // headlessMod is a mod the command line selected, resolved against the
@@ -57,6 +58,42 @@ func (m *headlessMod) selector() string { return m.mod.ID + "@" + m.mod.Version 
 // roots is the mount order: the base install, then the mod, which wins.
 func (m *headlessMod) roots() []string {
 	return append(append([]string(nil), m.base...), m.mod.Dir)
+}
+
+// headlessMountConfig chooses the Nanolathe config the run applies, in the
+// desktop command's order (docs/DESIGN_MODS_MUTATORS.md §4.3): the
+// --mod-config file, which also stands in for a selected mod's own config;
+// else the mod's own config; else, with no mod, the saved contentProfile
+// preference when it names a config file. Content without a config runs as
+// plain content — the base game's profile, no Community source — and the
+// returned notice says so. There is no detection.
+func headlessMountConfig(path string, mod *headlessMod) (modlibrary.Metadata, string, error) {
+	if path = strings.TrimSpace(path); path != "" {
+		meta, err := modlibrary.ReadConfigFile(path)
+		if err != nil {
+			return modlibrary.Metadata{}, "", err
+		}
+		if mod != nil {
+			mod.mod = mod.mod.WithConfig(meta)
+		}
+		return meta, "", nil
+	}
+	if mod != nil {
+		if !mod.mod.HasConfig() {
+			return modlibrary.Metadata{}, modlibrary.NoConfigNotice(mod.mod.Name), nil
+		}
+		return mod.mod.Metadata, "", nil
+	}
+	stored, _ := settings.Load()
+	saved := strings.TrimSpace(stored.ContentProfile)
+	switch {
+	case saved == "" || strings.EqualFold(saved, "retail"):
+		return modlibrary.Metadata{}, "", nil
+	case modlibrary.IsRemovedProfile(saved):
+		return modlibrary.Metadata{}, fmt.Sprintf("the saved content profile %q was removed; mods carry their own Nanolathe config now, so the content runs without one", saved), nil
+	}
+	meta, err := modlibrary.ReadConfigFile(saved)
+	return meta, "", err
 }
 
 // checkGameplay refuses a command line that names a gameplay mode below the

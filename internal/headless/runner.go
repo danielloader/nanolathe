@@ -115,17 +115,20 @@ type FreshBattle struct {
 type Request struct {
 	GameplayFeatures  community.Overrides
 	GameplayOverrides []community.Overrides
-	ProfileFeatures   []community.Overrides
-	Gameplay          gameplay.Mode
-	Root              string   // fallback for callers supplying one root
-	Roots             []string // load order; omitted roots enable installation discovery
-	Map               string
-	Mission           string
-	Difficulty        int
-	SimulationSeed    uint32
-	CRTSeed           uint32
-	TickLimit         uint32
-	UnitLimit         int // zero uses the skirmish default; campaign keeps authored maxunits
+	// ProfileFeatures is the running Nanolathe config's Community
+	// declaration (modlibrary.Metadata.CommunitySources), the content source
+	// of DESIGN_COMMUNITY_PATCH §3.2; nil for plain content.
+	ProfileFeatures []community.Overrides
+	Gameplay        gameplay.Mode
+	Root            string   // fallback for callers supplying one root
+	Roots           []string // load order; omitted roots enable installation discovery
+	Map             string
+	Mission         string
+	Difficulty      int
+	SimulationSeed  uint32
+	CRTSeed         uint32
+	TickLimit       uint32
+	UnitLimit       int // zero uses the skirmish default; campaign keeps authored maxunits
 	// Survival selects a Survival battle on Map with SurvivalBuddies allied
 	// computer players (docs/DESIGN_SURVIVAL.md §10).
 	Survival        session.SurvivalOptions
@@ -137,11 +140,14 @@ type Request struct {
 	// computer player of the battle is an error. Nil leaves every computer
 	// player Classic.
 	ComputerAI []session.ComputerAI
-	// ContentProfile selects the mounted content set's directory table and
-	// limits by name or by the path of a profile JSON file. Empty detects the
-	// profile from the mounted markers. Run overwrites it with the resolved
-	// name, so the report always carries the profile the run actually used
+	// Content is the running Nanolathe config's content section: the
+	// directory table and limits the mount applies. The zero value is the
+	// base game's profile (profiles.Retail). The host chooses it — a mod's
+	// own config, a --mod-config file or none — and the runner applies it
 	// (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
+	Content profiles.Profile
+	// ContentProfile is the report name of the content Run applied, set by
+	// Run from Content: the config's id, or `retail`.
 	ContentProfile string
 	// Mutators are the battle's global multipliers; the report prints the
 	// canonical set the session bound (docs/DESIGN_MODS_MUTATORS.md §6.6).
@@ -161,16 +167,11 @@ func Run(request Request) (Report, error) {
 	}
 	defer fs.Close()
 
-	// The content profile is resolved after mounting and before anything
-	// reads content, because detection asks the mounted overlay for its
-	// markers. Everything downstream reads the returned view, so the
-	// required-product check below already goes through the directory table.
-	view, profile, err := contentProfileView(fs, request.ContentProfile)
-	if err != nil {
-		return Report{}, err
-	}
+	// The content section applies before anything reads content.
+	// Everything downstream reads the returned view, so the required-product
+	// check below already goes through the directory table.
+	view, profile := contentView(fs, request.Content)
 	request.ContentProfile = profile.Name
-	request.ProfileFeatures = profile.GameplaySources()
 
 	for _, required := range []string{"gamedata/moveinfo.tdf", "gamedata/sidedata.tdf"} {
 		if _, err := view.Stat(required); err != nil {
@@ -401,18 +402,18 @@ func mountContentRoots(root string, roots []string) (*vfs.FS, error) {
 	return fs, nil
 }
 
-// contentProfileView resolves the content profile for a mounted overlay and
-// returns the read view the loaders should use, plus the resolved profile —
-// its name for the report and its limits for the catalog compile. A retail content set resolves to an empty directory
-// table, and an empty table returns the overlay itself — so an unmodified
-// install keeps the concrete overlay, its manifest identity and its catalog
-// hash (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
-func contentProfileView(fs *vfs.FS, selector string) (vfs.FSOps, profiles.Profile, error) {
-	profile, err := profiles.Resolve(fs, selector)
-	if err != nil {
-		return nil, profiles.Profile{}, err
+// contentView applies a content section to a mounted overlay and returns the
+// read view the loaders should use, plus the profile — its name for the
+// report and its limits for the catalog compile. An unnamed profile is the
+// base game's. The base game's profile has an empty directory table, and an
+// empty table returns the overlay itself — so an unmodified install keeps
+// the concrete overlay, its manifest identity and its catalog hash
+// (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
+func contentView(fs *vfs.FS, profile profiles.Profile) (vfs.FSOps, profiles.Profile) {
+	if profile.Name == "" {
+		profile.Name = profiles.RetailName
 	}
-	return profile.Layout().Apply(fs), profile, nil
+	return profile.Layout().Apply(fs), profile
 }
 
 func validateRoot(root string) error {

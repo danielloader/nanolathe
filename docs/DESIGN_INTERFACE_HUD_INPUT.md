@@ -1937,7 +1937,9 @@ entry snapshot, the same way it re-applies gamma and the volumes.
 
 This is a Nanolathe extension authorized by the user, not a retail finding.
 The fifth options category, **Nanolathe**, sits one authored category spacing
-below Visuals in both STARTOPT and PREFS. The engine adds its gadget and builds
+below Visuals in PREFS, the battle's options. The front end's STARTOPT leaves
+it out: there the Nanolathe screen (§3.17) owns these choices, and the
+Community pages move up one spacing. The engine adds its gadget and builds
 a page from the VISUALS canvas, label style and control dimensions. The front
 end uses the original options background; battle uses the game's tiled window background.
 BUTTONS0 and stagebuttn2/3 from the game assets supply the buttons and controls.
@@ -1959,14 +1961,25 @@ display's refresh grid; classic still presents at 30 Hz. Higher or refresh-follo
 values remain available through `--fps`; a value outside the presets is
 displayed as stored.
 
-The six switches select the Enhanced effects the modern executor draws, listed
-with what each gates in [DESIGN_GPU_RENDERER.md](DESIGN_GPU_RENDERER.md) §30.
+The six buttons select the Enhanced effects the modern executor draws. Glow is
+one switch; the other five are family shortcuts over the independent switches
+listed with what each gates in [DESIGN_GPU_RENDERER.md](DESIGN_GPU_RENDERER.md)
+§30, which the Nanolathe screen (§3.17) offers one by one. A shortcut is not a
+stored value: it shows On while any switch of its family is on, and a press
+writes every switch of the family to the new stage. Water is the surface,
+motion, foam and reflections switches; Lights the model and ground light; Metal
+the finishes only (the glint is its own switch and no shortcut's); Heat the
+blast rings, fire shimmer, wreck glow and wreck shimmer; Marks the scorch switch
+and the trail strength, which a press off sets to 0 and a press on restores to
+the default when it is 0. The glint, the aircraft soft shadows and the model
+supersampling (Smooth edges on the Nanolathe screen's Effects page,
+DESIGN_GPU_RENDERER §17.5) belong to no shortcut, and no shortcut moves the ground light or blast ring strength.
 Glow edits the display block, where §19.4 already put it, so it previews through
 the same live path the Visuals rows use; the other five edit the presentation
 block, which the host polls each update. Classic presents identically whatever
-they say. The same five toggle from the message line as `+water`, `+lights`,
-`+finish`, `+heat` and `+marks`, beside the existing `+glow`, each persisting
-its value the way the display-bit commands do.
+they say. The same five shortcuts run from the message line as `+water`,
+`+lights`, `+finish`, `+heat` and `+marks`, beside the existing `+glow`, each
+persisting the switches it wrote the way the display-bit commands do.
 
 Expanded sidebar selects the modern composition described in §3.3 and remains
 independent of the renderer choice; Classic always uses the authored page.
@@ -1974,8 +1987,8 @@ independent of the renderer choice; Classic always uses the authored page.
 Edits preview immediately; gameplay changes enqueue a typed command for the
 next simulation boundary. OK saves gameplay and the presentation block with the existing
 settings transaction; Cancel restores the entry values, Undo restores this
-page — including its glow bit — and Restore Defaults chooses Modern / 60 with
-every effect on. F10 updates the shell and saves
+page — including its glow bit, every switch its shortcuts write and the trail
+strength — and Restore Defaults chooses Modern / 60 with every effect on. F10 updates the shell and saves
 only the renderer field, preserving other pending preferences. The adapter polls
 the live shell preference and shares executor-swap cleanup with F10. A saved
 renderer also controls subsequent battle loading and detail-art preparation.
@@ -2142,6 +2155,150 @@ gestures treat a queued token as superseding input even when there is no new
 physical edge. The plain F9/F10 presentation extensions leave their Ctrl
 compositions to the currently unimplemented retail developer paths; their
 planned activation is owned by DESIGN_DEVELOPER_TOOLS.
+
+#### Rebinding
+
+**Policy.** Keyboard rebinding is a Nanolathe host input preference, built as
+a prototype on its own branch. It is presentation only: it adds no
+`gameplay.Mode` term or `RuleSet` seam, never reads the gameplay mode or the
+content profile, and enters no digest, fingerprint or save [I6]. The retail
+profile with nothing rebound is the identity. Every token reaches the battle
+unchanged, and `TestRetailKeyMapIsIdentity` locks that over the whole
+catalogue.
+
+**Chords.** A binding is an `input.Chord`: a key with Ctrl and Shift. Alt is
+never part of one, because retail folds Alt+key into the plain key's token
+(Alt's system key-down pushes the raw character) `[07 R-CAM-01 §14]`. Group
+recall reads Alt live, as before. Ctrl composes only letters, digits and
+function keys, and a composed token carries no Shift. So Ctrl+Shift+B is
+Ctrl+B, and its Shift stays the live additive modifier the handler reads.
+Shift is visible only as a character's case or shifted symbol. The producer
+queues the translated character, which is read on the US layout the retail
+install assumes: Shift+1 is `!`. Shift with a function key, an edit key or
+Space is the same token as the plain key. `Chord.Normalize` folds a captured
+key press onto the chord the token stream can tell apart. `ParseChord`
+refuses the rest (`alt+a`, `ctrl+tab`, `shift+f5`, `ctrl+shift+a`). The
+written form is lower case with `+` separators (`ctrl+a`, `shift+t`, `f5`,
+`,`; `!` or `+` may stand for their shifted keys). The displayed form is
+`Ctrl+A`, `Shift+T`, `F5`, `!`.
+
+**Catalogue.** `input.Actions()` lists every key the rewrite knows, from
+evidence only.
+
+| Group | Actions and retail keys | Evidence |
+|---|---|---|
+| Orders | Move `m`, Attack `a`, Patrol `p`, Guard `g`, Stop `s`, Repair `r`, Reclaim `e`, Capture `c`, Load `l`, Unload `u`, D-gun `d`, Fire orders `f`, Move orders `v`, On/off `x`, Cloak `k`, Orders page `o`, Build page `b` | the command palette's quick keys, identical in stock `ARMGEN.GUI` and `CORGEN.GUI` (gadgets `MOVE`…`BUILD`, `DEFEND`, `BLAST`, `FIREORD`, `MOVEORD`, `ONOFF`); `TestRetailOrderKeysMatchAuthoredPalette` reads both windows from the install `[07 R-WGT-01 §3]` |
+| Orders | Previous / next build page `,` / `.`, plus this build's Page Down / Page Up; Self-destruct Ctrl+D | census rows above; the page keys' host extras in `handleBattleShortcuts` |
+| Selection | Select all Ctrl+A, commander Ctrl+C, on screen Ctrl+S, same type Ctrl+Z; `CTRL_B`, `CTRL_E`…`CTRL_R`, `CTRL_T`…`CTRL_Y` category selects on their Ctrl letters | census rows `[07 R-CAM-01 §2]` |
+| Camera | Follow next / previous `t` / `T`; next unvisited `n`; message source F3; store bookmarks 1–4 Ctrl+F5–F8 and recall F5–F8; zoom step F9 | census rows; F9 is the host extension of §3.8 |
+| Game | Options F2; options, resume or megamap Tab; Pause; speed `+` `=` / `-` `_`; label every unit `` ` `` `~` `!` `#` `*`; unit information F1; score panel F4; clear messages F12; chat Enter; switch renderer F10 | census rows; Enter opens TALK (§3.9); F10 is the host extension of DESIGN_GPU_RENDERER §14.6 |
+| Fixed | Recall group or build page 1–9; assign group Ctrl+1–9; cancel or deselect Escape; scroll arrows; slide the rails Space (held) | shown for reference, never rebound |
+
+Fixed keys are held-key queries (arrows, Space), modifier-read multiplexers
+(the `SwitchAlt` digits with live Shift and Alt), or Escape. Escape is also
+the options window's and TALK's own cancel key, so rebinding it on the
+residual path alone would split its meaning. No action may take a Fixed key.
+Options (F2) and Unit information (F1) act only with Shift up, which the
+rewrite cannot change, so a shifted chord is never bound to them.
+The developer keys (`\`, Ctrl+F9, Ctrl+F10, F11) and the out-of-scope `h`
+are not catalogued. They pass through unchanged, and binding an action to
+one of them takes the key.
+
+**Translation.** `KeyMap.Translate` reads the token's chord.
+
+* A chord bound to an action becomes that action's retail token. A press
+  that is already one of the action's retail keys passes unchanged.
+  Otherwise the token is the first default whose Shift matches the press,
+  or the first default. So a speed key bound to `j` emits `=` and bound to
+  `J` emits `+`.
+* A chord that is some action's retail key, but reaches no action now, is
+  dropped. Moving Attack from A to Q stops A from attacking.
+* Any other token passes unchanged.
+
+The palette matches its quick keys without regard to case and reads Shift
+live `[07 R-WGT-01 §3]`. An order action is therefore marked `AnyShift`:
+binding `q` also answers Shift+Q, that press emits `A`, and both A and
+Shift+A are dropped once Attack leaves them. An explicit binding of the
+shifted letter to another action outranks this.
+
+A chord belongs to one action. `Rebind` takes each chord from its previous
+owner and returns those owners. `Reset` restores the profile's keys and takes
+them back from any action holding one. An empty binding leaves the action
+unbound. A request made only of Fixed or indistinguishable keys changes
+nothing.
+
+**Where it applies.** Only in the battle, and only on the shortcut token
+path. In `viewerStep`'s ordinary frame the hook `serviceKeyMap` rewrites the
+queued head token in place (`KeyMap.TranslatePending`). It runs after
+UNITINFO's authored keys and the Zero drag-filter key have seen the physical
+key, and before the command palette, TALK's opener and the residual hotkey
+table read it. A dropped token counts as claimed, exactly like a consumed
+one, so the next queued token waits for the next pass. The head is always
+consumed in that frame, so no token is translated twice. The hook is
+skipped while a text editor has the keyboard: TALK owns its whole frame
+before the hook is reached, and `textEntryActive` also covers a focused text
+field.
+
+Inside the options window only a key bound to the two options actions is
+rewritten, and only while the window's own F2/Tab toggle would act on it.
+The rebound key then closes what it opened, and every other key reaches the
+authored controls as the physical key. As a consequence, an unbound F2 or Tab
+still closes the window from inside. Front-end menus, the Nanolathe screen
+and battles without a shell (captures, benchmarks, headless runs) play the
+retail keys. Held-key queries are never remapped: arrow scrolling, the rail
+slide's Space, live Shift, Ctrl and Alt, and the Zero scheme's W/B/Y drag
+filters (§3.13). The Shift+arrow page keys therefore keep working whatever
+the page actions are bound to.
+
+**Profiles.** Retail is the retail keys. Community is the same keys: ProTA's
+documented controls change what Ctrl+B, Ctrl+F and Ctrl+S do, not which
+keys do it, and those behaviours are already the Community selection scheme
+of §3.13
+([ProTA hotkey audit](../research/extensions/prota-engine.md#shipped-selection-and-hotkey-audit)).
+Zero adds `z` as a second previous-build-page key
+([TA Zero documented behavior](../research/extensions/ta-zero-engine.md#documented-engine-level-behavior)),
+so under Zero `z` emits `,`.
+
+**Settings.** The shell holds an `*input.KeyMap` built from the settings key
+`keyBindings` (`settings.KeyBindings`: `profile` and `bindings`, a map from
+action to written chords). On load, unknown actions and unreadable chords
+are dropped. A list whose chords all fail to read keeps the profile's keys,
+while a list saved empty unbinds the action. On save only the actions that
+differ from the profile are written, and a retail block with nothing rebound
+is omitted from the file. A content reload carries the map through the same
+capture and apply.
+
+The controls presets gain a *Keyboard* row (Retail 0, Community 1, Zero 2).
+Applying a preset selects its profile and keeps every rebound action, and
+restoring from a preset returns the row to Retail the way every other row
+returns. A settings screen edits `gameShell.liveKeyMap()` in place, captures
+a key with `keyCaptureChord`, which maps it through `ebitenapp.PortableKey`
+and `Chord.Normalize`, and can name a chord's current owner with
+`KeyMap.Owner`.
+
+**Limitations.** A content's own palette quick keys play under the retail
+profile, because an uncatalogued letter passes through unchanged. A rebound
+order emits the retail-authored letter. Under content that authors different
+quick keys, that letter reaches whichever gadget the content binds to it (or
+none), and the content's own letter still passes through unchanged. This is
+an explicit limitation, not an inference about the content.
+
+Rebinding the Tab action moves the megamap toggle's press, but the megamap
+still waits for the physical Tab to be released (§3.15). A rebound key
+therefore toggles on its press. Key capture reads key positions and tokens
+read characters, so on a non-US layout a captured letter or symbol can
+differ from the character the key types.
+
+**Tests.** `internal/input` locks the identity over the catalogue,
+`TestRebindMovesActionAndSuppressesOldKey`,
+`TestRebindDisplacesTheChordsOwner`, `TestZeroProfileZPagesBack` and
+`TestParseChordRoundTrip`. `cmd/nanolathe` locks
+`TestKeyMapBypassedWhileTalkOpen`, `TestKeyBindingsSettingsRoundTrip`,
+`TestControlsPresetSelectsKeyboardProfile`, `TestKeyCaptureChord` and the
+retail-tier `TestRetailOrderKeysMatchAuthoredPalette`. The TALK test types a
+retail order key and a rebound one into the chat line and checks that both
+arrive unchanged. Outside TALK it checks that the unbound F12 is dropped and
+the rebound Home clears the ring.
 
 ### 3.7 The command dispatch boundary
 
@@ -2842,6 +2999,10 @@ valid sites are green. On release the
 first accepted build replaces orders unless Shift is held, and subsequent sites
 append without duplicate-site toggle. If no site is valid, placement stays armed.
 A click still uses the existing single-site path, on release in modern mode.
+`presentation.buildDrag` (on by default; the Nanolathe screen's *Build drag*
+card, §3.17) switches the construction row and grid off, so every press
+places one site through that path; move, repair and reclaim drags are
+unaffected.
 
 **Cancelling queued sites with a Shift row (requested input policy,
 2026-09-28).** A player sweeps a row over queued sites to take them off, as
@@ -3645,6 +3806,166 @@ result branch of the battle update in `battle.go`, and the switch in
 title gate and the retail default. `TestCommunityHUDEverySwitchCommits` locks
 the switch: each HUD row writes only its own preference, and the click plays
 only the `Options` cue.
+
+### 3.17 The Nanolathe screen
+
+**Policy.** A Nanolathe-owned setup screen, user-authorized 2026-09-28 as a
+prototype on its own branch. It is presentation and host preference only: it
+writes the same settings the options pages, the Mods & Mutators screen
+([DESIGN_MODS_MUTATORS §8](DESIGN_MODS_MUTATORS.md#8-presentation)) and the
+controls presets already write, adds no gameplay rule and enters no digest,
+fingerprint or save. The main menu's *NANOLATHE* button opens it; a shell with
+no window keeps the Mods & Mutators screen.
+
+**Host.** `ebitenapp.RunOptions.Screen` takes an `ebitenapp.FullScreen`.
+While it is active it owns the window: `Layout` returns the display's own
+pixel size rather than the authored 640×480 canvas, `Draw` hands it the
+whole screen, it reads the pointer and keyboard itself, and the client is
+fed an idle sample so nothing underneath reacts. The client keeps stepping,
+so a content reload the screen requests still runs between host steps. The
+system pointer is shown in place of the retail software cursor. Closing
+waits until every key and button is up, keeping the last frame (the window
+is not cleared each frame), so the Enter or Esc that closed it never reaches
+the menu as a fresh press. `internal/platform/screenkit` holds its toolkit:
+the film typefaces' glyphs as mip levels, paint helpers and hit regions. It
+is a platform package, allowed to import Ebitengine.
+
+**Layout.** One unit is `min(height/900, width/1560)` pixels, so a 4:3
+window keeps the header on one line. A tab row (*Game*, *Mutators*,
+*Graphics*, *Effects*, *Controls*) and *Back* / *Apply* (with the count of
+changed cards) head the screen; under the wordmark one line names the
+content, rules, renderer and mutators a battle started now would use, each
+part a jump to its card. The focused card fills the left: kicker, title, one
+control of its kind (lamp meter, throw switch, stepper, the three rule
+layers, side-by-side choices, or the content list), a description, a lock or
+renderer note, chips and *Compare*. The page's cards run along the bottom;
+the focused one lifts. Arrow keys choose and change, Tab pages, Space
+compares, Enter applies, Esc goes back. The content list shows every
+installed mod with its version, its rule lock and whether it brings its own
+controls, and scrolls past five rows.
+
+**Controls page.** Not a deck but a keyboard and mouse mapping view over
+the key map of §3.6 "Rebinding". A profile bar offers Retail 3.1, Community
+and TA Zero (the draft content's recommendation marked); choosing one shows
+its keys at once and lists the other settings Apply will write. Tabs split
+the actions into Orders, Selection, Camera, Game and Mouse. Each key is a cap:
+clicking it waits for the next key press (Ctrl and Shift held are part of the
+chord; Esc cancels, Backspace clears), `+` adds a second key, right-click
+clears one, and a row that differs from the profile has a reset. A key taken
+from another action is reported. A keyboard diagram colours every key by
+the group that uses it, lights the selected action's keys with their
+modifiers, and names a hovered key's actions plain, with Shift and with
+Ctrl. The Mouse tab explains the two Interface Types on a drawn mouse (§3.5)
+and holds the behaviour switches: mouse buttons, selection rules,
+double-click, factory ×100, digit keys, order drag, build drag, the Tab key
+and the snap-override key.
+
+**Live preview.** Behind everything a small real battle plays, staged off
+the game goroutine the way the film route stages its shots
+([FILM_CAPTURE](FILM_CAPTURE.md)) and stepped at 30 Hz with its own client
+and renderer; it is never saved, networked or seen by the window's battle.
+The scene depends on the focused card, on maps where units stand out (no
+metal maps): an armour battle on Great Divide; Coast To Coast's shoreline with
+submarines, underwater structures and sinking wrecks for the water parts; a
+laser-tower defence with lightning kbots and working constructors on Crystal
+Cracked for glow, and on Gasbag Forests for lighting, beside six small copses
+set alight in turn; eleven copses on SHERWOOD, spaced so fire cannot jump
+between them and each lit from its middle in turn, with no unit in frame, for
+fire shimmer; fresh wrecks made every 40 ticks for the wreck parts; a Guardian
+(accuracy 0) shelling the middle tank of a 5×3 Leveler block, first shell
+0.67 s after the scene appears and then every three seconds, the block
+healed to full between shots and a health bar over every tank, for blast
+rings and blast size; constructors already in build range of their sites,
+with the trees cleared round them, for the build mutators, and reclaiming
+wrecks for salvage, with each scene's metal shown; nine hovercraft and tanks
+circling on a Great Divide hillside that faces the key light of
+DESIGN_GPU_RENDERER §23.7 at about 4.4×, for finish, glint and smooth edges
+(on flat ground a deck faces straight up, which both finishes leave
+unchanged); a snow march for trails; low aircraft for soft shadows; a fogged
+march under Circular line of sight for Sight (the True raster stops at
+sightdistance 256, which most units already reach); and the renderer compare
+on Greenhaven at the detail view's 2×. Every camera is still, since a slow
+pan moves pixel art in uneven one-pixel steps: a scene that frames a fight
+follows it through the lead-in, which is silent and never shown, and holds
+that frame from the first visible tick, and a twin compare copies its
+primary's frame. Each scene has a fixed anchor, the
+preview's computer player is passive (its units still shoot back), and a
+scene of the viewer's units alone keeps one far enemy building, since a side
+with nothing left has lost and the battle would stop. The main menu stages
+the first card's scene in the background, so the screen opens onto it. The
+preview's client draws no effect entry with a frame above 512 pixels
+(`client.SetEffectArtLimit`): every stock entry is far smaller, but TA:
+Escalation's explode2–4 are its 760–1140 pixel shield bubbles, which its
+ordinary weapons also name, and a preview full of them covered the screen
+and slowed it to a crawl
+([escalation-shields](../research/extensions/escalation-shields.md)).
+Battles draw every entry.
+Rules and mutators are part of the scene's key, so a
+change restages it with the draft applied; renderer and effect values are
+applied per frame. *Compare* splits the background at a draggable line: the
+executor renders the same recorded frame twice, once with the card's
+alternative value; while a Classic picture is wanted the view is floored to
+the whole world pixel and the camera blend snapped after each tick, so both
+halves line up. A mutator changes the simulation, so its compare stages
+a twin scene under ×1, stepped on the same clock and framed on the same
+ground, and shows the two side by side, each cropped around the point the
+camera aimed at, projected through the camera, since a camera clamped at
+the map's edge does not hold the fight right of centre; a structure still
+rising carries its build percentage from each simulation. Classic previews hold the camera on
+the native or 2× step, the only factors the Classic executor draws. The
+Metal and Smooth edges cards' compare blinks instead: the whole frame
+alternates between the two values every 0.8 seconds under one tag naming the
+value on screen, because those changes are too fine to find by looking from
+one half to the other.
+
+**Graphics and Effects pages.** Graphics holds the choices that shape the
+whole picture in either renderer: the renderer itself, the frame rate, the
+sidebar and fullscreen. Effects holds Enhanced's own looks, the player
+switches of DESIGN_GPU_RENDERER §30, in cards that share one scene: Water
+(surface, motion, foam, reflections), Lighting (unit light, ground light and
+its strength), Metal (finish, glint), Smooth edges (the model supersampling
+of §17.5), Glow (strength), Heat (blast rings and their strength, fire
+shimmer, wreck glow, wreck heat wave), Marks (scorch, trails) and Soft
+shadows. A grouped card has one row per switch; the focused row picks the
+scene and the compare. Every switch is independent: there is no family
+master.
+
+**Demonstrations and numbers.** Sidebar (Original, 12 per page, Free flow)
+and Fullscreen draw a small demonstration over the preview
+(`nlscreen_demo.go`); the demonstration code also places marks on the
+preview's real units — each unit's world position projected through the
+preview camera, whose origin is the surface corner, less the viewport
+origin, then through the background's crop. A mutator card lists three of the running content's
+units with the scaled value before and after, read from a clone of the
+catalog after `Catalog.ApplyMutators` with that one factor, so engine limits
+show (a Krogoth's hit points stop at 32767). Choosing a controls profile
+lists every row it would change, old then new.
+
+**Apply.** The screen edits a draft. Apply writes a chosen controls profile
+first, then only the cards the player touched, over the live state, so a
+profile keeps every row nobody changed afterwards. A different content is a
+reload request carrying the mod, rules, mutators and the mod's recommended
+controls (unless a profile was chosen here), exactly as the Mods & Mutators
+screen makes it, except that the screen stays open: a loading plate covers
+it while the content switches, and the draft is then applied to the new
+shell and saved, so the changes made in the same Apply belong to the new
+content. Otherwise the settings are saved at once. The rule-lock override is
+[DESIGN_MODS_MUTATORS §4.3](DESIGN_MODS_MUTATORS.md#43-selection-and-precedence)
+"Overriding a rule lock".
+
+**Verification.** `--nl-shot <dir>` renders every card, each part of a
+grouped card that has its own scene, its compare and the override dialog to
+PNGs with no visible window, each at a fixed second of its scene's clock
+(restaging a scene already past it), and logs each compare's share of
+changed pixels. `TestNLScreenApplyKeepsTouchedCardsOverProfile`
+(retail tier) and `TestModLockOverrideSurvivesStartupRaise` lock the Apply
+order and the override.
+
+**Open.** Mouse buttons are not rebindable: the Mouse tab offers the
+retail Interface Types and the existing switches. A mod's own key profile is
+its controls preset's keyboard row; no content yet authors key bindings of
+its own, so none is read. The blast rings change little of a still: a
+ring lasts a fraction of a second.
 
 ## 4. Retail behaviour that is not a bug
 

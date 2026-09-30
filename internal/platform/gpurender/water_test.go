@@ -289,12 +289,119 @@ func checkWaterDevicePixels() error {
 	if err := checkWaterSurfaceAdditions(); err != nil {
 		return err
 	}
+	if err := checkWaterPartsDevicePixels(r, read); err != nil {
+		return err
+	}
 	r.ResetSources()
 	if r.water.mask != nil || r.water.source != nil {
 		return fmt.Errorf("coastal mask survived source reset")
 	}
 	return nil
 }
+
+// checkWaterPartsDevicePixels locks the independent water switches of the
+// surface pass (§30), Nanolathe presentation policy. With motion off the open
+// water holds still across phases yet still shades, while shore foam keeps its
+// own clock; with foam off the shore differs and no foam or hover dust mark
+// draws; with the surface shading off the water keeps moving and foaming over
+// its painted colours, and the damp band leaves the dry shore; with only foam
+// on, open water is the painted frame exactly; with all three off the pass
+// draws nothing.
+func checkWaterPartsDevicePixels(r *Renderer, read func(tick uint32, zoom float32, enabled bool, wakes int) []byte) error {
+	const w = 160
+	defer r.setWaterSurface(true)
+	defer r.setWaterMotion(true)
+	defer r.setWaterFoam(true)
+	differs := func(a, b []byte, x0, x1, y0, y1 int) bool {
+		for y := y0; y < y1; y++ {
+			for x := x0; x < x1; x++ {
+				i := (y*w + x) * 4
+				if !bytes.Equal(a[i:i+4], b[i:i+4]) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	moving, off := read(30, 1, true, 0), read(30, 1, false, 0)
+	r.setWaterMotion(false)
+	still, stillLater := read(30, 1, true, 0), read(42, 1, true, 0)
+	if !differs(still, off, 0, 70, 8, 112) {
+		return fmt.Errorf("still water drew no surface")
+	}
+	if !differs(still, moving, 0, 70, 8, 112) {
+		return fmt.Errorf("water motion off left the displacement in place")
+	}
+	// Shore foam keeps its clock over a still surface.
+	if !differs(still, stillLater, 85, 105, 50, 80) {
+		return fmt.Errorf("water motion off stopped the shore foam")
+	}
+	r.setWaterFoam(false)
+	calm, calmLater := read(30, 1, true, 0), read(42, 1, true, 0)
+	// Well inside the water only the frozen field and no foam remain, so two
+	// phases agree; the damp band's own pulse lies on the dry side.
+	if differs(calm, calmLater, 0, 70, 8, 112) {
+		return fmt.Errorf("still water without foam moved between phases")
+	}
+	r.setWaterMotion(true)
+	foamless := read(30, 1, true, 0)
+	if !differs(foamless, moving, 85, 105, 50, 80) {
+		return fmt.Errorf("water foam off left the shore foam")
+	}
+	if !bytes.Equal(foamless, read(30, 1, true, 1)) || !bytes.Equal(foamless, read(30, 1, true, 2)) {
+		return fmt.Errorf("water foam off still drew building foam or hover dust")
+	}
+	r.setWaterFoam(true)
+
+	// The surface shading off alone: the painted water still moves and
+	// foams, but takes no ripple shade, crest or shallow tint, and the dry
+	// shore takes no damp band — beyond the coast the frame is the painted one.
+	r.setWaterSurface(false)
+	bare, bareLater := read(30, 1, true, 0), read(42, 1, true, 0)
+	if !differs(bare, moving, 0, 70, 8, 112) {
+		return fmt.Errorf("water surface off left the shading")
+	}
+	if !differs(bare, off, 0, 70, 8, 112) || !differs(bare, bareLater, 0, 70, 8, 112) {
+		return fmt.Errorf("water surface off stopped the moving surface")
+	}
+	if !differs(moving, off, dampBandX0, dampBandX1, 8, 112) {
+		return fmt.Errorf("fixture shows no damp band at columns %d..%d", dampBandX0, dampBandX1)
+	}
+	if differs(bare, off, dampBandX0, w, 0, 120) {
+		return fmt.Errorf("water surface off left the damp band on the dry shore")
+	}
+	r.setWaterFoam(false)
+	bareCalm := read(30, 1, true, 0)
+	if !differs(bare, bareCalm, 85, 105, 50, 80) {
+		return fmt.Errorf("water surface off removed the shore foam")
+	}
+	// Motion alone keeps moving open water over the painted colours.
+	if !differs(bareCalm, off, 0, 70, 8, 112) || !differs(bareCalm, read(42, 1, true, 0), 0, 70, 8, 112) {
+		return fmt.Errorf("water motion alone drew no moving surface")
+	}
+	// Foam alone: open water and the dry shore are the painted frame exactly,
+	// and the shore foam laps on its own clock.
+	r.setWaterFoam(true)
+	r.setWaterMotion(false)
+	foamOnly, foamOnlyLater := read(30, 1, true, 0), read(42, 1, true, 0)
+	if differs(foamOnly, off, 0, 70, 0, 120) || differs(foamOnly, off, dampBandX0, w, 0, 120) {
+		return fmt.Errorf("water foam alone changed open water or the dry shore")
+	}
+	if !differs(foamOnly, off, 85, 105, 50, 80) || !differs(foamOnly, foamOnlyLater, 85, 105, 50, 80) {
+		return fmt.Errorf("water foam alone drew no lapping shore foam")
+	}
+	// Nothing on: the pass does not run.
+	r.setWaterFoam(false)
+	if !bytes.Equal(read(30, 1, true, 0), off) {
+		return fmt.Errorf("every surface-pass switch off still changed the frame")
+	}
+	return nil
+}
+
+// dampBandX0 and dampBandX1 bound fixture columns on the dry side of the coast,
+// past the surface's own fade, that the damp band darkens with the surface
+// shading on (§32.3).
+const dampBandX0, dampBandX1 = 100, 112
 
 // dampBandRingReference is the damp band's gate as the shader once computed it:
 // eight bilinear water taps around the fragment, every frame, on top of the

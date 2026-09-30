@@ -146,7 +146,7 @@ func (g *filmGame) startScene(opts Options, cs *contentSet, scene film.Scene) er
 	cl.SetAntiAlias(true)
 	cl.SetFeatureShadows(true)
 	cl.SetShadowOptions(true, true, true)
-	cl.SetEffects(drawlist.Effects{Water: true, Lighting: true, Finish: true, Distortion: true, Marks: true})
+	cl.SetEffects(drawlist.AllEffects())
 	cl.SetGlow(true)
 	cl.SetEnhanced(true)
 	cl.SetInterpolation(true)
@@ -297,6 +297,8 @@ func (g *filmGame) Draw(screen *ebiten.Image) {
 	g.gpu.SetGlowStrength(g.cl.GlowStrength())
 	g.gpu.SetGlowFamilies(g.cl.GlowFamilies())
 	g.gpu.SetEffects(g.cl.Effects())
+	g.gpu.SetGroundLightStrength(g.cl.GroundLightStrength())
+	g.gpu.SetBlastRingStrength(g.cl.BlastRingStrength())
 	img := g.gpu.Execute(list, w, h)
 	if img == nil {
 		g.fail(fmt.Errorf("nanolathe: film: frame %d composed no surface", g.drawn))

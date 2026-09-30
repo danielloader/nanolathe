@@ -193,13 +193,15 @@ func TestTrailStrengthScalesExistingMarks(t *testing.T) {
 	if got := read(); got != 102 {
 		t.Fatalf("full footprint strength %d, want 102", got)
 	}
-	c.SetTrailStrength(0)
-	if got := recordTrails(c); len(got.batches) != 0 {
-		t.Fatal("zero trail strength still recorded marks")
-	}
 	c.SetTrailStrength(200)
 	if c.TrailStrength() != 100 || read() != 102 {
 		t.Fatal("trail strength was not capped at 100")
+	}
+	// Zero is the layer's off (GPU design §30), which also retires the marks;
+	// TestTrailStrengthZeroGatesTrailHistory locks the history side.
+	c.SetTrailStrength(0)
+	if got := recordTrails(c); len(got.batches) != 0 {
+		t.Fatal("zero trail strength still recorded marks")
 	}
 }
 

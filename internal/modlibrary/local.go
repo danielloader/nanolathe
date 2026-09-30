@@ -32,10 +32,9 @@ func (l *Library) InstallLocal(path string, baseRoots []string) (Mod, error) {
 // library for a command that mounts it: `none` selects no mod (ok false), a
 // missing version selects the newest installed one, and a mod that is not
 // installed, or whose `requires` paths the base install does not resolve
-// (§4.2), is an error naming what is missing. The mod carries its content
-// profile's controls preset and gameplay minimum where its metadata names
-// none (ResolveProfileDefaults). baseRoots are the resolved base install
-// roots, without any mod.
+// (§4.2), is an error naming what is missing. The mod carries its own config
+// (Metadata.Config), or none, in which case it mounts as plain content.
+// baseRoots are the resolved base install roots, without any mod.
 func (l *Library) Select(selector string, baseRoots []string) (Mod, bool, error) {
 	id, version, err := ParseSelector(selector)
 	if err != nil || id == "" {
@@ -51,7 +50,7 @@ func (l *Library) Select(selector string, baseRoots []string) (Mod, bool, error)
 	if missing := UnmetRequirements(baseRoots, mod.Metadata); len(missing) > 0 {
 		return Mod{}, false, diagnostic("mod "+selector+" requires content the base install does not supply", strings.Join(missing, ", "), baseRoots, "a base install that resolves every path the mod requires")
 	}
-	return ResolveProfileDefaults(baseRoots, mod), true, nil
+	return mod, true, nil
 }
 
 // UnmetRequirements mounts the base install alone and lists the mod's

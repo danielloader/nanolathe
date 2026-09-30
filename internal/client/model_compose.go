@@ -545,9 +545,15 @@ func (c *Client) supersampleModel(structure bool) bool {
 // under it every subject is supersampled — structure or mobile, cached or live
 // lane, outline and shadow alike — whenever the Anti_Alias display option is
 // on. The option keeps its retail name and its off state: off, the executor
-// rasterizes at native scale as it always has.
+// doubles the native corners itself.
+//
+// The player's Supersample switch off builds no doubled lane either, so the
+// subject keeps retail's anchor and native corners, and the executor then
+// commits each pixel from the one texel the native raster samples (§17.5).
+// The geometry caches carry this result in their identities, so a change of
+// either input rebuilds the lane.
 func (c *Client) supersampleGeometry() bool {
-	return c != nil && c.antiAlias && c.pal != nil
+	return c != nil && c.antiAlias && c.pal != nil && c.effects.Supersample
 }
 
 // modelAnchorDoubled is a supersampled subject's placement: the whole pixel

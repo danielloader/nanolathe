@@ -18,19 +18,19 @@ import (
 )
 
 // Exercise authored button identity through admission, placement and construction,
-// with automatic content layout selection for each installed faction.
+// with each mod's repository config naming its content layout for each installed faction.
 func TestRetailModFactoryConstructionFromModernMenu(t *testing.T) {
 	for _, mod := range []struct {
-		name  string
-		sides int
-	}{{"prota", 2}, {"zero", 3}, {"escalation", 2}} {
+		name, config string
+		sides        int
+	}{{"prota", "prota-4.8", 2}, {"zero", "ta-zero-alpha5-20241224", 3}, {"escalation", "escalation-10.2.0", 2}} {
 		roots := filepath.SplitList(os.Getenv("NANOLATHE_MOD_ROOTS_" + strings.ToUpper(mod.name)))
 		for side := 0; side < mod.sides; side++ {
 			t.Run(fmt.Sprintf("%s/side%d", mod.name, side), func(t *testing.T) {
 				if len(roots) == 0 {
 					t.Skip("installed mod roots not supplied")
 				}
-				opts := Options{Root: testsupport.RetailRoot(t), Roots: append([]string{testsupport.RetailRoot(t)}, roots...), Map: "ashap plateau", Seed: 7}
+				opts := Options{Root: testsupport.RetailRoot(t), Roots: append([]string{testsupport.RetailRoot(t)}, roots...), Map: "ashap plateau", Seed: 7, ModConfig: testsupport.ModConfigPath(t, mod.config)}
 				cs, err := openContent(opts)
 				if err != nil {
 					t.Fatal(err)

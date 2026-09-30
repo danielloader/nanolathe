@@ -77,7 +77,9 @@ func (s *waterReflections) sourceOptions(scale, ox, oy, invScale, time float32) 
 	return &s.sourceOpts
 }
 
-// setWaterReflections is the second executor gate the Water switch drives (§30).
+// setWaterReflections is the executor gate of the water reflections switch
+// (§30). It is independent of the surface pass: reflections read the shared
+// mask and the recorded phase, not the surface pass's output.
 func (r *Renderer) setWaterReflections(on bool) { r.reflections.disabled = !on }
 
 func (s *waterReflections) resetFrame() {
@@ -154,7 +156,7 @@ func (r *Renderer) reflectModelFaceAs(m *modelFaceReflection) {
 	s := &r.reflections
 	g := m.g
 	n := len(f.Vertices)
-	if g == nil || !g.ReflectWater || s.disabled || r.water.disabled || n < 3 || n > 256 || len(s.verts)+max(n, 3*(n-2)) > reflectionVertexLimit-4096 {
+	if g == nil || !g.ReflectWater || s.disabled || n < 3 || n > 256 || len(s.verts)+max(n, 3*(n-2)) > reflectionVertexLimit-4096 {
 		return
 	}
 	high := float32(0)
@@ -222,7 +224,7 @@ func (r *Renderer) reflectModelFaceAs(m *modelFaceReflection) {
 
 func (r *Renderer) prepareProjectileReflections(l *drawlist.List) {
 	s := &r.reflections
-	if s.disabled || r.water.disabled {
+	if s.disabled {
 		return
 	}
 	l.VisitSprites(func(sp drawlist.Sprite) {
@@ -286,7 +288,7 @@ func (r *Renderer) prepareProjectileReflections(l *drawlist.List) {
 
 func (r *Renderer) drawWaterReflections(c drawlist.Terrain) {
 	s, st := &r.reflections, &r.water
-	if s.disabled || st.disabled || !c.Water.Enabled || st.mask == nil || !st.visibleWater(c) || len(s.verts) == 0 || s.sourceShader == nil || s.resolveShader == nil || s.softResolveShader == nil {
+	if s.disabled || !c.Water.Enabled || st.mask == nil || !st.visibleWater(c) || len(s.verts) == 0 || s.sourceShader == nil || s.resolveShader == nil || s.softResolveShader == nil {
 		return
 	}
 	// A second water pass in one frame draws after the first's pending draws,
@@ -299,7 +301,9 @@ func (r *Renderer) drawWaterReflections(c drawlist.Terrain) {
 		s.source = ebiten.NewImageWithOptions(image.Rect(0, 0, r.w, r.h), &ebiten.NewImageOptions{Unmanaged: true})
 	}
 	scale := float32(c.Scale.Float())
-	time := (float32(c.Water.Tick) + float32(c.Water.Fraction16)/65536) / 30
+	// The ripple and the vertex waves hold phase zero while the water motion
+	// switch is off (§30).
+	time := st.motionPhase(c.Water)
 	s.transformed = append(s.transformed[:0], s.verts...)
 	// Leave the headroom deviceVertexSpan rounds the last run into.
 	if spare := deviceVertexClass(len(s.transformed)) - len(s.transformed); cap(s.transformed)-len(s.transformed) < spare {

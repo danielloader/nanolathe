@@ -40,13 +40,13 @@ func TestRetailProTAPresentationAssets(t *testing.T) {
 		t.Fatal("NANOLATHE_MOD_ROOTS_PROTA names no roots")
 	}
 	retail := testsupport.RetailRoot(t)
-	cs, err := openContent(Options{Root: retail, Roots: append([]string{retail}, modRoots...)})
+	cs, err := openContent(Options{Root: retail, Roots: append([]string{retail}, modRoots...), ModConfig: modRootsConfigPath(t, "prota")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cs.Close()
 	if cs.profile != "prota" {
-		t.Fatalf("detected profile %q, want prota", cs.profile)
+		t.Fatalf("mounted config %q, want prota", cs.profile)
 	}
 
 	sources, ok := cs.fs.(interface{ Sources(string) []vfs.EntryInfo })
@@ -221,14 +221,14 @@ func TestRetailProTADirectionalCoreShipyardClicks(t *testing.T) {
 			roots = append(roots, root)
 		}
 	}
-	opts := Options{Root: retail, Roots: append([]string{retail}, roots...), Map: "ashap plateau", Seed: 7}
+	opts := Options{Root: retail, Roots: append([]string{retail}, roots...), Map: "ashap plateau", Seed: 7, ModConfig: modRootsConfigPath(t, "prota")}
 	cs, err := openContent(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cs.Close()
 	if cs.profile != "prota" {
-		t.Fatalf("detected profile %q, want prota", cs.profile)
+		t.Fatalf("mounted config %q, want prota", cs.profile)
 	}
 
 	cfg := session.SkirmishConfig{MapName: opts.Map, NumPlayers: 2}

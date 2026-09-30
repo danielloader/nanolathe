@@ -28,7 +28,7 @@ func TestRetailProTAMegamapIconBank(t *testing.T) {
 		}
 	}
 	retail := testsupport.RetailRoot(t)
-	cs, err := openContent(Options{Root: retail, Roots: append([]string{retail}, modRoots...)})
+	cs, err := openContent(Options{Root: retail, Roots: append([]string{retail}, modRoots...), ModConfig: modRootsConfigPath(t, "prota")})
 	if err != nil {
 		t.Fatal(err)
 	}

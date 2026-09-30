@@ -1,8 +1,10 @@
 // Package modlibrary owns the mod library: the data directory that holds one
-// extracted content root per installed mod version, the metadata every mod
-// carries, the install receipts, and the extraction and validation path that
-// both downloads and manual installs go through
-// (docs/DESIGN_MODS_MUTATORS.md §4 and §5.3).
+// extracted content root per installed mod version, the metadata and
+// Nanolathe config every mod carries in its own nanolathe-mod.json, the
+// install receipts, and the extraction and validation path that both
+// downloads and manual installs go through (docs/DESIGN_MODS_MUTATORS.md §4
+// and §5.3). The engine carries no per-mod data: a mod's content layout,
+// limits, rules and recommended settings are its config (Config).
 //
 // A mod here is a downloadable content package, never a gameplay rule set;
 // the repository's mods/ directory is unrelated (DESIGN_MODS_MUTATORS §1
@@ -19,6 +21,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/nanolathe-gg/nanolathe/internal/community"
 	contentprofiles "github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 )
@@ -32,22 +35,43 @@ const MetadataFile = "nanolathe-mod.json"
 // library writes its own.
 const ReceiptFile = "install.json"
 
-// metadataSchema is the only metadata schema this build reads.
-const metadataSchema = 1
+// The metadata schemas this build reads. Schema 1 is identity only as far as
+// this build is concerned: it predates the config, and its contentProfile,
+// minimumGameplay, controls and buildMenuPageSize name engine data that no
+// longer exists, so an installed schema 1 mod mounts as plain content
+// (§4.5). Schema 2 is the mod's own Nanolathe config (Config).
+const (
+	schemaLegacy = 1
+	schemaConfig = 2
+)
 
-// maxMetadataBytes bounds the metadata read. The document is a dozen short
-// fields; anything larger is not a metadata file.
+// localMetadataSchema is the schema of the generated description of a
+// package that carries no nanolathe-mod.json: identity only, no config.
+const localMetadataSchema = schemaLegacy
+
+// maxMetadataBytes bounds the metadata read. A config with a full settings
+// document and feature table is a few kilobytes; anything larger is not a
+// metadata file.
 const maxMetadataBytes = 64 << 10
 
-// Metadata is one mod version's self-description, as nanolathe-mod.json and
-// each catalogue entry carry it (DESIGN_MODS_MUTATORS §4.2, §5.1).
+// Metadata is one mod version's self-description: the identity every
+// nanolathe-mod.json and every catalogue entry carries (DESIGN_MODS_MUTATORS
+// §4.2, §5.1), and, for a schema 2 file, the mod's Config.
+//
+// The JSON tags describe the catalogue entry and the schema 1 file, which
+// are flat. A schema 2 file is read by ParseMetadata into the same fields:
+// MinimumGameplay, Controls and BuildMenuPageSize are then filled from its
+// config, so every reader sees the running mod's one value.
 type Metadata struct {
-	Schema          int      `json:"schema"`
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Version         string   `json:"version"`
-	Summary         string   `json:"summary,omitempty"`
-	Homepage        string   `json:"homepage,omitempty"`
+	Schema   int    `json:"schema"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Version  string `json:"version"`
+	Summary  string `json:"summary,omitempty"`
+	Homepage string `json:"homepage,omitempty"`
+	// ContentProfile is schema 1's selector of a built-in content profile.
+	// It is read and validated for compatibility and never applied; schema 2
+	// refuses it.
 	ContentProfile  string   `json:"contentProfile,omitempty"`
 	MinimumGameplay string   `json:"minimumGameplay,omitempty"` // a reserved gameplay word or ""
 	Controls        string   `json:"controls,omitempty"`        // "community", "retail", "zero" or ""
@@ -55,9 +79,32 @@ type Metadata struct {
 	// BuildMenuPageSize locks the expanded sidebar's build pages to at most
 	// this many products, so a mod whose menus place a fixed number of
 	// products per page keeps that paging. Zero or omitted leaves the host's
-	// auto-flow (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock").
+	// auto-flow (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock"). A schema
+	// 2 config spells it content.presentation.build_menu_page_size.
 	BuildMenuPageSize int `json:"buildMenuPageSize,omitempty"`
+	// Config is the mod's Nanolathe config, read from its own schema 2
+	// nanolathe-mod.json; nil for a schema 1 file, a generated local
+	// description and a catalogue entry, which carry none.
+	Config *Config `json:"-"`
 }
+
+// HasConfig reports whether the mod ships a Nanolathe config. One that does
+// not mounts as plain content with NoConfigNotice (§4.5).
+func (m Metadata) HasConfig() bool { return m.Config != nil }
+
+// Content is the load-time content description a mount applies for this
+// mod: its config's content section, or the base game's profile for a mod
+// without a config.
+func (m Metadata) Content() contentprofiles.Profile {
+	if m.Config == nil {
+		return contentprofiles.Retail()
+	}
+	return m.Config.Content
+}
+
+// CommunitySources is the mod's Community declaration as the session's
+// content source, none for a mod without a config (Config.CommunitySources).
+func (m Metadata) CommunitySources() []community.Overrides { return m.Config.CommunitySources() }
 
 // idPattern is the stable id's alphabet (§4.2): lowercase letters, digits and
 // hyphens.
@@ -81,12 +128,21 @@ const (
 	localVersion  = "local"
 )
 
-// ParseMetadata decodes and validates one nanolathe-mod.json document.
-// Unknown fields are refused, as for content profiles, so a misspelt key is
-// reported rather than silently ignored; a new field is a new schema.
+// ParseMetadata decodes and validates one nanolathe-mod.json document of
+// either schema. Unknown fields are refused at every level, so a misspelt key
+// is reported rather than silently ignored; a new field is a new schema.
 func ParseMetadata(data []byte) (Metadata, error) {
 	if len(data) > maxMetadataBytes {
 		return Metadata{}, diagnostic("mod metadata is too large", MetadataFile, nil, fmt.Sprintf("a metadata document of at most %d bytes", maxMetadataBytes))
+	}
+	var peek struct {
+		Schema int `json:"schema"`
+	}
+	if err := json.Unmarshal(data, &peek); err != nil {
+		return Metadata{}, diagnostic("reading mod metadata failed: "+err.Error(), MetadataFile, nil, "a schema 1 or schema 2 mod metadata document")
+	}
+	if peek.Schema == schemaConfig {
+		return parseConfigDocument(data)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -110,8 +166,8 @@ func (m Metadata) Validate() error {
 	fail := func(what, expected string) error {
 		return diagnostic(what, MetadataFile, nil, expected)
 	}
-	if m.Schema != metadataSchema {
-		return fail(fmt.Sprintf("mod metadata schema %d is not supported", m.Schema), "schema 1")
+	if m.Schema != schemaLegacy && m.Schema != schemaConfig {
+		return fail(fmt.Sprintf("mod metadata schema %d is not supported", m.Schema), "schema 1 or 2")
 	}
 	if len(m.ID) > maxSegment || !idPattern.MatchString(m.ID) {
 		return fail(fmt.Sprintf("mod id %q is invalid", m.ID), fmt.Sprintf("an id of 1 to %d characters from [a-z0-9-]", maxSegment))
@@ -133,12 +189,26 @@ func (m Metadata) Validate() error {
 	default:
 		return fail(fmt.Sprintf("mod controls preset %q is unknown", m.Controls), "community, retail, zero or omitted")
 	}
-	if m.ContentProfile != "" && strings.TrimSpace(m.ContentProfile) != m.ContentProfile {
-		return fail("mod contentProfile has surrounding space", "a shipped profile name or a profile path relative to the mod root")
+	if m.Schema == schemaConfig {
+		// A schema 2 catalogue entry names no content profile or preset: the
+		// zip's own config is authoritative (§5.1). A parsed file's Controls
+		// is derived from its config, never written.
+		if m.ContentProfile != "" {
+			return fail("mod contentProfile is a schema 1 field", "schema 2 metadata without contentProfile; the mod's config is its content section")
+		}
+		if m.Controls != m.Config.ControlsPreset() {
+			return fail("mod controls is a schema 1 field", "schema 2 metadata without controls; the mod's config names its keyboard profile")
+		}
+		if m.Config == nil && m.BuildMenuPageSize != 0 {
+			return fail("mod buildMenuPageSize is a schema 1 field", "schema 2 metadata without buildMenuPageSize; the mod's config is content.presentation.build_menu_page_size")
+		}
 	}
-	if m.ContentProfile != "" && !isShippedProfile(m.ContentProfile) {
+	if m.ContentProfile != "" && strings.TrimSpace(m.ContentProfile) != m.ContentProfile {
+		return fail("mod contentProfile has surrounding space", "a profile name or a profile path relative to the mod root")
+	}
+	if m.ContentProfile != "" {
 		if _, err := cleanRelative(m.ContentProfile); err != nil {
-			return fail(fmt.Sprintf("mod contentProfile %q leaves the mod root", m.ContentProfile), "a shipped profile name or a profile path relative to the mod root")
+			return fail(fmt.Sprintf("mod contentProfile %q leaves the mod root", m.ContentProfile), "a profile name or a profile path relative to the mod root")
 		}
 	}
 	if m.BuildMenuPageSize < 0 {
@@ -155,8 +225,7 @@ func (m Metadata) Validate() error {
 	return nil
 }
 
-// Controls presets a mod may name (§4.3), spelled as content profiles spell
-// them.
+// Controls presets a schema 1 file may name (§4.3).
 const (
 	controlsCommunity = contentprofiles.ControlsCommunity
 	controlsRetail    = contentprofiles.ControlsRetail
@@ -188,10 +257,10 @@ func ParseSelector(s string) (id, version string, err error) {
 
 // localMetadata is the generated description of a package that carries no
 // nanolathe-mod.json (P11, §4.5): `local-<sanitized name>`, version `local`,
-// no minimum, no preset, and a detected content profile.
+// and no config, so it mounts as plain content with NoConfigNotice.
 func localMetadata(baseName string) Metadata {
 	return Metadata{
-		Schema:  metadataSchema,
+		Schema:  localMetadataSchema,
 		ID:      localIDPrefix + sanitizeName(baseName),
 		Name:    baseName,
 		Version: localVersion,

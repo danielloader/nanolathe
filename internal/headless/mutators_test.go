@@ -6,7 +6,9 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
+	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/testsupport/retailcat"
+	"github.com/nanolathe-gg/nanolathe/internal/visibility"
 )
 
 // TestReportCarriesTheBoundMutators: the report prints the canonical set the
@@ -52,5 +54,47 @@ func TestDisplaylessRequestForwardsMutators(t *testing.T) {
 		if report.Mutators != tc.m.String() || (report.CatalogHash != cat.Hash) != tc.mutated {
 			t.Fatalf("mutators %q catalog %q (base %q), want %q mutated=%v", report.Mutators, report.CatalogHash, cat.Hash, tc.m.String(), tc.mutated)
 		}
+	}
+}
+
+// TestSightMutatorReachesTheLOSRasters: Sight scales the sightdistance both
+// rasters quantize when a unit publishes, through the battle's catalog clone,
+// in Strict 3.1 as in every mode. Circular line of sight grows with it. True
+// line of sight stops at the last reachable LOS.TDF table, TABLE8 or
+// sightdistance 256 with the stock nine, which the Arm commander's 290
+// already selects, so doubling it changes nothing there while halving it
+// shrinks the footprint [03 §3.2][03 R-COMP-02 §1]
+// (docs/DESIGN_MODS_MUTATORS.md §6.5). Skipped without retail assets.
+func TestSightMutatorReachesTheLOSRasters(t *testing.T) {
+	cat, fs := retailcat.Shared(t)
+	covered := func(losType int, sight content.Factor) int {
+		t.Helper()
+		cfg := session.DirectSkirmishConfig("metal heck")
+		cfg.ApplyDefaults()
+		cfg.LOSType = losType
+		fb, err := ComposeFreshBattle(FreshBattleRequest{
+			Kind: ScenarioDirectOTA, Map: cfg.MapName, Skirmish: cfg, Gameplay: gameplay.Strict31,
+			LocalOwner: -1, SimulationSeed: 7, CRTSeed: 7, FS: fs, Catalog: cat,
+			Mutators: content.Mutators{Sight: sight},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Battle entry has published the commanders; only the viewer's own
+		// observers reach its byte grid [03 §3.2].
+		n := 0
+		for _, b := range fb.Session.Vis.ByteGrid(visibility.PlayerID(fb.Session.ViewingOwner)) {
+			if b != 0 {
+				n++
+			}
+		}
+		return n
+	}
+	half, one, two := content.Factor{Num: 1, Den: 2}, content.Factor{}, content.Factor{Num: 2, Den: 1}
+	if c1, c2 := covered(0, one), covered(0, two); c2 <= c1 {
+		t.Fatalf("Circular coverage %d at Sight x2, want more than %d at x1", c2, c1)
+	}
+	if t1, t2, th := covered(1, one), covered(1, two), covered(1, half); t2 != t1 || th >= t1 {
+		t.Fatalf("True coverage x0.5/x1/x2 = %d/%d/%d, want the x2 footprint equal to x1 (both at the top table) and x0.5 smaller", th, t1, t2)
 	}
 }

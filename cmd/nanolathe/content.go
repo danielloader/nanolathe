@@ -31,7 +31,8 @@ type contentSet struct {
 	// product through it bypasses the profile's directory table, so a read
 	// here is wrong unless one of those cases applies.
 	unmappedMount *vfs.FS
-	// profile is the resolved content profile's name, for the reports.
+	// profile is the mounted content's report name (`content_profile`):
+	// the running config's id, or `retail` for content without one.
 	profile string
 	// limits are the table sizes that profile compiles under: the size of the
 	// unit-definition ID domain and of the weapon record table. Every compile
@@ -42,6 +43,16 @@ type contentSet struct {
 	limits           content.Limits
 	presentation     contentprofiles.Presentation
 	gameplayFeatures []community.Overrides
+	// config is the running Nanolathe config: the mounted mod's own, or the
+	// file --mod-config (or the saved contentProfile path) named; nil for
+	// plain content. Its settings, keys and locks are exposed here for the
+	// shell to layer; the mount applies only its content section and its
+	// Community table (docs/DESIGN_MODS_MUTATORS.md §4.2).
+	config *modlibrary.Config
+	// configPath is the explicit config file this mount used, "" when the
+	// config is a mod's own or there is none. A remount passes it back as
+	// --mod-config so a manual stack keeps its config.
+	configPath string
 
 	root         string
 	roots        []string
@@ -60,17 +71,22 @@ type contentSet struct {
 	// §4.3 "A missing mod at start").
 	savedMod bool
 	// modNotice is a one-line player-facing notice about the mod selection,
-	// shown on the main menu (for example a saved mod that has gone).
+	// shown on the main menu (for example a saved mod that has gone, or
+	// content mounted without a Nanolathe config).
 	modNotice string
-	// profileControls is the resolved content profile's recommended controls
-	// preset. It is offered once when the profile is mounted without a mod
+	// configNotice is the plain-content notice when the mounted content has
+	// no Nanolathe config (docs/DESIGN_MODS_MUTATORS.md §4.5), "" otherwise.
+	// It is also modNotice unless the selection had its own notice to show.
+	configNotice string
+	// profileControls is the controls preset of a config mounted without a
+	// mod (--mod-config on a manual stack). It is offered once
 	// (docs/DESIGN_MODS_MUTATORS.md §4.3); a mod carries its own in mod.
 	profileControls string
 }
 
-// buildMenuPageSize is the running content's build page lock: a mounted mod's
-// metadata, which already carries its profile's value when it names none,
-// else the content profile's own (interface design §3.3 "Build page lock").
+// buildMenuPageSize is the running content's build page lock: a mounted
+// mod's config, else the content section of the config a manual stack
+// named (interface design §3.3 "Build page lock").
 func (c *contentSet) buildMenuPageSize() int {
 	if c == nil {
 		return 0
@@ -143,7 +159,8 @@ func openContent(opts Options) (*contentSet, error) {
 }
 
 // mountContent mounts the resolved base roots plus the selected mod, if any,
-// resolves the content profile and checks the required products.
+// applies the running Nanolathe config's content section and checks the
+// required products.
 func mountContent(opts Options, baseRoots []string, selection modSelection) (*contentSet, error) {
 	roots := append([]string(nil), baseRoots...)
 	if selection.mod != nil {
@@ -171,35 +188,29 @@ func mountContent(opts Options, baseRoots []string, selection modSelection) (*co
 			return nil, err
 		}
 	}
-	// The content profile is resolved after mounting and before anything
-	// reads content, because detection asks the mounted overlay for its
-	// markers. Precedence is the explicit flag, then the saved preference,
-	// then detection — the same order the displayless command follows
-	// (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles"). With a mod the
-	// mod's own profile takes the saved preference's place.
-	selector := opts.ContentProfile
-	if strings.TrimSpace(selector) == "" && selection.mod != nil {
-		// A selected mod names its profile explicitly, or means detection
-		// when it names none, as a metadata-less local package does
-		// (docs/DESIGN_MODS_MUTATORS.md §4.5). The saved preference never
-		// applies another content set's directory table to a mod (D12).
-		selector = selection.mod.ContentProfileSelector()
-	} else if strings.TrimSpace(selector) == "" {
-		stored, _ := settings.Load()
-		selector = stored.ContentProfile
-	}
-	profile, err := contentprofiles.Resolve(fileSystem, selector)
+	// The Nanolathe config is chosen before anything reads content: its
+	// content section is the directory table and limits every reader goes
+	// through (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
+	config, err := resolveMountConfig(opts, selection)
 	if err != nil {
 		fileSystem.Close()
 		return nil, err
 	}
+	profile := config.meta.Content()
 	mod := selection.mod
-	if mod != nil {
-		// A mod whose metadata names no controls preset or gameplay minimum,
-		// such as a metadata-less local package, takes its content profile's
-		// (docs/DESIGN_MODS_MUTATORS.md §4.3).
-		withDefaults := mod.WithProfileDefaults(profile)
-		mod = &withDefaults
+	if mod != nil && config.path != "" {
+		// A config named on the command line stands in for the mod's own, so
+		// a config can be tried against an installed mod before it is
+		// packaged (docs/DESIGN_MODS_MUTATORS.md §4.3).
+		withConfig := mod.WithConfig(config.meta)
+		mod = &withConfig
+	}
+	notice := selection.notice
+	if config.notice != "" && notice == "" {
+		notice = config.notice
+	}
+	if config.notice != "" {
+		fmt.Fprintln(os.Stderr, "nanolathe: "+config.notice)
 	}
 	set := &contentSet{
 		fs:               profile.Layout().Apply(fileSystem),
@@ -207,16 +218,29 @@ func mountContent(opts Options, baseRoots []string, selection modSelection) (*co
 		profile:          profile.Name,
 		limits:           content.LimitsFromProfile(profile.Limits),
 		presentation:     profile.Presentation,
-		gameplayFeatures: profile.GameplaySources(),
+		gameplayFeatures: config.meta.CommunitySources(),
+		config:           config.meta.Config,
+		configPath:       config.path,
 		root:             roots[0], roots: append([]string(nil), roots...), notes: fileSystem.Notes(),
-		mod: mod, baseRoots: append([]string(nil), baseRoots...), manualRoots: selection.manual, modNotice: selection.notice,
-		savedMod: selection.saved, profileControls: profile.Controls,
+		mod: mod, baseRoots: append([]string(nil), baseRoots...), manualRoots: selection.manual, modNotice: notice,
+		configNotice: config.notice, savedMod: selection.saved,
+	}
+	if mod == nil {
+		set.profileControls = config.meta.Controls
+	}
+	if missing := profile.MissingMarkers(fileSystem); len(missing) > 0 {
+		// The markers select nothing; a config paired with other content is
+		// reported and mounted as asked, and the required-product check below
+		// still decides whether the content can start.
+		note := fmt.Sprintf("nanolathe: the %s config names content directory %s, which the mounted content lacks", profile.Name, missing[0])
+		set.notes = append(set.notes, note)
+		fmt.Fprintln(os.Stderr, note)
 	}
 
 	// One required product proves the mount produced game data rather than an
 	// empty directory. MOVEINFO.TDF and SIDEDATA.TDF are the hard requirements
 	// [02 §1]; GAMEDATA.TDF is not — it does not exist in a real install
-	// (docs/SPEC_CONFLICTS.md SC2). The probe goes through the profile view,
+	// (docs/SPEC_CONFLICTS.md SC2). The probe goes through the config's view,
 	// so a content set that ships `gamedata` under another name satisfies it.
 	for _, required := range []string{"gamedata/moveinfo.tdf", "gamedata/sidedata.tdf"} {
 		if _, err := set.fs.Stat(required); err != nil {
@@ -250,9 +274,65 @@ func mountContent(opts Options, baseRoots []string, selection modSelection) (*co
 	return set, nil
 }
 
-// contentProfileName is the resolved profile's name for a report. A benchmark
-// or capture written without a mounted content set names none rather than
-// claiming the retail profile.
+// mountConfig is the Nanolathe config one mount applies: the metadata that
+// carries it (whose Config is nil for plain content, so its Content is the
+// base game's profile and it declares no Community source), the explicit
+// file it was read from, and a player-facing notice when content mounts
+// without one.
+type mountConfig struct {
+	meta   modlibrary.Metadata
+	path   string
+	notice string
+}
+
+// resolveMountConfig chooses the config a mount applies
+// (docs/DESIGN_MODS_MUTATORS.md §4.3): an explicit --mod-config file first;
+// else the selected mod's own config; else, with no mod, the saved
+// contentProfile preference when it names a config file. Content left
+// without a config mounts as plain content — the retail layout and base
+// limits — and says so: a mod without one, a manual root stack without
+// one, and a saved preference that names a removed built-in profile. There
+// is no detection.
+func resolveMountConfig(opts Options, selection modSelection) (mountConfig, error) {
+	if path := strings.TrimSpace(opts.ModConfig); path != "" {
+		meta, err := modlibrary.ReadConfigFile(path)
+		if err != nil {
+			return mountConfig{}, err
+		}
+		return mountConfig{meta: meta, path: path}, nil
+	}
+	if mod := selection.mod; mod != nil {
+		if !mod.HasConfig() {
+			return mountConfig{notice: modlibrary.NoConfigNotice(mod.Name)}, nil
+		}
+		return mountConfig{meta: mod.Metadata}, nil
+	}
+	// The saved preference is the file --mod-config would name, and like
+	// the removed content-profile preference it applies whenever no mod is
+	// selected (a selected mod's own config always wins, D12).
+	stored, _ := settings.Load()
+	if saved := strings.TrimSpace(stored.ContentProfile); saved != "" {
+		if modlibrary.IsRemovedProfile(saved) {
+			if strings.EqualFold(saved, contentprofiles.RetailName) {
+				return mountConfig{}, nil
+			}
+			return mountConfig{notice: fmt.Sprintf("The saved content profile %q was removed: mods carry their own Nanolathe config now. The content mounts without one and may not load correctly.", saved)}, nil
+		}
+		meta, err := modlibrary.ReadConfigFile(saved)
+		if err != nil {
+			return mountConfig{}, err
+		}
+		return mountConfig{meta: meta, path: saved}, nil
+	}
+	if selection.manual {
+		return mountConfig{notice: "This root stack has no Nanolathe config file; it may not load correctly. Name one with --mod-config."}, nil
+	}
+	return mountConfig{}, nil
+}
+
+// contentProfileName is the mounted content's report name: the running
+// config's id, or `retail`. A benchmark or capture written without a mounted
+// content set names none rather than claiming the retail profile.
 func (c *contentSet) contentProfileName() string {
 	if c == nil {
 		return ""
@@ -260,8 +340,8 @@ func (c *contentSet) contentProfileName() string {
 	return c.profile
 }
 
-// compileCatalog compiles the one immutable catalog under the resolved
-// profile's limits. It is the command's own compile seam: a caller that needs
+// compileCatalog compiles the one immutable catalog under the running
+// config's content limits. It is the command's own compile seam: a caller that needs
 // a catalog before a session exists takes this rather than content.Compile,
 // which would silently admit only what the retail tables hold
 // (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").

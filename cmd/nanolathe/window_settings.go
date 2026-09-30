@@ -45,9 +45,7 @@ func windowOptionsFor(current func() *gameShell) ebitenapp.RunOptions {
 	// edit previews on the next update (DESIGN_GPU_RENDERER §30).
 	options.Effects = func() drawlist.Effects {
 		g := current()
-		if clPtr != nil {
-			clPtr.SetTrailStrength(g.presentation.TrailStrength)
-		}
+		applyEffectStrengths(clPtr, g.presentation)
 		return presentationEffects(g.presentation)
 	}
 	options.ShowFPS = func() bool {

@@ -299,7 +299,11 @@ func (g *gameShell) activateGadget(name string) {
 	case modeMenuMain:
 		switch name {
 		case "MODS":
-			g.openModsScreenReporting()
+			// The Nanolathe screen needs the window; a displayless shell keeps
+			// the Mods & Mutators window (DESIGN_INTERFACE_HUD_INPUT §3.17).
+			if !g.openNLScreen() {
+				g.openModsScreenReporting()
+			}
 		case "INTRO":
 			reportRetailMessageError(g.startIntro(clPtr))
 		case "Credits":

@@ -133,7 +133,7 @@ func effectBankMetadata(source *formats.GAFSource) *formats.GAF {
 
 func (c *Client) effectFrame(bankName, entryName string, index int32) (*formats.GAFFrame, bool) {
 	entry, ok := c.effectEntry(bankName, entryName)
-	if !ok {
+	if !ok || !c.effectArtAdmitted(entry) {
 		return nil, false
 	}
 	index = max(0, min(index, int32(len(entry.Frames)-1)))

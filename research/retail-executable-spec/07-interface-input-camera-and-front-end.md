@@ -2897,7 +2897,7 @@ performance-counter RNG, resolves the mission or skirmish schema, places
 commanders, and finishes by opening `MAIN2.GUI`, the in-game HUD — the
 `<side>main2.gui` window whose name is stored as the battle root's command-
 window name (see §6). The transition that starts the thread also fixes the
-battle viewport rectangle to `(0, 32, W-1, H-33)` and initializes the
+battle viewport rectangle to `(128, 32, W-1, H-33)` and initializes the
 player-slot ready table.
 
 #### Multiplayer

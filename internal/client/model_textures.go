@@ -603,10 +603,6 @@ func (r *ModelTextureRegistry) StepPhase7() {
 	}
 }
 
-func (r *ModelTextureRegistry) animatedFrame(model *compiledmodel.Model, piece, primitive int, ref texRef) *formats.GAFFrame {
-	return r.animatedFrameSelected(model, piece, primitive, ref, false)
-}
-
 // animatedFrameSelected preserves the loaded cursor while choosing the cached
 // entry's first frame or the live entry's current frame [03 R-REN-03A §5].
 func (r *ModelTextureRegistry) animatedFrameSelected(model *compiledmodel.Model, piece, primitive int, ref texRef, first bool) *formats.GAFFrame {

@@ -1982,7 +1982,7 @@ No retail asset is copied into the repository or changed on disk.
 
 The page contains a captioned Gameplay (Strict 3.1 / Community 3.9 / Modern)
 row. Compact Renderer (Classic / Modern), FPS (30 / 60 / 120), Sidebar (Off / On),
-Modern Zoom (Smooth / Steps), Modern Icons (Modern / Community 3.9),
+Modern Zoom (Smooth / Steps / Off), Modern Icons (Modern / Community 3.9),
 Glow, Water, Lights, Metal, Heat and Marks controls carry their own names.
 The icon button abbreviates Community as Comm to fit the authored font; its
 help spells out the full name. The captioned row uses a tight pitch and the
@@ -4190,24 +4190,6 @@ than compiled from every feature bank per scene, about half of a scene's
 staging before. The generated strategic icon atlas is a function of the icons'
 art keys alone and is drawn once per key set (`internal/client`), although each
 scene's catalog is a fresh clone.
-
-**Content reuse and asset scope.** A content set compiles the settings screen's
-authored catalog once. Each scene composes from its own clone, including an
-unmutated comparison scene; rule preparation and mutators never write to the
-cached base. The same content set retains immutable decoded texture banks, model
-geometry and reachable feature banks across scene loads. Each battle gets fresh
-loaded-model identities and animation cursors. A content reload creates a new
-cache.
-
-Before loading art, each fixture declares every unit it can create: initial and
-scheduled units, queued products, commanders, offscreen support and placement
-ghosts. Only those models and their linked projectile/corpse/successor assets are
-prepared, along with the terrain's admitted features and independent scene
-weapons such as meteors. Ordinary battle entry keeps full preparation. Texture
-banks still use the complete namespace to preserve entry precedence; authoritative
-terrain, simulation-art metadata, HUD art and detail synthesis retain their
-existing loading paths. This scope reduces repeated catalog and art work without
-cropping the simulation map or moving file reads into a simulation tick.
 
 **Input and persistence.** A grouped-effects wheel changes only the selected row
 and stops at its endpoints. Controls wheel scrolling survives redraw; keyboard

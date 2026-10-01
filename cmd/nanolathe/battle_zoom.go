@@ -94,19 +94,21 @@ func (b *battleSession) syncCameraControls() {
 	b.zoomTabPending = false
 	if style.disabled() || changed && !style.modern() {
 		mx, my := beamAnchor(battleViewCentre(b.cam))
-		if style.disabled() {
+		if style.disabled() || !b.executorEnhanced {
 			// Native is a scale, bypassing the legacy free-zoom floor even
 			// when a large viewport is wider than this map (§16.8).
 			b.cam.SetScaleAbout(mx, my, camera.ViewScaleNative)
 		} else {
 			b.cam.SetZoomAbout(mx, my, camera.ZoomUnit)
 		}
-	} else if style == battleZoomStepped {
+	} else if changed && b.executorEnhanced && style == battleZoomStepped {
 		current, floor := b.cam.EffectiveZoom(), b.cam.MinZoom()
 		lower, hasLower := camera.NextZoomStop(current, floor, lock, false)
 		upper, hasUpper := camera.NextZoomStop(current, floor, lock, true)
 		// A factor already at a stop stays there. Otherwise choose the nearest
-		// stop when turning steps on, without leaving an intermediate rest.
+		// stop when turning steps on in the Enhanced executor. Initial sync
+		// preserves entry/restart framing; Classic keeps its two exact scales
+		// (DESIGN_GPU_RENDERER §16.8).
 		atStop := current == floor || current == max(floor, camera.ZoomUnit/4) || current == lock || current == camera.ZoomMax
 		if !atStop {
 			want := lower

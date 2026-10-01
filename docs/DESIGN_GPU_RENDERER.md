@@ -3526,6 +3526,9 @@ palette or unit-info ownership. Placement rotation retains its modified wheel.
 Skipping the camera pass clears gesture state and wheel fractions/holds while
 preserving an accepted glide. Changing the selected mode, zoom style or active lock cancels
 the old gesture, glide and overview return before the new policy accepts input.
+Turning Steps on in the Enhanced executor chooses the nearest configured stop.
+Initial policy sync preserves battle-entry and restart framing; Classic keeps
+its exact native/detail scale cycle instead of adopting fractional stops.
 
 ### 16.7 The minimum factor — contract Z6
 

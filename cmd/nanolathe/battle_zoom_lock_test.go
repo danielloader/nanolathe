@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
@@ -17,6 +18,85 @@ func preferredZoomTestBattle(percent int) *battleSession {
 	b.hostPresentation = &p
 	b.syncCameraControls()
 	return b
+}
+
+// Saved Steps must not turn the first policy sync into a zoom gesture. Native
+// entry and explicit framing are separate from the preferred stop (§16.8).
+func TestSteppedZoomLockPreservesEntryFraming(t *testing.T) {
+	for _, renderer := range []string{"classic", "modern"} {
+		for _, entry := range []camera.Zoom{0, camera.ZoomUnit, camera.ZoomMax} {
+			t.Run(fmt.Sprintf("%s-entry%d", renderer, entry), func(t *testing.T) {
+				b := zoomTestBattle()
+				p := settings.DefaultPresentation()
+				p.ZoomStyle, p.ZoomLockPercent = settings.ZoomStepped, 120
+				b.hostPresentation = &p
+				b.followExecutor(renderer == "modern")
+				before := b.cam.PresentationView()
+				b.syncCameraControls() // The client installs policy before entry zoom.
+				if b.cam.EffectiveZoom() != camera.ZoomUnit || b.cam.PresentationView() != before {
+					t.Fatal("saved Steps moved the composed native camera")
+				}
+				applyEntryZoom(Options{Renderer: renderer, Zoom: entry}, b)
+				want := entry
+				if want == 0 {
+					want = camera.ZoomUnit
+				}
+				b.syncCameraControls()
+				if b.cam.EffectiveZoom() != want || b.cam.EffectiveScale() != want.Step() {
+					t.Fatalf("entry factor = %d, scale = %d, want %d", b.cam.EffectiveZoom(), b.cam.EffectiveScale(), want)
+				}
+			})
+		}
+	}
+	// A restart/capture's fractional factor is explicit framing too.
+	b := preferredZoomTestBattle(120)
+	b.hostPresentation.ZoomStyle = settings.ZoomStepped
+	b.cameraStyleSeen = false
+	b.followExecutor(true)
+	b.cam.SetZoomAbout(500, 300, 1536)
+	before := b.cam.PresentationView()
+	b.syncCameraControls()
+	if b.cam.EffectiveZoom() != 1536 || b.cam.PresentationView() != before {
+		t.Fatal("first Steps sync replaced restart framing")
+	}
+}
+
+func TestSteppedZoomNormalizationRequiresEnhancedTransition(t *testing.T) {
+	for _, enhanced := range []bool{false, true} {
+		b := preferredZoomTestBattle(120)
+		b.followExecutor(enhanced)
+		b.hostPresentation.ZoomStyle = settings.ZoomStepped
+		b.syncCameraControls()
+		want := camera.ZoomUnit
+		if enhanced {
+			want = 1229
+		}
+		if b.cam.EffectiveZoom() != want {
+			t.Fatalf("enhanced=%v: Steps transition factor = %d, want %d", enhanced, b.cam.EffectiveZoom(), want)
+		}
+		if !enhanced {
+			b.toggleViewScale(false)
+			if b.cam.EffectiveZoom() != camera.ZoomMax || b.cam.EffectiveScale() != camera.ViewScaleDetail {
+				t.Fatal("Classic F9 lost its exact detail scale")
+			}
+		}
+	}
+}
+
+func TestClassicZoomPolicyChangeKeepsNativeScaleOnSmallMap(t *testing.T) {
+	b := zoomTestBattle()
+	b.cam.ViewW, b.cam.ViewH, b.cam.MapW, b.cam.MapH = 1920, 1080, 1600, 3968
+	b.sess = &session.Session{Gameplay: gameplay.Modern}
+	b.followExecutor(false)
+	b.syncCameraControls()
+	b.sess.Gameplay = gameplay.Strict31
+	b.syncCameraControls()
+	if b.cam.MinZoom() <= camera.ZoomUnit {
+		t.Fatal("fixture does not exercise the legacy viewport floor")
+	}
+	if b.cam.EffectiveZoom() != camera.ZoomUnit || b.cam.EffectiveScale() != camera.ViewScaleNative {
+		t.Fatal("Strict's viewport floor replaced Classic's exact native scale")
+	}
 }
 
 func TestPinchPreferredZoomLockAndDeparture(t *testing.T) {

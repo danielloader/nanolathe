@@ -382,8 +382,8 @@ func (s *nlScreen) graphicsCards() []nlCard {
 		},
 		{
 			key: "sidebar", label: "Sidebar", pics: []string{"armlab", "armvp"}, kind: nlHalves,
-			steps: []string{"Original", "12 per page", "Free flow"},
-			subs:  []string{"Authored pages", "Twelve per page", "Fills the window"},
+			steps: []string{"Original", "Page limit 12", "Free flow"},
+			subs:  []string{"Original panel", "Keeps authored pages", "Rows above orders"},
 			// Original is the authored panel; the other two are the expanded
 			// sidebar, locked to twelve-cell pages or flowing freely
 			// (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock").
@@ -402,9 +402,9 @@ func (s *nlScreen) graphicsCards() []nlCard {
 			},
 			desc: func(_ *nlDraft, v int) string {
 				return [...]string{
-					"The original side panel: each builder's authored build pages, six to a page.",
-					"The taller side panel with build pages of twelve, the layout ProTA, TA Zero and Escalation author. A mod's own page size can still set it.",
-					"The taller side panel fills every row the window has room for, so fewer page turns on a big display.",
+					"The original panel and authored build pages. Stock TA uses six slots per page, with black below the panel at taller game resolutions.",
+					"The taller panel preserves authored page breaks, with at most twelve build cells per page. Stock TA's six-slot pages stay six. If twelve cannot fit, it uses the authored layout.",
+					"Fills complete rows above all order buttons. A lower game resolution leaves fewer rows, even in fullscreen. A mod's page-size limit still applies.",
 				}[v]
 			},
 			scene:    func(*nlDraft, int) string { return "armor" },

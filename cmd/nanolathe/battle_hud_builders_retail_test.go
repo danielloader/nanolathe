@@ -73,6 +73,26 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 						u.Flags &^= hud.SelectionFlag
 					}
 					d, _ := cat.Unit(name)
+					// The settings demonstration must resolve the same cells as
+					// the live HUD, rather than inventing six/twelve-item pages
+					// from CANBUILD (HUD design §3.17).
+					demo := loadNLSidebar(cs.fs, cat, d, cat.Sides[side], nil)
+					live := h.sidebarProductCatalog(cat, d, int(d.BuildPageCount))
+					if demo == nil || len(demo.cells) != len(live.cells) {
+						t.Fatal("settings preview did not resolve the live build cells")
+					}
+					for i, cell := range live.cells {
+						other := demo.cells[i]
+						if cell.page != other.page || cell.bounds != other.bounds || len(cell.products) != len(other.products) {
+							t.Fatalf("preview cell %d differs from the HUD", i)
+						}
+						for j, product := range cell.products {
+							x, y := product.source, other.products[j].source
+							if product.rect != other.products[j].rect || x.window.Gadgets[x.index].Name != y.window.Gadgets[y.index].Name {
+								t.Fatalf("preview product %d/%d differs from the HUD", i, j)
+							}
+						}
+					}
 					handle, err := sess.Units.Create(d, sess.LocalOwner, x+numeric.FixedFromInt(160), y, z)
 					if err != nil {
 						t.Fatal(err)

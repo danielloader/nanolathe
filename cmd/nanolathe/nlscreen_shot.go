@@ -155,10 +155,12 @@ func nlShotSteps(s *nlScreen, only string) []nlShotStep {
 				}
 			}
 			if card.demo != "" {
-				// The demonstration's other value too.
-				steps = append(steps, nlShotStep{name: base + "-alt", page: pi, card: ci, draft: func(d *nlDraft) {
-					card.set(d, (card.get(d)+1)%len(card.steps))
-				}})
+				// Capture every alternative; Sidebar has three distinct policies.
+				for offset := 1; offset < len(card.steps); offset++ {
+					steps = append(steps, nlShotStep{name: fmt.Sprintf("%s-alt%d", base, offset), page: pi, card: ci, draft: func(d *nlDraft) {
+						card.set(d, (card.get(d)+offset)%len(card.steps))
+					}})
+				}
 			}
 			if card.usesMutators {
 				// Raised two steps and compared against ×1, as twin scenes.

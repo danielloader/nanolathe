@@ -1718,8 +1718,8 @@ Composites still count as one cell.
 
 The lock resolves in this order, first positive value winning:
 
-1. the player's `presentation.buildMenuPageSize` in the settings file, which has
-   no options row;
+1. the player's `presentation.buildMenuPageSize` in the settings file, also
+   selected by Nanolathe → Graphics → Sidebar's **Page limit 12** option;
 2. the mounted mod's `buildMenuPageSize` metadata (DESIGN_MODS_MUTATORS §4.2);
 3. the content profile's `presentation.build_menu_page_size`, which a mod
    without its own value inherits;
@@ -4108,9 +4108,26 @@ scene and the compare. Every switch is independent: there is no family
 master among the effect switches. The existing overall glow amount still scales
 the bloom layer, and the separate source amounts multiply their own families.
 
-**Demonstrations and numbers.** Sidebar (Original, 12 per page, Free flow)
+**Demonstrations and numbers.** Sidebar (Original, Page limit 12, Free flow)
 and Fullscreen draw a small demonstration over the preview
-(`nlscreen_demo.go`); the demonstration code also places marks on the
+(`nlscreen_demo.go`). The Sidebar label names a cap, not a promise to combine
+authored pages: stock six-slot pages stay six under Page limit 12, and a lock
+too tall for the game surface uses the authored layout (§3.3 "Build page lock").
+The Original description explains the native panel's black lower band; Free
+flow explains that complete build rows fit above all command buttons at the
+game's logical resolution, independently of fullscreen scaling. Its preview
+resolves the running content's GUI/download cells on the picture worker,
+including source page breaks, duplicate entries and composite children. It
+shares the HUD's command reservation, lock precedence and page partitions at
+the selected game resolution; it never sorts CANBUILD membership into fictional
+six/twelve/sixteen-item pages. Missing or unsafe pages show no demonstration.
+Oversized authored/fitted pages show a layout description rather than a
+normalized grid with an inaccurate page count. The worker honours retirement
+between nested GUI and art reads. `TestNLSidebarPreviewPagePolicies` locks the
+partitions and fitted boundary; `TestNLSidebarLoaderStopsBetweenAssetReads`
+locks cancellation, and the retail builder sweep compares preview cells with
+the live HUD.
+The demonstration code also places marks on the
 preview's real units — each unit's world position projected through the
 preview camera, whose origin is the surface corner, less the viewport
 origin, then through the background's crop. A mutator card lists three of the running content's

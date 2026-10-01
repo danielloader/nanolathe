@@ -36,7 +36,7 @@ import (
 type nlPicNames struct {
 	cards   map[string][]string
 	stats   map[string][]string
-	sidebar []string
+	sidebar *sidebarProductCatalog
 }
 
 // nlPicRequest is one card's portrait preferences, copied from the catalogue.
@@ -48,7 +48,7 @@ type nlPicRequest struct {
 // resolveNLPicNames resolves every picture the screen can show through the
 // same content roster the scenes use. halted is polled between names; a
 // halted resolution returns nil.
-func resolveNLPicNames(cat *content.Catalog, cards []nlPicRequest, halted func() bool) *nlPicNames {
+func resolveNLPicNames(fs vfs.FSOps, cat *content.Catalog, cards []nlPicRequest, halted func() bool) *nlPicNames {
 	st := &nlStats{base: cat}
 	names := &nlPicNames{cards: map[string][]string{}, stats: map[string][]string{}}
 	for _, info := range content.MutatorCatalog() {
@@ -80,7 +80,20 @@ func resolveNLPicNames(cat *content.Catalog, cards []nlPicRequest, halted func()
 		names.cards[c.key] = list
 	}
 	if builder, ok := r.cat.Unit(r.resolve("armck")); ok {
-		names.sidebar = r.products(builder)
+		if halted() {
+			return nil
+		}
+		// As in battle, the viewing player's side owns the HUD; a reachable
+		// constructor can author a different unit-side tag [07 §6].
+		for _, side := range cat.Sides {
+			if side != nil && strings.EqualFold(side.Name, r.factions[0]) {
+				names.sidebar = loadNLSidebar(fs, cat, builder, side, halted)
+				break
+			}
+		}
+		if halted() {
+			return nil
+		}
 	}
 	return names
 }
@@ -100,7 +113,13 @@ func (n *nlPicNames) order(cards []nlPicRequest) []string {
 	for _, c := range cards {
 		add(n.cards[c.key])
 	}
-	add(n.sidebar)
+	if n.sidebar != nil {
+		for _, cell := range n.sidebar.cells {
+			for _, product := range cell.products {
+				add([]string{product.source.window.Gadgets[product.source.index].Name})
+			}
+		}
+	}
 	return out
 }
 
@@ -177,7 +196,7 @@ func (p *nlPictures) run() {
 	if !resolved {
 		// Only this goroutine resolves, and stop waits for it, so the names
 		// are never resolved twice at once.
-		names := resolveNLPicNames(p.cat, p.cards, p.halted)
+		names := resolveNLPicNames(p.fs, p.cat, p.cards, p.halted)
 		p.mu.Lock()
 		if names != nil {
 			p.names = names

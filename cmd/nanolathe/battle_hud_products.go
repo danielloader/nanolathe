@@ -318,7 +318,7 @@ func (h *retailBattleHUD) sidebarProductsWindow(b *battleSession, f *frame.Frame
 			lowerHeight += gap.pixels
 		}
 	}
-	capacity := int((int32(height)-128-c.upperHeight-gridGap-lowerHeight)/64) * 2
+	capacity := c.sidebarCapacity(int32(height), spacing)
 	if capacity < 2 {
 		return nil
 	}
@@ -443,6 +443,16 @@ func (h *retailBattleHUD) sidebarProductsWindow(b *battleSession, f *frame.Frame
 	l.key = key
 	l.selection = append([]pool.Handle(nil), f.Selection.Handles...)
 	return l.window
+}
+
+// Shared with the settings demonstration: commands and their gaps reserve
+// rail pixels before complete two-column build rows (HUD design §3.3).
+func (c *sidebarProductCatalog) sidebarCapacity(height int32, spacing []sidebarCommandGap) int {
+	reserved := int32(128) + c.upperHeight + c.lowerHeight
+	for _, gap := range spacing {
+		reserved += gap.pixels
+	}
+	return max(0, int((height-reserved)/64)*2)
 }
 
 // Normalize art using its pixel aspect, retaining the source gadget separately

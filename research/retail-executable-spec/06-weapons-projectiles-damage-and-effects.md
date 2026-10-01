@@ -586,6 +586,10 @@ target owner's ally group, is nonzero (the reciprocal row is not read), when
 its definition index is in the slot's bad-target mask, or when the slot's
 weapon is a paralyzer and the target already carries the stunned bit. A
 surviving target ends the slot's work with no re-acquisition and no draws.
+This retention pass does not call the unit-to-unit physical gate: a target
+moving below the sea-level admission boundary or outside weapon range is not
+released for that reason. A slot held by an order is skipped by the scan's
+autonomy clause, so its target instead follows that order's own lifecycle.
 
 **Established fact:** When retention fails, the slot re-acquires by weapon
 class: an `interceptor` weapon runs the projectile scan of §11.2 and installs a
@@ -1602,7 +1606,9 @@ no one of them says in one place is this.
 its clauses are §1's list, with the range test last). Its callers are the
 autonomous acquisition's per-candidate test, the order handlers
 (`Attack_Chase` and `Guard` among them) and the cursor-shape chooser: it runs
-when a target is **installed** on a slot, never per shot. The shot-time gate of §3.3 is a *different* routine taking the
+at acquisition and at the order phases that ask it, including checks of an
+already bound target. It is not a universal per-shot gate. The shot-time gate
+of §3.3 is a *different* routine taking the
 shooter, the shooter's position triple, the resolved target **point** and the
 slot. Its clauses, in the order they are evaluated:
 
@@ -1635,10 +1641,23 @@ gate's other callers are the computer player's rally admission
 (`[08 R-AI-01 §7]`) and a presentation-side cursor-shape chooser; neither
 adds a clause.
 
+**Established — a hover-attack recheck does not inhibit firing.**
+`AirToGroundHover` asks the unit-to-unit gate again in phase 3, but refusal
+feeds its movement miss counter rather than clearing or inhibiting slot 0
+([04 R-AIR-01 §8]). The target remains bound through both the alternating
+standoff arm and the miss-recovery arm. Together with the autonomous retention
+contract of §3.2, this means an ordinary non-water weapon can continue firing
+at a live target acquired before it became fully submerged, provided the
+separate shot-time gate and executor still admit the shot. Fresh acquisition
+of that same target still fails the target-height clause unless the shooter's
+`kamikaze` flag bypasses it (§3.2). The submersion boundary is the target's
+whole-unit Y plus its cached model-top word at or below sea level; an origin
+below sea level alone does not exclude the target.
+
 For the implementation: the shot-time site must carry exactly clauses 1–3
 above — with the model-top addend and the whole-unit compare, not a bare
 16.16 compare against sea level — and the target-side clauses of §3.1/§1
-belong to the acquisition and order-installation gate only.
+belong to the unit-to-unit acquisition and order-query gate only.
 
 ### 3.4 The weapon-query path [R-P0-07]
 

@@ -14036,7 +14036,9 @@ weapon slot's `Range`, and zeroes two record scratch words (a side flag and a
 miss counter). Phase 3 is the orbit:
 
 * Ask the weapon layer whether the unit can engage the target; if it cannot,
-  increment the miss counter.
+  increment the miss counter. Refusal does not clear or inhibit the bound
+  weapon slot, end the attack order, or raise a could-not-fire event; the
+  weapon pipeline still uses its separate point gate ([06 R-WPN-05 §9]).
 * If the miss counter exceeds `1`, reset it, draw a full-circle bearing
   (random below `0x10000`), build a point marker at
   `targetPos − offset(bearing, Range)` with horizontal arrival radius `0x80`

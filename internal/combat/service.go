@@ -1188,10 +1188,10 @@ func (s *Service) SlotAcquisitionAdmits(u *units.Unit, idx int, cand *units.Unit
 // raw 16.16 Y against sea level instead of the whole-unit word plus the model
 // top height. [06 R-WPN-05 §9] establishes that the two admissions are two
 // distinct routines and that this one has no target-side clause of any kind:
-// the unit-to-unit gate runs when a target is INSTALLED on a slot (the order
-// handlers and the autonomous scan's per-candidate test), never per shot. The
-// merged form refused every ground/point target for a non-water weapon,
-// because a point target carries no Y and 0 is never above sea level.
+// the unit-to-unit gate runs during acquisition and selected order queries,
+// including the hover loop's retained-target check, rather than as a condition
+// for every shot. The merged form refused every ground/point target for a
+// non-water weapon, because a point target carries no Y and 0 is never above sea level.
 func checkAdmission(s *Service, u *units.Unit, weapon *content.WeaponDef, tgtPos Vec3, terrain *world.Terrain) bool {
 	return s.rules().ShotTimeAdmitted(ShotTimeAdmission{
 		Service: s,

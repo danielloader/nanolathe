@@ -3461,8 +3461,16 @@ control: `WATCHING` and `GAMEOPEN` toggles of the lobby word, `LIVEPLYR<n>`
 recorded, semantics out of scope), `ALLIES` the lobby alliance panel
 (out of scope).
 
-`EXITMENU.GUI` (flags `0x1800`, centred) shows `RESTART` (authored
-inactive) only for campaign and skirmish, and hides `MAINMENU` when the
+**Established (direct-static and authored GUI).** `EXITMENU.GUI` (flags
+`0x1800`, centred) opens with `RESTART` authored inactive. For campaign and
+skirmish, the opener activates the first named `RESTART` gadget and replaces
+its caption with the translated `Restart` key before the window is serviced.
+The caption setter copies at most 128 bytes and applies ordinary button
+shortcut assignment against the window's current keys [R-WGT-01 §12]. Other
+session kinds leave the authored restart activity and caption unchanged.
+Authored inactivity suppresses both painting and pointer/keyboard admission;
+opening the dialog alone therefore does not expose the restart choice.
+The opener hides `MAINMENU` when the
 session was launched from a DirectPlay lobby. `MAINMENU` and `EXITGAME` set
 the exit-kind word (0 / 2), close, and open `YESORNO` (flags `0x1000`)
 titled `Surrender this battle and return to main menu?` / `Exit the Battle`

@@ -162,7 +162,7 @@ func (b *battleSession) activateBattleMenuButton(name string, cl *client.Client)
 	if b.hud != nil {
 		switch state.Modal() {
 		case ui.BattleModalExit:
-			b.hud.openExitWindow()
+			b.hud.openExitWindow(battleSessionKind(b))
 		case ui.BattleModalConfirmMain, ui.BattleModalConfirmExit:
 			b.hud.openConfirmWindow()
 		}

@@ -136,6 +136,7 @@ func (g *modelFixtureGame) Draw(screen *ebiten.Image) {
 		checkModelRetainDevicePixels,
 		checkModelCloakDevicePixels,
 		checkSourceLifecycleDevicePixels,
+		checkSharedPagesDevicePixels,
 		checkTransientFrameDevicePixels,
 	} {
 		if g.err = check(); g.err != nil {

@@ -116,8 +116,21 @@ type nlScreen struct {
 	// canvasScale replaces the display's device scale when set, for a
 	// capture that has no display.
 	canvasScale float64
-	stats       nlStats
-	statsCS     *contentSet
+	// deviceScale is the display's device scale as last read, and the
+	// screen clock and canvas size it was read at (cachedDeviceScale).
+	deviceScale                float64
+	deviceScaleRead            bool
+	deviceScaleAt              float64
+	deviceScaleW, deviceScaleH float64
+	stats                      nlStats
+	statsCS                    *contentSet
+	catalogue                  nlCatalogue // the built pages (pages)
+	// saved is the shell's live state as a draft and changed the count of
+	// cards and keys the draft differs from it by, read once a frame for the
+	// Apply count and the cards' changed lamps.
+	saved   nlDraft
+	changed int
+	ui      nlUICache // memoized strings and wrapped text (nlscreen_ui_cache.go)
 }
 
 func newNLScreen(host func() *gameShell) *nlScreen {
@@ -156,11 +169,16 @@ func (s *nlScreen) show(g *gameShell) {
 }
 
 // warm prepares the screen while the main menu is idle, so opening it is
-// quick: the fonts and art, the installed mods, and the first card's scene
-// staged in the background. It runs once per shell; a content switch
-// releases it first (releasePreview).
+// quick: the fonts and art, the installed mods, the first card's scene
+// staged in the background and the unit pictures. It prepares once per
+// shell, and a content switch releases it first (releasePreview); later idle
+// steps only keep the picture loader going (tendMenuPictures).
 func (s *nlScreen) warm(g *gameShell) {
-	if s == nil || s.open || s.reload != nil || g == nil || g.cs == nil || s.warmed == g {
+	if s == nil || s.open || s.reload != nil || g == nil || g.cs == nil {
+		return
+	}
+	if s.warmed == g {
+		s.tendMenuPictures(g)
 		return
 	}
 	if s.baseFS == nil {
@@ -174,7 +192,7 @@ func (s *nlScreen) warm(g *gameShell) {
 	}
 	if !s.ready {
 		s.fonts = screenkit.LoadFonts()
-		s.art = loadNLArt(s.baseFS, g.cs.fs)
+		s.art = loadNLArt(s.baseFS)
 		s.ready = true
 	}
 	// The canvas the screen will open at: the window, or the display in
@@ -192,6 +210,7 @@ func (s *nlScreen) warm(g *gameShell) {
 		return
 	}
 	nlScreenW, nlScreenH = float64(w)*scale, float64(h)*scale
+	s.noteDeviceScale(scale)
 	s.reloadMods(g)
 	s.draft = s.freshDraft(g)
 	s.releasePreview(false)
@@ -200,12 +219,15 @@ func (s *nlScreen) warm(g *gameShell) {
 	key, _, _ := s.plan(card, card.get(&s.draft))
 	s.preview.request(key)
 	s.warmed = g
+	s.tendMenuPictures(g)
 }
 
-// releasePreview retires the preview. With wait, a scene still being staged
-// is waited for and closed here, so nothing reads the content afterwards —
-// what a content switch needs before it closes the old content.
+// releasePreview retires the preview and pauses the picture loader. With
+// wait, a scene still being staged is waited for and closed here, so nothing
+// reads the content afterwards — what a content switch needs before it closes
+// the old content.
 func (s *nlScreen) releasePreview(wait bool) {
+	s.art.pauseLoader()
 	p := s.preview
 	if p == nil {
 		return
@@ -228,10 +250,7 @@ func (s *nlScreen) bindShell(g *gameShell) {
 	s.bound = g
 	s.bindPointer(g)
 	s.reloadMods(g)
-	if s.statsCS != g.cs {
-		s.stats = nlStats{}
-	}
-	s.statsCS = g.cs
+	s.bindStats(g)
 	s.draft = s.freshDraft(g)
 	s.touched = map[string]bool{}
 	s.pendingPresets = nil
@@ -240,11 +259,9 @@ func (s *nlScreen) bindShell(g *gameShell) {
 	if s.preview == nil {
 		s.preview = newNLPreview(g.opts, g.cs)
 	}
-	if s.art != nil {
-		// Unit pictures come from the running content, which a mod switch
-		// replaces; the base-install art stays.
-		s.art.fs, s.art.pics = g.cs.fs, map[string]*ebiten.Image{}
-	}
+	// Unit pictures come from the running content, which a mod switch
+	// replaces; the base-install art stays.
+	s.tendPictures(g)
 	if s.baseFS == nil {
 		base := vfs.New()
 		if err := base.MountGameDirectories(g.cs.baseRoots); err == nil {
@@ -275,6 +292,9 @@ func (s *nlScreen) hide() {
 	s.closing = true
 	s.dialog = ""
 	s.warmed = nil // the menu warms the screen again for its next opening
+	// The menu underneath may switch content once it has the input back; its
+	// idle steps resume the pictures (warm).
+	s.art.pauseLoader()
 	// The previews go now: a content switch requested with the close may
 	// release the content set they read before the gesture ends. The window
 	// keeps its last frame meanwhile, since the screen is not cleared.
@@ -345,21 +365,27 @@ func (s *nlScreen) modAt(i int) *modlibrary.Mod {
 	return &s.mods[i-1]
 }
 
-// dirty lists the cards whose draft value differs from the shell's.
+// dirty counts the cards (and keys) whose draft value differs from the
+// shell's, keeping the shell's state in s.saved and the count in s.changed.
+// Draw calls it once a frame: the header's Apply count and the carousel's
+// changed lamps read what it kept, and nothing changes the draft or the
+// shell while a frame draws.
 func (s *nlScreen) dirty() int {
+	s.saved, s.changed = nlDraft{}, 0
 	g := s.shell()
 	if g == nil {
 		return 0
 	}
-	live := s.snapshot(g)
+	s.saved = s.snapshot(g)
 	n := s.keysDiffer()
 	for _, page := range s.pages() {
-		for _, c := range page.cards {
-			if c.get(&s.draft) != c.get(&live) {
+		for i := range page.cards {
+			if c := &page.cards[i]; c.get(&s.draft) != c.get(&s.saved) {
 				n++
 			}
 		}
 	}
+	s.changed = n
 	return n
 }
 
@@ -551,9 +577,9 @@ func (s *nlScreen) Update() {
 	case in.KeyPressed(ebiten.KeyArrowLeft):
 		s.focusCard(max(idx-1, 0))
 	case in.KeyPressed(ebiten.KeyArrowUp) && card.kind == nlGroup:
-		s.partSel[card.key] = max(0, s.selectedPart(card)-1)
+		s.partSel[card.key] = max(0, s.selectedPart(&card)-1)
 	case in.KeyPressed(ebiten.KeyArrowDown) && card.kind == nlGroup:
-		s.partSel[card.key] = min(len(card.parts)-1, s.selectedPart(card)+1)
+		s.partSel[card.key] = min(len(card.parts)-1, s.selectedPart(&card)+1)
 	case in.KeyPressed(ebiten.KeyArrowUp):
 		s.step(card, v, 1)
 	case in.KeyPressed(ebiten.KeyArrowDown):
@@ -592,7 +618,7 @@ func (s *nlScreen) step(c nlCard, v, d int) {
 		if len(c.parts) == 0 {
 			return
 		}
-		part := c.parts[s.selectedPart(c)]
+		part := c.parts[s.selectedPart(&c)]
 		next := s.draft
 		part.set(&next, max(0, min(len(part.steps)-1, part.get(&next)+d)))
 		s.setCard(c, c.get(&next))
@@ -711,7 +737,7 @@ func (s *nlScreen) Draw(screen *ebiten.Image) {
 	g := s.shell()
 	if !s.ready {
 		s.fonts = screenkit.LoadFonts()
-		s.art = loadNLArt(s.baseFS, g.cs.fs)
+		s.art = loadNLArt(s.baseFS)
 		s.ready = true
 	}
 	b := screen.Bounds()
@@ -731,6 +757,8 @@ func (s *nlScreen) Draw(screen *ebiten.Image) {
 	idx := min(s.focus[s.page], len(page.cards)-1)
 	card := page.cards[idx]
 	v := card.get(&s.draft)
+	s.dirty()
+	s.tendPictures(g)
 
 	s.drawBackground(screen, card, v, dt)
 	s.drawChrome(screen, card)
@@ -745,7 +773,7 @@ func (s *nlScreen) Draw(screen *ebiten.Image) {
 		s.demoT += dt
 		s.drawDemo(screen, card, v)
 		s.drawHeader(screen, pages)
-		s.drawHero(screen, page, card, idx, v)
+		s.drawHero(screen, page, &page.cards[idx], idx, v)
 		s.drawCarousel(screen, page, idx, dt)
 	}
 	s.drawLoadout(screen, pages)
@@ -793,23 +821,17 @@ func (s *nlScreen) drawLoadout(screen *ebiten.Image, pages []nlPage) {
 	d := &s.draft
 	content := "Total Annihilation"
 	if m := s.modAt(d.mod); m != nil {
-		content = m.Name + " " + m.Version
+		content = s.ui.text(nlTextKey{kind: "mod", a: m.Name, b: m.Version}, func() string { return m.Name + " " + m.Version })
 	}
 	renderer := "Enhanced"
 	if d.pres.Renderer == "classic" {
 		renderer = "Classic"
 	}
-	mutators := "No mutators"
-	if n := len(d.mutators.Describe()); n == 1 {
-		mutators = d.mutators.Describe()[0]
-	} else if n > 1 {
-		mutators = fmt.Sprintf("%d mutators", n)
-	}
-	parts := []struct{ text, page, card string }{
-		{content, "game", "content"},
-		{gameplayLabel(d.gameplay) + " rules", "game", "rules"},
-		{renderer, "graphics", "renderer"},
-		{mutators, "mutators", ""},
+	parts := [...]struct{ text, page, card, id string }{
+		{content, "game", "content", "loadout-gamecontent"},
+		{s.ui.text(nlTextKey{kind: "rules", a: gameplayLabel(d.gameplay)}, func() string { return gameplayLabel(d.gameplay) + " rules" }), "game", "rules", "loadout-gamerules"},
+		{renderer, "graphics", "renderer", "loadout-graphicsrenderer"},
+		{s.mutatorsLabel(d.mutators), "mutators", "", "loadout-mutators"},
 	}
 	x, y := 60*u, 96*u
 	bf := s.fonts.Body
@@ -818,7 +840,7 @@ func (s *nlScreen) drawLoadout(screen *ebiten.Image, pages []nlPage) {
 			screenkit.Disc(screen, x+8*u, y-4*u, 2*u, alphaC(nlKicker, 0.8))
 			x += 18 * u
 		}
-		id := "loadout-" + part.page + part.card
+		id := part.id
 		hover := s.hits.HoverAmount(id)
 		st := screenkit.Style{Size: 11.5 * u, Top: lerpRGBA(color.RGBA{190, 182, 150, 255}, color.RGBA{255, 244, 210, 255}, hover), Shadow: 0.12}
 		tw := bf.Draw(screen, part.text, x, y, st)
@@ -840,6 +862,21 @@ func (s *nlScreen) drawLoadout(screen *ebiten.Image, pages []nlPage) {
 		}})
 		x += tw + 8*u
 	}
+}
+
+// mutatorsLabel names the mutators in the loadout line: none, the one, or
+// how many.
+func (s *nlScreen) mutatorsLabel(m content.Mutators) string {
+	return s.ui.text(nlTextKey{kind: "mutators", a: s.ui.mutatorKey(m)}, func() string {
+		switch desc := m.Describe(); len(desc) {
+		case 0:
+			return "No mutators"
+		case 1:
+			return desc[0]
+		default:
+			return fmt.Sprintf("%d mutators", len(desc))
+		}
+	})
 }
 
 // drawHints names the keyboard, bottom right under the cards.
@@ -913,19 +950,19 @@ func (s *nlScreen) drawPreviewLimit(screen *ebiten.Image) {
 	st := screenkit.Style{Size: 11.5 * u, Top: nlAmber, Shadow: 0.12}
 	const leading = 1.75
 	width := 360 * u
-	lines := s.fonts.Body.Wrap(p.cur.previewLimit, st, width)
+	lines := s.ui.wrap(s.fonts.Body, p.cur.previewLimit, st, width)
 	height := float64(len(lines))*st.Size*leading + 32*u
 	x, y := s.w()-420*u, float64(s.carouselTop())-height-14*u
 	screenkit.Fill(screen, screenkit.Rect{X: x - 12*u, Y: y - 12*u, W: width + 24*u, H: height}, color.RGBA{10, 14, 8, 224})
 	screenkit.Outline(screen, screenkit.Rect{X: x - 12*u, Y: y - 12*u, W: width + 24*u, H: height}, u, color.RGBA{120, 103, 54, 210})
 	s.fonts.Display.Draw(screen, "Preview", x, y+10*u, screenkit.Style{Size: 10 * u, Tracking: 0.2, Top: nlKicker, Upper: true})
-	s.fonts.Body.DrawWrapped(screen, p.cur.previewLimit, x, y+20*u, width, leading, st)
+	s.drawWrapped(screen, s.fonts.Body, p.cur.previewLimit, x, y+20*u, width, leading, st)
 }
 
 func (s *nlScreen) previewSize() (int, int) {
 	scale := s.canvasScale
 	if scale == 0 {
-		scale = ebiten.Monitor().DeviceScaleFactor()
+		scale = s.cachedDeviceScale()
 	}
 	if scale < 1 {
 		scale = 1
@@ -942,6 +979,23 @@ func (s *nlScreen) previewSize() (int, int) {
 	return w, h
 }
 
+// cachedDeviceScale is the display's device scale, read again four times a
+// second of the screen's clock and whenever the canvas changes size, never
+// every frame: in Ebitengine's multi-threaded mode each Monitor query waits
+// for the OS main thread. A move to a display of another scale also resizes
+// the canvas, so it is seen at once.
+func (s *nlScreen) cachedDeviceScale() float64 {
+	if !s.deviceScaleRead || s.clock-s.deviceScaleAt >= 0.25 || s.w() != s.deviceScaleW || s.h() != s.deviceScaleH {
+		s.noteDeviceScale(ebiten.Monitor().DeviceScaleFactor())
+	}
+	return s.deviceScale
+}
+
+func (s *nlScreen) noteDeviceScale(scale float64) {
+	s.deviceScale, s.deviceScaleRead = scale, true
+	s.deviceScaleAt, s.deviceScaleW, s.deviceScaleH = s.clock, s.w(), s.h()
+}
+
 // plan picks the scene and frame parameters for the focused card.
 func (s *nlScreen) plan(card nlCard, v int) (nlSceneKey, nlRender, *nlRender) {
 	d := &s.draft
@@ -949,7 +1003,9 @@ func (s *nlScreen) plan(card nlCard, v int) (nlSceneKey, nlRender, *nlRender) {
 		effects: presentationEffects(d.pres),
 		glow:    d.glow != 0, glowStrength: d.glowStrength, trailStrength: d.pres.TrailStrength,
 		classic: d.pres.Renderer == "classic",
-		fps:     30,
+		// The background repaints at the rate a battle would present at
+		// (nlCadence); the Frame rate card shows its own value.
+		fps: d.pres.FPS,
 	}
 	if card.enhanced {
 		r.classic = false
@@ -964,7 +1020,7 @@ func (s *nlScreen) plan(card nlCard, v int) (nlSceneKey, nlRender, *nlRender) {
 	}
 	key := nlSceneKey{preset: preset, gameplay: d.gameplay, w: w, h: h}
 	if card.usesMutators {
-		key.mutators = d.mutators.String()
+		key.mutators = s.ui.mutatorKey(d.mutators)
 	}
 	var alt *nlRender
 	if s.compare && card.compare != nil {
@@ -974,7 +1030,7 @@ func (s *nlScreen) plan(card nlCard, v int) (nlSceneKey, nlRender, *nlRender) {
 				// scene under the other factor rather than a second render.
 				tw := nlDraft{mutators: d.mutators}
 				card.set(&tw, bv)
-				key.paired, key.twinMutators = true, tw.mutators.String()
+				key.paired, key.twinMutators = true, s.ui.mutatorKey(tw.mutators)
 				a := r
 				return key, r, &a
 			}
@@ -1131,7 +1187,8 @@ func (s *nlScreen) drawPaired(screen *ebiten.Image, card nlCard, v int) {
 			if !r.Contains(sx, sy) {
 				continue
 			}
-			label := fmt.Sprintf("%d%%", int((1-m.building)*100))
+			pct := int((1 - m.building) * 100)
+			label := s.ui.text(nlTextKey{kind: "percent", i: pct}, func() string { return fmt.Sprintf("%d%%", pct) })
 			st := screenkit.Style{Size: 13 * u, Tracking: 0.04, Top: nlGreenText, Align: 1, Shadow: 0.1}
 			tw := s.fonts.Display.Measure(label, st) + 12*u
 			tag := screenkit.Rect{X: sx - tw/2, Y: sy - 11*u, W: tw, H: 22 * u}
@@ -1156,12 +1213,16 @@ func (s *nlScreen) drawPaired(screen *ebiten.Image, card nlCard, v int) {
 	crop(p.alt, left, p.cur.twin)
 	crop(p.frame, right, p.cur)
 	bv, _ := card.compare(&s.draft, v)
-	for i, r := range []screenkit.Rect{left, right} {
+	for i, r := range [2]screenkit.Rect{left, right} {
 		label := card.steps[bv]
 		if i == 1 {
 			label = card.steps[v]
 		}
-		screenkit.Outline(screen, r.Inset(-3*u), 2*u, map[bool]color.RGBA{false: {90, 90, 80, 255}, true: {255, 227, 138, 255}}[i == 1])
+		edge := color.RGBA{90, 90, 80, 255}
+		if i == 1 {
+			edge = color.RGBA{255, 227, 138, 255}
+		}
+		screenkit.Outline(screen, r.Inset(-3*u), 2*u, edge)
 		st := screenkit.Style{Size: 22 * u, Tracking: 0.06, Top: nlCream, Align: 1, Shadow: 0.08}
 		tw := s.fonts.Display.Measure(label, st) + 28*u
 		tag := screenkit.Rect{X: r.X + r.W/2 - tw/2, Y: r.Y + 10*u, W: tw, H: 38 * u}
@@ -1234,7 +1295,7 @@ func (s *nlScreen) drawHeader(screen *ebiten.Image, pages []nlPage) {
 	f := s.fonts.Display
 	for i, p := range pages {
 		st := screenkit.Style{Size: 16 * u, Tracking: 0.14, Upper: true, Shadow: 0.1}
-		id := "tab-" + p.key
+		id := s.ui.id("tab-", p.key, -1, -1)
 		hover := s.hits.HoverAmount(id)
 		switch {
 		case i == s.page:
@@ -1251,12 +1312,12 @@ func (s *nlScreen) drawHeader(screen *ebiten.Image, pages []nlPage) {
 		x += tw + 34*u
 	}
 	// Apply and Back on the right.
-	dirty := s.dirty()
+	dirty := s.changed
 	aw, bw, bh := 150*u, 120*u, 44*u
 	ax := s.w() - 56*u - aw
 	label := "Apply"
 	if dirty > 0 {
-		label = fmt.Sprintf("Apply  %d", dirty)
+		label = s.ui.text(nlTextKey{kind: "apply", i: dirty}, func() string { return fmt.Sprintf("Apply  %d", dirty) })
 	}
 	s.button(screen, "apply", screenkit.Rect{X: ax, Y: 24 * u, W: aw, H: bh}, label, true, dirty > 0, func() { s.apply() })
 	s.button(screen, "back", screenkit.Rect{X: ax - 14*u - bw, Y: 24 * u, W: bw, H: bh}, "Back", false, false, func() { s.hide() })
@@ -1437,7 +1498,7 @@ func (s *nlScreen) drawPointer(screen *ebiten.Image, now time.Time) {
 
 // ---------------------------------------------------------------- hero
 
-func (s *nlScreen) drawHero(screen *ebiten.Image, page nlPage, card nlCard, idx, v int) {
+func (s *nlScreen) drawHero(screen *ebiten.Image, page nlPage, card *nlCard, idx, v int) {
 	u := s.u()
 	if s.heroKey != page.key+card.key {
 		s.heroKey, s.heroT = page.key+card.key, 0
@@ -1450,9 +1511,10 @@ func (s *nlScreen) drawHero(screen *ebiten.Image, page nlPage, card nlCard, idx,
 	ks := screenkit.Style{Size: 12 * u, Tracking: 0.32, Top: alphaC(nlKicker, a), Upper: true, Shadow: 0.1}
 	kx := x + df.Draw(screen, page.title, x, y, ks) + 12*u
 	screenkit.Disc(screen, kx, y-6*u, 2.5*u, alphaC(nlGreen, a))
-	kx += 16*u + df.Draw(screen, fmt.Sprintf("%d / %d", idx+1, len(page.cards)), kx+16*u, y, ks)
+	count := s.ui.text(nlTextKey{kind: "count", i: idx + 1, j: len(page.cards)}, func() string { return fmt.Sprintf("%d / %d", idx+1, len(page.cards)) })
+	kx += 16*u + df.Draw(screen, count, kx+16*u, y, ks)
 	s.drawSource(screen, card, kx+24*u, y-17*u, a)
-	title := strings.ToUpper(card.label)
+	title := s.ui.upperCase(card.label)
 	size := 76 * u
 	for size > 30*u && df.Measure(title, screenkit.Style{Size: size, Tracking: 0.02}) > 720*u {
 		size -= 2 * u
@@ -1480,7 +1542,7 @@ func (s *nlScreen) drawHero(screen *ebiten.Image, page nlPage, card nlCard, idx,
 	{
 		desc := card.desc(&s.draft, v)
 		st := screenkit.Style{Size: 13 * u, Top: alphaC(nlBody, a), Shadow: 0.12}
-		y += bf.DrawWrapped(screen, desc, x, y, 620*u, 2.15, st)
+		y += s.drawWrapped(screen, bf, desc, x, y, 620*u, 2.15, st)
 	}
 	if card.details != nil {
 		if lines := card.details(&s.draft, v); len(lines) > 0 {
@@ -1509,7 +1571,7 @@ func (s *nlScreen) drawHero(screen *ebiten.Image, page nlPage, card nlCard, idx,
 	}
 	// Notes: locks, Enhanced-only, stand-in.
 	y += 6 * u
-	if note := s.cardNote(card, v); note != "" {
+	if note := s.cardNote(*card, v); note != "" {
 		s.padlock(screen, x, y+2*u, 13*u, nlAmber, false)
 		bf.Draw(screen, note, x+22*u, y+13*u, screenkit.Style{Size: 11.5 * u, Top: alphaC(nlAmber, a), Shadow: 0.12})
 		y += 30 * u
@@ -1728,10 +1790,10 @@ func (s *nlScreen) segment(screen *ebiten.Image, r screenkit.Rect, state int, ho
 
 // heroSwitch is a two-way throw switch: a metal knob that slides over a
 // riveted track, the lit side green for on and a red lamp for off.
-func (s *nlScreen) heroSwitch(screen *ebiten.Image, card nlCard, v int, x, y, a float64) float64 {
+func (s *nlScreen) heroSwitch(screen *ebiten.Image, card *nlCard, v int, x, y, a float64) float64 {
 	u := s.u()
 	r := screenkit.Rect{X: x, Y: y, W: 250 * u, H: 66 * u}
-	id := "switch-" + card.key
+	id := s.ui.id("switch-", card.key, -1, -1)
 	pos := s.ease(id, float64(v), 16)
 	s.well(screen, r, a)
 	in := r.Inset(9 * u)
@@ -1766,8 +1828,8 @@ func (s *nlScreen) heroSwitch(screen *ebiten.Image, card nlCard, v int, x, y, a 
 		lampC = nlGreen
 	}
 	s.lamp(screen, knob.X+22*u, knob.Y+knob.H/2, 8*u, lampC, true)
-	s.hits.Add(screenkit.Region{ID: id, Rect: r, Click: func() { s.setCard(card, 1-v) }})
-	label := strings.ToUpper(card.steps[v])
+	s.hits.Add(screenkit.Region{ID: id, Rect: r, Click: func() { s.setCard(*card, 1-v) }})
+	label := s.ui.upperCase(card.steps[v])
 	vc := nlGreenText
 	if v == 0 {
 		vc = color.RGBA{214, 140, 120, 255}
@@ -1776,14 +1838,14 @@ func (s *nlScreen) heroSwitch(screen *ebiten.Image, card nlCard, v int, x, y, a 
 	return r.Y + r.H
 }
 
-func (s *nlScreen) selectedPart(card nlCard) int {
+func (s *nlScreen) selectedPart(card *nlCard) int {
 	return max(0, min(s.partSel[card.key], len(card.parts)-1))
 }
 
 // heroGroup lists a grouped card's parts, one row each: its name and what it
 // does, and its own switch or strength lamps. Clicking a row picks the part
 // Compare shows; the switch or lamps change it.
-func (s *nlScreen) heroGroup(screen *ebiten.Image, card nlCard, x, y, a float64) float64 {
+func (s *nlScreen) heroGroup(screen *ebiten.Image, card *nlCard, x, y, a float64) float64 {
 	u := s.u()
 	df, bf := s.fonts.Display, s.fonts.Body
 	sel := s.selectedPart(card)
@@ -1792,7 +1854,7 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card nlCard, x, y, a float64)
 	rowH := min(58*u, max(44*u, (float64(s.carouselTop())-y-150*u)/float64(len(card.parts))-6*u))
 	for i, p := range card.parts {
 		r := screenkit.Rect{X: x, Y: y + float64(i)*(rowH+6*u), W: 640 * u, H: rowH}
-		id := fmt.Sprintf("part-%s-%d", card.key, i)
+		id := s.ui.id("part-", card.key, i, -1)
 		v := p.get(&s.draft)
 		screenkit.Fill(screen, r, color.RGBA{12, 16, 12, uint8(215 * a)})
 		if i == sel {
@@ -1801,7 +1863,7 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card nlCard, x, y, a float64)
 		} else {
 			screenkit.Outline(screen, r, 1*u, alphaC(lerpRGBA(color.RGBA{58, 58, 51, 255}, color.RGBA{150, 150, 130, 255}, s.hits.HoverAmount(id)), a))
 		}
-		df.Draw(screen, strings.ToUpper(p.label), r.X+18*u, r.Y+min(25*u, rowH-25*u), screenkit.Style{Size: 16 * u, Tracking: 0.08, Top: alphaC(nlCream, a)})
+		df.Draw(screen, s.ui.upperCase(p.label), r.X+18*u, r.Y+min(25*u, rowH-25*u), screenkit.Style{Size: 16 * u, Tracking: 0.08, Top: alphaC(nlCream, a)})
 		bf.Draw(screen, p.sub, r.X+18*u, r.Y+rowH-13*u, screenkit.Style{Size: 11 * u, Top: alphaC(color.RGBA{169, 162, 131, 255}, a)})
 		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: r.X, Y: r.Y, W: r.W - 230*u, H: r.H}, Click: func() { s.partSel[card.key] = i }})
 		// The control, right-aligned in the row.
@@ -1809,7 +1871,7 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card nlCard, x, y, a float64)
 		if !p.meter {
 			w := 110 * u
 			sr := screenkit.Rect{X: cx - w, Y: r.Y + 12*u, W: w, H: r.H - 24*u}
-			sid := fmt.Sprintf("part-sw-%s-%d", card.key, i)
+			sid := s.ui.id("part-sw-", card.key, i, -1)
 			pos := s.ease(sid, float64(v), 16)
 			screenkit.Fill(screen, sr, color.RGBA{6, 8, 6, 240})
 			half := sr.W / 2
@@ -1832,7 +1894,7 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card nlCard, x, y, a float64)
 				nv := 1 - v
 				d := s.draft
 				p.set(&d, nv)
-				s.setCard(card, card.get(&d))
+				s.setCard(*card, card.get(&d))
 			}})
 		} else {
 			n := len(p.steps)
@@ -1847,13 +1909,13 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card nlCard, x, y, a float64)
 				case k <= v:
 					state = 1
 				}
-				lid := fmt.Sprintf("part-seg-%s-%d-%d", card.key, i, k)
+				lid := s.ui.id("part-seg-", card.key, i, k)
 				s.segment(screen, lr, state, s.hits.HoverAmount(lid))
 				s.hits.Add(screenkit.Region{ID: lid, Rect: lr.Inset(-3 * u), Click: func() {
 					s.partSel[card.key] = i
 					d := s.draft
 					p.set(&d, k)
-					s.setCard(card, card.get(&d))
+					s.setCard(*card, card.get(&d))
 				}})
 			}
 			df.Draw(screen, p.steps[v], lx-12*u, r.Y+r.H/2+6*u, screenkit.Style{Size: 14 * u, Tracking: 0.04, Top: alphaC(nlGreenText, a), Align: 2})
@@ -1876,7 +1938,7 @@ func (s *nlScreen) ease(id string, target, rate float64) float64 {
 	return cur
 }
 
-func (s *nlScreen) heroMeter(screen *ebiten.Image, card nlCard, v int, x, y, a float64) float64 {
+func (s *nlScreen) heroMeter(screen *ebiten.Image, card *nlCard, v int, x, y, a float64) float64 {
 	u := s.u()
 	sw, sh, gap := 34*u, 54*u, 9*u
 	for i := range card.steps {
@@ -1887,18 +1949,18 @@ func (s *nlScreen) heroMeter(screen *ebiten.Image, card nlCard, v int, x, y, a f
 		} else if i <= v {
 			state = 1
 		}
-		id := fmt.Sprintf("seg-%s-%d", card.key, i)
+		id := s.ui.id("seg-", card.key, i, -1)
 		s.segment(screen, r, state, s.hits.HoverAmount(id))
 		s.hits.Add(screenkit.Region{ID: id, Rect: r.Inset(-4 * u), Click: func() {
 			if i == 0 && v == 0 {
-				s.setCard(card, 1)
+				s.setCard(*card, 1)
 			} else {
-				s.setCard(card, i)
+				s.setCard(*card, i)
 			}
 		}})
 	}
 	tx := x + float64(len(card.steps))*(sw+gap) + 16*u
-	s.fonts.Display.Draw(screen, strings.ToUpper(card.steps[v]), tx, y+sh/2+16*u, screenkit.Style{Size: 32 * u, Tracking: 0.04, Top: alphaC(nlGreenText, a), Shadow: 0.06})
+	s.fonts.Display.Draw(screen, s.ui.upperCase(card.steps[v]), tx, y+sh/2+16*u, screenkit.Style{Size: 32 * u, Tracking: 0.04, Top: alphaC(nlGreenText, a), Shadow: 0.06})
 	return y + sh
 }
 
@@ -1937,14 +1999,14 @@ func (s *nlScreen) well(screen *ebiten.Image, r screenkit.Rect, alpha float64) {
 	}
 }
 
-func (s *nlScreen) heroStepper(screen *ebiten.Image, card nlCard, v int, x, y, a float64) float64 {
+func (s *nlScreen) heroStepper(screen *ebiten.Image, card *nlCard, v int, x, y, a float64) float64 {
 	u := s.u()
 	bh := 66 * u
-	s.arrow(screen, "prev-"+card.key, screenkit.Rect{X: x, Y: y + 8*u, W: 50 * u, H: 50 * u}, true, v > 0, func() { s.setCard(card, v-1) })
+	s.arrow(screen, s.ui.id("prev-", card.key, -1, -1), screenkit.Rect{X: x, Y: y + 8*u, W: 50 * u, H: 50 * u}, true, v > 0, func() { s.setCard(*card, v-1) })
 	box := screenkit.Rect{X: x + 62*u, Y: y, W: 330 * u, H: bh}
 	s.well(screen, box, a)
 	s.fonts.Display.Draw(screen, card.steps[v], box.X+box.W/2, box.Y+bh/2+14*u, screenkit.Style{Size: 29 * u, Tracking: 0.04, Top: alphaC(nlCream, a), Align: 1})
-	s.arrow(screen, "next-"+card.key, screenkit.Rect{X: box.X + box.W + 12*u, Y: y + 8*u, W: 50 * u, H: 50 * u}, false, v < len(card.steps)-1, func() { s.setCard(card, v+1) })
+	s.arrow(screen, s.ui.id("next-", card.key, -1, -1), screenkit.Rect{X: box.X + box.W + 12*u, Y: y + 8*u, W: 50 * u, H: 50 * u}, false, v < len(card.steps)-1, func() { s.setCard(*card, v+1) })
 	// A notch per value under the readout; click one to jump there.
 	n := len(card.steps)
 	span := box.W - 40*u
@@ -1954,13 +2016,13 @@ func (s *nlScreen) heroStepper(screen *ebiten.Image, card nlCard, v int, x, y, a
 			cx += span * float64(i) / float64(n-1)
 		}
 		cy := y + bh + 18*u
-		id := fmt.Sprintf("notch-%s-%d", card.key, i)
+		id := s.ui.id("notch-", card.key, i, -1)
 		lit := i == v
 		s.lamp(screen, cx, cy, 5*u, nlGreen, lit)
 		if !lit && s.hits.HoverAmount(id) > 0 {
 			screenkit.Ring(screen, cx, cy, 8*u, 1.5*u, alphaC(nlGreen, s.hits.HoverAmount(id)))
 		}
-		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: cx - 12*u, Y: cy - 12*u, W: 24 * u, H: 24 * u}, Click: func() { s.setCard(card, i) }})
+		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: cx - 12*u, Y: cy - 12*u, W: 24 * u, H: 24 * u}, Click: func() { s.setCard(*card, i) }})
 	}
 	return y + bh + 30*u
 }
@@ -1980,14 +2042,14 @@ func (s *nlScreen) padlock(screen *ebiten.Image, x, y, size float64, c color.RGB
 	screenkit.Fill(screen, screenkit.Rect{X: x + w/2 - size*0.06, Y: body.Y + body.H*0.3, W: size * 0.12, H: body.H * 0.4}, color.RGBA{30, 24, 8, 255})
 }
 
-func (s *nlScreen) heroLayers(screen *ebiten.Image, card nlCard, v int, x, y, a float64) float64 {
+func (s *nlScreen) heroLayers(screen *ebiten.Image, card *nlCard, v int, x, y, a float64) float64 {
 	u := s.u()
 	bw, bh, gap := 600*u, 60*u, 8*u
 	df, bf := s.fonts.Display, s.fonts.Body
 	for row := 0; row < 3; row++ {
 		i := 2 - row
 		r := screenkit.Rect{X: x, Y: y + float64(row)*(bh+gap), W: bw, H: bh}
-		id := fmt.Sprintf("layer-%d", i)
+		id := s.ui.id("layer", "", i, -1)
 		hover := s.hits.HoverAmount(id)
 		included, selected := i <= v, i == v
 		locked, _ := s.stageLocked(i)
@@ -2017,7 +2079,7 @@ func (s *nlScreen) heroLayers(screen *ebiten.Image, card nlCard, v int, x, y, a 
 		if selected {
 			tc = nlCream
 		}
-		tw := df.Draw(screen, strings.ToUpper(card.steps[i]), r.X+52*u, r.Y+bh/2+10*u, screenkit.Style{Size: 20 * u, Tracking: 0.08, Top: alphaC(tc, a)})
+		tw := df.Draw(screen, s.ui.upperCase(card.steps[i]), r.X+52*u, r.Y+bh/2+10*u, screenkit.Style{Size: 20 * u, Tracking: 0.08, Top: alphaC(tc, a)})
 		if locked {
 			s.padlock(screen, r.X+62*u+tw, r.Y+bh/2-10*u, 18*u, nlAmber, false)
 		}
@@ -2028,13 +2090,13 @@ func (s *nlScreen) heroLayers(screen *ebiten.Image, card nlCard, v int, x, y, a 
 				s.pendingV, s.pendingAction, s.pendingWhat, s.dialog = i, nil, "", "override"
 				return
 			}
-			s.setCard(card, i)
+			s.setCard(*card, i)
 		}})
 	}
 	return y + 3*bh + 2*gap
 }
 
-func (s *nlScreen) heroHalves(screen *ebiten.Image, card nlCard, v int, x, y, a float64) float64 {
+func (s *nlScreen) heroHalves(screen *ebiten.Image, card *nlCard, v int, x, y, a float64) float64 {
 	u := s.u()
 	n := len(card.steps)
 	total := 600 * u
@@ -2044,7 +2106,7 @@ func (s *nlScreen) heroHalves(screen *ebiten.Image, card nlCard, v int, x, y, a 
 	df, bf := s.fonts.Display, s.fonts.Body
 	for i := 0; i < n; i++ {
 		r := screenkit.Rect{X: x + float64(i)*(w+gap), Y: y, W: w, H: h}
-		id := fmt.Sprintf("half-%s-%d", card.key, i)
+		id := s.ui.id("half-", card.key, i, -1)
 		hover := s.hits.HoverAmount(id)
 		on := i == v
 		screenkit.Fill(screen, r, color.RGBA{14, 16, 12, uint8(215 * a)})
@@ -2063,14 +2125,15 @@ func (s *nlScreen) heroHalves(screen *ebiten.Image, card nlCard, v int, x, y, a 
 			tc = nlCream
 		}
 		size := 22 * u
-		for size > 12*u && df.Measure(strings.ToUpper(card.steps[i]), screenkit.Style{Size: size, Tracking: 0.06}) > r.W-20*u {
+		label := s.ui.upperCase(card.steps[i])
+		for size > 12*u && df.Measure(label, screenkit.Style{Size: size, Tracking: 0.06}) > r.W-20*u {
 			size -= u
 		}
-		df.Draw(screen, strings.ToUpper(card.steps[i]), r.X+r.W/2, r.Y+64*u, screenkit.Style{Size: size, Tracking: 0.06, Top: alphaC(tc, a), Align: 1})
+		df.Draw(screen, label, r.X+r.W/2, r.Y+64*u, screenkit.Style{Size: size, Tracking: 0.06, Top: alphaC(tc, a), Align: 1})
 		if len(card.subs) > i {
 			bf.Draw(screen, card.subs[i], r.X+r.W/2, r.Y+92*u, screenkit.Style{Size: 10 * u, Top: alphaC(color.RGBA{169, 162, 131, 255}, a), Align: 1})
 		}
-		s.hits.Add(screenkit.Region{ID: id, Rect: r, Click: func() { s.setCard(card, i) }})
+		s.hits.Add(screenkit.Region{ID: id, Rect: r, Click: func() { s.setCard(*card, i) }})
 	}
 	return y + h
 }
@@ -2079,7 +2142,7 @@ func (s *nlScreen) heroHalves(screen *ebiten.Image, card nlCard, v int, x, y, a 
 // one lit, with its version, its rule lock and whether it brings its own
 // controls. More rows than fit scroll with the wheel or the arrows beside
 // the list.
-func (s *nlScreen) heroContent(screen *ebiten.Image, card nlCard, v int, x, y, a float64) float64 {
+func (s *nlScreen) heroContent(screen *ebiten.Image, card *nlCard, v int, x, y, a float64) float64 {
 	u := s.u()
 	const visible = 5
 	rowH := 46 * u
@@ -2099,7 +2162,7 @@ func (s *nlScreen) heroContent(screen *ebiten.Image, card nlCard, v int, x, y, a
 	for row := 0; row < shown; row++ {
 		i := s.contentTop + row
 		r := screenkit.Rect{X: list.X + 8*u, Y: list.Y + 6*u + float64(row)*rowH, W: list.W - 16*u, H: rowH - 4*u}
-		id := fmt.Sprintf("content-%d", i)
+		id := s.ui.id("content", "", i, -1)
 		hover := s.hits.HoverAmount(id)
 		on := i == v
 		if on {
@@ -2141,7 +2204,7 @@ func (s *nlScreen) heroContent(screen *ebiten.Image, card nlCard, v int, x, y, a
 		}
 		// A removable mod has a remove cap at the row's end.
 		if m != nil && !sameMod(m, s.shell().cs.mod) {
-			rid := fmt.Sprintf("content-remove-%d", i)
+			rid := s.ui.id("content-remove", "", i, -1)
 			xr := screenkit.Rect{X: bx - 30*u, Y: r.Y + r.H/2 - 12*u, W: 24 * u, H: 24 * u}
 			c := lerpRGBA(color.RGBA{120, 110, 90, 255}, nlRed, s.hits.HoverAmount(rid))
 			screenkit.Line(screen, xr.X+6*u, xr.Y+6*u, xr.X+xr.W-6*u, xr.Y+xr.H-6*u, 2*u, c)
@@ -2149,7 +2212,7 @@ func (s *nlScreen) heroContent(screen *ebiten.Image, card nlCard, v int, x, y, a
 			mod := *m
 			s.hits.Add(screenkit.Region{ID: rid, Rect: xr, Click: func() { s.removing, s.dialog = mod, "remove" }})
 		}
-		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: r.X, Y: r.Y, W: r.W - 40*u, H: r.H}, Click: func() { s.setCard(card, i) }})
+		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: r.X, Y: r.Y, W: r.W - 40*u, H: r.H}, Click: func() { s.setCard(*card, i) }})
 	}
 	// Scroll arrows when the list is longer than its window.
 	if n > shown {
@@ -2206,13 +2269,9 @@ func (s *nlScreen) drawCarousel(screen *ebiten.Image, page nlPage, focus int, dt
 	goal = clamp(goal, 0, math.Max(0, total-visible))
 	s.scroll += (goal - s.scroll) * min(1, dt*10)
 	s.scroll = clamp(s.scroll, 0, math.Max(0, total-visible))
-	live := s.shell()
-	var saved nlDraft
-	if live != nil {
-		saved = s.snapshot(live)
-	}
 	classic := s.draft.pres.Renderer == "classic"
-	for i, c := range page.cards {
+	for i := range page.cards {
+		c := &page.cards[i]
 		// Cards arrive with a short stagger when a page opens.
 		appear := clamp(s.pageT*1.6-float64(i)*0.08, 0, 1)
 		appear = 1 - math.Pow(1-appear, 3)
@@ -2220,7 +2279,7 @@ func (s *nlScreen) drawCarousel(screen *ebiten.Image, page nlPage, focus int, dt
 		if x+cw < 0 || x > s.w() {
 			continue
 		}
-		id := "card-" + c.key
+		id := s.ui.id("card-", c.key, -1, -1)
 		target := 0.0
 		if i == focus {
 			target = 14 * u
@@ -2231,7 +2290,12 @@ func (s *nlScreen) drawCarousel(screen *ebiten.Image, page nlPage, focus int, dt
 		y := top - s.lift[id] + (1-appear)*40*u
 		r := screenkit.Rect{X: x, Y: y, W: cw, H: ch}
 		cv := c.get(&s.draft)
-		s.drawCard(screen, c, r, cv, i == focus, appear*(map[bool]float64{true: 0.45, false: 1}[classic && c.enhanced]), c.get(&saved) != cv)
+		alpha := appear
+		if classic && c.enhanced {
+			// Enhanced-only cards dim under Classic.
+			alpha = appear * 0.45
+		}
+		s.drawCard(screen, c, r, cv, i == focus, alpha, c.get(&s.saved) != cv)
 		s.hits.Add(screenkit.Region{ID: id, Rect: r, Click: func() { s.focusCard(i) }, Right: func() {
 			s.focusCard(i)
 		}})
@@ -2248,7 +2312,7 @@ func (s *nlScreen) drawCarousel(screen *ebiten.Image, page nlPage, focus int, dt
 	}
 }
 
-func (s *nlScreen) drawCard(screen *ebiten.Image, c nlCard, r screenkit.Rect, v int, focused bool, a float64, changed bool) {
+func (s *nlScreen) drawCard(screen *ebiten.Image, c *nlCard, r screenkit.Rect, v int, focused bool, a float64, changed bool) {
 	u := s.u()
 	if focused {
 		screenkit.Glow(screen, screenkit.Rect{X: r.X - 40*u, Y: r.Y - 30*u, W: r.W + 80*u, H: r.H + 60*u}, color.RGBA{255, 210, 90, uint8(70 * a)})
@@ -2275,7 +2339,7 @@ func (s *nlScreen) drawCard(screen *ebiten.Image, c nlCard, r screenkit.Rect, v 
 		screenkit.Outline(screen, r.Inset(-2*u), 2*u, alphaC(color.RGBA{255, 227, 138, 255}, a))
 	}
 	df := s.fonts.Display
-	name := strings.ToUpper(c.label)
+	name := s.ui.upperCase(c.label)
 	size := 16 * u
 	for size > 9*u && df.Measure(name, screenkit.Style{Size: size, Tracking: 0.08}) > r.W-28*u {
 		size -= 0.5 * u
@@ -2300,7 +2364,8 @@ func (s *nlScreen) drawCard(screen *ebiten.Image, c nlCard, r screenkit.Rect, v 
 			}
 			s.segment(screen, screenkit.Rect{X: lx + float64(i)*(lw+lg), Y: r.Y + 165*u, W: lw, H: lh}, state, 0)
 		}
-		s.fonts.Body.Draw(screen, fmt.Sprintf("%d of %d on", on, len(c.parts)), r.X+14*u, r.Y+177*u, screenkit.Style{Size: 10.5 * u, Top: alphaC(nlGreenText, a)})
+		parts := s.ui.text(nlTextKey{kind: "parts on", i: on, j: len(c.parts)}, func() string { return fmt.Sprintf("%d of %d on", on, len(c.parts)) })
+		s.fonts.Body.Draw(screen, parts, r.X+14*u, r.Y+177*u, screenkit.Style{Size: 10.5 * u, Top: alphaC(nlGreenText, a)})
 		s.drawCardSource(screen, c, r, a)
 		if changed {
 			s.lamp(screen, r.X+r.W-16*u, r.Y+22*u, 5*u, nlAmber, true)
@@ -2369,7 +2434,7 @@ func (s *nlScreen) drawDialog(screen *ebiten.Image) {
 		body = fmt.Sprintf("%s sets %s and asks that it stay as it is. Changing it may change how the mod plays, and future network games may refuse the change. Overriding unlocks all of %s's settings.",
 			name, strings.ToLower(s.pendingWhat), name)
 	}
-	s.fonts.Body.DrawWrapped(screen, body, r.X+32*u, r.Y+84*u, w-64*u, 2.1, screenkit.Style{Size: 12.5 * u, Top: nlBody})
+	s.drawWrapped(screen, s.fonts.Body, body, r.X+32*u, r.Y+84*u, w-64*u, 2.1, screenkit.Style{Size: 12.5 * u, Top: nlBody})
 	bw := 170 * u
 	s.button(screen, "dlg-override", screenkit.Rect{X: r.X + w - 32*u - bw, Y: r.Y + h - 70*u, W: bw, H: 44 * u}, "Override", true, false, s.confirmOverride)
 	s.button(screen, "dlg-keep", screenkit.Rect{X: r.X + w - 46*u - 2*bw, Y: r.Y + h - 70*u, W: bw, H: 44 * u}, "Keep lock", false, false, func() { s.dialog = "" })

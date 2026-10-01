@@ -189,7 +189,7 @@ func (s *nlScreen) drawCatalog(screen *ebiten.Image) {
 			df.Draw(screen, label, bar.X+bar.W/2, bar.Y+12*u, screenkit.Style{Size: 10 * u, Top: nlCream, Align: 1})
 		default:
 			enabled := !job.running
-			id := fmt.Sprintf("catalog-get-%d", i)
+			id := s.ui.id("catalog-get", "", i, -1)
 			if enabled {
 				s.button(screen, id, screenkit.Rect{X: bx, Y: rr.Y + rr.H/2 - 18*u, W: 150 * u, H: 36 * u}, "Download", true, false, func() { s.downloadMod(e) })
 			} else {
@@ -214,7 +214,7 @@ func (s *nlScreen) drawRemoveConfirm(screen *ebiten.Image) {
 	r := screenkit.Rect{X: s.w()/2 - w/2, Y: s.h()/2 - h/2, W: w, H: h}
 	s.well(screen, r, 1)
 	s.fonts.Display.Draw(screen, fmt.Sprintf("Remove %s %s?", m.Name, m.Version), r.X+32*u, r.Y+56*u, screenkit.Style{Size: 24 * u, Tracking: 0.04, Top: nlAmber, Upper: true})
-	s.fonts.Body.DrawWrapped(screen, "Its files are deleted from the mod library. A saved game that uses it will offer to download it again.", r.X+32*u, r.Y+84*u, w-64*u, 2.1, screenkit.Style{Size: 12.5 * u, Top: nlBody})
+	s.drawWrapped(screen, s.fonts.Body, "Its files are deleted from the mod library. A saved game that uses it will offer to download it again.", r.X+32*u, r.Y+84*u, w-64*u, 2.1, screenkit.Style{Size: 12.5 * u, Top: nlBody})
 	bw := 150 * u
 	s.button(screen, "remove-yes", screenkit.Rect{X: r.X + w - 32*u - bw, Y: r.Y + h - 66*u, W: bw, H: 42 * u}, "Remove", true, false, func() {
 		s.dialog = ""

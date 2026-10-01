@@ -1,6 +1,10 @@
 package ebitenapp
 
-import "github.com/hajimehoshi/ebiten/v2"
+import (
+	"time"
+
+	"github.com/hajimehoshi/ebiten/v2"
+)
 
 // FullScreen is a host-owned screen that replaces the client's frame while it
 // is active: the Nanolathe screen (docs/DESIGN_INTERFACE_HUD_INPUT.md §3.17).
@@ -30,11 +34,35 @@ func (a *app) screenActive() bool {
 	return a.options.Screen != nil && a.options.Screen.Active()
 }
 
-// screenLayout is the device-pixel canvas the screen draws at.
-func screenLayout(outsideWidth, outsideHeight int) (int, int) {
-	scale := ebiten.Monitor().DeviceScaleFactor()
-	if scale <= 0 {
-		scale = 1
+// screenScale caches the monitor's device scale for screenLayout. Asking the
+// monitor is a synchronous round trip to the OS main thread, and Layout runs
+// every display frame while the screen is open; the answer changes only when
+// the window moves to another display, which also changes its outside size,
+// and is otherwise re-read twice a second.
+type screenScale struct {
+	scale         float64
+	outside       [2]int
+	at            time.Time
+	monitorScaleF func() float64
+}
+
+func (s *screenScale) get(outsideWidth, outsideHeight int, now time.Time) float64 {
+	outside := [2]int{outsideWidth, outsideHeight}
+	if s.scale <= 0 || outside != s.outside || now.Sub(s.at) >= 500*time.Millisecond {
+		read := s.monitorScaleF
+		if read == nil {
+			read = func() float64 { return ebiten.Monitor().DeviceScaleFactor() }
+		}
+		s.scale, s.outside, s.at = read(), outside, now
 	}
+	if s.scale <= 0 {
+		return 1
+	}
+	return s.scale
+}
+
+// screenLayout is the device-pixel canvas the screen draws at.
+func (a *app) screenLayout(outsideWidth, outsideHeight int) (int, int) {
+	scale := a.screenScale.get(outsideWidth, outsideHeight, time.Now())
 	return max(1, int(float64(outsideWidth)*scale)), max(1, int(float64(outsideHeight)*scale))
 }

@@ -1,6 +1,8 @@
 package gpurender
 
 import (
+	"image"
+
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/formats"
 )
@@ -8,7 +10,9 @@ import (
 // modelTextureAtlas packs every resolved 3DO texture frame into shared pages, so
 // one batched body pass can carry faces of many subjects and many textures
 // (C-G9). Frames are packed once per identity and reused until ResetSources
-// retires the terrain generation.
+// retires the terrain generation. A frame's texels are written straight into
+// its page region: a standalone texture per frame, copied into the page, cost
+// a settings preview's first frame a hundred or more device allocations.
 type modelTextureSlot struct {
 	img        *ebiten.Image
 	x, y, w, h int
@@ -18,9 +22,13 @@ type modelTextureSlot struct {
 const modelTexturePageSize = 2048
 
 type modelTextureAtlas struct {
-	slots     map[*formats.GAFFrame]modelTextureSlot
-	page      *ebiten.Image
+	slots map[*formats.GAFFrame]modelTextureSlot
+	page  *ebiten.Image
+	// pages is every page filled, the open one last, so ResetSources can
+	// return them all to the pool.
+	pages     []*ebiten.Image
 	x, y, row int
+	scratch   []byte
 }
 
 func (r *Renderer) modelTextureFor(f *formats.GAFFrame) modelTextureSlot {
@@ -49,15 +57,19 @@ func (r *Renderer) modelTextureFor(f *formats.GAFFrame) modelTextureSlot {
 		a.row = 0
 	}
 	if a.page == nil || a.y+h+2 > modelTexturePageSize {
-		a.page = r.pages.take(modelTexturePageSize, modelTexturePageSize)
+		a.page = r.pool().take(modelTexturePageSize, modelTexturePageSize)
+		a.pages = append(a.pages, a.page)
 		a.x = 0
 		a.y = 0
 		a.row = 0
 	}
 	s := modelTextureSlot{a.page, a.x + 1, a.y + 1, w, h}
-	op := &ebiten.DrawImageOptions{Blend: ebiten.BlendCopy}
-	op.GeoM.Translate(float64(s.x), float64(s.y))
-	a.page.DrawImage(r.gafImageFor(f), op)
+	// The page's border texels stay as the cleared page left them, as they did
+	// when the frame was drawn in with a copy blend.
+	a.scratch = gafFrameIndexPixels(a.scratch, f)
+	sub := a.page.RecyclableSubImage(image.Rect(s.x, s.y, s.x+w, s.y+h))
+	sub.WritePixels(a.scratch)
+	sub.Recycle()
 	a.x += w + 2
 	if h+2 > a.row {
 		a.row = h + 2

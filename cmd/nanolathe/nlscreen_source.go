@@ -185,7 +185,7 @@ func (s *nlScreen) cardSource(c nlCard) string {
 
 // drawSource is the hero's marker beside the page counter: who set the
 // value, and a way back to the mod's. y is the marker's top.
-func (s *nlScreen) drawSource(screen *ebiten.Image, c nlCard, x, y, a float64) {
+func (s *nlScreen) drawSource(screen *ebiten.Image, c *nlCard, x, y, a float64) {
 	u := s.u()
 	df := s.fonts.Display
 	chip := func(text string, col color.RGBA, lock bool) float64 {
@@ -205,16 +205,16 @@ func (s *nlScreen) drawSource(screen *ebiten.Image, c nlCard, x, y, a float64) {
 		df.Draw(screen, text, tx, r.Y+15.5*u, st)
 		return tw
 	}
-	if s.cardLocked(c) {
+	if s.cardLocked(*c) {
 		chip("Locked by "+s.src.mod, nlAmber, true)
 		return
 	}
-	switch s.cardSource(c) {
+	switch s.cardSource(*c) {
 	case "set":
 		chip("Set by "+s.src.mod, nlGreenText, false)
 	case "changed":
 		w := chip("Changed for "+s.src.mod, nlAmber, false)
-		id := "use-mod-" + c.key
+		id := s.ui.id("use-mod-", c.key, -1, -1)
 		label := "Use " + s.src.mod + "'s"
 		if c.kind != nlGroup {
 			if rec := c.get(&s.src.rec); rec >= 0 && rec < len(c.steps) && c.steps[rec] != "" {
@@ -226,21 +226,21 @@ func (s *nlScreen) drawSource(screen *ebiten.Image, c nlCard, x, y, a float64) {
 		lw := df.Draw(screen, label, lx, y+15.5*u, st)
 		screenkit.Fill(screen, screenkit.Rect{X: lx, Y: y + 19*u, W: lw, H: 1 * u}, alphaC(nlKicker, a))
 		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: lx - 4*u, Y: y, W: lw + 8*u, H: 22 * u}, Click: func() {
-			s.setCard(c, c.get(&s.src.rec))
+			s.setCard(*c, c.get(&s.src.rec))
 		}})
 	}
 }
 
 // drawCardSource tags a carousel card with its marker.
-func (s *nlScreen) drawCardSource(screen *ebiten.Image, c nlCard, r screenkit.Rect, a float64) {
+func (s *nlScreen) drawCardSource(screen *ebiten.Image, c *nlCard, r screenkit.Rect, a float64) {
 	u := s.u()
-	if s.cardLocked(c) {
+	if s.cardLocked(*c) {
 		s.padlock(screen, r.X+r.W-30*u, r.Y+14*u, 14*u, nlAmber, false)
 		return
 	}
 	tag := ""
 	col := nlGreenText
-	switch s.cardSource(c) {
+	switch s.cardSource(*c) {
 	case "set":
 		tag = s.src.mod
 	case "changed":

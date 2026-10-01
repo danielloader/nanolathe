@@ -80,8 +80,8 @@ const modelPlaceParticipants = 6
 // default. order, when set, gives the order the participants claim a frame's
 // jobs in: a permutation of 0..jobs−1.
 type modelPlaceTuning struct {
-	floor, keyCap, paramBound, vertexLimit int
-	order                                  func(jobs int) []int32
+	floor, keyCap, paramBound, vertexLimit, perHelper int
+	order                                             func(jobs int) []int32
 }
 
 func tuned(v, def int) int {
@@ -192,7 +192,7 @@ func (r *Renderer) placeParallel(jobs, packets int) {
 	// jobs only once they are all decided.
 	stream := d.place.order == nil
 	pool := r.modelPlacePool()
-	pool.start(r, d.jobs[:cap(d.jobs)], d.packets[:cap(d.packets)])
+	pool.start(r, d.jobs[:cap(d.jobs)], d.packets[:cap(d.packets)], jobs/tuned(d.place.perHelper, modelPlaceJobsPerHelper))
 	// Step 2: the jobs in the sequential lane's order, allocated and decided,
 	// each published to the participants as it is decided.
 	for _, p := range d.pending {
@@ -432,11 +432,18 @@ func (p *modelPlacePool) serve(w *modelPlaceWorker, wake chan struct{}) {
 	}
 }
 
+// modelPlaceJobsPerHelper is the jobs that justify waking one more helper: a
+// wake costs the placing goroutine a scheduler round trip, often an OS thread
+// wake, so a frame of a few dozen jobs — a settings preview — wakes one
+// helper and a crowded battle every participant. The participant that claims
+// a job places it; how many participate changes no result.
+const modelPlaceJobsPerHelper = 32
+
 // start opens a frame's dispatch over the frame's job and packet storage and
-// wakes the participants. Every participant's context is emptied here, before
-// the wakes: a participant woken too late to claim a job then writes nothing
-// the placing goroutine reads once the jobs are filled.
-func (p *modelPlacePool) start(r *Renderer, jobs []modelPlaceJob, packets []modelPlacePacket) {
+// wakes at most helpers of the participants. Every participant's context is
+// emptied here, before the wakes: a participant woken too late to claim a job
+// then writes nothing the placing goroutine reads once the jobs are filled.
+func (p *modelPlacePool) start(r *Renderer, jobs []modelPlaceJob, packets []modelPlacePacket, helpers int) {
 	for _, w := range p.workers {
 		w.ctx.resetFrame()
 		w.ctx.stats = modelPlaceStats{}
@@ -449,8 +456,9 @@ func (p *modelPlacePool) start(r *Renderer, jobs []modelPlaceJob, packets []mode
 	p.filled.Store(0)
 	p.scatterCursor.Store(0)
 	p.stage.Store(modelPlaceStageFill)
-	p.done.Add(len(p.wake))
-	for _, wake := range p.wake {
+	helpers = max(0, min(helpers, len(p.wake)))
+	p.done.Add(helpers)
+	for _, wake := range p.wake[:helpers] {
 		wake <- struct{}{}
 	}
 }

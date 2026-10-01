@@ -455,7 +455,7 @@ func (r *Renderer) Terrain(c drawlist.Terrain) {
 		endTY = tileMapH - 1
 	}
 	if atlas.cells != nil {
-		atlas.fill(&r.pages, t, c.Detail, scale, tileMapW, startTX, startTY, endTX, endTY)
+		atlas.fill(r.pool(), t, c.Detail, scale, tileMapW, startTX, startTY, endTX, endTY)
 	}
 
 	// One command per atlas page: the page rides source slot 3 of the scene

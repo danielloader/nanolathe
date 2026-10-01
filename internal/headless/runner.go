@@ -88,6 +88,9 @@ type FreshBattleRequest struct {
 	// (docs/DESIGN_SESSIONS_AI_SAVE.md "Modern AI computer player"). The
 	// zero value configures none.
 	AIOverrides session.AIOverrides
+	// SimArt, for a skirmish, is a precompiled authored animation table to
+	// share (session.SkirmishEntryOptions.SimArt); nil compiles one.
+	SimArt *content.SimArt
 }
 
 // FreshBattle is the authoritative result of composition. Presentation owns
@@ -263,7 +266,7 @@ func ComposeFreshBattle(request FreshBattleRequest) (FreshBattle, error) {
 	case ScenarioCampaign:
 		sess, err = session.NewMissionWithEntryOptions(request.FS, request.Catalog, identity, request.Difficulty, request.SimulationSeed, request.CRTSeed, session.MissionEntryOptions{BuilderOptions: request.BuilderOptions, CommunitySources: request.CommunitySources, Gameplay: request.Gameplay, SelectedSide: request.SelectedSide, SelectedSideSet: request.SelectedSideSet, ContentLimits: request.ContentLimits, Mutators: request.Mutators, AIOverrides: request.AIOverrides}, request.Progress)
 	case ScenarioDirectOTA, ScenarioSkirmish, ScenarioSurvival:
-		sess, err = session.NewSkirmishWithEntryOptions(request.FS, request.Catalog, cfg, session.SkirmishEntryOptions{BuilderOptions: request.BuilderOptions, CommunitySources: request.CommunitySources, Progress: request.Progress, ContentLimits: request.ContentLimits, Mutators: request.Mutators, AIOverrides: request.AIOverrides, AutomatedPlayers: request.AutomatedPlayers})
+		sess, err = session.NewSkirmishWithEntryOptions(request.FS, request.Catalog, cfg, session.SkirmishEntryOptions{BuilderOptions: request.BuilderOptions, CommunitySources: request.CommunitySources, Progress: request.Progress, ContentLimits: request.ContentLimits, Mutators: request.Mutators, AIOverrides: request.AIOverrides, AutomatedPlayers: request.AutomatedPlayers, SimArt: request.SimArt})
 	default:
 		err = fmt.Errorf("headless: unsupported fresh battle kind %q", kind)
 	}

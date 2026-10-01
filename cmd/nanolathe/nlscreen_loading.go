@@ -16,6 +16,8 @@ type nlPreviewContent struct {
 	catalogErr  error
 	assetsOnce  sync.Once
 	assets      *client.PreviewModelTextureAssets
+	simArtOnce  sync.Once
+	simArt      *content.SimArt
 }
 
 // nlPreviewCatalog is the settings screen's immutable authored catalog seam.
@@ -30,6 +32,19 @@ func (c *contentSet) nlPreviewCatalog() (*content.Catalog, error) {
 		c.preview.catalog, c.preview.catalogErr = c.compileCatalog(nil)
 	})
 	return c.preview.catalog, c.preview.catalogErr
+}
+
+// nlPreviewSimArt is the authored animation table every settings scene's
+// battle composes with: compiled once per content set from its VFS and
+// authored catalog instead of once per staged scene, where reading every
+// feature bank in the catalog was about half of a scene's staging. It depends
+// only on the files and the feature definitions, which neither rules nor
+// mutators change (session.SkirmishEntryOptions.SimArt).
+func (c *contentSet) nlPreviewSimArt(cat *content.Catalog) *content.SimArt {
+	c.preview.simArtOnce.Do(func() {
+		c.preview.simArt = content.CompileSimArt(c.fs, cat)
+	})
+	return c.preview.simArt
 }
 
 func (c *contentSet) nlPreviewModelAssets() *client.PreviewModelTextureAssets {

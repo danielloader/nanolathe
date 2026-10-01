@@ -4,7 +4,6 @@ import (
 	"image"
 	"image/color"
 	"math"
-	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/formats"
@@ -21,11 +20,15 @@ import (
 // from the base install so a mod that repaints the front end cannot move the
 // letters (docs/DESIGN_MODS_MUTATORS.md §8.2).
 type nlArt struct {
-	wordmark     *ebiten.Image // nil when the title backdrops are missing
-	frame        *ebiten.Image // riveted well, nine-sliced at edge nlFrameEdge
-	texture      *ebiten.Image
+	wordmark *ebiten.Image // nil when the title backdrops are missing
+	frame    *ebiten.Image // riveted well, nine-sliced at edge nlFrameEdge
+	texture  *ebiten.Image
+	// The running content's unit pictures by name (a nil value: none), the
+	// content they belong to, and its loader and names (nlscreen_ui_pics.go).
 	pics         map[string]*ebiten.Image
-	fs           vfs.FSOps
+	cs           *contentSet
+	loader       *nlPictures
+	names        *nlPicNames
 	buttons      *formats.GAFEntry
 	buttonPal    *palette.Tables
 	buttonImages map[*formats.GAFFrame]*ebiten.Image
@@ -53,8 +56,8 @@ var nlTitleGlyphs = map[rune]nlTitleGlyph{
 	'E': {"optinterface4x", 316, 326, 27},
 }
 
-func loadNLArt(base, content vfs.FSOps) *nlArt {
-	art := &nlArt{pics: map[string]*ebiten.Image{}, fs: content, buttonImages: map[*formats.GAFFrame]*ebiten.Image{}}
+func loadNLArt(base vfs.FSOps) *nlArt {
+	art := &nlArt{pics: map[string]*ebiten.Image{}, buttonImages: map[*formats.GAFFrame]*ebiten.Image{}}
 	if base != nil {
 		if g, err := formats.LoadGAFFile(base, "anims/commongui.gaf"); err == nil {
 			art.buttons, _ = g.Find("BUTTONS0")
@@ -83,28 +86,6 @@ func loadNLArt(base, content vfs.FSOps) *nlArt {
 		art.texture = ebiten.NewImageFromImage(mirrorTile(pcxRegion(p, image.Rect(260, 70, 420, 230))))
 	}
 	return art
-}
-
-// pic is a unit picture by name, cached; nil when the content has none.
-func (a *nlArt) pic(names ...string) *ebiten.Image {
-	for _, name := range names {
-		key := strings.ToLower(name)
-		if img, ok := a.pics[key]; ok {
-			if img != nil {
-				return img
-			}
-			continue
-		}
-		p, err := formats.LoadPCXFile(a.fs, "unitpics/"+key+".pcx")
-		if err != nil {
-			a.pics[key] = nil
-			continue
-		}
-		img := ebiten.NewImageFromImage(pcxRegion(p, image.Rect(0, 0, int(p.Width), int(p.Height))))
-		a.pics[key] = img
-		return img
-	}
-	return nil
 }
 
 func pcxRegion(p *formats.PCX, r image.Rectangle) *image.RGBA {

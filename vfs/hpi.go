@@ -555,35 +555,119 @@ func (a *Archive) readRecordRange(record hpiRecord, offset int64, length int) ([
 
 // decodeChunk reads and decodes one SQSH chunk. expectedOutput is the record
 // chunk span: 64 KiB for every non-final chunk and the record remainder for
-// the final chunk [02 §2]. Reading the fixed header first validates the
-// payload metadata before its file-backed bytes are streamed.
+// the final chunk [02 §2]. The header's fields are validated before anything
+// is decoded.
+//
+// A chunk of plausible size is read whole, header and payload, in one read,
+// and its checksum, payload transform and decoding all work from that buffer.
+// Streamed instead, a chunk cost about ten reads — the checksum pass, then the
+// decoder pulling its payload in 4 KiB pieces — and loading a battle's art
+// spends most of its time in those system calls.
 func (a *Archive) decodeChunk(index, position, storedSize, expectedOutput uint64) ([]byte, error) {
 	if storedSize < hpiChunkHeaderSize {
 		return nil, fmt.Errorf("%w: chunk %d size", ErrMalformedArchive, index)
 	}
+	if storedSize > hpiChunkReadLimit {
+		return a.decodeChunkStreamed(index, position, storedSize, expectedOutput)
+	}
+	buffer := chunkBuffers.Get().(*[]byte)
+	defer chunkBuffers.Put(buffer)
+	chunk := (*buffer)[:storedSize]
+	if err := a.readArchiveBytes(position, chunk); err != nil {
+		return nil, err
+	}
+	header := chunk[:hpiChunkHeaderSize]
+	method, payloadSize, decompressedSize, err := chunkHeader(index, header, storedSize, expectedOutput)
+	if err != nil {
+		return nil, err
+	}
+	payload := chunk[hpiChunkHeaderSize:]
+	var sum uint32
+	for _, value := range payload {
+		sum += uint32(value)
+	}
+	if a.options.VerifyChecksums && sum != binary.LittleEndian.Uint32(header[15:19]) {
+		return nil, fmt.Errorf("%w: chunk %d checksum", ErrMalformedArchive, index)
+	}
+	if header[6] != 0 {
+		unscramble(payload, 0)
+	}
+	source := bytes.NewReader(payload[:payloadSize])
+	var decoded []byte
+	switch method {
+	case 1:
+		decoded, err = decodeLZ77(source, decompressedSize)
+	case 2:
+		decoded, err = decodeZlib(source, decompressedSize)
+	}
+	return checkDecoded(index, decoded, decompressedSize, err)
+}
+
+// hpiChunkReadLimit bounds a chunk read whole: a full 64 KiB chunk that its
+// encoder failed to shrink, with room to spare. A larger stored size is not
+// one retail writes; it is streamed rather than buffered.
+const hpiChunkReadLimit = 2*hpiChunkSize + hpiChunkHeaderSize
+
+// chunkBuffers keeps whole-chunk read buffers for reuse across archives and
+// goroutines.
+var chunkBuffers = sync.Pool{New: func() any {
+	b := make([]byte, hpiChunkReadLimit)
+	return &b
+}}
+
+// chunkHeader validates a chunk header against its table entry [02 §2]: the
+// marker, the payload size the entry implies and the decompressed span. The
+// chunk header selects the decoder; retail does not require it to match the
+// record's compression byte, so dispatch is on the chunk alone.
+func chunkHeader(index uint64, header []byte, storedSize, expectedOutput uint64) (method byte, payloadSize, decompressedSize uint64, err error) {
+	if string(header[0:4]) != "SQSH" {
+		return 0, 0, 0, fmt.Errorf("%w: chunk %d marker", ErrMalformedArchive, index)
+	}
+	payloadSize = uint64(binary.LittleEndian.Uint32(header[7:11]))
+	decompressedSize = uint64(binary.LittleEndian.Uint32(header[11:15]))
+	if payloadSize != storedSize-hpiChunkHeaderSize || decompressedSize != expectedOutput {
+		return 0, 0, 0, fmt.Errorf("%w: chunk %d size fields", ErrMalformedArchive, index)
+	}
+	return header[5], payloadSize, decompressedSize, nil
+}
+
+func checkDecoded(index uint64, decoded []byte, decompressedSize uint64, err error) ([]byte, error) {
+	if err != nil {
+		return nil, fmt.Errorf("%w: chunk %d: %v", ErrMalformedArchive, index, err)
+	}
+	if uint64(len(decoded)) != decompressedSize {
+		return nil, fmt.Errorf("%w: chunk %d output size", ErrMalformedArchive, index)
+	}
+	return decoded, nil
+}
+
+// unscramble reverses the SQSH payload transform over data, the payload's
+// bytes from index on.
+func unscramble(data []byte, index uint64) {
+	for i := range data {
+		position := index + uint64(i)
+		data[i] = byte(uint16(data[i])-uint16(position)) ^ byte(position)
+	}
+}
+
+// decodeChunkStreamed is decodeChunk for a chunk too large to buffer whole:
+// the header first, then the payload streamed twice, for its checksum and to
+// the decoder.
+func (a *Archive) decodeChunkStreamed(index, position, storedSize, expectedOutput uint64) ([]byte, error) {
 	header := make([]byte, hpiChunkHeaderSize)
 	if err := a.readArchiveBytes(position, header); err != nil {
 		return nil, err
 	}
-	if string(header[0:4]) != "SQSH" {
-		return nil, fmt.Errorf("%w: chunk %d marker", ErrMalformedArchive, index)
-	}
-	method := header[5]
-	// [02 §2]: the chunk header selects the actual decoder and retail does
-	// not require the two method numbers to match, so no equality check
-	// against the record's compression byte — dispatch on the chunk alone.
-	payloadSize := uint64(binary.LittleEndian.Uint32(header[7:11]))
-	decompressedSize := uint64(binary.LittleEndian.Uint32(header[11:15]))
-	checksum := binary.LittleEndian.Uint32(header[15:19])
-	if payloadSize != storedSize-hpiChunkHeaderSize || decompressedSize != expectedOutput {
-		return nil, fmt.Errorf("%w: chunk %d size fields", ErrMalformedArchive, index)
+	method, payloadSize, decompressedSize, err := chunkHeader(index, header, storedSize, expectedOutput)
+	if err != nil {
+		return nil, err
 	}
 	payloadOffset := position + hpiChunkHeaderSize
 	sum, err := a.checksumPayload(payloadOffset, payloadSize)
 	if err != nil {
 		return nil, fmt.Errorf("%w: chunk %d checksum payload: %v", ErrMalformedArchive, index, err)
 	}
-	if a.options.VerifyChecksums && sum != checksum {
+	if a.options.VerifyChecksums && sum != binary.LittleEndian.Uint32(header[15:19]) {
 		return nil, fmt.Errorf("%w: chunk %d checksum", ErrMalformedArchive, index)
 	}
 	payload := &archivePayloadReader{archive: a, offset: payloadOffset, remaining: payloadSize, encoded: header[6] != 0}
@@ -594,13 +678,7 @@ func (a *Archive) decodeChunk(index, position, storedSize, expectedOutput uint64
 	case 2:
 		decoded, err = decodeZlib(payload, decompressedSize)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: chunk %d: %v", ErrMalformedArchive, index, err)
-	}
-	if uint64(len(decoded)) != decompressedSize {
-		return nil, fmt.Errorf("%w: chunk %d output size", ErrMalformedArchive, index)
-	}
-	return decoded, nil
+	return checkDecoded(index, decoded, decompressedSize, err)
 }
 
 // archivePayloadReader reads a chunk payload in bounded pieces. The checksum
@@ -625,10 +703,7 @@ func (r *archivePayloadReader) Read(data []byte) (int, error) {
 		return 0, err
 	}
 	if r.encoded {
-		for i := range data {
-			position := r.index + uint64(i)
-			data[i] = byte(uint16(data[i])-uint16(position)) ^ byte(position)
-		}
+		unscramble(data, r.index)
 	}
 	r.offset += uint64(len(data))
 	r.remaining -= uint64(len(data))

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image/color"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
@@ -275,5 +276,33 @@ func TestStrategicIconDuplicateRecordAuthoredFallback(t *testing.T) {
 	b, _ = c.Lookup("same", 2)
 	if a.Level != 0 || b.Level != 3 {
 		t.Fatal("retained duplicate inherited the named record's reachable route")
+	}
+}
+
+// Two catalogs whose units resolve to the same art keys — a battle's mutated
+// clone and its authored catalog, say — share one atlas, and it is the atlas
+// a fresh draw makes: the art is a function of the key alone.
+func TestStrategicIconAtlasIsSharedByArtKeys(t *testing.T) {
+	first := NewStrategicIconCatalog(iconTestCatalog(iconUnit("a", "TANK LEVEL2", 1), iconUnit("b", "KBOT LEVEL3", 2)))
+	second := NewStrategicIconCatalog(iconTestCatalog(iconUnit("b", "KBOT LEVEL3", 2), iconUnit("a", "TANK LEVEL2", 1)))
+	a, _ := first.Lookup("a", 1)
+	b, _ := second.Lookup("a", 1)
+	if a.Atlas == nil || a.Atlas != b.Atlas || a.Rect != b.Rect {
+		t.Fatal("catalogs with the same art keys drew separate atlases")
+	}
+	art := []StrategicIconDescriptor{first.fallback}
+	unique := map[string]StrategicIconDescriptor{strategicArtKey(first.fallback): first.fallback}
+	for _, e := range first.entries {
+		art = append(art, e.Descriptor)
+		unique[strategicArtKey(e.Descriptor)] = e.Descriptor
+	}
+	keys := make([]string, 0, len(unique))
+	for k := range unique {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	fresh, _ := drawStrategicIconAtlas(keys, unique)
+	if shared, _ := makeStrategicIconAtlas(art); shared != a.Atlas || !bytes.Equal(fresh.Pixels, shared.Pixels) {
+		t.Fatal("the shared atlas is not the one a fresh draw makes")
 	}
 }

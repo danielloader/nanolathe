@@ -84,7 +84,7 @@ func TestSparseTerrainAtlasPlacesVisibleTilesOnce(t *testing.T) {
 	if a == nil || a.cells == nil || a.filled != 0 || len(a.pages) != 0 {
 		t.Fatal("a sparse atlas did not start empty")
 	}
-	a.fill(&r.pages, terrain, detail, camera.ViewScaleDetail, 8, 0, 0, 1, 1)
+	a.fill(r.pool(), terrain, detail, camera.ViewScaleDetail, 8, 0, 0, 1, 1)
 	seen := map[int]bool{}
 	for ty := 0; ty <= 1; ty++ {
 		for tx := 0; tx <= 1; tx++ {
@@ -99,7 +99,7 @@ func TestSparseTerrainAtlasPlacesVisibleTilesOnce(t *testing.T) {
 		t.Fatalf("filled %d cells on %d pages for %d distinct visible tiles", a.filled, len(a.pages), len(seen))
 	}
 	before := a.filled
-	a.fill(&r.pages, terrain, detail, camera.ViewScaleDetail, 8, 0, 0, 1, 1)
+	a.fill(r.pool(), terrain, detail, camera.ViewScaleDetail, 8, 0, 0, 1, 1)
 	if a.filled != before {
 		t.Fatal("a tile already placed was placed again")
 	}

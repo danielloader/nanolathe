@@ -3870,19 +3870,50 @@ the menu as a fresh press. `internal/platform/screenkit` holds its toolkit:
 the film typefaces' glyphs as mip levels, paint helpers and hit regions. It
 is a platform package, allowed to import Ebitengine.
 
-**Control shape reuse.** The full animated background is retained. Small
-antialiased control discs, rings and lines reuse the existing vector painter's
-rasterization after the same shape recurs. Exact float32 geometry, including
-absolute fractional position, and RGBA colour identify a stamp. Both one-use
-history and stamps share a 256-entry limit; retained stamp pixel payload is
-limited to 4 MiB and each side to 128 pixels. Larger or unsupported geometry
-keeps the existing vector route. Construction and use stay on the game
-goroutine. Integer placement preserves the source pixel grid and destination
-clipping; an extra RGBA blend can introduce rounding. Native coverage fixtures
-review fractional, clipped, translucent and overlapping controls against direct
-painting, with at most one 8-bit channel level of difference in those fixtures.
-This is Nanolathe host presentation policy, user-authorized 2026-09-30, and
-changes no battle pixels, pacing or simulation state.
+**Control shapes.** The full animated background is retained. Control discs,
+rings, strokes and convex polygons draw through one shader
+(`screenkit/shape_draw.go`) that computes each pixel's antialiased coverage
+analytically, as the fraction of the pixel square [x, x+1)×[y, y+1) inside the
+shape. A disc of radius up to 8 takes its exact area in the pixel; a larger disc
+treats its edge as straight across the pixel at the radius √(r²−1/12). A ring is
+its outer disc less its inner. A butt-capped stroke is the product of exact
+box-filtered slabs along and across its segment, and a polygon the product of
+its edges' exact box-filtered half-planes. Shape-local coordinates, kind and
+parameters travel in vertex attributes, so no shader uniform varies and
+consecutive shapes merge into one draw command however they animate; nothing is
+cached. Previously Ebitengine's antialiased vector path rasterized each shape
+through stencil passes, and every animated lamp — the hero's slide-in, hover
+fades, the staging blinkers — paid that cost: a page switch froze the screen for
+up to 615 ms on an M3 Pro, now at most 15 ms. Geometry follows the vector
+painter's conventions, with a stroke's width centred on its segment or radius.
+Disc, Ring and Line keep its reading of their colour as alpha-premultiplied;
+Poly keeps straight alpha. Degenerate input (non-positive size, non-finite
+coordinates, or coordinates beyond float32's integer range) draws nothing. The
+program compiles on first use, and construction and drawing stay on the game
+goroutine. A hidden native fixture compares fractional, clipped, translucent and
+overlapping controls with the vector painter: pixels clear of an edge blend
+identically, edge pixels differ only by antialiasing method, and every shape's
+total coverage stays within 2% of its area (5% for sub-pixel shapes). This is
+Nanolathe host presentation policy, user-authorized 2026-09-30, and changes no
+battle pixels, pacing or simulation state.
+
+**Frame work and pictures.** The screen builds its page catalogue once and
+rebuilds it only when the installed mods' names or versions change: they are the
+one value its builders capture; every other value is read by the cards when they
+run. Each frame reads the shell's live state once, for the Apply count and the
+cards' changed lamps. A worker goroutine for each content set resolves the unit
+pictures — card portraits, mutator examples and the sidebar demonstration's
+products — through the content roster and decodes them. It starts once the
+screen's catalog has compiled, normally while the main menu idles. The game
+goroutine only uploads decoded pixels and never waits for a decode. A picture
+not yet decoded draws nothing that frame, and a later name never stands in for
+an earlier one still being read. The worker stops, and the game goroutine waits
+for the file in hand, before anything that can close the content's archives: a
+content switch, closing the screen, leaving the main menu, or a window opened
+over it. The display's device scale is read at most four times a second, or
+when the canvas size changes, and the host's own layout reads it likewise.
+Hit-region names, labels, counts and wrapped paragraphs are kept rather than
+rebuilt every frame. This is host presentation policy and changes nothing drawn.
 
 **Layout.** One unit is `min(height/900, width/1560)` pixels, so a 4:3
 window keeps the header on one line. A tab row (*Game*, *Mutators*,
@@ -3927,9 +3958,18 @@ and the snap-override key.
 the game goroutine the way the film route stages its shots
 ([FILM_CAPTURE](FILM_CAPTURE.md)) and stepped at 30 Hz with its own client
 and renderer; it is never saved, networked or seen by the window's battle.
-Ordinary backgrounds refresh at 30 FPS, while controls, animation and the cursor
-keep the host's display cadence. The Frame rate card overrides that background
-budget with its selected value, including Display's uncapped value. Both compare
+The background repaints at the draft's own Enhanced frame rate — the rate a
+battle would present at — and the Frame rate card shows its selected value,
+including Display; controls, animation and the cursor keep the host's display
+cadence. A repaint lands on a whole number of display refreshes, its stride
+(`nlCadence`): the preferred rate rounded to the median measured refresh (60 on
+a 144 Hz display repaints every second refresh), slowed while the smoothed CPU
+cost of a repaint exceeds 35% of a refresh, and slowed one refresh further for
+each 90-frame verdict in which more than a tenth of the display frames arrived
+over one and a half refreshes late — a GPU or host that cannot keep up — until
+three calm verdicts in a row give it back. A repaint never falls below 30 a
+second. Loading, arrival and the fade-in measure the refresh but do not vote.
+Before this, ordinary backgrounds repainted at a fixed 30 FPS. Both compare
 pictures refresh together; scene activation, a missing compare picture and an
 edit to either picture's render parameters bypass the cadence. During an
 outstanding scene load the previous picture holds and both its simulations and
@@ -4084,10 +4124,18 @@ The renderer keeps its surfaces, layers, raster
 pages and recycled source pages across the reset (DESIGN_GPU_RENDERER §2.3
 "Source lifetime"), and fills its terrain atlas on demand (DESIGN_GPU_RENDERER
 §14.8), so a scene change uploads the few
-hundred tiles in view and allocates almost no device memory. Measured on an M3
-Pro, a scene's first picture fell from 100–485 ms of frozen frames (scene draw
-plus the backend's wait) to about 25–100 ms; shared programs matter most where
-the backend compiles slowly (Direct3D). Nanolathe host presentation policy.
+hundred tiles in view and allocates almost no device memory. Every renderer the
+screen makes draws through one `gpurender.SharedPages` set — the model lane's
+4096² planes and the recycled source pages — since they execute one after
+another on the UI goroutine: a new card size or the first compare no longer
+allocates its own planes, and an evicted renderer's pages return to the set.
+Measured on an M3 Pro, a scene's first picture fell from 100–485 ms of frozen
+frames (scene draw plus the backend's wait) to about 25–100 ms with the kept
+renderers, and then to 15–37 ms on a renderer the screen already holds and
+30–58 ms for one it makes (the first compare, the smaller card) once model
+textures were written into their page, every recycled page actually returned to
+the pool and the planes shared; shared programs matter most where the backend
+compiles slowly (Direct3D). Nanolathe host presentation policy.
 
 **Content reuse and asset scope.** A content set compiles the settings screen's
 authored catalog once. Each scene composes from its own clone, including an
@@ -4103,9 +4151,15 @@ ghosts. Only those models and their linked projectile/corpse/successor assets ar
 prepared, along with the terrain's admitted features and independent scene
 weapons such as meteors. Ordinary battle entry keeps full preparation. Texture
 banks still use the complete namespace to preserve entry precedence; authoritative
-terrain, simulation-art metadata, HUD art and detail synthesis retain their
-existing loading paths. This scope reduces repeated catalog and art work without
-cropping the simulation map or moving file reads into a simulation tick.
+terrain, HUD art and detail synthesis retain their existing loading paths. This
+scope reduces repeated catalog and art work without cropping the simulation map
+or moving file reads into a simulation tick. The authored animation table (`content.SimArt`), which depends only on the
+files and the feature definitions, is compiled once per content set and handed
+to every scene's battle entry (`session.SkirmishEntryOptions.SimArt`) rather
+than compiled from every feature bank per scene, about half of a scene's
+staging before. The generated strategic icon atlas is a function of the icons'
+art keys alone and is drawn once per key set (`internal/client`), although each
+scene's catalog is a fresh clone.
 
 **Input and persistence.** A grouped-effects wheel changes only the selected row
 and stops at its endpoints. Controls wheel scrolling survives redraw; keyboard

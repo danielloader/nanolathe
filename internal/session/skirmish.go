@@ -581,6 +581,13 @@ type SkirmishEntryOptions struct {
 	// (docs/DESIGN_SESSIONS_AI_SAVE.md "Modern AI computer player"). The
 	// zero value configures none.
 	AIOverrides AIOverrides
+	// SimArt is the authored animation table content.CompileSimArt builds
+	// from this entry's VFS and catalog, when the caller already holds one: it
+	// depends only on the files and the feature definitions, which neither
+	// rules nor mutators change, and is never written after compilation, so
+	// battles over one content set may share it. Nil compiles it at
+	// composition, as every battle entry otherwise does.
+	SimArt *content.SimArt
 }
 
 // NewSkirmishWithProgress is NewSkirmishWithEntryOptions with only a load
@@ -694,6 +701,7 @@ func NewSkirmishWithEntryOptions(fs vfs.FSOps, cat *content.Catalog, cfg Skirmis
 		World:            terrain,
 		Mission:          m,
 		Skirmish:         cfg,
+		simArt:           options.SimArt,
 		Clock:            &clock.State{Requested: 10, Active: 10},
 		Snapshot:         frame.NewBuffer(),
 		Units:            unitsWorld,

@@ -36,7 +36,9 @@ func checkSourceLifecycleDevicePixels() error {
 	after := make([]byte, len(before))
 	img.ReadPixels(before)
 	expected := counts()
-	if expected[0] != 1 || expected[1] == 0 || expected[2] == 0 || expected[3] == 0 {
+	// Model textures are written into the shared page, so only an oversized
+	// frame would hold a standalone image (expected[1]).
+	if expected[0] != 1 || expected[2] == 0 || expected[3] == 0 {
 		return fmt.Errorf("source lifecycle fixture did not populate caches: %v", expected)
 	}
 	shader, output := r.scene2D, r.surfaces[0]

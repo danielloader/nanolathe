@@ -182,6 +182,7 @@ func recordParallelFrames(t *testing.T, workers, frames int) []uint64 {
 	c.recordModelGeometry = true
 	c.parallelRecord = true
 	c.recordPool = newRecordPool(workers)
+	c.recordPool.wakeAll = true
 	defer c.recordPool.close()
 
 	out := make([]uint64, 0, frames)

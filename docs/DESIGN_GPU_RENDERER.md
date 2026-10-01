@@ -340,24 +340,46 @@ retain their caches.
 
 Device images that hold nothing between frames also survive: the model lane's
 4096² key and colour pages and the water reflection planes, each cleared
-before every use. Fixed-size source pages — the scene atlas's shared 2048²
-pages, the model texture page and the pages of a terrain atlas filled on demand
-(§14.8) — go to a pool of up to 128 MiB (`page_pool.go`) and come back cleared
-to the next generation's packers. On unified memory every fresh texture is
-wired before the first frame that uses it can start: a settings-preview scene
-change measured about 100 ms of driver wiring on an M3 Pro, 56 ms of it for the
-model lane's three 64 MiB planes, inside one frame. With these kept, a new
-battle or preview scene packs into memory the renderer already holds.
+before every use, and the flash disc page with its staging bytes, whose
+frames are keyed by generated table and frame and rewrite their region and
+border before upload. Fixed-size source pages — the scene atlas's shared 2048²
+pages, every model texture page and the pages of a terrain atlas filled on
+demand (§14.8) — and the water mask, replaced wholesale per map, go to a pool
+of up to 128 MiB (`page_pool.go`) and come back cleared to whoever asks for
+that size next. A 3DO texture frame is written straight into its model texture
+page region; only a frame too large for a page keeps a standalone texture. On
+unified memory every fresh texture is wired before the first frame that uses
+it can start: a settings-preview scene change measured about 100 ms of driver
+wiring on an M3 Pro, 56 ms of it for the model lane's three 64 MiB planes,
+inside one frame, and a standalone texture per model texture frame added
+about 150 small allocations to every scene's first frame. With these kept, a
+new battle or preview scene packs into memory the renderer already holds.
+
+**Shared pages.** Renderers that execute one after another on one goroutine
+may draw through one `SharedPages` set (`shared_pages.go`): the model lane's
+page planes and the page pool. Every `Execute` clears the model page rows it
+uses and finishes reading them before it returns, and the pool hands a page to
+one owner at a time, so the device order Ebitengine keeps is all sharing
+needs. The settings screen attaches one set to all of its preview renderers,
+so a renderer made for a new card size or the first compare does not allocate
+its own 128 MiB of planes, and the compare twin packs into pages the primary
+retired (DESIGN_INTERFACE_HUD_INPUT §3.17). A device fixture interleaves two
+renderers sharing a set across resets and compares every frame with an
+unshared renderer's. Renderers that may execute concurrently must not share a
+set; a battle's renderer has its own.
 
 **Shared programs.** Every Kage program the package compiles goes through one
 process-wide table keyed by its source text (`shader_cache.go`). Programs are
 immutable and no renderer deallocates one, so a second renderer — each
 settings-screen preview scene, its compare twin, a film or capture — reuses
 the first one's programs. The backend compiles a new program on the render
-thread inside a frame: Direct3D's compiler costs tens of milliseconds a pixel
-shader, and a renderer carries about thirty, so building one renderer per
-preview scene froze the settings screen for seconds on Windows at every scene
-change. A source that fails to compile keeps its error, so `NewChecked`
+thread inside a frame, and a renderer carries about thirty. Ebitengine's
+Direct3D backend runs `D3DCompile` at optimization level 3 for every new pixel
+shader and caches only vertex shaders, so a renderer per preview scene paid
+the whole set at every scene change on Windows; the per-program cost there is
+expected to be tens of milliseconds but has not been measured on Windows. On an
+M3 Pro (Metal) the worst scene-change freeze fell from 485 to 168 ms with this
+change alone. A source that fails to compile keeps its error, so `NewChecked`
 reports it for every renderer. This is host resource sharing; no pixel changes.
 
 #### On-demand effect uploads
@@ -1968,7 +1990,12 @@ strategic-view, carrier-link and model-name gates, resolved once so both passes
 read one slot array. Each job computes the unit's geometry pair into a slot
 indexed by that unit's position in the committed unit slice. Participants take
 jobs from a shared cursor, because per-unit cost varies by an order of magnitude
-and a shared cursor balances better than a fixed stripe.
+and a shared cursor balances better than a fixed stripe. A dispatch wakes only
+the workers its work warrants — one per 32 jobs (`recordUnitsPerHelper`),
+one per chunk past the first for the blend below — because every wake is a scheduler signal and a thread that spins
+looking for work: a settings-screen preview with a few dozen units woke the
+whole pool several times a frame for work the recording goroutine finishes
+alone. Which participant takes a job never reaches the output.
 
 **The blend rides the same pool.** The interpolated view of §13.5 blends every
 unit of the battle, not only the ones in view, and each unit's blend reads its
@@ -4729,8 +4756,10 @@ appends cannot interact:
   only by a shift;
 - at least 32 jobs, a timing floor.
 
-The placing goroutine then wakes the pool and runs the pre-pass, allocating and
-deciding the jobs in the sequential order and publishing each as it is decided;
+The placing goroutine then wakes one helper per 32 jobs
+(`modelPlaceJobsPerHelper`), at most the pool, and runs the pre-pass,
+allocating and deciding the jobs in the sequential order and publishing each
+as it is decided;
 the participants fill published jobs as they appear, claimed from a shared
 cursor, each into its own context, so the fill runs beside the pre-pass. A
 sequential layout lays the jobs' output end to end in job order, joining a job's

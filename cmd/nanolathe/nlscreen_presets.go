@@ -308,7 +308,7 @@ func (s *nlScreen) drawPresets(screen *ebiten.Image) {
 		i := s.presetTop + row
 		e := entries[i]
 		rr := screenkit.Rect{X: list.X + 6*u, Y: list.Y + 6*u + float64(row)*rowH, W: list.W - 12*u, H: rowH - 4*u}
-		id := fmt.Sprintf("preset-%d", i)
+		id := s.ui.id("preset", "", i, -1)
 		if i == s.presetSel {
 			screenkit.HGradient(screen, rr, color.RGBA{40, 100, 44, 220}, color.RGBA{16, 30, 16, 120})
 			screenkit.Outline(screen, rr, 1.5*u, color.RGBA{255, 227, 138, 255})
@@ -333,13 +333,17 @@ func (s *nlScreen) drawPresets(screen *ebiten.Image) {
 	py += 26 * u
 	for i, sc := range nlPresetScopes {
 		br := screenkit.Rect{X: px, Y: py, W: 320 * u, H: 38 * u}
-		id := fmt.Sprintf("preset-scope-%d", i)
+		id := s.ui.id("preset-scope", "", i, -1)
 		on := s.presetScopes[i]
 		screenkit.Fill(screen, br, color.RGBA{14, 16, 12, 220})
 		if on {
 			screenkit.HGradient(screen, br, color.RGBA{40, 100, 44, 220}, color.RGBA{14, 30, 16, 180})
 		}
-		screenkit.Outline(screen, br, 1.5*u, map[bool]color.RGBA{false: {70, 70, 60, 255}, true: {255, 227, 138, 255}}[on])
+		edge := color.RGBA{70, 70, 60, 255}
+		if on {
+			edge = color.RGBA{255, 227, 138, 255}
+		}
+		screenkit.Outline(screen, br, 1.5*u, edge)
 		s.lamp(screen, br.X+18*u, br.Y+br.H/2, 6*u, nlGreen, on)
 		bf.Draw(screen, sc.label, br.X+36*u, br.Y+br.H/2+5*u, screenkit.Style{Size: 13 * u, Top: nlCream})
 		s.hits.Add(screenkit.Region{ID: id, Rect: br, Click: func() { s.presetScopes[i] = !s.presetScopes[i] }})

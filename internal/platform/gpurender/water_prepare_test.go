@@ -108,14 +108,15 @@ func TestPreparedWaterMaskReusesMatchingDrawsAndRetiresSources(t *testing.T) {
 	}
 
 	// A freshly loaded copy is a new source even when all of its bytes match.
+	// Its mask is written wholesale into the pooled page of the same size, so
+	// the source, not the image, is what changes.
 	r.PrepareWaterMask(BuildWaterMask(second))
-	secondMask := r.water.mask
-	if secondMask == nil || secondMask == firstMask || r.water.source != second {
-		t.Fatal("different terrain identity reused the previous prepared image")
+	if r.water.mask == nil || r.water.source != second || len(r.pages.free) != 0 {
+		t.Fatal("different terrain identity kept the previous source or did not reuse its page")
 	}
 	r.prepareWater(record)
-	if r.water.source != first || r.water.mask == nil || r.water.mask == secondMask {
-		t.Fatal("a draw for another terrain reused the prepared source's mask")
+	if r.water.source != first || r.water.mask == nil {
+		t.Fatal("a draw for another terrain kept the prepared source")
 	}
 	lazyMask := r.water.mask
 	r.PrepareWaterMask(prepared)
@@ -128,8 +129,8 @@ func TestPreparedWaterMaskReusesMatchingDrawsAndRetiresSources(t *testing.T) {
 		released[img]++
 		img.Deallocate()
 	})
-	if released[lazyMask] != 1 || len(released) != 1 || r.water.mask != nil || r.water.source != nil || r.water.w != 0 || r.water.h != 0 || r.water.step != 0 || r.water.blocks != nil || r.water.blockW != 0 || r.water.blockH != 0 || r.water.record.Terrain != nil {
-		t.Fatal("source reset retained the prepared generation or failed to retire its image once")
+	if released[lazyMask] != 0 || len(released) != 0 || len(r.pages.free) != 1 || r.pages.free[0] != lazyMask || r.water.mask != nil || r.water.source != nil || r.water.w != 0 || r.water.h != 0 || r.water.step != 0 || r.water.blocks != nil || r.water.blockW != 0 || r.water.blockH != 0 || r.water.record.Terrain != nil {
+		t.Fatal("source reset retained the prepared generation or did not pool its image")
 	}
 }
 

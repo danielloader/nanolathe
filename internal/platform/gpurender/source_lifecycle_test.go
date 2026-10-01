@@ -37,8 +37,11 @@ func TestLifecycleResetSourcesReleasesBattleResources(t *testing.T) {
 	r.surfaceCache[0] = surfaceUpload{identity: 8, entry: sceneEntry{ok: true}}
 	released := map[*ebiten.Image]int{}
 	r.resetSources(func(img *ebiten.Image) { released[img]++ })
-	if released[tile] != 1 || released[shared] != 1 || released[flash] != 1 || released[groupKey] != 1 || released[groupColour] != 1 || len(released) != 5 {
+	if released[tile] != 1 || released[shared] != 1 || released[groupKey] != 1 || released[groupColour] != 1 || len(released) != 4 {
 		t.Fatalf("shared source release counts=%v", released)
+	}
+	if r.sched.flash.img != flash || released[flash] != 0 || r.sched.flash.regions != nil {
+		t.Fatal("source reset released the flash disc page or kept the old generation's placements")
 	}
 	if len(r.tileAtlases) != 0 || len(r.gafImages) != 0 || len(r.scene.pages) != 0 || len(r.scene.frames) != 0 || len(r.scene.pcx) != 0 || len(r.scene.fonts) != 0 || len(r.textureAtlas.slots) != 0 {
 		t.Fatal("previous battle source identities retained")
@@ -64,4 +67,32 @@ func TestLifecycleResetSourcesReleasesBattleResources(t *testing.T) {
 		t.Fatal("source reset changed renderer configuration")
 	}
 	r.resetSources(func(img *ebiten.Image) { t.Fatal("empty reset released an already retired image") })
+}
+
+// The model texture pages and the water mask go back to the pool, not to the
+// device: every page the texture atlas filled, although each in-page slot
+// names its page, while an oversized frame's standalone texture is released.
+func TestResetSourcesPoolsTexturePagesAndWaterMask(t *testing.T) {
+	full, open, alone, mask := &ebiten.Image{}, &ebiten.Image{}, &ebiten.Image{}, &ebiten.Image{}
+	a, b, c := &formats.GAFFrame{}, &formats.GAFFrame{}, &formats.GAFFrame{}
+	r := &Renderer{
+		gafImages: map[*formats.GAFFrame]*ebiten.Image{c: alone},
+		textureAtlas: modelTextureAtlas{
+			slots: map[*formats.GAFFrame]modelTextureSlot{a: {img: full}, b: {img: open}, c: {img: alone}},
+			page:  open, pages: []*ebiten.Image{full, open},
+		},
+	}
+	r.water.mask, r.water.w, r.water.h = mask, 64, 32
+	released := map[*ebiten.Image]int{}
+	r.resetSources(func(img *ebiten.Image) { released[img]++ })
+	if released[alone] != 1 || len(released) != 1 {
+		t.Fatalf("release counts=%v, want only the standalone texture", released)
+	}
+	kept := map[*ebiten.Image]bool{}
+	for _, img := range r.pages.free {
+		kept[img] = true
+	}
+	if !kept[full] || !kept[open] || !kept[mask] || len(r.pages.free) != 3 || r.water.mask != nil || r.textureAtlas.pages != nil {
+		t.Fatal("texture pages or the water mask were not pooled for the next generation")
+	}
 }

@@ -22,6 +22,15 @@ func (r Rect) Inset(d float64) Rect { return Rect{r.X + d, r.Y + d, r.W - 2*d, r
 var (
 	white    = newWhite()
 	softDisc = newSoftDisc(64)
+	// whiteTexel is white's centre texel, away from its filtered border.
+	whiteTexel = white.SubImage(image.Rect(1, 1, 2, 2)).(*ebiten.Image)
+
+	// Fill, the gradients and every text glyph draw one quad. They reuse
+	// this scratch on the game goroutine; Ebitengine copies it during the
+	// call.
+	quadVerts   [4]ebiten.Vertex
+	quadIdx     = [6]uint32{0, 1, 2, 1, 3, 2}
+	quadOptions = ebiten.DrawTrianglesOptions{Filter: ebiten.FilterLinear, ColorScaleMode: ebiten.ColorScaleModePremultipliedAlpha}
 )
 
 func newWhite() *ebiten.Image {
@@ -47,6 +56,10 @@ func newSoftDisc(n int) *ebiten.Image {
 	return ebiten.NewImageFromImage(rgba)
 }
 
+// span is a segment's length for the control shapes' stroke and polygon
+// geometry (shape_draw.go): presentation-only, like the soft-disc falloff.
+func span(dx, dy float64) float64 { return math.Hypot(dx, dy) }
+
 func premul(c color.RGBA) (r, g, b, a float32) {
 	a = float32(c.A) / 255
 	return float32(c.R) / 255 * a, float32(c.G) / 255 * a, float32(c.B) / 255 * a, a
@@ -57,32 +70,29 @@ func premul(c color.RGBA) (r, g, b, a float32) {
 func drawQuad(dst, src *ebiten.Image, x, y, w, h float64, tl, tr, bl, br color.RGBA) {
 	b := src.Bounds()
 	sx0, sy0, sx1, sy1 := float32(b.Min.X), float32(b.Min.Y), float32(b.Max.X), float32(b.Max.Y)
-	v := make([]ebiten.Vertex, 4)
 	pts := [4][2]float64{{x, y}, {x + w, y}, {x, y + h}, {x + w, y + h}}
 	uvs := [4][2]float32{{sx0, sy0}, {sx1, sy0}, {sx0, sy1}, {sx1, sy1}}
 	cols := [4]color.RGBA{tl, tr, bl, br}
-	for i := range v {
+	for i := range quadVerts {
 		r, g, bb, a := premul(cols[i])
-		v[i] = ebiten.Vertex{DstX: float32(pts[i][0]), DstY: float32(pts[i][1]), SrcX: uvs[i][0], SrcY: uvs[i][1], ColorR: r, ColorG: g, ColorB: bb, ColorA: a}
+		quadVerts[i] = ebiten.Vertex{DstX: float32(pts[i][0]), DstY: float32(pts[i][1]), SrcX: uvs[i][0], SrcY: uvs[i][1], ColorR: r, ColorG: g, ColorB: bb, ColorA: a}
 	}
-	op := &ebiten.DrawTrianglesOptions{Filter: ebiten.FilterLinear}
-	op.ColorScaleMode = ebiten.ColorScaleModePremultipliedAlpha
-	dst.DrawTriangles(v, []uint16{0, 1, 2, 1, 3, 2}, src, op)
+	dst.DrawTriangles32(quadVerts[:], quadIdx[:], src, &quadOptions)
 }
 
 // Fill paints a solid rectangle.
 func Fill(dst *ebiten.Image, r Rect, c color.RGBA) {
-	drawQuad(dst, white.SubImage(image.Rect(1, 1, 2, 2)).(*ebiten.Image), r.X, r.Y, r.W, r.H, c, c, c, c)
+	drawQuad(dst, whiteTexel, r.X, r.Y, r.W, r.H, c, c, c, c)
 }
 
 // VGradient paints a rectangle from top colour to bottom colour.
 func VGradient(dst *ebiten.Image, r Rect, top, bottom color.RGBA) {
-	drawQuad(dst, white.SubImage(image.Rect(1, 1, 2, 2)).(*ebiten.Image), r.X, r.Y, r.W, r.H, top, top, bottom, bottom)
+	drawQuad(dst, whiteTexel, r.X, r.Y, r.W, r.H, top, top, bottom, bottom)
 }
 
 // HGradient paints a rectangle from left colour to right colour.
 func HGradient(dst *ebiten.Image, r Rect, left, right color.RGBA) {
-	drawQuad(dst, white.SubImage(image.Rect(1, 1, 2, 2)).(*ebiten.Image), r.X, r.Y, r.W, r.H, left, right, left, right)
+	drawQuad(dst, whiteTexel, r.X, r.Y, r.W, r.H, left, right, left, right)
 }
 
 // Glow paints a soft radial halo of colour c centred in r.
@@ -106,9 +116,13 @@ func Shade(dst *ebiten.Image, r Rect, alpha float64) {
 	dst.DrawImage(softDisc, op)
 }
 
-// Line strokes a segment.
+// Line strokes a segment with butt caps, width centred on it. Like Disc and
+// Ring it reads c as alpha-premultiplied, as image/color defines
+// color.RGBA, where Fill, the gradients and Poly take straight alpha.
 func Line(dst *ebiten.Image, x0, y0, x1, y1, width float64, c color.RGBA) {
-	drawSmallShape(dst, shapeSpec{kind: shapeLine, geometry: [5]float32{float32(x0), float32(y0), float32(x1), float32(y1), float32(width)}, colour: c})
+	if lineQuad(&shapeQuad, x0, y0, x1, y1, width, c) {
+		drawShapeQuad(dst)
+	}
 }
 
 // Outline strokes a rectangle's border inside r.
@@ -130,14 +144,19 @@ func Bevel(dst *ebiten.Image, r Rect, width float64, light, dark color.RGBA, sun
 	Fill(dst, Rect{r.X + r.W - width, r.Y, width, r.H}, dark)
 }
 
-// Disc paints a filled circle.
+// Disc paints a filled circle; c is alpha-premultiplied, as for Line.
 func Disc(dst *ebiten.Image, cx, cy, radius float64, c color.RGBA) {
-	drawSmallShape(dst, shapeSpec{kind: shapeDisc, geometry: [5]float32{float32(cx), float32(cy), float32(radius)}, colour: c})
+	if discQuad(&shapeQuad, cx, cy, radius, c) {
+		drawShapeQuad(dst)
+	}
 }
 
-// Ring strokes a circle.
+// Ring strokes a circle, width centred on the radius; c is
+// alpha-premultiplied, as for Line.
 func Ring(dst *ebiten.Image, cx, cy, radius, width float64, c color.RGBA) {
-	drawSmallShape(dst, shapeSpec{kind: shapeRing, geometry: [5]float32{float32(cx), float32(cy), float32(radius), float32(width)}, colour: c})
+	if ringQuad(&shapeQuad, cx, cy, radius, width, c) {
+		drawShapeQuad(dst)
+	}
 }
 
 // Image draws src scaled into r. Nearest keeps pixel art crisp.
@@ -192,23 +211,9 @@ func NineSlice(dst, src *ebiten.Image, r Rect, edge int, k float64, fillCentre b
 	}
 }
 
-// Poly fills a convex polygon given as x, y pairs, as one triangle fan.
+// Poly fills a convex polygon given as x, y pairs, antialiased, with c in
+// straight alpha like Fill.
 func Poly(dst *ebiten.Image, pts []float64, c color.RGBA) {
-	n := len(pts) / 2
-	if n < 3 {
-		return
-	}
 	r, g, b, a := premul(c)
-	v := make([]ebiten.Vertex, n)
-	for i := range v {
-		v[i] = ebiten.Vertex{DstX: float32(pts[2*i]), DstY: float32(pts[2*i+1]), SrcX: 1, SrcY: 1, ColorR: r, ColorG: g, ColorB: b, ColorA: a}
-	}
-	idx := make([]uint16, 0, 3*(n-2))
-	for i := 1; i < n-1; i++ {
-		idx = append(idx, 0, uint16(i), uint16(i+1))
-	}
-	//lint:ignore SA1019 Retain the triangle-fan antialiasing path during the compiler upgrade.
-	op := &ebiten.DrawTrianglesOptions{AntiAlias: true}
-	op.ColorScaleMode = ebiten.ColorScaleModePremultipliedAlpha
-	dst.DrawTriangles(v, idx, white, op)
+	drawPoly(dst, pts, shapeColour{r, g, b, a})
 }

@@ -5,7 +5,10 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"slices"
 	"sort"
+	"strings"
+	"sync"
 
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
 )
@@ -18,6 +21,28 @@ const strategicIconSourceSize = 32
 func strategicArtKey(d StrategicIconDescriptor) string {
 	return fmt.Sprintf("%s/%s/%s/ticks%d", d.Family, d.Role, d.Subtype, strategicLevelMarks(d))
 }
+
+// strategicAtlases memoizes generated atlases by their sorted art keys. An
+// icon's art is a function of its key alone — strategicCoverage reads only the
+// family, role, subtype and level marks the key spells — so every catalog
+// whose units resolve to the same keys draws the same atlas: every battle over
+// one content set, whatever rules or mutators cloned its catalog. Each
+// settings-screen scene built one on its staging goroutine. The atlas and its
+// rectangles are never written after they are made; the few most recent key
+// sets are kept.
+var strategicAtlases struct {
+	mu      sync.Mutex
+	entries []strategicAtlasEntry // least recently made first
+}
+
+type strategicAtlasEntry struct {
+	keys  string
+	atlas *drawlist.MarkerAtlas
+	rects map[string]drawlist.Rect
+}
+
+const strategicAtlasCacheSize = 4
+
 func makeStrategicIconAtlas(descriptors []StrategicIconDescriptor) (*drawlist.MarkerAtlas, map[string]drawlist.Rect) {
 	unique := make(map[string]StrategicIconDescriptor)
 	for _, d := range descriptors {
@@ -28,6 +53,24 @@ func makeStrategicIconAtlas(descriptors []StrategicIconDescriptor) (*drawlist.Ma
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	joined := strings.Join(keys, "\x00")
+	strategicAtlases.mu.Lock()
+	defer strategicAtlases.mu.Unlock()
+	for _, e := range strategicAtlases.entries {
+		if e.keys == joined {
+			return e.atlas, e.rects
+		}
+	}
+	atlas, rects := drawStrategicIconAtlas(keys, unique)
+	if len(strategicAtlases.entries) == strategicAtlasCacheSize {
+		strategicAtlases.entries = slices.Delete(strategicAtlases.entries, 0, 1)
+	}
+	strategicAtlases.entries = append(strategicAtlases.entries, strategicAtlasEntry{keys: joined, atlas: atlas, rects: rects})
+	return atlas, rects
+}
+
+// drawStrategicIconAtlas draws one tile per key, in key order.
+func drawStrategicIconAtlas(keys []string, unique map[string]StrategicIconDescriptor) (*drawlist.MarkerAtlas, map[string]drawlist.Rect) {
 	const columns = 8
 	rows := (len(keys) + columns - 1) / columns
 	atlas := &drawlist.MarkerAtlas{Width: columns * strategicIconSourceSize, Height: rows * strategicIconSourceSize}

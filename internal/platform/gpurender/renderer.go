@@ -34,8 +34,9 @@ type Renderer struct {
 	// sparseTerrain fills tile atlases on demand rather than packing a whole
 	// map at its first sight (SetSparseTerrain).
 	sparseTerrain bool
-	// pages keeps fixed-size source pages across ResetSources (pagePool).
-	pages pagePool
+	// pages keeps fixed-size source pages across ResetSources (pagePool):
+	// the renderer's own, or a SharedPages set's.
+	pages *pagePool
 
 	// effects is the last player selection SetEffects applied (§30). Every
 	// per-family switch below is set from it and from nothing else.
@@ -254,7 +255,7 @@ func NewChecked(pal *palette.Tables, w, h int) (*Renderer, error) {
 	if pal != nil {
 		r.displayPalette = pal.Base
 	}
-	r.scene.pool = &r.pages
+	r.scene.pool = r.pool()
 	r.scene.frames = make(map[*formats.GAFFrame]sceneEntry)
 	r.scene.pcx = make(map[*formats.PCX]sceneEntry)
 	r.scene.fonts = make(map[*formats.FNT]*fntAtlas)

@@ -7,6 +7,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
+	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 )
 
@@ -83,27 +84,16 @@ type nlCard struct {
 	blink bool
 }
 
-// previewCardPics resolves stock portrait preferences through the same authored
-// roster as the background. The screen painter calls this accessor so content
-// switches replace the pictures along with the units (§3.17).
-func (s *nlScreen) previewCardPics(c nlCard) []string {
-	g := s.shell()
-	if g == nil || s.stats.catalog(g.cs) == nil {
-		return nil
+// previewCardPics is the card's portrait names in the running content,
+// resolved through the same authored roster as the background, so content
+// switches replace the pictures along with the units (§3.17). The picture
+// loader resolves them off the game goroutine (nlscreen_ui_pics.go); nil
+// until it has.
+func (s *nlScreen) previewCardPics(c *nlCard) []string {
+	if names := s.art.pictureNames(); names != nil {
+		return names.cards[c.key]
 	}
-	if strings.HasPrefix(c.key, "mut-") {
-		if stat, ok := nlMutatorStats[strings.TrimPrefix(c.key, "mut-")]; ok {
-			return s.stats.statUnitNames(stat)
-		}
-	}
-	r := s.stats.contentRoster()
-	var names []string
-	for _, preferred := range c.pics {
-		if name := r.resolve(preferred); name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
+	return nil
 }
 
 type nlPage struct {
@@ -125,7 +115,44 @@ func onOff(v bool) int {
 	return 0
 }
 
+// pages is the catalogue, built once and kept: Update, Draw and the change
+// count read it every frame. A builder reads exactly one input when it runs —
+// the installed mods' names and versions, which are the Content card's steps;
+// everything else (the draft, the shell, the part a grouped card compares) is
+// read by the cards' closures when they are called. So the catalogue is
+// rebuilt when, and only when, that list differs from the one it was built
+// from (a mod installed or removed, or a content switch's re-read).
 func (s *nlScreen) pages() []nlPage {
+	if !s.catalogue.builtFrom(s.mods) {
+		s.catalogue = nlCatalogue{pages: s.buildPages(), mods: make([]nlModName, len(s.mods))}
+		for i, m := range s.mods {
+			s.catalogue.mods[i] = nlModName{m.Name, m.Version}
+		}
+	}
+	return s.catalogue.pages
+}
+
+// nlCatalogue is the built pages and the mod names they captured.
+type nlCatalogue struct {
+	pages []nlPage
+	mods  []nlModName
+}
+
+type nlModName struct{ name, version string }
+
+func (c *nlCatalogue) builtFrom(mods []modlibrary.Mod) bool {
+	if c.pages == nil || len(c.mods) != len(mods) {
+		return false
+	}
+	for i := range mods {
+		if c.mods[i] != (nlModName{mods[i].Name, mods[i].Version}) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *nlScreen) buildPages() []nlPage {
 	return []nlPage{
 		{key: "game", title: "Game", cards: s.gameCards()},
 		{key: "mutators", title: "Mutators", cards: s.mutatorCards()},
@@ -189,32 +216,7 @@ func (s *nlScreen) gameCards() []nlCard {
 					"Community 3.9 plus Nanolathe's own fixes for movement, building and targeting. Each layer includes the ones beneath it.",
 				}[v]
 			},
-			// DESIGN_COMMUNITY_PATCH §2–§4 and the Modern policies listed in
-			// CLAUDE.md, in player terms.
-			details: func(d *nlDraft, v int) []string {
-				return [][]string{{
-					"Original limits: short paths, 300 shots",
-					"No building where your own units stand",
-					"Structures always face one way",
-					"Shots can hit a hill in the way",
-					"Units meeting head-on stop and wait",
-					"The reference for every test",
-				}, {
-					"Long paths, far more shots and effects",
-					"Build under units: they step aside",
-					"Guarding builders hold position",
-					"Structures can rotate",
-					"Splash hits every unit in a crowd",
-					"New weapon keys and veterancy",
-				}, {
-					"No shots wasted into terrain",
-					"Hold Fire always holds fire",
-					"Units clear factory exits and sites",
-					"Group moves spread, on straight paths",
-					"Friendly traffic jams always clear",
-					"Aircraft queue for repair pads",
-				}}[v]
-			},
+			details:   func(d *nlDraft, v int) []string { return nlRuleDetails[v] },
 			scene:     func(*nlDraft, int) string { return "march" },
 			usesRules: true,
 		},
@@ -246,6 +248,31 @@ func (s *nlScreen) gameCards() []nlCard {
 }
 
 var nlUnitLimits = []int{0, 250, 500, 1000, 1500, 2000, 3000}
+
+// nlRuleDetails is what each rule layer changes: DESIGN_COMMUNITY_PATCH §2–§4
+// and the Modern policies listed in CLAUDE.md, in player terms.
+var nlRuleDetails = [][]string{{
+	"Original limits: short paths, 300 shots",
+	"No building where your own units stand",
+	"Structures always face one way",
+	"Shots can hit a hill in the way",
+	"Units meeting head-on stop and wait",
+	"The reference for every test",
+}, {
+	"Long paths, far more shots and effects",
+	"Build under units: they step aside",
+	"Guarding builders hold position",
+	"Structures can rotate",
+	"Splash hits every unit in a crowd",
+	"New weapon keys and veterancy",
+}, {
+	"No shots wasted into terrain",
+	"Hold Fire always holds fire",
+	"Units clear factory exits and sites",
+	"Group moves spread, on straight paths",
+	"Friendly traffic jams always clear",
+	"Aircraft queue for repair pads",
+}}
 
 // ---------------------------------------------------------------- MUTATORS
 

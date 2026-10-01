@@ -287,3 +287,63 @@ func (r *sparseReaderAt) ReadAt(data []byte, offset int64) (int, error) {
 func (r *sparseReaderAt) reset() { r.maxRequest = 0 }
 
 var _ io.ReaderAt = (*sparseReaderAt)(nil)
+
+// A chunk read whole decodes exactly as the streamed path does, scrambled
+// payload and checksum included, and costs one read per chunk.
+func TestArchiveChunkReadWholeMatchesStreamed(t *testing.T) {
+	data := make([]byte, 3*hpiChunkSize-7)
+	for i := range data {
+		data[i] = byte(i*7 + i/251)
+	}
+	archive := authoredArchive(t, []ArchiveFile{{Path: "art.bin", Data: data}}, true)
+	// Scramble the first chunk's payload as the SQSH transform's inverse and
+	// set its flag, with the checksum taken over the stored bytes [02 §2].
+	// The record's data opens with a table of three chunk sizes.
+	table := firstChunkOffset(archive) - 4
+	stored := uint64(binary.LittleEndian.Uint32(archive[table : table+4]))
+	chunk := table + 3*4
+	payloadSize := int(binary.LittleEndian.Uint32(archive[chunk+7 : chunk+11]))
+	payload := archive[chunk+hpiChunkHeaderSize : chunk+hpiChunkHeaderSize+payloadSize]
+	var sum uint32
+	for i, plain := range payload {
+		payload[i] = (plain ^ byte(i)) + byte(i)
+		sum += uint32(payload[i])
+	}
+	archive[chunk+6] = 1
+	binary.LittleEndian.PutUint32(archive[chunk+15:chunk+19], sum)
+
+	tracked := &countingReaderAt{reader: bytes.NewReader(archive)}
+	fs := New()
+	if _, err := fs.MountArchiveReader("art.hpi", tracked, int64(len(archive)), 1, ArchiveOptions{VerifyChecksums: true}); err != nil {
+		t.Fatalf("mount: %v", err)
+	}
+	defer fs.Close()
+	tracked.reset()
+	got, err := fs.ReadFile("art.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatal("whole-chunk reads decoded different bytes")
+	}
+	// The chunk table and one read for each of the three chunks.
+	if tracked.calls > 4 {
+		t.Fatalf("a three-chunk file took %d reads", tracked.calls)
+	}
+
+	a, err := NewArchive("art.hpi", bytes.NewReader(archive), int64(len(archive)), ArchiveOptions{VerifyChecksums: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole, err := a.decodeChunk(0, uint64(chunk), stored, hpiChunkSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamed, err := a.decodeChunkStreamed(0, uint64(chunk), stored, hpiChunkSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(whole, streamed) || !bytes.Equal(whole, data[:hpiChunkSize]) {
+		t.Fatal("the whole-chunk and streamed decoders disagree")
+	}
+}

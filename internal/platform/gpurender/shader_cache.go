@@ -12,8 +12,8 @@ import (
 // settings-screen preview scene, its compare twin, a film or capture — takes
 // the first one's programs instead of handing the backend the same sources
 // again. The backend compiles each new program on the render thread inside a
-// frame: tens of milliseconds a program under Direct3D's compiler, and a
-// renderer carries about thirty.
+// frame, and a renderer carries about thirty; Ebitengine's Direct3D backend
+// compiles every new pixel shader with D3DCompile.
 var shaderPrograms struct {
 	mu   sync.Mutex
 	byID map[string]shaderProgram

@@ -58,11 +58,8 @@ func (s *nlScreen) demoSidebar(screen *ebiten.Image, mode int) {
 	screenkit.Fill(screen, panel, color.RGBA{10, 14, 10, 235})
 	s.well(screen, panel, 1)
 	var pics []string
-	if g := s.shell(); g != nil && s.stats.catalog(g.cs) != nil {
-		r := s.stats.contentRoster()
-		if builder, ok := r.cat.Unit(r.resolve("armck")); ok {
-			pics = r.products(builder)
-		}
+	if names := s.art.pictureNames(); names != nil {
+		pics = names.sidebar
 	}
 	if len(pics) == 0 {
 		s.fonts.Body.Draw(screen, "No authored build products in this content.", panel.X+14*u, panel.Y+28*u, screenkit.Style{Size: 11 * u, Top: nlDim})
@@ -70,7 +67,8 @@ func (s *nlScreen) demoSidebar(screen *ebiten.Image, mode int) {
 	}
 	pages := (len(pics) + perPage - 1) / perPage
 	page := int(s.demoT/2.2) % pages
-	s.fonts.Display.Draw(screen, fmt.Sprintf("Build  %d / %d", page+1, pages), panel.X+14*u, panel.Y+28*u, screenkit.Style{Size: 13 * u, Tracking: 0.2, Top: nlKicker, Upper: true})
+	heading := s.ui.text(nlTextKey{kind: "build pages", i: page + 1, j: pages}, func() string { return fmt.Sprintf("Build  %d / %d", page+1, pages) })
+	s.fonts.Display.Draw(screen, heading, panel.X+14*u, panel.Y+28*u, screenkit.Style{Size: 13 * u, Tracking: 0.2, Top: nlKicker, Upper: true})
 	for i := 0; i < perPage; i++ {
 		k := page*perPage + i
 		if k >= len(pics) {

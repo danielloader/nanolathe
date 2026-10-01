@@ -2,6 +2,7 @@ package gpurender
 
 import (
 	"bytes"
+	"slices"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/formats"
@@ -38,30 +39,41 @@ import (
 //
 // The 2D families read the packed scene atlas instead (atlas.go); this per-frame
 // texture serves the model material passes, which sample a texture frame from its
-// own image.
+// own image when it is too large for the shared model texture page.
 func buildGAFFrameImage(f *formats.GAFFrame) *ebiten.Image {
+	buf := gafFrameIndexPixels(nil, f)
+	if buf == nil {
+		return nil
+	}
+	img := newRendererImage(int(f.Width), int(f.Height))
+	img.WritePixels(buf)
+	return img
+}
+
+// gafFrameIndexPixels is a frame's index texels as buildGAFFrameImage
+// describes them, written over scratch when it is large enough (Ebitengine
+// copies the bytes it is handed), or nil for an empty frame.
+func gafFrameIndexPixels(scratch []byte, f *formats.GAFFrame) []byte {
 	fw, fh := int(f.Width), int(f.Height)
 	if fw <= 0 || fh <= 0 {
 		return nil
 	}
 	np := len(f.Pixels)
 	nt := len(f.Transparent)
-	buf := make([]byte, fw*fh*4)
+	buf := slices.Grow(scratch[:0], fw*fh*4)[:fw*fh*4]
 	for i := 0; i < fw*fh; i++ {
 		// Opaque iff the pixel exists and is not flagged transparent — the same
 		// admission blitGAFFrame and uiBlitClippedRaw make per pixel [03 §4.4].
+		var index, opacity byte
 		if i < np {
-			buf[i*4+0] = f.Pixels[i]
+			index = f.Pixels[i]
 		}
-		opaque := i < np && (i >= nt || !f.Transparent[i])
-		if opaque {
-			buf[i*4+1] = 255
+		if i < np && (i >= nt || !f.Transparent[i]) {
+			opacity = 255
 		}
-		buf[i*4+3] = 255
+		buf[i*4+0], buf[i*4+1], buf[i*4+2], buf[i*4+3] = index, opacity, 0, 255
 	}
-	img := newRendererImage(fw, fh)
-	img.WritePixels(buf)
-	return img
+	return buf
 }
 
 // gafImageFor returns the cached standalone index texture for f, building it on

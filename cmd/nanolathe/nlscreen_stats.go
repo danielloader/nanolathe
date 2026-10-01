@@ -206,7 +206,8 @@ func (s *nlScreen) heroMutatorStats(screen *ebiten.Image, key string, x, y, a fl
 	}
 	u := s.u()
 	base := s.stats.catalog(g.cs)
-	if base == nil {
+	names := s.art.pictureNames()
+	if base == nil || names == nil {
 		s.fonts.Body.Draw(screen, "Reading this content's units…", x, y+14*u, screenkit.Style{Size: 11 * u, Top: alphaC(nlDim, a)})
 		return y + 26*u
 	}
@@ -221,7 +222,7 @@ func (s *nlScreen) heroMutatorStats(screen *ebiten.Image, key string, x, y, a fl
 	df.Draw(screen, "In this content", x, y+12*u, screenkit.Style{Size: 11 * u, Tracking: 0.24, Top: alphaC(nlKicker, a), Upper: true})
 	y += 22 * u
 	shown := 0
-	for _, name := range s.stats.statUnitNames(stat) {
+	for _, name := range names.stats[key] {
 		if shown == 3 {
 			break
 		}

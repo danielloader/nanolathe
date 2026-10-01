@@ -68,27 +68,10 @@ var nlGroupTint = map[string]color.RGBA{
 
 func (s *nlScreen) controlsGroup() string { return nlControlGroups[s.ctlGroup] }
 
-// controlActions lists the actions of the selected group.
+// controlActions lists the actions of the selected group. The list is
+// shared; callers only read it.
 func (s *nlScreen) controlActions() []input.Action {
-	var out []input.Action
-	for _, a := range input.Actions() {
-		if a.Group == s.controlsGroup() {
-			out = append(out, a)
-		}
-	}
-	return out
-}
-
-// controlRows are the Mouse tab's rows: the Controls page's cards bar the
-// profile, which the profile bar owns.
-func (s *nlScreen) controlRows() []nlCard {
-	var out []nlCard
-	for _, c := range s.controlCards() {
-		if c.key != "profile" {
-			out = append(out, c)
-		}
-	}
-	return out
+	return nlGroupActions()[s.controlsGroup()]
 }
 
 // keysDiffer counts the actions whose draft keys differ from the shell's.
@@ -102,7 +85,7 @@ func (s *nlScreen) keysDiffer() int {
 	if live.Profile() != s.draft.keys.Profile() {
 		n++
 	}
-	for _, a := range input.Actions() {
+	for _, a := range nlActions() {
 		if !slices.Equal(live.Keys(a.ID), s.draft.keys.Keys(a.ID)) {
 			n++
 		}
@@ -229,7 +212,7 @@ func (s *nlScreen) resetKey(id string) {
 
 func (s *nlScreen) resetKeys() {
 	s.guardKeys(func() {
-		for _, a := range input.Actions() {
+		for _, a := range nlActions() {
 			s.draft.keys.Reset(a.ID)
 		}
 		s.touched["keys"] = true
@@ -270,7 +253,7 @@ func (s *nlScreen) drawControls(screen *ebiten.Image) {
 	tx := x0
 	for i, name := range nlControlGroups {
 		st := screenkit.Style{Size: 15 * u, Tracking: 0.14, Upper: true, Shadow: 0.1, Top: color.RGBA{183, 174, 140, 255}}
-		id := "ctl-group-" + name
+		id := s.ui.id("ctl-group-", name, -1, -1)
 		if i == s.ctlGroup {
 			st.Top = nlCream
 		} else {
@@ -315,7 +298,7 @@ func (s *nlScreen) drawProfileBar(screen *ebiten.Image, x, y float64) float64 {
 		st := screenkit.Style{Size: max(8, 14*u), Tracking: 0.08, Upper: true, Align: 1}
 		w := df.Measure(label, st) + 34*u
 		r := screenkit.Rect{X: bx, Y: y + 12*u, W: w, H: 34 * u}
-		id := fmt.Sprintf("ctl-profile-%d", i)
+		id := s.ui.id("ctl-profile", "", i, -1)
 		on := s.draft.controls == i
 		s.buttonPlate(screen, id, r, on, false)
 		st.Top = nlCream
@@ -398,7 +381,7 @@ func (s *nlScreen) drawKeyTable(screen *ebiten.Image, r screenkit.Rect) {
 		i := s.ctlScroll + row
 		a := actions[i]
 		rr := screenkit.Rect{X: r.X + 6*u, Y: r.Y + 6*u + float64(row)*rowH, W: r.W - 12*u, H: rowH - 4*u}
-		id := "ctl-row-" + a.ID
+		id := s.ui.id("ctl-row-", a.ID, -1, -1)
 		sel := i == s.ctlRow
 		if sel {
 			screenkit.HGradient(screen, rr, color.RGBA{40, 80, 40, 200}, color.RGBA{14, 24, 14, 60})
@@ -430,7 +413,7 @@ func (s *nlScreen) drawKeyTable(screen *ebiten.Image, r screenkit.Rect) {
 			if capturing {
 				label = "Press a key"
 			}
-			cid := fmt.Sprintf("ctl-cap-%s-%d", a.ID, slot)
+			cid := s.ui.id("ctl-cap-", a.ID, slot, -1)
 			w := s.keyCapButton(screen, cid, kx, rr.Y+4*u, rr.H-8*u, label, slot == len(keys), capturing, a.Fixed)
 			if !a.Fixed {
 				s.hits.Add(screenkit.Region{ID: cid, Rect: screenkit.Rect{X: kx, Y: rr.Y + 4*u, W: w, H: rr.H - 8*u},
@@ -446,9 +429,9 @@ func (s *nlScreen) drawKeyTable(screen *ebiten.Image, r screenkit.Rect) {
 			kx += w + 8*u
 		}
 		// A row that differs from the profile shows its lamp and a reset.
-		if !a.Fixed && g != nil && !slices.Equal(keys, input.ProfileDefaults(s.draft.keys.Profile())[a.ID]) {
+		if !a.Fixed && g != nil && !slices.Equal(keys, nlProfileDefault(s.draft.keys.Profile(), a.ID)) {
 			s.lamp(screen, rr.X+rr.W-60*u, rr.Y+rr.H/2, 4.5*u, nlAmber, true)
-			rid := "ctl-undo-" + a.ID
+			rid := s.ui.id("ctl-undo-", a.ID, -1, -1)
 			st := screenkit.Style{Size: 10 * u, Tracking: 0.12, Top: lerpRGBA(nlDim, nlCream, s.hits.HoverAmount(rid)), Upper: true, Align: 2}
 			df.Draw(screen, "Reset", rr.X+rr.W-10*u, rr.Y+rr.H/2+4*u, st)
 			s.hits.Add(screenkit.Region{ID: rid, Rect: screenkit.Rect{X: rr.X + rr.W - 48*u, Y: rr.Y, W: 46 * u, H: rr.H}, Click: func() {
@@ -501,10 +484,8 @@ func (s *nlScreen) drawKeyboard(screen *ebiten.Image, r screenkit.Rect) {
 	m := s.draft.keys
 	// Who holds each key, plain or with modifiers.
 	owners := map[input.Key][]string{}
-	groupOf := map[string]string{}
-	labelOf := map[string]string{}
-	for _, a := range input.Actions() {
-		groupOf[a.ID], labelOf[a.ID] = a.Group, a.Label
+	groupOf, labelOf := nlActionNames().group, nlActionNames().label
+	for _, a := range nlActions() {
 		keys := m.Keys(a.ID)
 		if a.Fixed {
 			keys = a.Default
@@ -572,7 +553,7 @@ func (s *nlScreen) drawKeyboard(screen *ebiten.Image, r screenkit.Rect) {
 				screenkit.Glow(screen, screenkit.Rect{X: kr.X - unit*0.4, Y: kr.Y - unit*0.4, W: kr.W + unit*0.8, H: kr.H + unit*0.8}, color.RGBA{255, 214, 92, 120})
 				base, text = color.RGBA{200, 160, 60, 255}, color.RGBA{30, 20, 0, 255}
 			}
-			id := fmt.Sprintf("kb-%d-%d", ri, ci)
+			id := s.ui.id("kb", "", ri, ci)
 			screenkit.Fill(screen, kr.Inset(-1*u), color.RGBA{0, 0, 0, 255})
 			screenkit.VGradient(screen, kr, lerpRGBA(base, color.RGBA{255, 255, 255, 255}, 0.12), base)
 			size := min(12*u, unit*0.34)
@@ -649,7 +630,7 @@ func (s *nlScreen) drawActionInfo(screen *ebiten.Image, r screenkit.Rect) {
 		} else if a.AnyShift {
 			text += " An order key also answers with Shift held."
 		}
-		y += bf.DrawWrapped(screen, text, r.X, y, r.W, 2.0, screenkit.Style{Size: 12 * u, Top: nlBody})
+		y += s.drawWrapped(screen, bf, text, r.X, y, r.W, 2.0, screenkit.Style{Size: 12 * u, Top: nlBody})
 	}
 	if s.draft.controls != 0 {
 		s.heroProfileChanges(screen, s.draft.controls, r.X, y+10*u, 1)
@@ -665,7 +646,19 @@ func (s *nlScreen) drawMouseRows(screen *ebiten.Image, r screenkit.Rect) {
 	bf, df := s.fonts.Body, s.fonts.Display
 	rowH := 58 * u
 	y := r.Y + 8*u
-	for _, c := range s.controlRows() {
+	// The Controls page's cards are the rows, bar the profile, which the
+	// profile bar owns.
+	var cards []nlCard
+	for _, page := range s.pages() {
+		if page.key == "controls" {
+			cards = page.cards
+		}
+	}
+	for ci := range cards {
+		c := &cards[ci]
+		if c.key == "profile" {
+			continue
+		}
 		v := c.get(&s.draft)
 		bf.Draw(screen, c.label, r.X+16*u, y+22*u, screenkit.Style{Size: 13.5 * u, Top: nlCream, Shadow: 0.1})
 		if len(c.subs) > v {
@@ -676,12 +669,12 @@ func (s *nlScreen) drawMouseRows(screen *ebiten.Image, r screenkit.Rect) {
 			st := screenkit.Style{Size: max(7, 12*u), Tracking: 0.06, Upper: true, Align: 1}
 			w := max(70*u, df.Measure(step, st)+24*u)
 			br := screenkit.Rect{X: bx, Y: y + 10*u, W: w, H: 32 * u}
-			id := fmt.Sprintf("ctl-%s-%d", c.key, i)
+			id := s.ui.id("ctl-", c.key, i, -1)
 			on := i == v
 			s.buttonPlate(screen, id, br, on, false)
 			st.Top = nlCream
 			s.buttonCaption(screen, step, br.X+w/2, br.Y+br.H/2+st.Size/2, st)
-			s.hits.Add(screenkit.Region{ID: id, Rect: br, Click: func() { s.setCard(c, i) }})
+			s.hits.Add(screenkit.Region{ID: id, Rect: br, Click: func() { s.setCard(*c, i) }})
 			bx += w + 6*u
 		}
 		y += rowH
@@ -719,7 +712,7 @@ func (s *nlScreen) drawMouse(screen *ebiten.Image, r screenkit.Rect) {
 	tx := cx + w/2 + 40*u
 	row := func(y float64, title, text string) {
 		df.Draw(screen, title, tx, y, screenkit.Style{Size: 13 * u, Tracking: 0.14, Top: nlKicker, Upper: true})
-		bf.DrawWrapped(screen, text, tx, y+8*u, r.X+r.W-tx, 1.9, screenkit.Style{Size: 12 * u, Top: nlBody})
+		s.drawWrapped(screen, bf, text, tx, y+8*u, r.X+r.W-tx, 1.9, screenkit.Style{Size: 12 * u, Top: nlBody})
 	}
 	leftText := "Select, and give the armed order."
 	rightText := "Deselect and cancel."

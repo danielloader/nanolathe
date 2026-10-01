@@ -42,7 +42,7 @@ func (r *Renderer) resetSources(release func(*ebiten.Image)) {
 			return
 		}
 		seen[img] = struct{}{}
-		if !r.pages.keep(img, w, h) {
+		if !r.pool().keep(img, w, h) {
 			release(img)
 		}
 	}
@@ -73,10 +73,15 @@ func (r *Renderer) resetSources(release func(*ebiten.Image)) {
 			retire(p.img)
 		}
 	}
+	// The pages go back before the slots are walked: an in-page slot names
+	// its page, and retiring it there would release a page the pool should
+	// keep. What remains are the standalone textures of oversized frames.
+	for _, page := range r.textureAtlas.pages {
+		recycle(page, modelTexturePageSize, modelTexturePageSize)
+	}
 	for _, slot := range r.textureAtlas.slots {
 		retire(slot.img)
 	}
-	recycle(r.textureAtlas.page, modelTexturePageSize, modelTexturePageSize)
 	// The model lane's 4096² pages are frame scratch, not sources: each frame
 	// clears the rows it uses before rasterizing into them. They survive like
 	// the output surfaces, so a new battle or settings preview does not
@@ -88,9 +93,15 @@ func (r *Renderer) resetSources(release func(*ebiten.Image)) {
 	retire(r.modelDirect.groups.colour)
 	retire(r.fog.atlas)
 	retire(r.fog.grid)
-	retire(r.water.mask)
+	// A mask is replaced wholesale by the next map's, so one of the same size
+	// is reused from the pool.
+	recycle(r.water.mask, r.water.w, r.water.h)
 	retire(r.pointPlane.img)
-	retire(r.sched.flash.img)
+	// The flash disc page and its staging bytes are kept: its frames are keyed
+	// by generated table and frame, and every frame packed rewrites its
+	// region and border before it is uploaded, so a texel of the old
+	// generation is never sampled.
+	flash := flashDiscAtlas{img: r.sched.flash.img, buf: r.sched.flash.buf}
 	for _, atlas := range r.markerAtlases {
 		retire(atlas.image)
 	}
@@ -99,7 +110,7 @@ func (r *Renderer) resetSources(release func(*ebiten.Image)) {
 	r.tileAtlases = make(map[tileAtlasKey]*tileAtlas)
 	r.gafImages = make(map[*formats.GAFFrame]*ebiten.Image)
 	r.scene = sceneAtlas{
-		pool:   &r.pages,
+		pool:   r.pool(),
 		frames: make(map[*formats.GAFFrame]sceneEntry),
 		pcx:    make(map[*formats.PCX]sceneEntry),
 		fonts:  make(map[*formats.FNT]*fntAtlas),
@@ -114,7 +125,7 @@ func (r *Renderer) resetSources(release func(*ebiten.Image)) {
 	// use, and survive like the output surfaces.
 	r.reflections = waterReflections{disabled: r.reflections.disabled, sourceShader: r.reflections.sourceShader, resolveShader: r.reflections.resolveShader, softResolveShader: r.reflections.softResolveShader,
 		source: r.reflections.source, height: r.reflections.height}
-	r.modelDirect = modelDirectLane{keyShader: r.modelDirect.keyShader, colourShader: r.modelDirect.colourShader, shaderErr: r.modelDirect.shaderErr, groups: modelGroupMergeLane{shader: r.modelDirect.groups.shader}}
+	r.modelDirect = modelDirectLane{shared: r.modelDirect.shared, keyShader: r.modelDirect.keyShader, colourShader: r.modelDirect.colourShader, shaderErr: r.modelDirect.shaderErr, groups: modelGroupMergeLane{shader: r.modelDirect.groups.shader}}
 	for i, pg := range pages {
 		r.modelDirect.pages[i] = modelDirectPage{key: pg.key, colour: pg.colour}
 	}
@@ -122,7 +133,7 @@ func (r *Renderer) resetSources(release func(*ebiten.Image)) {
 	r.arrival = arrivalLayer{shader: r.arrival.shader}
 	// Retained compiled runs and options also reference source images. Drop
 	// those and frame scratch together; nothing from the old frame is replayable.
-	r.sched = scheduler{}
+	r.sched = scheduler{flash: flash}
 	r.sceneOpts = ebiten.DrawTrianglesShaderOptions{}
 	r.surfaceDynamic = surfaceUpload{}
 	r.surfaceCache = [4]surfaceUpload{}

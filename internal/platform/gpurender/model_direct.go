@@ -172,7 +172,10 @@ type modelDirectPage struct {
 type modelDirectLane struct {
 	modelPlaceCtx
 
-	pages                 [modelDirectMaxPages]modelDirectPage
+	pages [modelDirectMaxPages]modelDirectPage
+	// shared, when set, holds the page planes this lane draws through
+	// (SharedPages).
+	shared                *SharedPages
 	page                  int32
 	packX, packY, packRow int32
 	regions               map[*drawlist.ModelGeometry]modelDirectRegion
@@ -259,15 +262,22 @@ func (r *Renderer) modelDirectEligible(g *drawlist.ModelGeometry) bool {
 		r.tables.atlas != nil && g != nil && g.Eligible
 }
 
-// ensurePage allocates one page's planes once.
+// ensurePage allocates one page's planes once, or takes a shared set's.
 func (d *modelDirectLane) ensurePage(i int32) {
 	pg := &d.pages[i]
 	if pg.key != nil {
 		return
 	}
-	opts := &ebiten.NewImageOptions{Unmanaged: true}
-	pg.key = ebiten.NewImageWithOptions(image.Rect(0, 0, modelDirectAtlasW, modelDirectAtlasH), opts)
-	pg.colour = ebiten.NewImageWithOptions(image.Rect(0, 0, modelDirectAtlasW, modelDirectAtlasH), opts)
+	planes := &modelPagePlanes{}
+	if d.shared != nil {
+		planes = &d.shared.model[i]
+	}
+	if planes.key == nil {
+		opts := &ebiten.NewImageOptions{Unmanaged: true}
+		planes.key = ebiten.NewImageWithOptions(image.Rect(0, 0, modelDirectAtlasW, modelDirectAtlasH), opts)
+		planes.colour = ebiten.NewImageWithOptions(image.Rect(0, 0, modelDirectAtlasW, modelDirectAtlasH), opts)
+	}
+	pg.key, pg.colour = planes.key, planes.colour
 }
 
 // resetFrame starts a frame: the packer, the regions and the batch.

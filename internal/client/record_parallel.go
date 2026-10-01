@@ -83,6 +83,8 @@ type recordPool struct {
 	// cursor hands out job indices. Per-unit cost varies by an order of
 	// magnitude (a commander against a solar collector), so a shared cursor
 	// balances better than a fixed stripe.
+	wakeAll bool // tests: every helper takes part, however small the work
+
 	cursor atomic.Int64
 	jobs   []int32
 	units  []frame.UnitView
@@ -185,8 +187,11 @@ func (w *recordWorker) refresh(c *Client) {
 func (p *recordPool) forEach(n, chunk int, fn func(lo, hi int)) {
 	p.task, p.taskN, p.taskChunk = fn, n, chunk
 	p.cursor.Store(0)
-	p.done.Add(len(p.wake))
-	for _, wake := range p.wake {
+	// The caller takes a chunk too, so only the chunks beyond its first need
+	// helpers (recordHelpers).
+	helpers := p.helpers((n+chunk-1)/chunk - 1)
+	p.done.Add(helpers)
+	for _, wake := range p.wake[:helpers] {
 		wake <- struct{}{}
 	}
 	p.runTask()
@@ -222,6 +227,23 @@ func (p *recordPool) drain(c *Client) {
 // parallelUnitFloor is the job count below which stage one stays on the
 // recording goroutine. It is a timing threshold, not a behavioural one.
 const parallelUnitFloor = 8
+
+// recordUnitsPerHelper is the stage-one units that justify waking one more
+// helper. A wake costs the recording goroutine a scheduler round trip, often
+// an OS thread wake, so a small scene — a settings preview's few dozen units
+// — wakes one or two helpers rather than every core's, while a large battle
+// still wakes them all. How many participate changes no result: every slot is
+// indexed by its unit [I1].
+const recordUnitsPerHelper = 32
+
+// helpers is the helpers to wake for want of them, at most the pool's own;
+// a test's wakeAll wakes every helper whatever the work, to exercise them.
+func (p *recordPool) helpers(want int) int {
+	if p.wakeAll {
+		return len(p.wake)
+	}
+	return max(0, min(len(p.wake), want))
+}
 
 // recordPoolSize is the participant count, including the recording goroutine.
 // One participant per hardware thread: the recorder is the frame's critical
@@ -334,8 +356,9 @@ func (c *Client) prepareUnitGeometry(units []frame.UnitView, jobs []int32) {
 	p.self.refresh(c)
 	p.src = c
 	p.cursor.Store(0)
-	p.done.Add(len(p.wake))
-	for _, wake := range p.wake {
+	helpers := p.helpers(len(jobs) / recordUnitsPerHelper)
+	p.done.Add(helpers)
+	for _, wake := range p.wake[:helpers] {
 		wake <- struct{}{}
 	}
 	p.drain(&p.self.clone)

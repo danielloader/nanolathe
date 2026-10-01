@@ -1874,3 +1874,48 @@ func TestStripBoundsFollowTheSpecialEffectsLimit(t *testing.T) {
 		t.Fatalf("full 30-slot pool: producer spent %d draws, live %d", got, s.strips.live)
 	}
 }
+
+// A table compiled once for the content and handed to entry
+// (SkirmishEntryOptions.SimArt) is the one composition binds, and answers as
+// the battle's own compile would: the settings screen shares one across its
+// preview battles.
+func TestCompositionKeepsASharedAnimationTable(t *testing.T) {
+	fs := simArtCompositionFS(t)
+	cat := minimalCatalogForStrict()
+	cat.Features = map[string]*content.FeatureDef{
+		"tree1": {Filename: "trees", SeqNameBurn: "treeburn", SeqNameDie: "treedie", SeqNameDieShad: "treedieshad"},
+	}
+	shared := content.CompileSimArt(fs, cat)
+	compose := func(art *content.SimArt) *Session {
+		w, err := newSlicedWorldWithCOB(cat, fs)
+		if err != nil {
+			t.Fatalf("unit pool: %v", err)
+		}
+		s := &Session{Catalog: cat, World: minimalTerrain(), Mission: syntheticMission(), Units: w,
+			Clock: &clock.State{}, Econ: &economy.Service{}, simArt: art}
+		s.SeedSessionRNG(31, 31)
+		s.Econ.Players[0].Exists = true
+		s.Econ.Players[0].ControllerState = 1
+		s.Econ.SeedDeadlines(0)
+		s.InitBattleWindForSession()
+		if err := createAndBindServicesForTest(t, s); err != nil {
+			t.Fatalf("createAndBindServices: %v", err)
+		}
+		return s
+	}
+	own, sharing := compose(nil), compose(shared)
+	if sharing.simArt != shared || own.simArt == nil || own.simArt == shared {
+		t.Fatal("composition replaced the shared table or did not compile its own")
+	}
+	def := cat.Features["tree1"]
+	for visit := int32(0); visit < 6; visit++ {
+		a1, a2, a3, a4 := own.Features.BurnFrameGeometry(def, visit)
+		b1, b2, b3, b4 := sharing.Features.BurnFrameGeometry(def, visit)
+		if a1 != b1 || a2 != b2 || a3 != b3 || a4 != b4 {
+			t.Fatalf("visit %d: shared table answered differently from the battle's own", visit)
+		}
+	}
+	if own.effectEntryFrameCountBase(smokePuffEntry) != sharing.effectEntryFrameCountBase(smokePuffEntry) {
+		t.Fatal("shared table's effect length differs from the battle's own")
+	}
+}

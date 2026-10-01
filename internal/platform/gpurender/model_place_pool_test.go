@@ -97,6 +97,7 @@ func newParallelPlaceRenderer(t *testing.T, workers int) *Renderer {
 	t.Cleanup(func() { closeModelPlacePool(r) })
 	r.placeWorkers = workers
 	r.modelDirect.place.floor = 1
+	r.modelDirect.place.perHelper = 1
 	return r
 }
 
@@ -225,6 +226,7 @@ func TestModelPlacePoolStops(t *testing.T) {
 		r := newPlaceRenderer(t)
 		r.placeWorkers = 6
 		r.modelDirect.place.floor = 1
+		r.modelDirect.place.perHelper = 1
 		runPlaceFrame(r, sc, 0)
 		if r.modelDirect.placeMode != modelPlacedParallel || r.placePool == nil {
 			t.Fatal("the frame was not placed on the pool")

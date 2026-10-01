@@ -127,6 +127,7 @@ func TestNLPreviewRenderEditsBypassCadence(t *testing.T) {
 func TestNLScreenPreviewFrameRateCardOverridesBudget(t *testing.T) {
 	s := newNLScreen(nil)
 	s.canvasScale = 1
+	s.draft.pres.FPS = 144
 	var frameRate nlCard
 	for _, card := range s.graphicsCards() {
 		if card.key == "fps" {
@@ -134,8 +135,8 @@ func TestNLScreenPreviewFrameRateCardOverridesBudget(t *testing.T) {
 			continue
 		}
 		_, render, _ := s.plan(card, card.get(&s.draft))
-		if render.fps != 30 {
-			t.Fatalf("ordinary %s card has cadence %d", card.key, render.fps)
+		if render.fps != s.draft.pres.FPS {
+			t.Fatalf("ordinary %s card has cadence %d, want the draft's %d", card.key, render.fps, s.draft.pres.FPS)
 		}
 	}
 	if frameRate.render == nil {

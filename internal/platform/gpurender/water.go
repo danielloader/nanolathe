@@ -451,10 +451,10 @@ func (r *Renderer) beginWaterMask(t *world.Terrain) bool {
 		return false
 	}
 	st := &r.water
-	if st.mask != nil {
+	if st.mask != nil && !r.pool().keep(st.mask, st.w, st.h) {
 		st.mask.Deallocate()
-		st.mask = nil
 	}
+	st.mask = nil
 	st.source = t
 	return true
 }
@@ -466,7 +466,9 @@ func (r *Renderer) installWaterMask(prepared *PreparedWaterMask) {
 	if st.w == 0 || st.h == 0 {
 		return
 	}
-	st.mask = newRendererImage(st.w, st.h)
+	// A settings preview changes maps every few seconds; a pooled mask of the
+	// same size spares a fresh allocation inside the scene's first frame.
+	st.mask = r.pool().take(st.w, st.h)
 	st.mask.WritePixels(prepared.pixels)
 }
 

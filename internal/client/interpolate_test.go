@@ -310,6 +310,7 @@ func TestPooledUnitBlendMatchesSequential(t *testing.T) {
 		want[i].Pieces = append([]frame.PieceView(nil), want[i].Pieces...)
 	}
 	p := newRecordPool(6)
+	p.wakeAll = true
 	defer p.close()
 	var par interpolator
 	par.each = p.forEachFn

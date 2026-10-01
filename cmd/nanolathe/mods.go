@@ -407,6 +407,12 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 	optionsPanel, optionsAssets, optionsState = nil, nil, nil
 	saveLoadUI, saveLoadPanel, saveLoadAssets = nil, nil, nil
 	old.releaseAudio()
+	// A settings preview staged while the main menu idled reads the old set's
+	// archives; wait for it, and stop the screen's picture loader, before they
+	// close. A reload from the screen itself has done this already.
+	if nlScreenInst != nil {
+		nlScreenInst.releasePreview(true)
+	}
 	_ = old.cs.Close()
 	h.shell = shell
 	if request.loadSave != "" {

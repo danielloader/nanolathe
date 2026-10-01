@@ -82,6 +82,8 @@ type app struct {
 	cursorMode ebiten.CursorModeType
 	// screenWasActive is the FullScreen state the last Update saw.
 	screenWasActive bool
+	// screenScale caches the device scale the screen's layout reads.
+	screenScale screenScale
 	// presentPending is set by the 30 Hz update and consumed by Draw. Draw can
 	// still be called at the monitor's refresh rate, so the retained-screen
 	// mode configured by Run lets those extra calls leave the frame untouched.
@@ -1085,7 +1087,7 @@ func (a *app) Layout(outsideWidth, outsideHeight int) (int, int) {
 	a.paceHeld = a.beganAt.Sub(arrived)
 	a.c.SetOutsideSize(outsideWidth, outsideHeight)
 	if a.screenActive() {
-		return screenLayout(outsideWidth, outsideHeight)
+		return a.screenLayout(outsideWidth, outsideHeight)
 	}
 	w, h := a.c.Size()
 	if outsideWidth > 0 && outsideHeight > 0 {

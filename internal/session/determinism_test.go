@@ -199,7 +199,7 @@ func TestRS06_FloatAudit(t *testing.T) {
 		"internal/platform/gpurender/water_reflections.go": true, // reflection stroke length, presentation-only, never simulation input [I2][DESIGN_GPU_RENDERER §26.4]
 		"internal/film/text.go":                            true, // offline capture overlay stroke rasterizer, presentation-only, never on a sim path [I2][docs/FILM_CAPTURE.md]
 		"internal/platform/gpurender/glow.go":              true, // the glow stroke's length, presentation-only on the device path, never on a sim path [I2][DESIGN_GPU_RENDERER §19]
-		"internal/platform/screenkit/paint.go":             true, // the Nanolathe screen's soft-disc falloff, presentation-only, never on a sim path [I2][DESIGN_INTERFACE_HUD_INPUT §3.17]
+		"internal/platform/screenkit/paint.go":             true, // the Nanolathe screen's soft-disc falloff and control-shape stroke lengths, presentation-only, never on a sim path [I2][DESIGN_INTERFACE_HUD_INPUT §3.17]
 	}
 	re := regexp.MustCompile(`math\.(Hypot|Sqrt|Acos)`)
 	err := walkGoFiles(root+"/internal", func(path string, content string) {

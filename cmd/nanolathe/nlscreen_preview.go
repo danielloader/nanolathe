@@ -227,12 +227,19 @@ type nlPreview struct {
 	// §3.17 "Scene reuse").
 	gpus    []*nlGPU
 	twinGPU nlGPU
+	// pages is the device memory every renderer above draws through: they
+	// execute one after another on the UI goroutine, so a renderer made for a
+	// new card size or the first compare takes the model pages and recycled
+	// source pages the others hold instead of allocating its own
+	// (gpurender.SharedPages).
+	pages *gpurender.SharedPages
 
 	frame      *ebiten.Image // the last presented picture, world viewport only
 	alt        *ebiten.Image // the compare picture, when asked for
 	fade       *ebiten.Image // the outgoing scene's last picture
 	fadeLeft   float64
 	lastDrawn  time.Time
+	cadence    nlCadence
 	lastRender nlRenderSignature
 }
 
@@ -483,6 +490,9 @@ func stageNLSession(opts Options, cs *contentSet, preset nlPreset, rules gamepla
 	request.value.Catalog, err = cs.nlPreviewCatalog()
 	if err != nil {
 		return nil, time.Time{}, err
+	}
+	if request.value.FS == cs.fs {
+		request.value.SimArt = cs.nlPreviewSimArt(request.value.Catalog)
 	}
 	if preset.circular {
 		// Zero is a lobby value, so it is set after the defaults
@@ -816,9 +826,10 @@ func (p *nlPreview) activate(next nlCachedPreview) {
 	p.trimCache()
 }
 
-// renderDue shares one cadence for both pictures, with an immediate redraw on
-// an edit or activation. Only the background is throttled; the screen's input,
-// controls and cursor still run on every host frame (DESIGN_INTERFACE_HUD_INPUT §3.17).
+// renderDue shares one cadence for both pictures (nlCadence), with an
+// immediate redraw on an edit or activation. Only the background is throttled;
+// the screen's input, controls and cursor still run on every host frame
+// (DESIGN_INTERFACE_HUD_INPUT §3.17).
 func (p *nlPreview) renderDue(now time.Time, sig nlRenderSignature, stepped bool) bool {
 	if p.presentNeeded || p.lastRender != sig || p.frame == nil || (sig.compare && p.alt == nil) {
 		return true
@@ -826,7 +837,7 @@ func (p *nlPreview) renderDue(now time.Time, sig nlRenderSignature, stepped bool
 	if sig.primary.classic && !stepped && !sig.compare {
 		return false // Classic presents once per 30 Hz tick.
 	}
-	return sig.primary.fps <= 0 || now.Sub(p.lastDrawn) >= time.Second/time.Duration(sig.primary.fps)-2*time.Millisecond
+	return p.cadence.due(now, p.lastDrawn, sig.primary.fps)
 }
 
 // Frame advances the preview and refreshes both pictures when due. Staging
@@ -834,6 +845,9 @@ func (p *nlPreview) renderDue(now time.Time, sig nlRenderSignature, stepped bool
 // discarded rather than accumulated for a catch-up after loading
 // (DESIGN_INTERFACE_HUD_INPUT §3.17).
 func (p *nlPreview) Frame(dt float64, primary nlRender, alt *nlRender) {
+	// Loading, arrival and the fade-in are slow on their own; they measure
+	// the refresh but cast no vote on the cadence's back-off.
+	p.cadence.observe(time.Now(), p.loading || p.presentNeeded || p.fadeLeft > 0)
 	select {
 	case res := <-p.results:
 		p.loading = false
@@ -880,6 +894,8 @@ func (p *nlPreview) Frame(dt float64, primary nlRender, alt *nlRender) {
 	}
 	drawStart := time.Now()
 	gpu := p.primaryGPU(inst)
+	// Only a repaint with nothing to prepare measures the steady cost.
+	ordinary := !p.presentNeeded && gpu.owner == inst && (inst.twin == nil || p.twinGPU.owner == inst.twin)
 	p.render(gpu, inst, primary, &p.frame)
 	switch {
 	case inst.twin != nil:
@@ -890,6 +906,9 @@ func (p *nlPreview) Frame(dt float64, primary nlRender, alt *nlRender) {
 	}
 	p.presentNeeded, p.lastRender = false, sig
 	p.lastDrawn = time.Now()
+	if ordinary {
+		p.cadence.spent(p.lastDrawn.Sub(drawStart))
+	}
 	if !p.cacheResumeStarted.IsZero() {
 		fmt.Fprintf(os.Stderr, "nanolathe: preview: %s cached frame %v, %v after revisit\n", inst.key.preset,
 			p.lastDrawn.Sub(drawStart).Round(time.Millisecond), p.lastDrawn.Sub(p.cacheResumeStarted).Round(time.Millisecond))
@@ -929,6 +948,9 @@ func (p *nlPreview) primaryGPU(inst *nlPreviewInstance) *nlGPU {
 	}
 	g := &nlGPU{}
 	if len(p.gpus) >= nlPreviewRenderers {
+		// The evicted renderer's source pages go back to the shared pool for
+		// the one about to be made.
+		p.gpus[nlPreviewRenderers-1].r.ResetSources()
 		p.gpus = p.gpus[:nlPreviewRenderers-1]
 	}
 	p.gpus = append([]*nlGPU{g}, p.gpus...)
@@ -991,6 +1013,10 @@ func (p *nlPreview) render(g *nlGPU, inst *nlPreviewInstance, r nlRender, into *
 		// A preview's camera holds still, so it packs only the tiles in view
 		// rather than the whole map inside its first frame.
 		gpu.SetSparseTerrain(true)
+		if p.pages == nil {
+			p.pages = gpurender.NewSharedPages()
+		}
+		gpu.SharePages(p.pages)
 		*g = nlGPU{r: gpu, pal: pal, w: inst.surfaceW, h: inst.surfaceH, classic: g.classic}
 	}
 	if g.owner != inst {
@@ -1040,7 +1066,7 @@ func (p *nlPreview) Close() {
 		g.r.ResetSources()
 	}
 	p.twinGPU.r.ResetSources()
-	p.gpus, p.twinGPU = nil, nlGPU{}
+	p.gpus, p.twinGPU, p.pages = nil, nlGPU{}, nil
 	if p.loading {
 		go func(ch chan nlPreviewResult) {
 			if res := <-ch; res.inst != nil {

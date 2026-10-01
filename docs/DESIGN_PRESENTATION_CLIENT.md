@@ -72,6 +72,13 @@ That gives the boundary its shape, and the shape is a one-way valve.
   its entries. Any new runtime producer that can introduce an
   unrelated feature definition must extend the setup roots before using this
   warm policy.
+
+  Settings previews declare a bounded unit-production closure instead of using
+  every catalog corpse (DESIGN_INTERFACE_HUD_INPUT §3.17). Their terrain roots
+  and successor walk remain complete. A content-set cache may share immutable
+  bank pixels and model geometry across these previews; per-battle loaded-model
+  identities, phase-7 cursors and per-client event caches remain independent.
+  Ordinary battles retain the full catalog roots and their existing load order.
 * **Nothing here touches the simulation RNG.** Presentation randomness — the
   segmented-projectile jitter of render type 7, the audio variant pick and the
   music chooser — draws from private CRT copies taken when their owners bind.

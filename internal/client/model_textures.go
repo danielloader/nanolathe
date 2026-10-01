@@ -125,6 +125,11 @@ type ModelTextureRegistry struct {
 	players         []phase7Stepper
 	bindings        map[modelTexturePrimitiveKey]*modelTextureCursor
 	standalone      bool
+	// Preview preparation can share decoded immutable art, never the loaded
+	// model identity or its phase-7 cursors. Nil scope retains full preparation.
+	previewAssets    *PreviewModelTextureAssets
+	previewUnitNames []string
+	previewModels    map[string]bool
 }
 
 type modelTextureLoadKind uint8
@@ -177,6 +182,10 @@ func resolveTextureRef(side, defaults map[string]texRef, name string) (texRef, b
 // factions and single-player coverage").
 func NewModelTextureRegistry(fs *vfs.FS, cat *content.Catalog, terrain *world.Terrain, restoreStart int, teamLogos ...string) (*ModelTextureRegistry, error) {
 	r := newModelTextureRegistry(fs, false, teamLogos...)
+	return r.prepareCatalog(cat, terrain, restoreStart)
+}
+
+func (r *ModelTextureRegistry) prepareCatalog(cat *content.Catalog, terrain *world.Terrain, restoreStart int) (*ModelTextureRegistry, error) {
 	if cat == nil {
 		return r, nil
 	}
@@ -198,7 +207,7 @@ func NewModelTextureRegistry(fs *vfs.FS, cat *content.Catalog, terrain *world.Te
 }
 
 func (r *ModelTextureRegistry) bindUnitModels(cat *content.Catalog) error {
-	for _, def := range cat.UnitRecords() {
+	for _, def := range r.unitRecords(cat) {
 		if def == nil {
 			continue
 		}
@@ -260,6 +269,9 @@ func (r *ModelTextureRegistry) bindProjectileModels(cat *content.Catalog) error 
 			continue
 		}
 		name := ckey(def.Model)
+		if r.previewModels != nil && !r.previewModels[name] {
+			continue
+		}
 		load, ok := projectileNames[name]
 		if !ok {
 			load = modelTextureLoadKey{kind: modelLoadProjectile, id: strconv.FormatInt(int64(def.ID), 10)}
@@ -274,6 +286,12 @@ func (r *ModelTextureRegistry) bindProjectileModels(cat *content.Catalog) error 
 }
 
 func newModelTextureRegistry(fs *vfs.FS, standalone bool, teamLogos ...string) *ModelTextureRegistry {
+	r := emptyModelTextureRegistry(fs, standalone, teamLogos...)
+	r.buildTextureIndex()
+	return r
+}
+
+func emptyModelTextureRegistry(fs *vfs.FS, standalone bool, teamLogos ...string) *ModelTextureRegistry {
 	r := &ModelTextureRegistry{
 		fs: fs, primary: map[string]texRef{}, logos: map[string]texRef{},
 		loads: map[modelTextureLoadKey]*unitModel{}, byCompiled: map[*compiledmodel.Model]modelTextureLoadKey{},
@@ -286,7 +304,6 @@ func newModelTextureRegistry(fs *vfs.FS, standalone bool, teamLogos ...string) *
 	if len(teamLogos) > 0 && teamLogos[0] != "" {
 		r.teamLogos = strings.ToLower(strings.ReplaceAll(teamLogos[0], `\`, "/"))
 	}
-	r.buildTextureIndex()
 	return r
 }
 
@@ -326,7 +343,7 @@ func (r *ModelTextureRegistry) prepareFeatureModels(cat *content.Catalog, terrai
 	// unit corpses and successor closure. Admission below still determines
 	// cursor order, and a later tick never reads the VFS [03 R-CRD-005 §1].
 	var roots []string
-	for _, unit := range cat.UnitRecords() {
+	for _, unit := range r.unitRecords(cat) {
 		if unit != nil && cat.Features[content.CanonicalKey(unit.Corpse)] != nil {
 			roots = append(roots, unit.Corpse)
 		}
@@ -351,7 +368,7 @@ func (r *ModelTextureRegistry) prepareFeatureModels(cat *content.Catalog, terrai
 		if def == nil || def.Object == "" {
 			continue
 		}
-		m, err := expandModelFromFSStrict(r.fs, def.Object)
+		m, err := r.loadModel(def.Object)
 		if err != nil {
 			return fmt.Errorf("feature %q: %w", def.CanonicalKey, err)
 		}
@@ -479,7 +496,7 @@ func (r *ModelTextureRegistry) bindLoad(key modelTextureLoadKey, name string) (*
 	if m, ok := r.loads[key]; ok {
 		return m, nil
 	}
-	m, err := expandModelFromFSStrict(r.fs, name)
+	m, err := r.loadModel(name)
 	if err != nil {
 		return nil, err
 	}

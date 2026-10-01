@@ -666,7 +666,7 @@ func (g *glowLayer) compileShaders() error {
 		{&g.blurShader, glowBlurShaderSource()},
 		{&g.compositeShader, glowCompositeShaderSource()},
 	} {
-		shader, err := ebiten.NewShader([]byte(s.src))
+		shader, err := compileShader(s.src)
 		if err != nil {
 			return err
 		}

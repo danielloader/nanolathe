@@ -574,11 +574,11 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 
 // newScene2DShader compiles the opaque scene pass once for the renderer's life.
 func newScene2DShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(scene2DShaderSource()))
+	return compileShader(scene2DShaderSource())
 }
 
 // newSceneDestShader compiles the destination-reading pass once for the
 // renderer's life.
 func newSceneDestShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(sceneDestShaderSource()))
+	return compileShader(sceneDestShaderSource())
 }

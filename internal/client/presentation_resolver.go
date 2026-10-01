@@ -14,7 +14,18 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
 
-const projectileGAFPath = "anims/fx.gaf"
+const projectileGAFPath = "anims/" + projectileGAFBank + ".gaf"
+
+// projectileGAFBank is the projectile bank's name among the anims banks.
+const projectileGAFBank = "fx"
+
+// WarmProjectileArt loads the projectile bank off the draw path, beside the
+// battle's other presentation art (WarmBattleFeatureSequences). Loaded on
+// first use instead, the first shot a battle or settings preview drew decoded
+// the whole bank inside that frame. Presentation state only [I6].
+func (c *Client) WarmProjectileArt() {
+	c.ensureProjectileGAF()
+}
 
 // The fixed engine slots are the only shared projectile GAF identities closed
 // by the retail contract. Selector 4 intentionally binds the same `plasmasm`
@@ -171,6 +182,13 @@ func (c *Client) ensureProjectileGAF() *formats.GAF {
 		return c.projectileGAF
 	}
 	c.projectileGAFLoaded = true
+	if r := c.modelTextures; r != nil && r.previewAssets != nil {
+		// Settings previews share one decoded bank per content set, as they
+		// share feature banks (DESIGN_INTERFACE_HUD_INPUT §3.17).
+		bank := r.previewAssets.featureBank(projectileGAFBank)
+		c.projectileGAF, c.projectileGAFErr = bank.gaf, bank.err
+		return c.projectileGAF
+	}
 	if c.modelFS == nil {
 		return nil
 	}

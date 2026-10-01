@@ -93,7 +93,7 @@ func walkFogLeaves(fr *formats.GAFFrame, mode fogLeafMode, emit func(*formats.GA
 func (r *Renderer) fogOrdered(fg drawlist.Fog, scale camera.ViewScale) {
 	if r.fog.orderedShader == nil {
 		var err error
-		r.fog.orderedShader, err = ebiten.NewShader([]byte(fogOrderedShaderSource))
+		r.fog.orderedShader, err = compileShader(fogOrderedShaderSource)
 		if err != nil {
 			r.fog.contentErr = fmt.Errorf("nanolathe: fog shader compilation failed: logical path anims/fog.gaf, providers searched [], expected ordered fog compositor: %w", err)
 		}

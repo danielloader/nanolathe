@@ -228,7 +228,7 @@ func (s *nlScreen) bindShell(g *gameShell) {
 	s.bound = g
 	s.bindPointer(g)
 	s.reloadMods(g)
-	if s.stats.base != nil && s.statsCS != g.cs {
+	if s.statsCS != g.cs {
 		s.stats = nlStats{}
 	}
 	s.statsCS = g.cs
@@ -750,6 +750,9 @@ func (s *nlScreen) Draw(screen *ebiten.Image) {
 	}
 	s.drawLoadout(screen, pages)
 	s.drawHints(screen)
+	if page.key != "controls" {
+		s.drawPreviewLimit(screen)
+	}
 	if s.preview.Loading() && s.preview.Ready() {
 		s.drawStaging(screen)
 	}
@@ -888,7 +891,7 @@ func (s *nlScreen) chevron(screen *ebiten.Image, cx, cy, dx, dy, r float64, c co
 }
 
 // drawStaging is the small lamp that says a new scene is being staged
-// while the current one keeps playing.
+// while the previous picture holds.
 func (s *nlScreen) drawStaging(screen *ebiten.Image) {
 	u := s.u()
 	x, y := s.w()-60*u, 104*u
@@ -897,6 +900,26 @@ func (s *nlScreen) drawStaging(screen *ebiten.Image) {
 		s.lamp(screen, x-float64(2-i)*14*u, y, 4*u, nlGreen, lit)
 	}
 	s.fonts.Display.Draw(screen, "Staging", x-44*u, y+4*u, screenkit.Style{Size: 11 * u, Tracking: 0.2, Top: nlKicker, Upper: true, Align: 2})
+}
+
+// A capability note belongs to the scene actually requested, including its
+// rules and mutators; a previous scene may keep playing while that one stages.
+func (s *nlScreen) drawPreviewLimit(screen *ebiten.Image) {
+	p := s.preview
+	if p == nil || p.cur == nil || p.cur.key != p.want || p.cur.previewLimit == "" {
+		return
+	}
+	u := s.u()
+	st := screenkit.Style{Size: 11.5 * u, Top: nlAmber, Shadow: 0.12}
+	const leading = 1.75
+	width := 360 * u
+	lines := s.fonts.Body.Wrap(p.cur.previewLimit, st, width)
+	height := float64(len(lines))*st.Size*leading + 32*u
+	x, y := s.w()-420*u, float64(s.carouselTop())-height-14*u
+	screenkit.Fill(screen, screenkit.Rect{X: x - 12*u, Y: y - 12*u, W: width + 24*u, H: height}, color.RGBA{10, 14, 8, 224})
+	screenkit.Outline(screen, screenkit.Rect{X: x - 12*u, Y: y - 12*u, W: width + 24*u, H: height}, u, color.RGBA{120, 103, 54, 210})
+	s.fonts.Display.Draw(screen, "Preview", x, y+10*u, screenkit.Style{Size: 10 * u, Tracking: 0.2, Top: nlKicker, Upper: true})
+	s.fonts.Body.DrawWrapped(screen, p.cur.previewLimit, x, y+20*u, width, leading, st)
 }
 
 func (s *nlScreen) previewSize() (int, int) {
@@ -926,6 +949,7 @@ func (s *nlScreen) plan(card nlCard, v int) (nlSceneKey, nlRender, *nlRender) {
 		effects: presentationEffects(d.pres),
 		glow:    d.glow != 0, glowStrength: d.glowStrength, trailStrength: d.pres.TrailStrength,
 		classic: d.pres.Renderer == "classic",
+		fps:     30,
 	}
 	if card.enhanced {
 		r.classic = false
@@ -2232,7 +2256,7 @@ func (s *nlScreen) drawCard(screen *ebiten.Image, c nlCard, r screenkit.Rect, v 
 	screenkit.Shade(screen, screenkit.Rect{X: r.X - 20*u, Y: r.Y - 10*u, W: r.W + 40*u, H: r.H + 40*u}, 0.5*a)
 	screenkit.Fill(screen, r, color.RGBA{8, 12, 8, uint8(225 * a)})
 	img := screenkit.Rect{X: r.X + 10*u, Y: r.Y + 10*u, W: r.W - 20*u, H: 112 * u}
-	if pic := s.art.pic(c.pics...); pic != nil {
+	if pic := s.art.pic(s.previewCardPics(c)...); pic != nil {
 		b := pic.Bounds()
 		scale := math.Max(img.W/float64(b.Dx()), img.H/float64(b.Dy()))
 		cw, ch := img.W/scale, img.H/scale

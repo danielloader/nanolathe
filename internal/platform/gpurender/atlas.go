@@ -75,6 +75,8 @@ type scenePage struct {
 // by pointer and never ranged in a way that reaches output, so they introduce no
 // ordering [I1].
 type sceneAtlas struct {
+	// pool supplies and takes back the shared pages (pagePool); nil allocates.
+	pool      *pagePool
 	transient transientFrames
 	pages     []*scenePage
 	frames    map[*formats.GAFFrame]sceneEntry
@@ -200,7 +202,9 @@ func (a *sceneAtlas) ensurePage(e sceneEntry) *ebiten.Image {
 		return nil
 	}
 	p := a.pages[e.page]
-	if p.img == nil {
+	if p.img == nil && p.shared && a.pool != nil {
+		p.img = a.pool.take(p.w, p.h)
+	} else if p.img == nil {
 		p.img = newRendererImage(p.w, p.h)
 	}
 	return p.img

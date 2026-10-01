@@ -1,6 +1,8 @@
 package gpurender
 
 import (
+	"encoding/binary"
+	"hash/maphash"
 	"math"
 	"strings"
 
@@ -15,6 +17,73 @@ import (
 // The mask is in painted map pixels, not the world-height grid: the existing
 // inverse projection accounts for the angled camera before classifying water.
 const waterBlockSize = 128
+
+// PreparedWaterMask is an immutable CPU snapshot of a terrain's projected
+// water mask and block index, bound to that terrain's source identity (§26.1).
+// Its contents are private so callers can transfer it to the renderer without
+// exposing mutable pixel storage.
+type PreparedWaterMask struct {
+	source         *world.Terrain
+	pixels         []byte
+	w, h, step     int
+	blocks         []bool
+	blockW, blockH int
+}
+
+// BuildWaterMask performs only CPU work. The caller must exclusively own the
+// terrain while it is read, after any staging lead-in that changes its plots
+// (§26.1). The result may then be transferred to the render thread.
+func BuildWaterMask(t *world.Terrain) *PreparedWaterMask {
+	pixels, w, h, step, blocks, bw, bh := waterMaskPixels(t)
+	return &PreparedWaterMask{source: t, pixels: pixels, w: w, h: h, step: step,
+		blocks: blocks, blockW: bw, blockH: bh}
+}
+
+// waterMaskSeed keys WaterMaskInputs for this process.
+var waterMaskSeed = maphash.MakeSeed()
+
+// WaterMaskInputs fingerprints everything BuildWaterMask reads: the cell
+// grid, the sea level, the lava flag and each plot cell's height byte and void
+// state. The mask is a pure function of them, so two loads of a map with equal
+// fingerprints build the same mask, and a loader may build it once and bind it
+// to each later load (ForTerrain). Placing or removing a feature leaves the
+// fingerprint alone: of the feature field only the void sentinels are read.
+// Like BuildWaterMask, the caller must exclusively own the terrain.
+func WaterMaskInputs(t *world.Terrain) uint64 {
+	if t == nil {
+		return 0
+	}
+	buf := make([]byte, 0, 16+2*len(t.Plot))
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(t.CellW))
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(t.CellH))
+	buf = append(buf, t.SeaLevel)
+	if t.LavaWorld {
+		buf = append(buf, 1)
+	} else {
+		buf = append(buf, 0)
+	}
+	for i := range t.Plot {
+		cell := &t.Plot[i]
+		void := byte(0)
+		if cell.IsVoid() {
+			void = 1
+		}
+		buf = append(buf, cell.Height(), void)
+	}
+	return maphash.Bytes(waterMaskSeed, buf)
+}
+
+// ForTerrain binds a mask built for one load of a map to another load whose
+// WaterMaskInputs match, sharing its pixels and block index, which nothing
+// writes after construction.
+func (m *PreparedWaterMask) ForTerrain(t *world.Terrain) *PreparedWaterMask {
+	if m == nil {
+		return nil
+	}
+	bound := *m
+	bound.source = t
+	return &bound
+}
 
 type waterLayer struct {
 	bedSprites []drawlist.Sprite
@@ -67,14 +136,14 @@ const (
 	waterStillMotion = "const surfaceMotion = 0.0"
 )
 
-func newWaterShader() (*ebiten.Shader, error) { return ebiten.NewShader([]byte(waterShaderSource)) }
+func newWaterShader() (*ebiten.Shader, error) { return compileShader(waterShaderSource) }
 
 // newStillWaterShader compiles the surface with its motion constant at zero:
 // the field is evaluated at phase zero with no drift, so it shades exactly as
 // the moving surface does at that instant and then never moves, and the seabed
 // is sampled in place (§26.3, §30).
 func newStillWaterShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(strings.Replace(waterShaderSource, waterMotionLine, waterStillMotion, 1)))
+	return compileShader(strings.Replace(waterShaderSource, waterMotionLine, waterStillMotion, 1))
 }
 
 // motionPhase is the water phase in seconds the moving treatments read: the
@@ -88,7 +157,7 @@ func (st *waterLayer) motionPhase(c drawlist.WaterSurface) float32 {
 	return (float32(c.Tick) + float32(c.Fraction16)/65536) / 30
 }
 func newSurfaceWakeShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(surfaceWakeShaderSource))
+	return compileShader(surfaceWakeShaderSource)
 }
 
 // waterMaskPixels builds a conservative, bounded-resolution projected mask.
@@ -361,24 +430,44 @@ func (r *Renderer) prepareWater(c drawlist.Terrain) {
 	// Aircraft soft shadows read this mask whatever the Water and Marks
 	// switches say, so terrain alone decides whether it is built
 	// (GPU design §29, §34).
-	if c.Terrain == nil {
+	if !r.beginWaterMask(c.Terrain) {
 		return
 	}
-	if st.source == c.Terrain {
+	r.installWaterMask(BuildWaterMask(c.Terrain))
+}
+
+// PrepareWaterMask installs an already-built mask on the render thread. It
+// keeps the ordinary terrain identity cache and retains no CPU pixels after
+// upload; callers may release the prepared result immediately (§26.1).
+func (r *Renderer) PrepareWaterMask(prepared *PreparedWaterMask) {
+	if prepared == nil || !r.beginWaterMask(prepared.source) {
 		return
 	}
+	r.installWaterMask(prepared)
+}
+
+func (r *Renderer) beginWaterMask(t *world.Terrain) bool {
+	if r == nil || t == nil || r.water.source == t {
+		return false
+	}
+	st := &r.water
 	if st.mask != nil {
 		st.mask.Deallocate()
 		st.mask = nil
 	}
-	st.source = c.Terrain
-	pixels, w, h, step, blocks, bw, bh := waterMaskPixels(c.Terrain)
-	st.w, st.h, st.step, st.blocks, st.blockW, st.blockH = w, h, step, blocks, bw, bh
-	if w == 0 || h == 0 {
+	st.source = t
+	return true
+}
+
+func (r *Renderer) installWaterMask(prepared *PreparedWaterMask) {
+	st := &r.water
+	st.w, st.h, st.step = prepared.w, prepared.h, prepared.step
+	st.blocks, st.blockW, st.blockH = prepared.blocks, prepared.blockW, prepared.blockH
+	if st.w == 0 || st.h == 0 {
 		return
 	}
-	st.mask = newRendererImage(w, h)
-	st.mask.WritePixels(pixels)
+	st.mask = newRendererImage(st.w, st.h)
+	st.mask.WritePixels(prepared.pixels)
 }
 
 func (st *waterLayer) visibleWater(c drawlist.Terrain) bool {

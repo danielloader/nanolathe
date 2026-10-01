@@ -204,7 +204,7 @@ func (r *Renderer) appendBlastWaves() {
 }
 
 func newDistortionShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(distortionShaderSource))
+	return compileShader(distortionShaderSource)
 }
 
 const distortionShaderSource = `//kage:unit pixels

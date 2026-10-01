@@ -173,7 +173,7 @@ func (r *Renderer) appendGroundLights() {
 }
 
 func newGroundLightShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(groundLightShaderSource))
+	return compileShader(groundLightShaderSource)
 }
 
 // The fragment is base × light, not a flat additive wash: multiplying by the

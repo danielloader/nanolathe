@@ -241,12 +241,12 @@ type modelDirectFace struct {
 // initModelDirect compiles the lane's two atlas passes.
 func (r *Renderer) initModelDirect() error {
 	d := &r.modelDirect
-	d.keyShader, d.shaderErr = ebiten.NewShader([]byte(modelDirectKeyShaderSource()))
+	d.keyShader, d.shaderErr = compileShader(modelDirectKeyShaderSource())
 	if d.shaderErr == nil {
-		d.colourShader, d.shaderErr = ebiten.NewShader([]byte(modelDirectColourShaderSource()))
+		d.colourShader, d.shaderErr = compileShader(modelDirectColourShaderSource())
 	}
 	if d.shaderErr == nil {
-		d.groups.shader, d.shaderErr = ebiten.NewShader([]byte(modelGroupMergeShaderSource))
+		d.groups.shader, d.shaderErr = compileShader(modelGroupMergeShaderSource)
 	}
 	return d.shaderErr
 }

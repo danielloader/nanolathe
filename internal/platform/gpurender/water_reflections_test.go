@@ -205,7 +205,9 @@ func checkWaterReflectionDevicePixels() error {
 		return err
 	}
 	r.ResetSources()
-	if r.reflections.source != nil || r.reflections.height != nil || len(r.reflections.verts) != 0 {
+	// The planes are surface scratch cleared before every use and survive a
+	// reset like the output surfaces; no reflected geometry may.
+	if len(r.reflections.verts) != 0 || r.reflections.source != nil && r.reflections.source.Bounds() != image.Rect(0, 0, r.w, r.h) {
 		return fmt.Errorf("reflection storage survived source reset")
 	}
 	return nil

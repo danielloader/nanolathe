@@ -38,7 +38,7 @@ type aircraftShadowLayer struct {
 var aircraftShadowIndices = [6]uint32{0, 1, 2, 1, 3, 2}
 
 func newAircraftShadowShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(aircraftShadowSource))
+	return compileShader(aircraftShadowSource)
 }
 
 func aircraftShadowRadius(height, scale float32) float32 {

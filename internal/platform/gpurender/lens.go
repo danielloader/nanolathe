@@ -80,7 +80,7 @@ func (r *Renderer) appendLens(l drawlist.Lens) {
 	}
 }
 
-func newLensShader() (*ebiten.Shader, error) { return ebiten.NewShader([]byte(lensShaderSource)) }
+func newLensShader() (*ebiten.Shader, error) { return compileShader(lensShaderSource) }
 
 // The modern composite has no palette identities. The documented lens policy
 // compares RGB bytes to the display palette's key color; duplicate colors and

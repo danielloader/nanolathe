@@ -63,6 +63,9 @@ type contentSet struct {
 	// mod switches, without repeating providers for a set already reported.
 	loadDuration    time.Duration
 	startupReported bool
+	// preview retains only immutable authored products for this mount. Every
+	// staged battle owns its catalog clone and animation state.
+	preview nlPreviewContent
 
 	// mod is the selected installed mod mounted as the last root, or nil.
 	// baseRoots are the roots without it, and manualRoots marks a command

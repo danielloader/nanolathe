@@ -31,6 +31,12 @@ type Renderer struct {
 	// last Execute's stages (StageTimes).
 	stageTiming bool
 	stageTimes  StageTimes
+	// sparseTerrain fills tile atlases on demand rather than packing a whole
+	// map at its first sight (SetSparseTerrain).
+	sparseTerrain bool
+	// pages keeps fixed-size source pages across ResetSources (pagePool).
+	pages pagePool
+
 	// effects is the last player selection SetEffects applied (§30). Every
 	// per-family switch below is set from it and from nothing else.
 	effects          drawlist.Effects
@@ -248,6 +254,7 @@ func NewChecked(pal *palette.Tables, w, h int) (*Renderer, error) {
 	if pal != nil {
 		r.displayPalette = pal.Base
 	}
+	r.scene.pool = &r.pages
 	r.scene.frames = make(map[*formats.GAFFrame]sceneEntry)
 	r.scene.pcx = make(map[*formats.PCX]sceneEntry)
 	r.scene.fonts = make(map[*formats.FNT]*fntAtlas)

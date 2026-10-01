@@ -41,3 +41,18 @@ func (r *Renderer) PrepareSprites(frames []*formats.GAFFrame) {
 		}
 	}
 }
+
+// SetSparseTerrain makes the tile atlases this renderer builds from now on
+// fill on demand: a tile is packed and uploaded the first frame it is in view,
+// onto pages of sparseTileAtlasSide² cells, instead of every tile of the map at
+// its first sight. A view that holds still, like a settings preview, then
+// uploads the few hundred tiles it shows rather than the whole map's thousands
+// — tens of megabytes inside one frame at the detail scale. The pixels drawn
+// are the same either way; only the cell a tile occupies differs. Battles keep
+// the complete atlas PrepareTerrain uploads at loading, so a camera jump never
+// packs tiles mid-game (DESIGN_GPU_RENDERER §14.8).
+func (r *Renderer) SetSparseTerrain(on bool) {
+	if r != nil {
+		r.sparseTerrain = on
+	}
+}

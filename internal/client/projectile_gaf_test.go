@@ -96,3 +96,42 @@ func TestProjectileGAFResolvesOnlyEstablishedSharedEntries(t *testing.T) {
 		t.Fatal("shared projectile bank was not retained after lazy load")
 	}
 }
+
+// Settings previews share one decoded projectile bank per content set, and
+// warming loads it before any draw asks for it (DESIGN_INTERFACE_HUD_INPUT
+// §3.17).
+func TestPreviewClientsShareTheWarmedProjectileBank(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "anims"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "anims", "fx.gaf"), projectileGAFFixture([]string{"shadow"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs := vfs.New()
+	if err := fs.MountDirectory(dir, 1); err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+	assets := NewPreviewModelTextureAssets(fs)
+	var clients [2]*Client
+	for i := range clients {
+		r := emptyModelTextureRegistry(fs, false)
+		r.previewAssets = assets
+		clients[i] = &Client{}
+		clients[i].SetModelTextureRegistry(r)
+		clients[i].WarmProjectileArt()
+		if !clients[i].projectileGAFLoaded || clients[i].projectileGAF == nil {
+			t.Fatalf("preview client %d did not warm the projectile bank", i)
+		}
+	}
+	if clients[0].projectileGAF != clients[1].projectileGAF {
+		t.Fatal("two preview clients decoded the projectile bank separately")
+	}
+	// An ordinary client keeps its own lazy load.
+	own := &Client{modelFS: fs}
+	own.WarmProjectileArt()
+	if own.projectileGAF == nil || own.projectileGAF == clients[0].projectileGAF {
+		t.Fatal("an ordinary client did not load its own projectile bank")
+	}
+}

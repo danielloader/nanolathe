@@ -83,6 +83,29 @@ type nlCard struct {
 	blink bool
 }
 
+// previewCardPics resolves stock portrait preferences through the same authored
+// roster as the background. The screen painter calls this accessor so content
+// switches replace the pictures along with the units (§3.17).
+func (s *nlScreen) previewCardPics(c nlCard) []string {
+	g := s.shell()
+	if g == nil || s.stats.catalog(g.cs) == nil {
+		return nil
+	}
+	if strings.HasPrefix(c.key, "mut-") {
+		if stat, ok := nlMutatorStats[strings.TrimPrefix(c.key, "mut-")]; ok {
+			return s.stats.statUnitNames(stat)
+		}
+	}
+	r := s.stats.contentRoster()
+	var names []string
+	for _, preferred := range c.pics {
+		if name := r.resolve(preferred); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 type nlPage struct {
 	key, title string
 	cards      []nlCard

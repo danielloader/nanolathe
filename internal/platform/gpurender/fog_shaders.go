@@ -231,5 +231,5 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 // first Fog command rather than in NewChecked, so the fog unit owns its own
 // resource lifetime.
 func newFogPassShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(fogPassShaderSource))
+	return compileShader(fogPassShaderSource)
 }

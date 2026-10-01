@@ -3870,6 +3870,20 @@ the menu as a fresh press. `internal/platform/screenkit` holds its toolkit:
 the film typefaces' glyphs as mip levels, paint helpers and hit regions. It
 is a platform package, allowed to import Ebitengine.
 
+**Control shape reuse.** The full animated background is retained. Small
+antialiased control discs, rings and lines reuse the existing vector painter's
+rasterization after the same shape recurs. Exact float32 geometry, including
+absolute fractional position, and RGBA colour identify a stamp. Both one-use
+history and stamps share a 256-entry limit; retained stamp pixel payload is
+limited to 4 MiB and each side to 128 pixels. Larger or unsupported geometry
+keeps the existing vector route. Construction and use stay on the game
+goroutine. Integer placement preserves the source pixel grid and destination
+clipping; an extra RGBA blend can introduce rounding. Native coverage fixtures
+review fractional, clipped, translucent and overlapping controls against direct
+painting, with at most one 8-bit channel level of difference in those fixtures.
+This is Nanolathe host presentation policy, user-authorized 2026-09-30, and
+changes no battle pixels, pacing or simulation state.
+
 **Layout.** One unit is `min(height/900, width/1560)` pixels, so a 4:3
 window keeps the header on one line. A tab row (*Game*, *Mutators*,
 *Graphics*, *Effects*, *Controls*) and *Back* / *Apply* (with the count of
@@ -3913,6 +3927,14 @@ and the snap-override key.
 the game goroutine the way the film route stages its shots
 ([FILM_CAPTURE](FILM_CAPTURE.md)) and stepped at 30 Hz with its own client
 and renderer; it is never saved, networked or seen by the window's battle.
+Ordinary backgrounds refresh at 30 FPS, while controls, animation and the cursor
+keep the host's display cadence. The Frame rate card overrides that background
+budget with its selected value, including Display's uncapped value. Both compare
+pictures refresh together; scene activation, a missing compare picture and an
+edit to either picture's render parameters bypass the cadence. During an
+outstanding scene load the previous picture holds and both its simulations and
+renderers pause. The loading interval never accumulates for a catch-up on resume.
+This is Nanolathe host presentation policy, not a gameplay or retail rule.
 The scene depends on the focused card, on maps where units stand out (no
 metal maps): an armour battle on Great Divide; Coast To Coast's shoreline with
 submarines, underwater structures and sinking wrecks for the water parts; a
@@ -3971,6 +3993,22 @@ alternates between the two values every 0.8 seconds under one tag naming the
 value on screen, because those changes are too fine to find by looking from
 one half to the other.
 
+**Content-aware fixtures.** The named units above are the stock compositions.
+Settings fixtures resolve those preferences against the mounted catalog's
+SIDEDATA factions and authored capabilities. Missing names get deterministic
+substitutes suitable for the scene; the film and benchmark fixtures retain their
+pinned rosters. Selection reads the immutable authored catalog before rules and
+mutators, so both halves of a comparison choose the same units. Construction
+examples use a selected constructor's full authored build membership while
+ordinary bound rules still admit each queued product. Commander build trees and
+visible download placements identify the human roster when a mod's constructor
+side tags also label another authored roster. Visible button zero participates
+in that preference. Artillery,
+worksite spacing and other unit-dependent geometry use the selected definitions.
+Card portraits and mutator examples follow the same content selection. When a
+capability is absent, the preview uses a compatible demonstration and explains
+the limitation. This is settings presentation policy, user-authorized 2026-09-30.
+
 **Graphics and Effects pages.** Graphics holds the choices that shape the
 whole picture in either renderer: the renderer itself, the frame rate, the
 sidebar and fullscreen. Effects holds Enhanced's own looks, the player
@@ -4017,16 +4055,57 @@ shared backend's configuration or battle preferences. Menu cues and the authored
 menu loop use 10% of their former cue amplitude; battle audio retains the player's
 FX/music settings. This is user-authorized host policy (2026-09-29).
 
-**Scene reuse.** The screen keeps recently viewed scenes paused, with their client,
-renderer source uploads and last pictures, so a revisit avoids both battle/client
-composition and the first-frame source upload. The cache is scoped to one
-content set and keyed by preset, rules, mutators, paired comparison and surface
-size. Current and cached scenes retain at most three battles in total; a paired
-comparison counts as two. The least recently used scene is retired first. Cached
-scenes do not step; a revisit resumes the same scene clock. Exhausted loops stage
-afresh, and closing the screen or reloading content retires every cached client
-and renderer source. First visits and uncached rule/mutator combinations still
-pay staging cost; this is a bounded recent-scene cache, not a preload of all maps.
+**Scene reuse.** The screen keeps recently viewed scenes paused, with their client
+and last pictures, so a revisit avoids battle/client composition. The cache is
+scoped to one content set and keyed by preset, rules, mutators, paired comparison
+and surface size. Current and cached scenes retain at most three battles in total;
+a paired comparison counts as two. The least recently used scene is retired first.
+Cached scenes do not step; a revisit resumes the same scene clock. Exhausted loops
+stage afresh, and closing the screen or reloading content retires every cached
+client. First visits and uncached rule/mutator combinations still pay staging
+cost; this is a bounded recent-scene cache, not a preload of all maps.
+
+Scenes do not own renderers. The screen keeps one Enhanced renderer per surface
+size (at most two: the common size and the closer-look scene's) and one for a
+paired comparison's twin, for as long as it is open; GPU programs are shared
+process-wide (DESIGN_GPU_RENDERER §2.3 "Shared programs"). When a different
+scene — new, cached or restarted — takes a renderer, its predecessor's sources
+are reset and the scene's own are prepared before its picture: the projected
+water/shadow mask its staging worker built while exclusively owning the terrain
+(DESIGN_GPU_RENDERER §26.1), kept with the scene for revisits, and the feature
+rest art its terrain admits. The mask is a pure function of the map's static
+terrain, so the screen keeps the last four built, keyed by a fingerprint of
+exactly their inputs (`gpurender.WaterMaskInputs`: cell grid, sea level, lava
+flag, each plot's height and void state); a restart, twin or revisit on the
+same map binds the one already built instead of spending 220–440 ms of staging
+on it. The projectile bank is loaded with the other battle art before any draw
+(`Client.WarmProjectileArt`) and, for previews, decoded once per content set.
+The renderer keeps its surfaces, layers, raster
+pages and recycled source pages across the reset (DESIGN_GPU_RENDERER §2.3
+"Source lifetime"), and fills its terrain atlas on demand (DESIGN_GPU_RENDERER
+§14.8), so a scene change uploads the few
+hundred tiles in view and allocates almost no device memory. Measured on an M3
+Pro, a scene's first picture fell from 100–485 ms of frozen frames (scene draw
+plus the backend's wait) to about 25–100 ms; shared programs matter most where
+the backend compiles slowly (Direct3D). Nanolathe host presentation policy.
+
+**Content reuse and asset scope.** A content set compiles the settings screen's
+authored catalog once. Each scene composes from its own clone, including an
+unmutated comparison scene; rule preparation and mutators never write to the
+cached base. The same content set retains immutable decoded texture banks, model
+geometry and reachable feature banks across scene loads. Each battle gets fresh
+loaded-model identities and animation cursors. A content reload creates a new
+cache.
+
+Before loading art, each fixture declares every unit it can create: initial and
+scheduled units, queued products, commanders, offscreen support and placement
+ghosts. Only those models and their linked projectile/corpse/successor assets are
+prepared, along with the terrain's admitted features and independent scene
+weapons such as meteors. Ordinary battle entry keeps full preparation. Texture
+banks still use the complete namespace to preserve entry precedence; authoritative
+terrain, simulation-art metadata, HUD art and detail synthesis retain their
+existing loading paths. This scope reduces repeated catalog and art work without
+cropping the simulation map or moving file reads into a simulation tick.
 
 **Input and persistence.** A grouped-effects wheel changes only the selected row
 and stops at its endpoints. Controls wheel scrolling survives redraw; keyboard

@@ -545,7 +545,7 @@ func (s *waterReflections) softenSubset(w, h int, scale, effective, energy, ox, 
 }
 
 func newReflectionSourceShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(`//kage:unit pixels
+	return compileShader(`//kage:unit pixels
 package main
 var Metadata float
 var RecordScale float
@@ -602,15 +602,15 @@ func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
  }
  return c
 }
-`))
+`)
 }
 
 func newReflectionResolveShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(strings.Replace(reflectionResolveShaderSource, "if custom.w<.5 {", "if true {", 1)))
+	return compileShader(strings.Replace(reflectionResolveShaderSource, "if custom.w<.5 {", "if true {", 1))
 }
 
 func newSoftReflectionResolveShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(strings.Replace(reflectionResolveShaderSource, "if custom.w<.5 {", "if false {", 1)))
+	return compileShader(strings.Replace(reflectionResolveShaderSource, "if custom.w<.5 {", "if false {", 1))
 }
 
 const reflectionResolveShaderSource = `//kage:unit pixels

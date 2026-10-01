@@ -74,7 +74,7 @@ func (r *Renderer) resolveArrival() {
 }
 
 func newArrivalShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(arrivalShaderSource))
+	return compileShader(arrivalShaderSource)
 }
 
 const arrivalShaderSource = `//kage:unit pixels

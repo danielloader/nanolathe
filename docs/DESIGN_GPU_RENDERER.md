@@ -293,7 +293,8 @@ Public API:
 * `(*Renderer).PrepareTerrain(drawlist.Terrain)` prepares the native and detail
   terrain atlas keys during loading (§14.8), without replaying a frame, and
   `PrepareSprites([]*formats.GAFFrame)` places the battle's feature rest art
-  in the scene atlas at the same boundary.
+  in the scene atlas at the same boundary. `SetSparseTerrain(true)` instead
+  fills tile atlases on demand, a tile the first frame it is in view (§14.8).
 * `(*Renderer).SetEffects`, `SetGlow`, `ResetSources`, and the diagnostics
   `DeviceDraws`, `ModelStats`, `AtlasUploads`, `FogContentError`,
   `DebugSnapshot`, `DebugLastFrame`.
@@ -336,6 +337,28 @@ upload identities and frame scratch. Shared images are released once. Shader
 programs, palette tables, output surfaces, the player's effect selection and
 renderer settings survive. Stable bindings, zoom changes and ordinary frames
 retain their caches.
+
+Device images that hold nothing between frames also survive: the model lane's
+4096² key and colour pages and the water reflection planes, each cleared
+before every use. Fixed-size source pages — the scene atlas's shared 2048²
+pages, the model texture page and the pages of a terrain atlas filled on demand
+(§14.8) — go to a pool of up to 128 MiB (`page_pool.go`) and come back cleared
+to the next generation's packers. On unified memory every fresh texture is
+wired before the first frame that uses it can start: a settings-preview scene
+change measured about 100 ms of driver wiring on an M3 Pro, 56 ms of it for the
+model lane's three 64 MiB planes, inside one frame. With these kept, a new
+battle or preview scene packs into memory the renderer already holds.
+
+**Shared programs.** Every Kage program the package compiles goes through one
+process-wide table keyed by its source text (`shader_cache.go`). Programs are
+immutable and no renderer deallocates one, so a second renderer — each
+settings-screen preview scene, its compare twin, a film or capture — reuses
+the first one's programs. The backend compiles a new program on the render
+thread inside a frame: Direct3D's compiler costs tens of milliseconds a pixel
+shader, and a renderer carries about thirty, so building one renderer per
+preview scene froze the settings screen for seconds on Windows at every scene
+change. A source that fails to compile keeps its error, so `NewChecked`
+reports it for every renderer. This is host resource sharing; no pixel changes.
 
 #### On-demand effect uploads
 
@@ -2938,6 +2961,21 @@ device-free loading, and lifecycle invalidation. Compare cold and prepared
 first-detail submissions separately from repeated detail draws; upload
 submission time is not a GPU completion timestamp (§6).
 
+**Terrain filled on demand.** A renderer set with `SetSparseTerrain` builds
+each tile atlas empty and packs a tile the first frame it is in view: before
+the draw walks its pages, every visible tile without a cell takes the next
+cell and uploads that one padded cell. Pages hold 32×32 cells (1,088 px
+native, 2,112 px detail), capped by the device, allocated as cells are handed
+out. A tile's cell is the only thing that differs from the complete atlas — the
+cell's texels, padding and the draw's clipping and remainder are the same code
+— so the pixels are identical (`checkSparseTerrainDevicePixels` walks a camera
+over both scales against the complete atlas). The settings screen's previews
+use it: their cameras hold still, so a scene packs and uploads the few hundred
+tiles it shows instead of every tile of the map — 40–50 MB at the detail scale
+on the preview maps, 200 MB on the largest — inside its first frame. Battles
+keep the complete atlas `PrepareTerrain` uploads at loading, so a camera jump
+mid-game never packs tiles. This is host presentation policy; no pixel changes.
+
 ## 15. Trails: Enhanced ground marks
 
 Mobile ground units leave fading marks on the terrain: alternating footprints
@@ -5362,6 +5400,23 @@ sprites are part of its terrain input; wake fragments clip to the
 matching wet/dry mask. No postprocess displaces units, HUD or fog; the submerged
 part of a blue-tinted hull is refracted inside its own commit (§26.5). Cache resources
 are released on map replacement and disposal.
+
+`BuildWaterMask(*world.Terrain) *PreparedWaterMask` runs the existing mask
+construction entirely on the CPU and returns an opaque immutable result bound
+to the terrain pointer. `WaterMaskInputs` fingerprints everything the mask
+reads — the cell grid, the sea level, the lava flag and each plot's height and
+void state — and `ForTerrain` binds a built mask to another load whose
+fingerprint matches, sharing its pixels; feature placement never moves the
+fingerprint, since only the void sentinels of the feature field are read. A staging worker must exclusively own the terrain while
+building it, after any lead-in that changes its plots. The result may cross to
+the render thread, where `Renderer.PrepareWaterMask` only installs its geometry
+and block index and uploads its pixels. The renderer retains no prepared pixel
+storage; the caller may release the result after upload. Matching terrain
+identities reuse the installed mask, replacement releases the previous image,
+and `ResetSources` drops the mask and terrain reference (§2.3). Draws still record
+the current projection and use the ordinary lazy construction when preparation
+was not supplied. Preparation leaves all mask channels, resolution bounds and
+shoreline calculations unchanged (§26.3, §32.3).
 
 ### 26.3 Surface treatment and cost bounds
 

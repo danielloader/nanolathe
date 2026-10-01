@@ -115,7 +115,7 @@ func (r *Renderer) strategicIcon(m *drawlist.Marker) {
 }
 
 func newMarkerShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(markerShaderSource()))
+	return compileShader(markerShaderSource())
 }
 
 func markerShaderSource() string {

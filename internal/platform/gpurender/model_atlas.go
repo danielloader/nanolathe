@@ -13,6 +13,10 @@ type modelTextureSlot struct {
 	img        *ebiten.Image
 	x, y, w, h int
 }
+
+// modelTexturePageSize is the side of one model texture page.
+const modelTexturePageSize = 2048
+
 type modelTextureAtlas struct {
 	slots     map[*formats.GAFFrame]modelTextureSlot
 	page      *ebiten.Image
@@ -34,18 +38,18 @@ func (r *Renderer) modelTextureFor(f *formats.GAFFrame) modelTextureSlot {
 	if w <= 0 || h <= 0 {
 		return modelTextureSlot{}
 	}
-	if w > 2046 || h > 2046 {
+	if w > modelTexturePageSize-2 || h > modelTexturePageSize-2 {
 		s := modelTextureSlot{img: r.gafImageFor(f), w: w, h: h}
 		a.slots[f] = s
 		return s
 	}
-	if a.x+w+2 > 2048 {
+	if a.x+w+2 > modelTexturePageSize {
 		a.x = 0
 		a.y += a.row
 		a.row = 0
 	}
-	if a.page == nil || a.y+h+2 > 2048 {
-		a.page = newRendererImage(2048, 2048)
+	if a.page == nil || a.y+h+2 > modelTexturePageSize {
+		a.page = r.pages.take(modelTexturePageSize, modelTexturePageSize)
 		a.x = 0
 		a.y = 0
 		a.row = 0

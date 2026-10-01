@@ -547,6 +547,13 @@ func composeBattleEntryWithDetail(sess *session.Session, cat *content.Catalog, c
 // render-thread commit as the rest of the battle presentation [08
 // R-SAVE-02 §11–§12].
 func composeBattleEntryDetached(sess *session.Session, cat *content.Catalog, cs *contentSet, shell *gameShell, savedCamera *save.Camera) (*battleSession, error) {
+	return composeBattleEntryDetachedWithModels(sess, cat, cs, shell, savedCamera, nil)
+}
+
+// composeBattleEntryDetachedWithModels accepts model resources prepared by the
+// settings preview's bounded fixture. Ordinary battles pass nil and retain the
+// complete catalog registry (docs/DESIGN_INTERFACE_HUD_INPUT.md §3.17).
+func composeBattleEntryDetachedWithModels(sess *session.Session, cat *content.Catalog, cs *contentSet, shell *gameShell, savedCamera *save.Camera, models *client.ModelTextureRegistry) (*battleSession, error) {
 	if sess == nil {
 		return nil, fmt.Errorf("nanolathe: battle composition failed: no session")
 	}
@@ -601,9 +608,12 @@ func composeBattleEntryDetached(sess *session.Session, cat *content.Catalog, cs 
 	if sess.Features != nil {
 		restoreStart = sess.Features.DefinitionRestoreStart()
 	}
-	b.modelTextures, err = client.NewModelTextureRegistry(cs.unmappedMount, cat, sess.World, restoreStart, cs.presentation.TeamLogos)
-	if err != nil {
-		return nil, fmt.Errorf("nanolathe: battle composition failed: model textures: %w", err)
+	b.modelTextures = models
+	if b.modelTextures == nil {
+		b.modelTextures, err = client.NewModelTextureRegistry(cs.unmappedMount, cat, sess.World, restoreStart, cs.presentation.TeamLogos)
+		if err != nil {
+			return nil, fmt.Errorf("nanolathe: battle composition failed: model textures: %w", err)
+		}
 	}
 	sess.SetPhase7Service(b.modelTextures)
 	sess.SetFragmentMaterialResolver(b.modelTextures.FreezeFragmentMaterial)
@@ -762,6 +772,7 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 	if b.sess.Catalog != nil {
 		cl.WarmBattleFeatureSequences(b.sess.Catalog, b.sess.World.FeatureDefs)
 	}
+	cl.WarmProjectileArt()
 	if b.preview {
 		b.battleUI.SetPanelCue(nil)
 		cl.SetAudioService(nil)

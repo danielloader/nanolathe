@@ -1,6 +1,8 @@
 package client
 
 import (
+	"strings"
+
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 )
@@ -14,16 +16,31 @@ import (
 //
 // This is only a presentation loading policy. It does not alter content.SimArt,
 // definition admission order, or any authoritative state [I6].
+// An explicit settings-preview registry restricts corpse roots to its fixture's
+// unit scope and shares decoded banks through that content set's assets; terrain
+// roots and every successor remain included (DESIGN_INTERFACE_HUD_INPUT §3.17).
 func (c *Client) WarmBattleFeatureSequences(cat *content.Catalog, admitted []*content.FeatureDef) {
 	if c == nil {
 		return
 	}
-	defs := battleFeatureDefinitions(cat, admitted)
+	var unitNames []string
+	if c.modelTextures != nil {
+		unitNames = c.modelTextures.previewUnitNames
+	}
+	var defs []*content.FeatureDef
+	if unitNames == nil {
+		defs = battleFeatureDefinitions(cat, admitted)
+	} else {
+		defs = battleFeatureDefinitionsForUnits(cat, admitted, unitNames)
+	}
 	c.battleAdmittedFeatures = admitted
 	// Whole-catalog event warming could incidentally load a bank used here
 	// only for rest art. Keep every reachable rest/shadow bank ready too, so
 	// narrowing the event set cannot move those decodes into Draw.
 	for _, def := range defs {
+		if c.modelTextures != nil && c.modelTextures.previewAssets != nil {
+			c.warmPreviewFeatureBank(c.modelTextures.previewAssets, def)
+		}
 		if def.SeqName != "" || def.SeqNameShad != "" {
 			_, _ = c.featureGAFFor(def.Filename)
 		}
@@ -32,6 +49,10 @@ func (c *Client) WarmBattleFeatureSequences(cat *content.Catalog, admitted []*co
 }
 
 func battleFeatureDefinitions(cat *content.Catalog, admitted []*content.FeatureDef) []*content.FeatureDef {
+	return battleFeatureDefinitionsForUnits(cat, admitted, nil)
+}
+
+func battleFeatureDefinitionsForUnits(cat *content.Catalog, admitted []*content.FeatureDef, unitNames []string) []*content.FeatureDef {
 	var defs []*content.FeatureDef
 	seen := make(map[*content.FeatureDef]bool)
 	add := func(def *content.FeatureDef) {
@@ -50,7 +71,7 @@ func battleFeatureDefinitions(cat *content.Catalog, admitted []*content.FeatureD
 		add(def)
 	}
 	if cat != nil {
-		for _, unit := range cat.UnitRecords() {
+		for _, unit := range scopedUnitRecords(cat, unitNames) {
 			if unit != nil {
 				add(byName(unit.Corpse))
 			}
@@ -77,6 +98,33 @@ func battleFeatureDefinitions(cat *content.Catalog, admitted []*content.FeatureD
 		}
 	}
 	return defs
+}
+
+func (c *Client) warmPreviewFeatureBank(assets *PreviewModelTextureAssets, def *content.FeatureDef) {
+	if def == nil || def.Filename == "" {
+		return
+	}
+	if def.SeqName == "" && def.SeqNameShad == "" && def.SeqNameBurn == "" && def.SeqNameBurnShad == "" &&
+		def.SeqNameDie == "" && def.SeqNameDieShad == "" && def.SeqNameReclamate == "" && def.SeqNameReclamateShad == "" {
+		return
+	}
+	key := strings.ToLower(strings.TrimSpace(def.Filename))
+	if key == "" {
+		return
+	}
+	if _, ok := c.featureGAFs[key]; ok {
+		return
+	}
+	if _, ok := c.featureGACErr[key]; ok {
+		return
+	}
+	bank := assets.featureBank(key)
+	if bank.err != nil {
+		c.featureGACErr[key] = bank.err
+		return
+	}
+	c.featureGAFs[key] = bank.gaf
+	c.indexDetailBank(key, bank.gaf)
 }
 
 // BattleSpriteFrames lists, each once, the rest and shadow frames at the

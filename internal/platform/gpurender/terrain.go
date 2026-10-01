@@ -1,6 +1,8 @@
 package gpurender
 
 import (
+	"image"
+
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
@@ -83,6 +85,26 @@ type tileAtlas struct {
 	rowsPer int // tile rows per page
 	perPage int // cols*rowsPer
 	count   int // number of tiles (len(TileSet))
+	// cells maps a tile to its cell in an atlas filled on demand
+	// (SetSparseTerrain): -1 until the tile is first in view. Nil for the
+	// complete atlas, where tile i is cell i.
+	cells  []int32
+	filled int    // cells handed out so far, on demand
+	cell1  []byte // one padded cell's pixels, reused per upload
+}
+
+// sparseTileAtlasSide is the cell grid of one page of an atlas filled on
+// demand: 32×32 cells, 1,088 px at the native scale and 2,112 at the detail
+// scale. One still settings preview fits in a page at either scale.
+const sparseTileAtlasSide = 32
+
+// cellOf returns the atlas cell holding tile id, or -1 while an atlas filled
+// on demand has not packed it.
+func (a *tileAtlas) cellOf(id int) int {
+	if a.cells == nil {
+		return id
+	}
+	return int(a.cells[id])
 }
 
 // tileAtlasPad is the border of duplicated edge texels around every cell of the
@@ -107,10 +129,10 @@ type tileAtlas struct {
 const tileAtlasPad = 1
 
 // atlasSrc returns the page and the atlas pixel coordinate of intra-tile pixel
-// (sx, sy) of tile id. The caller has already validated id against count.
-func (a *tileAtlas) atlasSrc(id, sx, sy int) (page, ax, ay int) {
-	page = id / a.perPage
-	local := id % a.perPage
+// (sx, sy) in cell (cellOf). The caller has already validated the cell.
+func (a *tileAtlas) atlasSrc(cell, sx, sy int) (page, ax, ay int) {
+	page = cell / a.perPage
+	local := cell % a.perPage
 	gx := (local%a.cols)*a.stride + tileAtlasPad
 	gy := (local/a.cols)*a.stride + tileAtlasPad
 	return page, gx + sx, gy + sy
@@ -194,50 +216,105 @@ func buildTileAtlas(t *world.Terrain, detail [][drawlist.DetailTilePixels]byte, 
 		atlasH := rows * stride
 		buf := make([]byte, atlasW*atlasH*4)
 		for i := first; i < last; i++ {
-			// The blitter's per-tile source choice: the detail tile at a scale
-			// above native when the record carries one for this tile, and the
-			// 32×32 tile otherwise (§14.2).
-			srcSide, src := terrainTileSize, t.TileSet[i][:]
-			direct := scale.Native()
-			if !scale.Native() && i < len(detail) {
-				srcSide, src, direct = side, detail[i][:], true
-			}
-			if len(src) < srcSide*srcSide {
-				continue
-			}
 			local := i - first
-			gx := (local%cols)*stride + tileAtlasPad
-			gy := (local/cols)*stride + tileAtlasPad
-			for ty := 0; ty < side; ty++ {
-				sy := ty
-				if !direct {
-					sy = int(scale.Inverse(int32(ty)))
-				}
-				if sy >= srcSide {
-					continue
-				}
-				dstRow := ((gy+ty)*atlasW + gx) * 4
-				srcRow := sy * srcSide
-				for tx := 0; tx < side; tx++ {
-					sx := tx
-					if !direct {
-						sx = int(scale.Inverse(int32(tx)))
-					}
-					if sx >= srcSide {
-						continue
-					}
-					p := dstRow + tx*4
-					buf[p] = src[srcRow+sx]
-					buf[p+3] = 255
-				}
-			}
-			padTileCell(buf, atlasW, gx, gy, side)
+			packTileCell(buf, atlasW, (local%cols)*stride+tileAtlasPad, (local/cols)*stride+tileAtlasPad, t, detail, scale, i)
 		}
 		img := newRendererImage(atlasW, atlasH)
 		img.WritePixels(buf)
 		a.pages[page] = img
 	}
 	return a
+}
+
+// packTileCell writes tile i into the cell whose first inner texel is
+// (gx, gy) of an atlasW-wide RGBA buffer, then fills its border. The source is
+// the blitter's per-tile choice: the detail tile at a scale above native when
+// the record carries one for this tile, and the 32×32 tile otherwise (§14.2),
+// resampled through the scale's inverse. A source pixel the blitter's guard
+// rejects leaves the texel at index zero.
+func packTileCell(buf []byte, atlasW, gx, gy int, t *world.Terrain, detail [][drawlist.DetailTilePixels]byte, scale camera.ViewScale, i int) {
+	side := int(scale.Px(terrainTileSize))
+	srcSide, src := terrainTileSize, t.TileSet[i][:]
+	direct := scale.Native()
+	if !scale.Native() && i < len(detail) {
+		srcSide, src, direct = side, detail[i][:], true
+	}
+	if len(src) < srcSide*srcSide {
+		return
+	}
+	for ty := 0; ty < side; ty++ {
+		sy := ty
+		if !direct {
+			sy = int(scale.Inverse(int32(ty)))
+		}
+		if sy >= srcSide {
+			continue
+		}
+		dstRow := ((gy+ty)*atlasW + gx) * 4
+		srcRow := sy * srcSide
+		for tx := 0; tx < side; tx++ {
+			sx := tx
+			if !direct {
+				sx = int(scale.Inverse(int32(tx)))
+			}
+			if sx >= srcSide {
+				continue
+			}
+			p := dstRow + tx*4
+			buf[p] = src[srcRow+sx]
+			buf[p+3] = 255
+		}
+	}
+	padTileCell(buf, atlasW, gx, gy, side)
+}
+
+// newSparseTileAtlas is an empty atlas filled on demand (SetSparseTerrain):
+// pages of sparseTileAtlasSide² cells, capped by the device, allocated as
+// cells are handed out.
+func newSparseTileAtlas(t *world.Terrain, scale camera.ViewScale) *tileAtlas {
+	scale = scale.Norm()
+	side := int(scale.Px(terrainTileSize))
+	stride := side + 2*tileAtlasPad
+	perSide := min(sparseTileAtlasSide, max(1, terrainAtlasMaxSide()/stride))
+	a := &tileAtlas{side: side, stride: stride, cols: perSide, rowsPer: perSide, perPage: perSide * perSide,
+		count: len(t.TileSet), cells: make([]int32, len(t.TileSet))}
+	for i := range a.cells {
+		a.cells[i] = -1
+	}
+	return a
+}
+
+// fill packs every tile of the visible tile range [tx0, tx1] × [ty0, ty1] that
+// an atlas filled on demand does not hold yet, one cell upload each, before
+// the draw walks its pages; so a tile is placed the first frame it is in view
+// and never again.
+func (a *tileAtlas) fill(pool *pagePool, t *world.Terrain, detail [][drawlist.DetailTilePixels]byte, scale camera.ViewScale, tileMapW, tx0, ty0, tx1, ty1 int) {
+	for ty := ty0; ty <= ty1; ty++ {
+		for tx := tx0; tx <= tx1; tx++ {
+			id := int(t.TileIndices[ty*tileMapW+tx])
+			if id < 0 || id >= a.count || a.cells[id] >= 0 {
+				continue
+			}
+			cell := a.filled
+			page := cell / a.perPage
+			for len(a.pages) <= page {
+				a.pages = append(a.pages, nil)
+			}
+			if a.pages[page] == nil {
+				a.pages[page] = pool.take(a.cols*a.stride, a.rowsPer*a.stride)
+			}
+			if a.cell1 == nil {
+				a.cell1 = make([]byte, a.stride*a.stride*4)
+			}
+			clear(a.cell1)
+			packTileCell(a.cell1, a.stride, tileAtlasPad, tileAtlasPad, t, detail, scale, id)
+			local := cell % a.perPage
+			x, y := (local%a.cols)*a.stride, (local/a.cols)*a.stride
+			a.pages[page].SubImage(image.Rect(x, y, x+a.stride, y+a.stride)).(*ebiten.Image).WritePixels(a.cell1)
+			a.cells[id] = int32(cell)
+			a.filled++
+		}
+	}
 }
 
 // padTileCell copies a cell's edge texels into the one-texel border around it,
@@ -283,7 +360,12 @@ func (r *Renderer) atlasFor(t *world.Terrain, detail [][drawlist.DetailTilePixel
 	if a, ok := r.tileAtlases[key]; ok {
 		return a
 	}
-	a := buildTileAtlas(t, detail, scale)
+	var a *tileAtlas
+	if r.sparseTerrain {
+		a = newSparseTileAtlas(t, scale)
+	} else {
+		a = buildTileAtlas(t, detail, scale)
+	}
 	r.tileAtlases[key] = a
 	return a
 }
@@ -372,6 +454,9 @@ func (r *Renderer) Terrain(c drawlist.Terrain) {
 	if endTY > tileMapH-1 {
 		endTY = tileMapH - 1
 	}
+	if atlas.cells != nil {
+		atlas.fill(&r.pages, t, c.Detail, scale, tileMapW, startTX, startTY, endTX, endTY)
+	}
 
 	// One command per atlas page: the page rides source slot 3 of the scene
 	// shader, so the terrain pass merges into the same batch as the frame's
@@ -390,7 +475,8 @@ func (r *Renderer) Terrain(c drawlist.Terrain) {
 				if tileID < 0 || tileID >= atlas.count {
 					continue
 				}
-				if tileID/atlas.perPage != page {
+				cell := atlas.cellOf(tileID)
+				if cell < 0 || cell/atlas.perPage != page {
 					continue
 				}
 				// Tile screen origin (shear term is zero for terrain at ground
@@ -430,7 +516,7 @@ func (r *Renderer) Terrain(c drawlist.Terrain) {
 					}
 					begun = true
 				}
-				_, ax0, ay0 := atlas.atlasSrc(tileID, srcX0, srcY0)
+				_, ax0, ay0 := atlas.atlasSrc(cell, srcX0, srcY0)
 				r.sched.quad(schedOpaque,
 					float32(dstX0), float32(dstY0), float32(dstX1), float32(dstY1),
 					float32(ax0), float32(ay0), float32(ax0+w), float32(ay0+h),

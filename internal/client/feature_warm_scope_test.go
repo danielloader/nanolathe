@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/frame"
 )
 
 func TestBattleFeatureDefinitionsClosesEveryAdmissionRoot(t *testing.T) {
@@ -101,5 +102,57 @@ func TestBattleFeatureWarmIncludesRestOnlyAndShadowOnlyBanks(t *testing.T) {
 		if _, _, _, _, _, ok := c.FeatureSequence("trees", "treeburn", 0); !ok {
 			t.Fatal("rest bank pixels unavailable without filesystem access")
 		}
+	}
+}
+
+func TestPreviewFeatureWarmUsesUnitScopeAndSharesOnlyDecodedArt(t *testing.T) {
+	first, second := newFeatureSequenceClient(t), newFeatureSequenceClient(t)
+	assets := NewPreviewModelTextureAssets(first.modelFS)
+	first.modelTextures = &ModelTextureRegistry{previewAssets: assets, previewUnitNames: []string{"product"}}
+	second.modelTextures = &ModelTextureRegistry{previewAssets: assets, previewUnitNames: []string{"product"}}
+	tree := &content.FeatureDef{Filename: "trees", SeqName: "treeburn"}
+	wreck := &content.FeatureDef{Filename: "trees", SeqNameDie: "treedie", FeatureDead: "successor"}
+	successor := &content.FeatureDef{Filename: "trees", SeqNameReclamate: "treeburn", FeatureBurntDef: wreck}
+	unrelated := &content.FeatureDef{Filename: "unrelated", SeqNameDie: "unused"}
+	cat := &content.Catalog{
+		Units: map[string]*content.UnitDef{
+			"product": {DefinitionHeader: content.DefinitionHeader{CanonicalKey: "product"}, Corpse: "wreck"},
+			"unused":  {DefinitionHeader: content.DefinitionHeader{CanonicalKey: "unused"}, Corpse: "unrelated"},
+		},
+		Features: map[string]*content.FeatureDef{"wreck": wreck, "successor": successor, "unrelated": unrelated},
+	}
+	first.WarmBattleFeatureSequences(cat, []*content.FeatureDef{tree})
+	second.WarmBattleFeatureSequences(cat, []*content.FeatureDef{tree})
+	if _, tried := first.featureGACErr["unrelated"]; tried {
+		t.Fatal("preview warmed an unrelated unit's corpse bank")
+	}
+	if first.featureGAFs["trees"] == nil || first.featureGAFs["trees"] != second.featureGAFs["trees"] {
+		t.Fatal("paired previews decoded their shared feature pixels twice")
+	}
+	for _, seq := range []string{"treedie", "treeburn"} {
+		key := featureSequenceKey("trees", seq)
+		if first.featureSeqs[key] == nil || !reflect.DeepEqual(first.featureSeqs[key], second.featureSeqs[key]) {
+			t.Fatalf("future product corpse or successor omitted %s", seq)
+		}
+	}
+	// Each client keeps its own mutable rest cursor even when all decoded
+	// frames come from one immutable bank.
+	first.featureAnim = map[string]*featureAnimCursor{}
+	second.featureAnim = map[string]*featureAnimCursor{}
+	view := frame.FeatureView{Filename: "trees", SeqName: "treeburn", Animating: true}
+	first.featureFrameFor(view, false)
+	second.featureFrameFor(view, false)
+	a, b := first.featureAnim["trees|treeburn"], second.featureAnim["trees|treeburn"]
+	if a == nil || b == nil || a == b || a.player == b.player {
+		t.Fatal("shared feature pixels aliased a mutable rest cursor")
+	}
+	a.player.Step()
+	a.player.Step()
+	a.player.Step()
+	if index, _ := a.player.FrameIndex(); index == 0 {
+		t.Fatal("first feature cursor did not advance in the isolation check")
+	}
+	if index, _ := b.player.FrameIndex(); index != 0 {
+		t.Fatal("feature rest cursor advance crossed the preview boundary")
 	}
 }

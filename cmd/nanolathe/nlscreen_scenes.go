@@ -10,7 +10,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/features"
 	"github.com/nanolathe-gg/nanolathe/internal/film"
-	"github.com/nanolathe-gg/nanolathe/internal/movement"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
@@ -209,10 +208,14 @@ var nlPresets = map[string]nlPreset{
 // what it places, keeps sites from overlapping, and collects the events the
 // preview runs on the scene's tick count.
 type nlStage struct {
-	s      *session.Session
-	cx, cz int32
-	taken  []nlBox
-	events []nlEvent
+	s         *session.Session
+	cx, cz    int32
+	taken     []nlBox
+	events    []nlEvent
+	roster    *nlRoster
+	required  []string
+	limits    []string
+	placement string
 	// live is set once staging is done: an event's units walk off, so what
 	// it places is checked against the ground alone and reserves nothing.
 	live bool
@@ -359,6 +362,7 @@ func nlPlace(s *session.Session, def *content.UnitDef, x, z numeric.Fixed) (nume
 // the content lacks it or no spot within rings accepts it.
 func (st *nlStage) unit(name string, owner uint8, x, z, rings int32) *units.Unit {
 	s := st.s
+	name = st.name(name)
 	def, ok := s.Catalog.Unit(name)
 	if !ok {
 		return nil
@@ -520,9 +524,9 @@ func nlClear(s *session.Session, x0, z0, x1, z1 int32) int {
 // lost and the battle stops, so a scene that kills or omits a side's units
 // keeps one far-off structure for each.
 func (st *nlStage) sentinels() {
-	nlStageSentinel(st.s, st.cx, st.cz)
+	st.sentinel()
 	s := st.s
-	def, ok := s.Catalog.Unit("armsolar")
+	def, ok := s.Catalog.Unit(st.name("armsolar"))
 	if !ok {
 		return
 	}
@@ -551,6 +555,29 @@ func (st *nlStage) storage() {
 // their wrecks settle on the bottom.
 func nlStageNaval(st *nlStage) {
 	s := st.s
+	if st.roster != nil {
+		supported := false
+		for side := range st.roster.factions {
+			for _, role := range []nlUnitRole{nlShip, nlSubmarine, nlAircraft} {
+				if st.roster.pick("", side, role, nil) != "" {
+					supported = true
+				}
+			}
+		}
+		if !supported {
+			// The shoreline anchor can be deep water. A dry-only roster needs
+			// its own ordinary ground composition and camera anchor (§3.17).
+			x, z, _, err := filmBattleCentre(film.Scene{}, s.World)
+			if err != nil {
+				st.limit("This content has no naval or combat aircraft units, and this map has no ground area for a compatible battle.")
+				return
+			}
+			st.cx, st.cz = x, z
+			st.limit("This content has no naval or combat aircraft units; a ground battle is shown.")
+			st.compatibleBattle()
+			return
+		}
+	}
 	cx, cz := st.cx, st.cz
 	own, foe := s.LocalOwner, s.EnemyOwner
 	// Underwater structures ring the anchor; each takes the nearest water
@@ -583,28 +610,16 @@ func nlStageNaval(st *nlStage) {
 		nlLoop(s, u, cx+120, cz+20-int32(i%2)*40, 220, i+2)
 	}
 	// Aircraft circle over the water.
-	for i, name := range []string{"armthund", "armfig", "armthund", "corshad", "corveng", "corshad"} {
-		def, ok := s.Catalog.Unit(name)
-		if !ok {
-			continue
-		}
+	for i, preferred := range []string{"armthund", "armfig", "armthund", "corshad", "corveng", "corshad"} {
+		name := st.name(preferred)
 		side := own
 		if i >= 3 {
 			side = foe
 		}
 		x, z := cx-150+int32(i)*90, cz-160+int32(i%2)*280
-		fx, fz := nlFixed(x), nlFixed(z)
 		// In flight from the first frame, through the airborne creator and the
 		// cruise-altitude seam the film fixture uses [04 §10.1].
-		h, err := s.Units.CreateWithMoverMode(def, side, fx, movement.CruiseAltitudeForOffset(s.World, fx, fz, def.CruiseAlt), fz, 2)
-		if err != nil {
-			continue
-		}
-		u := s.Units.Unit(h)
-		if s.Movement != nil {
-			s.Movement.EnsureUnit(u)
-		}
-		s.BindStagedOrderQueue(u)
+		u := st.airOrUnit(name, side, x, z, 10)
 		nlLoop(s, u, cx+60+int32(i%3)*30, cz, 170, i)
 	}
 	// The sunk: ships and a submarine placed over the deepest water near the
@@ -647,8 +662,11 @@ func nlStageDefence(st *nlStage, fire bool) {
 		nlHold(u)
 	}
 	// Constructors behind the line, each beside the structure it raises.
+	builderName := st.name("armck")
+	bd, _ := s.Catalog.Unit(builderName)
 	for i, p := range []struct{ product string }{{"armrad"}, {"armsolar"}, {"armllt"}} {
-		pd, ok := s.Catalog.Unit(p.product)
+		product := st.buildProduct(bd, p.product)
+		pd, ok := s.Catalog.Unit(product)
 		if !ok {
 			continue
 		}
@@ -657,16 +675,17 @@ func nlStageDefence(st *nlStage, fire bool) {
 		if !ok {
 			continue
 		}
-		b := st.unit("armck", own, sx+pd.FootprintX*8+20, sz, 3)
+		b := st.unit(builderName, own, sx+pd.FootprintX*8+max(bd.FootprintX*8, 20), sz, 3)
 		if b == nil {
 			continue
 		}
-		st.queueBuild(b, p.product, sx, sz)
+		st.queueBuild(b, product, sx, sz)
 	}
 	// Waves walk in from the east and on through the towers.
+	waveNames := st.names([]string{"corak", "corpyro", "corak", "corpyro", "corak"})
 	wave := func(s *session.Session, tick int) {
 		k := int32(tick / 30)
-		for i, name := range []string{"corak", "corpyro", "corak", "corpyro", "corak"} {
+		for i, name := range waveNames {
 			x := cx + 380 + int32(i%2)*40 + (k*37)%60
 			z := cz - 110 + int32(i)*55
 			u := st.unit(name, foe, x, z, 4)
@@ -705,6 +724,7 @@ var nlLightingCopses = [][2]int32{{190, -150}, {260, 140}, {330, -150}, {120, 14
 // (x, z).
 func (st *nlStage) queueBuild(b *units.Unit, product string, x, z int32) {
 	s := st.s
+	st.requireUnit(product)
 	pd, ok := s.Catalog.Unit(product)
 	if !ok || b == nil {
 		return
@@ -842,6 +862,11 @@ const nlHotWreckPeriod = 40
 // every stage of cooling and nothing else moves.
 func nlStageHotWrecks(st *nlStage) {
 	cx, cz := st.cx, st.cz
+	names := st.names(nlHotWreckUnits)
+	if len(names) == 0 {
+		st.sentinels()
+		return
+	}
 	round := len(nlHotWreckSpots) * nlHotWreckPeriod
 	for k, spot := range nlHotWreckSpots {
 		st.every(2+k*nlHotWreckPeriod, round, func(s *session.Session, tick int) {
@@ -853,7 +878,7 @@ func nlStageHotWrecks(st *nlStage) {
 			if k%2 == 1 {
 				owner = s.EnemyOwner
 			}
-			name := nlHotWreckUnits[(k+tick/round)%len(nlHotWreckUnits)]
+			name := names[(k+tick/round)%len(names)]
 			nlKill(s, st.unit(name, owner, x, z, 3), true)
 		})
 	}
@@ -887,12 +912,23 @@ func nlStageWorksite(st *nlStage) {
 	cx, cz := st.cx, st.cz
 	nlClearWorksite(st)
 	st.storage()
-	builder, ok := s.Catalog.Unit("armck")
+	builder, ok := s.Catalog.Unit(st.name("armck"))
 	if !ok {
+		st.compatibleBattle()
 		return
 	}
-	for i, products := range nlWorksite {
-		bx, bz, _, ok := st.spot(builder, cx+nlCrewRows[i][0], cz+nlCrewRows[i][1], 4)
+	productsByRow := make([][3]string, len(nlWorksite))
+	var productNames []string
+	for i, row := range nlWorksite {
+		for k, preferred := range row {
+			productsByRow[i][k] = st.buildProduct(builder, preferred)
+			productNames = append(productNames, productsByRow[i][k])
+		}
+	}
+	rows := st.crewRows(builder, productNames)
+	nlClear(s, cx-180, cz+rows[0][1]-100, cx+180, cz+rows[2][1]+190)
+	for i, products := range productsByRow {
+		bx, bz, _, ok := st.spot(builder, cx+rows[i][0], cz+rows[i][1], 4)
 		if !ok {
 			continue
 		}
@@ -940,6 +976,7 @@ func nlClearWorksite(st *nlStage) {
 // create makes one of the viewer's units at a spot already reserved.
 func (st *nlStage) create(def *content.UnitDef, x, z int32) *units.Unit {
 	s := st.s
+	st.requireUnit(def.UnitName)
 	fx, fz := nlFixed(x), nlFixed(z)
 	h, err := s.Units.Create(def, s.LocalOwner, fx, s.World.HeightAt(fx, fz), fz)
 	if err != nil {
@@ -965,8 +1002,9 @@ func nlStageSalvage(st *nlStage) {
 	cx, cz := st.cx, st.cz
 	nlClearWorksite(st)
 	st.storage()
-	builder, ok := s.Catalog.Unit("armck")
+	builder, ok := s.Catalog.Unit(st.name("armck"))
 	if !ok {
+		st.compatibleBattle()
 		return
 	}
 	type crew struct {
@@ -1069,12 +1107,6 @@ const nlBlastTank = "corlevlr"
 // them as the blast-size factor grows.
 const nlBlastPitch = 44
 
-// nlBlastRefill is the ticks after a shell's damage shows before the block's
-// health is set back to full, about half the gun's reload: the bars drop,
-// hold long enough to read who was hit and by how much, and refill before
-// the next shell.
-const nlBlastRefill = 45
-
 // nlStageBlast stands a block of five by three enemy tanks on flat, cleared
 // ground with the middle one on the anchor, and one gun beyond the frame's
 // west edge firing at a ground point just past that middle tank. The gun
@@ -1084,13 +1116,39 @@ const nlBlastRefill = 45
 func nlStageBlast(st *nlStage) {
 	s := st.s
 	cx, cz := st.cx, st.cz
-	half := int32(nlBlastPitch)
+	gunNames := st.names(nlBlastGuns)
+	if len(gunNames) == 0 {
+		st.compatibleBattle()
+		return
+	}
+	gunName := gunNames[0]
+	gd, _ := s.Catalog.Unit(gunName)
+	weapon := nlBatteryWeapon(gd)
+	tankName := st.name(nlBlastTank)
+	if st.roster != nil {
+		// Choose from the authored health/damage values before any mutator,
+		// so compared scenes contain the same block.
+		ad, _ := st.roster.cat.Unit(gunName)
+		tankName = st.requireUnit(st.roster.blastTarget(nlBlastTank, nlBatteryWeapon(ad)))
+	}
+	td, ok := s.Catalog.Unit(tankName)
+	if !ok || weapon == nil {
+		st.limit("This content has no compatible splash-artillery target block; an ordinary battle is shown.")
+		st.compatibleBattle()
+		return
+	}
+	half := max(int32(nlBlastPitch), max(td.FootprintX, td.FootprintZ)*16+12)
+	rangeToTarget, lead := int32(nlBlastRange), int32(nlBlastLead)
+	if gunName != "armguard" && gunName != "corpun" || weapon.Range < rangeToTarget {
+		rangeToTarget, lead = min(int32(nlBlastRange), weapon.Range*3/4), 0
+	}
+	refillDelay := max(1, int(uint16(weapon.ReloadTime))/2)
 	nlClear(s, cx-3*half, cz-2*half-40, cx+3*half, cz+2*half+110)
 	var block []*units.Unit
 	var mid *units.Unit
 	for row := int32(-1); row <= 1; row++ {
 		for col := int32(-2); col <= 2; col++ {
-			u := st.unit(nlBlastTank, s.EnemyOwner, cx+col*half, cz+row*half, 1)
+			u := st.unit(tankName, s.EnemyOwner, cx+col*half, cz+row*half, 1)
 			if u == nil {
 				continue
 			}
@@ -1112,13 +1170,13 @@ func nlStageBlast(st *nlStage) {
 	// mutator compare's crops centre on it.
 	st.cx, st.cz = int32(mid.X.Int()), int32(mid.Z.Int())
 	var gun *units.Unit
-	for _, name := range nlBlastGuns {
-		if gun = st.unit(name, s.LocalOwner, st.cx-nlBlastRange+nlBlastLead, st.cz, 6); gun != nil {
+	for _, name := range gunNames {
+		if gun = st.unit(name, s.LocalOwner, st.cx-rangeToTarget+lead, st.cz, 6); gun != nil {
 			break
 		}
 	}
 	if gun != nil {
-		tx, tz := mid.X+nlFixed(nlBlastLead), mid.Z
+		tx, tz := mid.X+nlFixed(lead), mid.Z
 		st.at(1, func(s *session.Session, _ int) {
 			nlPush(s, gun, "Suppress", 0, tx, s.World.HeightAt(tx, tz), tz)
 		})
@@ -1137,7 +1195,7 @@ func nlStageBlast(st *nlStage) {
 		if refill == 0 {
 			for _, u := range block {
 				if u.Alive && u.Health < u.MaxHealth {
-					refill = tick + nlBlastRefill
+					refill = tick + refillDelay
 					break
 				}
 			}
@@ -1216,8 +1274,9 @@ func wsAbs(v int32) int32 {
 
 // nlStageSentinel places one enemy structure far from the anchor, the nearest
 // open ground to a point across the map from it.
-func nlStageSentinel(s *session.Session, cx, cz int32) {
-	def, ok := s.Catalog.Unit("corsolar")
+func (st *nlStage) sentinel() {
+	s, cx, cz := st.s, st.cx, st.cz
+	def, ok := s.Catalog.Unit(st.name("corsolar"))
 	if !ok {
 		return
 	}

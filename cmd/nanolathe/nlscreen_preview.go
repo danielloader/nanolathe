@@ -6,9 +6,11 @@ import (
 	"math"
 	"os"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
@@ -16,6 +18,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/film"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
+	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/gpurender"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
@@ -106,14 +109,32 @@ type nlRender struct {
 	arrival         bool
 	placementRanges bool
 	classic         bool
-	// fps throttles how often the picture changes, for the frame-rate
-	// preview; zero changes it on every display frame.
+	// fps throttles background refresh. The Frame rate card overrides the
+	// ordinary 30 FPS budget; zero refreshes on every display frame.
 	fps int
 	// zoom multiplies the preset's own zoom, for the view-scale preview.
 	zoom float64
 	// The ground light and blast ring strengths, percentages.
 	groundLightStrength int
 	blastRingStrength   int
+}
+
+// Both pictures are refreshed together. Keeping the parameters beside the
+// retained images lets an edit bypass the background's cadence without
+// changing the recorder's effect histories (DESIGN_INTERFACE_HUD_INPUT §3.17).
+type nlRenderSignature struct {
+	primary, alt nlRender
+	compare      bool
+}
+
+func nlRenderInputs(primary nlRender, alt *nlRender, paired bool) nlRenderSignature {
+	sig := nlRenderSignature{primary: primary}
+	if paired {
+		sig.alt, sig.compare = primary, true
+	} else if alt != nil {
+		sig.alt, sig.compare = *alt, true
+	}
+	return sig
 }
 
 type nlPreviewInstance struct {
@@ -152,6 +173,12 @@ type nlPreviewInstance struct {
 
 	placementDef           *content.UnitDef
 	placementX, placementZ int32
+	previewLimit           string // authored capabilities missing from this fixture
+	// The staging worker's share of the scene's renderer sources: the
+	// projected water/shadow mask and the feature rest art, prepared each
+	// time the scene takes a renderer (nlPreview.render).
+	waterMask *gpurender.PreparedWaterMask
+	sprites   []*formats.GAFFrame
 }
 
 type nlPreviewResult struct {
@@ -159,17 +186,20 @@ type nlPreviewResult struct {
 	err  error
 }
 
-// A paused scene keeps its source uploads with its client. Reusing only the
-// session would still pay the first-frame upload cost on every revisit.
+// A paused scene keeps its session, client and last pictures. Its renderer
+// sources are prepared again on a revisit (nlPreview.render).
 type nlCachedPreview struct {
-	inst         *nlPreviewInstance
-	gpu, twinGPU nlGPU
-	frame, alt   *ebiten.Image
+	inst       *nlPreviewInstance
+	frame, alt *ebiten.Image
 }
 
 // Bound retained battles rather than cards: a paired mutator compare owns two.
 // The current scene and the recent-scene cache retain at most three sessions.
 const nlPreviewCacheSessions = 3
+
+// nlPreviewRenderers bounds the primary renderers kept by surface size: the
+// common size and the one closer-look scene that renders smaller.
+const nlPreviewRenderers = 2
 
 type nlPreview struct {
 	opts Options
@@ -189,14 +219,21 @@ type nlPreview struct {
 	presentNeeded      bool
 	cacheResumeStarted time.Time
 
-	gpu     nlGPU // the scene's renderer
-	twinGPU nlGPU // the paired scene's own renderer: sources belong to one client
+	// gpus are the renderers every scene draws through, most recently used
+	// first (nlPreviewRenderers), and twinGPU the paired scene's own: a
+	// renderer's sources belong to one client at a time, and the pair draws
+	// in the same frame. A renderer outlives its scenes; a different scene
+	// resets its sources and prepares its own (DESIGN_INTERFACE_HUD_INPUT
+	// §3.17 "Scene reuse").
+	gpus    []*nlGPU
+	twinGPU nlGPU
 
-	frame     *ebiten.Image // the last presented picture, world viewport only
-	alt       *ebiten.Image // the compare picture, when asked for
-	fade      *ebiten.Image // the outgoing scene's last picture
-	fadeLeft  float64
-	lastDrawn time.Time
+	frame      *ebiten.Image // the last presented picture, world viewport only
+	alt        *ebiten.Image // the compare picture, when asked for
+	fade       *ebiten.Image // the outgoing scene's last picture
+	fadeLeft   float64
+	lastDrawn  time.Time
+	lastRender nlRenderSignature
 }
 
 func newNLPreview(opts Options, cs *contentSet) *nlPreview {
@@ -209,7 +246,7 @@ func (p *nlPreview) Ready() bool { return p != nil && p.cur != nil }
 // Loading reports whether a scene is being staged.
 func (p *nlPreview) Loading() bool { return p != nil && p.loading && p.loadKey == p.want }
 
-// request asks for a scene; the current one keeps playing until it arrives.
+// request asks for a scene; its previous picture stays while it loads.
 func (p *nlPreview) request(key nlSceneKey) {
 	p.want = key
 	if p.cur != nil && p.cur.key == key {
@@ -307,7 +344,6 @@ func buildNLPreviewScene(opts Options, cs *contentSet, key nlSceneKey, mutators 
 	if err != nil {
 		return nil, err
 	}
-	cl.SetModelFS(cs.unmappedMount, cs.presentation.TeamLogos)
 	cl.SetAntiAlias(true)
 	cl.SetFeatureShadows(true)
 	cl.SetShadowOptions(true, true, true)
@@ -326,7 +362,16 @@ func buildNLPreviewScene(opts Options, cs *contentSet, key nlSceneKey, mutators 
 	cl.SetInterpolation(true)
 	detailOpts := opts
 	detailOpts.Zoom = camera.Zoom(2 * camera.ZoomUnit)
-	b, err = composeBattleEntryDetached(sess, sess.Catalog, cs, nil, nil)
+	restoreStart := len(sess.World.FeatureDefs)
+	if sess.Features != nil {
+		restoreStart = sess.Features.DefinitionRestoreStart()
+	}
+	models, err := client.NewPreviewModelTextureRegistry(cs.nlPreviewModelAssets(), sess.Catalog, sess.World, restoreStart, st.assetUnitNames(), sess.Meteor.WeaponName)
+	if err != nil {
+		cl.Close()
+		return nil, fmt.Errorf("nanolathe: preview %s: model textures: %w", key.preset, err)
+	}
+	b, err = composeBattleEntryDetachedWithModels(sess, sess.Catalog, cs, nil, nil, models)
 	if err != nil {
 		cl.Close()
 		return nil, err
@@ -348,7 +393,7 @@ func buildNLPreviewScene(opts Options, cs *contentSet, key nlSceneKey, mutators 
 	step := uint32(0)
 	inst = &nlPreviewInstance{key: key, preset: preset, cl: cl, b: b, anchorX: anchorX, anchorZ: anchorZ,
 		surfaceW: surfaceW, surfaceH: surfaceH, effects: drawlist.AllEffects(), enhanced: true,
-		sess: sess}
+		sess: sess, previewLimit: st.previewLimit()}
 	inst.advance = func() {
 		step++
 		millis.step = step
@@ -396,6 +441,13 @@ func buildNLPreviewScene(opts Options, cs *contentSet, key nlSceneKey, mutators 
 	if key.preset == "placement" {
 		inst.stagePlacement(st)
 	}
+	leadInDone := time.Now()
+	// The staged battle has one owner until it crosses the result channel.
+	// Build the projected water/shadow pixels and gather the feature rest art
+	// here rather than in the first UI draw; the renderer uploads them later
+	// (DESIGN_GPU_RENDERER §14.8, §26.1).
+	inst.waterMask = nlWaterMask(sess.World)
+	inst.sprites = cl.BattleSpriteFrames()
 	own, foe := 0, 0
 	for _, m := range inst.marks {
 		if m.own {
@@ -404,9 +456,9 @@ func buildNLPreviewScene(opts Options, cs *contentSet, key nlSceneKey, mutators 
 			foe++
 		}
 	}
-	fmt.Fprintf(os.Stderr, "nanolathe: preview: %s on %s at %d,%d: %d own and %d enemy units; battle %v, fixture %v, client %v, %d lead-in ticks %v\n",
+	fmt.Fprintf(os.Stderr, "nanolathe: preview: %s on %s at %d,%d: %d own and %d enemy units; battle %v, fixture %v, client %v, %d lead-in ticks %v, mask %v\n",
 		key.preset, scene.Map, anchorX, anchorZ, own, foe, composed.Sub(started).Round(time.Millisecond),
-		fixture.Sub(composed).Round(time.Millisecond), staged.Sub(fixture).Round(time.Millisecond), scene.PreTicks, time.Since(staged).Round(time.Millisecond))
+		fixture.Sub(composed).Round(time.Millisecond), staged.Sub(fixture).Round(time.Millisecond), scene.PreTicks, leadInDone.Sub(staged).Round(time.Millisecond), time.Since(leadInDone).Round(time.Millisecond))
 	return inst, nil
 }
 
@@ -428,12 +480,20 @@ func stageNLSession(opts Options, cs *contentSet, preset nlPreset, rules gamepla
 	if err != nil {
 		return nil, time.Time{}, err
 	}
+	request.value.Catalog, err = cs.nlPreviewCatalog()
+	if err != nil {
+		return nil, time.Time{}, err
+	}
 	if preset.circular {
 		// Zero is a lobby value, so it is set after the defaults
 		// [08 "Skirmish configuration"].
 		request.value.Skirmish.LOSType = 0
 	}
-	authoritative, err := composeAuthoritativeBattle(request)
+	// Keep the authored catalog available to roster selection while every
+	// preview, including the unmutated twin, owns its battle catalog.
+	battleRequest := request
+	battleRequest.value.Catalog = request.value.Catalog.Clone()
+	authoritative, err := composeAuthoritativeBattle(battleRequest)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -448,16 +508,51 @@ func stageNLSession(opts Options, cs *contentSet, preset nlPreset, rules gamepla
 			mgr.Passive = true
 		}
 	}
-	anchorX, anchorZ, err := stageFilmScene(scene, sess)
+	st, err := stageNLPreviewFixture(preset, sess, request.value.Catalog)
 	if err != nil {
 		return nil, composed, err
 	}
-	st := &nlStage{s: sess, cx: anchorX, cz: anchorZ}
-	if preset.stage != nil {
-		preset.stage(st)
-	}
-	st.live = true
 	return st, composed, nil
+}
+
+// nlWaterMasks keeps the last few water masks staged, by the fingerprint of
+// their inputs (gpurender.WaterMaskInputs). A mask costs a few hundred
+// milliseconds of staging on the preview maps and depends only on the map's
+// static terrain, so a restart, a compare twin or a revisit on the same map
+// binds the one already built. Entries are kept unbound, so the cache never
+// holds a retired battle's terrain.
+var nlWaterMasks struct {
+	sync.Mutex
+	keys  []uint64
+	masks []*gpurender.PreparedWaterMask
+}
+
+const nlWaterMaskCache = 4
+
+// nlWaterMask returns t's water mask, built or bound from the cache. The
+// staging worker calls it while it exclusively owns t, after the lead-in.
+func nlWaterMask(t *world.Terrain) *gpurender.PreparedWaterMask {
+	key := gpurender.WaterMaskInputs(t)
+	c := &nlWaterMasks
+	c.Lock()
+	for i, k := range c.keys {
+		if k == key {
+			m := c.masks[i]
+			c.Unlock()
+			return m.ForTerrain(t)
+		}
+	}
+	c.Unlock()
+	m := gpurender.BuildWaterMask(t)
+	c.Lock()
+	defer c.Unlock()
+	if !slices.Contains(c.keys, key) {
+		if len(c.keys) == nlWaterMaskCache {
+			c.keys, c.masks = c.keys[1:], c.masks[1:]
+		}
+		c.keys, c.masks = append(c.keys, key), append(c.masks, m.ForTerrain(nil))
+	}
+	return m
 }
 
 // nlScriptTick is what the preview does before simulation tick step: the
@@ -605,6 +700,7 @@ func (inst *nlPreviewInstance) close() {
 	if inst == nil || inst.closed {
 		return
 	}
+	inst.waterMask, inst.sprites = nil, nil
 	inst.closed = true
 	inst.twin.close()
 	inst.b.teardown(inst.cl)
@@ -655,10 +751,10 @@ func (c nlCachedPreview) sessions() int {
 	return 1
 }
 
+// close retires a scene. Its renderer sources stay until another scene takes
+// the renderer.
 func (c nlCachedPreview) close() {
 	c.inst.close()
-	c.gpu.resetSources()
-	c.twinGPU.resetSources()
 }
 
 func (p *nlPreview) takeCached(key nlSceneKey) (nlCachedPreview, bool) {
@@ -702,7 +798,7 @@ func (p *nlPreview) trimCache() {
 }
 
 func (p *nlPreview) activate(next nlCachedPreview) {
-	old := nlCachedPreview{inst: p.cur, gpu: p.gpu, twinGPU: p.twinGPU, frame: p.frame, alt: p.alt}
+	old := nlCachedPreview{inst: p.cur, frame: p.frame, alt: p.alt}
 	if old.frame != nil && old.inst != nil {
 		if p.fade == nil || p.fade.Bounds() != old.frame.Bounds() {
 			p.fade = ebiten.NewImage(old.frame.Bounds().Dx(), old.frame.Bounds().Dy())
@@ -711,7 +807,7 @@ func (p *nlPreview) activate(next nlCachedPreview) {
 		p.fade.DrawImage(old.frame, nil)
 		p.fadeLeft = 1
 	}
-	p.cur, p.gpu, p.twinGPU = next.inst, next.gpu, next.twinGPU
+	p.cur = next.inst
 	p.frame, p.alt = next.frame, next.alt
 	p.cur.started = time.Now()
 	p.lastDrawn, p.presentNeeded, p.lastErr = time.Time{}, true, ""
@@ -720,8 +816,23 @@ func (p *nlPreview) activate(next nlCachedPreview) {
 	p.trimCache()
 }
 
-// Frame advances the preview and renders it. primary is always drawn; alt,
-// when non-nil, is drawn too for a split compare.
+// renderDue shares one cadence for both pictures, with an immediate redraw on
+// an edit or activation. Only the background is throttled; the screen's input,
+// controls and cursor still run on every host frame (DESIGN_INTERFACE_HUD_INPUT §3.17).
+func (p *nlPreview) renderDue(now time.Time, sig nlRenderSignature, stepped bool) bool {
+	if p.presentNeeded || p.lastRender != sig || p.frame == nil || (sig.compare && p.alt == nil) {
+		return true
+	}
+	if sig.primary.classic && !stepped && !sig.compare {
+		return false // Classic presents once per 30 Hz tick.
+	}
+	return sig.primary.fps <= 0 || now.Sub(p.lastDrawn) >= time.Second/time.Duration(sig.primary.fps)-2*time.Millisecond
+}
+
+// Frame advances the preview and refreshes both pictures when due. Staging
+// leaves the old scene paused, including its twin; the display-frame dt is
+// discarded rather than accumulated for a catch-up after loading
+// (DESIGN_INTERFACE_HUD_INPUT §3.17).
 func (p *nlPreview) Frame(dt float64, primary nlRender, alt *nlRender) {
 	select {
 	case res := <-p.results:
@@ -738,6 +849,9 @@ func (p *nlPreview) Frame(dt float64, primary nlRender, alt *nlRender) {
 			p.request(p.want)
 		}
 	default:
+	}
+	if p.loading {
+		return
 	}
 	p.fadeLeft = max(0, p.fadeLeft-dt/0.6)
 	inst := p.cur
@@ -758,48 +872,67 @@ func (p *nlPreview) Frame(dt float64, primary nlRender, alt *nlRender) {
 		// Restart before the fight burns out; the new copy fades in over it.
 		p.restarts++
 		p.startLoad(inst.key)
+		return
 	}
-	throttle := primary.fps > 0 && time.Since(p.lastDrawn) < time.Second/time.Duration(primary.fps)-2*time.Millisecond
-	if primary.classic && !stepped && p.frame != nil && alt == nil && !p.presentNeeded {
-		throttle = true // Classic presents once per 30 Hz tick.
+	sig := nlRenderInputs(primary, alt, inst.twin != nil)
+	if !p.renderDue(time.Now(), sig, stepped) {
+		return
 	}
-	if !throttle {
-		drawStart := time.Now()
-		p.render(&p.gpu, inst, primary, &p.frame)
-		p.presentNeeded = false
-		p.lastDrawn = time.Now()
-		if !p.cacheResumeStarted.IsZero() {
-			fmt.Fprintf(os.Stderr, "nanolathe: preview: %s cached frame %v, %v after revisit\n", inst.key.preset,
-				p.lastDrawn.Sub(drawStart).Round(time.Millisecond), p.lastDrawn.Sub(p.cacheResumeStarted).Round(time.Millisecond))
-			p.cacheResumeStarted = time.Time{}
-		}
-		if !inst.firstDraw {
-			inst.firstDraw = true
-			fmt.Fprintf(os.Stderr, "nanolathe: preview: %s first frame %v, %v after it was requested\n", inst.key.preset,
-				p.lastDrawn.Sub(drawStart).Round(time.Millisecond), p.lastDrawn.Sub(p.loadStarted).Round(time.Millisecond))
-		}
-	}
+	drawStart := time.Now()
+	gpu := p.primaryGPU(inst)
+	p.render(gpu, inst, primary, &p.frame)
 	switch {
 	case inst.twin != nil:
 		// A mutator compare: the twin under the other factor, drawn the same.
 		p.render(&p.twinGPU, inst.twin, primary, &p.alt)
 	case alt != nil:
-		p.render(&p.gpu, inst, *alt, &p.alt)
+		p.render(gpu, inst, *alt, &p.alt)
 	}
+	p.presentNeeded, p.lastRender = false, sig
+	p.lastDrawn = time.Now()
+	if !p.cacheResumeStarted.IsZero() {
+		fmt.Fprintf(os.Stderr, "nanolathe: preview: %s cached frame %v, %v after revisit\n", inst.key.preset,
+			p.lastDrawn.Sub(drawStart).Round(time.Millisecond), p.lastDrawn.Sub(p.cacheResumeStarted).Round(time.Millisecond))
+		p.cacheResumeStarted = time.Time{}
+	}
+	if !inst.firstDraw {
+		inst.firstDraw = true
+		fmt.Fprintf(os.Stderr, "nanolathe: preview: %s first frame %v, %v after it was requested\n", inst.key.preset,
+			p.lastDrawn.Sub(drawStart).Round(time.Millisecond), p.lastDrawn.Sub(p.loadStarted).Round(time.Millisecond))
+	}
+}
+
+// samePalette reports whether two palette installs hold the same tables.
+func samePalette(a, b *palette.Tables) bool {
+	return a == b || (a != nil && b != nil && *a == *b)
 }
 
 // nlGPU is one Enhanced renderer and the Classic staging image a scene draws
-// through.
+// through, and the scene whose sources the renderer holds.
 type nlGPU struct {
 	r       *gpurender.Renderer
+	pal     *palette.Tables
 	w, h    int
 	classic *ebiten.Image
+	owner   *nlPreviewInstance
 }
 
-func (g *nlGPU) resetSources() {
-	if g.r != nil {
-		g.r.ResetSources()
+// primaryGPU is the renderer for a scene's surface size, most recently used
+// first; a third size replaces the least recently used.
+func (p *nlPreview) primaryGPU(inst *nlPreviewInstance) *nlGPU {
+	for i, g := range p.gpus {
+		if g.w == inst.surfaceW && g.h == inst.surfaceH {
+			copy(p.gpus[1:i+1], p.gpus[:i])
+			p.gpus[0] = g
+			return g
+		}
 	}
+	g := &nlGPU{}
+	if len(p.gpus) >= nlPreviewRenderers {
+		p.gpus = p.gpus[:nlPreviewRenderers-1]
+	}
+	p.gpus = append([]*nlGPU{g}, p.gpus...)
+	return g
 }
 
 func (p *nlPreview) render(g *nlGPU, inst *nlPreviewInstance, r nlRender, into **ebiten.Image) {
@@ -849,14 +982,29 @@ func (p *nlPreview) render(g *nlGPU, inst *nlPreviewInstance, r nlRender, into *
 	if list == nil {
 		return
 	}
-	if g.r == nil || g.w != inst.surfaceW || g.h != inst.surfaceH {
-		g.resetSources()
-		gpu, err := gpurender.NewChecked(cl.PaletteTables(), inst.surfaceW, inst.surfaceH)
+	if pal := cl.PaletteTables(); g.r == nil || !samePalette(g.pal, pal) || g.w != inst.surfaceW || g.h != inst.surfaceH {
+		gpu, err := gpurender.NewChecked(pal, inst.surfaceW, inst.surfaceH)
 		if err != nil {
 			p.lastErr = err.Error()
 			return
 		}
-		g.r, g.w, g.h = gpu, inst.surfaceW, inst.surfaceH
+		// A preview's camera holds still, so it packs only the tiles in view
+		// rather than the whole map inside its first frame.
+		gpu.SetSparseTerrain(true)
+		*g = nlGPU{r: gpu, pal: pal, w: inst.surfaceW, h: inst.surfaceH, classic: g.classic}
+	}
+	if g.owner != inst {
+		// Another scene's sources go, and this one's are prepared before its
+		// first picture: the staging worker built the water mask, and the
+		// feature rest art is placed before the frame rather than inside it.
+		// The renderer keeps its surfaces, layers, raster pages and recycled
+		// source pages, so a scene change allocates almost nothing.
+		if g.owner != nil {
+			g.r.ResetSources()
+		}
+		g.owner = inst
+		g.r.PrepareWaterMask(inst.waterMask)
+		g.r.PrepareSprites(inst.sprites)
 	}
 	g.r.SetDisplayPalette(cl.DisplayPalette())
 	g.r.SetGlow(r.glow)
@@ -887,9 +1035,12 @@ func (p *nlPreview) Close() {
 		c.close()
 	}
 	p.cache = nil
-	p.gpu.resetSources()
-	p.twinGPU.resetSources()
-	p.gpu, p.twinGPU = nlGPU{}, nlGPU{}
+	// Closing the screen keeps no renderer: their surfaces go with the screen.
+	for _, g := range p.gpus {
+		g.r.ResetSources()
+	}
+	p.twinGPU.r.ResetSources()
+	p.gpus, p.twinGPU = nil, nlGPU{}
 	if p.loading {
 		go func(ch chan nlPreviewResult) {
 			if res := <-ch; res.inst != nil {
@@ -903,28 +1054,25 @@ func (p *nlPreview) Close() {
 // stagePlacement arms a real prospective tower at a validated, snapped site.
 // The battle's own ghost and shared range overlay draw the preview.
 func (inst *nlPreviewInstance) stagePlacement(st *nlStage) {
-	for _, name := range []string{"armllt", "corllt"} {
-		def, ok := st.s.Catalog.Unit(name)
-		if !ok || def == nil {
-			continue
-		}
-		x, z, y, ok := st.spot(def, st.cx+96, st.cz, 24)
-		if !ok {
-			continue
-		}
-		b := inst.b
-		b.armPlacement(def)
-		state := &b.battleState().Input
-		state.BuildCellX, state.BuildCellZ = world.PlacementAnchor(nlFixed(x), nlFixed(z), state.BuildFootX, state.BuildFootZ)
-		state.BuildSiteH, state.BuildOK = int32(y.Int()), true
-		// No physical pointer drives a preview. Keep the battle's admission gate
-		// in its viewport and preserve the validated site while the scene steps.
-		state.PointerX, state.PointerY = int32(inst.surfaceW/2), int32(inst.surfaceH/2)
-		inst.anchorX, inst.anchorZ = x, z
-		inst.placementDef, inst.placementX, inst.placementZ = def, x, z
-		inst.applyCamera(0)
+	def, ok := st.s.Catalog.Unit(st.placementUnitName())
+	if !ok || def == nil {
 		return
 	}
+	x, z, y, ok := st.spot(def, st.cx+96, st.cz, 24)
+	if !ok {
+		return
+	}
+	b := inst.b
+	b.armPlacement(def)
+	state := &b.battleState().Input
+	state.BuildCellX, state.BuildCellZ = world.PlacementAnchor(nlFixed(x), nlFixed(z), state.BuildFootX, state.BuildFootZ)
+	state.BuildSiteH, state.BuildOK = int32(y.Int()), true
+	// No physical pointer drives a preview. Keep the battle's admission gate
+	// in its viewport and preserve the validated site while the scene steps.
+	state.PointerX, state.PointerY = int32(inst.surfaceW/2), int32(inst.surfaceH/2)
+	inst.anchorX, inst.anchorZ = x, z
+	inst.placementDef, inst.placementX, inst.placementZ = def, x, z
+	inst.applyCamera(0)
 }
 
 // This is preview choreography. Move the prospective tower on the same

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"slices"
 	"strconv"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -16,8 +17,7 @@ import (
 // (docs/DESIGN_MODS_MUTATORS.md §6.4). The card's factor is applied alone, so
 // the plate shows that mutator's effect and nothing else.
 
-// nlStat is one mutator's plate: the value it scales and the units that show
-// it; the first units the content holds are used.
+// nlStat is one mutator's plate: the value it scales and preferred stock examples.
 type nlStat struct {
 	label  string
 	units  []string
@@ -26,7 +26,12 @@ type nlStat struct {
 }
 
 func weapon1(u *content.UnitDef) (*content.WeaponDef, bool) {
-	return u.Weapon1Def, u.Weapon1Def != nil
+	for _, w := range []*content.WeaponDef{u.Weapon1Def, u.Weapon2Def, u.Weapon3Def} {
+		if !content.IsWeaponInactive(w) && uint16(w.DamageDefault) > 0 {
+			return w, true
+		}
+	}
+	return nil, false
 }
 
 func formatInt(v float64) string { return strconv.FormatInt(int64(v), 10) }
@@ -41,7 +46,12 @@ var nlMutatorStats = map[string]nlStat{
 			return float64(u.BuildCostMetal), u.BuildCostMetal > 0
 		}, format: formatInt},
 	"income": {label: "Energy made", units: []string{"armsolar", "armwin", "armfus", "corsolar", "corfus"},
-		value:  func(_ *content.Catalog, u *content.UnitDef) (float64, bool) { return u.EnergyMake, u.EnergyMake > 0 },
+		value: func(_ *content.Catalog, u *content.UnitDef) (float64, bool) {
+			// The mutator scales surplus above upkeep, including the negative-use
+			// production arm (DESIGN_MODS_MUTATORS §6.5 "Income").
+			v := u.EnergyMake - u.EnergyUse
+			return v, v > 0
+		},
 		format: func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }},
 	"salvage": {label: "Wreck metal", units: []string{"armbull", "corkrog", "armzeus", "corgol", "armpw"},
 		value: func(c *content.Catalog, u *content.UnitDef) (float64, bool) {
@@ -66,7 +76,7 @@ var nlMutatorStats = map[string]nlStat{
 	"areaOfEffect": {label: "Blast radius", units: []string{"armbull", "armbrtha", "corgol", "armham", "corthud"},
 		value: func(_ *content.Catalog, u *content.UnitDef) (float64, bool) {
 			w, ok := weapon1(u)
-			if !ok || w.AreaOfEffect <= 0 {
+			if !ok || uint16(w.AreaOfEffect) <= 16 {
 				return 0, false
 			}
 			return float64(uint16(w.AreaOfEffect)), true
@@ -100,6 +110,7 @@ type nlStats struct {
 	loading bool
 	result  chan *content.Catalog
 	mutated map[string]*content.Catalog
+	roster  *nlRoster
 }
 
 // catalog returns the base catalog once it has compiled, starting the
@@ -112,7 +123,7 @@ func (st *nlStats) catalog(cs *contentSet) *content.Catalog {
 		st.loading = true
 		st.result = make(chan *content.Catalog, 1)
 		go func(ch chan *content.Catalog) {
-			c, err := cs.compileCatalog(nil)
+			c, err := cs.nlPreviewCatalog()
 			if err != nil {
 				c = nil
 			}
@@ -125,6 +136,44 @@ func (st *nlStats) catalog(cs *contentSet) *content.Catalog {
 	default:
 	}
 	return st.base
+}
+
+func (st *nlStats) contentRoster() *nlRoster {
+	if st.base == nil {
+		return nil
+	}
+	if st.roster == nil {
+		st.roster = newNLRoster(st.base, nil)
+	}
+	return st.roster
+}
+
+// statUnitNames uses the same capability resolver as the scenes, then fills
+// missing examples from the active content. A unit must carry the scaled value;
+// a missing stock name never leaves a mod's plate empty.
+func (st *nlStats) statUnitNames(stat nlStat) []string {
+	r := st.contentRoster()
+	if r == nil {
+		return nil
+	}
+	var names []string
+	add := func(name string) {
+		if u, ok := st.base.Unit(name); ok && u != nil {
+			if _, ok := stat.value(st.base, u); ok && !slices.Contains(names, name) {
+				names = append(names, name)
+			}
+		}
+	}
+	for _, preferred := range stat.units {
+		add(r.resolve(preferred))
+	}
+	for _, name := range r.keys {
+		if len(names) >= 3 {
+			break
+		}
+		add(name)
+	}
+	return names
 }
 
 // with returns the base catalog with one mutator applied, cached.
@@ -172,7 +221,7 @@ func (s *nlScreen) heroMutatorStats(screen *ebiten.Image, key string, x, y, a fl
 	df.Draw(screen, "In this content", x, y+12*u, screenkit.Style{Size: 11 * u, Tracking: 0.24, Top: alphaC(nlKicker, a), Upper: true})
 	y += 22 * u
 	shown := 0
-	for _, name := range stat.units {
+	for _, name := range s.stats.statUnitNames(stat) {
 		if shown == 3 {
 			break
 		}

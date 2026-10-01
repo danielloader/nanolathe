@@ -57,8 +57,17 @@ func (s *nlScreen) demoSidebar(screen *ebiten.Image, mode int) {
 	screenkit.Shade(screen, screenkit.Rect{X: panel.X - 20*u, Y: panel.Y - 10*u, W: panel.W + 40*u, H: panel.H + 30*u}, 0.6)
 	screenkit.Fill(screen, panel, color.RGBA{10, 14, 10, 235})
 	s.well(screen, panel, 1)
-	pics := []string{"armpw", "armrock", "armham", "armjeth", "armwar", "armck", "armfark", "armmark",
-		"armfido", "armzeus", "armsnipe", "armaak", "armflea", "armspid", "armvader", "armspy"}
+	var pics []string
+	if g := s.shell(); g != nil && s.stats.catalog(g.cs) != nil {
+		r := s.stats.contentRoster()
+		if builder, ok := r.cat.Unit(r.resolve("armck")); ok {
+			pics = r.products(builder)
+		}
+	}
+	if len(pics) == 0 {
+		s.fonts.Body.Draw(screen, "No authored build products in this content.", panel.X+14*u, panel.Y+28*u, screenkit.Style{Size: 11 * u, Top: nlDim})
+		return
+	}
 	pages := (len(pics) + perPage - 1) / perPage
 	page := int(s.demoT/2.2) % pages
 	s.fonts.Display.Draw(screen, fmt.Sprintf("Build  %d / %d", page+1, pages), panel.X+14*u, panel.Y+28*u, screenkit.Style{Size: 13 * u, Tracking: 0.2, Top: nlKicker, Upper: true})

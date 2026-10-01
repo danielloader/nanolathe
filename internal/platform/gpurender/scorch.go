@@ -9,7 +9,7 @@ import (
 )
 
 func newScorchShader() (*ebiten.Shader, error) {
-	return ebiten.NewShader([]byte(fmt.Sprintf(scorchShaderSource, float32(drawlist.ScorchFadeStartTicks), float32(drawlist.ScorchLifeTicks))))
+	return compileShader(fmt.Sprintf(scorchShaderSource, float32(drawlist.ScorchFadeStartTicks), float32(drawlist.ScorchLifeTicks)))
 }
 
 // ScorchMarks draws authored cooling ground marks beneath objects and fog

@@ -6,7 +6,6 @@ import (
 	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
 // Rect is a screen rectangle in pixels.
@@ -109,7 +108,7 @@ func Shade(dst *ebiten.Image, r Rect, alpha float64) {
 
 // Line strokes a segment.
 func Line(dst *ebiten.Image, x0, y0, x1, y1, width float64, c color.RGBA) {
-	vector.StrokeLine(dst, float32(x0), float32(y0), float32(x1), float32(y1), float32(width), c, true)
+	drawSmallShape(dst, shapeSpec{kind: shapeLine, geometry: [5]float32{float32(x0), float32(y0), float32(x1), float32(y1), float32(width)}, colour: c})
 }
 
 // Outline strokes a rectangle's border inside r.
@@ -133,12 +132,12 @@ func Bevel(dst *ebiten.Image, r Rect, width float64, light, dark color.RGBA, sun
 
 // Disc paints a filled circle.
 func Disc(dst *ebiten.Image, cx, cy, radius float64, c color.RGBA) {
-	vector.FillCircle(dst, float32(cx), float32(cy), float32(radius), c, true)
+	drawSmallShape(dst, shapeSpec{kind: shapeDisc, geometry: [5]float32{float32(cx), float32(cy), float32(radius)}, colour: c})
 }
 
 // Ring strokes a circle.
 func Ring(dst *ebiten.Image, cx, cy, radius, width float64, c color.RGBA) {
-	vector.StrokeCircle(dst, float32(cx), float32(cy), float32(radius), float32(width), c, true)
+	drawSmallShape(dst, shapeSpec{kind: shapeRing, geometry: [5]float32{float32(cx), float32(cy), float32(radius), float32(width)}, colour: c})
 }
 
 // Image draws src scaled into r. Nearest keeps pixel art crisp.

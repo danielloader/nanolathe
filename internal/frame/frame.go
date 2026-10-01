@@ -1143,6 +1143,9 @@ type Frame struct {
 	// ViewingPlayer is the observer for this committed frame; selection keeps
 	// its separate true-local owner [03 R-VIS-01 §4].
 	ViewingPlayer uint8
+	// MainViewRadarDots is the committed visibility-rule answer for the Modern
+	// main-view contact feature (DESIGN_INTERFACE_HUD_INPUT "Modern radar dots").
+	MainViewRadarDots bool
 	// Paused is the scheduler state captured at this completed tick-end
 	// publication. A pause transition can take effect synchronously without
 	// another completed tick; UI keeps its own canonical truth for that interval
@@ -1347,6 +1350,7 @@ func (f *Frame) Reset() {
 	// revision without another map-sized copy [03 §2.4].
 	f.retainedViewingPlayer = f.ViewingPlayer
 	f.ViewingPlayer = 0
+	f.MainViewRadarDots = false
 	f.retainedVisibility = f.Visibility
 	f.retainedFog = f.Fog
 	f.Visibility.Visible = f.Visibility.Visible[:0]

@@ -17,9 +17,10 @@ import (
 const strategicIconSize = 24
 
 type strategicLayoutScratch struct {
-	marks   []drawlist.Marker
-	targets []int // UnitView index + 1; zero is an unidentified contact
-	slots   []int
+	marks    []drawlist.Marker
+	targets  []int         // UnitView index + 1; zero is an unidentified contact
+	contacts []pool.Handle // attack-only contact identity, never an identified target
+	slots    []int
 }
 
 // A successful GPU submission freezes the camera used by that list. The
@@ -97,6 +98,7 @@ func presentationPoint(v camera.PresentationView, x, z int64) (int64, int64) {
 func (c *Client) layoutStrategicMarkers(f *frame.Frame, viewer uint8, dst *strategicLayoutScratch, picking bool) {
 	dst.marks = dst.marks[:0]
 	dst.targets = dst.targets[:0]
+	dst.contacts = dst.contacts[:0]
 	if !picking && c != nil {
 		c.strategicRecorded.valid = false
 	}
@@ -136,13 +138,14 @@ func (c *Client) layoutStrategicMarkers(f *frame.Frame, viewer uint8, dst *strat
 	if typed {
 		passes = 2
 	}
-	appendMark := func(m drawlist.Marker, target int) {
+	appendMark := func(m drawlist.Marker, target int, contact pool.Handle) {
 		x, y := m.X-m.Size/2, m.Y-m.Size/2
 		if x+m.Size <= viewport.X || x >= viewport.X+viewport.W || y+m.Size <= viewport.Y || y >= viewport.Y+viewport.H {
 			return
 		}
 		dst.marks = append(dst.marks, m)
 		dst.targets = append(dst.targets, target)
+		dst.contacts = append(dst.contacts, contact)
 	}
 	for pass := 0; pass < passes; pass++ {
 		for i := range f.Radar.Contacts {
@@ -161,6 +164,9 @@ func (c *Client) layoutStrategicMarkers(f *frame.Frame, viewer uint8, dst *strat
 			}
 			if visible && (typed || alpha == 0) {
 				continue // the visible model/icon lane owns this contact, including hidden cargo
+			}
+			if c.enhanced && !visible && (!f.MainViewRadarDots || c.radarDots == 0) {
+				continue
 			}
 			// Enhanced sensor dots stay legible above fog at every zoom (§18.4).
 			// Only identified units take the strategic fade; radar cannot grant identity.
@@ -182,7 +188,11 @@ func (c *Client) layoutStrategicMarkers(f *frame.Frame, viewer uint8, dst *strat
 				}
 			}
 			x, y := presentationPoint(view, int64(p.X)>>16, (int64(p.Z)>>16)-(int64(p.Y)>>17))
-			appendMark(drawlist.Marker{X: int32(x), Y: int32(y), Size: strategicMarkerSize, Index: index, Outline: outline, Selected: p.Selected, Alpha: contactAlpha, Clip: viewport, HasClip: true}, 0)
+			contactHandle := pool.Handle(0)
+			if !visible {
+				contactHandle = p.Handle
+			}
+			appendMark(drawlist.Marker{X: int32(x), Y: int32(y), Size: strategicMarkerSize, Index: index, Outline: outline, Selected: p.Selected, Alpha: contactAlpha, Clip: viewport, HasClip: true}, 0, contactHandle)
 		}
 		if !typed || alpha == 0 {
 			continue
@@ -217,7 +227,7 @@ func (c *Client) layoutStrategicMarkers(f *frame.Frame, viewer uint8, dst *strat
 					}
 				}
 			}
-			appendMark(drawlist.Marker{X: int32(x), Y: int32(y), Size: strategicIconSize, Index: index, Outline: iconOutline, Selected: highlighted, Alpha: alpha, Clip: viewport, HasClip: true, IconAtlas: icon.Atlas, IconRect: iconRect}, i+1)
+			appendMark(drawlist.Marker{X: int32(x), Y: int32(y), Size: strategicIconSize, Index: index, Outline: iconOutline, Selected: highlighted, Alpha: alpha, Clip: viewport, HasClip: true, IconAtlas: icon.Atlas, IconRect: iconRect}, i+1, 0)
 		}
 	}
 }
@@ -281,8 +291,7 @@ func (c *Client) PickPresentedUnit(f *frame.Frame, x, y int32, viewer uint8) (po
 	c.layoutStrategicMarkers(f, viewer, &c.strategicPick, true)
 	for i := len(c.strategicPick.marks) - 1; i >= 0; i-- {
 		m := c.strategicPick.marks[i]
-		left, top := m.X-m.Size/2, m.Y-m.Size/2
-		if x < left || x >= left+m.Size || y < top || y >= top+m.Size || x < m.Clip.X || x >= m.Clip.X+m.Clip.W || y < m.Clip.Y || y >= m.Clip.Y+m.Clip.H {
+		if !markerContains(m, x, y) {
 			continue
 		}
 		n := c.strategicPick.targets[i]
@@ -314,4 +323,48 @@ func (dst *strategicLayoutScratch) indexUnits(f *frame.Frame) {
 			dst.slots[int(f.Units[i].Slot)] = i + 1
 		}
 	}
+}
+
+// SetRadarDots installs the host preference after joining any recorder that
+// copied it. Rules admission remains the frame's, including while paused
+// (DESIGN_INTERFACE_HUD_INPUT "Modern radar dots").
+func (c *Client) SetRadarDots(style int) {
+	if c == nil {
+		return
+	}
+	if style < 0 || style > 2 {
+		style = 1
+	}
+	if c.radarDots == style {
+		return
+	}
+	c.JoinPreRecord()
+	c.radarDots = style
+	c.pausedWorldRevision++
+	c.BumpPresentationEpoch()
+	c.strategicPresented = strategicProjection{}
+	c.strategicRecorded = strategicProjection{}
+}
+
+func markerContains(m drawlist.Marker, x, y int32) bool {
+	left, top := m.X-m.Size/2, m.Y-m.Size/2
+	return x >= left && x < left+m.Size && y >= top && y < top+m.Size &&
+		x >= m.Clip.X && x < m.Clip.X+m.Clip.W && y >= m.Clip.Y && y < m.Clip.Y+m.Clip.H
+}
+
+// PickRadarDot supplies only a contact handle to the battle's attack adapter.
+// It shares the drawn bounds, admission, blink and ordering, at every zoom;
+// it never promotes concealed metadata into an identified hover hit
+// (DESIGN_INTERFACE_HUD_INPUT "Modern radar dots").
+func (c *Client) PickRadarDot(f *frame.Frame, x, y int32, viewer uint8) pool.Handle {
+	if c == nil || !c.enhanced || c.radarDots != 2 || f == nil || !f.MainViewRadarDots || viewer != f.ViewingPlayer {
+		return 0
+	}
+	c.layoutStrategicMarkers(f, viewer, &c.strategicPick, true)
+	for i := len(c.strategicPick.marks) - 1; i >= 0; i-- {
+		if markerContains(c.strategicPick.marks[i], x, y) {
+			return c.strategicPick.contacts[i]
+		}
+	}
+	return 0
 }

@@ -3968,8 +3968,9 @@ Committed `UnitView`s carry model visibility, owner colour and selection;
   still consumes their radar records.
 - **Sensor-only contacts** retain `MinimapBlipAdmitted`, blink included, never
   expose definition art or a `UnitView` hit, and draw at full opacity at every
-  Enhanced zoom including the fade band — a hidden unit has no visible model to
-  replace.
+  Enhanced zoom including the fade band when the bound rules and Radar dots
+  preference allow them. The separate attack-only contact picker follows
+  [Modern radar dots](DESIGN_INTERFACE_HUD_INPUT.md#modern-radar-dots).
 - **Placement.** The foreground pass follows fog and precedes HUD chrome, and runs
   when the paused world is reused. Identities are not remembered across visibility
   loss; retained hover identity uses `InstanceID`, not a reusable pool slot.
@@ -3992,8 +3993,9 @@ Committed `UnitView`s carry model visibility, owner colour and selection;
   before visible units in stable publication order and selected icons last, and
   hit-test in reverse draw order; a hover halo does not reorder. That order is
   shared across cursor, click selection, tooltips and command targeting. Generic
-  contacts retain existing command and knowledge restrictions: a hit must not hand
-  hidden `UnitView` metadata to a tooltip or enable a new target action. Drag
+  contacts retain knowledge restrictions: the identified picker never hands
+  hidden `UnitView` metadata to a tooltip. Modern Attackable dots uses a separate
+  contact-handle picker for ordinary hostile attack commands only. Drag
   selection keeps its visible projected-centre policy. Visibility loss and changes
   of viewer, camera, viewport or mode invalidate presented icon and hit-test lists
   immediately.

@@ -49,6 +49,12 @@ func (b *battleSession) cursorShapeAt(latch input.Latch, mx, my int32) int {
 	if hover.OverWorld && !hover.Placing {
 		var pos *orders.ResolvePos
 		_, hover.Target, pos = b.pickTarget(mx, my)
+		if hover.Target == nil {
+			_, hover.Target = b.pickRadarAttackTarget(mx, my, latch)
+			if hover.Target != nil {
+				latch = input.LatchAttack
+			}
+		}
 		if pos != nil {
 			hover.X, hover.Y, hover.Z = pos.X, pos.Y, pos.Z
 		}

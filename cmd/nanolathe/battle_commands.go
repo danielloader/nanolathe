@@ -312,6 +312,15 @@ func (b *battleSession) orderSelected(code int, sx, sy int32, queued bool) bool 
 	if hud.LatchToCode(latch) != code {
 		return false
 	}
+	if target == nil {
+		if h, radarTarget := b.pickRadarAttackTarget(sx, sy, latch); radarTarget != nil {
+			targetHandle, target = h, radarTarget
+			// Contextual contact clicks are attacks only; concealed unit traits
+			// cannot choose repair/reclaim/capture or another contextual action.
+			code = hud.LatchToCode(input.LatchAttack)
+			latch = input.LatchAttack
+		}
+	}
 	// The shape gate applies to the ARMED latches only. The contextual code
 	// the idle latch issues reaches this producer from the click classifier's
 	// own branches, which have already consumed the select and deselect

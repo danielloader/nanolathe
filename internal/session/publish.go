@@ -224,6 +224,9 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 		published.Wind = frame.WindView{Heading: s.Wind.Heading, Strength: s.Wind.Strength}
 	}
 	published.ViewingPlayer = s.ViewingOwner
+	if s.Rules.Visibility != nil {
+		published.MainViewRadarDots = s.Rules.Visibility.MainViewRadarDots()
+	}
 	publication := s.ensurePublicationState()
 	publication.beginUnitIdentities()
 	defer publication.finishUnitIdentities()

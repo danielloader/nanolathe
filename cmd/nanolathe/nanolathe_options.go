@@ -302,11 +302,13 @@ func nanolatheOptionsPage(window *gui.Window) error {
 	button.Status = 0
 	label.Link = ""
 	label.Rect.X, label.Rect.W = button.Rect.X, button.Rect.W
-	// Compact Renderer leaves room for the two Modern camera preferences above
-	// Restore in the shorter battle column. Gameplay keeps its caption because
+	// Compact Renderer leaves room for camera and radar preferences in the
+	// shorter battle column. Gameplay keeps its caption because
 	// a registered rule set may replace one of its stage labels
 	// (DESIGN_INTERFACE_HUD_INPUT §3.4.1).
-	const captionedPitch, switchPitch = 40, 20
+	const captionGap = 4
+	switchPitch := button.Rect.H
+	captionedPitch := label.Rect.H + captionGap + button.Rect.H
 	y := label.Rect.Y
 	renderer := button
 	renderer.Name, renderer.SourceName, renderer.Text, renderer.Stages = "NRENDER", "NRENDER", "Render: Classic|Render: Modern", 2
@@ -323,7 +325,7 @@ func nanolatheOptionsPage(window *gui.Window) error {
 		caption.Name, caption.SourceName, caption.Text = row.name+"LABEL", row.name+"LABEL", row.title
 		caption.Rect.Y = y
 		control.Name, control.SourceName, control.Text, control.Stages = row.name, row.name, row.text, row.stages
-		control.Rect.Y = caption.Rect.Y + caption.Rect.H + 4
+		control.Rect.Y = caption.Rect.Y + caption.Rect.H + captionGap
 		kept = append(kept, caption, control)
 		y += captionedPitch
 	}
@@ -336,6 +338,7 @@ func nanolatheOptionsPage(window *gui.Window) error {
 		{"NSIDEBAR", "Sidebar: 6|Sidebar: Flow", 2},
 		{"NZOOM", "Zoom: Smooth|Zoom: Steps|Zoom: Off", 3},
 		{"NICONS", "Icons: Modern|Icons: Comm 3.9", 2},
+		{"NRADARDOTS", "No dots|Visible dots|Attackable dots", 3},
 	} {
 		control := button
 		control.Name, control.SourceName, control.Text, control.Stages = row.name, row.name, row.text, row.stages
@@ -345,6 +348,8 @@ func nanolatheOptionsPage(window *gui.Window) error {
 			control.Help = "Modern camera zoom: continuous, stepped, or off at 1x. Free zoom requires the Modern renderer."
 		case "NICONS":
 			control.Help = "Modern strategic icons: generated symbols or the running content's Community 3.9 art. Missing art keeps generated symbols."
+		case "NRADARDOTS":
+			control.Help = "Radar dots in the main view require Modern gameplay and the Enhanced renderer: hidden, display only, or attack hostile contacts without unit details. Minimap contacts are unchanged."
 		}
 		kept = append(kept, control)
 		y += switchPitch
@@ -352,18 +357,33 @@ func nanolatheOptionsPage(window *gui.Window) error {
 	// The Enhanced presentation switches (DESIGN_GPU_RENDERER §30). Glow keeps
 	// its home in the display block; the others are presentation values.
 	// Classic composes the same pixels whatever these switches say.
-	for i, row := range []struct{ name, text string }{
+	effectRows := []struct{ name, text string }{
 		{"NGLOW", "Glow: Off|Glow: On"},
 		{"NWATER", "Water: Off|Water: On"},
 		{"NLIGHTS", "Lights: Off|Lights: On"},
 		{"NFINISH", "Metal: Off|Metal: On"},
 		{"NHEAT", "Heat: Off|Heat: On"},
 		{"NMARKS", "Marks: Off|Marks: On"},
-	} {
+	}
+	for i, row := range effectRows {
 		control := button
 		control.Name, control.SourceName, control.Text, control.Stages = row.name, row.name, row.text, 2
 		control.Rect.Y = y + int32(i)*switchPitch
 		kept = append(kept, control)
+	}
+	// Use the authored control height throughout, then spend the footer's
+	// spare gap on the additional row. Restore and Undo keep their own art and
+	// hit rectangles, with a clear gap after the preferences and each other.
+	const footerGap = 2
+	nextY := y + int32(len(effectRows))*switchPitch + footerGap
+	for _, name := range []string{"RESTORE", "UNDO"} {
+		for i := range kept {
+			if kept[i].Name == name {
+				kept[i].Rect.Y = max(kept[i].Rect.Y, nextY)
+				nextY = kept[i].Rect.Y + kept[i].Rect.H + footerGap
+				break
+			}
+		}
 	}
 	window.Gadgets = kept
 	return nil
@@ -386,6 +406,7 @@ func (g *gameShell) syncNanolatheOptions() {
 	g.syncNanolatheFPSStage()
 	optionsPanel.SetStageAt(optionsPanel.Index("NZOOM"), g.presentation.ZoomStyle)
 	optionsPanel.SetStageAt(optionsPanel.Index("NICONS"), g.presentation.StrategicIconStyle)
+	optionsPanel.SetStageAt(optionsPanel.Index("NRADARDOTS"), g.presentation.RadarDots)
 	// The Enhanced switches. Glow reads the display block; the others
 	// read the presentation block (DESIGN_GPU_RENDERER §30).
 	optionsPanel.SetStageAt(optionsPanel.Index("NGLOW"), boolInt(g.display.Glow != 0))
@@ -443,6 +464,8 @@ func (g *gameShell) activateNanolatheOption(name string) bool {
 		p.ZoomStyle = g.retailOptionsStage(name, 3, p.ZoomStyle)
 	case "NICONS":
 		p.StrategicIconStyle = g.retailOptionsStage(name, 2, p.StrategicIconStyle)
+	case "NRADARDOTS":
+		p.RadarDots = g.retailOptionsStage(name, 3, p.RadarDots)
 	case "NRENDER":
 		stage := g.retailOptionsStage(name, 2, boolInt(p.Renderer == "modern"))
 		p.Renderer = "classic"
@@ -516,7 +539,7 @@ func gameplayOptionStage(mode gameplay.Mode) int {
 
 // Each options page restores only fields it owns; host input preferences live
 // on the Orders page and share the ordinary options transaction. This page's
-// camera choices and family shortcuts are its fields; Marks owns the trail
+// camera and radar choices and family shortcuts are its fields; Marks owns the trail
 // strength too, so Undo and Restore Defaults take all of those back;
 // the glint and the soft shadows are no shortcut's and stay as they are.
 func (g *gameShell) setNanolathePreferences(p settings.Presentation) {
@@ -524,6 +547,7 @@ func (g *gameShell) setNanolathePreferences(p settings.Presentation) {
 	next.Renderer, next.FPS, next.ExpandedSidebar = p.Renderer, p.FPS, p.ExpandedSidebar
 	next.SidebarOrders, next.BuildMenuPageSize = p.SidebarOrders, p.BuildMenuPageSize
 	next.ZoomStyle, next.StrategicIconStyle = p.ZoomStyle, p.StrategicIconStyle
+	next.RadarDots = p.RadarDots
 	for _, f := range effectFamilies {
 		f.restore(&next, p)
 	}

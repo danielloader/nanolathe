@@ -20,7 +20,7 @@ func iconLayoutFixture(t *testing.T) (*Client, *frame.Frame) {
 		"plant":  {DefinitionHeader: content.DefinitionHeader{CanonicalKey: "plant"}, UnitName: "plant", BMCode: 0, Category: "PLANT", Builder: true},
 	}}))
 	c.cam.Zoom, c.cam.Scale = strategicModelCut, camera.ViewScaleNative
-	f := &frame.Frame{ViewingPlayer: 0, Units: []frame.UnitView{{Slot: 7, InstanceID: 1, Owner: 0, OwnerColorKnown: true, DefName: "walker", X: numeric.FixedFromInt(600), Z: numeric.FixedFromInt(400)}}}
+	f := &frame.Frame{MainViewRadarDots: true, ViewingPlayer: 0, Units: []frame.UnitView{{Slot: 7, InstanceID: 1, Owner: 0, OwnerColorKnown: true, DefName: "walker", X: numeric.FixedFromInt(600), Z: numeric.FixedFromInt(400)}}}
 	f.Radar.Contacts = []frame.RadarContactView{{Kind: frame.RadarContactUnit, Handle: 7, Owner: 0, PaletteKnown: true, Visible: true, X: f.Units[0].X, Z: f.Units[0].Z}}
 	return c, f
 }

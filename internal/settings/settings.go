@@ -597,6 +597,14 @@ func (m *Messages) Normalize() {
 	}
 }
 
+// Radar dot styles are the persisted main-view choices of Nanolathe's Modern
+// policy (DESIGN_INTERFACE_HUD_INPUT "Modern radar dots").
+const (
+	RadarDotsNone       = 0
+	RadarDotsVisible    = 1
+	RadarDotsAttackable = 2
+)
+
 // Presentation holds Nanolathe's host presentation preferences
 // (DESIGN_GPU_RENDERER §13.5, §14.6). FPS zero follows the display refresh;
 // positive values cap modern presentation without changing the simulation.
@@ -627,6 +635,10 @@ type Presentation struct {
 	GroupNumbers      int `json:"groupNumbers"`
 	AlliedResources   int `json:"alliedResources"`
 	WeatherReport     int `json:"weatherReport"`
+	// RadarDots chooses sensor-only markers in the Enhanced main view under
+	// Modern gameplay (DESIGN_INTERFACE_HUD_INPUT "Modern radar dots").
+	// Visible dots is the default; zero explicitly disables them.
+	RadarDots int `json:"radarDots"`
 
 	Renderer string `json:"renderer"`
 	FPS      int    `json:"fps"`
@@ -771,6 +783,7 @@ func DefaultPresentation() Presentation {
 	return Presentation{
 		Renderer: "modern", FPS: 60, ExpandedSidebar: 1, SidebarOrders: 1, BuildMenuPageSize: -1, GroupNumbers: 1, Arrival: 1, PlacementWeaponRanges: 1,
 		ZoomStyle: ZoomSmooth, ZoomLockPercent: ZoomLockDefaultPercent, StrategicIconStyle: StrategicIconsModern,
+		RadarDots:     RadarDotsVisible,
 		MexSnapRadius: -1, WreckSnapRadius: -1, BuildRotateKey: "/", ClickSnapOverrideKey: "alt", BuildRotationOverlay: 1, BuildDrag: 1,
 		WaterSurface: DefaultEffectSwitch, WaterMotion: DefaultEffectSwitch, WaterFoam: DefaultEffectSwitch, HovercraftLandWash: DefaultEffectSwitch, WaterReflections: DefaultEffectSwitch,
 		ModelLight: DefaultEffectSwitch, GroundLight: DefaultEffectSwitch, GroundLightStrength: DefaultEffectStrength,
@@ -795,6 +808,9 @@ func DefaultPresentation() Presentation {
 // refresh choice (zero) and arbitrary positive presentation caps. The effect
 // switches are booleans, so only a negative value is repaired.
 func (p *Presentation) Normalize() {
+	if p.RadarDots < RadarDotsNone || p.RadarDots > RadarDotsAttackable {
+		p.RadarDots = RadarDotsVisible
+	}
 	if p.NanoframePreview < 0 || p.NanoframePreview > 3 {
 		p.NanoframePreview = 0
 	}

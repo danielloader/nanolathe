@@ -814,3 +814,14 @@ Open questions carried by the contracts above rather than by a marker:
 * The word grid's universal semantic name is deliberately not established, so
   the code calls it the word mask and never `explored` or `radar`; its consumer
   census is closed `[03 §3.1]` `[03 R-LAYER §1]`.
+
+### Modern main-view sensor contacts
+
+**Nanolathe Modern policy.** `visibility.Rules.MainViewRadarDots` answers whether
+the Enhanced main view may expose anonymous sensor dots. Strict 3.1 and
+Community 3.9 answer false; Modern answers true. Session publication carries
+that answer in `frame.Frame.MainViewRadarDots`, so drawing and attack picking
+never read a live rule set or derive behavior from content names. This changes
+no visibility grids or sensor contacts. Preferences, information boundaries
+and tests are owned by
+[Modern radar dots](DESIGN_INTERFACE_HUD_INPUT.md#modern-radar-dots).

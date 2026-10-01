@@ -116,6 +116,11 @@ func (b *battleSession) resourceSite(mx, my int32) (resourceBuildSite, bool) {
 	if handle != 0 || pos == nil {
 		return resourceBuildSite{}, false
 	}
+	// An anonymous attackable contact is an attack gesture, not empty ground
+	// for the Shift construction shortcut (interface design "Modern radar dots").
+	if h, _ := b.pickRadarAttackTarget(mx, my, input.LatchNormal); h != 0 {
+		return resourceBuildSite{}, false
+	}
 	extractor, solar, geothermal := b.resourceProducts(v.DefName)
 	product := solar
 	var deposit resourceRect

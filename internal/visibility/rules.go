@@ -1,25 +1,29 @@
 package visibility
 
 // Rules is the gameplay-policy seam owned by visibility. It decides whether
-// one jammer suppresses the viewing player's contacts and answers one complete
-// unit-visibility request. Both questions are asked at their request boundary;
+// one jammer suppresses the viewing player's contacts, answers one complete
+// unit-visibility request and admits Modern main-view dots. Each question is
+// asked at its request boundary;
 // implementations hold no session state and draw no random numbers
 // [DESIGN_COMMUNITY_PATCH §4.4] [DESIGN_GAMEPLAY_RULES §9].
 type Rules interface {
 	JammerSuppresses(s *Service, viewer, jammerOwner PlayerID) bool
 	Visible(s *Service, viewer PlayerID, target Target) bool
+	// MainViewRadarDots admits the Modern presentation/attack feature.
+	// The answer is published, never read from live rules by presentation.
+	MainViewRadarDots() bool
 }
 
 // StrictRules is the retail baseline. It is zero size, so binding it and asking
-// either question adds no allocation [03 §3.2] [03 R-VIS-01 §5].
+// a question adds no allocation [03 §3.2] [03 R-VIS-01 §5].
 type StrictRules struct{}
 
 // CommunityRules is the Community 3.9 layer. It embeds StrictRules so every
 // unchanged answer remains retail's [DESIGN_COMMUNITY_PATCH §2].
 type CommunityRules struct{ StrictRules }
 
-// ModernRules currently inherits both community visibility contracts without
-// another override [DESIGN_COMMUNITY_PATCH §4.4].
+// ModernRules inherits community visibility and admits main-view sensor dots
+// (DESIGN_INTERFACE_HUD_INPUT "Modern radar dots").
 type ModernRules struct{ CommunityRules }
 
 // CommunityState is the resolved feature-table projection visibility owns.
@@ -79,3 +83,11 @@ func (CommunityRules) Visible(s *Service, viewer PlayerID, target Target) bool {
 	}
 	return s.communityVisible(viewer, target)
 }
+
+// MainViewRadarDots keeps the viewport's retail hull-only contact boundary
+// [07 R-SEL-02B2]. Community inherits this answer.
+func (StrictRules) MainViewRadarDots() bool { return false }
+
+// MainViewRadarDots enables the approved Modern display/attack preference
+// (DESIGN_INTERFACE_HUD_INPUT "Modern radar dots").
+func (ModernRules) MainViewRadarDots() bool { return true }

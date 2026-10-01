@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
+	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/hud"
@@ -62,7 +63,10 @@ func TestModernRadarDotAttackUsesOrdinaryCommandWithoutIdentifiedHover(t *testin
 	for _, latch := range []input.Latch{input.LatchNormal, input.LatchAttack} {
 		for _, queued := range []bool{false, true} {
 			b, target := radarDotBattle(t, gameplay.Modern, 2)
+			b.sess.Econ = &economy.Service{}
+			b.sess.Econ.Players[0].Stock = [2]float32{123, 456}
 			sim, crt := *b.sess.SimRNG(), *b.sess.CrtRNG()
+			resources := b.sess.Econ.Players
 			if h, _, _ := b.pickTarget(320, 180); h != 0 {
 				t.Fatal("hidden dot became an identified pick")
 			}
@@ -82,6 +86,9 @@ func TestModernRadarDotAttackUsesOrdinaryCommandWithoutIdentifiedHover(t *testin
 			}
 			if *b.sess.SimRNG() != sim || *b.sess.CrtRNG() != crt {
 				t.Fatal("presentation/command construction drew RNG")
+			}
+			if b.sess.Econ.Players != resources {
+				t.Fatal("presentation/command construction changed resources")
 			}
 		}
 	}

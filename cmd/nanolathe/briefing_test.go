@@ -176,8 +176,8 @@ func TestBriefingWindDrawOrderAndStartRequest(t *testing.T) {
 
 func TestBriefingArtKeepsPreviousOnOptionalMediaMiss(t *testing.T) {
 	previous := &formats.GAF{Version: 1}
-	if got := loadBriefingArt(nil, BriefingPlanet{Brief: "LavaBrief"}, previous); got != previous {
-		t.Fatalf("optional art miss replaced prior GAF: got %p want %p", got, previous)
+	if got, loaded := loadBriefingArt(nil, BriefingPlanet{Brief: "LavaBrief"}, previous); got != previous || loaded {
+		t.Fatalf("optional art miss: got %p want %p, loaded=%t", got, previous, loaded)
 	}
 }
 

@@ -239,7 +239,11 @@ func (g *gameShell) briefingUnavailableError() error {
 // loadBriefingPanel keeps optional media lazy; a missing GUI refuses opening
 // the screen [07 §5 "Frontend asset failure boundaries"].
 func (g *gameShell) loadBriefingPanel(planet BriefingPlanet) *ui.Panel {
-	if g == nil || g.assets == nil || g.cs == nil || g.cs.fs == nil {
+	if g == nil {
+		return nil
+	}
+	g.briefingPanoramaBound = false
+	if g.assets == nil || g.cs == nil || g.cs.fs == nil {
 		return nil
 	}
 	if g.assets.briefing == nil {
@@ -251,10 +255,17 @@ func (g *gameShell) loadBriefingPanel(planet BriefingPlanet) *ui.Panel {
 	if g.assets.briefing == nil || g.assets.briefing.window == nil {
 		return nil
 	}
-	g.assets.briefing.art = loadBriefingArt(g.cs.fs, planet, g.assets.briefing.art)
+	art, loaded := loadBriefingArt(g.cs.fs, planet, g.assets.briefing.art)
+	g.assets.briefing.art = art
 	window := gui.CloneWindow(g.assets.briefing.window)
 	g.installRetailWindowButtonArt(window, g.assets.briefing.art)
 	panel := ui.NewPanel(window)
+	// Retaining a previous GAF after a failed load does not install this
+	// visit's callback. Once installed, condition text survives a missing
+	// sequence or frame at draw time [08 R-CAMP-01 §2].
+	if loaded && panel.Index("PANORAMA") >= 0 {
+		_, g.briefingPanoramaBound = art.Find(planet.Panorama)
+	}
 	// Its custom conditions are painted by PANORAMA rather than by this
 	// gadget's ordinary painter [08 R-CAMP-01 §2].
 	panel.SetActive("SOLARSYSTEM", false)
@@ -262,19 +273,18 @@ func (g *gameShell) loadBriefingPanel(planet BriefingPlanet) *ui.Panel {
 }
 
 // loadBriefingArt resolves the planet-specific GAF for every newly opened
-// briefing. A missing optional asset leaves the prior successful art intact;
-// this keeps a media failure from replacing a usable panel with nil [08
-// R-CAMP-01 §2].
-func loadBriefingArt(fs vfs.FSOps, planet BriefingPlanet, previous *formats.GAF) *formats.GAF {
+// briefing. A missing optional asset leaves the prior successful art intact,
+// but only a successful current load can install callbacks [08 R-CAMP-01 §2].
+func loadBriefingArt(fs vfs.FSOps, planet BriefingPlanet, previous *formats.GAF) (*formats.GAF, bool) {
 	if fs == nil {
-		return previous
+		return previous, false
 	}
 	path := "anims/" + strings.ToLower(planet.Brief) + ".gaf"
 	art, err := formats.LoadGAFFile(fs, path)
 	if err != nil {
-		return previous
+		return previous, false
 	}
-	return art
+	return art, true
 }
 
 func (g *gameShell) briefingInput(cl *client.Client) {
@@ -499,6 +509,12 @@ func panoramaStrip(frames int, widthAt func(int) int, scroll, rectX, rectW int, 
 }
 
 func (g *gameShell) drawBriefingPanorama(c *client.Client, b *campaignBriefingController, r gui.Rect) {
+	// Admission belongs to this visit's callback binding, not a fresh lookup
+	// in possibly retained artwork. Conditions precede all animation guards
+	// even though SOLARSYSTEM itself is hidden [08 R-CAMP-01 §2].
+	if g.briefingPanoramaBound {
+		g.drawBriefingSolarSystem(c, b)
+	}
 	if g.assets == nil || g.assets.briefing == nil || g.assets.briefing.art == nil {
 		return
 	}
@@ -506,10 +522,6 @@ func (g *gameShell) drawBriefingPanorama(c *client.Client, b *campaignBriefingCo
 	if !ok {
 		return
 	}
-	// The bound panorama callback prints these conditions before testing
-	// its sequence, even though SOLARSYSTEM itself is hidden
-	// [08 R-CAMP-01 §2].
-	g.drawBriefingSolarSystem(c, b)
 	if len(e.Frames) == 0 {
 		return
 	}

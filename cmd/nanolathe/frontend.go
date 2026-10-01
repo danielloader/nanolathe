@@ -245,6 +245,9 @@ type gameShell struct {
 	briefing      *campaignBriefingController
 	briefingPanel *ui.Panel
 	briefingNowMS int64
+	// briefingPanoramaBound records this visit's successful panorama callback
+	// installation separately from the retained artwork [08 R-CAMP-01 §2].
+	briefingPanoramaBound bool
 	// briefingFont is the FNT the TextRegion's font index selects — `armfont`
 	// or `corefont` from MSNBRIEF's own kind-7 records. The wrapper, the pager
 	// and the label pen all read it [08 R-CAMP-01 §2][07 R-WGT-01 §12].

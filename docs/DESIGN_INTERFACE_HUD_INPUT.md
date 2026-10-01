@@ -951,7 +951,13 @@ the controller's existing wind display without new random draws, translates
 both labels and converts authored gravity for the readout only
 `[08 R-CAMP-01 §2]`. Successful text installation assigns the side font to
 both text-region and conditions gadgets; missing text retains their authored
-font numbers. Condition text precedes panorama art and uses its own clip.
+font numbers. Each briefing visit records successful current-GAF loading and
+panorama callback installation independently of the retained artwork. A failed
+load or missing named panorama does not admit condition text; after binding,
+the text still precedes missing-sequence and frame guards. Condition text
+precedes panorama art and uses its own clip. The retail tests
+`TestBriefingConditionsRequireCurrentArtBinding` and
+`TestBriefingConditionsUseHiddenGadgetFontAndClip` lock these boundaries.
 
 Selecting a row fills the summary panel's text fields and its `RADAR` surface.
 `RADAR` shows the selected file's Summary `Radar Image` box — an 8-byte

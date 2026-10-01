@@ -13,6 +13,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/mission"
+	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
 type briefingConditionsCollector struct {
@@ -136,6 +137,75 @@ func TestBriefingConditionsUseHiddenGadgetFontAndClip(t *testing.T) {
 			if len(got.conditions) != 2 {
 				t.Fatal("the panorama frame guard suppressed the condition text")
 			}
+			// Callback binding survives loss of the sequence itself, not only
+			// an empty frame list [08 R-CAMP-01 §2].
+			name := entry.Name
+			entry.Name = "missing panorama"
+			got = &briefingConditionsCollector{}
+			c.RecordFrame().Replay(got)
+			entry.Name = name
+			if len(got.conditions) != 2 {
+				t.Fatal("loss of the bound sequence suppressed the condition text")
+			}
 		})
 	}
+}
+
+// Retained artwork cannot install a callback after this visit's load failed.
+// A later successful visit must bind again [08 R-CAMP-01 §2].
+func TestBriefingConditionsRequireCurrentArtBinding(t *testing.T) {
+	shell, _ := retailShellForTest(t)
+	shell.openMenu(modeMenuMission)
+	shell.campaignIdx, shell.missionIdx = 0, 0
+	shell.openCampaignBriefing()
+	b := shell.briefing
+	if b == nil || shell.briefingPanel == nil {
+		t.Fatal("campaign briefing did not open")
+	}
+	previous := shell.assets.briefing.art
+	if _, ok := previous.Find(b.planet.Panorama); !ok {
+		t.Fatal("stock panorama sequence unavailable")
+	}
+	c, err := client.New(client.Options{Buffer: &frame.Buffer{}, Width: 640, Height: 480})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetFNT(shell.font)
+	c.SetPalette(shell.assets.pal)
+	c.SetUIStage(painterBindingStage(shell.drawBriefing))
+	assertConditions := func(want int) {
+		t.Helper()
+		b.crt, b.windSpeed, b.countdown = &countingRand{}, 17, 63
+		got := &briefingConditionsCollector{}
+		c.RecordFrame().Replay(got)
+		if len(got.conditions) != want {
+			t.Fatalf("conditions = %d, want %d", len(got.conditions), want)
+		}
+		if b.crt.(*countingRand).n != 0 {
+			t.Fatal("condition drawing added random work")
+		}
+	}
+	assertConditions(2)
+
+	fullFS := shell.cs.fs
+	emptyFS := vfs.New()
+	t.Cleanup(func() { emptyFS.Close() })
+	shell.cs.fs = emptyFS
+	shell.briefingPanel = shell.loadBriefingPanel(b.planet)
+	shell.cs.fs = fullFS
+	if shell.briefingPanel == nil || shell.assets.briefing.art != previous {
+		t.Fatal("failed current load must retain the previous artwork")
+	}
+	assertConditions(0)
+
+	shell.briefingPanel = shell.loadBriefingPanel(b.planet)
+	assertConditions(2)
+	panorama := b.planet.Panorama
+	b.planet.Panorama = "missing panorama"
+	shell.briefingPanel = shell.loadBriefingPanel(b.planet)
+	assertConditions(0)
+	b.planet.Panorama = panorama
+	assertConditions(0) // draw-time lookup cannot install the missing callback.
+	shell.briefingPanel = shell.loadBriefingPanel(b.planet)
+	assertConditions(2)
 }

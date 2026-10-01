@@ -476,9 +476,11 @@ service stays enabled throughout supported single-player scope, so a new
 mutable enable flag is unnecessary here. I03 owns ordered token service; the
 shared I06 toggle/radio mutation path is implemented.
 
-`TODO(question)`: Nanolathe has no identified authored battle-root
-`MAIN2.GUI` opener. Retail builds that root before the successful transition;
-its integration must preserve that timing when the root owner is implemented.
+Battle HUD entry loads and builds the side-prefix `MAIN2.GUI` root before
+the first successful transition disables startup preclear; later entries
+retain that process-lifetime state.
+Its resolved header panel is retained for the empty-selection painter
+`[07 §6]` `[07 R-WGT-01 §3]`.
 Actual command, options, confirmation and result windows build at their runtime
 open, after the transition. The options caller relabels the already-built
 MISSION caption, retaining the originally assigned accelerator. Results
@@ -1103,8 +1105,8 @@ localized possessive-tail question remains owned by `[08 R-CAMP-01 §9]`.
 block, the rail art, the GUI windows, the fonts, the radar surface and the
 display size. The rest is split by concern: `battle_hud_assets.go` is the asset
 resolution and its diagnostics; `battle_hud_pages.go` the command-window
-selection (`<prefix>gen.gui` for an empty selection, the per-unit window
-otherwise, the generated `<unit>N.GUI` numbered pages) and the gadget art and
+selection (closed for an empty selection, `<prefix>gen.gui` for generic orders
+or multiple selection, and the generated `<unit>N.GUI` numbered pages) and the gadget art and
 frame choice; `battle_hud_siderail.go` the rail draw, the command-button
 verdicts (staged, greyed, hidden) and the product captions and queue counts
 `[07 R-HUD-03 §6]` `[07 R-P0-11 §2]`; `battle_hud_input.go` the rail's click
@@ -1747,6 +1749,11 @@ its bottom border at the surface edge, where retail shows it at 640×480;
 stock CORE art ends in a purple row that a mirrored or tiled copy would repeat
 mid-rail. A surface no taller than the art keeps the retail stamp. The radar,
 strips and rail controls draw over the backdrop exactly as before.
+With no selected units, the retained side-prefix `MAIN2.GUI` header panel
+draws over that backdrop at its native authored origin and size. This reveals
+the stock faction emblem without stretching it; the host backdrop remains
+visible below the root at taller sizes. No command window is opened and no
+command input is admitted for that state `[07 §6]` `[07 R-HUD-05]`.
 `TestRailWindowReachesBelowArt` locks the extent test; seeded `--shot`
 comparisons against the retail path must match outside the rail columns.
 
@@ -1841,8 +1848,9 @@ battle's speed, and the in-battle arm applies changes immediately. Save loads
 retain their restored scheduler and the isolated Settings preview keeps its own
 speed `[08 R-ENTRY-01 §3]`.
 
-**C18 — the in-battle modal chain.** An empty selection activates the
-side-authored `<prefix>gen.gui`, not the underlying `<prefix>main.gui`. In a
+**C18 — the in-battle modal chain.** An empty selection closes the command
+window and its input; the retained side-authored `<prefix>main2.gui` root
+supplies the empty rail artwork `[07 §6]`. In a
 non-network battle the options window sets the single-player pause state and
 draws `igtitles.gaf:igpaused` at the live view centre using its authored GAF
 offsets `[07 R-HUD-05 "Centred in the view"]`; closing it unpauses. `EXIT`

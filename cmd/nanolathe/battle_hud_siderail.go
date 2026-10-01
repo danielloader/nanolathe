@@ -25,6 +25,12 @@ func (h *retailBattleHUD) drawSidePage(c *client.Client, b *battleSession, f *fr
 		return
 	}
 	if window == nil {
+		// Closing command windows for an empty selection exposes MAIN2's
+		// ordinary header panel, which contains the stock faction emblem.
+		// Keep its native size over the host rail backdrop [07 §6][07 R-HUD-05].
+		if f == nil || len(f.Selection.Handles) == 0 {
+			drawWindowPanel(c, h.rootWin, h.rootGAF, h.common, h.guiColor)
+		}
 		return
 	}
 	paged := commandPageIsPaged(f)

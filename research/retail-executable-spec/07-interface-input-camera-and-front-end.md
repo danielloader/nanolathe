@@ -4250,6 +4250,21 @@ that page's `<unit>1.gaf`, then the side/main support GAFs, then the common
 `BUTTONS0` stock-size groups. A left-button hold inside a gadget selects its
 armed frame; pointer hover alone does not tint or change an ordinary button.
 
+**Established — empty-selection panel artwork.** Battle entry selects
+`<prefix>MAIN2.GUI` from the local player's side-table prefix and builds it
+before the loading hand-off [R-WGT-01 §3]. Its header panel uses the ordinary
+window-owned GAF, common GUI GAF, then `BackTile` lookup and panel painter
+[R-WGT-01 §12][R-FE-02 §4]. The stock Arm and Core roots name `ARMPAN2` and
+`CORPAN2` in `anims/commongui.gaf`: each is a single 128×352 frame painted at
+the root's authored `(0,128)` origin. Those panels contain the faction emblem;
+the side's `PANELSIDE` backdrop does not. The root's three authored statistic
+labels have empty captions, and its callback does not populate them. Opening
+general or numbered command windows covers the root with those windows'
+ordinary panels; clearing the selection exposes the root again. The faction
+panel is selected by side identity, independently of the player's logo or
+team-color choice. Its authored size and origin remain fixed at larger display
+sizes [R-HUD-05].
+
 The stock battle resource set binds `fonts/<font>.fnt` as the side console
 font and `fonts/<fontgui>.fnt` as the side GUI/button font. The frontend
 `COMIX.FNT` selection is not a battle-HUD fallback. `energycolor` and

@@ -30,6 +30,7 @@ func radarDotBattle(t *testing.T, mode gameplay.Mode, style int) (*battleSession
 	written.Units = append([]frame.UnitView(nil), cur.Units...)
 	written.Radar.Contacts = append([]frame.RadarContactView(nil), cur.Radar.Contacts...)
 	written.Radar.MappingLOS = 3
+	written.CommandPage.Builder = actor.Handle
 	for i := range written.Units {
 		v := &written.Units[i]
 		if v.Slot == target.Handle {
@@ -131,5 +132,31 @@ func TestModernRadarDotLeftClickQueuesAttack(t *testing.T) {
 	pending := b.sess.PendingHumanCommands()
 	if len(pending) != 1 || pending[0].Kind != session.HumanOrder || pending[0].Order.Target != target || pending[0].Order.Code != hud.LatchToCode(input.LatchAttack) {
 		t.Fatalf("dot left click queued %+v", pending)
+	}
+}
+
+// The real Shift click must reach attack dispatch before the resource shortcut
+// can interpret the anonymous contact as an empty construction site.
+func TestModernRadarDotShiftClickBypassesResourceConstruction(t *testing.T) {
+	b, target := radarDotBattle(t, gameplay.Modern, 2)
+	b.cat.Units["armsolar"].Category = "SOLAR"
+	b.cat.Units["armsolar"].EnergyUse = -20
+	b.cl.SetFocused(true)
+	b.cl.SetRadarDots(1)
+	if _, ok := b.resourceSite(320, 180); !ok {
+		t.Fatal("fixture does not exercise the resource shortcut")
+	}
+	b.cl.SetRadarDots(2)
+	for i := 0; i < 2; i++ {
+		resourceClickAt(b, b.cl, 320, 180, true)
+	}
+	pending := b.sess.PendingHumanCommands()
+	if len(pending) != 2 || b.resourceClick != nil {
+		t.Fatalf("Shift clicks started a resource gesture: %+v", pending)
+	}
+	for _, c := range pending {
+		if c.Kind != session.HumanOrder || c.Order.Code != hud.LatchToCode(input.LatchAttack) || c.Order.Target != target || !c.Order.Queued {
+			t.Fatalf("Shift click produced %+v, want queued contact attack", c)
+		}
 	}
 }

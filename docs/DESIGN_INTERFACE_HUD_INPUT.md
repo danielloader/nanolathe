@@ -1983,12 +1983,14 @@ No retail asset is copied into the repository or changed on disk.
 The page contains a captioned Gameplay (Strict 3.1 / Community 3.9 / Modern)
 row. Compact Renderer (Classic / Modern), FPS (30 / 60 / 120), Sidebar (Off / On),
 Modern Zoom (Smooth / Steps / Off), Modern Icons (Modern / Community 3.9),
-Glow, Water, Lights, Metal, Heat and Marks controls carry their own names.
+Radar dots (No dots / Visible dots / Attackable dots), Glow, Water, Lights,
+Metal, Heat and Marks controls carry their own names.
 The icon button abbreviates Community as Comm to fit the authored font; its
 help spells out the full name. The captioned row uses a tight pitch and the
 switches sit directly together at their authored height, so the
-page fits the in-battle column as well as the front-end one without reaching
-Restore Defaults or Undo Changes. Zoom and icons preview live and share the
+page fits the in-battle column as well as the front-end one. Restore Defaults
+and Undo Changes retain their authored dimensions with a clear gap after the
+preferences and between each other. Zoom, icons and radar dots preview live and share the
 ordinary page Undo, defaults, Cancel and persistence transactions. Their Modern
 mode boundary is DESIGN_GPU_RENDERER §16.6 and §18.7. The main-menu Controls
 screen's Mouse table scrolls when these and the existing rows exceed its height.
@@ -4810,7 +4812,9 @@ selection target, nor offer repair, reclaim, capture, guard or load. Only a
 hostile contact may supply a target for a contextual order or an armed Attack
 click. The existing cursor weapon admission and ordinary typed command path
 remain authoritative; left-click follows the configured interface convention,
-and Shift retains normal queued-order behavior. Losing contact admission,
+and Shift retains normal queued-order behavior. An attackable contact prevents
+the Shift resource-construction shortcut from treating the dot as empty ground.
+Losing contact admission,
 changing the viewer, or reusing a slot cannot preserve a cached target.
 
 **State and effects.** The preference is host state; the rule objects remain

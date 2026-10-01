@@ -3923,7 +3923,11 @@ on Greenhaven at the detail view's 2×. Every camera is still, since a slow
 pan moves pixel art in uneven one-pixel steps: a scene that frames a fight
 follows it through the lead-in, which is silent and never shown, and holds
 that frame from the first visible tick, and a twin compare copies its
-primary's frame. Each scene has a fixed anchor, the
+primary's frame. The construction scene's hidden lead-in includes the
+constructors' ordinary script readiness as well as their short approach to
+each site's edge, so its first visible frame shows structures rising
+([04 R-ORD-01 §5]). Both halves of a build-mutator comparison use the same
+lead-in. Each scene has a fixed anchor, the
 preview's computer player is passive (its units still shoot back), and a
 scene of the viewer's units alone keeps one far enemy building, since a side
 with nothing left has lost and the battle would stop. The main menu stages

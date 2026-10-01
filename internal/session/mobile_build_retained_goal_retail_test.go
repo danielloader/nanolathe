@@ -13,8 +13,9 @@ import (
 )
 
 // An in-range cannot-get-there wake may start construction while retaining
-// the approach goal. Advancing into work must preserve the inactive route,
-// rather than installing another synthetic straight route [05 R-WORK-01 §14].
+// the approach goal. Placement, script readiness and work must preserve the
+// inactive route, rather than installing another synthetic straight route
+// [04 R-ORD-01 §5][05 R-WORK-01 §14].
 func TestMobileBuildFailurePreservesInactiveApproachRetail(t *testing.T) {
 	for _, mode := range []gameplay.Mode{gameplay.Modern, gameplay.Strict31} {
 		t.Run(string(mode), func(t *testing.T) {
@@ -39,6 +40,9 @@ func TestMobileBuildFailurePreservesInactiveApproachRetail(t *testing.T) {
 			}
 			s.CompleteUnit(h)
 			builder := s.Units.Unit(h)
+			if builder.COBBinding() == nil {
+				t.Fatal("builder has no production script binding")
+			}
 			if err := construction.QueueMobileBuild(builder, "armsolar", builder.X, builder.Z+world.CellToWorld(7), 1, s.Catalog); err != nil {
 				t.Fatal(err)
 			}
@@ -64,23 +68,46 @@ func TestMobileBuildFailurePreservesInactiveApproachRetail(t *testing.T) {
 			for tick := 0; tick < 5 && node.Target == 0; tick++ {
 				step()
 			}
-			if node.Phase != uint8(construction.State3) || node.Target == 0 {
-				t.Fatalf("in-range failure did not start construction: phase=%d target=%d", node.Phase, node.Target)
+			if node.Phase != uint8(construction.State2) || node.Target == 0 {
+				t.Fatalf("in-range failure did not bind a frame for readiness: phase=%d target=%d", node.Phase, node.Target)
 			}
-			remaining := s.Units.Unit(node.Target).Remaining
+			// Allocation and the product's lifecycle are committed before the
+			// stock script finishes its readiness path [04 R-ORD-01 §5].
+			target := node.Target
+			product := s.Units.Unit(target)
+			wantGate := construction.InterruptCancel | construction.InterruptStop | units.PendingScriptTouched
+			if product == nil || !product.Alive || product.Owner != builder.Owner || product.Health != 0 || product.Remaining != 1 || builder.InBuildStance || node.DynamicGate != wantGate || node.Deadline != -1 {
+				t.Fatal("bound frame did not enter the stock script readiness wait")
+			}
+			pq := orders.QueueOfUnit(product)
+			if pq == nil || pq.Head() == nil || pq.Head().ID != orders.Lookup("GetBuilt") || pq.Head().Owner != target || pq.Head().Target != h {
+				t.Fatal("placement did not commit the product's GetBuilt relationship")
+			}
+			if owner, ok := s.Build.BuilderLink(target); !ok || owner != h {
+				t.Fatal("placement did not commit the builder-product link")
+			}
+			remaining := product.Remaining
 			// Cross both modes' ordinary follower poll boundaries. Inactivity
 			// alone must not re-arm a route with two stored points and no
-			// blockage [04 R-MOV-03 §2].
+			// blockage while the script becomes ready and work begins
+			// [04 R-MOV-03 §2].
 			for tick := 0; tick < 90; tick++ {
 				step()
+				q := orders.QueueOfUnit(builder)
+				if q == nil || q.Head() != node || node.Target != target || s.Units.Unit(target) != product {
+					t.Fatal("readiness or work replaced the build record or its product")
+				}
+				if !builder.InBuildStance && (product.Health != 0 || product.Remaining != remaining) {
+					t.Fatal("construction advanced before the stock script became ready")
+				}
 				if !s.Movement.HasGroundGoal(h, node) {
-					t.Fatal("work discarded the retained retail approach goal")
+					t.Fatal("readiness or work discarded the retained retail approach goal")
 				}
 				if route.Active || route.Points != points || route.Count != count || s.Movement.HasPathRequest(h) {
-					t.Fatalf("work restarted the inactive, unblocked approach at work tick %d", tick)
+					t.Fatalf("readiness or work restarted the inactive, unblocked approach at follow-up tick %d", tick)
 				}
 			}
-			if s.Units.Unit(node.Target).Remaining >= remaining {
+			if !builder.InBuildStance || node.Phase != uint8(construction.State3) || product.Health <= 0 || product.Remaining >= remaining {
 				t.Fatal("preserving the inactive approach stopped construction work")
 			}
 		})

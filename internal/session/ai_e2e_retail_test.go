@@ -264,36 +264,27 @@ func TestComputerPlayerFormsAnAttackWaveRetail(t *testing.T) {
 	if testing.Short() {
 		t.Skip("long AI acceptance trajectory: run tools/check-retail --full")
 	}
-	// The 24000-tick bound was established with retail's entry path allowance
-	// and unit-limit divisor. Community and Modern intentionally replace both
-	// parameters [DESIGN_COMMUNITY_PATCH §4.1].
+	// Strict keeps retail's 1333-step path allowance [04 R-PATH-01 §10]. This
+	// fixture retains the lobby-default 1000-unit limit, rather than the 250
+	// explicitly configured by the headless lock. Community and Modern replace
+	// both entry parameters [DESIGN_COMMUNITY_PATCH §4.1].
 	sess := aiE2ESkirmishAtMode(t, "ashap plateau", aiE2ESeed, SkirmishDefaultDifficulty, gameplay.Strict31)
 	manager := sess.AI[1]
 	if manager == nil {
 		t.Fatal("the computer slot composed without a manager")
 	}
 	scaled := sess.Clock.ScaledAnchor
-	// This test runs at the lobby default difficulty, Medium. Compiling the
-	// complete download menu in retail union order changes the weighted unit
-	// candidate sequence [02 R-CAT-01 §1][08 R-AI-01 §8], so the first
-	// regroup-A member on this seed now arrives at tick 15090. The budget was
-	// briefly 18000 during
-	// WU-19-32: the exact-versus-category matcher of [08 R-AI-01 §12] made
-	// ai/default.txt's `Weight ARM 0.2` / `Weight CORE 0.2` reach every member
-	// of those categories for the first time, and against the hard tables the
-	// profile then fell back to that pushed formation out to 14100. Binding the
-	// real difficulty word brought it back in; the complete authored candidate
-	// table moves it forward again, still within the established 18000 bound.
-	//
-	// WU-19-78 moves it again, to tick 20700 (it was 13800). The ledger's
-	// production discount for a computer player now has its selector bound to
-	// the battle's difficulty word, and at Medium every positive production
-	// contribution the computer player makes is credited at seven tenths
-	// [05 R-ECO-01 §3][05 R-ECO-01 §11]. A slower economy builds its first
-	// armed ground units later; retail's Medium computer player is meant to be
-	// this much poorer than its Hard one, so the budget follows the behavior
-	// rather than the behavior being trimmed to the budget.
-	const formationBy = uint32(24000)
+	// This is an authored observation budget, not a retail formation deadline.
+	// Ground construction waits for script readiness [04 R-ORD-01 §5]; the
+	// changed timing changes this seed's later candidate sequence
+	// [08 R-AI-01 §8]. A matched trace restoring only the earlier construction
+	// implementation forms wave A at 21900. With readiness enforced, the player
+	// builds air plants first: at 24000 its four armed ground instances are all
+	// buildings in the null record, so neither regroup nor wave A should hold
+	// them [08 R-P0-04 §3]. The first regroup-A member arrives at 64950 and
+	// wave A bootstraps at 65100. The budget leaves 6900 ticks of margin, or 23
+	// wave task periods [08 R-AI-01 §4], without changing any planner rule.
+	const formationBy = uint32(72000)
 	for sess.Clock.GlobalTick < formationBy && sess.State != StatePostBattle {
 		scaled += 5
 		sess.Step(scaled)

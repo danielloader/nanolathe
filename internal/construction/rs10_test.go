@@ -71,9 +71,18 @@ func TestRS10_MobileBuildLegalSite(t *testing.T) {
 	if node.GoalX != siteX || node.GoalZ != siteZ {
 		t.Fatalf("pending site mutated after allocation")
 	}
-	// queue operation state: Phase should be 3 (work loop), not 2
-	if State(node.Phase) != State3 {
-		t.Fatalf("queue operation state after allocation want State3 got %d", node.Phase)
+	// Placement precedes readiness; it must not bypass the level wait
+	// [04 R-ORD-01 §5][05 R-P0-06 §1].
+	if State(node.Phase) != State2 || node.DynamicGate != 0xE || node.Deadline != -1 || prod.Health != 0 || prod.Remaining != 1 {
+		t.Fatalf("allocation did not wait for readiness: phase/gate/deadline=%d/%#x/%d health=%d remaining=%g", node.Phase, node.DynamicGate, node.Deadline, prod.Health, prod.Remaining)
+	}
+	svc.RegisterOrderHandlers(q)
+	builder.InBuildStance = true
+	builder.Pending |= units.PendingScriptTouched
+	q.Pump(builder, 1)
+	svc.Pump(builder, 1)
+	if State(node.Phase) != State3 || node.Target != prod.Handle || prod.Remaining >= 1 || builder.Pending&units.PendingScriptTouched != 0 {
+		t.Fatal("readiness wake did not enter work on the already placed frame")
 	}
 }
 

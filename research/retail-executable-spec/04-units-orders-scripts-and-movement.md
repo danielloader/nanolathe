@@ -3918,6 +3918,30 @@ Phase 3: work step; when it did work draw the spray; stamp `tick + 300`;
 product unfinished → deadline 1, gate |= `0xA`, hold; finished → advance.
 Phase 4: status 8 with `Building complete`; complete. Other: cancel-all.
 
+**Established — a new ground frame waits for script readiness.** Successful
+placement and `StartBuilding` do not themselves admit a construction quantum.
+The next phase returns the `INBUILDSTANCE` helper's result: a clear stance
+holds with cancel-current, target-removal and script-touched wake bits, with
+no deadline; a set stance advances into work in the same primary-pump pass.
+While holding, this builder neither requests resources nor changes the
+product's health or remaining fraction, queries a nano piece, emits a spray,
+or writes its work reveal deadline. Another builder can still work on the
+frame independently. The helper reads only the stance level, not completion
+of `StartBuilding` or of every piece animation. An already-set stance passes
+immediately; this row does not clear the builder's stance when issuing the
+callback. The aircraft twin differs deliberately: its first work phase
+discards the helper's return and applies work while the stance is clear
+([R-ORD-02 §2]).
+
+**Established — reference-install script examples.** Stock ARMCK and ARMACK
+hand an opening request to another script thread and return from
+`StartBuilding`; their opening path raises `INBUILDSTANCE` after the authored
+opening sequence and aim-turn wait. ARMCOM raises it after its build-aim turn
+waits. Stock ARMCA instead raises it directly in `StartBuilding`. These
+bounded asset observations explain why callback return is not a readiness
+signal; the engine still tests the stance level rather than imposing those
+units' particular animation sequences on every constructor.
+
 **"Prepare the site" is the snap-and-site-height writer — Established.** The
 step both build handlers run between the placement check and the creation
 call takes the product definition and a pointer to the record's goal triple,

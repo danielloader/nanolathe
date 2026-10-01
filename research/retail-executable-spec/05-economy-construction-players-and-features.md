@@ -4426,7 +4426,8 @@ The emission producers, their admission gates, and their cadences:
 
 | Path | Work/admission condition | Query timing | Segment count | Next work timing |
 | --- | --- | --- | --- | --- |
-| Mobile construction | shared construction work helper accepts the builder's worker quantum | once after accepted work in state 3 | one | unfinished target retries after one tick |
+| Ground mobile construction | the script's `INBUILDSTANCE` wait has advanced, then the shared construction work helper accepts the builder's worker quantum | once after accepted work in state 3 | one | unfinished target retries after one tick |
+| Aircraft mobile construction | shared construction work helper accepts the builder's worker quantum; the first work phase polls stance but discards the verdict | once after accepted work in phase 3 or 4 | one | unfinished target retries after one tick |
 | Factory product construction | same two-resource work helper accepts the factory worker quantum | once after accepted work in state 3 | one | unfinished product retries after one tick |
 | Build assist | the same shared construction work helper accepts the assister's worker quantum | once after accepted work | one | unfinished target retries after one tick |
 | Unit reclaim / capture | target is valid and in range, and the operation is admitted | once for the visit | one | operation schedules the next visit two ticks later |
@@ -4440,6 +4441,17 @@ construction cadence follows accepted work visits rather than a visual clock.
 admission rejects the work step.** The presentation contract is therefore:
 publish a nano event only for an accepted work transition, carrying the
 builder/source, the target/site, the mode, and the resolved source piece.
+
+**Established — readiness precedes ground work admission.** A new ground
+build allocates its nanoframe and arranges `StartBuilding` before its
+`INBUILDSTANCE` wait. Until that wait advances, the owning builder reaches
+neither the shared work helper nor the nano query: health, remaining fraction,
+resource requests and spray all wait together. Readiness is the script-owned
+stance level, not a callback-return or full-animation-completion test. The
+wait has no timer and is re-polled on an engine-port write. An already-set
+stance passes immediately. `VTOL_MobileBuild` instead discards the wait
+helper's return and continues into work even with a clear stance
+[04 R-ORD-01 §1] [04 R-ORD-01 §5] [04 R-ORD-02 §2] [04 R-COB-06].
 
 ### Synchronous QueryNanoPiece contract [R-P0-06 §2]
 

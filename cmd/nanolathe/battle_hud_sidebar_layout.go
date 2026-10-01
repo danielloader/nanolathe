@@ -8,6 +8,7 @@ type sidebarPageLayout struct {
 	commands     []sidebarProduct
 	spacing      []sidebarCommandGap
 	lowerHeight  int32
+	commandTop   int32
 }
 
 func (c *sidebarProductCatalog) sidebarLayout(height, limit int, orders bool) sidebarPageLayout {
@@ -28,16 +29,16 @@ func (c *sidebarProductCatalog) sidebarLayout(height, limit int, orders bool) si
 			if limit > 0 {
 				p.capacity = min(p.capacity, limit)
 			}
-			return p
+			return c.sidebarPlaceCommands(height, limit, p)
 		}
 	}
-	spacing, fits := sidebarFitSpacing(c.sidebarBuildBudget(height, c.navigationHeight, required), c.navigationSpacing)
+	spacing, fits := sidebarFitSpacing(c.sidebarBuildBudget(height, c.buildCommandHeight, required), c.buildCommandSpacing)
 	if !fits && limit > 0 {
 		// A constrained fixed count takes every achievable complete row before
 		// retaining the remaining gap pixels. Free flow keeps its six-slot
 		// floor rather than entering this fallback.
-		available := height - 128 - int(c.upperHeight) - int(c.navigationHeight)
-		for _, gap := range c.navigationSpacing {
+		available := height - 128 - int(c.upperHeight) - int(c.buildCommandHeight)
+		for _, gap := range c.buildCommandSpacing {
 			if gap.pixels > 0 {
 				available--
 			}
@@ -46,15 +47,35 @@ func (c *sidebarProductCatalog) sidebarLayout(height, limit int, orders bool) si
 		if fittingSlots == 0 {
 			return sidebarPageLayout{}
 		}
-		spacing, fits = sidebarFitSpacing(c.sidebarBuildBudget(height, c.navigationHeight, fittingSlots), c.navigationSpacing)
+		spacing, fits = sidebarFitSpacing(c.sidebarBuildBudget(height, c.buildCommandHeight, fittingSlots), c.buildCommandSpacing)
 	}
 	if !fits {
 		return sidebarPageLayout{}
 	}
-	p := sidebarPageLayout{commands: c.navigation, spacing: spacing, lowerHeight: c.navigationHeight}
+	p := sidebarPageLayout{commands: c.buildCommands, spacing: spacing, lowerHeight: c.buildCommandHeight}
 	p.capacity = c.sidebarLayoutCapacity(height, p)
 	if limit > 0 {
 		p.capacity = min(p.capacity, limit)
+	}
+	return c.sidebarPlaceCommands(height, limit, p)
+}
+
+// Fixed counts keep the control panel directly below their reserved build
+// rows, including on partial pages. Free flow uses the full rail (HUD §3.3).
+func (c *sidebarProductCatalog) sidebarPlaceCommands(height, limit int, p sidebarPageLayout) sidebarPageLayout {
+	p.commandTop = int32(height) - p.lowerHeight
+	for _, gap := range p.spacing {
+		if gap.at >= 0 {
+			p.commandTop -= gap.pixels
+		}
+	}
+	if limit > 0 {
+		p.commandTop = 128 + c.upperHeight + int32((p.capacity+1)/2)*64
+		for _, gap := range p.spacing {
+			if gap.at < 0 {
+				p.commandTop += gap.pixels
+			}
+		}
 	}
 	return p
 }

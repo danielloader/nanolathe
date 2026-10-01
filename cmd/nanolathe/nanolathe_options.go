@@ -333,7 +333,7 @@ func nanolatheOptionsPage(window *gui.Window) error {
 		stages     uint8
 	}{
 		{"NFPS", "FPS: 30|FPS: 60|FPS: 120", 3},
-		{"NSIDEBAR", "Sidebar: Off|Sidebar: On", 2},
+		{"NSIDEBAR", "Sidebar: 6|Sidebar: Flow", 2},
 		{"NZOOM", "Zoom: Smooth|Zoom: Steps|Zoom: Off", 3},
 		{"NICONS", "Icons: Modern|Icons: Comm 3.9", 2},
 	} {
@@ -389,7 +389,7 @@ func (g *gameShell) syncNanolatheOptions() {
 	// The Enhanced switches. Glow reads the display block; the others
 	// read the presentation block (DESIGN_GPU_RENDERER §30).
 	optionsPanel.SetStageAt(optionsPanel.Index("NGLOW"), boolInt(g.display.Glow != 0))
-	optionsPanel.SetStageAt(optionsPanel.Index("NSIDEBAR"), boolInt(g.presentation.ExpandedSidebar != 0))
+	optionsPanel.SetStageAt(optionsPanel.Index("NSIDEBAR"), boolInt(g.presentation.BuildMenuPageSize != 6 || g.presentation.SidebarOrders != 0))
 	// The five family shortcuts show On while any of their switches is on.
 	// `NGLOW` is not among them: glow stays in the display block, where the
 	// chat command and the capture route already read it (§19.4).
@@ -433,7 +433,12 @@ func (g *gameShell) activateNanolatheOption(name string) bool {
 		g.syncNanolatheOptions()
 		return true
 	case "NSIDEBAR":
-		p.ExpandedSidebar = g.retailOptionsStage(name, 2, boolInt(p.ExpandedSidebar != 0))
+		p.ExpandedSidebar = 1
+		if g.retailOptionsStage(name, 2, boolInt(p.BuildMenuPageSize != 6 || p.SidebarOrders != 0)) == 0 {
+			p.BuildMenuPageSize, p.SidebarOrders = 6, 0
+		} else {
+			p.BuildMenuPageSize, p.SidebarOrders = 0, 1
+		}
 	case "NZOOM":
 		p.ZoomStyle = g.retailOptionsStage(name, 3, p.ZoomStyle)
 	case "NICONS":

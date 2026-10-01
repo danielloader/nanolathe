@@ -16,8 +16,12 @@ import (
 func nlSidebarOption(t *testing.T, s *nlScreen, key string) nlCard {
 	t.Helper()
 	for _, card := range s.graphicsCards() {
-		if card.key == key {
-			return card
+		if card.key == "sidebar" {
+			part := card.parts[0]
+			if key == "sidebar-orders" {
+				part = card.parts[1]
+			}
+			return nlCard{key: card.key, label: part.label, steps: part.steps, get: part.get, set: part.set, desc: card.desc}
 		}
 	}
 	t.Fatalf("missing Graphics card %s", key)
@@ -28,23 +32,23 @@ func TestNLSidebarChoicesUseDraftContentAndExplicitFreeFlow(t *testing.T) {
 	mod := &modlibrary.Mod{Metadata: modlibrary.Metadata{ID: "twelve", Name: "Twelve", BuildMenuPageSize: 12}}
 	g, s := settingsRegressionScreen(mod, settings.Defaults())
 	build, orders := nlSidebarOption(t, s, "sidebar"), nlSidebarOption(t, s, "sidebar-orders")
-	if build.label != "Build items" || !slices.Equal(build.steps, []string{"Original", "6 per page", "12 per page", "Free flow"}) || orders.label != "Orders below build" || !slices.Equal(orders.steps, []string{"When space permits", "Never"}) {
+	if build.label != "Build items" || !slices.Equal(build.steps, []string{"6 per page", "12 per page", "Free flow"}) || orders.label != "Orders below build" || !slices.Equal(orders.steps, []string{"When space permits", "Never"}) {
 		t.Fatal("missing independent sidebar choices")
 	}
-	if build.get(&s.draft) != 2 || s.nlSidebarBuildLimit(&s.draft) != 12 || !strings.Contains(build.desc(&s.draft, 2), "content recommends 12") {
+	if build.get(&s.draft) != 1 || s.nlSidebarBuildLimit(&s.draft) != 12 || !strings.Contains(build.desc(&s.draft, 1), "content recommends 12") {
 		t.Fatal("inherited count did not show the content recommendation")
 	}
 	s.mods = append(s.mods, modlibrary.Mod{Metadata: modlibrary.Metadata{ID: "six", Name: "Six", BuildMenuPageSize: 6}})
 	s.draft.mod = 2
-	if build.get(&s.draft) != 1 || s.nlSidebarBuildLimit(&s.draft) != 6 {
+	if build.get(&s.draft) != 0 || s.nlSidebarBuildLimit(&s.draft) != 6 {
 		t.Fatal("count followed running content instead of draft content")
 	}
 	s.draft.mod = 0
-	if build.get(&s.draft) != 3 || s.nlSidebarBuildLimit(&s.draft) != 0 {
-		t.Fatal("Original content inherited the running mod's recommendation")
+	if build.get(&s.draft) != 2 || s.nlSidebarBuildLimit(&s.draft) != 0 {
+		t.Fatal("Stock content inherited the running mod's recommendation")
 	}
 	s.draft.mod = 1
-	s.setCard(build, 3)
+	s.setCard(build, 2)
 	if s.draft.pres.ExpandedSidebar != 1 || s.draft.pres.BuildMenuPageSize != 0 || s.nlSidebarBuildLimit(&s.draft) != 0 || g.presentation.BuildMenuPageSize != -1 {
 		t.Fatal("explicit Free flow failed to override the mod in the draft")
 	}
@@ -53,11 +57,7 @@ func TestNLSidebarChoicesUseDraftContentAndExplicitFreeFlow(t *testing.T) {
 	if s.draft.pres.SidebarOrders != 0 || s.draft.pres.BuildMenuPageSize != before || s.draft.pres.ExpandedSidebar != 1 {
 		t.Fatal("orders changed the independent build preference")
 	}
-	build.set(&s.draft, 0)
-	if s.draft.pres.ExpandedSidebar != 0 || s.draft.pres.BuildMenuPageSize != before || s.draft.pres.SidebarOrders != 0 {
-		t.Fatal("Original replaced a retained adaptive preference")
-	}
-	for choice, count := range map[int]int{1: 6, 2: 12, 3: 0} {
+	for choice, count := range map[int]int{0: 6, 1: 12, 2: 0} {
 		build.set(&s.draft, choice)
 		if s.draft.pres.ExpandedSidebar != 1 || s.draft.pres.BuildMenuPageSize != count || s.draft.pres.SidebarOrders != 0 {
 			t.Fatalf("choice %d did not save count %d independently", choice, count)
@@ -70,9 +70,9 @@ func TestNLSidebarOptionsDraftApplySaveCancel(t *testing.T) {
 	g, s := settingsRegressionScreen(nil, settings.Defaults())
 	g.settingsWritable = true
 	build, orders := nlSidebarOption(t, s, "sidebar"), nlSidebarOption(t, s, "sidebar-orders")
-	s.setCard(build, 1)
+	s.setCard(build, 0)
 	s.setCard(orders, 1)
-	if s.draft.pres.BuildMenuPageSize != 6 || s.draft.pres.SidebarOrders != 0 || g.presentation.BuildMenuPageSize != -1 || g.presentation.SidebarOrders != 1 || s.dirty() != 2 {
+	if s.draft.pres.BuildMenuPageSize != 6 || s.draft.pres.SidebarOrders != 0 || g.presentation.BuildMenuPageSize != -1 || g.presentation.SidebarOrders != 1 || s.dirty() != 1 {
 		t.Fatal("sidebar draft changed live settings or lost its independent change count")
 	}
 	s.savePreset("Six without orders")
@@ -92,7 +92,7 @@ func TestNLSidebarOptionsDraftApplySaveCancel(t *testing.T) {
 	if err != nil || g.presentation.BuildMenuPageSize != 6 || stored.Presentation.BuildMenuPageSize != 6 || g.presentation.SidebarOrders != 0 || stored.Presentation.SidebarOrders != 0 || s.dirty() != 0 {
 		t.Fatalf("Apply did not persist both choices: %+v, %v", stored.Presentation, err)
 	}
-	s.setCard(build, 2)
+	s.setCard(build, 1)
 	s.setCard(orders, 0)
 	s.hide()
 	stored, err = settings.Load()
@@ -110,7 +110,7 @@ func TestNLSidebarLegacyCountSurvivesUnrelatedApply(t *testing.T) {
 	file.Presentation.BuildMenuPageSize = 10
 	g, s := settingsRegressionScreen(nil, file)
 	build, orders := nlSidebarOption(t, s, "sidebar"), nlSidebarOption(t, s, "sidebar-orders")
-	if build.get(&s.draft) != 2 || !strings.Contains(build.desc(&s.draft, build.get(&s.draft)), "Current count: 10 per page") {
+	if build.get(&s.draft) != 1 || !strings.Contains(build.desc(&s.draft, build.get(&s.draft)), "Current count: 10 per page") {
 		t.Fatal("legacy count was concealed")
 	}
 	s.setCard(orders, 1)
@@ -118,7 +118,7 @@ func TestNLSidebarLegacyCountSurvivesUnrelatedApply(t *testing.T) {
 	if g.presentation.BuildMenuPageSize != 10 || s.draft.pres.BuildMenuPageSize != 10 {
 		t.Fatal("applying the orders preference rewrote the saved count")
 	}
-	s.setCard(build, 2)
+	s.setCard(build, 1)
 	if s.draft.pres.BuildMenuPageSize != 12 || s.dirty() != 1 {
 		t.Fatal("choosing the displayed fixed count did not replace the legacy count")
 	}
@@ -126,20 +126,38 @@ func TestNLSidebarLegacyCountSurvivesUnrelatedApply(t *testing.T) {
 	if g.presentation.BuildMenuPageSize != 12 {
 		t.Fatal("Apply did not keep the explicit fixed count")
 	}
-	s.setCard(build, 1)
+	s.setCard(build, 0)
 	s.apply()
 	if g.presentation.BuildMenuPageSize != 6 {
 		t.Fatal("explicit supported choice did not replace the legacy count")
 	}
 }
 
+func TestNLSidebarGroupedOrdersChangePreservesExactCount(t *testing.T) {
+	for _, count := range []int{-1, 10} {
+		file := settings.Defaults()
+		file.Presentation.BuildMenuPageSize = count
+		g, s := settingsRegressionScreen(nil, file)
+		card := s.sidebarCard()
+		s.partSel[card.key] = 1
+		s.step(card, card.get(&s.draft), 1)
+		if s.draft.pres.BuildMenuPageSize != count || s.draft.pres.SidebarOrders != 0 || s.dirty() != 1 {
+			t.Fatal("changing only grouped orders rewrote the build preference")
+		}
+		s.apply()
+		if g.presentation.BuildMenuPageSize != count || g.presentation.SidebarOrders != 0 {
+			t.Fatal("Apply lost the independent grouped choices")
+		}
+	}
+}
+
 func TestNLSidebarExplicitFreeFlowReplacesInheritedFreeFlow(t *testing.T) {
 	g, s := settingsRegressionScreen(nil, settings.Defaults())
 	build := nlSidebarOption(t, s, "sidebar")
-	if build.get(&s.draft) != 3 || s.draft.pres.BuildMenuPageSize != -1 {
+	if build.get(&s.draft) != 2 || s.draft.pres.BuildMenuPageSize != -1 {
 		t.Fatal("missing inherited Free flow default")
 	}
-	s.setCard(build, 3)
+	s.setCard(build, 2)
 	if s.draft.pres.BuildMenuPageSize != 0 || g.presentation.BuildMenuPageSize != -1 || s.dirty() != 1 {
 		t.Fatal("explicit Free flow looked unchanged or reached live preferences")
 	}
@@ -172,7 +190,7 @@ func TestNLSidebarOptionsGraphicsPresetScopeAndRestore(t *testing.T) {
 			s.applyPresetToDraft(nlPresetEntry{name: "Sidebar", patch: patch}, tc.scopes)
 			want := file.Presentation
 			if tc.want {
-				want.ExpandedSidebar, want.BuildMenuPageSize, want.SidebarOrders = 0, 12, 0
+				want.ExpandedSidebar, want.BuildMenuPageSize, want.SidebarOrders = 1, 6, 0
 			}
 			if s.draft.pres.ExpandedSidebar != want.ExpandedSidebar || s.draft.pres.BuildMenuPageSize != want.BuildMenuPageSize || s.draft.pres.SidebarOrders != want.SidebarOrders {
 				t.Fatalf("%s scope changed the wrong sidebar preferences", tc.name)
@@ -197,36 +215,44 @@ func TestNLSidebarOptionsGraphicsPresetScopeAndRestore(t *testing.T) {
 	}
 }
 
-func TestNLSidebarOptionsExposeBothBuildPaths(t *testing.T) {
+func TestNLSidebarPageOwnsBothChoicesAndTheirPaths(t *testing.T) {
 	_, s := settingsRegressionScreen(nil, settings.Defaults())
-	paths := s.cardPaths(nlSidebarOption(t, s, "sidebar"), settings.Defaults())
-	if !slices.Contains(paths, "presentation.expandedSidebar") || !slices.Contains(paths, "presentation.buildMenuPageSize") || slices.Contains(paths, "presentation.sidebarOrders") {
-		t.Fatalf("Build items paths = %v", paths)
+	card := s.sidebarCard()
+	if card.label != "Sidebar" || card.kind != nlGroup || len(card.parts) != 2 || card.compare != nil {
+		t.Fatal("sidebar choices do not share one page")
 	}
-	if paths := s.cardPaths(nlSidebarOption(t, s, "sidebar-orders"), settings.Defaults()); !slices.Equal(paths, []string{"presentation.sidebarOrders"}) {
-		t.Fatalf("Orders below build paths = %v", paths)
+	for _, c := range s.graphicsCards() {
+		if c.key == "sidebar-orders" {
+			t.Fatal("orders still has a separate page")
+		}
+	}
+	paths := s.cardPaths(card, settings.Defaults())
+	for _, path := range []string{"presentation.buildMenuPageSize", "presentation.sidebarOrders"} {
+		if !slices.Contains(paths, path) {
+			t.Fatalf("Sidebar paths omitted %s: %v", path, paths)
+		}
 	}
 }
 
-func TestNLSidebarShotChoicesCoverBothCards(t *testing.T) {
+func TestNLSidebarShotChoicesCoverBothParts(t *testing.T) {
 	_, s := settingsRegressionScreen(nil, settings.Defaults())
-	steps := nlShotSteps(s, "sidebar,sidebar-orders")
+	steps := nlShotSteps(s, "sidebar")
 	var build, orders []int
 	for _, step := range steps {
-		if step.draft == nil {
+		if step.draft == nil || step.gameSize.Y > 0 {
 			continue
 		}
 		draft := s.draft
 		step.draft(&draft)
 		card := s.pages()[step.page].cards[step.card]
-		switch card.key {
-		case "sidebar":
-			build = append(build, card.get(&draft))
-		case "sidebar-orders":
-			orders = append(orders, card.get(&draft))
+		switch step.part {
+		case 0:
+			build = append(build, card.parts[0].get(&draft))
+		case 1:
+			orders = append(orders, card.parts[1].get(&draft))
 		}
 	}
-	if !slices.Equal(build, []int{0, 1, 2, 3}) || !slices.Equal(orders, []int{0, 1}) {
+	if !slices.Equal(build, []int{0, 1, 2}) || !slices.Equal(orders, []int{0, 1}) {
 		t.Fatalf("shot choices = build %v, orders %v", build, orders)
 	}
 }

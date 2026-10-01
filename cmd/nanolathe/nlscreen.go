@@ -402,7 +402,7 @@ func (s *nlScreen) setCard(c nlCard, v int) {
 // from explicit choices. Apply/restore copy the underlying sidebar values.
 func nlCardEqual(c nlCard, a, b *nlDraft) bool {
 	if c.key == "sidebar" {
-		return a.pres.ExpandedSidebar == b.pres.ExpandedSidebar && a.pres.BuildMenuPageSize == b.pres.BuildMenuPageSize
+		return a.pres.ExpandedSidebar == b.pres.ExpandedSidebar && a.pres.BuildMenuPageSize == b.pres.BuildMenuPageSize && a.pres.SidebarOrders == b.pres.SidebarOrders
 	}
 	return c.get(a) == c.get(b)
 }
@@ -410,6 +410,7 @@ func nlCardEqual(c nlCard, a, b *nlDraft) bool {
 func nlCopyCard(c nlCard, to, from *nlDraft) {
 	if c.key == "sidebar" {
 		to.pres.ExpandedSidebar, to.pres.BuildMenuPageSize = from.pres.ExpandedSidebar, from.pres.BuildMenuPageSize
+		to.pres.SidebarOrders = from.pres.SidebarOrders
 		return
 	}
 	c.set(to, c.get(from))
@@ -647,7 +648,7 @@ func (s *nlScreen) step(c nlCard, v, d int) {
 		part := c.parts[s.selectedPart(&c)]
 		next := s.draft
 		part.set(&next, max(0, min(len(part.steps)-1, part.get(&next)+d)))
-		s.setCard(c, c.get(&next))
+		s.setCardDraft(c, next)
 		return
 	}
 	next := v + d
@@ -1891,10 +1892,41 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card *nlCard, x, y, a float64
 		}
 		df.Draw(screen, s.ui.upperCase(p.label), r.X+18*u, r.Y+min(25*u, rowH-25*u), screenkit.Style{Size: 16 * u, Tracking: 0.08, Top: alphaC(nlCream, a)})
 		bf.Draw(screen, p.sub, r.X+18*u, r.Y+rowH-13*u, screenkit.Style{Size: 11 * u, Top: alphaC(color.RGBA{169, 162, 131, 255}, a)})
-		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: r.X, Y: r.Y, W: r.W - 230*u, H: r.H}, Click: func() { s.partSel[card.key] = i }})
+		controlWidth := 230 * u
+		var choiceWidths []float64
+		if p.choices {
+			controlWidth = 16 * u
+			for _, label := range p.steps {
+				w := max(76*u, df.Measure(label, screenkit.Style{Size: 11 * u})+20*u)
+				choiceWidths = append(choiceWidths, w)
+				controlWidth += w + 4*u
+			}
+		}
+		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: r.X, Y: r.Y, W: r.W - controlWidth, H: r.H}, Click: func() { s.partSel[card.key] = i }})
 		// The control, right-aligned in the row.
 		cx := r.X + r.W - 16*u
-		if !p.meter {
+		if p.choices {
+			lx := r.X + r.W - controlWidth
+			for k, w := range choiceWidths {
+				cr := screenkit.Rect{X: lx, Y: r.Y + 10*u, W: w, H: r.H - 20*u}
+				lid := s.ui.id("part-choice-", card.key, i, k)
+				screenkit.Fill(screen, cr, color.RGBA{6, 8, 6, 240})
+				ink := nlDim
+				if k == v {
+					screenkit.Fill(screen, cr, color.RGBA{42, 67, 33, uint8(240 * a)})
+					screenkit.Outline(screen, cr, 1.5*u, alphaC(nlKicker, a))
+					ink = nlCream
+				}
+				df.Draw(screen, p.steps[k], cr.X+cr.W/2, cr.Y+cr.H/2+4*u, screenkit.Style{Size: 11 * u, Top: alphaC(ink, a), Align: 1})
+				s.hits.Add(screenkit.Region{ID: lid, Rect: cr, Click: func() {
+					s.partSel[card.key] = i
+					d := s.draft
+					p.set(&d, k)
+					s.setCardDraft(*card, d)
+				}})
+				lx += w + 4*u
+			}
+		} else if !p.meter {
 			w := 110 * u
 			sr := screenkit.Rect{X: cx - w, Y: r.Y + 12*u, W: w, H: r.H - 24*u}
 			sid := s.ui.id("part-sw-", card.key, i, -1)
@@ -1920,7 +1952,7 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card *nlCard, x, y, a float64
 				nv := 1 - v
 				d := s.draft
 				p.set(&d, nv)
-				s.setCard(*card, card.get(&d))
+				s.setCardDraft(*card, d)
 			}})
 		} else {
 			n := len(p.steps)
@@ -1941,7 +1973,7 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card *nlCard, x, y, a float64
 					s.partSel[card.key] = i
 					d := s.draft
 					p.set(&d, k)
-					s.setCard(*card, card.get(&d))
+					s.setCardDraft(*card, d)
 				}})
 			}
 			df.Draw(screen, p.steps[v], lx-12*u, r.Y+r.H/2+6*u, screenkit.Style{Size: 14 * u, Tracking: 0.04, Top: alphaC(nlGreenText, a), Align: 2})
@@ -2381,16 +2413,27 @@ func (s *nlScreen) drawCard(screen *ebiten.Image, c *nlCard, r screenkit.Rect, v
 		on := 0
 		for i, p := range c.parts {
 			pv := p.get(&s.draft)
-			if pv > 0 || p.meter && p.steps[0] != "Off" {
+			lit := pv > 0 || p.meter && p.steps[0] != "Off"
+			if c.key == "sidebar" {
+				lit = i == 0 || pv == 0
+			}
+			if lit {
 				on++
 			}
 			state := 2
-			if pv > 0 || p.meter && p.steps[0] != "Off" {
+			if lit {
 				state = 1
 			}
 			s.segment(screen, screenkit.Rect{X: lx + float64(i)*(lw+lg), Y: r.Y + 165*u, W: lw, H: lh}, state, 0)
 		}
 		parts := s.ui.text(nlTextKey{kind: "parts on", i: on, j: len(c.parts)}, func() string { return fmt.Sprintf("%d of %d on", on, len(c.parts)) })
+		if c.key == "sidebar" {
+			orders := "auto"
+			if s.draft.pres.SidebarOrders == 0 {
+				orders = "never"
+			}
+			parts = c.parts[0].steps[c.parts[0].get(&s.draft)] + " · orders " + orders
+		}
 		s.fonts.Body.Draw(screen, parts, r.X+14*u, r.Y+177*u, screenkit.Style{Size: 10.5 * u, Top: alphaC(nlGreenText, a)})
 		s.drawCardSource(screen, c, r, a)
 		if changed {

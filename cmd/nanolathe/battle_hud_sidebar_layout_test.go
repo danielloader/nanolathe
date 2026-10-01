@@ -6,9 +6,9 @@ import "testing"
 // exact six-slot boundary. These are not retail panel measurements.
 func TestSidebarBuildCapacityPrecedesOrders(t *testing.T) {
 	c := &sidebarProductCatalog{
-		upperHeight: 20, lowerHeight: 148, navigationHeight: 20,
-		spacing:           []sidebarCommandGap{{at: -1, pixels: 4}},
-		navigationSpacing: []sidebarCommandGap{{at: -1, pixels: 4}},
+		upperHeight: 20, lowerHeight: 148, buildCommandHeight: 20,
+		spacing:             []sidebarCommandGap{{at: -1, pixels: 4}},
+		buildCommandSpacing: []sidebarCommandGap{{at: -1, pixels: 4}},
 	}
 	for _, tc := range []struct {
 		name          string
@@ -36,7 +36,7 @@ func TestSidebarBuildCapacityPrecedesOrders(t *testing.T) {
 			}
 		})
 	}
-	c.navigationSpacing[0].pixels = 100
+	c.buildCommandSpacing[0].pixels = 100
 	if p := c.sidebarLayout(600, 12, true); p.capacity != 12 || p.inlineOrders || p.spacing[0].pixels != 48 {
 		t.Fatalf("twelve should compress navigation gaps before reducing count: %+v", p)
 	}

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"image/color"
-	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
@@ -46,18 +45,19 @@ func (s *nlScreen) drawDemo(screen *ebiten.Image, card nlCard, v int) {
 }
 
 // demoSidebar draws the resolved products and retained controls at the
-// selected game's logical resolution. Both sidebar cards use this same draft.
+// selected game's logical resolution. Both sidebar choices use this same draft.
 func (s *nlScreen) demoSidebar(screen *ebiten.Image) {
 	u := s.u()
 	stage := s.demoStage()
-	var c *sidebarProductCatalog
+	var preview *nlSidebarPreview
 	if names := s.art.pictureNames(); names != nil {
-		c = names.sidebar
+		preview = names.sidebar
 	}
-	if c == nil {
+	if preview == nil {
 		s.fonts.Body.Draw(screen, "No resolved build pages in this content.", stage.X, stage.Y+28*u, screenkit.Style{Size: 11 * u, Top: nlDim})
 		return
 	}
+	c := preview.sidebarProductCatalog
 	g := s.shell()
 	height := g.display.Height
 	original := s.draft.pres.ExpandedSidebar == 0
@@ -79,8 +79,14 @@ func (s *nlScreen) demoSidebar(screen *ebiten.Image) {
 	scale := min(1.1*u, (stage.H-104*u)/float64(max(height, 1)))
 	panel := screenkit.Rect{X: stage.X + stage.W*0.16, Y: stage.Y + 40*u, W: 128 * scale, H: float64(height) * scale}
 	screenkit.Shade(screen, panel.Inset(-20*u), 0.6)
-	screenkit.Fill(screen, panel, color.RGBA{10, 14, 10, 235})
-	s.well(screen, panel, 1)
+	screenkit.Fill(screen, panel, color.RGBA{0, 0, 0, 255})
+	if pic := s.art.sidebarImage(preview.backdrop); pic != nil {
+		r := panel
+		if original {
+			r.H = float64(pic.Bounds().Dy()) * scale
+		}
+		screenkit.Image(screen, pic, r, 1, false)
+	}
 	project := func(x, y, w, h int32) screenkit.Rect {
 		return screenkit.Rect{X: panel.X + float64(x)*scale, Y: panel.Y + float64(y)*scale, W: float64(w) * scale, H: float64(h) * scale}
 	}
@@ -97,33 +103,12 @@ func (s *nlScreen) demoSidebar(screen *ebiten.Image) {
 		}
 		screenkit.Bevel(screen, r, max(0.5, scale), color.RGBA{190, 190, 182, 255}, color.RGBA{20, 20, 18, 255}, false)
 	}
-	var names []string
 	for _, item := range controls {
-		r := project(item.rect.X, item.rect.Y, item.rect.W, item.rect.H)
-		gadget := item.source.window.Gadgets[item.source.index]
-		name := commandButtonName(gadget.Name)
-		if name == "" {
-			name = gadget.Name
+		if pic := s.art.sidebarImage(preview.controls[item.source]); pic != nil {
+			r := project(item.rect.X, item.rect.Y, int32(pic.Bounds().Dx()), int32(pic.Bounds().Dy()))
+			screenkit.Image(screen, pic, r, 1, false)
 		}
-		if gadget.Text != "" {
-			name = gadget.Text
-		} else if len(gadget.Labels) > 0 {
-			name = gadget.Labels[min(max(0, int(gadget.Status)), len(gadget.Labels)-1)]
-		}
-		name = strings.TrimSpace(name)
-		if name == "" {
-			name = gadget.Name
-		}
-		names = append(names, name)
-		screenkit.Fill(screen, r, color.RGBA{38, 49, 34, 255})
-		screenkit.Bevel(screen, r, max(0.5, scale), color.RGBA{132, 148, 111, 255}, color.RGBA{12, 20, 10, 255}, false)
-		fontSize := min(10*scale, r.H*0.6)
-		for fontSize > 3*scale && s.fonts.Body.Measure(name, screenkit.Style{Size: fontSize}) > r.W-4*scale {
-			fontSize -= scale
-		}
-		s.fonts.Body.Draw(screen, name, r.X+r.W/2, r.Y+r.H/2+fontSize*0.35, screenkit.Style{Size: fontSize, Top: nlCream, Align: 1})
 	}
-	// The full-sized labels make even a tall, uniformly scaled rail legible.
 	infoX, infoY := panel.X+panel.W+32*u, panel.Y+12*u
 	info := "Authored pages"
 	if !original {
@@ -136,9 +121,9 @@ func (s *nlScreen) demoSidebar(screen *ebiten.Image) {
 	infoY += 24 * u
 	orders := "Authored controls"
 	if !original {
-		orders = "Orders hidden · use Orders page"
+		orders = "Orders-page controls on own page"
 		if layout.inlineOrders {
-			orders = "Orders shown below build"
+			orders = "Orders-page controls below build"
 		}
 	}
 	s.fonts.Body.Draw(screen, orders, infoX, infoY, screenkit.Style{Size: 12 * u, Top: nlBody})
@@ -146,11 +131,6 @@ func (s *nlScreen) demoSidebar(screen *ebiten.Image) {
 	if !original && limit > 0 && limit != 6 && limit != 12 {
 		s.fonts.Body.Draw(screen, fmt.Sprintf("Current count: %d per page", limit), infoX, infoY, screenkit.Style{Size: 12 * u, Top: nlAmber})
 		infoY += 28 * u
-	}
-	s.fonts.Display.Draw(screen, "Visible controls", infoX, infoY, screenkit.Style{Size: 11 * u, Tracking: 0.16, Top: nlKicker, Upper: true})
-	infoY += 22 * u
-	for i, name := range names {
-		s.fonts.Body.Draw(screen, name, infoX+float64(i%2)*160*u, infoY+float64(i/2)*20*u, screenkit.Style{Size: 11 * u, Top: nlBody})
 	}
 	resolution := s.ui.text(nlTextKey{kind: "sidebar resolution", i: g.display.Width, j: height}, func() string {
 		return fmt.Sprintf("Game resolution: %d x %d", g.display.Width, height)

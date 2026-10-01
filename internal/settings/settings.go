@@ -636,10 +636,10 @@ type Presentation struct {
 	// ZoomLockPercent is the preferred sticky factor for Modern camera input.
 	// One percent steps avoid storing a floating-point preference (§16.6).
 	ZoomLockPercent int `json:"zoomLockPercent"`
-	// ExpandedSidebar uses spare modern UI height for more authored controls.
-	// This is a Nanolathe presentation preference (interface design §3.3).
+	// ExpandedSidebar is retained for settings compatibility. Legacy Off loads
+	// as six items with no inline Orders-page controls (interface design §3.3).
 	ExpandedSidebar int `json:"expandedSidebar"`
-	// SidebarOrders shows orders below build items when the complete panel fits
+	// SidebarOrders shows supplementary Orders-page controls when they fit
 	// alongside the required build capacity (interface design §3.3).
 	SidebarOrders int `json:"sidebarOrders"`
 	// Arrival enables the Enhanced battle opening (GPU design §36).
@@ -819,6 +819,11 @@ func (p *Presentation) Normalize() {
 	}
 	if p.ExpandedSidebar < 0 {
 		p.ExpandedSidebar = DefaultPresentation().ExpandedSidebar
+	}
+	if p.ExpandedSidebar == 0 {
+		// The retired Original choice is now the same six-item layout with
+		// Orders-page controls kept on their dedicated page (HUD §3.3).
+		p.ExpandedSidebar, p.BuildMenuPageSize, p.SidebarOrders = 1, 6, 0
 	}
 	if p.BuildMenuPageSize < -1 {
 		p.BuildMenuPageSize = -1

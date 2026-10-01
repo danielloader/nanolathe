@@ -81,6 +81,16 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 					if demo == nil || len(demo.cells) != len(live.cells) {
 						t.Fatal("settings preview did not resolve the live build cells")
 					}
+					if demo.backdrop == nil {
+						t.Fatal("settings preview did not resolve the native rail artwork")
+					}
+					for _, items := range [][]sidebarProduct{demo.tabs, demo.commands} {
+						for _, item := range items {
+							if demo.controls[item.source] == nil {
+								t.Fatalf("settings preview lost native control art for %s", item.source.window.Gadgets[item.source.index].Name)
+							}
+						}
+					}
 					for i, cell := range live.cells {
 						other := demo.cells[i]
 						if cell.page != other.page || cell.bounds != other.bounds || len(cell.products) != len(other.products) {
@@ -120,8 +130,9 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 								controls[commandButtonName(g.Name)] = true
 							}
 						}
-						for _, name := range []string{"MOVE", "STOP", "ATTACK", "REPAIR", "FIREORD"} {
-							if h.expandedSidebar.key.inlineOrders && !controls[name] {
+						for _, name := range []string{"MOVE", "STOP", "DEFEND", "PATROL", "ATTACK", "BLAST", "REPAIR", "FIREORD"} {
+							common := name != "REPAIR" && name != "FIREORD"
+							if (common || h.expandedSidebar.key.inlineOrders) && !controls[name] {
 								t.Fatalf("missing combined command %s", name)
 							}
 						}

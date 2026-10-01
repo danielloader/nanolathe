@@ -1,18 +1,63 @@
 package main
 
 import (
+	"fmt"
+	"image"
 	"strings"
 
+	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
+	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
+
+func (s *nlScreen) sidebarCard() nlCard {
+	card := s.groupCard("sidebar", "Sidebar", []string{"armlab", "armvp"}, "armor", "",
+		nlPart{key: "build", label: "Build items", sub: "Reserve build space first", choices: true,
+			steps: []string{"6 per page", "12 per page", "Free flow"}, get: s.nlSidebarCountChoice,
+			set: func(d *nlDraft, v int) {
+				d.pres.ExpandedSidebar = 1
+				d.pres.BuildMenuPageSize = [...]int{6, 12, 0}[v]
+			}},
+		nlPart{key: "orders", label: "Orders below build", sub: "Always available on the Orders page", choices: true,
+			steps: []string{"When space permits", "Never"},
+			get:   func(d *nlDraft) int { return onOff(d.pres.SidebarOrders == 0) },
+			set:   func(d *nlDraft, v int) { d.pres.SidebarOrders = onOff(v == 0) }})
+	card.demo, card.compare = "sidebar", nil
+	card.desc = func(d *nlDraft, _ int) string {
+		v := s.nlSidebarCountChoice(d)
+		text := [...]string{
+			"Six build items per page, combining authored pages as needed.",
+			"Twelve build items per page, combining authored pages as needed. Orders-page controls hide first; if twelve still cannot fit, the page uses the fitting count.",
+			"Free flow reserves at least six build slots, then fills every remaining row. This choice overrides a mod's recommended count."}[v]
+		limit := s.nlSidebarBuildLimit(d)
+		if limit > 0 && limit != 6 && limit != 12 {
+			text = fmt.Sprintf("Current count: %d per page. This stored or recommended count stays until you choose another option.", limit)
+		} else if d.pres.BuildMenuPageSize < 0 && limit > 0 {
+			text = fmt.Sprintf("The content recommends %d per page. %s", limit, text)
+		}
+		if d.pres.SidebarOrders != 0 {
+			return text + " Common command buttons stay visible. The Orders-page controls appear above the common command buttons when they fit."
+		}
+		return text + " Common command buttons stay visible. Orders-page controls stay on their own page."
+	}
+	return card
+}
+
+// Art is decoded on the picture worker through the battle's resource and
+// button-frame resolvers. Draw only uploads these immutable pixels (HUD §3.17).
+type nlSidebarPreview struct {
+	*sidebarProductCatalog
+	backdrop *image.RGBA
+	controls map[sidebarGadgetSource]*image.RGBA
+}
 
 // Resolve the demonstration on the picture worker, through the HUD's ordinary
 // GUI/download/art path. CANBUILD is not a source of visible cells or page
 // membership [07 R-HUD-03 §6] (HUD design §3.3 and §3.17).
-func loadNLSidebar(fs vfs.FSOps, cat *content.Catalog, builder *content.UnitDef, side *content.SideDef, halted func() bool) *sidebarProductCatalog {
+func loadNLSidebar(fs vfs.FSOps, cat *content.Catalog, builder *content.UnitDef, side *content.SideDef, halted func() bool) *nlSidebarPreview {
 	if fs == nil || builder == nil || side == nil || builder.BuildPageCount < 2 {
 		return nil
 	}
@@ -28,7 +73,45 @@ func loadNLSidebar(fs vfs.FSOps, cat *content.Catalog, builder *content.UnitDef,
 	if !c.safe || len(c.cells) == 0 {
 		return nil
 	}
-	return c
+	h.pal, _ = palette.Load(fs)
+	preview := &nlSidebarPreview{sidebarProductCatalog: c, controls: make(map[sidebarGadgetSource]*image.RGBA)}
+	panel, _ := battleFrame(h.intGAF, "PANELSIDE")
+	preview.backdrop = nlGAFImage(panel, h.pal)
+	for _, source := range append([]*sidebarCommandScaffold{c.orders}, c.pages...) {
+		if source == nil {
+			continue
+		}
+		for _, i := range source.indices {
+			g := source.window.Gadgets[i]
+			art := h.gadgetButtonFrame(g, source.art, int(g.Status), 0, g.GrayedOut&1 != 0)
+			if commandButtonName(g.Name) != "" {
+				// This demonstration shows a build page; retain its actual tab
+				// stage and the native unpressed art for the other commands.
+				stage := boolStage(commandButtonName(g.Name) == "BUILD")
+				art = commandButtonFrame(h.gadgetArtEntry(g, source.art), g, stage, g.GrayedOut&1 != 0, false)
+			}
+			preview.controls[sidebarGadgetSource{source.window, source.art, i}] = nlGAFImage(art, h.pal)
+		}
+	}
+	if halted != nil && halted() {
+		return nil
+	}
+	return preview
+}
+
+func (a *nlArt) sidebarImage(pixels *image.RGBA) *ebiten.Image {
+	if pixels == nil {
+		return nil
+	}
+	if a.sidebarImages == nil {
+		a.sidebarImages = make(map[*image.RGBA]*ebiten.Image)
+	}
+	if img := a.sidebarImages[pixels]; img != nil {
+		return img
+	}
+	img := ebiten.NewImageFromImage(pixels)
+	a.sidebarImages[pixels] = img
+	return img
 }
 
 // The picture worker stops between asset reads, including the HUD's nested
@@ -70,20 +153,17 @@ func (s *nlScreen) nlSidebarBuildLimit(d *nlDraft) int {
 }
 
 func (s *nlScreen) nlSidebarCountChoice(d *nlDraft) int {
-	if d.pres.ExpandedSidebar == 0 {
-		return 0
-	}
 	limit := s.nlSidebarBuildLimit(d)
 	if limit == 0 {
-		return 3
+		return 2
 	}
 	// Keep unusual saved counts until a choice changes them. The description
 	// and demonstration name the exact count; the selector uses the closest
 	// supported fixed choice rather than changing the saved preference.
 	if abs(limit-6) <= abs(limit-12) {
-		return 1
+		return 0
 	}
-	return 2
+	return 1
 }
 
 // Original keeps source pages. Every adaptive choice partitions the flattened
@@ -130,12 +210,10 @@ func nlSidebarPreviewItems(c *sidebarProductCatalog, start, end, height int, p s
 		}
 		return products, controls
 	}
-	gridGap, lowerHeight := int32(0), p.lowerHeight
+	gridGap := int32(0)
 	for _, gap := range p.spacing {
 		if gap.at < 0 {
 			gridGap += gap.pixels
-		} else {
-			lowerHeight += gap.pixels
 		}
 	}
 	for _, tab := range c.tabs {
@@ -149,7 +227,7 @@ func nlSidebarPreviewItems(c *sidebarProductCatalog, start, end, height int, p s
 				r.Y += gap.pixels
 			}
 		}
-		r.Y += int32(height) - lowerHeight
+		r.Y += p.commandTop
 		controls = append(controls, sidebarProduct{source: item.source, rect: r})
 	}
 	for n, cell := range c.cells[start:end] {

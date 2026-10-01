@@ -26,9 +26,9 @@ type sidebarProductCatalog struct {
 	commands, tabs           []sidebarProduct
 	groups                   map[sidebarAssociation]int32
 	spacing                  []sidebarCommandGap
-	navigation               []sidebarProduct
-	navigationHeight         int32
-	navigationSpacing        []sidebarCommandGap
+	buildCommands            []sidebarProduct
+	buildCommandHeight       int32
+	buildCommandSpacing      []sidebarCommandGap
 	safe                     bool
 }
 type sidebarAssociation struct {
@@ -209,7 +209,7 @@ func (h *retailBattleHUD) sidebarCombinedCommands(c *sidebarProductCatalog) bool
 		seen[strings.ToUpper(c.orders.window.Gadgets[i].Name)] = true
 	}
 	collect(build, &extra)
-	pack := func(items []sidebarProduct, offset int32, gaps bool) int32 {
+	pack := func(items []sidebarProduct, offset int32, gaps *[]sidebarCommandGap) int32 {
 		indices := make([]int, len(items))
 		for i := range indices {
 			indices[i] = i
@@ -218,8 +218,8 @@ func (h *retailBattleHUD) sidebarCombinedCommands(c *sidebarProductCatalog) bool
 		var height, previousEnd int32
 		for start := 0; start < len(indices); {
 			top := items[indices[start]].rect.Y
-			if gaps && start > 0 {
-				c.spacing = append(c.spacing, sidebarCommandGap{at: offset + height, pixels: top - previousEnd})
+			if gaps != nil && start > 0 {
+				*gaps = append(*gaps, sidebarCommandGap{at: offset + height, pixels: top - previousEnd})
 			}
 			end, last := top, start
 			for last < len(indices) && (last == start || items[indices[last]].rect.Y < end) {
@@ -238,31 +238,31 @@ func (h *retailBattleHUD) sidebarCombinedCommands(c *sidebarProductCatalog) bool
 		return height
 	}
 	margins := h.sidebarCommandMargins(build, c.orders, extra)
-	c.upperHeight = pack(c.tabs, 0, false)
-	extraHeight := pack(extra, 0, true)
-	c.lowerHeight = extraHeight + pack(orders, extraHeight, true)
-	c.spacing = append(c.spacing,
-		sidebarCommandGap{at: -1, pixels: margins.grid},
-		sidebarCommandGap{at: 0, pixels: margins.above},
-		sidebarCommandGap{at: extraHeight, pixels: margins.below},
-		sidebarCommandGap{at: c.lowerHeight, pixels: margins.bottom})
-	for i := range orders {
-		orders[i].rect.Y += extraHeight
+	c.upperHeight = pack(c.tabs, 0, nil)
+	compose := func(panel []sidebarProduct, spacing *[]sidebarCommandGap) ([]sidebarProduct, int32) {
+		prefix, panel := slices.Clone(extra), slices.Clone(panel)
+		extraHeight := pack(prefix, 0, spacing)
+		height := extraHeight + pack(panel, extraHeight, spacing)
+		*spacing = append(*spacing,
+			sidebarCommandGap{at: -1, pixels: margins.grid},
+			sidebarCommandGap{at: 0, pixels: margins.above},
+			sidebarCommandGap{at: extraHeight, pixels: margins.below},
+			sidebarCommandGap{at: height, pixels: margins.bottom})
+		for i := range panel {
+			panel[i].rect.Y += extraHeight
+		}
+		return append(prefix, panel...), height
 	}
-	c.commands = append(extra, orders...)
-	for _, item := range c.commands {
-		if sidebarNavigation(item.source.window.Gadgets[item.source.index]) {
-			c.navigation = append(c.navigation, item)
+	c.commands, c.lowerHeight = compose(orders, &c.spacing)
+	var common []sidebarProduct
+	for _, item := range orders {
+		if sidebarCommonCommand(item.source.window.Gadgets[item.source.index]) {
+			common = append(common, item)
 		}
 	}
-	// The compact build-only footer retains page navigation. Ordinary orders
-	// remain available through the Orders tab (host policy in HUD §3.3).
-	c.navigationHeight = pack(c.navigation, 0, false)
-	c.navigationSpacing = []sidebarCommandGap{
-		{at: -1, pixels: margins.grid},
-		{at: 0, pixels: margins.above},
-		{at: c.navigationHeight, pixels: margins.bottom},
-	}
+	// Page navigation, build-only controls and the common command rows are
+	// always retained. The rest of Orders is available on its dedicated page.
+	c.buildCommands, c.buildCommandHeight = compose(common, &c.buildCommandSpacing)
 	// Match duplicate command associations before remapping source-local groups.
 	// This keeps supplementary orders in the same radio group as shared STOP.
 	groups := make(map[sidebarAssociation]int32)
@@ -383,13 +383,12 @@ func (h *retailBattleHUD) sidebarProductsWindow(b *battleSession, f *frame.Frame
 			return nil
 		}
 		commands, layout.lowerHeight = c.commands, c.lowerHeight
+		layout.commandTop = 128 + c.upperHeight
 	}
-	gridGap, lowerHeight := int32(0), layout.lowerHeight
+	gridGap := int32(0)
 	for _, gap := range spacing {
 		if gap.at < 0 {
 			gridGap += gap.pixels
-		} else {
-			lowerHeight += gap.pixels
 		}
 	}
 	start, end := p.cellStarts[p.state.Remembered-1], len(c.cells)
@@ -423,29 +422,27 @@ func (h *retailBattleHUD) sidebarProductsWindow(b *battleSession, f *frame.Frame
 		r.Y += 128
 		appendGadget(item.source, r)
 	}
-	for _, item := range commands {
-		r := item.rect
-		for _, gap := range spacing {
-			if gap.at >= 0 && gap.at <= item.rect.Y {
-				r.Y += gap.pixels
-			}
-		}
-		r.Y += int32(height) - lowerHeight
-		appendGadget(item.source, r)
-	}
-	if !layout.inlineOrders && !dedicatedOrders {
-		// Hidden command buttons retain their authored keyboard accelerators.
-		// Zero hit rectangles and inactive draw records keep them off the rail;
-		// the shared widget service activates them only for the token pass.
-		for _, item := range c.commands {
-			if sidebarNavigation(item.source.window.Gadgets[item.source.index]) {
-				continue
-			}
+	// Geometry may hide supplementary controls, but widget token precedence
+	// stays in the canonical command-record order (HUD §3.3, [07 R-WGT-01 §3]).
+	for _, item := range c.commands {
+		visible := slices.IndexFunc(commands, func(p sidebarProduct) bool { return p.source == item.source })
+		if visible < 0 {
+			// Keep authored accelerators without a drawable or pointer target;
+			// only the token pass temporarily enables this private record.
 			appendGadget(item.source, gui.Rect{Y: 128})
 			i := len(l.window.Gadgets) - 1
 			l.window.Gadgets[i].Active = 0
 			l.keyOnly[i] = true
+			continue
 		}
+		r := commands[visible].rect
+		for _, gap := range spacing {
+			if gap.at >= 0 && gap.at <= commands[visible].rect.Y {
+				r.Y += gap.pixels
+			}
+		}
+		r.Y += layout.commandTop
+		appendGadget(item.source, r)
 	}
 	if dedicatedOrders {
 		end = start

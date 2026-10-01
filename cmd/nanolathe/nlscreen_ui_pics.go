@@ -36,7 +36,7 @@ import (
 type nlPicNames struct {
 	cards   map[string][]string
 	stats   map[string][]string
-	sidebar *sidebarProductCatalog
+	sidebar *nlSidebarPreview
 }
 
 // nlPicRequest is one card's portrait preferences, copied from the catalogue.
@@ -266,6 +266,7 @@ func (a *nlArt) bindContent(cs *contentSet) {
 	}
 	a.loader.stop()
 	a.cs, a.loader, a.names, a.pics = cs, nil, nil, map[string]*ebiten.Image{}
+	a.sidebarImages = map[*image.RGBA]*ebiten.Image{}
 }
 
 // pauseLoader stops the loader until the next resume.

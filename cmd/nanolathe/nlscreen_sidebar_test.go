@@ -28,7 +28,7 @@ func TestNLSidebarPreviewPagePolicies(t *testing.T) {
 			for _, orders := range []bool{false, true} {
 				starts, got := nlSidebarPageStarts(c, false, height, limit, orders)
 				want := c.sidebarLayout(height, limit, orders)
-				if got.capacity != want.capacity || got.inlineOrders != want.inlineOrders || !slices.Equal(got.commands, want.commands) || !slices.Equal(got.spacing, want.spacing) || got.lowerHeight != want.lowerHeight {
+				if got.capacity != want.capacity || got.inlineOrders != want.inlineOrders || !slices.Equal(got.commands, want.commands) || !slices.Equal(got.spacing, want.spacing) || got.lowerHeight != want.lowerHeight || got.commandTop != want.commandTop {
 					t.Fatalf("preview diverged from battle at %d/%d/%v: %+v vs %+v", height, limit, orders, got, want)
 				}
 				if !slices.Equal(starts, sidebarPageStarts(c.cells, want.capacity, false)) {
@@ -51,7 +51,7 @@ func TestNLSidebarPreviewPagePolicies(t *testing.T) {
 	// Preserve GUI names, duplicate entries and download cells even if the
 	// catalog's membership table disagrees with the actual product controls.
 	b.cat.BuildMenus = map[string]*content.BuildMenuPage{"armfav": {Buttons: []string{"wrong"}}}
-	names := (&nlPicNames{sidebar: c}).order(nil)
+	names := (&nlPicNames{sidebar: &nlSidebarPreview{sidebarProductCatalog: c}}).order(nil)
 	if slices.Contains(names, "wrong") || !slices.Contains(names, "product0") || !slices.Contains(names, "product17") {
 		t.Fatalf("preview pictures came from membership: %v", names)
 	}
@@ -103,7 +103,7 @@ func TestNLSidebarLoaderStopsBetweenAssetReads(t *testing.T) {
 	fs := &nlPicFS{t: t, files: map[string][]byte{}}
 	fs.hold.Lock()
 	var halted atomic.Bool
-	done := make(chan *sidebarProductCatalog, 1)
+	done := make(chan *nlSidebarPreview, 1)
 	go func() { done <- loadNLSidebar(fs, cat, builder, cat.Sides[0], halted.Load) }()
 	nlWaitFor(t, "the first sidebar asset read", func() bool { return fs.readCount() == 1 })
 	halted.Store(true)

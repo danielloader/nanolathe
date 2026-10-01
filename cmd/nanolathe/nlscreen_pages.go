@@ -380,55 +380,7 @@ func (s *nlScreen) graphicsCards() []nlCard {
 			render:   func(d *nlDraft, v int, r *nlRender) { r.fps = nlFPS[v] },
 			enhanced: true,
 		},
-		{
-			key: "sidebar", label: "Build items", pics: []string{"armlab", "armvp"}, kind: nlHalves,
-			steps: []string{"Original", "6 per page", "12 per page", "Free flow"},
-			subs:  []string{"Original panel", "Six build slots", "Twelve build slots", "Every fitting row"},
-			// Build count and orders are independent host preferences
-			// (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock").
-			get: s.nlSidebarCountChoice,
-			set: func(d *nlDraft, v int) {
-				d.pres.ExpandedSidebar = onOff(v != 0)
-				d.pres.BuildMenuPageSize = [...]int{d.pres.BuildMenuPageSize, 6, 12, 0}[v]
-			},
-			desc: func(d *nlDraft, v int) string {
-				text := [...]string{
-					"The original panel and authored build pages. Stock TA uses six slots per page, with black below the panel at taller game resolutions.",
-					"Six build items per page, combining authored pages as needed. Build space comes first; orders appear below only when the complete panel fits.",
-					"Twelve build items per page, combining authored pages as needed. Orders hide first at a lower game resolution; if twelve still cannot fit, the page uses the fitting count.",
-					"Reserves at least six build slots, includes the complete orders panel when it fits, then fills every remaining row. This choice overrides a mod's recommended count.",
-				}[v]
-				if v != 0 {
-					limit := s.nlSidebarBuildLimit(d)
-					if limit > 0 && limit != 6 && limit != 12 {
-						return fmt.Sprintf("Current count: %d per page. This stored or recommended count stays until you choose another option. Pages combine authored sources as needed; orders hide before the build count is reduced to fit.", limit)
-					}
-					if d.pres.BuildMenuPageSize < 0 && limit > 0 {
-						return fmt.Sprintf("The content recommends %d per page. %s", limit, text)
-					}
-				}
-				return text
-			},
-			scene:    func(*nlDraft, int) string { return "armor" },
-			enhanced: true,
-			demo:     "sidebar",
-		},
-		{
-			key: "sidebar-orders", label: "Orders below build", pics: []string{"armlab", "armvp"}, kind: nlHalves,
-			steps: []string{"When space permits", "Never"},
-			subs:  []string{"After build space", "Use the Orders page"},
-			get:   func(d *nlDraft) int { return onOff(d.pres.SidebarOrders == 0) },
-			set:   func(d *nlDraft, v int) { d.pres.SidebarOrders = onOff(v == 0) },
-			desc: func(_ *nlDraft, v int) string {
-				return [...]string{
-					"Shows the complete orders panel below build items when it fits after the selected build count. Free flow reserves six slots first. Orders always remain available on their own page.",
-					"Keeps build pages for build items and page navigation. Use the Orders page for commands. Original keeps its authored panel.",
-				}[v]
-			},
-			scene:    func(*nlDraft, int) string { return "armor" },
-			enhanced: true,
-			demo:     "sidebar",
-		},
+		s.sidebarCard(),
 		{
 			key: "fullscreen", label: "Fullscreen", pics: []string{"armmark", "armrad"}, kind: nlHalves,
 			steps: []string{"Windowed", "Fullscreen"}, subs: []string{"A window you can move", "The whole display"},
@@ -646,6 +598,7 @@ type nlPart struct {
 	key, label, sub string
 	steps           []string
 	meter           bool // a strength or level rather than an Off/On switch
+	choices         bool // named choices shown together rather than numeric lamps
 	get             func(d *nlDraft) int
 	set             func(d *nlDraft, v int)
 	render          func(r *nlRender, v int)
@@ -699,7 +652,9 @@ func (s *nlScreen) groupCard(key, label string, pics []string, scene, text strin
 		},
 		render: func(d *nlDraft, code int, r *nlRender) {
 			for i, v := range unpack(code) {
-				parts[i].render(r, v)
+				if parts[i].render != nil {
+					parts[i].render(r, v)
+				}
 			}
 		},
 		compare: func(d *nlDraft, code int) (int, bool) {

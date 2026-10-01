@@ -99,6 +99,16 @@ func sidebarNavigation(g gui.Gadget) bool {
 	return command == "BUILD" || command == "ORDERS" || strings.HasSuffix(name, "NEXT") || strings.HasSuffix(name, "PREV") || strings.Contains(name, "NEXTPAGE") || strings.Contains(name, "PREVPAGE") || strings.Contains(name, "PAGEUP") || strings.Contains(name, "PAGEDOWN")
 }
 
+// Common command rows stay on every build view; only supplementary Orders
+// controls are optional (user-approved host policy, HUD §3.3).
+func sidebarCommonCommand(g gui.Gadget) bool {
+	switch commandButtonName(g.Name) {
+	case "MOVE", "STOP", "DEFEND", "PATROL", "ATTACK", "BLAST":
+		return true
+	}
+	return false
+}
+
 type sidebarSpan struct {
 	top, end int32
 	set      bool

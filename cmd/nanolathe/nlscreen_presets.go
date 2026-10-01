@@ -33,7 +33,7 @@ var nlPresetScopes = []struct {
 // nlGraphicsPaths are the presentation settings that change the picture.
 func nlGraphicsPaths() []string {
 	var out []string
-	for _, k := range []string{"renderer", "fps", "expandedSidebar", "buildMenuPageSize", "trailStrength", "strategicIconConfig",
+	for _, k := range []string{"renderer", "fps", "expandedSidebar", "sidebarOrders", "buildMenuPageSize", "trailStrength", "strategicIconConfig",
 		"waterSurface", "waterMotion", "waterFoam", "waterReflections", "hovercraftLandWash", "modelLight", "groundLight", "groundLightStrength",
 		"finish", "glint", "supersample", "blastRings", "blastRingStrength", "fireShimmer", "wreckGlow", "wreckShimmer", "scorch", "softShadows",
 		"arrival", "placementWeaponRanges", "weaponGlowStrength", "explosionGlowStrength", "nanoGlowStrength", "shadowSoftness"} {
@@ -177,7 +177,7 @@ func (s *nlScreen) applyPresetToDraft(e nlPresetEntry, scopes []bool) {
 	}
 	for _, page := range s.pages() {
 		for _, c := range page.cards {
-			if c.get(&before) != c.get(d) {
+			if !nlCardEqual(c, &before, d) {
 				s.touched[c.key] = true
 			}
 		}

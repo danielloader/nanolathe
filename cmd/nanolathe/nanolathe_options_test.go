@@ -125,8 +125,8 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	if p := g.presentation; p.ZoomStyle != settings.ZoomStepped || p.StrategicIconStyle != settings.StrategicIconsCommunity {
 		t.Fatalf("camera preferences did not preview: %+v", p)
 	}
-	if (&battleSession{shell: g}).expandedSidebarEnabled() {
-		t.Fatal("sidebar preference did not preview immediately")
+	if b := (&battleSession{shell: g}); !b.expandedSidebarEnabled() || b.buildPageLock() != 6 || b.sidebarOrdersEnabled() {
+		t.Fatal("six-item sidebar preference did not preview immediately")
 	}
 	// The page's buttons are family shortcuts: each wrote every switch of its
 	// family off, Marks the trail strength too, while the glint, the soft
@@ -172,8 +172,8 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	if saved.Display.Glow != 0 {
 		t.Fatalf("saved glow %d", saved.Display.Glow)
 	}
-	if saved.Presentation.ExpandedSidebar != 0 {
-		t.Fatal("saved preference lost the disabled sidebar")
+	if saved.Presentation.ExpandedSidebar != 1 || saved.Presentation.BuildMenuPageSize != 6 || saved.Presentation.SidebarOrders != 0 {
+		t.Fatal("saved preference lost six items without inline Orders")
 	}
 	if saved.Presentation.ZoomStyle != settings.ZoomStepped || saved.Presentation.StrategicIconStyle != settings.StrategicIconsCommunity {
 		t.Fatal("OK lost the camera preferences")
@@ -315,8 +315,8 @@ func TestBattleNanolatheOptionsPointerAndLayout(t *testing.T) {
 		click(name)
 	}
 	click("NSIDEBAR")
-	if b.expandedSidebarEnabled() {
-		t.Fatal("pointer did not disable expanded sidebar")
+	if !b.expandedSidebarEnabled() || b.buildPageLock() != 6 || b.sidebarOrdersEnabled() {
+		t.Fatal("pointer did not select six items without inline Orders")
 	}
 	// The page's five buttons are family shortcuts: off, every switch of
 	// every family is off, while the glint, the aircraft soft shadows and the

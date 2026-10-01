@@ -44,7 +44,7 @@ const (
 	nlGroup                 // several related settings on one card
 	nlStepper               // ◄ value ► with a notch per value
 	nlLayers                // the three rule layers
-	nlHalves                // two or three big choices side by side
+	nlHalves                // big choices side by side
 	nlContent               // the mod chooser
 )
 
@@ -380,37 +380,7 @@ func (s *nlScreen) graphicsCards() []nlCard {
 			render:   func(d *nlDraft, v int, r *nlRender) { r.fps = nlFPS[v] },
 			enhanced: true,
 		},
-		{
-			key: "sidebar", label: "Sidebar", pics: []string{"armlab", "armvp"}, kind: nlHalves,
-			steps: []string{"Original", "12 per page", "Free flow"},
-			subs:  []string{"Authored pages", "Twelve per page", "Fills the window"},
-			// Original is the authored panel; the other two are the expanded
-			// sidebar, locked to twelve-cell pages or flowing freely
-			// (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock").
-			get: func(d *nlDraft) int {
-				switch {
-				case d.pres.ExpandedSidebar == 0:
-					return 0
-				case d.pres.BuildMenuPageSize == 12:
-					return 1
-				}
-				return 2
-			},
-			set: func(d *nlDraft, v int) {
-				d.pres.ExpandedSidebar = onOff(v != 0)
-				d.pres.BuildMenuPageSize = [...]int{d.pres.BuildMenuPageSize, 12, 0}[v]
-			},
-			desc: func(_ *nlDraft, v int) string {
-				return [...]string{
-					"The original side panel: each builder's authored build pages, six to a page.",
-					"The taller side panel with build pages of twelve, the layout ProTA, TA Zero and Escalation author. A mod's own page size can still set it.",
-					"The taller side panel fills every row the window has room for, so fewer page turns on a big display.",
-				}[v]
-			},
-			scene:    func(*nlDraft, int) string { return "armor" },
-			enhanced: true,
-			demo:     "sidebar",
-		},
+		s.sidebarCard(),
 		{
 			key: "fullscreen", label: "Fullscreen", pics: []string{"armmark", "armrad"}, kind: nlHalves,
 			steps: []string{"Windowed", "Fullscreen"}, subs: []string{"A window you can move", "The whole display"},
@@ -628,6 +598,7 @@ type nlPart struct {
 	key, label, sub string
 	steps           []string
 	meter           bool // a strength or level rather than an Off/On switch
+	choices         bool // named choices shown together rather than numeric lamps
 	get             func(d *nlDraft) int
 	set             func(d *nlDraft, v int)
 	render          func(r *nlRender, v int)
@@ -681,7 +652,9 @@ func (s *nlScreen) groupCard(key, label string, pics []string, scene, text strin
 		},
 		render: func(d *nlDraft, code int, r *nlRender) {
 			for i, v := range unpack(code) {
-				parts[i].render(r, v)
+				if parts[i].render != nil {
+					parts[i].render(r, v)
+				}
 			}
 		},
 		compare: func(d *nlDraft, code int) (int, bool) {

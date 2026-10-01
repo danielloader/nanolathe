@@ -65,9 +65,8 @@ func (s *nlScreen) draftOf(st settings.Settings) nlDraft {
 }
 
 // cardPaths finds the settings paths a card writes by changing it and
-// diffing: every value of every grouped part, every other card to its next value.
-// A next-value probe can miss a path that only another value changes, such as
-// Overall glow at 100%: 150% changes strength, while Off changes the switch.
+// diffing every value. A next-value probe can miss a path that only another
+// value changes, such as a page count when Free flow cycles to Original.
 func (s *nlScreen) cardPaths(c nlCard, base settings.Settings) []string {
 	if c.key == "content" {
 		return nil
@@ -83,9 +82,11 @@ func (s *nlScreen) cardPaths(c nlCard, base settings.Settings) []string {
 			}
 		}
 	} else if len(c.steps) > 1 {
-		d := from
-		c.set(&d, (c.get(&d)+1)%len(c.steps))
-		probes = append(probes, d)
+		for v := range c.steps {
+			d := from
+			c.set(&d, v)
+			probes = append(probes, d)
+		}
 	}
 	seen := map[string]bool{}
 	var out []string
@@ -173,11 +174,10 @@ func (s *nlScreen) cardSource(c nlCard) string {
 	if !s.sourceActive() || c.key == "content" {
 		return ""
 	}
-	v, rec, base := c.get(&s.draft), c.get(&s.src.rec), c.get(&s.src.base)
 	switch {
-	case v != rec:
+	case !nlCardEqual(c, &s.draft, &s.src.rec):
 		return "changed"
-	case rec != base:
+	case !nlCardEqual(c, &s.src.rec, &s.src.base):
 		return "set"
 	}
 	return ""
@@ -226,7 +226,7 @@ func (s *nlScreen) drawSource(screen *ebiten.Image, c *nlCard, x, y, a float64) 
 		lw := df.Draw(screen, label, lx, y+15.5*u, st)
 		screenkit.Fill(screen, screenkit.Rect{X: lx, Y: y + 19*u, W: lw, H: 1 * u}, alphaC(nlKicker, a))
 		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: lx - 4*u, Y: y, W: lw + 8*u, H: 22 * u}, Click: func() {
-			s.setCard(*c, c.get(&s.src.rec))
+			s.setCardDraft(*c, s.src.rec)
 		}})
 	}
 }

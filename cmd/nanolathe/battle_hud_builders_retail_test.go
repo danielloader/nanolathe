@@ -73,6 +73,36 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 						u.Flags &^= hud.SelectionFlag
 					}
 					d, _ := cat.Unit(name)
+					// The settings demonstration must resolve the same cells as
+					// the live HUD, rather than inventing six/twelve-item pages
+					// from CANBUILD (HUD design §3.17).
+					demo := loadNLSidebar(cs.fs, cat, d, cat.Sides[side], nil)
+					live := h.sidebarProductCatalog(cat, d, int(d.BuildPageCount))
+					if demo == nil || len(demo.cells) != len(live.cells) {
+						t.Fatal("settings preview did not resolve the live build cells")
+					}
+					if demo.backdrop == nil {
+						t.Fatal("settings preview did not resolve the native rail artwork")
+					}
+					for _, items := range [][]sidebarProduct{demo.tabs, demo.commands} {
+						for _, item := range items {
+							if demo.controls[item.source] == nil {
+								t.Fatalf("settings preview lost native control art for %s", item.source.window.Gadgets[item.source.index].Name)
+							}
+						}
+					}
+					for i, cell := range live.cells {
+						other := demo.cells[i]
+						if cell.page != other.page || cell.bounds != other.bounds || len(cell.products) != len(other.products) {
+							t.Fatalf("preview cell %d differs from the HUD", i)
+						}
+						for j, product := range cell.products {
+							x, y := product.source, other.products[j].source
+							if product.rect != other.products[j].rect || x.window.Gadgets[x.index].Name != y.window.Gadgets[y.index].Name {
+								t.Fatalf("preview product %d/%d differs from the HUD", i, j)
+							}
+						}
+					}
 					handle, err := sess.Units.Create(d, sess.LocalOwner, x+numeric.FixedFromInt(160), y, z)
 					if err != nil {
 						t.Fatal(err)
@@ -96,10 +126,13 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 						state, _ := h.expandedSidebarPaging(b, f)
 						controls := map[string]bool{}
 						for _, g := range w.Gadgets {
-							controls[commandButtonName(g.Name)] = true
+							if g.Active != 0 {
+								controls[commandButtonName(g.Name)] = true
+							}
 						}
-						for _, name := range []string{"MOVE", "STOP", "ATTACK", "REPAIR", "FIREORD"} {
-							if !controls[name] {
+						for _, name := range []string{"MOVE", "STOP", "DEFEND", "PATROL", "ATTACK", "BLAST", "REPAIR", "FIREORD"} {
+							common := name != "REPAIR" && name != "FIREORD"
+							if (common || h.expandedSidebar.key.inlineOrders) && !controls[name] {
 								t.Fatalf("missing combined command %s", name)
 							}
 						}
@@ -107,9 +140,14 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 							t.Fatal("combined page has no build products")
 						}
 						first := sidebarVisibleProducts(w)
+						inline := h.expandedSidebar.key.inlineOrders
+						if h.sidebarPaging.capacity < 6 {
+							t.Fatal("Free flow capacity fell below six")
+						}
 						h.selectExpandedSidebarPage(b, f, 0)
-						if !slices.Equal(sidebarVisibleProducts(expandedWindow(t, b)), first) {
-							t.Fatal("Orders hid the current build partition")
+						ordersProducts := sidebarVisibleProducts(expandedWindow(t, b))
+						if inline && !slices.Equal(ordersProducts, first) || !inline && len(ordersProducts) != 0 {
+							t.Fatal("Orders did not match the combined or dedicated layout")
 						}
 						h.selectExpandedSidebarPage(b, f, state.Remembered)
 						if dir := os.Getenv("NANOLATHE_MENU_SHOTS"); dir != "" && height == 768 {

@@ -636,19 +636,20 @@ type Presentation struct {
 	// ZoomLockPercent is the preferred sticky factor for Modern camera input.
 	// One percent steps avoid storing a floating-point preference (§16.6).
 	ZoomLockPercent int `json:"zoomLockPercent"`
-	// ExpandedSidebar uses spare modern UI height for more authored controls.
-	// This is a Nanolathe presentation preference (interface design §3.3).
+	// ExpandedSidebar is retained for settings compatibility. Legacy Off loads
+	// as six items with no inline Orders-page controls (interface design §3.3).
 	ExpandedSidebar int `json:"expandedSidebar"`
+	// SidebarOrders shows supplementary Orders-page controls when they fit
+	// alongside the required build capacity (interface design §3.3).
+	SidebarOrders int `json:"sidebarOrders"`
 	// Arrival enables the Enhanced battle opening (GPU design §36).
 	Arrival int `json:"arrival"`
 	// PlacementWeaponRanges shows authored weapon ranges at a prospective
 	// building site (GPU design §20).
 	PlacementWeaponRanges int `json:"placementWeaponRanges"`
-	// BuildMenuPageSize locks the expanded sidebar's build pages to at most
-	// this many product cells, overriding the running mod's own lock. Zero,
-	// the default, defers to the mod and otherwise fills every row that fits
-	// (interface design §3.3 "Build page lock"). It has no options row; the
-	// settings file is its only editor.
+	// BuildMenuPageSize selects a fixed number of product cells, or zero for
+	// Free flow. Negative one inherits the content recommendation; every
+	// explicit choice, including zero, overrides it (interface design §3.3).
 	BuildMenuPageSize int `json:"buildMenuPageSize"`
 	// CommunitySelection chooses Retail (0), Community (1), or Zero (2)
 	// selection controls (DESIGN_INTERFACE_HUD_INPUT §3.13). It is host input
@@ -768,7 +769,7 @@ type Presentation struct {
 // Enhanced effect on.
 func DefaultPresentation() Presentation {
 	return Presentation{
-		Renderer: "modern", FPS: 60, ExpandedSidebar: 1, GroupNumbers: 1, Arrival: 1, PlacementWeaponRanges: 1,
+		Renderer: "modern", FPS: 60, ExpandedSidebar: 1, SidebarOrders: 1, BuildMenuPageSize: -1, GroupNumbers: 1, Arrival: 1, PlacementWeaponRanges: 1,
 		ZoomStyle: ZoomSmooth, ZoomLockPercent: ZoomLockDefaultPercent, StrategicIconStyle: StrategicIconsModern,
 		MexSnapRadius: -1, WreckSnapRadius: -1, BuildRotateKey: "/", ClickSnapOverrideKey: "alt", BuildRotationOverlay: 1, BuildDrag: 1,
 		WaterSurface: DefaultEffectSwitch, WaterMotion: DefaultEffectSwitch, WaterFoam: DefaultEffectSwitch, HovercraftLandWash: DefaultEffectSwitch, WaterReflections: DefaultEffectSwitch,
@@ -819,8 +820,16 @@ func (p *Presentation) Normalize() {
 	if p.ExpandedSidebar < 0 {
 		p.ExpandedSidebar = DefaultPresentation().ExpandedSidebar
 	}
-	if p.BuildMenuPageSize < 0 {
-		p.BuildMenuPageSize = 0
+	if p.ExpandedSidebar == 0 {
+		// The retired Original choice is now the same six-item layout with
+		// Orders-page controls kept on their dedicated page (HUD §3.3).
+		p.ExpandedSidebar, p.BuildMenuPageSize, p.SidebarOrders = 1, 6, 0
+	}
+	if p.BuildMenuPageSize < -1 {
+		p.BuildMenuPageSize = -1
+	}
+	if p.SidebarOrders < 0 {
+		p.SidebarOrders = DefaultPresentation().SidebarOrders
 	}
 	if p.CommunitySelection < 0 || p.CommunitySelection > 2 {
 		p.CommunitySelection = 0

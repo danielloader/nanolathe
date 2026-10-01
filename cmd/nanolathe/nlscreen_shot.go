@@ -39,7 +39,7 @@ func runNLScreenShot(opts Options, cs *contentSet) error {
 	s.canvasScale = 1
 	s.show(shell)
 	defer s.finishHide()
-	game := &nlShotGame{s: s, out: opts.NLShot, w: w, h: h}
+	game := &nlShotGame{s: s, out: opts.NLShot, w: w, h: h, displaySize: image.Pt(shell.display.Width, shell.display.Height)}
 	game.steps = nlShotSteps(s, opts.NLShotOnly)
 	if len(game.steps) == 0 {
 		return fmt.Errorf("nanolathe: nl-shot: no card matches %q", opts.NLShotOnly)
@@ -85,6 +85,7 @@ type nlShotStep struct {
 	presetScroll bool
 	dialog       string
 	draft        func(d *nlDraft)
+	gameSize     image.Point // logical game size for a sidebar layout sample
 	// The Controls page: which tab, and a key cap waiting for a press.
 	ctlGroup  int
 	capturing bool
@@ -155,10 +156,44 @@ func nlShotSteps(s *nlScreen, only string) []nlShotStep {
 				}
 			}
 			if card.demo != "" {
-				// The demonstration's other value too.
-				steps = append(steps, nlShotStep{name: base + "-alt", page: pi, card: ci, draft: func(d *nlDraft) {
-					card.set(d, (card.get(d)+1)%len(card.steps))
-				}})
+				switch card.key {
+				case "sidebar":
+					// Name and capture every explicit choice. The base also
+					// records inherited or unusual stored counts faithfully.
+					names := []string{"six", "twelve", "free-flow"}
+					for value, name := range names {
+						steps = append(steps, nlShotStep{name: base + "-" + name, page: pi, card: ci, draft: func(d *nlDraft) {
+							card.parts[0].set(d, value)
+						}})
+					}
+					for value, name := range []string{"when-space-permits", "never"} {
+						steps = append(steps, nlShotStep{name: base + "-orders-" + name, page: pi, card: ci, part: 1, draft: func(d *nlDraft) {
+							d.pres.ExpandedSidebar = 1
+							card.parts[1].set(d, value)
+						}})
+					}
+					steps = append(steps, nlShotStep{name: base + "-tall-orders", page: pi, card: ci, gameSize: image.Pt(1280, 1080), draft: func(d *nlDraft) {
+						d.pres.ExpandedSidebar, d.pres.BuildMenuPageSize, d.pres.SidebarOrders = 1, 12, 1
+					}})
+					for _, sample := range []struct {
+						name          string
+						count, orders int
+					}{
+						{"tall-six-never", 6, 0}, {"tall-six-orders", 6, 1},
+						{"tall-twelve-never", 12, 0},
+						{"tall-free-flow-never", 0, 0}, {"tall-free-flow-orders", 0, 1},
+					} {
+						steps = append(steps, nlShotStep{name: base + "-" + sample.name, page: pi, card: ci, gameSize: image.Pt(1280, 1080), draft: func(d *nlDraft) {
+							d.pres.ExpandedSidebar, d.pres.BuildMenuPageSize, d.pres.SidebarOrders = 1, sample.count, sample.orders
+						}})
+					}
+				default:
+					for offset := 1; offset < len(card.steps); offset++ {
+						steps = append(steps, nlShotStep{name: fmt.Sprintf("%s-alt%d", base, offset), page: pi, card: ci, draft: func(d *nlDraft) {
+							card.set(d, (card.get(d)+offset)%len(card.steps))
+						}})
+					}
+				}
 			}
 			if card.usesMutators {
 				// Raised two steps and compared against ×1, as twin scenes.
@@ -185,20 +220,21 @@ func nlShotSteps(s *nlScreen, only string) []nlShotStep {
 }
 
 type nlShotGame struct {
-	diff      nlDiffStats
-	s         *nlScreen
-	steps     []nlShotStep
-	index     int
-	out       string
-	w, h      int
-	target    *ebiten.Image
-	frames    int
-	settle    int
-	started   bool
-	demoArmed bool
-	written   int
-	err       error
-	done      bool
+	displaySize image.Point
+	diff        nlDiffStats
+	s           *nlScreen
+	steps       []nlShotStep
+	index       int
+	out         string
+	w, h        int
+	target      *ebiten.Image
+	frames      int
+	settle      int
+	started     bool
+	demoArmed   bool
+	written     int
+	err         error
+	done        bool
 }
 
 func (g *nlShotGame) Update() error {
@@ -223,6 +259,10 @@ func (g *nlShotGame) Draw(screen *ebiten.Image) {
 		g.started = true
 		g.frames, g.settle, g.demoArmed = 0, 0, false
 		s.draft = s.snapshot(s.shell())
+		s.shell().display.Width, s.shell().display.Height = g.displaySize.X, g.displaySize.Y
+		if step.gameSize.X > 0 && step.gameSize.Y > 0 {
+			s.shell().display.Width, s.shell().display.Height = step.gameSize.X, step.gameSize.Y
+		}
 		if step.draft != nil {
 			step.draft(&s.draft)
 		}

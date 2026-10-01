@@ -174,8 +174,8 @@ diagnostic, so a misspelling is reported rather than ignored.
   sizes and read caps (an omitted count keeps the retail value), and
   `presentation` the front-end art, main-menu version text, team logos,
   range-guide defaults and the `build_menu_page_size` build page lock
-  (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock"; the player's settings
-  value overrides it). `detect` selects nothing: the install check (§5.3
+  (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock"; every explicit player choice, including Free flow,
+  overrides it; omitted player preferences inherit the recommendation). `detect` selects nothing: the install check (§5.3
   step 4) refuses a package whose content lacks a directory it names, so a
   config paired with other content is caught. Omitted, the mod is
   retail-shaped. The section is kept apart from `rules` in code

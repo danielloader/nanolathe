@@ -26,6 +26,9 @@ type sidebarProductCatalog struct {
 	commands, tabs           []sidebarProduct
 	groups                   map[sidebarAssociation]int32
 	spacing                  []sidebarCommandGap
+	buildCommands            []sidebarProduct
+	buildCommandHeight       int32
+	buildCommandSpacing      []sidebarCommandGap
 	safe                     bool
 }
 type sidebarAssociation struct {
@@ -206,7 +209,7 @@ func (h *retailBattleHUD) sidebarCombinedCommands(c *sidebarProductCatalog) bool
 		seen[strings.ToUpper(c.orders.window.Gadgets[i].Name)] = true
 	}
 	collect(build, &extra)
-	pack := func(items []sidebarProduct, offset int32, gaps bool) int32 {
+	pack := func(items []sidebarProduct, offset int32, gaps *[]sidebarCommandGap) int32 {
 		indices := make([]int, len(items))
 		for i := range indices {
 			indices[i] = i
@@ -215,8 +218,8 @@ func (h *retailBattleHUD) sidebarCombinedCommands(c *sidebarProductCatalog) bool
 		var height, previousEnd int32
 		for start := 0; start < len(indices); {
 			top := items[indices[start]].rect.Y
-			if gaps && start > 0 {
-				c.spacing = append(c.spacing, sidebarCommandGap{at: offset + height, pixels: top - previousEnd})
+			if gaps != nil && start > 0 {
+				*gaps = append(*gaps, sidebarCommandGap{at: offset + height, pixels: top - previousEnd})
 			}
 			end, last := top, start
 			for last < len(indices) && (last == start || items[indices[last]].rect.Y < end) {
@@ -235,18 +238,31 @@ func (h *retailBattleHUD) sidebarCombinedCommands(c *sidebarProductCatalog) bool
 		return height
 	}
 	margins := h.sidebarCommandMargins(build, c.orders, extra)
-	c.upperHeight = pack(c.tabs, 0, false)
-	extraHeight := pack(extra, 0, true)
-	c.lowerHeight = extraHeight + pack(orders, extraHeight, true)
-	c.spacing = append(c.spacing,
-		sidebarCommandGap{at: -1, pixels: margins.grid},
-		sidebarCommandGap{at: 0, pixels: margins.above},
-		sidebarCommandGap{at: extraHeight, pixels: margins.below},
-		sidebarCommandGap{at: c.lowerHeight, pixels: margins.bottom})
-	for i := range orders {
-		orders[i].rect.Y += extraHeight
+	c.upperHeight = pack(c.tabs, 0, nil)
+	compose := func(panel []sidebarProduct, spacing *[]sidebarCommandGap) ([]sidebarProduct, int32) {
+		prefix, panel := slices.Clone(extra), slices.Clone(panel)
+		extraHeight := pack(prefix, 0, spacing)
+		height := extraHeight + pack(panel, extraHeight, spacing)
+		*spacing = append(*spacing,
+			sidebarCommandGap{at: -1, pixels: margins.grid},
+			sidebarCommandGap{at: 0, pixels: margins.above},
+			sidebarCommandGap{at: extraHeight, pixels: margins.below},
+			sidebarCommandGap{at: height, pixels: margins.bottom})
+		for i := range panel {
+			panel[i].rect.Y += extraHeight
+		}
+		return append(prefix, panel...), height
 	}
-	c.commands = append(extra, orders...)
+	c.commands, c.lowerHeight = compose(orders, &c.spacing)
+	var common []sidebarProduct
+	for _, item := range orders {
+		if sidebarCommonCommand(item.source.window.Gadgets[item.source.index]) {
+			common = append(common, item)
+		}
+	}
+	// Page navigation, build-only controls and the common command rows are
+	// always retained. The rest of Orders is available on its dedicated page.
+	c.buildCommands, c.buildCommandHeight = compose(common, &c.buildCommandSpacing)
 	// Match duplicate command associations before remapping source-local groups.
 	// This keeps supplementary orders in the same radio group as shared STOP.
 	groups := make(map[sidebarAssociation]int32)
@@ -305,35 +321,15 @@ func (h *retailBattleHUD) sidebarProductsWindow(b *battleSession, f *frame.Frame
 		return nil
 	}
 	width, height := b.cl.Size()
-	// Reserve the complete command panel before allocating any build cells.
-	spacing, fits := c.sidebarSpacing(int32(height))
-	if !fits {
-		return nil
-	}
-	gridGap, lowerHeight := int32(0), c.lowerHeight
-	for _, gap := range spacing {
-		if gap.at < 0 {
-			gridGap += gap.pixels
-		} else {
-			lowerHeight += gap.pixels
-		}
-	}
-	capacity := int((int32(height)-128-c.upperHeight-gridGap-lowerHeight)/64) * 2
-	if capacity < 2 {
-		return nil
-	}
-	// A locked page that does not fit keeps the authored/fitted layout rather
-	// than splitting the mod's pages (§3.3 "Build page lock").
 	lock := b.buildPageLock()
-	if lock > 0 {
-		if lock > capacity {
-			return nil
-		}
-		capacity = lock
+	layout := c.sidebarLayout(height, lock, b.sidebarOrdersEnabled())
+	capacity := layout.capacity
+	if capacity < 1 {
+		return nil
 	}
 	p := &h.sidebarPaging
 	reseed := !p.flat || p.definition != def || p.builder != f.CommandPage.Builder || !slices.Equal(p.selection, f.Selection.Handles) || p.authoredPage != int(f.CommandPage.Page) || p.authoredRemembered != buildButtonPage(f) || p.authoredCount != int(f.CommandPage.PageCount)
-	key := expandedSidebarKey{base: base, definition: def, width: int32(width), height: int32(height), page: int(f.CommandPage.Page), count: int(f.CommandPage.PageCount), remembered: buildButtonPage(f), localPage: p.state.Page, lock: lock, flat: true, transport: f.CommandPage.IsTransport, builder: f.CommandPage.Builder}
+	key := expandedSidebarKey{base: base, definition: def, width: int32(width), height: int32(height), page: int(f.CommandPage.Page), count: int(f.CommandPage.PageCount), remembered: buildButtonPage(f), localPage: p.state.Page, lock: lock, inlineOrders: layout.inlineOrders, flat: true, transport: f.CommandPage.IsTransport, builder: f.CommandPage.Builder}
 	if !reseed && key == h.expandedSidebar.key && h.expandedSidebar.window != nil {
 		return h.expandedSidebar.window
 	}
@@ -364,7 +360,7 @@ func (h *retailBattleHUD) sidebarProductsWindow(b *battleSession, f *frame.Frame
 	}
 	p.capacity = capacity
 	p.starts = nil
-	p.cellStarts = sidebarPageStarts(c.cells, capacity, lock > 0)
+	p.cellStarts = sidebarPageStarts(c.cells, capacity, false)
 	p.state.Count = 1 + len(p.cellStarts)
 	p.state.Remembered = 1
 	for i, first := range p.cellStarts {
@@ -375,13 +371,34 @@ func (h *retailBattleHUD) sidebarProductsWindow(b *battleSession, f *frame.Frame
 	if p.state.Page != 0 {
 		p.state.Page = p.state.Remembered
 	}
+	spacing := layout.spacing
+	commands := layout.commands
+	// When orders are absent from build pages, page zero remains the complete
+	// dedicated Orders view. Build capacity and remembered pagination stay put.
+	dedicatedOrders := p.state.Page == 0 && !layout.inlineOrders
+	if dedicatedOrders {
+		var fits bool
+		spacing, fits = sidebarFitSpacing(int32(height)-128-c.upperHeight-c.lowerHeight, c.spacing)
+		if !fits {
+			return nil
+		}
+		commands, layout.lowerHeight = c.commands, c.lowerHeight
+		layout.commandTop = 128 + c.upperHeight
+	}
+	gridGap := int32(0)
+	for _, gap := range spacing {
+		if gap.at < 0 {
+			gridGap += gap.pixels
+		}
+	}
 	start, end := p.cellStarts[p.state.Remembered-1], len(c.cells)
 	if p.state.Remembered < len(p.cellStarts) {
 		end = p.cellStarts[p.state.Remembered]
 	}
 	p.anchor = start
 	p.anchorSource = c.cells[start].products[0].source
-	// The same command panel remains visible on every local page.
+	// Commands stay stationary across build partitions, including a short last
+	// page. Hidden orders are accessed through the dedicated page zero.
 	scaffold := c.orders
 	h.retireExpandedSidebar()
 	l := &h.expandedSidebar
@@ -396,6 +413,7 @@ func (h *retailBattleHUD) sidebarProductsWindow(b *battleSession, f *frame.Frame
 		g.Labels = append([]string(nil), g.Labels...)
 		l.window.Gadgets = append(l.window.Gadgets, g)
 		l.sources = append(l.sources, source)
+		l.keyOnly = append(l.keyOnly, false)
 	}
 	appendGadget(sidebarGadgetSource{scaffold.window, scaffold.art, 0}, l.window.Rect)
 	l.window.Gadgets[0].Rect = l.window.Rect
@@ -404,15 +422,30 @@ func (h *retailBattleHUD) sidebarProductsWindow(b *battleSession, f *frame.Frame
 		r.Y += 128
 		appendGadget(item.source, r)
 	}
+	// Geometry may hide supplementary controls, but widget token precedence
+	// stays in the canonical command-record order (HUD §3.3, [07 R-WGT-01 §3]).
 	for _, item := range c.commands {
-		r := item.rect
+		visible := slices.IndexFunc(commands, func(p sidebarProduct) bool { return p.source == item.source })
+		if visible < 0 {
+			// Keep authored accelerators without a drawable or pointer target;
+			// only the token pass temporarily enables this private record.
+			appendGadget(item.source, gui.Rect{Y: 128})
+			i := len(l.window.Gadgets) - 1
+			l.window.Gadgets[i].Active = 0
+			l.keyOnly[i] = true
+			continue
+		}
+		r := commands[visible].rect
 		for _, gap := range spacing {
-			if gap.at >= 0 && gap.at <= item.rect.Y {
+			if gap.at >= 0 && gap.at <= commands[visible].rect.Y {
 				r.Y += gap.pixels
 			}
 		}
-		r.Y += int32(height) - lowerHeight
+		r.Y += layout.commandTop
 		appendGadget(item.source, r)
+	}
+	if dedicatedOrders {
+		end = start
 	}
 	for n, cell := range c.cells[start:end] {
 		x, y := int32(n%2)*64, 128+c.upperHeight+gridGap+int32(n/2)*64
@@ -460,15 +493,12 @@ func sidebarFittedArtRect(cell gui.Rect, art *formats.GAFFrame) gui.Rect {
 	return gui.Rect{X: cell.X + (cell.W-w)/2, Y: cell.Y + (cell.H-h)/2, W: w, H: h}
 }
 
-// sidebarPageStarts partitions the logical cells into local build pages and
-// returns each page's first cell. Auto-flow fills every page to capacity. A
-// locked page also never spans two source pages, so a mod that places a fixed
-// number of products on each authored page keeps that page membership even
-// where an authored page is short (interface design §3.3 "Build page lock").
-func sidebarPageStarts(cells []sidebarBuildCell, capacity int, locked bool) []int {
+// Adaptive pages fill to capacity across source boundaries; Original's preview
+// preserves source pages (interface design §3.3 "Build page lock").
+func sidebarPageStarts(cells []sidebarBuildCell, capacity int, preserveSourcePages bool) []int {
 	var starts []int
 	for i, cell := range cells {
-		if len(starts) == 0 || i-starts[len(starts)-1] >= capacity || locked && cell.page != cells[starts[len(starts)-1]].page {
+		if len(starts) == 0 || i-starts[len(starts)-1] >= capacity || preserveSourcePages && cell.page != cells[starts[len(starts)-1]].page {
 			starts = append(starts, i)
 		}
 	}

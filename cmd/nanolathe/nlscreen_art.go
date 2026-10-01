@@ -25,13 +25,14 @@ type nlArt struct {
 	texture  *ebiten.Image
 	// The running content's unit pictures by name (a nil value: none), the
 	// content they belong to, and its loader and names (nlscreen_ui_pics.go).
-	pics         map[string]*ebiten.Image
-	cs           *contentSet
-	loader       *nlPictures
-	names        *nlPicNames
-	buttons      *formats.GAFEntry
-	buttonPal    *palette.Tables
-	buttonImages map[*formats.GAFFrame]*ebiten.Image
+	pics          map[string]*ebiten.Image
+	cs            *contentSet
+	loader        *nlPictures
+	names         *nlPicNames
+	buttons       *formats.GAFEntry
+	buttonPal     *palette.Tables
+	buttonImages  map[*formats.GAFFrame]*ebiten.Image
+	sidebarImages map[*image.RGBA]*ebiten.Image
 }
 
 const nlFrameEdge = 12

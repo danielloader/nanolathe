@@ -21,6 +21,7 @@ type expandedSidebarKey struct {
 	page, count, remembered int
 	localPage               int
 	lock                    int
+	inlineOrders            bool
 	flat                    bool
 	transport               bool
 	builder                 pool.Handle
@@ -36,6 +37,7 @@ type expandedSidebarLayout struct {
 	key       expandedSidebarKey
 	window    *gui.Window
 	sources   []sidebarGadgetSource
+	keyOnly   []bool
 	selection []pool.Handle
 }
 
@@ -95,6 +97,16 @@ func sidebarNavigation(g gui.Gadget) bool {
 	command := commandButtonName(g.Name)
 	name := strings.ToUpper(g.Name)
 	return command == "BUILD" || command == "ORDERS" || strings.HasSuffix(name, "NEXT") || strings.HasSuffix(name, "PREV") || strings.Contains(name, "NEXTPAGE") || strings.Contains(name, "PREVPAGE") || strings.Contains(name, "PAGEUP") || strings.Contains(name, "PAGEDOWN")
+}
+
+// Common command rows stay on every build view; only supplementary Orders
+// controls are optional (user-approved host policy, HUD §3.3).
+func sidebarCommonCommand(g gui.Gadget) bool {
+	switch commandButtonName(g.Name) {
+	case "MOVE", "STOP", "DEFEND", "PATROL", "ATTACK", "BLAST":
+		return true
+	}
+	return false
 }
 
 type sidebarSpan struct {

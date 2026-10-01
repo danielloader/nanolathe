@@ -79,14 +79,20 @@ func (h *retailBattleHUD) palettePanel(window *gui.Window) *ui.Panel {
 // preparePalettePanel makes the retained generic service see the current
 // command-page visibility and capability verdict. The compiled GUI record is
 // restored afterwards because the painter owns its own dynamic grey branch.
-func (h *retailBattleHUD) preparePalettePanel(p *ui.Panel, ctx paletteActivationContext) func() {
+func (h *retailBattleHUD) preparePalettePanel(p *ui.Panel, ctx paletteActivationContext, tokens bool) func() {
 	if p == nil || ctx.window == nil {
 		return func() {}
 	}
 	grey := make([]int16, len(ctx.window.Gadgets))
+	activity := make([]uint8, len(ctx.window.Gadgets))
 	for i, gad := range ctx.window.Gadgets {
 		grey[i] = gad.GrayedOut
+		activity[i] = gad.Active
 		active := gad.Active != 0
+		if tokens && ctx.window == h.expandedSidebar.window && i < len(h.expandedSidebar.keyOnly) && h.expandedSidebar.keyOnly[i] {
+			active = true
+			ctx.window.Gadgets[i].Active = 1
+		}
 		if command, isCommand := h.sidebarGadgetVerdict(ctx.window, gad, ctx.frame, ctx.paged, ctx.catalog); isCommand {
 			active = active && !command.hidden
 			if command.grey {
@@ -98,6 +104,7 @@ func (h *retailBattleHUD) preparePalettePanel(p *ui.Panel, ctx paletteActivation
 	return func() {
 		for i := range ctx.window.Gadgets {
 			ctx.window.Gadgets[i].GrayedOut = grey[i]
+			ctx.window.Gadgets[i].Active = activity[i]
 		}
 	}
 }
@@ -121,7 +128,7 @@ func (h *retailBattleHUD) servicePaletteFrame(b *battleSession, in *input.State,
 	if p == nil {
 		return result, false
 	}
-	restore := h.preparePalettePanel(p, ctx)
+	restore := h.preparePalettePanel(p, ctx, tokens)
 	defer restore()
 
 	frame := pointerFrame(in, nil, false)

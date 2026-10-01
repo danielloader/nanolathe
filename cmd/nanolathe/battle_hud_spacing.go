@@ -1,8 +1,8 @@
 package main
 
 // Command spacing belongs to the approved Modern host layout (HUD §3.3).
-// Keep source row gaps and outer margins. Only a surface too short for one
-// build row compresses them, retaining at least one pixel per positive gap.
+// Keep source row gaps and margins, compressing only to fit the required build
+// capacity and retaining at least one pixel per positive gap.
 type sidebarCommandGap struct {
 	at     int32 // compact command Y; -1 is the gap between tabs and build grid
 	pixels int32
@@ -56,10 +56,9 @@ func (h *retailBattleHUD) sidebarCommandMargins(build, orders *sidebarCommandSca
 	return m
 }
 
-func (c *sidebarProductCatalog) sidebarSpacing(height int32) ([]sidebarCommandGap, bool) {
-	budget := height - 128 - c.upperHeight - c.lowerHeight - 64
+func sidebarFitSpacing(budget int32, spacing []sidebarCommandGap) ([]sidebarCommandGap, bool) {
 	var total, minimum int32
-	for _, gap := range c.spacing {
+	for _, gap := range spacing {
 		total += gap.pixels
 		if gap.pixels > 0 {
 			minimum++
@@ -69,9 +68,9 @@ func (c *sidebarProductCatalog) sidebarSpacing(height int32) ([]sidebarCommandGa
 		return nil, false
 	}
 	if total <= budget {
-		return c.spacing, true
+		return spacing, true
 	}
-	gaps := append([]sidebarCommandGap(nil), c.spacing...)
+	gaps := append([]sidebarCommandGap(nil), spacing...)
 	// Cumulative integer apportionment preserves the exact gap budget without
 	// starving later gaps or introducing floating-point rounding drift.
 	var weight, assigned int64

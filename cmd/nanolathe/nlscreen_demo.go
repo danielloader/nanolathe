@@ -38,53 +38,104 @@ func (s *nlScreen) drawDemo(screen *ebiten.Image, card nlCard, v int) {
 	}
 	switch card.demo {
 	case "sidebar":
-		s.demoSidebar(screen, v)
+		s.demoSidebar(screen)
 	case "fullscreen":
 		s.demoFullscreen(screen, v == 1)
 	}
 }
 
-// demoSidebar is the side panel's build pages: the authored six, locked
-// pages of twelve, or rows flowing to the window's height, with the page
-// turning so the page size reads.
-func (s *nlScreen) demoSidebar(screen *ebiten.Image, mode int) {
+// demoSidebar draws the resolved products and retained controls at the
+// selected game's logical resolution. Both sidebar choices use this same draft.
+func (s *nlScreen) demoSidebar(screen *ebiten.Image) {
 	u := s.u()
 	stage := s.demoStage()
-	perPage := [...]int{6, 12, 16}[mode]
-	rows := s.ease("sidebar-rows", float64(perPage/2), 8)
-	cell := min(58*u, (stage.H-90*u)/8)
-	panel := screenkit.Rect{X: stage.X + stage.W*0.12, Y: stage.Y + 10*u, W: 2*cell + 30*u, H: rows*cell + 74*u}
-	screenkit.Shade(screen, screenkit.Rect{X: panel.X - 20*u, Y: panel.Y - 10*u, W: panel.W + 40*u, H: panel.H + 30*u}, 0.6)
-	screenkit.Fill(screen, panel, color.RGBA{10, 14, 10, 235})
-	s.well(screen, panel, 1)
-	var pics []string
+	var preview *nlSidebarPreview
 	if names := s.art.pictureNames(); names != nil {
-		pics = names.sidebar
+		preview = names.sidebar
 	}
-	if len(pics) == 0 {
-		s.fonts.Body.Draw(screen, "No authored build products in this content.", panel.X+14*u, panel.Y+28*u, screenkit.Style{Size: 11 * u, Top: nlDim})
+	if preview == nil {
+		s.fonts.Body.Draw(screen, "No resolved build pages in this content.", stage.X, stage.Y+28*u, screenkit.Style{Size: 11 * u, Top: nlDim})
 		return
 	}
-	pages := (len(pics) + perPage - 1) / perPage
-	page := int(s.demoT/2.2) % pages
-	heading := s.ui.text(nlTextKey{kind: "build pages", i: page + 1, j: pages}, func() string { return fmt.Sprintf("Build  %d / %d", page+1, pages) })
-	s.fonts.Display.Draw(screen, heading, panel.X+14*u, panel.Y+28*u, screenkit.Style{Size: 13 * u, Tracking: 0.2, Top: nlKicker, Upper: true})
-	for i := 0; i < perPage; i++ {
-		k := page*perPage + i
-		if k >= len(pics) {
-			break
+	c := preview.sidebarProductCatalog
+	g := s.shell()
+	height := g.display.Height
+	original := s.draft.pres.ExpandedSidebar == 0
+	limit := s.nlSidebarBuildLimit(&s.draft)
+	starts, layout := nlSidebarPageStarts(c, original, height, limit, s.draft.pres.SidebarOrders != 0)
+	if len(starts) == 0 {
+		s.fonts.Body.Draw(screen, "Uses the authored layout; oversized pages fit rows to the available height.", stage.X, stage.Y+28*u, screenkit.Style{Size: 11 * u, Top: nlDim})
+		return
+	}
+	original = original || layout.capacity == 0
+	page := int(s.demoT/2.2) % len(starts)
+	start, end := starts[page], len(c.cells)
+	if page+1 < len(starts) {
+		end = starts[page+1]
+	}
+	products, controls := nlSidebarPreviewItems(c, start, end, height, layout, original)
+	// Scale the whole rail uniformly. Rows and the complete orders panel keep
+	// their actual logical geometry, even on a short last page.
+	scale := min(1.1*u, (stage.H-104*u)/float64(max(height, 1)))
+	panel := screenkit.Rect{X: stage.X + stage.W*0.16, Y: stage.Y + 40*u, W: 128 * scale, H: float64(height) * scale}
+	screenkit.Shade(screen, panel.Inset(-20*u), 0.6)
+	screenkit.Fill(screen, panel, color.RGBA{0, 0, 0, 255})
+	if pic := s.art.sidebarImage(preview.backdrop); pic != nil {
+		r := panel
+		if original {
+			r.H = float64(pic.Bounds().Dy()) * scale
 		}
-		r := screenkit.Rect{X: panel.X + 12*u + float64(i%2)*(cell+6*u), Y: panel.Y + 40*u + float64(i/2)*cell, W: cell, H: cell - 4*u}
-		if r.Y+r.H > panel.Y+panel.H-30*u {
-			break
-		}
-		if pic := s.art.pic(pics[k]); pic != nil {
+		screenkit.Image(screen, pic, r, 1, false)
+	}
+	project := func(x, y, w, h int32) screenkit.Rect {
+		return screenkit.Rect{X: panel.X + float64(x)*scale, Y: panel.Y + float64(y)*scale, W: float64(w) * scale, H: float64(h) * scale}
+	}
+	minimap := project(1, 1, 126, 126)
+	screenkit.Fill(screen, minimap, color.RGBA{16, 30, 22, 255})
+	s.fonts.Body.Draw(screen, "Minimap", minimap.X+minimap.W/2, minimap.Y+minimap.H/2, screenkit.Style{Size: 10 * scale, Top: nlDim, Align: 1})
+	heading := s.ui.text(nlTextKey{kind: "build pages", i: page + 1, j: len(starts)}, func() string { return fmt.Sprintf("Build  %d / %d", page+1, len(starts)) })
+	s.fonts.Display.Draw(screen, heading, panel.X, panel.Y-12*u, screenkit.Style{Size: 13 * u, Tracking: 0.2, Top: nlKicker, Upper: true})
+	for _, product := range products {
+		r := project(product.rect.X, product.rect.Y, product.rect.W, product.rect.H)
+		name := product.source.window.Gadgets[product.source.index].Name
+		if pic := s.art.pic(name); pic != nil {
 			screenkit.Image(screen, pic, r, 1, false)
 		}
-		screenkit.Bevel(screen, r, 1.5*u, color.RGBA{190, 190, 182, 255}, color.RGBA{20, 20, 18, 255}, false)
+		screenkit.Bevel(screen, r, max(0.5, scale), color.RGBA{190, 190, 182, 255}, color.RGBA{20, 20, 18, 255}, false)
 	}
-	label := [...]string{"Six to a page", "Twelve to a page", "Rows to the window"}[mode]
-	s.caption(screen, label, panel.X+panel.W/2, panel.Y+panel.H+14*u, 1)
+	for _, item := range controls {
+		if pic := s.art.sidebarImage(preview.controls[item.source]); pic != nil {
+			r := project(item.rect.X, item.rect.Y, int32(pic.Bounds().Dx()), int32(pic.Bounds().Dy()))
+			screenkit.Image(screen, pic, r, 1, false)
+		}
+	}
+	infoX, infoY := panel.X+panel.W+32*u, panel.Y+12*u
+	info := "Authored pages"
+	if !original {
+		info = fmt.Sprintf("Capacity: %d build slots", layout.capacity)
+	}
+	s.fonts.Display.Draw(screen, info, infoX, infoY, screenkit.Style{Size: 14 * u, Top: nlGreenText})
+	infoY += 26 * u
+	visible := fmt.Sprintf("Page items: %d", end-start)
+	s.fonts.Body.Draw(screen, visible, infoX, infoY, screenkit.Style{Size: 12 * u, Top: nlBody})
+	infoY += 24 * u
+	orders := "Authored controls"
+	if !original {
+		orders = "Orders-page controls on own page"
+		if layout.inlineOrders {
+			orders = "Orders-page controls below build"
+		}
+	}
+	s.fonts.Body.Draw(screen, orders, infoX, infoY, screenkit.Style{Size: 12 * u, Top: nlBody})
+	infoY += 28 * u
+	if !original && limit > 0 && limit != 6 && limit != 12 {
+		s.fonts.Body.Draw(screen, fmt.Sprintf("Current count: %d per page", limit), infoX, infoY, screenkit.Style{Size: 12 * u, Top: nlAmber})
+		infoY += 28 * u
+	}
+	resolution := s.ui.text(nlTextKey{kind: "sidebar resolution", i: g.display.Width, j: height}, func() string {
+		return fmt.Sprintf("Game resolution: %d x %d", g.display.Width, height)
+	})
+	s.fonts.Body.Draw(screen, resolution, panel.X, panel.Y+panel.H+28*u, screenkit.Style{Size: 11 * u, Top: nlDim})
 }
 
 // demoFullscreen is a display with the game's window on it.

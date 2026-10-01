@@ -1,6 +1,8 @@
 package client
 
 import (
+	"slices"
+
 	"github.com/nanolathe-gg/nanolathe/internal/audio"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
@@ -100,8 +102,10 @@ func (c *Client) TickAudio() {
 		return
 	}
 	var committedTick uint32
+	var current *frame.Frame
 	if c.buffer != nil {
-		if current := c.buffer.Current(); current != nil {
+		current = c.buffer.Current()
+		if current != nil {
 			committedTick = current.Tick
 		}
 		// Drain even with no audio owner bound: finished announcements still
@@ -109,6 +113,10 @@ func (c *Client) TickAudio() {
 		c.committedEvents = c.buffer.DrainCommittedEvents(c.committedEvents)
 	}
 	c.enqueueStatusEvents(committedTick, c.committedEvents)
+	// Damage in the just-finished simulation batch reads the PRECEDING list.
+	// Refresh only after those requests were admitted, like the retail host
+	// driver after its sub-ticks and camera input [07 R-HUD-03 §14.1].
+	c.retainNoticeViewport(current)
 	if c.audioService != nil {
 		// Event delivery is independent of the queue-pop host policy; no
 		// repeated draw or paused simulation can discard committed activity.
@@ -148,6 +156,11 @@ func (c *Client) enqueueStatusEvents(ringTick uint32, events []frame.EventView) 
 			// A unit torn down in its raise tick had its slot zeroed before
 			// publication; Emit refuses slot 0, which is that purge [03 R-AUD-01 §7].
 			if c.audioService != nil {
+				if audio.Slot(event.StatusKind) == audio.SlotUnderAttack {
+					if _, inView := slices.BinarySearch(c.noticeOnScreen, event.Source); inView {
+						continue // reject before queue state, captions or variant draws
+					}
+				}
 				_ = c.audioService.Emit(event.Tick, audio.Slot(event.StatusKind), event.Source, event.StatusText)
 			}
 		case frame.EventKindAnnounce:

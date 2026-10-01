@@ -2899,7 +2899,7 @@ performance-counter RNG, resolves the mission or skirmish schema, places
 commanders, and finishes by opening `MAIN2.GUI`, the in-game HUD — the
 `<side>main2.gui` window whose name is stored as the battle root's command-
 window name (see §6). The transition that starts the thread also fixes the
-battle viewport rectangle to `(0, 32, W-1, H-33)` and initializes the
+battle viewport rectangle to `(128, 32, W-1, H-33)` and initializes the
 player-slot ready table.
 
 #### Multiplayer
@@ -5023,11 +5023,29 @@ hold:
 
 A null caption argument is replaced by the slot's default caption from the slot
 table; the caption — given or defaulted — then goes through the localization
-table before it is queued. Two further variants of the helper exist that
-additionally require the unit to be, or not to be, in the current selection;
-only the *not selected* variant has a caller, and the *selected* variant is
-unreachable code. ([03 R-AUD-01 §3] names these same two gates "the unit's
+table before it is queued. Two further variants additionally require presence
+in, or absence from, the retained **on-screen unit list** of [R-REV-01 §5].
+Only the absence variant has a caller: the damage reaction requests event
+slot 2 through it [06 R-WPN-04 §2]. The presence variant has no caller in the
+image. Neither variant tests selection membership or a selected status bit.
+The list includes a viewing player's unit when its projected definition box
+intersects the viewport, including exact edge contact; successful model
+drawing is not a condition. The plain helper used by ordinary unit voices
+has no viewport-membership gate. ([03 R-AUD-01 §3] names the live/death gates "the unit's
 chat-enable status bit" and "the silenced bit"; the predicate is identical.)
+
+**Established — the membership is retained across the simulation batch.**
+The outer host service drains the voice queue before calling the battle
+driver. The driver advances the budgeted sub-ticks, handles hotkeys and
+scroll, rebuilds the on-screen list, then composes the world. A damage
+reaction during those sub-ticks therefore reads the preceding completed
+frame's list, not a fresh test against the camera after scrolling. The
+next-own-unit hotkey and screenshot routes also rebuild the list, as
+[R-REV-01 §5] records. There is no reclaim-specific filter later in the
+caption presenter, voice resolver or message ring. This closes the mistaken
+selection interpretation: an unselected building in view cannot enter the
+under-attack queue through this helper; a selected building outside the
+retained list can.
 
 **Established — the `Slot` column of [05 "the build-order caption census"]
 is an event slot, not a priority.** The number is the **sound event slot** of
@@ -6050,14 +6068,15 @@ state. Its projected rectangle coordinates carry the separate beam-space
 values. The later HUD rail can overwrite pixels in its own interface pass.
 No separate plate clipping rule exists because no plate is drawn.
 
-**Viewport coordinates.** The `(0,32,W-1,H-33)` battle viewport rectangle
-of §5 and the `(128,32,W-1,H-33)` subrect of [03 §4.1] describe different
-coordinate records, not one universal selection clip. The static
-call chain establishes that selection consumes the runtime surface-descriptor
-clip, but does not establish its left value for every visible/hidden-panel
-state. That selection-left value is therefore **Unknown** until a focused
-mode/panel capture records the descriptor at the selection draw. Neither
-tuple may be used as a universal canonical value.
+**Viewport coordinates.** The `HOT UNITS` producer consumes the initialized
+`(128,32,W-1,H-33)` battle viewport record [R-REV-01 §5]. Its writer census
+corrects the previous claim of a second `(0,32,W-1,H-33)` producer tuple.
+Selection consumes the active working surface's clip descriptor, a separate
+record. The static selection call chain does not establish that descriptor's
+left value for every visible/hidden-panel state. That selection-left value
+therefore remains **Unknown** until a focused mode/panel capture records the
+descriptor at the selection draw; the collector's tuple alone does not
+settle it.
 
 **Established palette/remap.** The rectangular outline's outer color is
 logical map entry **15** for an ordinary drag-selection rectangle, and its
@@ -6314,9 +6333,42 @@ exactly three tests, in this order:
    movement-mode status bits are not equal to 1, the producer queries the
    terrain record under the unit's position and, if that query returns a
    record whose height byte is smaller than the accumulated vertical term,
-   clamps the term to that byte. That the tested bits are the movement-mode
-   bits described in [04] is a **Supported inference**; what would settle it
-   is a writer census of that status word.
+   clamps the term to that byte. **Established — movement-mode mirror.** The
+   position-commit path copies the mover mode into these same low two status
+   bits; attachment follows the shared position commit. Creation seeds the
+   mirror to 1, and the air/land transition callers write modes 2/1 through
+   the same owner. [04 R-MOV-01 §8] owns that encoding and writer census;
+   [03 R-RAST-01 §7] identifies the identical mirror used by the compositor.
+
+   **Established — exact bound projection.** Read each position and each
+   definition bound as its signed high word **separately**, then form:
+
+   ```text
+   left   = unitX + minX - cameraX + 128
+   right  = unitX + maxX - cameraX + 128
+   top    = unitZ + minZ - cameraZ - ((unitY + maxY) >> 1) + 32
+   bottom = unitZ + maxZ - cameraZ - (lowerY >> 1) + 32
+   ```
+
+   `lowerY` starts as `unitY + minY`. Unless the tested two status bits
+   equal 1, a valid plot cell at the full fixed-point unit position caps it
+   to the cell's authored height byte when that byte is smaller. This is
+   the plot height, not its derived floor minimum, maximum or interpolated
+   surface. Both half-height shifts are arithmetic. Adding fixed-point
+   position and extent before taking the high word would introduce a
+   fractional carry absent from this producer. Retain the candidate exactly
+   when `left <= viewportRight`, `right >= viewportLeft`,
+   `top <= viewportBottom` and `bottom >= viewportTop`.
+
+   **Established — collector viewport record.** Battle entry initializes its
+   bounds to `(128,32,W-1,H-33)` and derives the inclusive width and height
+   from those bounds. These are the only stores to the collector's bounds
+   in the image. All uses that pass the record by reference read it without
+   writing or retaining a mutable alias; other uses copy the tuple by value
+   into a working surface. HUD/window painting therefore does not change
+   the collector's bounds. This corrects the earlier transition/input
+   description with left 0; the separate question about the selection
+   surface's clip in each panel state remains [R-SEL-02A]'s Unknown.
 3. **Ownership or foreign visibility.** A candidate whose owner byte equals
    the **viewing** player's owner byte is appended without any visibility
    query — the viewing slot, not the local one, and the two differ in a
@@ -6546,9 +6598,6 @@ uses.
 - Feature-versus-unit pointer priority; features are absent from the unit
   hover list, and reclaim families resolve features separately at the pointer
   · §8 · static trace.
-- Whether the two low status bits the producer tests before its terrain
-  clamp are the movement-mode bits of doc 04 (Supported inference) · §8
-  [R-REV-01 §5] · a writer census of that status word.
 
 
 ## 9. Selection, control groups, orders, and build pages
@@ -8913,9 +8962,6 @@ and the decider that would close it.
 - Whether a stock aircraft always outscores the stock buildings it can fly
   over (Supported inference) · §8 [R-REV-01 §9] · a census of
   `FootprintX`/`FootprintZ` and model heights over the stock definitions.
-- Whether the two low status bits the `HOT UNITS` producer tests before its
-  terrain clamp are the movement-mode bits (Supported inference) · §8
-  [R-REV-01 §5] · a writer census of that status word.
 - The selection rectangle's clip-left value for every visible/hidden-panel
   state · §8 [R-SEL-02A] · a focused mode/panel capture recording the surface
   descriptor at the selection draw.

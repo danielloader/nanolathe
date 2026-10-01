@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/nanolathe-gg/nanolathe/internal/ai"
+	"github.com/nanolathe-gg/nanolathe/internal/audio"
 	"github.com/nanolathe-gg/nanolathe/internal/clock"
 	"github.com/nanolathe-gg/nanolathe/internal/cob"
 	"github.com/nanolathe-gg/nanolathe/internal/combat"
@@ -2650,21 +2651,11 @@ func (s *Session) bindDamageReaction() {
 			return s.Combat.SlotAcquisitionAdmits(victim, idx, cand, s.Units, s.Vis, s.World, s.Econ, s.Catalog)
 		},
 		UnderAttackSilenced: orders.UnderAttackSilenced,
-		// The message helper posts the kind-2 message only when the victim is
-		// NOT in the current selection, is owned by the viewing player, is alive
-		// and is not death-latched [06 R-WPN-04 §2 part 4]. Bit 4 of the status
-		// word is the selection bit the local selection commands write.
+		// The client applies retained viewport membership before queue insertion;
+		// selection is irrelevant [07 R-HUD-03 §14.1]. The ordinary status sink
+		// preserves the raise-time owner/live/death gate across publication [I6].
 		UnderAttackNotice: func(victim *units.Unit) {
-			if victim == nil || victim.Owner != s.ViewingOwner {
-				return
-			}
-			if !victim.Alive || victim.Dying {
-				return
-			}
-			if victim.Flags&0x10 != 0 {
-				return
-			}
-			s.EmitUnderAttack(victim.Handle)
+			s.raiseStatusCue(victim, uint8(audio.SlotUnderAttack))
 		},
 	}
 }

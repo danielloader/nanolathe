@@ -18,6 +18,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	compiledmodel "github.com/nanolathe-gg/nanolathe/internal/model"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	presentationrender "github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
@@ -519,6 +520,10 @@ type Client struct {
 	// Audio is the concrete internal/audio owner. The client only binds the
 	// service and drains it at the rendered-frame boundary [03 §8.3–§8.4] [I6].
 	audioService *audio.Service
+	// noticeOnScreen is the preceding host presentation's viewport-unit list.
+	// Only the audio boundary rebuilds it; speculative recording cannot advance
+	// warning admission [07 R-HUD-03 §14.1][I6]. It stays in ascending slot order.
+	noticeOnScreen []pool.Handle
 	// messages is the presentation-owned shared caption/chat ring. It is
 	// rebuilt only from committed semantic events and never read by simulation
 	// [07 R-HUD-03 §14][I6].
@@ -705,6 +710,7 @@ func (c *Client) SetTerrain(t *world.Terrain) {
 		c.arrival = arrivalPresentation{}
 		c.resetFogCache()
 		c.resetTrails()
+		c.noticeOnScreen = c.noticeOnScreen[:0]
 		c.terrain = t
 		if t == nil {
 			c.SetDetailArt(nil)
@@ -810,6 +816,7 @@ func (c *Client) SetSnapshot(b *frame.Buffer) {
 	if c != nil && b != nil && c.buffer != b {
 		c.resetFogCache()
 		c.resetTrails()
+		c.noticeOnScreen = c.noticeOnScreen[:0]
 		// Entry and restore reset stocks and bind the new saved deadlines;
 		// the four rate latches survive this reset [07 R-HUD-03 §4].
 		c.displayedResources.Energy, c.displayedResources.Metal = 0, 0

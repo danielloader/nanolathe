@@ -710,11 +710,13 @@ The registry `unitchat` value (absent → `10`) is the unit-chat **voice** level
 byte; it is edited from the sound options screen's `SPEECH` gauge, not here
 ([03 R-AUD-01 §2]). `SwitchAlt` has no gadget ([R-CAM-01 §4]).
 
-The two slider read-outs are written by name to gadgets called
+**Established:** the two slider read-outs are written by name to gadgets called
 `TEXTSCROLLTEXT` and `MAXLINESTEXT`. Neither `SPEEDS.GUI` nor `SPEEDSRT.GUI`
-authors a gadget of either name, so the setter finds nothing and the values are
-never shown; the page's `GAMETEXT` label is authored empty and nothing writes
-it. The screen therefore draws four unlabelled slider tracks.
+authors either gadget, so those values are not shown. The frontend
+`SPEEDS.GUI` authors `GAMETEXT` with an empty caption; the in-battle
+`SPEEDSRT.GUI` authors it with the static caption `Game`. The `GAME` value
+callback writes no numeric caption to `GAMETEXT` in either form. The authored
+static headings remain, but the sliders have no numeric read-outs.
 
 **Established fact — slider value mapping.** Every slider callback computes
 its value from the slider's knob position word `pos` and range word `range`
@@ -3347,8 +3349,10 @@ label `%d secs`; `MAXLINES` (max 30) → `textlines`, label `%d` or the
 The two labels are written by name to gadgets called `TEXTSCROLLTEXT` and
 `MAXLINESTEXT`, and **neither `SPEEDS.GUI` nor `SPEEDSRT.GUI` authors a gadget
 of either name**: the text setter finds nothing and the two read-outs are never
-drawn on the stock files. The page's own `GAMETEXT` label is authored empty and
-nothing writes it, so it is blank too.
+drawn on the stock files. `GAMETEXT` is authored empty in the frontend
+`SPEEDS.GUI`, while the in-battle `SPEEDSRT.GUI` gives it the static caption
+`Game`. The `GAME` value callback does not write a numeric caption to that
+gadget in either form.
 `RESTORE` sets textscroll 10, textlines 10, game speed 10, scroll speed 32,
 `LEFTCLICK` 0, unitchat 10, unitchattext 5; `UNDO` restores the snapshot.
 After the page opens every slider's value callback runs once so the labels

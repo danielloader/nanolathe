@@ -206,9 +206,9 @@ type gameShell struct {
 	// [03 R-AUD-01 §2][03 R-AUD-01 §4].
 	audioPrefs settings.Audio
 	// gameSpeed is the stored game-speed word the interface page's `GAME`
-	// slider writes. In the front end it only persists; in battle the same
-	// write also goes through the session's speed setter
-	// [07 R-CAM-01 §7][07 R-CAM-01 §3].
+	// slider writes. Fresh battles inherit it; in battle the same write also
+	// goes through the session's speed setter
+	// [08 R-ENTRY-01 §3][07 R-CAM-01 §7][07 R-CAM-01 §3].
 	gameSpeed int
 	// interfaceType is the `Interface Type` word the interface page's
 	// `LEFTCLICK` two-stage button writes [07 R-CAM-01 §5].

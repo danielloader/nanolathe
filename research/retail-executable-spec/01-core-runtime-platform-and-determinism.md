@@ -2107,7 +2107,9 @@ invalid and zero-divide exception bits, and the truncating helper of
 saved word. **No game routine writes the control word** — the one apparent
 in-game site is the jump-table data word mis-decoded as an instruction that
 `[R-DET-01 §3]` records. A clone may therefore compute every authoritative
-double expression at binary64 precision without emulating an 80-bit mantissa.
+double expression at binary64 precision without emulating an 80-bit mantissa,
+with one exception: the two-argument distance helper raises the precision for
+its own body, and its result shows it (`[R-DET-01 §7]`).
 The FPU setup helper always runs at startup;
 with `-fpufussy` absent it re-masks the invalid and zero-divide exceptions
 (no change from the runtime default), with it present it unmasks them; the
@@ -2232,7 +2234,10 @@ into a **32-bit** slot:
 1. **The bearing helper.** `bearing(a, b) = round(atan2(a, b) · 65536 ÷ 2π)`;
    the multiplier is a double constant (10430.378…), the arctangent is the
    x87 partial-arctangent at extended precision, the result is a 32-bit
-   integer that callers mask to the 16-bit heading domain. Sixteen callers:
+   integer that callers mask to the 16-bit heading domain. A value that does
+   not fit a signed 32-bit integer stores the processor's integer indefinite,
+   `0x80000000`, here and in the second routine: the invalid exception is
+   masked under the startup word (§8). Sixteen callers:
    the ground steering, the per-unit tick, the shared order-handler bearing,
    the turret and line-of-sight slot executors, the weapon impact dispatch,
    the projectile tick, four weapon-update helpers, the battle-entry unit
@@ -2277,6 +2282,111 @@ nearest, §8) holds outside
 those helpers, and the truncating helper remains the only rounding-mode change
 at a game-visible integer store. The optional `-fpufussy`/`-fpunofussy`
 switches of §8 are unaffected by this census.
+
+### The two-argument distance helper, exactly [R-DET-01 §7]
+
+**Established** by two independent static readings of the helper and of every
+routine it calls, which agree step for step. This is the C runtime's
+two-argument distance function, the `hypot` of the conversion census
+([R-DET-01 §1]) and of every lane section that names one. It has two entry
+points — the distance entry and a complex-magnitude entry — that differ only
+in an operation code handed to the runtime's error reporter; that code takes
+part in no arithmetic and in no branch of the computation. The
+complex-magnitude entry has no caller. All 39 game call sites, in 28
+routines, use the distance entry.
+
+**The sequence.** Write `RN64` for rounding to a 64-bit significand and
+`RN53` for the further rounding of that value when it is stored to a binary64
+slot. Both round to nearest, ties to even.
+
+1. Set the control word to a 64-bit significand, round to nearest, every
+   exception masked. Every exit restores the caller's word
+   ([R-DET-01 §3]).
+2. If either operand is a NaN or an infinity, take the special exit below.
+3. Replace each operand that compares below zero by its negation. Negative
+   zero does not compare below zero and is left as it is.
+4. `m` is the first operand, unless the second is strictly greater; equal
+   operands choose the first.
+5. If `m` equals zero the result is positive zero.
+6. Divide each operand by `m` and store each quotient:
+   `q = RN53(RN64(v ÷ m))`. The quotient of `m` itself is exactly one.
+7. Form `q₁·q₁ + q₂·q₂` as one expression — each square is `RN64`, and their
+   sum is `RN64` — and store it: `s = RN53(RN64(RN64(q₁·q₁) + RN64(q₂·q₂)))`.
+   `s` lies between one and two inclusive.
+8. Take the root of `s`. The runtime's root routine changes the control word
+   only to mask exceptions and **keeps the caller's precision field**, so
+   inside this helper the root is taken at a 64-bit significand; the helper
+   then stores it: `r = RN53(RN64(√s))`. A game routine that calls the root
+   routine directly, under the startup word of §8, gets a 53-bit root; this
+   helper does not.
+9. Split `r` and `m` each into a mantissa in [½, 1) and a binary exponent.
+   The split is exact; a subnormal `m` is normalised first. Multiply the two
+   mantissas and store the product:
+   `p = RN53(RN64(mantissa(r) · mantissa(m)))`.
+10. The result is `p` with its exponent replaced by
+    `exponent(p) + exponent(r) + exponent(m)`. That replacement is exact
+    unless the exponent is out of range (below). The result leaves through a
+    binary64 slot, so the caller sees a double.
+
+Four values are therefore rounded twice — the smaller quotient, the sum, the
+root and the mantissa product — first to 64 bits and then to 53. The result
+is neither a correctly rounded distance nor `√(x² + y²)` evaluated in
+binary64, and an implementation that wants retail's value performs these
+roundings in this order. For finite operands in range the sequence reduces
+to, with `q` the smaller operand's quotient and `m` the larger operand:
+
+```
+q      = RN53(RN64(smaller ÷ m))
+s      = RN53(RN64(1 + RN64(q·q)))
+r      = RN53(RN64(√s))
+result = RN53(RN64(m · r))
+```
+
+This is the one authoritative expression that the binary64 rule of §8 does
+not cover: the helper's 64-bit significand is observable in the bits it
+returns and in their truncation.
+
+**Callers (Established, except as marked).** Thirty-eight of the 39 sites
+pass two signed 32-bit integers, each converted exactly. The remaining one,
+in the flight integrator, passes two computed finite doubles (**Supported
+inference** from its argument preparation; the values' ranges were not traced
+to their inputs). Twenty-seven sites truncate the result directly
+([R-DET-01 §1]); six multiply it by plus or minus eight, which is exact, and
+then truncate; six keep the double — four scale it by 2⁻¹⁶, one compares it
+with a float, and one continues in double arithmetic. The whole binary64
+result is therefore observable, not only its integer part.
+
+**What that does to whole numbers (Established as arithmetic on the sequence
+above; not observed in a running retail process).** When both operands are
+integers and the exact distance is a whole number, the result can land one
+unit in the last place to either side of it, so the truncation that usually
+follows ([R-DET-01 §1]) is not always the exact answer. `(165, 52)` gives
+173.00000000000003, which truncates to 173. `(20, 99)` gives
+100.99999999999999, which truncates to **100**, not 101. Over every ordered
+pair of integers from 0 to 3000 the sequence truncates one below the exact
+whole answer on 722 pairs and never above it.
+
+**Out-of-range exponent.** A final exponent above 1024 takes the runtime
+error reporter's overflow path, which under round-to-nearest returns positive
+infinity. One below −1021 takes its underflow path, which denormalises by
+shifting the significand right and **discarding** the bits shifted out —
+truncation, not rounding — and returns zero when nothing would remain.
+Neither is reachable from operands formed from 16.16 world coordinates or
+per-tick velocities.
+
+**Special operands.** A signalling NaN in either operand returns the hardware
+sum of the two operands and reports an invalid operation. Otherwise a quiet
+NaN in either operand returns a NaN, and it wins over an infinity in the
+other. Otherwise an infinity returns positive infinity. The thirty-eight
+integer call sites cannot form any of these operands.
+
+**Supported inference — the rounding model.** `RN64` and `RN53` above are the
+documented behavior of the processor's arithmetic under that control word and
+of an eight-byte store. The sequence, evaluated in exact rational arithmetic
+with those two roundings, matched the same operations written out as
+processor instructions for the purpose — not the retail executable — on
+every one of some 150,000 operand pairs, including subnormal and
+near-overflow ones.
 
 ## 9. Diagnostics, anti-tamper, and error paths
 
@@ -2719,6 +2829,17 @@ stated in the body, not here.
 - The exact per-object CRT draw count of the effect-strip objects; doc 03 owns
   the object bodies, this census records the sites · §7.5, §7.6
   [R-DET-01 §5], doc 03 · static trace.
+- Whether a running retail process shows the two-argument distance helper's
+  traced values · §8 [R-DET-01 §7] · manual retail observation of a reach or
+  leash test at an offset such as `(20, 99)`, where the helper's truncated
+  distance is 100 and the exact one is 101.
+- The operand ranges at the distance helper's one call site that passes
+  computed doubles, in the flight integrator · §8 [R-DET-01 §7], doc 04 ·
+  static trace of that site's inputs.
+- The distance helper's path when the caller's control word unmasks the
+  exception being reported, which only the `-fpufussy` switch arranges and
+  only for a signalling NaN operand · §8 [R-DET-01 §7] · static trace of the
+  runtime's raise routine.
 
 ### Memory and queues
 

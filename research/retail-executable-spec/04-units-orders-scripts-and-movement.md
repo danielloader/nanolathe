@@ -7348,10 +7348,26 @@ call site passes 0.
 per-player unit-visibility predicate, indexed by the session's **viewing-player**
 byte — a slot distinct from the commanding-player byte the order paths use,
 though both are seeded from session data at battle entry. When it fails the
-opcode returns having done nothing — no allocation, no draw, no state change.
-It is therefore not simulation-visible and is correctly outside the
-deterministic contract, but it is also **not** unconditional: a script that
-relies on it for timing gets nothing on a client that cannot see the unit.
+opcode returns having done nothing — no allocation, no draw, no state change —
+so the opcode is **not** unconditional: a script that relies on it for timing
+gets nothing on a machine whose viewing player cannot see the unit.
+
+**Established — what the gate's outcome reaches.** The failing branch is
+inert; the outcome is not. For every effect type the dispatch below handles,
+the passing branch allocates a strip object, and two of the three families it
+reaches spend CRT draws while that object lives: the impact sprinkle three
+per puff, and the smoke puff one for its life and one at each frame advance.
+The flame-stream trail spends none ([03 R-FX-01 §3]). Those draws advance the
+stream that the wind interval, the meteor scheduler and the victory-timer arm
+read later ([01 §7.5]). On one machine the gate is therefore an input to that
+machine's CRT history and to its strip pool's occupancy, and it is decided by
+which player is viewing and what that player can see.
+
+Retail has no contract this breaks. Its machines each have their own viewing
+player and do not agree on their random-stream states
+([08 "Lockstep advancement"]), so two peers that take different branches here
+are behaving as designed. A contract that one battle reproduces from the same
+inputs on one machine has to count the viewing player among those inputs.
 
 **Established — the geometry.** Before reading anything the opcode refreshes
 the unit's cached render transform. That refresh is itself cached with a

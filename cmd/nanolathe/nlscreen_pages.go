@@ -244,6 +244,18 @@ func (s *nlScreen) gameCards() []nlCard {
 			},
 			scene: func(*nlDraft, int) string { return "armor" },
 		},
+		{
+			key: "radardots", label: "Radar dots", pics: []string{"armrad", "corrad"}, kind: nlHalves,
+			steps: []string{"No dots", "Visible dots", "Attackable dots"},
+			subs:  []string{"Main-view dots hidden", "Display only", "Attack hostile contacts"},
+			get:   func(d *nlDraft) int { return d.pres.RadarDots },
+			set:   func(d *nlDraft, v int) { d.pres.RadarDots = v },
+			desc: func(*nlDraft, int) string {
+				return "Modern gameplay and the Enhanced renderer only. Sensor contacts appear as dots in the main view. Visible dots displays them; Attackable dots lets you attack hostile contacts without revealing unit details. No dots hides these markers. The minimap keeps its usual contacts. Strict 3.1 and Community 3.9 bypass this preference."
+			},
+			scene:    func(*nlDraft, int) string { return "armor" },
+			enhanced: true,
+		},
 	}
 }
 

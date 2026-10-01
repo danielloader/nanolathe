@@ -1495,7 +1495,7 @@ func retailOptionsCue(key string) string {
 	case "communityhud", "nhealth", "ncounters", "nreload", "nveteran", "ngroups", "nallies", "nweather", "nvictory",
 		"builders", "bghold", "bgman", "bgroam", "bphold", "bpman", "bproam", "ncycle", "ndouble", "nhundred", "nswitchalt", "noverview",
 		"placement", "npreview", "nroverlay", "norderdrag", "nteamnano", "nmexsnap", "nwrecksnap", "nsnapmod",
-		"nanolathe", "ngameplay", "nrender", "nfps", "nsidebar", "nzoom", "nicons",
+		"nanolathe", "ngameplay", "nrender", "nfps", "nsidebar", "nzoom", "nicons", "nradardots",
 		"nglow", "nwater", "nlights", "nfinish", "nheat", "nmarks", "nnano",
 		"sound", "music", "speeds", "visuals", "prev",
 		"restore", "undo",
@@ -1527,7 +1527,7 @@ func (g *gameShell) activateRetailOptionsGadget(name string) bool {
 		return g.activateCommunityHUDOption(name)
 	case "BGHOLD", "BGMAN", "BGROAM", "BPHOLD", "BPMAN", "BPROAM", "NCYCLE", "NDOUBLE", "NHUNDRED", "NSWITCHALT", "NOVERVIEW":
 		return g.activateBuilderOption(name)
-	case "NGAMEPLAY", "NRENDER", "NFPS", "NGLOW", "NWATER", "NLIGHTS", "NFINISH", "NHEAT", "NMARKS", "NSIDEBAR", "NZOOM", "NICONS":
+	case "NGAMEPLAY", "NRENDER", "NFPS", "NGLOW", "NWATER", "NLIGHTS", "NFINISH", "NHEAT", "NMARKS", "NSIDEBAR", "NZOOM", "NICONS", "NRADARDOTS":
 		return g.activateNanolatheOption(name)
 	case "NPREVIEW", "NROVERLAY", "NORDERDRAG", "NTEAMNANO", "NMEXSNAP", "NWRECKSNAP", "NSNAPMOD":
 		return g.activateCommunityPlacementOption(name)
@@ -1840,6 +1840,8 @@ func retailOptionsCueKey(name string) string {
 		return "nzoom"
 	case "NICONS":
 		return "nicons"
+	case "NRADARDOTS":
+		return "nradardots"
 	case "NGLOW":
 		return "nglow"
 	case "NWATER":

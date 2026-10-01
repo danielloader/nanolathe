@@ -74,7 +74,7 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	if optionsState.page != "nanolathe" {
 		t.Fatal("new category did not open")
 	}
-	for _, name := range []string{"NANOLATHE", "NGAMEPLAY", "NRENDER", "NFPS", "NZOOM", "NICONS", "NGLOW", "NWATER", "NLIGHTS", "NFINISH", "NHEAT", "NMARKS", "NSIDEBAR"} {
+	for _, name := range []string{"NANOLATHE", "NGAMEPLAY", "NRENDER", "NFPS", "NZOOM", "NICONS", "NRADARDOTS", "NGLOW", "NWATER", "NLIGHTS", "NFINISH", "NHEAT", "NMARKS", "NSIDEBAR"} {
 		gad := optionsPanel.Window.Gadgets[optionsPanel.Index(name)]
 		if gad.ButtonArt == nil {
 			t.Fatalf("%s has no game-data button art", name)
@@ -85,6 +85,9 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	}
 	if optionsPanel.StageAt(optionsPanel.Index("NZOOM")) != settings.ZoomSmooth || optionsPanel.StageAt(optionsPanel.Index("NICONS")) != settings.StrategicIconsModern {
 		t.Fatal("camera controls do not show their defaults")
+	}
+	if dot := optionsPanel.Window.Gadgets[optionsPanel.Index("NRADARDOTS")]; dot.Stages != 3 || optionsPanel.StageAt(optionsPanel.Index("NRADARDOTS")) != settings.RadarDotsVisible || !strings.Contains(dot.Help, "Modern gameplay") || !strings.Contains(dot.Help, "Enhanced renderer") {
+		t.Fatal("radar control lost its default, stages or scope help")
 	}
 	if dir := os.Getenv("NANOLATHE_OPTIONS_SHOT"); dir != "" {
 		writeShellShot(t, cl, filepath.Join(dir, "nanolathe-options.png"))
@@ -122,8 +125,12 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	g.activateRetailOptionsGadget("NSIDEBAR")
 	g.activateRetailOptionsGadget("NZOOM")
 	g.activateRetailOptionsGadget("NICONS")
+	g.activateRetailOptionsGadget("NRADARDOTS")
 	if p := g.presentation; p.ZoomStyle != settings.ZoomStepped || p.StrategicIconStyle != settings.StrategicIconsCommunity {
 		t.Fatalf("camera preferences did not preview: %+v", p)
+	}
+	if g.presentation.RadarDots != settings.RadarDotsAttackable {
+		t.Fatal("radar control did not preview Attackable dots")
 	}
 	if (&battleSession{shell: g}).expandedSidebarEnabled() {
 		t.Fatal("sidebar preference did not preview immediately")
@@ -157,6 +164,8 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	g.activateRetailOptionsGadget("NSIDEBAR")
 	g.activateRetailOptionsGadget("NZOOM")
 	g.activateRetailOptionsGadget("NICONS")
+	g.activateRetailOptionsGadget("NRADARDOTS")
+	g.activateRetailOptionsGadget("NRADARDOTS")
 	g.activateRetailOptionsGadget("PREV")
 	saved, err := settings.Load()
 	if err != nil {
@@ -178,6 +187,9 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	if saved.Presentation.ZoomStyle != settings.ZoomStepped || saved.Presentation.StrategicIconStyle != settings.StrategicIconsCommunity {
 		t.Fatal("OK lost the camera preferences")
 	}
+	if saved.Presentation.RadarDots != settings.RadarDotsNone {
+		t.Fatal("OK lost the explicit No dots preference")
+	}
 	next := &gameShell{}
 	next.applySettings(saved)
 	if next.presentation != g.presentation {
@@ -187,6 +199,9 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	g.activateRetailOptionsGadget("NANOLATHE")
 	if optionsPanel.StageAt(optionsPanel.Index("NZOOM")) != settings.ZoomStepped || optionsPanel.StageAt(optionsPanel.Index("NICONS")) != settings.StrategicIconsCommunity {
 		t.Fatal("camera controls do not show the persisted choices")
+	}
+	if optionsPanel.StageAt(optionsPanel.Index("NRADARDOTS")) != settings.RadarDotsNone {
+		t.Fatal("radar control does not show persisted No dots")
 	}
 	g.activateRetailOptionsGadget("RESTORE")
 	if g.presentation != settings.DefaultPresentation() {
@@ -207,6 +222,7 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	g.activateRetailOptionsGadget("NFPS")
 	g.activateRetailOptionsGadget("NZOOM")
 	g.activateRetailOptionsGadget("NICONS")
+	g.activateRetailOptionsGadget("NRADARDOTS")
 	host.RendererChanged(ebitenapp.RendererModern)
 	after, err := settings.Load()
 	if err != nil {
@@ -217,6 +233,9 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	}
 	if after.Presentation.ZoomStyle != settings.ZoomStepped || after.Presentation.StrategicIconStyle != settings.StrategicIconsCommunity {
 		t.Fatal("F10 saved pending camera choices")
+	}
+	if after.Presentation.RadarDots != settings.RadarDotsNone {
+		t.Fatal("F10 saved the pending radar choice")
 	}
 	g.activateRetailOptionsGadget("CANCEL")
 	if g.presentation != after.Presentation {
@@ -266,7 +285,7 @@ func TestBattleNanolatheOptionsPointerAndLayout(t *testing.T) {
 	// Every switch has button art and a hit rectangle inside the battle column,
 	// and one click cycles it to Off (DESIGN_INTERFACE_HUD_INPUT §3.4.1).
 	canvasW, canvasH := cl.Size()
-	controls := append([]string{"NGAMEPLAY", "NRENDER", "NFPS", "NSIDEBAR", "NZOOM", "NICONS"}, effectGadgets...)
+	controls := append([]string{"NGAMEPLAY", "NRENDER", "NFPS", "NSIDEBAR", "NZOOM", "NICONS", "NRADARDOTS"}, effectGadgets...)
 	for _, name := range controls {
 		index := optionsPanel.Index(name)
 		if optionsPanel.Window.Gadgets[index].ButtonArt == nil {
@@ -285,7 +304,7 @@ func TestBattleNanolatheOptionsPointerAndLayout(t *testing.T) {
 				t.Fatalf("%s at %+v overlaps %s at %+v", name, r, other, o)
 			}
 		}
-		if name == "NRENDER" || name == "NZOOM" || name == "NICONS" {
+		if name == "NRENDER" || name == "NZOOM" || name == "NICONS" || name == "NRADARDOTS" {
 			gad := optionsPanel.Window.Gadgets[index]
 			measure, _ := g.retailTextMetrics(g.windowGadgetFont(optionsPanel, gad))
 			for _, text := range gad.Labels {
@@ -293,6 +312,12 @@ func TestBattleNanolatheOptionsPointerAndLayout(t *testing.T) {
 					t.Errorf("%s caption %q spans %d pixels in a %d-pixel control", name, text, width, r.W)
 				}
 			}
+		}
+	}
+	for _, want := range []int{settings.RadarDotsAttackable, settings.RadarDotsNone, settings.RadarDotsVisible} {
+		click("NRADARDOTS")
+		if g.presentation.RadarDots != want || optionsPanel.StageAt(optionsPanel.Index("NRADARDOTS")) != want {
+			t.Fatalf("pointer radar stage = %d, want %d", g.presentation.RadarDots, want)
 		}
 	}
 	click("NZOOM")
@@ -337,19 +362,21 @@ func TestBattleNanolatheOptionsPointerAndLayout(t *testing.T) {
 	}
 }
 
-// Undo and Restore Defaults own the two Modern choices alongside this page's
+// Undo and Restore Defaults own the camera and radar choices alongside this page's
 // renderer and effects. The icon path, Strict overview and unrelated effects
 // remain the preferences of their existing owners (DESIGN_INTERFACE_HUD_INPUT
 // §3.4.1, DESIGN_GPU_RENDERER §16.6 and §18.7).
 func TestNanolatheCameraPreferencesRestoreOnlyTheirPage(t *testing.T) {
 	entry := settings.DefaultPresentation()
 	entry.ZoomStyle, entry.StrategicIconStyle = settings.ZoomStepped, settings.StrategicIconsCommunity
+	entry.RadarDots = settings.RadarDotsAttackable
 	entry.StrategicIconConfig = "/icons/iconcfg.ini"
 	entry.Overview, entry.Glint = settings.OverviewMegamap, 0
 	g := &gameShell{presentation: entry}
 	g.setNanolathePreferences(settings.DefaultPresentation())
 	want := entry
 	want.ZoomStyle, want.StrategicIconStyle = settings.ZoomSmooth, settings.StrategicIconsModern
+	want.RadarDots = settings.RadarDotsVisible
 	if g.presentation != want {
 		t.Fatalf("restore changed preferences outside the page: %+v", g.presentation)
 	}

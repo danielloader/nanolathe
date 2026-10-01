@@ -603,7 +603,9 @@ func (r *ModelTextureRegistry) StepPhase7() {
 	}
 }
 
-func (r *ModelTextureRegistry) animatedFrame(model *compiledmodel.Model, piece, primitive int, ref texRef) *formats.GAFFrame {
+// animatedFrameSelected preserves the loaded cursor while choosing the cached
+// entry's first frame or the live entry's current frame [03 R-REN-03A §5].
+func (r *ModelTextureRegistry) animatedFrameSelected(model *compiledmodel.Model, piece, primitive int, ref texRef, first bool) *formats.GAFFrame {
 	if r == nil || model == nil {
 		return nil
 	}
@@ -615,8 +617,21 @@ func (r *ModelTextureRegistry) animatedFrame(model *compiledmodel.Model, piece, 
 	if p == nil || p.player == nil {
 		return ref.frame
 	}
+	return p.selectedFrame(first)
+}
+
+func (p *modelTextureCursor) selectedFrame(first bool) *formats.GAFFrame {
+	if p == nil || p.player == nil {
+		return nil
+	}
 	index, ok := p.player.FrameIndex()
-	if !ok || index >= len(p.frames) {
+	if !ok {
+		return nil
+	}
+	if first {
+		index = 0
+	}
+	if index >= len(p.frames) {
 		return nil
 	}
 	return p.frames[index]
@@ -646,20 +661,16 @@ func (c *Client) modelCursor(key modelTextureKey, ref texRef) *modelTextureCurso
 	return p
 }
 
-// modelAnimatedFrameAt resolves the cursor for one concrete model primitive.
+// modelAnimatedFrameSelected resolves one concrete model primitive's cursor.
 // In explicit standalone preview setup, a repeated texture on two primitives
 // still receives two playback players. Battle composition uses the loaded
 // primitive registry instead [R-CRD-005 §1].
-func (c *Client) modelAnimatedFrameAt(ref texRef, kind uint8, id uint64, piece, primitive int) *formats.GAFFrame {
+func (c *Client) modelAnimatedFrameSelected(ref texRef, kind uint8, id uint64, piece, primitive int, first bool) *formats.GAFFrame {
 	p := c.modelCursor(modelTextureKey{kind: kind, id: id, tex: ref.key, piece: piece, primitive: primitive}, ref)
 	if p == nil {
 		return ref.frame
 	}
-	index, ok := p.player.FrameIndex()
-	if !ok || index >= len(p.frames) {
-		return nil
-	}
-	return p.frames[index]
+	return p.selectedFrame(first)
 }
 
 func unitPresentationID(v frame.UnitView) uint64 {

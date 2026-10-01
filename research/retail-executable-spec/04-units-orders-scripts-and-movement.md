@@ -4293,10 +4293,14 @@ position; the patrol-chain setup of [R-ORD-01 §4]; preamble with
    `sightdistance` through the shared repair-candidate filter; when the list is
    non-empty draw `RNG(count)` and take that unit `u`: the filter includes the
    scanner-owner → candidate-owner nonhostile diplomacy gate. The VTOL path
-   does not repeat that diplomacy read. A complete `u` reaches the issue helper
-   for command code 8: acceptance → *rotate*, refusal → *wait*. An unfinished
+   does not repeat that diplomacy read. **Established — admission follows the
+   pick.** Apply the repair admission below to the selected unit before either
+   branch. A rejected unit falls through to feature pairing; there is no second
+   unit pick. An admitted complete `u` reaches the issue helper for command
+   code 8: acceptance → *rotate*, refusal → *wait*. An admitted unfinished
    `u` releases the payload, explicitly spawns `VTOL_HelpBuild` on `u` at the
-   head, gate = 0, and returns *wait*.
+   head, gate = 0, and returns *wait*. The explicit spawn bypasses the command
+   issuer's stance and return-move additions, but does not bypass admission.
 5. Feature pairing uses a diameter of 240 world units (±120), samples every
    48 world units, and resolves each lattice point independently. Qualifying
    entries require both `reclaimable` and `autoreclaimable`; nonzero authored
@@ -4312,17 +4316,27 @@ Other phase: cancel-all. Draws occur only at reached sites: the low-health pad
 pick, the unit-candidate pick, and the conditional energy and metal feature
 tournaments (three calls per nonempty list).
 
-**The repair admission test** (shared by `VTOL_RepairUnit` phase 0 and the
-patrol scan): the target exists; my definition carries the `canreclamate`
+**The repair admission test — Established** (shared by `VTOL_RepairUnit`
+phase 0, command resolution and the VTOL patrol's selected-candidate check):
+the target exists; my definition carries the `canreclamate`
 mirror bit; the target's 16-bit health differs from its `maxdamage`; the
 target's mover mode is not airborne (`≠ 2`); and a water clause: `(I am not
 canfly, or I am amphibious, or seaLevel ≤ targetY + targetModelHeight)` and
 `(I am canfly, or seaLevel − myMaxWaterDepth ≤ targetY + targetModelHeight)`,
-with `targetY` the whole part of the target's Y, `targetModelHeight` the
-whole part of its definition's model height word ([R-COB-03 §2] port 11),
-and `MaxWaterDepth` the movement-class value copied into the definition
-(§6.1). For an aircraft the clause reduces to `seaLevel ≤ targetY +
-targetModelHeight`: it will not repair a unit whose top is under water.
+with `targetY` the signed 16-bit whole part of the target's 16.16 Y,
+`targetModelHeight` the signed 16-bit whole part of its definition's full
+16.16 model-height dword ([R-COB-03 §2] port 11), and `MaxWaterDepth` the
+signed 16-bit movement-class value copied into the definition (§6.1).
+The model-height dword is the model bounding-box maximum Y, with minimum Y
+zeroed ([R-MOV-03 §5], [02 R-CAT-01 §7]); it is not the byte-masked observer
+height used by LOS. Arithmetic shifts select the whole parts before their
+signed 16-bit interpretation. Both water comparisons are inclusive. A
+non-amphibious aircraft therefore admits a model whose lifted height reaches
+sea level exactly, and refuses one strictly below it. An amphibious aircraft
+bypasses this water restriction. A non-flying constructor instead uses its
+own maximum water depth, regardless of its `amphibious` flag. No `floater`
+or naval-category test participates. This is a height-and-reach admission,
+not a blanket exclusion of underwater definitions.
 
 ### The ground guard's follow radius, goal shape, and cadence [R-ORD-01 §8]
 
@@ -5380,6 +5394,10 @@ phase: cancel-all.
   **not** (`u`'s last-damage side byte equals my side and
   its last-damage cause byte is 5) — a unit my side is currently reclaiming
   (cause 5 is the reclaim bite, [R-ORD-01 §5]) is never offered for repair.
+  **Established — water is not a gather condition.** The visitor does not
+  apply repair admission or prune submerged units. VTOL repair patrol applies
+  that admission only after its random pick ([R-ORD-01 §7]); a rejected pick
+  still consumes the ordinary bounded draw and falls through to feature work.
   The visitor has **no static call site**: the handler plants a pointer to it
   in the gather descriptor it builds on its own frame, through a one-entry
   function-pointer table, so a call census cannot see it.

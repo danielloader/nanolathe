@@ -718,6 +718,16 @@ weapon link on the committed-view copy and asked the combat service's own
 unit-to-unit or point admission gate, so an out-of-range tower shows
 `cursortoofar` `[07 §8][06 R-WPN-05 §9]`.
 
+The idle Type-0, MOVE and REPAIR assistance shapes use
+`CursorSelection.RepairAdmits`, bound to `session.CursorRepairAdmits`. A
+private queue on the committed actor copy supplies the immutable sea level to
+the order resolver's shared repair admission. Thus a construction aircraft
+does not advertise assistance on a wholly submerged structure. Idle additionally
+requires a nonzero remaining-build fraction. MOVE uses the shared admission
+without code 2's extra unsigned health comparison, preserving retail's shape
+for an over-full or death-latched live target `[07 §8][04 R-ORD-01 §7]
+[04 R-ORD-02 §7]`.
+
 The same chooser is the armed click's front door. `battle_commands.go`'s
 `orderSelected` issues an armed order only when the reduced shape is an action
 shape — an index below `cursorred` — judged on the unit that click itself

@@ -236,10 +236,10 @@ func repairAdmitsCode2(actor, target *units.Unit) bool {
 
 // nanoReach is THE repair admission of [04 R-ORD-01 §7] — the one function
 // [04 R-ORD-02 §7] establishes the command resolver's codes 1, 2 and 8,
-// `VTOL_RepairUnit` phase 0 and the repair-patrol scan all call. It was two
-// copies here (this one and `repairAdmission` in vtolwork.go) until they were
-// collapsed; the copies differed only in reading the health field zero- rather
-// than sign-extended, which no authored `maxdamage` can tell apart.
+// `VTOL_RepairUnit` phase 0 and VTOL repair-patrol's post-pick check all call.
+// It was two copies here (this one and `repairAdmission` in vtolwork.go) until
+// they were collapsed; the copies differed only in reading the health field
+// zero- rather than sign-extended, which no authored `maxdamage` can tell apart.
 //
 // [04 R-ORD-02 §1] names it *nano-reach*. Its terms, in the order that section
 // gives them:
@@ -251,15 +251,16 @@ func repairAdmitsCode2(actor, target *units.Unit) bool {
 //	  (not canfly(me) or amphibious(me) or seaLevel <= targetTop)
 //	  and (canfly(me) or seaLevel − MaxWaterDepth(me) <= targetTop)
 //	with targetTop = the whole part of the target's Y plus the whole part of
-//	its definition's model-height word ([R-COB-03 §2] port 11, the model
+//	its definition's model-height dword ([R-COB-03 §2] port 11, the model
 //	bounding box's maximum Y, [04 R-MOV-03 §5]).
 //
-// Both whole parts are the high word of a 16.16 dword, which is an arithmetic
-// shift and therefore floors (I3); numeric.Fixed.Floor is that shift, and
-// content.UnitDef.ModelTop is already the definition word's whole part.
+// Both whole parts are signed 16-bit high words of 16.16 dwords. The arithmetic
+// shifts floor before the signed-word interpretation (I3). ModelTopFixed
+// retains that full height; ModelTop is the byte-masked LOS height and must
+// not decide repair reach [04 R-ORD-01 §7].
 //
-// For an aircraft the clause reduces to `seaLevel <= targetTop`: it will not
-// repair a unit whose top is under water [04 R-ORD-01 §7].
+// A non-amphibious aircraft admits equality at sea level and refuses only a
+// model wholly below it; an amphibious flyer bypasses the water restriction.
 func nanoReach(actor, target *units.Unit) bool {
 	if actor == nil || actor.Def == nil || target == nil || target.Def == nil {
 		return false
@@ -313,9 +314,9 @@ func nanoReachWaterClause(actor, target *units.Unit) bool {
 	}
 	// The terrain header's sea level is a byte in whole world units [04 §10.2].
 	sea := int32(b.World.SeaLevel())
-	targetTop := int32(target.Y.Floor()) + target.Def.ModelTop
+	targetTop := int32(int16(target.Y.Floor())) + int32(int16(target.Def.ModelTopFixed>>16))
 	airHalf := !actor.Def.CanFly || actor.Def.Amphibious || sea <= targetTop
-	wadeHalf := actor.Def.CanFly || sea-actor.Def.MaxWaterDepth <= targetTop
+	wadeHalf := actor.Def.CanFly || sea-int32(int16(actor.Def.MaxWaterDepth)) <= targetTop
 	return airHalf && wadeHalf
 }
 

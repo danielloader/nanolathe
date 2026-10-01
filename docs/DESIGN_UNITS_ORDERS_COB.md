@@ -1482,6 +1482,23 @@ arms `[04 R-ORD-01 §4]` `[04 R-ORD-02 §2]` [I4]. The implementations live in
 `TestOpportunityScanIsFireAtWillOnly` and `TestVTOLPatrolSeeksAPadOnlyWhenHurt`
 lock the scan ordering, gates and pad-selection boundaries.
 
+`VTOL_RepairPatrol` applies shared repair admission **after** the bounded
+candidate pick, before either a repair issue or an explicit `VTOL_HelpBuild`
+spawn. A refusal proceeds to feature pairing with no new unit pick. The
+visitor itself keeps submerged candidates, preserving list indices and RNG
+effects `[04 R-ORD-01 §7]` `[04 R-ORD-02 §4]`. Direct assistance and a flying
+guard copying its ward's build use the same admission. Its water comparison
+uses the signed whole part of the full `ModelTopFixed` height, rather than the
+byte-masked `ModelTop` LOS height; equality at sea level is admitted. Flying
+non-amphibious constructors refuse a model whose lifted height stays below
+sea level, amphibious flyers bypass that restriction, and ground constructors
+use their authored maximum water depth. Floating/underwater category labels
+do not decide reach `[04 R-ORD-01 §7]` `[04 R-ORD-02 §3]`.
+`issue56_underwater_test.go` locks the direct, patrol and guard paths, the
+inclusive height boundary and the rejected-pick feature-work RNG effects;
+`issue56_underwater_retail_test.go` checks the same paths in both gameplay
+modes on stock constructors, underwater storage and a floating metal maker.
+
 The command-owned `ResolvePos.InterfaceType` captures the issuing session’s
 live option, also read by cursor dispatch. This avoids a process-global
 resolver setting while retaining both contextual ladders. Code 3 uses runtime

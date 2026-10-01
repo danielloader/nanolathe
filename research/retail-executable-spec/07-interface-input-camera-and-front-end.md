@@ -5833,7 +5833,8 @@ unchanged to Type 1:
   this rewrite is a re-entry into the armed RECLAIM row below, so that row's
   own admission predicate still decides, and a hostile commander or a hostile
   airborne target falls back out of it; otherwise it yields `cursorrepair`
-  over a friendly target needing assistance,
+  over a friendly target accepted by the shared repair admission of
+  [04 R-ORD-01 §7] **and** whose remaining-build fraction is nonzero,
   `cursorselect` over an own finished unit, `cursorrevive` or
   `cursorreclamate` over a reclaimable feature depending on `canresurrect`
   versus `canreclamate`, `cursormove` for a `canmove` unit, and
@@ -5846,7 +5847,8 @@ unchanged to Type 1:
   target the unit-reclaim admission predicate of the RECLAIM row below admits
   — the capture arm takes a `cancapture` actor first, so this arm is reached
   only by an actor without that key — `cursorrepair` over a friendly target
-  needing assistance, `cursorunload` when a flyer targets an `isairbase` unit,
+  accepted by that same shared repair admission, `cursorunload` when a flyer
+  targets an `isairbase` unit,
   the transport pair below over a carriable target, and `cursordefend` over a
   friendly target for a `canguard` unit; anything that fails, including the
   mover gate itself, yields `cursormove`. The `cursorrevive` arm sits before
@@ -5875,9 +5877,18 @@ unchanged to Type 1:
   transport, `cursorload` for a ground one.
 * FOLLOW (latch 7) requires `canguard` and a friendly target, and refuses when
   a ground guard is pointed at an air target; otherwise `cursordefend`.
-* REPAIR (latch 8) requires a target the unit can assist and gives
-  `cursorrepair`; PATROL (latch 9) requires `canpatrol` and gives
+* REPAIR (latch 8) requires a target accepted by the shared repair admission
+  and gives `cursorrepair`; PATROL (latch 9) requires `canpatrol` and gives
   `cursorpatrol`; TELEPORT (latch 0xB) gives `cursorteleport`.
+
+  **Established — the three assistance shapes call the shared admission,**
+  including its authored nanolathe capability, signed health inequality,
+  committed airborne-mode rejection and full-model-height water clause
+  [04 R-ORD-01 §7][04 R-ORD-02 §7]. The MOVE shape does not add command code 2's
+  separate unsigned health comparison: an over-full or death-latched target
+  that remains live can show repair even though code 2 then refuses it. The
+  idle Type-0 shape additionally requires unfinished construction; the armed
+  REPAIR shape does not.
 * RECLAIM (latch 0xC) applies two tests in order, and neither of them reads
   the diplomacy row. **The feature test:** with `canreclamate` on the actor, a
   pointer whose coarse tile is inside the map and mapped for the viewing

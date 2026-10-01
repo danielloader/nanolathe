@@ -81,8 +81,9 @@ func TestCode8NanoReachTerms(t *testing.T) {
 		target := mkUnit(2, 0, "ARM", 50, 100, true, 0, mkDef(func(d *content.UnitDef) {
 			d.MaxDamage = 100
 			d.ModelTop = 4
+			d.ModelTopFixed = 4 << 16
 		}))
-		// Whole-unit top = floor(Y) + ModelTop = 30 + 4, clear of sea level 20.
+		// Whole-unit height = floor(Y) + floor(ModelTopFixed), clear of sea level 20.
 		target.Y = numeric.Fixed(int64(30) << 16)
 		target.Move.Mode, target.Move.ModeMirror = 1, 1
 		setTestHostility(actor, func(*units.Unit, *units.Unit) bool { return false })

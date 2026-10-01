@@ -302,11 +302,13 @@ func nanolatheOptionsPage(window *gui.Window) error {
 	button.Status = 0
 	label.Link = ""
 	label.Rect.X, label.Rect.W = button.Rect.X, button.Rect.W
-	// Compact Renderer leaves room for camera and radar preferences above
-	// Restore in the shorter battle column. Gameplay keeps its caption because
+	// Compact Renderer leaves room for camera and radar preferences in the
+	// shorter battle column. Gameplay keeps its caption because
 	// a registered rule set may replace one of its stage labels
 	// (DESIGN_INTERFACE_HUD_INPUT §3.4.1).
-	const captionedPitch, switchPitch = 40, 18
+	const captionGap = 4
+	switchPitch := button.Rect.H
+	captionedPitch := label.Rect.H + captionGap + button.Rect.H
 	y := label.Rect.Y
 	renderer := button
 	renderer.Name, renderer.SourceName, renderer.Text, renderer.Stages = "NRENDER", "NRENDER", "Render: Classic|Render: Modern", 2
@@ -323,7 +325,7 @@ func nanolatheOptionsPage(window *gui.Window) error {
 		caption.Name, caption.SourceName, caption.Text = row.name+"LABEL", row.name+"LABEL", row.title
 		caption.Rect.Y = y
 		control.Name, control.SourceName, control.Text, control.Stages = row.name, row.name, row.text, row.stages
-		control.Rect.Y = caption.Rect.Y + caption.Rect.H + 4
+		control.Rect.Y = caption.Rect.Y + caption.Rect.H + captionGap
 		kept = append(kept, caption, control)
 		y += captionedPitch
 	}
@@ -355,18 +357,33 @@ func nanolatheOptionsPage(window *gui.Window) error {
 	// The Enhanced presentation switches (DESIGN_GPU_RENDERER §30). Glow keeps
 	// its home in the display block; the others are presentation values.
 	// Classic composes the same pixels whatever these switches say.
-	for i, row := range []struct{ name, text string }{
+	effectRows := []struct{ name, text string }{
 		{"NGLOW", "Glow: Off|Glow: On"},
 		{"NWATER", "Water: Off|Water: On"},
 		{"NLIGHTS", "Lights: Off|Lights: On"},
 		{"NFINISH", "Metal: Off|Metal: On"},
 		{"NHEAT", "Heat: Off|Heat: On"},
 		{"NMARKS", "Marks: Off|Marks: On"},
-	} {
+	}
+	for i, row := range effectRows {
 		control := button
 		control.Name, control.SourceName, control.Text, control.Stages = row.name, row.name, row.text, 2
 		control.Rect.Y = y + int32(i)*switchPitch
 		kept = append(kept, control)
+	}
+	// Use the authored control height throughout, then spend the footer's
+	// spare gap on the additional row. Restore and Undo keep their own art and
+	// hit rectangles, with a clear gap after the preferences and each other.
+	const footerGap = 2
+	nextY := y + int32(len(effectRows))*switchPitch + footerGap
+	for _, name := range []string{"RESTORE", "UNDO"} {
+		for i := range kept {
+			if kept[i].Name == name {
+				kept[i].Rect.Y = max(kept[i].Rect.Y, nextY)
+				nextY = kept[i].Rect.Y + kept[i].Rect.H + footerGap
+				break
+			}
+		}
 	}
 	window.Gadgets = kept
 	return nil

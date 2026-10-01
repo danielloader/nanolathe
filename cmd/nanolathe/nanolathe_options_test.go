@@ -285,7 +285,7 @@ func TestBattleNanolatheOptionsPointerAndLayout(t *testing.T) {
 	// Every switch has button art and a hit rectangle inside the battle column,
 	// and one click cycles it to Off (DESIGN_INTERFACE_HUD_INPUT §3.4.1).
 	canvasW, canvasH := cl.Size()
-	controls := append([]string{"NGAMEPLAY", "NRENDER", "NFPS", "NSIDEBAR", "NZOOM", "NICONS", "NRADARDOTS"}, effectGadgets...)
+	controls := append([]string{"NGAMEPLAY", "NRENDER", "NFPS", "NSIDEBAR", "NZOOM", "NICONS", "NRADARDOTS", "RESTORE", "UNDO"}, effectGadgets...)
 	for _, name := range controls {
 		index := optionsPanel.Index(name)
 		if optionsPanel.Window.Gadgets[index].ButtonArt == nil {
@@ -295,7 +295,7 @@ func TestBattleNanolatheOptionsPointerAndLayout(t *testing.T) {
 		if r.X < 0 || r.Y < 0 || int(r.X+r.W) > canvasW || int(r.Y+r.H) > canvasH {
 			t.Fatalf("%s at %+v leaves the %dx%d canvas", name, r, canvasW, canvasH)
 		}
-		for _, other := range append([]string{"RESTORE", "UNDO"}, controls...) {
+		for _, other := range controls {
 			if other == name {
 				continue
 			}

@@ -209,7 +209,7 @@ func TestExpandedSidebarFlatCoverageAndResize(t *testing.T) {
 		for page := 1; page < state.Count; page++ {
 			b.hud.selectExpandedSidebarPage(b, f, page)
 			w := expandedWindow(t, b)
-			if w.PlacedRect(expandedIndex(t, w, "CAPTURE")).Y >= w.PlacedRect(expandedIndex(t, w, "MOVE")).Y {
+			if b.hud.expandedSidebar.key.inlineOrders && w.PlacedRect(expandedIndex(t, w, "CAPTURE")).Y >= w.PlacedRect(expandedIndex(t, w, "MOVE")).Y {
 				t.Fatal("supplementary Orders are not above normal commands")
 			}
 			for i, g := range w.Gadgets {
@@ -220,7 +220,11 @@ func TestExpandedSidebarFlatCoverageAndResize(t *testing.T) {
 					}
 				}
 			}
-			for _, name := range []string{"PREV", "NEXT", "MOVE", "ATTACK", "REPAIR", "CAPTURE"} {
+			controlNames := []string{"PREV", "NEXT"}
+			if b.hud.expandedSidebar.key.inlineOrders {
+				controlNames = append(controlNames, "MOVE", "ATTACK", "REPAIR", "CAPTURE")
+			}
+			for _, name := range controlNames {
 				r := w.PlacedRect(expandedIndex(t, w, name))
 				if page == 1 {
 					controls[name] = r
@@ -556,8 +560,10 @@ func TestExpandedSidebarDifferentCommandScaffoldRetainsAuthoredPages(t *testing.
 func TestExpandedSidebarResizeAcrossFittedFallbackKeepsProduct(t *testing.T) {
 	b, cl, sources := sidebarRowsFixture(t, 480)
 	sources[0].Rect.H = 640
-	orders := sources[len(sources)-1]
-	orders.Gadgets[expandedIndex(t, orders, "CAPTURE")].Rect.H = 300
+	// A tall navigation scaffold cannot fit beside six cells at 480 rows.
+	for _, source := range sources[:len(sources)-1] {
+		source.Gadgets[expandedIndex(t, source, "NEXT")].Rect.H = 170
+	}
 	f, _ := b.currentSnapshot()
 	state, active := b.hud.expandedSidebarPaging(b, f)
 	if !active || b.hud.expandedSidebar.key.flat {
@@ -633,8 +639,14 @@ func TestExpandedSidebarRetainsCommandSpacing(t *testing.T) {
 	}
 	cl.Resize(640, 480)
 	w = expandedWindow(t, b)
-	if !b.hud.expandedSidebar.key.flat || len(sidebarVisibleProducts(w)) < 2 {
-		t.Fatal("short surface lost combined build row")
+	if !b.hud.expandedSidebar.key.flat || len(sidebarVisibleProducts(w)) < 6 || b.hud.expandedSidebar.key.inlineOrders {
+		t.Fatal("short surface did not prioritize six build slots")
+	}
+	f, _ := b.currentSnapshot()
+	b.hud.selectExpandedSidebarPage(b, f, 0)
+	w = expandedWindow(t, b)
+	if len(sidebarVisibleProducts(w)) != 0 {
+		t.Fatal("dedicated Orders page retained build products")
 	}
 	for _, pair := range [][2]string{{"PREV", "REPAIR"}, {"REPAIR", "CAPTURE"}, {"CAPTURE", "MOVE"}, {"MOVE", "ATTACK"}} {
 		a, b := w.PlacedRect(expandedIndex(t, w, pair[0])), w.PlacedRect(expandedIndex(t, w, pair[1]))

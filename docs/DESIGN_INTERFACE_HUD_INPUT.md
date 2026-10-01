@@ -1635,20 +1635,37 @@ build action or new submenu. Source geometry still selects the original button
 art family. Availability remains a draw/input decision and never repaginates or
 regroups the list. Building rotation remains outside this policy.
 
-Reserve the complete command panel before allocating build rows. Commands remain
-visible on every local page, including Orders: normal commands occupy the bottom
-of the rail, supplementary Orders controls sit above them, and the build grid
-uses as many complete rows as fit above both. The Orders source is the custom
-unit-zero GUI when present, otherwise the ordinary side Orders GUI; it owns the
-common commands as well as its additional controls. Deduplicate matching named
-controls from the first numbered build page, adding its unique controls (usually
-page arrows) immediately above the Orders panel. Keep tabs below the minimap.
-Retain authored row gaps, bottom padding and the gaps around the page arrows
-and below the tabs, including artwork extents. On a surface too short for these
-gaps plus one build row, compress only the gaps proportionally, retaining at least
-one pixel in every positive gap. Preserve horizontal geometry, source record
-precedence and overlapping row geometry. Allocate all remaining complete build
-rows after reserving this spaced panel.
+**Build capacity before orders (user-authorized 2026-10-01).** Two independent
+preferences choose build items (6, 12 or Free flow) and whether orders appear
+below build items when space permits. Original remains an authored-layout choice;
+six items selects the adaptive layout rather than the original artwork.
+
+Free flow first reserves **six logical build slots**, then includes the complete
+Orders panel only if it fits alongside those slots, then fills every remaining
+complete two-column row. Fixed counts reserve their selected count before
+considering Orders. If that count cannot fit even without Orders, use every
+complete row that fits; never shrink the buttons. Free flow's adaptive path
+requires capacity for at least six slots; the ordinary 640×480 minimum is enough
+for the stock scaffold. A builder with fewer products has a partial page, not
+invented products. Unsafe custom scaffolds retain the authored/fitted path.
+
+The Orders source is the custom unit-zero GUI when present, otherwise the ordinary
+side Orders GUI. It owns common commands and supplementary controls; deduplicate
+matching named controls from the first numbered build page, retaining that page's
+unique controls. Build-only views retain tabs and page navigation. Hidden orders
+remain available on the dedicated Orders page, which shows the complete commands
+without build products; BUILD returns to the remembered build partition. When
+orders fit inline, the existing combined Orders/build view remains. Non-builders
+continue to use their ordinary orders GUI regardless of this preference.
+
+Keep the authored row gaps and margins, including artwork extents. Compress only
+gaps when necessary to fit the required build capacity, proportionally and with
+at least one pixel per positive gap. Orders visibility, navigation and build
+capacity are fixed across all build pages, including a short final page. The
+shared `sidebarProductCatalog.sidebarLayout(height, limit, orders)` returns
+capacity, inline-orders visibility, retained commands, gaps and panel height for
+both the battle and the settings demonstration. Its arithmetic allocates whole
+64-pixel rows; composite product cells remain indivisible.
 All numbered sources must agree on command identities, stages and grouping so
 flattening cannot hide a later-page-only control. Compare retained numbered
 controls' shortcuts using the widget service's ASCII-only case equivalence;
@@ -1662,19 +1679,25 @@ than silently changing radio-button behavior. Source fonts and artwork survive
 composition. Unsafe widgets, incompatible scaffolds or panels that leave no
 complete build row retain the authored/fitted fallback. Different product sizes
 or sparse slots alone are not a fallback reason. Controls stay stationary across
-all pages, including the partial final page and Orders; hit regions and artwork
-must not overlap build cells.
+all build pages, including the partial final page; a dedicated Orders page may
+use the vacated build area. Hit regions and artwork must not overlap build cells.
+Hidden commands retain their authored accelerators as inactive, zero-hit-area
+records in the private composed window. The widget token pass enables those
+records temporarily, retaining capability greying and command precedence, then
+restores them before drawing. Pointer-only passes never enable them. This hides
+buttons without disabling ordinary or rebound order shortcuts; source GUIs remain
+immutable.
 
-The row count is the number of complete 64-pixel cells that fit after reserving
-controls. Without a build page lock (below), build-page count is the ceiling of
-logical cell count divided by cell capacity;
-there are no empty trailing pages or fixed per-builder item caps. Page zero is
-Orders, which continues to display the remembered build partition; positive
-pages select partitions of the list. The pager remains host state: arrows
-cycle build pages, comma/period also visit Orders, digit d selects visible page
-d-minus-one, and BUILD returns to the remembered build page. Existing SwitchAlt
-and squad behavior remains unchanged. These operations do not submit simulation
-commands or rewrite the committed authored page bits.
+Page count is one Orders page plus the ceiling of logical cell count divided by
+the resolved capacity. Fixed counts and Free flow both partition the same ordered
+list across authored source-page boundaries, so two stock six-item pages combine
+under twelve. There are no empty trailing pages; the final partition may be
+short. Source identities, product order and shortcuts remain authored.
+The pager remains host state: arrows cycle build pages, comma/period also visit
+Orders, digit d selects visible page d-minus-one, and BUILD returns to the
+remembered build page. Existing SwitchAlt and squad behavior remains unchanged.
+These operations do not submit simulation commands or rewrite committed authored
+page bits.
 
 On resize, show the new page containing the previous first visible product. A
 new builder, changed selection or external authored-page change seeds the view
@@ -1697,50 +1720,39 @@ host UI extension, not a promise to support arbitrary replacement command GUIs.
 
 #### Build page lock
 
-**Nanolathe host presentation policy**, added because some mods place up to
-twelve products on each authored build page, and auto-flow re-partitions them.
-ProTA 4.8, TA Zero Alpha 5 and Escalation all document or author twelve-slot
-pages ([ProTA engine](../research/extensions/prota-engine.md),
+**Nanolathe host presentation policy**, revised with user authorization on
+2026-10-01. The UI's **Build items** offers Original, 6 per page, 12 per page and
+Free flow; **Orders below build** offers When space permits and Never. Original
+ignores these adaptive capacity rules and keeps authored/fitted placement.
+Twelve means groups of twelve logical cells, combining short authored pages as
+needed. Mod-authored twelve-slot pages naturally retain full-page boundaries
+when their ordered lists align; short intermediate source pages no longer force
+a short displayed page. Composites count as one logical cell.
+
+ProTA 4.8, TA Zero Alpha 5 and Escalation document or author twelve-slot pages
+([ProTA engine](../research/extensions/prota-engine.md),
 [Extended build menus](../research/extensions/build-menus.md),
-[TAESC engine](../research/extensions/taesc-engine.md)). In the installed
-packages many builders fill a twelve-product page and follow it with a shorter
-one (ProTA's ARMALAB authors twelve then two), and the ProTA and Escalation
-commanders' pages hold fewer than twelve. None of their configuration files
-(`ProTA.ini`, `TAZero.ini`, `TAESC.ini`) names a page size, so the lock is a
-Nanolathe setting rather than a translated mod option; the authored pages stay
-the only source of page membership, and no shipped content profile sets a
-lock. A positive lock caps each expanded build page at
-that many logical cells, and a locked page also never spans two authored
-source pages, so a short authored page stays a page of its own rather than
-pulling the next page's products forward. Cells keep the ordering and
-normalized two-column geometry above; the lock changes only where pages break.
-Composites still count as one cell.
+[TAESC engine](../research/extensions/taesc-engine.md)). That evidence supplies
+content, not this pagination policy or a Community 3.9 presentation parity claim.
 
-The lock resolves in this order, first positive value winning:
+`presentation.buildMenuPageSize` stores 6 or 12 for fixed counts, zero for explicit
+Free flow, and negative one for the default content recommendation. An explicit
+choice, including Free flow, overrides the mounted mod's `buildMenuPageSize`
+metadata and the content profile's `presentation.build_menu_page_size`. If the
+player inherits, the mod recommendation wins over the profile; no positive
+recommendation selects Free flow. Detached captures inherit content defaults.
+Old stored positive values remain fixed sizes; old stored zero now means explicit
+Free flow. Missing keys load the content-default sentinel. `sidebarOrders` defaults
+to one (When space permits); zero selects Never. Classic and Expanded sidebar Off
+retain their authored/fitted layout. Apply, Cancel, Undo and Restore include both
+preferences, and the preview uses the resolved content recommendation and the
+selected game's logical resolution.
 
-1. the player's `presentation.buildMenuPageSize` in the settings file, also
-   selected by Nanolathe → Graphics → Sidebar's **Page limit 12** option;
-2. the mounted mod's `buildMenuPageSize` metadata (DESIGN_MODS_MUTATORS §4.2);
-3. the content profile's `presentation.build_menu_page_size`, which a mod
-   without its own value inherits;
-4. none: auto-flow, the default, fills every complete row that fits.
-
-A player's zero defers to the mod, so a player cannot restore auto-flow over a
-mod's lock. Captures (`--shot`, `--film`) read no settings file, so there only
-the mod's or profile's lock applies.
-
-A lock larger than the complete build cells that fit on the current surface is
-not shrunk to fit: the flat layout is not used, and the builder keeps the
-authored/fitted layout above, which is the mod's own placement (that path may
-still partition an authored page taller than the rail into row groups). The
-comparison is against the lock, not the builder's largest page, so a lock of
-twelve at 768 rows, where stock OTA fits eight cells, shows the authored
-layout although no stock page holds more than six. Classic and Expanded sidebar Off ignore the lock and
-compose byte-identically with or without one. Page count is one Orders page
-plus the locked partitions; the pager, resize anchoring and reseed rules above
-are unchanged. `TestExpandedSidebarBuildPageLock` locks the precedence, the
-short-page break and the oversized fallback; `TestContentBuildMenuPageSize`
-locks the mod-over-profile order.
+Verification locks six-slot boundary comparisons, whole-row capacity, hiding
+orders before reducing a fixed count, cross-source pagination, explicit Free flow
+over a mod recommendation, dedicated Orders accessibility, stable partial pages,
+resize anchoring, source identities and persisted defaults. Existing stock and
+oversized-mod tests check safe geometry and every product's reachability.
 
 #### Rail backdrop
 
@@ -4108,19 +4120,17 @@ scene and the compare. Every switch is independent: there is no family
 master among the effect switches. The existing overall glow amount still scales
 the bloom layer, and the separate source amounts multiply their own families.
 
-**Demonstrations and numbers.** Sidebar (Original, Page limit 12, Free flow)
-and Fullscreen draw a small demonstration over the preview
-(`nlscreen_demo.go`). The Sidebar label names a cap, not a promise to combine
-authored pages: stock six-slot pages stay six under Page limit 12, and a lock
-too tall for the game surface uses the authored layout (§3.3 "Build page lock").
-The Original description explains the native panel's black lower band; Free
-flow explains that complete build rows fit above all command buttons at the
-game's logical resolution, independently of fullscreen scaling. Its preview
-resolves the running content's GUI/download cells on the picture worker,
-including source page breaks, duplicate entries and composite children. It
-shares the HUD's command reservation, lock precedence and page partitions at
-the selected game resolution; it never sorts CANBUILD membership into fictional
-six/twelve/sixteen-item pages. Missing or unsafe pages show no demonstration.
+**Demonstrations and numbers.** Build items (Original, 6 per page, 12 per page,
+Free flow), Orders below build and Fullscreen draw a small demonstration over
+the preview (`nlscreen_demo.go`). Both sidebar controls show the draft's actual
+resolved capacity and orders visibility at the selected logical game resolution.
+Twelve combines authored pages; Free flow reserves at least six slots before
+orders. Fullscreen scaling and world zoom do not alter that logical space.
+The Original description explains the native panel's black lower band.
+The sidebar preview resolves the running content's GUI/download cells on the
+picture worker, including duplicates and composite children, then shares the
+HUD's `sidebarLayout` and adaptive page partitions. It never sorts CANBUILD
+membership into fictional pages. Missing or unsafe pages show no demonstration.
 Oversized authored/fitted pages show a layout description rather than a
 normalized grid with an inaccurate page count. The worker honours retirement
 between nested GUI and art reads. `TestNLSidebarPreviewPagePolicies` locks the

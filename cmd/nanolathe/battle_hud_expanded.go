@@ -21,6 +21,7 @@ type expandedSidebarKey struct {
 	page, count, remembered int
 	localPage               int
 	lock                    int
+	inlineOrders            bool
 	flat                    bool
 	transport               bool
 	builder                 pool.Handle
@@ -36,6 +37,7 @@ type expandedSidebarLayout struct {
 	key       expandedSidebarKey
 	window    *gui.Window
 	sources   []sidebarGadgetSource
+	keyOnly   []bool
 	selection []pool.Handle
 }
 

@@ -11,8 +11,8 @@ import (
 
 // The build page lock is a Nanolathe host presentation policy (interface
 // design §3.3 "Build page lock"), not a retail contract: the player's settings
-// file wins over the mod, the mod over auto-flow, and a locked page never
-// spans two authored pages.
+// choice wins over the mod, including explicit Free flow. All adaptive pages
+// combine authored source pages without changing product order.
 func TestExpandedSidebarBuildPageLock(t *testing.T) {
 	b, _, sources := sidebarRowsFixture(t, 1080)
 	b.shell = &gameShell{presentation: settings.DefaultPresentation()}
@@ -34,22 +34,28 @@ func TestExpandedSidebarBuildPageLock(t *testing.T) {
 	if got := page(0, 0, 1); len(got) <= 6 {
 		t.Fatalf("auto-flow page one = %v, want every row that fits", got)
 	}
-	if got := page(6, 0, 1); !slices.Equal(got, []string{"product0", "product1", "product2", "product3", "product4", "product5"}) {
+	if got := page(6, -1, 1); !slices.Equal(got, []string{"product0", "product1", "product2", "product3", "product4", "product5"}) {
 		t.Fatalf("mod lock page one = %v", got)
 	}
-	if got := page(6, 0, 2); !slices.Equal(got, []string{"product6", "product7", "product8", "product9", "product10"}) {
-		t.Fatalf("mod lock page two = %v, want the short authored page alone", got)
+	if got := page(6, -1, 2); !slices.Equal(got, []string{"product6", "product7", "product8", "product9", "product10", "product12"}) {
+		t.Fatalf("mod lock page two = %v, want the next source's product filling the short page", got)
 	}
-	if got := page(6, 0, 3); got[0] != "product12" || b.hud.sidebarPaging.state.Count != 5 {
+	if got := page(6, -1, 3); got[0] != "product13" || b.hud.sidebarPaging.state.Count != 5 {
 		t.Fatalf("mod lock page three = %v, pages %d", got, b.hud.sidebarPaging.state.Count)
 	}
-	if got := page(6, 4, 2); !slices.Equal(got, []string{"product4", "product5"}) {
+	if got := page(6, 4, 2); !slices.Equal(got, []string{"product4", "product5", "product6", "product7"}) {
 		t.Fatalf("settings lock should override the mod: page two = %v", got)
 	}
-	// A lock taller than the rail keeps the authored/fitted layout.
-	page(1000, 0, 1)
-	if len(b.hud.sidebarPaging.cellStarts) != 0 {
-		t.Fatalf("oversized lock still flowed %v", b.hud.sidebarPaging.cellStarts)
+	if got := page(6, 0, 1); len(got) <= 6 {
+		t.Fatalf("explicit Free flow failed to override the mod: %v", got)
+	}
+	if got := page(0, 12, 1); len(got) != 12 || got[11] != "product12" {
+		t.Fatalf("twelve did not combine authored pages: %v", got)
+	}
+	// A count taller than the rail hides orders and uses the fitting grid.
+	page(1000, -1, 1)
+	if len(b.hud.sidebarPaging.cellStarts) == 0 || b.hud.expandedSidebar.key.inlineOrders {
+		t.Fatal("oversized count did not retain a reachable build grid")
 	}
 }
 

@@ -103,10 +103,12 @@ func TestRetailExpandedSidebarFlatCommanderProducts(t *testing.T) {
 				}
 				commands := make(map[string]bool)
 				for _, g := range composed.Gadgets {
-					commands[commandButtonName(g.Name)] = true
+					if g.Active != 0 {
+						commands[commandButtonName(g.Name)] = true
+					}
 				}
 				for _, command := range []string{"MOVE", "STOP", "ATTACK", "REPAIR", "CAPTURE"} {
-					if !commands[command] {
+					if b.hud.expandedSidebar.key.inlineOrders && !commands[command] {
 						t.Fatalf("build page %d lost %s", page, command)
 					}
 				}
@@ -123,7 +125,7 @@ func TestRetailExpandedSidebarFlatCommanderProducts(t *testing.T) {
 							t.Fatalf("product %s covered by gadget %d", g.Name, hit)
 						}
 					}
-					if commandButtonName(g.Name) != "" || sidebarNavigation(g) {
+					if g.Active != 0 && (commandButtonName(g.Name) != "" || sidebarNavigation(g)) {
 						if page == 1 {
 							controlRects[g.Name] = r
 						} else if r != controlRects[g.Name] {

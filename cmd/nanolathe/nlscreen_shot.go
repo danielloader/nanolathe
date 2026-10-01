@@ -155,11 +155,28 @@ func nlShotSteps(s *nlScreen, only string) []nlShotStep {
 				}
 			}
 			if card.demo != "" {
-				// Capture every alternative; Sidebar has three distinct policies.
-				for offset := 1; offset < len(card.steps); offset++ {
-					steps = append(steps, nlShotStep{name: fmt.Sprintf("%s-alt%d", base, offset), page: pi, card: ci, draft: func(d *nlDraft) {
-						card.set(d, (card.get(d)+offset)%len(card.steps))
-					}})
+				switch card.key {
+				case "sidebar", "sidebar-orders":
+					// Name and capture every explicit choice. The base also
+					// records inherited or unusual stored counts faithfully.
+					names := []string{"original", "six", "twelve", "free-flow"}
+					if card.key == "sidebar-orders" {
+						names = []string{"when-space-permits", "never"}
+					}
+					for value, name := range names {
+						steps = append(steps, nlShotStep{name: base + "-" + name, page: pi, card: ci, draft: func(d *nlDraft) {
+							if card.key == "sidebar-orders" {
+								d.pres.ExpandedSidebar = 1
+							}
+							card.set(d, value)
+						}})
+					}
+				default:
+					for offset := 1; offset < len(card.steps); offset++ {
+						steps = append(steps, nlShotStep{name: fmt.Sprintf("%s-alt%d", base, offset), page: pi, card: ci, draft: func(d *nlDraft) {
+							card.set(d, (card.get(d)+offset)%len(card.steps))
+						}})
+					}
 				}
 			}
 			if card.usesMutators {

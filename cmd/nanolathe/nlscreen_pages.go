@@ -44,7 +44,7 @@ const (
 	nlGroup                 // several related settings on one card
 	nlStepper               // ◄ value ► with a notch per value
 	nlLayers                // the three rule layers
-	nlHalves                // two or three big choices side by side
+	nlHalves                // big choices side by side
 	nlContent               // the mod chooser
 )
 
@@ -381,30 +381,48 @@ func (s *nlScreen) graphicsCards() []nlCard {
 			enhanced: true,
 		},
 		{
-			key: "sidebar", label: "Sidebar", pics: []string{"armlab", "armvp"}, kind: nlHalves,
-			steps: []string{"Original", "Page limit 12", "Free flow"},
-			subs:  []string{"Original panel", "Keeps authored pages", "Rows above orders"},
-			// Original is the authored panel; the other two are the expanded
-			// sidebar, locked to twelve-cell pages or flowing freely
+			key: "sidebar", label: "Build items", pics: []string{"armlab", "armvp"}, kind: nlHalves,
+			steps: []string{"Original", "6 per page", "12 per page", "Free flow"},
+			subs:  []string{"Original panel", "Six build slots", "Twelve build slots", "Every fitting row"},
+			// Build count and orders are independent host preferences
 			// (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock").
-			get: func(d *nlDraft) int {
-				switch {
-				case d.pres.ExpandedSidebar == 0:
-					return 0
-				case d.pres.BuildMenuPageSize == 12:
-					return 1
-				}
-				return 2
-			},
+			get: s.nlSidebarCountChoice,
 			set: func(d *nlDraft, v int) {
 				d.pres.ExpandedSidebar = onOff(v != 0)
-				d.pres.BuildMenuPageSize = [...]int{d.pres.BuildMenuPageSize, 12, 0}[v]
+				d.pres.BuildMenuPageSize = [...]int{d.pres.BuildMenuPageSize, 6, 12, 0}[v]
 			},
+			desc: func(d *nlDraft, v int) string {
+				text := [...]string{
+					"The original panel and authored build pages. Stock TA uses six slots per page, with black below the panel at taller game resolutions.",
+					"Six build items per page, combining authored pages as needed. Build space comes first; orders appear below only when the complete panel fits.",
+					"Twelve build items per page, combining authored pages as needed. Orders hide first at a lower game resolution; if twelve still cannot fit, the page uses the fitting count.",
+					"Reserves at least six build slots, includes the complete orders panel when it fits, then fills every remaining row. This choice overrides a mod's recommended count.",
+				}[v]
+				if v != 0 {
+					limit := s.nlSidebarBuildLimit(d)
+					if limit > 0 && limit != 6 && limit != 12 {
+						return fmt.Sprintf("Current count: %d per page. This stored or recommended count stays until you choose another option. Pages combine authored sources as needed; orders hide before the build count is reduced to fit.", limit)
+					}
+					if d.pres.BuildMenuPageSize < 0 && limit > 0 {
+						return fmt.Sprintf("The content recommends %d per page. %s", limit, text)
+					}
+				}
+				return text
+			},
+			scene:    func(*nlDraft, int) string { return "armor" },
+			enhanced: true,
+			demo:     "sidebar",
+		},
+		{
+			key: "sidebar-orders", label: "Orders below build", pics: []string{"armlab", "armvp"}, kind: nlHalves,
+			steps: []string{"When space permits", "Never"},
+			subs:  []string{"After build space", "Use the Orders page"},
+			get:   func(d *nlDraft) int { return onOff(d.pres.SidebarOrders == 0) },
+			set:   func(d *nlDraft, v int) { d.pres.SidebarOrders = onOff(v == 0) },
 			desc: func(_ *nlDraft, v int) string {
 				return [...]string{
-					"The original panel and authored build pages. Stock TA uses six slots per page, with black below the panel at taller game resolutions.",
-					"The taller panel preserves authored page breaks, with at most twelve build cells per page. Stock TA's six-slot pages stay six. If twelve cannot fit, it uses the authored layout.",
-					"Fills complete rows above all order buttons. A lower game resolution leaves fewer rows, even in fullscreen. A mod's page-size limit still applies.",
+					"Shows the complete orders panel below build items when it fits after the selected build count. Free flow reserves six slots first. Orders always remain available on their own page.",
+					"Keeps build pages for build items and page navigation. Use the Orders page for commands. Original keeps its authored panel.",
 				}[v]
 			},
 			scene:    func(*nlDraft, int) string { return "armor" },

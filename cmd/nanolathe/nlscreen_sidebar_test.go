@@ -8,9 +8,8 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 )
 
-// The settings demonstration locks the same host policy as the battle:
-// source pages are retained by a lock, including short pages; free flow can
-// cross them, but only after reserving the commands (HUD design §3.3/§3.17).
+// The demonstration uses the battle's approved host layout, including its
+// build-first capacity and orders decision (HUD design §3.3 and §3.17).
 func TestNLSidebarPreviewPagePolicies(t *testing.T) {
 	b, _, sources := sidebarRowsFixture(t, 1080)
 	sources[1].Gadgets[9].Active = 0
@@ -20,35 +19,34 @@ func TestNLSidebarPreviewPagePolicies(t *testing.T) {
 	if c == nil || !c.safe || len(c.cells) == 0 {
 		t.Fatal("no resolved fixture pages")
 	}
-	original, _ := nlSidebarPageStarts(c, 0, 1080, 12)
-	locked, _ := nlSidebarPageStarts(c, 1, 1080, 12)
-	if !slices.Equal(locked, original) || len(locked) < 3 {
-		t.Fatalf("twelve-cell limit changed authored pages: %v vs %v", locked, original)
+	original, _ := nlSidebarPageStarts(c, true, 1080, 12, false)
+	if !slices.Equal(original, []int{0, 6, 11, 17}) {
+		t.Fatalf("Original changed authored pages: %v", original)
 	}
-	flow, capacity := nlSidebarPageStarts(c, 2, 1080, 0)
-	if capacity <= 6 || len(flow) >= len(original) {
-		t.Fatalf("tall free flow did not combine pages: %v, capacity %d", flow, capacity)
-	}
-	short, shortCapacity := nlSidebarPageStarts(c, 2, 480, 0)
-	if shortCapacity >= capacity || len(short) <= len(flow) {
-		t.Fatalf("short free flow ignored reserved commands: %v, capacity %d", short, shortCapacity)
-	}
-	fallback, _ := nlSidebarPageStarts(c, 1, 480, 12)
-	if !slices.Equal(fallback, original) {
-		t.Fatalf("oversized limit should retain source pages: %v", fallback)
-	}
-	modLocked, _ := nlSidebarPageStarts(c, 2, 1080, 6)
-	if !slices.Equal(modLocked, original) {
-		t.Fatalf("free-flow preview ignored the mod lock: %v", modLocked)
-	}
-	sources[0].Rect.H = 640
-	for _, mode := range []int{0, 1} {
-		if pages, _ := nlSidebarPageStarts(c, mode, 480, 12); len(pages) != 0 {
-			t.Fatalf("fitted authored pages must not claim normalized page counts: %v", pages)
+	for _, height := range []int{480, 800, 1080} {
+		for _, limit := range []int{0, 6, 12} {
+			for _, orders := range []bool{false, true} {
+				starts, got := nlSidebarPageStarts(c, false, height, limit, orders)
+				want := c.sidebarLayout(height, limit, orders)
+				if got.capacity != want.capacity || got.inlineOrders != want.inlineOrders || !slices.Equal(got.commands, want.commands) || !slices.Equal(got.spacing, want.spacing) || got.lowerHeight != want.lowerHeight {
+					t.Fatalf("preview diverged from battle at %d/%d/%v: %+v vs %+v", height, limit, orders, got, want)
+				}
+				if !slices.Equal(starts, sidebarPageStarts(c.cells, want.capacity, false)) {
+					t.Fatalf("adaptive pages retained authored breaks at %d/%d/%v: %v", height, limit, orders, starts)
+				}
+			}
 		}
 	}
-	if pages, _ := nlSidebarPageStarts(c, 1, 1080, 12); !slices.Equal(pages, locked) {
-		t.Fatalf("fitting lock suppressed a valid normalized preview: %v", pages)
+	locked, p := nlSidebarPageStarts(c, false, 1080, 12, true)
+	if p.capacity != 12 || !slices.Equal(locked, []int{0, 12}) {
+		t.Fatalf("twelve cells did not span the short source page: %v, capacity %d", locked, p.capacity)
+	}
+	sources[0].Rect.H = 640
+	if pages, _ := nlSidebarPageStarts(c, true, 480, 12, true); len(pages) != 0 {
+		t.Fatalf("fitted authored pages must not claim normalized page counts: %v", pages)
+	}
+	if pages, _ := nlSidebarPageStarts(c, false, 1080, 12, true); !slices.Equal(pages, locked) {
+		t.Fatalf("oversized source suppressed a supported adaptive preview: %v", pages)
 	}
 	// Preserve GUI names, duplicate entries and download cells even if the
 	// catalog's membership table disagrees with the actual product controls.
@@ -56,6 +54,45 @@ func TestNLSidebarPreviewPagePolicies(t *testing.T) {
 	names := (&nlPicNames{sidebar: c}).order(nil)
 	if slices.Contains(names, "wrong") || !slices.Contains(names, "product0") || !slices.Contains(names, "product17") {
 		t.Fatalf("preview pictures came from membership: %v", names)
+	}
+}
+
+func TestNLSidebarPreviewRetainsVisibleCommandsAndSourceIdentity(t *testing.T) {
+	b, _, sources := sidebarRowsFixture(t, 1080)
+	sources[3].Gadgets[9].Active = 0
+	def, _ := b.cat.Unit("armfav")
+	f, _ := b.currentSnapshot()
+	c := b.hud.sidebarProductCatalog(b.cat, def, int(f.CommandPage.PageCount))
+	for _, orders := range []bool{false, true} {
+		starts, p := nlSidebarPageStarts(c, false, 1080, 12, orders)
+		products, controls := nlSidebarPreviewItems(c, 0, starts[1], 1080, p, false)
+		lastProducts, lastControls := nlSidebarPreviewItems(c, starts[1], len(c.cells), 1080, p, false)
+		if len(products) != 12 || len(lastProducts) != 11 || !slices.Equal(controls, lastControls) {
+			t.Fatalf("short final page moved controls: products %d/%d, controls %v/%v", len(products), len(lastProducts), controls, lastControls)
+		}
+		if len(controls) != len(c.tabs)+len(p.commands) || p.inlineOrders != orders {
+			t.Fatalf("preview omitted the retained command panel: %d, inline %v", len(controls), p.inlineOrders)
+		}
+		for i, item := range controls[len(c.tabs):] {
+			if item.source != p.commands[i].source || item.rect.Y < products[len(products)-1].rect.Y+products[len(products)-1].rect.H {
+				t.Fatalf("command lost source or overlaps build rows: %+v", item)
+			}
+		}
+		for i, item := range products {
+			if item.source != c.cells[i].products[0].source {
+				t.Fatal("preview replaced a resolved product identity")
+			}
+		}
+	}
+	starts, p := nlSidebarPageStarts(c, true, 1080, 0, false)
+	products, controls := nlSidebarPreviewItems(c, starts[0], starts[1], 1080, p, true)
+	for _, product := range products {
+		if product.rect != product.source.window.PlacedRect(product.source.index) {
+			t.Fatal("Original normalized an authored product")
+		}
+	}
+	if len(controls) != len(c.pages[1].indices) {
+		t.Fatal("Original did not show its source controls")
 	}
 }
 

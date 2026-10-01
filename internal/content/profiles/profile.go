@@ -66,8 +66,8 @@ type Presentation struct {
 	TeamLogos              string `json:"team_logos,omitempty"`
 	ShowRanges             bool   `json:"show_ranges,omitempty"`
 	PlacementWeaponRanges  *bool  `json:"placement_weapon_ranges,omitempty"`
-	// BuildMenuPageSize is the content set's build page lock: at most this
-	// many products on each Modern expanded-sidebar build page
+	// BuildMenuPageSize recommends a fixed capacity for adaptive build pages,
+	// applied when neither the player nor mounted mod supplies a choice
 	// (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock").
 	BuildMenuPageSize int `json:"build_menu_page_size,omitempty"`
 	// MainMenuVersion is the text the main menu writes into its `DebugString`

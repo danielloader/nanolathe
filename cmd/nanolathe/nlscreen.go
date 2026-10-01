@@ -380,7 +380,7 @@ func (s *nlScreen) dirty() int {
 	n := s.keysDiffer()
 	for _, page := range s.pages() {
 		for i := range page.cards {
-			if c := &page.cards[i]; c.get(&s.draft) != c.get(&s.saved) {
+			if c := &page.cards[i]; !nlCardEqual(*c, &s.draft, &s.saved) {
 				n++
 			}
 		}
@@ -390,14 +390,40 @@ func (s *nlScreen) dirty() int {
 }
 
 func (s *nlScreen) setCard(c nlCard, v int) {
-	if c.kind != nlGroup && (v < 0 || v >= len(c.steps)) || v == c.get(&s.draft) {
+	if c.kind != nlGroup && (v < 0 || v >= len(c.steps)) {
+		return
+	}
+	next := s.draft
+	c.set(&next, v)
+	s.setCardDraft(c, next)
+}
+
+// Selector indices cannot distinguish inherited defaults or legacy counts
+// from explicit choices. Apply/restore copy the underlying sidebar values.
+func nlCardEqual(c nlCard, a, b *nlDraft) bool {
+	if c.key == "sidebar" {
+		return a.pres.ExpandedSidebar == b.pres.ExpandedSidebar && a.pres.BuildMenuPageSize == b.pres.BuildMenuPageSize
+	}
+	return c.get(a) == c.get(b)
+}
+
+func nlCopyCard(c nlCard, to, from *nlDraft) {
+	if c.key == "sidebar" {
+		to.pres.ExpandedSidebar, to.pres.BuildMenuPageSize = from.pres.ExpandedSidebar, from.pres.BuildMenuPageSize
+		return
+	}
+	c.set(to, c.get(from))
+}
+
+func (s *nlScreen) setCardDraft(c nlCard, next nlDraft) {
+	if nlCardEqual(c, &s.draft, &next) {
 		return
 	}
 	if s.cardLocked(c) {
-		s.guardLocked(c, func() { s.setCard(c, v) })
+		s.guardLocked(c, func() { s.setCardDraft(c, next) })
 		return
 	}
-	c.set(&s.draft, v)
+	nlCopyCard(c, &s.draft, &next)
 	s.touched[c.key] = true
 	if g := s.shell(); g != nil {
 		g.playMenuCue("SmallButton")
@@ -465,7 +491,7 @@ func (s *nlScreen) applyDraft(g *gameShell, draft nlDraft, touched map[string]bo
 	for _, page := range s.pages() {
 		for _, c := range page.cards {
 			if touched[c.key] && c.key != "content" {
-				c.set(&next, c.get(&draft))
+				nlCopyCard(c, &next, &draft)
 			}
 		}
 	}
@@ -2295,7 +2321,7 @@ func (s *nlScreen) drawCarousel(screen *ebiten.Image, page nlPage, focus int, dt
 			// Enhanced-only cards dim under Classic.
 			alpha = appear * 0.45
 		}
-		s.drawCard(screen, c, r, cv, i == focus, alpha, c.get(&s.saved) != cv)
+		s.drawCard(screen, c, r, cv, i == focus, alpha, !nlCardEqual(*c, &s.saved, &s.draft))
 		s.hits.Add(screenkit.Region{ID: id, Rect: r, Click: func() { s.focusCard(i) }, Right: func() {
 			s.focusCard(i)
 		}})

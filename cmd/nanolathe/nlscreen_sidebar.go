@@ -5,6 +5,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
@@ -52,32 +53,112 @@ func (f nlSidebarFiles) Stat(name string) (vfs.EntryInfo, error) {
 	return f.FSOps.Stat(name)
 }
 
-// Original keeps source pages; the lock also caps a page without pulling in
-// the next source page. The demonstration uses the same command reservation,
-// oversized-lock fallback and partitioning as the battle (HUD design §3.3).
-func nlSidebarPageStarts(c *sidebarProductCatalog, mode, height, lock int) ([]int, int) {
-	capacity := len(c.cells)
-	preservePages := mode == 0
-	authoredLayout := mode == 0
-	if mode != 0 {
-		spacing, fits := c.sidebarSpacing(int32(height))
-		capacity = c.sidebarCapacity(int32(height), spacing)
-		if !fits || capacity < 2 || lock > capacity {
-			capacity, preservePages = len(c.cells), true
-			authoredLayout = true
-		} else if lock > 0 {
-			capacity, preservePages = lock, true
+// Resolve the draft content's recommendation only while the player inherits.
+// Explicit Free flow is zero and wins over every recommendation (HUD §3.3).
+func (s *nlScreen) nlSidebarBuildLimit(d *nlDraft) int {
+	if d.pres.BuildMenuPageSize >= 0 {
+		return d.pres.BuildMenuPageSize
+	}
+	m := s.modAt(d.mod)
+	if m != nil && m.BuildMenuPageSize > 0 {
+		return m.BuildMenuPageSize
+	}
+	if g := s.shell(); g != nil && g.cs != nil && sameMod(m, g.cs.mod) {
+		return max(0, g.cs.buildMenuPageSize())
+	}
+	return 0
+}
+
+func (s *nlScreen) nlSidebarCountChoice(d *nlDraft) int {
+	if d.pres.ExpandedSidebar == 0 {
+		return 0
+	}
+	limit := s.nlSidebarBuildLimit(d)
+	if limit == 0 {
+		return 3
+	}
+	// Keep unusual saved counts until a choice changes them. The description
+	// and demonstration name the exact count; the selector uses the closest
+	// supported fixed choice rather than changing the saved preference.
+	if abs(limit-6) <= abs(limit-12) {
+		return 1
+	}
+	return 2
+}
+
+// Original keeps source pages. Every adaptive choice partitions the flattened
+// resolved cells, using the exact battle layout for capacity and orders (HUD
+// design §3.3 and §3.17).
+func nlSidebarPageStarts(c *sidebarProductCatalog, original bool, height, limit int, orders bool) ([]int, sidebarPageLayout) {
+	p := sidebarPageLayout{capacity: len(c.cells)}
+	if !original {
+		p = c.sidebarLayout(height, limit, orders)
+		if p.capacity > 0 {
+			return sidebarPageStarts(c.cells, p.capacity, false), p
 		}
 	}
-	if authoredLayout {
+	if original || p.capacity == 0 {
 		for _, source := range c.pages {
 			if source != nil && source.window.Rect.Y+source.window.Rect.H > retailScreenH {
 				// The fitted path paginates overlapping authored row groups,
 				// not normalized cells. Describe that layout instead of giving
 				// a false build-page count for the selected game resolution.
-				return nil, capacity
+				return nil, p
 			}
 		}
 	}
-	return sidebarPageStarts(c.cells, capacity, preservePages), capacity
+	// A scaffold the adaptive helper cannot fit uses the authored path.
+	return sidebarPageStarts(c.cells, len(c.cells), true), p
+}
+
+// These are drawing placements only. Capacity and the retained command set
+// always come from sidebarLayout, shared with the battle (HUD §3.3/§3.17).
+func nlSidebarPreviewItems(c *sidebarProductCatalog, start, end, height int, p sidebarPageLayout, original bool) (products, controls []sidebarProduct) {
+	if original {
+		for _, cell := range c.cells[start:end] {
+			for _, product := range cell.products {
+				product.rect = product.source.window.PlacedRect(product.source.index)
+				products = append(products, product)
+			}
+		}
+		if start < end {
+			if source := c.pages[c.cells[start].page]; source != nil {
+				for _, i := range source.indices {
+					controls = append(controls, sidebarProduct{source: sidebarGadgetSource{source.window, source.art, i}, rect: source.window.PlacedRect(i)})
+				}
+			}
+		}
+		return products, controls
+	}
+	gridGap, lowerHeight := int32(0), p.lowerHeight
+	for _, gap := range p.spacing {
+		if gap.at < 0 {
+			gridGap += gap.pixels
+		} else {
+			lowerHeight += gap.pixels
+		}
+	}
+	for _, tab := range c.tabs {
+		tab.rect.Y += 128
+		controls = append(controls, tab)
+	}
+	for _, item := range p.commands {
+		r := item.rect
+		for _, gap := range p.spacing {
+			if gap.at >= 0 && gap.at <= item.rect.Y {
+				r.Y += gap.pixels
+			}
+		}
+		r.Y += int32(height) - lowerHeight
+		controls = append(controls, sidebarProduct{source: item.source, rect: r})
+	}
+	for n, cell := range c.cells[start:end] {
+		origin := gui.Rect{X: int32(n%2) * 64, Y: 128 + c.upperHeight + gridGap + int32(n/2)*64}
+		for _, product := range cell.products {
+			product.rect.X += origin.X
+			product.rect.Y += origin.Y
+			products = append(products, product)
+		}
+	}
+	return products, controls
 }

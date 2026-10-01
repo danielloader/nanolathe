@@ -75,10 +75,9 @@ type Metadata struct {
 	MinimumGameplay string   `json:"minimumGameplay,omitempty"` // a reserved gameplay word or ""
 	Controls        string   `json:"controls,omitempty"`        // "community", "retail", "zero" or ""
 	Requires        []string `json:"requires,omitempty"`        // logical paths the BASE install must resolve
-	// BuildMenuPageSize locks the expanded sidebar's build pages to at most
-	// this many products, so a mod whose menus place a fixed number of
-	// products per page keeps that paging. Zero or omitted leaves the host's
-	// auto-flow (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock"). A schema
+	// BuildMenuPageSize recommends a fixed adaptive build-page capacity.
+	// Explicit player choices, including Free flow, take precedence
+	// (DESIGN_INTERFACE_HUD_INPUT §3.3 "Build page lock"). A schema
 	// 2 config spells it content.presentation.build_menu_page_size.
 	BuildMenuPageSize int `json:"buildMenuPageSize,omitempty"`
 	// Config is the mod's Nanolathe config, read from its own schema 2

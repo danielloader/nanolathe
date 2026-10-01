@@ -517,6 +517,7 @@ func gameplayOptionStage(mode gameplay.Mode) int {
 func (g *gameShell) setNanolathePreferences(p settings.Presentation) {
 	next := g.presentation
 	next.Renderer, next.FPS, next.ExpandedSidebar = p.Renderer, p.FPS, p.ExpandedSidebar
+	next.SidebarOrders, next.BuildMenuPageSize = p.SidebarOrders, p.BuildMenuPageSize
 	next.ZoomStyle, next.StrategicIconStyle = p.ZoomStyle, p.StrategicIconStyle
 	for _, f := range effectFamilies {
 		f.restore(&next, p)

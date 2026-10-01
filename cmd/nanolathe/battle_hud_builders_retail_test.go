@@ -116,10 +116,12 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 						state, _ := h.expandedSidebarPaging(b, f)
 						controls := map[string]bool{}
 						for _, g := range w.Gadgets {
-							controls[commandButtonName(g.Name)] = true
+							if g.Active != 0 {
+								controls[commandButtonName(g.Name)] = true
+							}
 						}
 						for _, name := range []string{"MOVE", "STOP", "ATTACK", "REPAIR", "FIREORD"} {
-							if !controls[name] {
+							if h.expandedSidebar.key.inlineOrders && !controls[name] {
 								t.Fatalf("missing combined command %s", name)
 							}
 						}
@@ -127,9 +129,14 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 							t.Fatal("combined page has no build products")
 						}
 						first := sidebarVisibleProducts(w)
+						inline := h.expandedSidebar.key.inlineOrders
+						if h.sidebarPaging.capacity < 6 {
+							t.Fatal("Free flow capacity fell below six")
+						}
 						h.selectExpandedSidebarPage(b, f, 0)
-						if !slices.Equal(sidebarVisibleProducts(expandedWindow(t, b)), first) {
-							t.Fatal("Orders hid the current build partition")
+						ordersProducts := sidebarVisibleProducts(expandedWindow(t, b))
+						if inline && !slices.Equal(ordersProducts, first) || !inline && len(ordersProducts) != 0 {
+							t.Fatal("Orders did not match the combined or dedicated layout")
 						}
 						h.selectExpandedSidebarPage(b, f, state.Remembered)
 						if dir := os.Getenv("NANOLATHE_MENU_SHOTS"); dir != "" && height == 768 {

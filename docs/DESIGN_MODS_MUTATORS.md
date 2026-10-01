@@ -68,7 +68,7 @@ To keep the two apart, code for this feature never uses the bare identifier
 | D2 | Every save gets a sidecar recording the mod, content profile, rule set, Community table, unit limit and mutators active when it was written. Loading the save restores that selection, including switching mod. The loading screen shows it. |
 | D3 | Redistribution permission is assumed. Nanolathe hosts the manifest **and** every download, so availability does not depend on the original sites and the hosted zips can be cleaned (§5.5). The manifest is on nanolathe.gg; the zips are assets of one GitHub release (`mods`) on the website repository, so the site's history does not carry them (revised 2026-09-23). |
 | D4 | Trust is HTTPS to nanolathe.gg. Manifest signatures are a follow-up, not a v1 requirement (§5.4). |
-| D5 | The client may use the network to fetch the mod manifest and mod downloads, and for nothing else. |
+| D5 | The client may use the network to fetch the mod manifest and mod downloads and, since DESIGN_MULTIPLAYER was adopted (2026-10-01, its §15 Q1), to connect to a multiplayer relay — and for nothing else. |
 | D6 | One zip per mod version, containing the complete content root. No layers. |
 | D7 | Mutators are global: every player, human and computer, plays the same catalog. |
 | D8 | Gameplay mode and renderer stay orthogonal to the mod. A mod may declare a minimum gameplay mode, which the selector enforces visibly; nothing switches silently. |
@@ -565,9 +565,11 @@ release). Add `minimumEngine` once releases are stamped.
 
 ### 5.2 When the client talks to the network
 
-- Only when the player opens the *Get more mods* dialog (§8.2) or starts a
-  download. Never at start-up, never in battle, never in the displayless
-  command (D5).
+- For mods, only when the player opens the *Get more mods* dialog (§8.2) or
+  starts a download. Never at start-up, never in battle, never in the
+  displayless command (D5). A multiplayer relay connection is the one other
+  use of the network and belongs to DESIGN_MULTIPLAYER §12; nothing of it is
+  implemented yet.
 - The manifest only from `https://nanolathe.gg`. An archive from the same
   origin, where a redirect to another origin is refused, or from a
   `nanolathe-gg` GitHub release asset (§5.1). GitHub answers a release asset

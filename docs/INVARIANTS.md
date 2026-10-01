@@ -103,11 +103,29 @@ an earlier statement — carries an explicit floating-point conversion, the
 specification's rounding barrier. It changes no operand width, no constant, no
 evaluation order and no narrowing point. Presentation packages are exempt.
 
+**Library functions and conversions** (adopted with DESIGN_MULTIPLAYER; in
+force from its milestone M1). The standard library's transcendental functions
+do not return the same bits on every architecture: `math.Hypot` is assembly
+on amd64 and fused Go on arm64, and package `math` itself is compiled with
+fused multiply-adds on arm64, where the guard below cannot see it. An
+authoritative package therefore calls only the exactly rounded library
+functions — `math.Sqrt`, `math.Abs`, `math.Floor`, `math.Ceil`, `math.Trunc`,
+`math.Round`, `math.RoundToEven` — and takes distance, sine, cosine,
+arctangent, arccosine and tangent from the in-repository implementations in
+`internal/sim/numeric`, each defined by the retail routine it stands for
+(DESIGN_MULTIPLAYER §5.3 L1). And a floating-point value becomes an integer
+only through a helper that defines the result for a value that does not fit
+or is not a number: Go leaves that conversion to the processor, and the
+processors disagree. Until M1 lands, the existing call sites and conversions
+are that milestone's work list, and a diff must not add to it.
+
 **Check.** `grep -rn "float64\|float32" internal/` — every hit maps to a row
 above or is presentation-only. `internal/architecture`'s
 `TestAuthoritativeArithmeticIsNotFused` compiles the authoritative packages for
 arm64 and for `GOAMD64=v3` and fails on a fused instruction outside its
 shrink-only allowlist, each entry of which argues that its product is exact.
+Two source guards for the library-function and conversion rule arrive with
+DESIGN_MULTIPLAYER's M1.
 
 ## I3 — Truncation toward zero
 
@@ -205,6 +223,17 @@ on later ticks `[01 §7.5]`. Anything that changes how long a strip container
 or sub-record lives — a span, a lifetime, a pool-occupancy decision — is
 therefore a determinism input, and the arithmetic that produces it is
 authoritative-side even when its product is only ever drawn `[03 R-STRIP-01 §3]`.
+The fixed effect pool is such a pool for both streams: at capacity it
+refuses a shatter fragment before that fragment's simulation-stream draws
+`[04 R-COB-04 §3]` and a land-dust puffer before its CRT draws, so how long
+its records live is a determinism input too (DESIGN_MULTIPLAYER §5.3 L9).
+
+**Multiplayer seed handoff** (DESIGN_MULTIPLAYER §8.3). In a lockstep battle
+the relay draws the explicit seed pair and every client receives it in the
+start message; it enters composition through the same handoff a
+single-player battle uses. The relay is not an authoritative package, so its
+use of `crypto/rand` is outside this rule, and no client-side history seeds
+either stream.
 
 **Check.** Identical seeded session setups have stable simulation and CRT draw
 counts; setup and briefing draws leave the retained battle CRT fresh; the
@@ -229,6 +258,16 @@ flag, reuses immediately, and validates per-definition limits and forced slots;
 stale 16-bit packets that validate only slot nonzero and alive alias silently
 after reuse.
 
+**Command references** (DESIGN_MULTIPLAYER §7.2; in force from its milestone
+M2). A human command that waits a network round trip before it applies names
+a unit by its handle plus an allocation serial. A session counter assigns a
+fresh serial at each successful unit creation and never reuses or wraps one,
+and a reference whose serial does not match the slot's occupant is dropped
+rather than redirected. This adds no generation tag to the pools: slot
+allocation, immediate reuse and every internal retail reference are
+unchanged, and a stale damage packet still aliases as retail's does. The
+serial and its counter are authoritative state.
+
 `pool.Projectiles` is the sole allocation/dead/count authority. The projectile
 pool **appends at the tail** and never fills holes; dead records
 set a flag without decrementing the count; compaction is stable and runs before
@@ -248,6 +287,20 @@ those observations never determine simulation state or tick behavior.
 Presentation and front-end random histories never become session seed inputs;
 the explicit battle seed pair is the only RNG handoff into composition
 (DESIGN_RUNTIME_DETERMINISM §2.2 and §5).
+
+**Seats and hosts** (adopted with DESIGN_MULTIPLAYER §5.4). Which seat is
+local, the viewing slot and the host's pump sizes are presentation inputs: no
+authoritative state, draw count or draw order may depend on them, outside the
+single-seat equivalences of DESIGN_MULTIPLAYER §6.5, where a single-player
+battle's one human seat is the perspective every such read resolves to. And
+nothing a host supplies after composition — a renderer, an art cache, an
+audio service, a preference — may change a lifetime, a pool's occupancy or a
+draw. The fixed effect pool is authoritative state although it is kept
+beside the publication boundary. Two parts of the engine do not yet meet
+this paragraph and are that design's work: the effect timing resolver only
+the windowed host installs (its milestone M1, §5.3 L9), and the reads of the
+local seat and viewing slot listed in its §6.3 (its milestone M5). A diff
+must not add a third.
 
 **Why.** Retail's draw path samples the accumulators exactly as committed at
 the current tick; no interpolation between updates exists `[03 §2.4]`.
@@ -369,6 +422,19 @@ one side — not a rule, so it adds no seam and consults the bound rule set like
 any other battle. Its director exists only in a Survival
 session and draws the simulation stream only there. It is owned by
 [DESIGN_SURVIVAL](DESIGN_SURVIVAL.md).
+
+**Multiplayer** (user-authorized 2026-10-01) is likewise available in every
+mode. It is a session kind — relayed deterministic lockstep, every client
+running the whole simulation from one command stream — not a rule, so it
+adds no seam and binds the rule set the lobby agreed like any other battle.
+"Strict 3.1 online" is owner-machine equivalence: each seat's work runs as
+that seat's own retail machine would have run it, because retail multiplayer
+has no single outcome to match. Its online policies (cheat permission for
+world-changing commands, no pause or speed change in the first releases,
+room-wide view restrictions) are Nanolathe's in every mode and are recorded
+as such, not as retail behavior. A single-seat battle is unchanged, and every
+fingerprint lock runs single-player. It is owned by
+[DESIGN_MULTIPLAYER](DESIGN_MULTIPLAYER.md) and is not yet implemented.
 
 The mode word also selects a **registered** set by name: a third-party set is
 compiled in through `mods/`, which only a command may import, and it composes

@@ -77,9 +77,11 @@ The boundary is drawn at six places:
   exact offsets because the container is a file format; what those bytes *mean*
   when they re-enter a battle is `internal/session`'s restore path
   `[08 "Location and representation"]` `[08 "Load process"]`.
-* **Networking is out of scope** and is not partially implemented here. The
-  local path still constructs the death, damage, creation and impact packets
-  and forwards them whole to the central handlers, and that is all
+* **Networking is not implemented here.** Multiplayer is in scope since
+  2026-10-01 and belongs to DESIGN_MULTIPLAYER, which does not reproduce
+  retail's transport. The local path still constructs the death, damage,
+  creation and impact packets and forwards them whole to the central
+  handlers, and that is all this document owns of it
   `[08 R-OOS-01 §1]` `[08 R-OOS-01 §3]`.
 
 The most dangerous mistake in this area is reading a slot's identity off the
@@ -1494,9 +1496,10 @@ random-draw count `[08 R-AI-01 §3]`.
 
 ### 3.4 Not implemented
 
-* **Multiplayer everything.** The lobby, the transport, packet framing, pacing,
-  lockstep, integrity checks, peer loss, host migration and multiplayer saves
-  are out of scope and named in ARCHITECTURE's exclusion table. What remains
+* **Multiplayer everything.** Retail's transport, packet framing and pacing
+  stay out of scope and are named in ARCHITECTURE's exclusion table. The
+  lobby, lockstep, integrity checks, departures and replays are designed in
+  DESIGN_MULTIPLAYER (adopted 2026-10-01) and not built yet. What remains
   here is the local construction of the death, damage, creation and impact
   packets, forwarded whole to the central handlers `[08 R-OOS-01 §1]`
   `[08 R-OOS-01 §2]` `[08 R-OOS-01 §3]`.

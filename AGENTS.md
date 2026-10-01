@@ -93,6 +93,24 @@ lock runs Classic. The policy is owned by
 its seam, lifecycle and determinism rules by
 [DESIGN_GAMEPLAY_RULES](docs/DESIGN_GAMEPLAY_RULES.md#the-modern-ai-controller).
 
+**Multiplayer is the fourth mode-independent exception (user-authorized
+2026-10-01).** A multiplayer battle is a session kind, not a rule: relayed
+deterministic lockstep, in which every client runs the whole simulation and
+only commands travel. It is offered for skirmish and Survival in every
+gameplay mode, Strict 3.1 included. Retail multiplayer has no single outcome
+to match, so "Strict 3.1 online" is defined by owner-machine equivalence —
+each seat's work runs as that seat's own retail machine would have run it —
+and it neither reproduces retail's transport nor interoperates with it.
+Three online policies apply in every mode and are Nanolathe's, not retail's:
+a command that changes the world needs the lobby's cheat permission even
+where retail leaves it ungated; online battles run at normal speed with no
+pause in the first releases; and a room may restrict views for all its
+players. Nothing a relay, a lobby or a host supplies may change what a tick
+computes, and a single-seat battle is untouched: every fingerprint lock runs
+single-player. It is owned by
+[DESIGN_MULTIPLAYER](docs/DESIGN_MULTIPLAYER.md), which stages the work in
+milestones (§16): build them in that order.
+
 Current policies: [terrain admission](docs/DESIGN_WEAPONS_PROJECTILES.md#231-modern-terrain-admission),
 [Hold Fire](docs/DESIGN_UNITS_ORDERS_COB.md#modern-hold-fire), and
 [factory-exit yielding](docs/DESIGN_ECONOMY_CONSTRUCTION.md#modern-factory-exit-yielding), and
@@ -375,9 +393,13 @@ unrecoverable failure mode.
 - **Implement:** skirmish and mission/campaign (single-player): economy,
   construction, movement+pathfinding, visibility/LOS, weapons/projectiles/
   damage, COB VM, features/fire, AI (skirmish planner), GUI/HUD,
-  camera/minimap, audio, effects, maps, save/load for single-player.
-  **Not now:** networking/multiplayer, replay beyond an optional debug
-  recorder, competitive desync hashes. No GPL code — MIT only.
+  camera/minimap, audio, effects, maps, save/load for single-player; and
+  multiplayer skirmish and Survival with replays, by relayed lockstep, in the
+  order [DESIGN_MULTIPLAYER](docs/DESIGN_MULTIPLAYER.md) §16 stages it
+  (user-authorized 2026-10-01).
+  **Not now:** retail's network transport or cross-play with any other
+  engine, co-op campaign, multiplayer saves, and ranked play before its own
+  gate. No GPL code — MIT only.
 - Keep the codebase simple and fast. No over-engineering, no scattered
   compatibility flags. The user-authorized central Modern / Strict 3.1 gameplay
   policy is the exception; see docs/DESIGN_WEAPONS_PROJECTILES.md §2.3.1. Prefer immutable compiled

@@ -128,8 +128,10 @@ conversion is needed. Music starts when a battle begins. Options → Music
 controls volume, playback mode and track selection. The main menu retains its
 retail ambient loop.
 
-Multiplayer is outside the current scope. For implemented contracts and known
-gaps, read the design document for the relevant engine area.
+Multiplayer is designed and not yet built: see
+[docs/DESIGN_MULTIPLAYER.md](docs/DESIGN_MULTIPLAYER.md). For implemented
+contracts and known gaps, read the design document for the relevant engine
+area.
 
 ## Contributors and AI agents
 

@@ -28,6 +28,7 @@ has its own design document; this one only says where the boundaries are.
 | [DESIGN_COMMUNITY_PATCH](DESIGN_COMMUNITY_PATCH.md) | the Community 3.9 gameplay profile: the third reserved rule set, the feature table a content set or player configures, the mapping of every community-patch contract onto a seam, and the decisions still open (design, not implemented) |
 | [DESIGN_MODS_MUTATORS](DESIGN_MODS_MUTATORS.md) | the mod library and the nanolathe.gg catalogue, global mutators applied to the per-battle catalog in every mode, and the save sidecar that records and restores a match's selection (implemented; follow-ups in its §13 unit 9) |
 | [DESIGN_SURVIVAL](DESIGN_SURVIVAL.md) | the Survival single-player mode: the attacker slot, the wave director, build-tree tech tiers, the no-victory result and score, available in every gameplay mode |
+| [DESIGN_MULTIPLAYER](DESIGN_MULTIPLAYER.md) | adopted 2026-10-01, not yet implemented: relayed deterministic lockstep for LAN and online battles, the determinism contract it needs, replays, spectators and the relay server, delivered in the milestones of its §16 |
 
 Rules that cut across every package are in [INVARIANTS.md](INVARIANTS.md);
 places where the reference install disproves the written contract are in
@@ -42,6 +43,12 @@ economy, construction, movement and pathfinding, visibility, weapons and
 damage, the COB script machine, features and fire, the skirmish planner, the
 GUI and HUD, camera and minimap, audio, effects, and save/load of a
 single-player battle.
+
+Multiplayer skirmish and Survival, with replays, came into scope on
+2026-10-01 and are not yet implemented. DESIGN_MULTIPLAYER owns the design —
+relayed deterministic lockstep, in every gameplay mode — and stages the work
+in its §16; until a milestone lands, the paragraphs above describe what the
+engine does.
 
 Authoritative behavior follows retail, including documented faults, except for
 the explicit Modern gameplay contracts (terrain admission in
@@ -79,10 +86,8 @@ changing this table first.
 | Research section | Why it is out |
 |---|---|
 | `[03 §9]` Smacker cinematics and movie capture | The `CDCHECK` gate remains excluded. Developer frame capture is planned in DESIGN_DEVELOPER_TOOLS; it is not implemented. Startup logo (`Data/1.zrb`), main-menu Intro (`Data/2.zrb`), campaign endings (`Data/3.zrb`, `Data/4.zrb`) and credits (`Data/5.zrb`) are implemented with an independently authored Smacker 2 decoder and portable PCM output; see DESIGN_INTERFACE_HUD_INPUT §3.9 and `[07 R-FE-01 §3]`. |
-| `[07 §12]` Lobby and session shell | The multiplayer lobby. The single-player skirmish setup screen is a different surface, owned by DESIGN_INTERFACE_HUD_INPUT and DESIGN_SESSIONS_AI_SAVE through `[07 R-FE-01 §5]` and `[08 R-SKIR-01]`. |
-| `[08 "DirectPlay transport"]`, `[08 "Packet framing and dispatch"]`, `[08 "Send pacing and batching"]`, `[08 "Receive buffering"]`, `[08 "Ping and adaptive timing"]`, `[08 "Lockstep advancement"]`, `[08 "Synchronization and integrity checks"]`, `[08 "Disconnect, resign, and peer loss"]` | Networking. `[08 R-OOS-01 §1]` names the packets the *local* path still constructs; those are in scope and DESIGN_SESSIONS_AI_SAVE cites them. |
-| `[08 "Multiplayer saves"]` | Follows from the above. Single-player save/load is DESIGN_SESSIONS_AI_SAVE (`[08 "Save-file organization"]`, `[08 "Load process"]`). |
-| `[08 "Replay"]` | Only an optional debug recorder is in scope, and none is designed. No competitive desync hashes. |
+| `[08 "DirectPlay transport"]`, `[08 "Packet framing and dispatch"]`, `[08 "Send pacing and batching"]`, `[08 "Receive buffering"]`, `[08 "Ping and adaptive timing"]` | Retail's transport and packet protocol. Multiplayer is in scope under DESIGN_MULTIPLAYER, which uses its own relayed lockstep protocol and neither reproduces nor interoperates with retail's (§3.2 there); it cites the lobby `[07 §12]`, `[08 "Lockstep advancement"]`, `[08 "Synchronization and integrity checks"]` and `[08 "Disconnect, resign, and peer loss"]` as the baseline it departs from. `[08 R-OOS-01 §1]` names the packets the *local* path still constructs; those are in scope and DESIGN_SESSIONS_AI_SAVE owns them. |
+| `[08 "Multiplayer saves"]` | Retail-format multiplayer saves. DESIGN_MULTIPLAYER offers no multiplayer save in its first versions (§11.5 there). Single-player save/load is DESIGN_SESSIONS_AI_SAVE (`[08 "Save-file organization"]`, `[08 "Load process"]`). |
 
 Meta sections carry no behavior and are cited by nobody by design:
 `[01 §10]`, `[03 §10]`, `[04 §11]`, `[06 §14]`, and each document's "Purpose

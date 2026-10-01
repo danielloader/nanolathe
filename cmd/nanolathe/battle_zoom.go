@@ -121,14 +121,15 @@ func (b *battleSession) syncCameraControls() {
 	}
 }
 
-// Tab takes the same whole-map/return action as F9 in Modern, on release like
-// the community megamap. F2 remains the battle menu (§16.8).
+// With Overview selected, Tab takes the same whole-map/return action as F9 in
+// Modern, on release like the community megamap. Otherwise the residual Tab
+// token keeps its Options binding (§16.8).
 func (b *battleSession) serviceZoomOverviewTab(pressed bool, in *input.State, cl *client.Client) bool {
 	if b == nil {
 		return false
 	}
 	style := b.cameraControlStyle()
-	if cl == nil || !cl.Enhanced() || !style.modern() || style.disabled() {
+	if cl == nil || !cl.Enhanced() || !style.modern() || style.disabled() || b.hostPreferences().Overview != settings.OverviewMegamap {
 		b.zoomTabPending = false
 		return false
 	}

@@ -5,8 +5,9 @@ package settings
 // preference keys ([draw-engine-interface](../../research/extensions/draw-engine-interface.md#prota-48-shipped-megamap))
 // and never select gameplay [I6].
 
-// Overview values: the smooth-zoom overview (today's behaviour) or the
-// megamap.
+// Overview values select Tab's Options binding or the overview. Modern uses
+// camera zoom for that overview; Strict uses the optional megamap. The stored
+// values and names retain compatibility with existing settings.
 const (
 	OverviewZoom    = 0
 	OverviewMegamap = 1

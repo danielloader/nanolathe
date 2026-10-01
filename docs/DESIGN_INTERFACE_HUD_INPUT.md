@@ -3517,11 +3517,14 @@ It enters no digest, fingerprint or save, and reads only the committed frame,
 the immutable catalog and terrain, and host input [I6].
 **Nanolathe Modern policy (user-authorized 2026-09-30):** the host selects the
 overview from the selected set's existing base layer. Modern uses camera zoom
-instead of this megamap (DESIGN_GPU_RENDERER §16.6–16.8); Tab or F9 fits the
-whole map and returns, with F2 opening Options. Community 3.9 always uses the
+instead of this megamap (DESIGN_GPU_RENDERER §16.6–16.8); F9 fits the
+whole map and returns, with F2 opening Options. Modern also honors the stored
+Tab choice (user-authorized 2026-10-01): `presentation.overview = 0` (Options, default) opens and closes
+Options; `1` (Overview) fits the whole map and returns on Tab release. Modern
+No zoom keeps Tab for Options. Community 3.9 always uses the
 megamap and disables pinch/wheel camera zoom and F9. Strict 3.1 retains the
-`presentation.overview` preference: `0` (Zoom, default) keeps Tab/F2 options and
-the earlier three camera presets; `1` (Megamap) installs the view below.
+`presentation.overview` preference: `0` (Options, default) keeps Tab/F2 options and
+the earlier three camera presets; `1` (Overview) installs the megamap below.
 Modern with the Classic renderer keeps its earlier Tab/F9 controls.
 Both renderers draw the community megamap identically because it is one
 indexed surface recorded after the world, not a camera factor: it is **not**
@@ -3533,7 +3536,7 @@ with ProTA 4.8's `ProTA.ini` values as defaults except where noted:
 
 | Key | Default | Patch key |
 |---|---|---|
-| `overview` (Strict 3.1 only) | 0 (Zoom) | `FullScreenMinimap` |
+| `overview` (Modern and Strict 3.1; Community 3.9 always uses Megamap) | 0 (Tab opens Options); 1 selects the mode's overview | `FullScreenMinimap` |
 | `megamapWheel` | 1 | `WheelZoom` |
 | `megamapWheelMove` | 1 | `WheelMoveMegaMap` |
 | `megamapDoubleClickMove` | 0 | `DoubleClickMoveMegamap` |

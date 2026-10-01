@@ -3577,11 +3577,17 @@ free passage through native, settings changes, overview return and mode bypass.
   position, clamped for the current viewport; a saved factor near the preferred
   lock snaps to it. It clears active pinch, wheel easing and follow. Bookmarks are not
   restored from the snapshot. Entering classic clears the saved return view.
-  Tab acts on release, like the megamap. F2 opens Options. Community 3.9 takes
-  Tab for its megamap and ignores F9 and explicit battle-entry zoom; Strict 3.1
+  F9 always takes this action while zoom is enabled. Tab takes it on release,
+  like the megamap, only when `presentation.overview = 1` (Overview); with
+  `0` (Options, default), Tab opens and closes Options without changing the
+  camera. Changing the choice to Options cancels a pending Tab release. F2
+  opens Options. Community 3.9 takes Tab for its megamap and ignores F9 and explicit battle-entry zoom; Strict 3.1
   retains its 1× → 2× → 0.25× F9 cycle. Classic keeps its 1× ↔ 2× F9 cycle in
   Modern and Strict, and Tab's options binding in Modern.
   Modern No zoom disables F9 in both renderers and retains Tab for Options.
+  `TestModernTabOptionsPreference` locks the menu toggle without camera movement
+  in Continuous and Steps, and F9's independent overview action;
+  `TestModernTabOptionsCancelsPendingOverview` locks cancellation across a preference change.
 * **The wheel** is §16.6.
 * **`--zoom`** accepts any factor in the free range for the modern executor and
   only 1 or 2 for classic — the restriction is applied after parsing,

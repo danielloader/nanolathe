@@ -163,6 +163,64 @@ func TestModernTabUsesZoomAndF2KeepsOptions(t *testing.T) {
 	}
 }
 
+func TestModernTabOptionsPreference(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		style int
+	}{{"continuous", settings.ZoomSmooth}, {"steps", settings.ZoomStepped}} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, cl := megamapTestBattle(t, settings.OverviewZoom)
+			b.sess.Gameplay = gameplay.Modern
+			b.hostPresentation.ZoomStyle = tc.style
+			cl.SetEnhanced(true)
+			cl.Input().Mouse.SetPosition(300, 200)
+			view, factor := b.cam.PresentationView(), b.cam.EffectiveZoom()
+			pressTab := func(in *input.State) {
+				in.Kbd.SetKey(input.KeyTab, true)
+				in.EnqueueToken(input.Token{Kind: input.TokenEdit, Key: input.KeyTab})
+			}
+			releaseTab := func(in *input.State) { in.Kbd.SetKey(input.KeyTab, false) }
+			megamapStep(b, cl, pressTab)
+			if b.battleState().Modal() != ui.BattleModalOptions || !b.sess.Clock.Paused {
+				t.Fatal("Tab ignored the Options preference")
+			}
+			megamapStep(b, cl, releaseTab)
+			megamapStep(b, cl, pressTab)
+			megamapStep(b, cl, releaseTab)
+			if b.battleState().Modal() != ui.BattleModalClosed || b.sess.Clock.Paused {
+				t.Fatal("second Tab did not close Options and resume")
+			}
+			if b.cam.PresentationView() != view || b.cam.EffectiveZoom() != factor || b.zoomReturn.factor != 0 || b.megamapShown() {
+				t.Fatal("Tab changed the camera with Options selected")
+			}
+			megamapStep(b, cl, func(in *input.State) {
+				in.Kbd.SetKey(input.KeyF9, true)
+				in.EnqueueToken(input.Token{Kind: input.TokenEdit, Key: input.KeyF9})
+			})
+			if b.cam.EffectiveZoom() != b.cam.MinZoom() || b.zoomReturn.factor == 0 {
+				t.Fatal("Options preference disabled F9 overview")
+			}
+		})
+	}
+}
+
+func TestModernTabOptionsCancelsPendingOverview(t *testing.T) {
+	b, cl := megamapTestBattle(t, settings.OverviewMegamap)
+	b.sess.Gameplay = gameplay.Modern
+	cl.SetEnhanced(true)
+	cl.Input().Mouse.SetPosition(300, 200)
+	megamapStep(b, cl, func(in *input.State) { in.Kbd.SetKey(input.KeyTab, true) })
+	if !b.zoomTabPending {
+		t.Fatal("Overview did not retain the Tab press until release")
+	}
+	view, factor := b.cam.PresentationView(), b.cam.EffectiveZoom()
+	b.hostPresentation.Overview = settings.OverviewZoom
+	megamapStep(b, cl, func(in *input.State) { in.Kbd.SetKey(input.KeyTab, false) })
+	if b.zoomTabPending || b.zoomReturn.factor != 0 || b.cam.PresentationView() != view || b.cam.EffectiveZoom() != factor {
+		t.Fatal("changing Tab to Options left a pending overview release")
+	}
+}
+
 func TestChangingZoomPolicyCancelsOldInput(t *testing.T) {
 	b := zoomTestBattle()
 	b.sess = &session.Session{Gameplay: gameplay.Modern}

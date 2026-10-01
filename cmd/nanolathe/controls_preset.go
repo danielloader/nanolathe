@@ -136,11 +136,11 @@ var controlsPresetRows = []controlsPresetRow{
 	presentationRow("Group digits", 1, 1, presetUnchanged, func(p *settings.Presentation) *int { return &p.GroupNumbers }),
 	presentationRow("Wind/tide readout", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.WeatherReport }),
 	// The megamap rows are ProTA.ini's draw-engine keys
-	// (DESIGN_INTERFACE_HUD_INPUT §3.15). The retail preset returns the
-	// overview to Zoom and leaves the megamap's own preferences alone.
+	// (DESIGN_INTERFACE_HUD_INPUT §3.15). The retail preset returns Tab to
+	// Options and leaves the megamap's own preferences alone.
 	{
-		label: "Overview", community: settings.OverviewMegamap, retail: settings.OverviewZoom, zero: settings.OverviewMegamap,
-		names: []string{"Zoom", "Megamap"},
+		label: "Tab key", community: settings.OverviewMegamap, retail: settings.OverviewZoom, zero: settings.OverviewMegamap,
+		names: []string{"Options", "Overview"},
 		get:   func(g *gameShell) int { return g.presentation.Overview },
 		set: func(g *gameShell, value int) {
 			p := g.presentation

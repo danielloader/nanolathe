@@ -137,37 +137,17 @@ func ParseZoom(text string) (Zoom, error) {
 	return z, nil
 }
 
-// MinZoomFor is the minimum zoom of §16.7: the factor at which the view in
-// world pixels equals the playable map in whichever axis would first exceed
-// it, so the camera clamp never has to letterbox.
-//
-// The battle viewport is measured in framebuffer pixels; the world it shows is
-// that many pixels divided by the factor, so the view fits the map when
-// f >= viewSpan/mapSpan in both axes, and the floor is the larger of the two.
-// A degenerate map or viewport has no floor and returns ZoomFloor.
-//
-// The viewport spans passed in are the battle viewport's own — the framebuffer
-// less the chrome insets — because that is the rectangle the world is seen
-// through [03 §4.1].
+// MinZoomFor is Modern's full-map factor (DESIGN_GPU_RENDERER §16.7).
+// Use the smaller viewport/map ratio, rounded down, so both playable axes fit.
+// The spare axis is centred by Clamp. This is a presentation choice [I6].
 func MinZoomFor(viewW, viewH, mapW, mapH int32) Zoom {
-	z := ZoomFloor
-	if mapW > 0 && viewW > 0 {
-		// ceil so the view never ends up one world pixel wider than the map.
-		zx := Zoom((int64(viewW)*int64(ZoomUnit) + int64(mapW) - 1) / int64(mapW))
-		if zx > z {
-			z = zx
-		}
+	if mapW <= 0 || mapH <= 0 || viewW <= 0 || viewH <= 0 {
+		return ZoomFloor
 	}
-	if mapH > 0 && viewH > 0 {
-		zy := Zoom((int64(viewH)*int64(ZoomUnit) + int64(mapH) - 1) / int64(mapH))
-		if zy > z {
-			z = zy
-		}
-	}
-	if z > ZoomMax {
-		z = ZoomMax
-	}
-	return z
+	zx := Zoom(int64(viewW) * int64(ZoomUnit) / int64(mapW))
+	zy := Zoom(int64(viewH) * int64(ZoomUnit) / int64(mapH))
+	// Native must remain reachable even when the whole map already fits at 1x.
+	return min(max(min(zx, zy), 1), ZoomUnit)
 }
 
 // MinZoom is MinZoomFor for this camera: the battle viewport measured in
@@ -182,7 +162,23 @@ func (c *Camera) MinZoom() Zoom {
 	}
 	viewW := c.ViewW - OriginX
 	viewH := c.ViewH - 2*OriginY
+	if c.ViewportZoomFloor {
+		return viewportMinZoomFor(viewW, viewH, c.MapW, c.MapH)
+	}
 	return MinZoomFor(viewW, viewH, c.MapW, c.MapH)
+}
+
+// Legacy zoom keeps both axes filled, including its original 1/16 lower bound
+// (DESIGN_GPU_RENDERER §16.7). This is a host control policy, not retail zoom.
+func viewportMinZoomFor(viewW, viewH, mapW, mapH int32) Zoom {
+	z := ZoomFloor
+	if mapW > 0 && viewW > 0 {
+		z = max(z, Zoom((int64(viewW)*int64(ZoomUnit)+int64(mapW)-1)/int64(mapW)))
+	}
+	if mapH > 0 && viewH > 0 {
+		z = max(z, Zoom((int64(viewH)*int64(ZoomUnit)+int64(mapH)-1)/int64(mapH)))
+	}
+	return min(z, ZoomMax)
 }
 
 // ViewScaleForZoom names the rest STEP a factor is exactly on, and false for

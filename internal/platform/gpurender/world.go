@@ -40,6 +40,7 @@ func (r *Renderer) World(w drawlist.WorldSpace) {
 	r.submitSchedule()
 	if !w.Begin {
 		r.worldW, r.worldH = r.w, r.h
+		r.worldFilter = false
 		r.sched.clearWorld()
 		return
 	}
@@ -56,7 +57,17 @@ func (r *Renderer) World(w drawlist.WorldSpace) {
 		k = w.Factor / (float32(camera.ZoomOf(w.Step)) / float32(camera.ZoomUnit))
 	}
 	r.sched.setWorldTransform(k, w.OffsetX, w.OffsetY)
+	r.worldFilter = w.Step.Norm() == camera.ViewScaleDetail && k < 1
 	r.prepareArrival(w)
+}
+
+// worldFilterLane selects fractional-zoom sampling (§16.3).
+// Native, detail, overview and screen-space art retain their existing sampling.
+func (r *Renderer) worldFilterLane() float32 {
+	if r.worldFilter {
+		return 1
+	}
+	return 0
 }
 
 // clipW and clipH are the extent every family clips a world command against:

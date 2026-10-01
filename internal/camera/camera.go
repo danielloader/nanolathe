@@ -38,6 +38,11 @@ type Camera struct {
 	// that scale is one and the recording reaches pixels untouched.
 	Zoom Zoom
 
+	// ViewportZoomFloor retains the older viewport-filling floor and clamp.
+	// The host selects it for legacy controls; Modern fits the whole map
+	// instead (DESIGN_GPU_RENDERER §16.7). No simulation reads this preference.
+	ViewportZoomFloor bool
+
 	// Requested factor before the map floor, retained across the animation so
 	// a tactical stop remains distinct from native on small maps (§16.7).
 	requestedZoom Zoom
@@ -336,6 +341,14 @@ func (c *Camera) Clamp() {
 	leadX, _, leadZ, _ := c.clampInsets()
 	c.X = clampAxis(c.X, c.MapW, spanW, leadX)
 	c.Z = clampAxis(c.Z, c.MapH, spanH, leadZ)
+	// Full-map zoom: centre an axis the view has outgrown instead
+	// of applying the retail clamp to its inverted bounds (DESIGN_GPU_RENDERER §16.7).
+	if !c.ViewportZoomFloor && c.Zoom > 0 && spanW > c.MapW {
+		c.X = (c.MapW-spanW)/2 - leadX
+	}
+	if !c.ViewportZoomFloor && c.Zoom > 0 && spanH > c.MapH {
+		c.Z = (c.MapH-spanH)/2 - leadZ
+	}
 }
 
 // Drag pans by a screen-pixel delta via middle-drag, converted to world pixels
@@ -420,7 +433,7 @@ func (c *Camera) RequestedZoom() Zoom {
 // above its usual model cutoff (DESIGN_GPU_RENDERER §16.7, §16.10).
 func (c *Camera) TacticalAtFloor() bool {
 	return c != nil && c.requestedZoom > 0 && c.requestedZoom < ZoomUnit &&
-		c.requestedZoom < c.MinZoom() && c.EffectiveZoom() <= c.MinZoom()
+		c.requestedZoom <= c.MinZoom() && c.EffectiveZoom() <= c.MinZoom()
 }
 
 // setZoomAboutRaw is SetZoomAbout without the map-derived floor, so the step

@@ -10,6 +10,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
+	"github.com/nanolathe-gg/nanolathe/internal/settings"
 )
 
 // The Nanolathe screen's Controls page: a keyboard and mouse mapping view
@@ -72,6 +73,23 @@ func (s *nlScreen) controlsGroup() string { return nlControlGroups[s.ctlGroup] }
 // shared; callers only read it.
 func (s *nlScreen) controlActions() []input.Action {
 	return nlGroupActions()[s.controlsGroup()]
+}
+
+// controlRows uses the cached cards while keeping the Mouse tab's scrolling.
+// The profile belongs to the profile bar, rather than the table.
+func (s *nlScreen) controlRows() []*nlCard {
+	var rows []*nlCard
+	for _, page := range s.pages() {
+		if page.key != "controls" {
+			continue
+		}
+		for i := range page.cards {
+			if page.cards[i].key != "profile" {
+				rows = append(rows, &page.cards[i])
+			}
+		}
+	}
+	return rows
 }
 
 // keysDiffer counts the actions whose draft keys differ from the shell's.
@@ -644,19 +662,16 @@ func (s *nlScreen) drawMouseRows(screen *ebiten.Image, r screenkit.Rect) {
 	screenkit.Fill(screen, r, color.RGBA{8, 12, 8, 200})
 	screenkit.Outline(screen, r, 1*u, color.RGBA{50, 60, 46, 255})
 	bf, df := s.fonts.Body, s.fonts.Display
-	rowH := 58 * u
+	rowH := max(30, 58*u)
+	rows := s.controlRows()
+	visible := max(1, int((r.H-16*u)/rowH))
+	s.ctlScroll = max(0, min(s.ctlScroll, len(rows)-visible))
+	s.ctlTable = r
 	y := r.Y + 8*u
-	// The Controls page's cards are the rows, bar the profile, which the
-	// profile bar owns.
-	var cards []nlCard
-	for _, page := range s.pages() {
-		if page.key == "controls" {
-			cards = page.cards
-		}
-	}
-	for ci := range cards {
-		c := &cards[ci]
-		if c.key == "profile" {
+	for _, c := range rows[s.ctlScroll:min(len(rows), s.ctlScroll+visible)] {
+		if c.key == "zoomlock" {
+			s.drawZoomLockRow(screen, *c, screenkit.Rect{X: r.X, Y: y, W: r.W, H: rowH})
+			y += rowH
 			continue
 		}
 		v := c.get(&s.draft)
@@ -678,10 +693,61 @@ func (s *nlScreen) drawMouseRows(screen *ebiten.Image, r screenkit.Rect) {
 			bx += w + 6*u
 		}
 		y += rowH
-		if y+rowH > r.Y+r.H {
-			break
-		}
 	}
+	if len(rows) > visible {
+		track := screenkit.Rect{X: r.X + r.W + 8*u, Y: r.Y, W: 5 * u, H: r.H}
+		screenkit.Fill(screen, track, color.RGBA{20, 24, 20, 200})
+		th := track.H * float64(visible) / float64(len(rows))
+		ty := track.Y + (track.H-th)*float64(s.ctlScroll)/float64(len(rows)-visible)
+		screenkit.Fill(screen, screenkit.Rect{X: track.X, Y: ty, W: track.W, H: th}, color.RGBA{120, 200, 120, 220})
+		bf.Draw(screen, "Scroll for more controls.", r.X, r.Y+r.H+22*u, screenkit.Style{Size: 11.5 * u, Top: nlKicker})
+	}
+}
+
+// drawZoomLockRow keeps a 200-value preference compact: a track for broad
+// changes, one-percent buttons for precision, and a native reset. It still
+// uses the cached card and draft transaction (DESIGN_GPU_RENDERER §16.6).
+func (s *nlScreen) drawZoomLockRow(screen *ebiten.Image, c nlCard, r screenkit.Rect) {
+	u := s.u()
+	bf, df := s.fonts.Body, s.fonts.Display
+	bf.Draw(screen, c.label, r.X+16*u, r.Y+max(11, 22*u), screenkit.Style{Size: max(8, 13.5*u), Top: nlCream, Shadow: 0.1})
+	bf.Draw(screen, "Modern; reset to 1.00×", r.X+16*u, r.Y+max(23, 42*u), screenkit.Style{Size: max(6, 10.5*u), Top: nlDim})
+	minus, value, plus, reset, track := nlZoomLockRects(r, u)
+	s.button(screen, "ctl-zoomlock-minus", minus, "-", false, false, func() { s.step(c, c.get(&s.draft), -1) })
+	s.button(screen, "ctl-zoomlock-plus", plus, "+", false, false, func() { s.step(c, c.get(&s.draft), 1) })
+	s.button(screen, "ctl-zoomlock-reset", reset, "Reset", false, false, func() {
+		s.setCard(c, settings.ZoomLockDefaultPercent-settings.ZoomLockMinPercent)
+	})
+	v := c.get(&s.draft)
+	screenkit.Fill(screen, value, color.RGBA{14, 24, 14, 220})
+	screenkit.Outline(screen, value, max(1, u), color.RGBA{67, 100, 67, 255})
+	st := screenkit.Style{Size: max(9, 15*u), Top: nlCream, Align: 1}
+	df.Draw(screen, c.steps[v], value.X+value.W/2, value.Y+value.H/2+st.Size/2, st)
+	cy := track.Y + track.H/2
+	screenkit.Line(screen, track.X, cy, track.X+track.W, cy, max(1, 2*u), color.RGBA{55, 68, 52, 255})
+	dx := track.W * float64(settings.ZoomLockDefaultPercent-settings.ZoomLockMinPercent) / float64(len(c.steps)-1)
+	screenkit.Line(screen, track.X+dx, cy-3*u, track.X+dx, cy+3*u, max(1, u), nlDim)
+	kx := track.X + track.W*float64(v)/float64(len(c.steps)-1)
+	screenkit.Line(screen, track.X, cy, kx, cy, max(1, 2*u), nlGreen)
+	screenkit.Disc(screen, kx, cy, max(2, 4*u), nlCream)
+	s.hits.Add(screenkit.Region{ID: "ctl-zoomlock-track", Rect: track, Drag: func(x, _ float64) {
+		fraction := clamp((x-track.X)/track.W, 0, 1)
+		s.setCard(c, int(math.Round(fraction*float64(len(c.steps)-1))))
+	}})
+}
+
+// nlZoomLockRects shares the compact row's geometry with its pointer checks.
+// Minimum pixel sizes keep its value and buttons legible on a 640×480 canvas.
+func nlZoomLockRects(r screenkit.Rect, u float64) (minus, value, plus, reset, track screenkit.Rect) {
+	x, y := r.X+250*u, r.Y+4*u
+	gap, bw, bh := max(3, 8*u), max(20, 32*u), max(18, 28*u)
+	minus = screenkit.Rect{X: x, Y: y, W: bw, H: bh}
+	value = screenkit.Rect{X: minus.X + minus.W + gap, Y: y, W: max(52, 100*u), H: bh}
+	plus = screenkit.Rect{X: value.X + value.W + gap, Y: y, W: bw, H: bh}
+	reset = screenkit.Rect{X: r.X + r.W - 16*u - max(60, 100*u), Y: y, W: max(60, 100*u), H: bh}
+	th := max(8, 10*u)
+	track = screenkit.Rect{X: x, Y: r.Y + r.H - max(5, 7*u) - th/2, W: reset.X + reset.W - x, H: th}
+	return
 }
 
 // drawMouse is a mouse with what each button does under the chosen
@@ -723,6 +789,12 @@ func (s *nlScreen) drawMouse(screen *ebiten.Image, r screenkit.Rect) {
 	}
 	row(top+10*u, "Left button", leftText)
 	row(top+90*u, "Right button", rightText)
-	row(top+170*u, "Wheel", "Zoom the Enhanced view in steps.")
+	wheelText := "Modern smooth zoom pauses at Zoom lock."
+	if s.draft.pres.ZoomStyle == settings.ZoomStepped {
+		wheelText = "Modern zoom steps include Zoom lock."
+	} else if s.draft.pres.ZoomStyle == settings.ZoomNone {
+		wheelText = "Modern camera zoom is disabled."
+	}
+	row(top+170*u, "Wheel", wheelText)
 	row(top+250*u, "On the minimap", mini)
 }

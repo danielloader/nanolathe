@@ -26,7 +26,7 @@ func TestMomentumTailCannotAdvanceZoomAfterCooldown(t *testing.T) {
 			t.Fatal("GUI lost total scroll")
 		}
 		if copy.Mouse.ZoomScrollY != 0 {
-			zoom.Wheel(cam, 500, 300, float64(copy.Mouse.ZoomScrollY), now)
+			zoom.WheelStepped(cam, 500, 300, float64(copy.Mouse.ZoomScrollY), now)
 		}
 	}
 	// Active scrolling and the first momentum event may share a host poll.
@@ -51,6 +51,9 @@ func TestMomentumTailCannotAdvanceZoomAfterCooldown(t *testing.T) {
 	poll(3200)
 	if zoom.Target(cam) != camera.ZoomUnit/4 {
 		t.Fatal("fresh deliberate scroll did not advance")
+	}
+	for range 100 {
+		zoom.Step(cam)
 	}
 	// A new finger gesture can oppose residual momentum in the same poll.
 	// Even when total scrolling cancels, its direct zoom input survives.

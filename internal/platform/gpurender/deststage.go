@@ -161,7 +161,7 @@ func (r *Renderer) drawTintLight(f *formats.GAFFrame, x, y, clipX, clipY, clipW,
 	r.sched.quad(schedOpaque,
 		float32(dx0), float32(dy0), float32(dx1), float32(dy1),
 		float32(int(e.x)+col0), float32(int(e.y)+row0), float32(int(e.x)+col1), float32(int(e.y)+row1),
-		[4]float32{}, [4]float32{0, 0, 0, sceneOpTint})
+		[4]float32{}, [4]float32{0, r.worldFilterLane(), 0, sceneOpTint})
 	if lights != nil && lights.count > 0 {
 		// quad transforms destination coordinates, so evaluate the four RECORD
 		// corners explicitly instead of reading back the transformed vertices.

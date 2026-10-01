@@ -85,6 +85,8 @@ type Renderer struct {
 	// step (docs/DESIGN_GPU_RENDERER.md §16.3). Outside the region they are w
 	// and h, so an interface family clips exactly as it always did.
 	worldW, worldH int
+	// Colour/coverage filtering between native and detail zoom (§16.3).
+	worldFilter bool
 
 	// tileAtlases caches one tile-index atlas per (tile set identity, detail tile
 	// set identity, view scale), built on first Terrain draw at that scale and
@@ -344,6 +346,7 @@ func (r *Renderer) Execute(list *drawlist.List, w, h int) *ebiten.Image {
 	r.pointPlane.resetFrame()
 	r.glow.resetFrame()
 	r.worldW, r.worldH = r.w, r.h
+	r.worldFilter = false
 	r.arrival.packet = drawlist.Arrival{}
 	r.modelPrep.reset()
 	defer r.modelPrep.reset()

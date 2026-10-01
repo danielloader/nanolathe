@@ -202,6 +202,8 @@ func TestPausedForegroundOmitsWorldModelPreparation(t *testing.T) {
 func TestPausedWorldInvalidatesClampedTacticalMode(t *testing.T) {
 	c := pausedClient(t)
 	c.SetEnhanced(true)
+	// Retain the legacy same-geometry fixture; Modern now fits both map axes.
+	c.cam.ViewportZoomFloor = true
 	c.cam.MapW = c.cam.ViewW - camera.OriginX
 	c.cam.SetZoomAbout(200, 120, camera.ZoomUnit)
 	native, ok := c.PausedWorldDigest()

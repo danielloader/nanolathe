@@ -3316,11 +3316,37 @@ tile atlas's own border, so they need no clamp of their own, and the choice ride
 a vertex lane rather than a second shader, so the terrain still merges into the
 frame's own opaque run. At a rest step the lane is zero and the fetch is the
 nearest one this pass has always made, which is what keeps the §6 parity gate
-exact. Sprites, model commits and the fog atlas stay nearest. `TODO(question)`:
-a keyed source cannot be blended the same way — the four taps straddle the colour
-key, so the blend would have to weight by coverage and hand the composite a
-fractional alpha, which is an antialiased sprite edge and a look to approve
-rather than a correctness fix.
+exact. The fog atlas stays nearest.
+
+**Fractional-zoom filtering (2026-09-30).** Between 1× and 2×,
+keyed and tinted world sprites resolve each of four texels through PAL and
+then interpolate premultiplied colour and coverage. A transparent texel
+contributes zero colour and zero coverage, preventing colour-key fringes.
+Model body commits, with Supersample enabled, interpolate four neighbouring
+resolved 2×2 coverage blocks from the existing colour page, using sixteen
+texel reads instead of four. The model atlas's two-texel margin isolates these
+reads; sprite reads use the existing one-texel border. This trades a little
+sharpness and additional sampling work for steadier fractional motion. It is
+an Enhanced presentation choice, not retail behavior. Model alpha metadata is
+decoded to full or zero coverage before filtering, so a submerged tag cannot
+make an otherwise opaque hull translucent when refraction is disabled. Exact 1×,
+exact 2×, zoom below 1×, screen-space UI, single-sample models, underwater
+commits and model shadows keep their existing sampling. Terrain retains its
+existing colour filter. This adds no render target, temporal history or
+simulation state. The device fixture compares filtered submerged and ordinary
+opaque hulls with the identity Blue table and refraction disabled.
+
+Prototype validation: Great Divide, seed 7, 1280×720, 90 ticks, with the local
+commander selected, produces byte-identical before/after PNGs at exact 1× and
+2×. The short coastal benchmark (scene 5, seed 7, 1920×1080, 1.5×, 30 draws/s,
+two runtime workers, 180 measured draws) has matching scene metadata and
+190..236 moving units in both builds. Mean host DrawWork was 12.265 ms before
+and 12.414 ms after; cadence remained 33.345 ms. These single runs measure
+host work, not GPU execution, and are not a performance budget. The classic
+renderer also completed the native-scale scene. Both Enhanced captures were
+inspected; the benchmark had no burning features in view, so it does not
+validate the standing-fire case. These are prototype measurements, preceding
+the mode/configuration work below.
 
 **One screen pixel, exactly one.** A world quad that would shrink below one
 screen pixel is given a span of exactly 1.0, not "at least one". The world is
@@ -3387,31 +3413,67 @@ their final screen pixels. Strategic picking retains the transform actually
 submitted; paused-world and speculative recording identities include the precise
 camera samples. The entire live camera is restored after recording.
 
-### 16.6 The wheel, the steps and the ease — contract Z5
+### 16.6 Pinch, wheel and ease — contract Z5
+
+**Nanolathe Modern policy (user-authorized 2026-09-30).** Modern replaces the
+community megamap with this camera overview. `presentation.zoomStyle` selects
+`0` (Continuous/Smooth, default), `1` (Steps), or `2` (No zoom) for pinch and
+wheel together. No zoom returns to fixed native 1×, cancels active zoom and
+disables pinch, wheel, F9 and whole-map Tab zoom; ordinary panning remains,
+and Tab keeps its Options binding. It does not enable the community megamap
+or change the independently stored icon style. Community
+3.9 disables these camera zoom bindings and uses its separate megamap
+(DESIGN_INTERFACE_HUD_INPUT §3.15). Strict 3.1 retains the earlier three
+presets, fixed 500 ms wheel cooldown and 0.30 ease; its overview preference
+still selects the optional megamap. Registered rule sets inherit their base
+layer's host policy through the existing registry. This is presentation only:
+no new gameplay seam, RNG draws, resources, orders or save state [I6].
+
+**Preferred zoom lock (user-authorized 2026-09-30).** Controls → Mouse owns
+`presentation.zoomLockPercent`: an integer percentage, default `100` (1×),
+with 1% choices from `1` to `200`. Old files and unsupported values adopt 100.
+The active lock is the percentage rounded to the nearest 1/1024 and clamped to
+the battle's full-map floor; the stored preference is retained when a small map
+needs a higher floor. It replaces the native detent in Modern smooth zoom and
+the native stop in Modern stepped zoom. It adds no independent stop at 1×.
+For example, 120 selects approximately 1.2×, keeping the fractional filtering
+of §16.3; it does not change the record scales or make that factor pixel-exact.
+Strict and Community controls ignore this preference. It changes neither the
+default battle-entry factor nor explicit `--zoom` framing (§16.8).
 
 `camera.ZoomController` is the state machine, driven once per host Update from
-the battle's camera pass. Easing uses host Updates and scroll cooldown uses the
+the battle's camera pass. Easing uses host Updates and the lock's wheel hold uses the
 supplied monotonic host milliseconds; neither reads simulation time [I6].
 
-* **The steps.** `ZoomSteps` is the ascending list {0.25, 1, 2}: a tactical
-  overview, the default native view, and the detail view. Fractional stops above
-  1× were removed after visual feedback on uneven sprite and model scaling and
-  its mismatch with filtered terrain. The 0.25× overview shows four times the
-  native span on each axis when the map is large enough; smaller maps clamp to
-  the minimum factor that fills the viewport (§16.7), and that floor need not be
-  one of the named steps.
-* **The wheel** requires `ZoomScrollThreshold` of accumulated travel — 1000
-  thousandths, one Ebitengine wheel unit — so one conventional mouse click is one
-  step. A call moves at most one stop whatever the delta. After an accepted step
-  `ZoomScrollCooldownMillis` discards further scroll input for 500 host
-  milliseconds; discarded input neither accumulates nor extends the deadline, and
-  the triggering event's excess is discarded too, so a burst from 2× first
-  targets 1× and cannot queue a second jump to 0.25×. Below-threshold fractions
-  accumulate; reversing direction clears that remainder. A step refused at a zoom
-  limit does not start a cooldown. From a free factor the wheel takes the nearest
-  stop in its direction of travel, and zoom stays anchored at the pointer
-  throughout the animation. F9 and pinch bypass the cooldown and clear pending
-  wheel state.
+* **Smooth policy.** Pinch is continuous; the wheel makes small
+  proportional changes. Both share `SnapZoom` and `ZoomSnapPercent`: targets
+  within ±15% of the active lock, and input crossing the lock in either
+  direction, snap immediately to it. At the default this is approximately
+  0.85×..1.15× and snaps to exactly 1×. These are user-authorized renderer
+  preferences, not retail findings. The previous preset list {0.25, 1, 2}
+  remains available through `ZoomSteps` and `NextZoomStep`, but no longer drives
+  Modern's wheel or F9.
+* **Stepped policy.** The four usable stops are the full-map floor,
+  max(floor, 0.25×), the active lock and 2×, sorted in increasing order.
+  Duplicate stops collapse, and
+  targets below the map floor are skipped. Each pinch spends one stop after
+  0.12 net magnification, including a gesture spent against a limit. Each
+  wheel notch advances a stop; a multi-notch event can move several stops but
+  stops immediately at the lock and discards the rest of that burst. The lock's
+  quiet hold and wheel easing are the same as Smooth. Selecting Steps from
+  a free factor puts the camera on the nearest usable stop.
+* **The wheel** banks `ZoomScrollThreshold` of travel (1000 thousandths, one
+  Ebitengine wheel unit) for each notch. `n` signed notches multiply the target
+  by `ZoomWheelRatio^n` (1.25); a negative notch divides by 1.25. Multiple
+  notches in a host frame are spent together, clamped to the full-map floor and
+  2×. Away from the lock there is no cooldown. Arriving at it puts the live camera
+  there immediately, discards excess travel and holds until no wheel event has
+  arrived for `ZoomScrollCooldownMillis` (180 host milliseconds). Each ignored
+  event restarts that quiet interval; a long burst cannot skip the lock. A pause
+  also clears fractional travel. Reversal discards the old remainder and glide,
+  starting from the live view; cancelling inside the snap band reaches the lock
+  with the same hold. Accepted wheel input clears follow. The ease stays
+  anchored at the pointer. F9 and pinch clear pending wheel state.
 * **macOS two-finger scrolling** pans both axes in Enhanced. A local AppKit
   monitor uses `hasPreciseScrollingDeltas` to distinguish point-based touch
   scrolling from conventional wheel events; Magic Mouse touch scrolling also
@@ -3422,22 +3484,33 @@ supplied monotonic host milliseconds; neither reads simulation time [I6].
   `momentumPhase != 0` events never pan or zoom: movement stops on finger lift
   instead of continuing through the inertial tail. GUI controls retain all scroll
   events in Ebitengine wheel units.
-* **macOS pinch** accumulates signed magnification deltas until their net
-  magnitude reaches `pinchThreshold` (0.12), then requests one adjacent zoom
-  stop, anchored at the pointer sampled when the gesture began. Even a large,
-  reversed or long-held pinch cannot step again until a new gesture begins, and
-  an attempt at a zoom limit spends the gesture. End and cancel events retire it;
+* **macOS smooth pinch.** Pinch/spread continuously requests
+  arbitrary factors from the full-map floor to 2×, anchored at the pointer
+  sampled when the gesture began. Signed magnification moves a logarithmic
+  position relative to the lock at `pinchSensitivity` (2.0); a flat interval
+  of ±`pinchStickiness` (0.20) around zero resists leaving the lock. Factors
+  within its ±15% snap band reach it directly, bypassing the ease. At the
+  default the picture immediately uses the native projection. A gesture
+  approaching the band from either side snaps to the lock and stays there
+  until finger lift, including
+  a single large event that crosses the whole band. A fresh gesture can leave
+  the lock after overcoming the resistance and snap band; nearby factors are never
+  final targets. A new gesture starts from the live factor, snapping nearby
+  factors to the lock, and excess travel at either limit is discarded so reversal
+  responds immediately. Pinch writes the live factor directly, without the
+  wheel's ease, and clears camera follow. End and cancel events retire the gesture;
   cancellation does not undo an already accepted target. Ordered pinch events
   survive host batching and the semantic input copy. Blocked camera input cancels
   the active pinch.
 * **The ease** closes `ZoomEaseFraction` of the remaining gap per Update, moves
   at least one unit so an integer factor cannot stall, and settles outright
-  inside `ZoomSettleEpsilon`. It is what makes a notch a glide rather than a cut,
-  and it is the only time the live factor is off a step.
+  inside `ZoomSettleEpsilon`. The Modern fraction is 0.50, closing 87.5% of
+  the gap in three 30 Hz Updates. Wheel input glides; pinch follows the fingers
+  directly. The existing presentation transform interpolation remains §16.5.
 
 Every one of those names is a **feel-tuning knob**, not a derived value; the
 wheel and ease knobs live at the top of `internal/camera/zoomfeel.go` and
-`pinchThreshold` in `cmd/nanolathe/trackpad.go`. The native monitor implements
+the pinch knobs in `cmd/nanolathe/trackpad.go`. The native monitor implements
 these choices using Apple's gesture and scroll-event semantics and returns events
 unchanged; empty native polls stay empty rather than replaying Ebiten's copy, and
 other platforms retain Ebitengine wheel zoom with no device classification
@@ -3448,25 +3521,33 @@ active GUI list under the pointer [07 §2][07 §10], and the UI boundary still
 consumes it first: the camera pass sees only a wheel the chrome did not want, and
 takes it only over the battle viewport, only outside TALK, only with no modal
 open and the pointer off the minimap, and only in the executor that can present a
-free factor. Trackpad controls share these gates and additionally require window
-focus and no command palette or unit-info ownership. Skipping the camera pass
-clears gesture state.
+free factor. Wheel and trackpad controls also require window focus and no command
+palette or unit-info ownership. Placement rotation retains its modified wheel.
+Skipping the camera pass clears gesture state and wheel fractions/holds while
+preserving an accepted glide. Changing the selected mode, zoom style or active lock cancels
+the old gesture, glide and overview return before the new policy accepts input.
 
 ### 16.7 The minimum factor — contract Z6
 
-`Camera.MinZoom` is `max(viewW/mapW, viewH/mapH)` over the battle viewport and
-the playable map, rounded up: the factor at which the view in world pixels
-exactly covers the map in whichever axis runs out first, so the clamp never has
-to letterbox. Targets below it are clamped, both at the controller and at the
-camera. The viewport span is taken in framebuffer pixels, because the chrome does
-not move with the zoom.
+**Modern full-map floor.** `Camera.MinZoom` is
+`min(viewW/mapW, viewH/mapH)` over the battle viewport and the playable map,
+rounded down and bounded to 1/1024..1×, so native remains reachable even when
+the map already fits at 1×. Both playable axes fit at the floor.
+For a camera with an explicit zoom, an axis smaller than the visible span is
+centred, leaving space around the map. Targets below it are clamped at the controller and
+camera. The viewport span is taken in framebuffer pixels, because the chrome
+does not move with the zoom. The host sets `Camera.ViewportZoomFloor` for legacy
+and Community controls: the greater axis ratio rounded upward, bounded to
+1/16..2×, with the earlier clamp. Modern alone uses the full-map fit. These
+presentation choices change no simulation, RNG or resource behavior [I6].
 
 The camera also retains the requested factor before clamping. Wheel, pinch and F9
 navigate that request, so the tactical and native stops remain distinct even if
 the map floor gives them the same live factor; animation changes only the live
 factor, direct jumps retain the request, and classic step changes replace it with
 their own factor. In Enhanced presentation a sub-native request clamped by the
-floor becomes a full strategic view when the live factor reaches that floor,
+floor, or equal to it, becomes a full strategic view when the live factor
+reaches that floor,
 which makes the furthest-out stop usable on small maps and large framebuffers
 without turning an ordinary native view into icons. Before arrival the usual fade
 applies; at arrival models disappear, icons become fully opaque, and icon picking
@@ -3475,14 +3556,29 @@ exception immediately. The paused world cache includes this gate; resolution
 changes refit the retained tactical request to the new floor.
 
 The step writer deliberately does **not** apply this floor: a step is always at
-least 1×, and `clampAxis`'s view-larger-than-map domain stays exactly where
-[07 §10] left it.
+least 1×. Modern centring is applied around `clampAxis`, leaving the retail
+primitive intact. Camera tests cover full-map fit, collapsed stops, preferred-lock
+barriers, reversal, fractional wheel travel and wrapping host milliseconds.
+Host tests cover the three mode boundaries, both pinch styles, input ownership,
+overview return and the retained legacy controls. `TestPreferredZoomLockBandAndCrossings`,
+`TestPreferredZoomLockWheelHoldAndReset`, `TestCustomZoomLockDoesNotCatchNative`
+and `TestPreferredZoomStopsOrderAndCollapse` lock the custom band, burst hold
+and step ordering. Host tests exercise a 120% pinch, fresh-gesture departure,
+free passage through native, settings changes, overview return and mode bypass.
 
 ### 16.8 Runtime switches
 
-* **F9** in classic toggles 1× ↔ 2× about the viewport centre. Modern cycles 1× → 2× → 0.25× → 1× as animated targets,
-  sharing the wheel's step list; a free factor cycles to the first step above it,
-  wrapping to 0.25× at the top, and the map floor still applies.
+* **Modern Tab/F9.** With the Modern renderer, Modern saves the current factor
+  and precise camera origin, then jumps to the
+  full-map floor and centres the map. The next press restores that factor and
+  position, clamped for the current viewport; a saved factor near the preferred
+  lock snaps to it. It clears active pinch, wheel easing and follow. Bookmarks are not
+  restored from the snapshot. Entering classic clears the saved return view.
+  Tab acts on release, like the megamap. F2 opens Options. Community 3.9 takes
+  Tab for its megamap and ignores F9 and explicit battle-entry zoom; Strict 3.1
+  retains its 1× → 2× → 0.25× F9 cycle. Classic keeps its 1× ↔ 2× F9 cycle in
+  Modern and Strict, and Tab's options binding in Modern.
+  Modern No zoom disables F9 in both renderers and retains Tab for Options.
 * **The wheel** is §16.6.
 * **`--zoom`** accepts any factor in the free range for the modern executor and
   only 1 or 2 for classic — the restriction is applied after parsing,
@@ -3949,6 +4045,17 @@ capability. No aggregation, displacement or cluster counts: inspect dense overla
 before designing any.
 
 ### 18.7 Optional community icon configuration
+
+**Nanolathe Modern policy (user-authorized 2026-09-30).**
+`presentation.strategicIconStyle` selects `0` (Modern, default) or `1`
+(Community 3.9) in Modern. Modern symbols ignore the optional path and mod
+auto-discovery; Community icons use the authored mapping below. The Controls
+screen's Mouse tab exposes this independently of Smooth/Steps. A live change
+joins speculative recording, invalidates the paused world and accepted icon
+projection, and rebuilds the battle catalog once. Missing community art retains
+the generated fallback; no substitute historical art is invented. Community
+3.9's megamap keeps its own icon bank regardless of this Modern preference;
+Strict retains its existing optional custom-icon resolution.
 
 `settings.Presentation.StrategicIconConfig` is an optional host path to the
 community draw engine's

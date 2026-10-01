@@ -24,7 +24,7 @@ func TestMiddleDragChangesCameraOnly(t *testing.T) {
 
 // The view scale is presentation-only: setting it changes where a world point
 // lands on screen and nothing else [F-P1-008] (DESIGN_GPU_RENDERER §14.1). The
-// wheel is no longer a camera control, so the scale is set directly.
+// record scale is set directly here, independent of the selected zoom controls.
 func TestDetailScaleChangesPresentationOnly(t *testing.T) {
 	cam := &Camera{X: 50, Z: 50, ViewW: 640, ViewH: 480, MapW: 2000, MapH: 2000, Scale: 1}
 	// World point at (200,200) pixels

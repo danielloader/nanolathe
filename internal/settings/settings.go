@@ -612,7 +612,10 @@ type Presentation struct {
 	// BuildDrag lets a left drag while placing a structure lay a row, and
 	// Alt a grid, in the Enhanced renderer (DESIGN_INTERFACE_HUD_INPUT §3.11);
 	// off, each click places one site. On by default.
-	BuildDrag           int        `json:"buildDrag"`
+	BuildDrag int `json:"buildDrag"`
+	// StrategicIconStyle selects Modern generated icons or community art
+	// (DESIGN_GPU_RENDERER §18); StrategicIconConfig retains the art path.
+	StrategicIconStyle  int        `json:"strategicIconStyle"`
 	StrategicIconConfig string     `json:"strategicIconConfig"`
 	TeamColorNanolathe  int        `json:"teamColorNanolathe"`
 	PlayerStreamColors  [10]string `json:"playerStreamColors"`
@@ -627,6 +630,12 @@ type Presentation struct {
 
 	Renderer string `json:"renderer"`
 	FPS      int    `json:"fps"`
+	// ZoomStyle selects continuous, stepped or disabled camera input (DESIGN_GPU_RENDERER
+	// §16), independently of gameplay selection.
+	ZoomStyle int `json:"zoomStyle"`
+	// ZoomLockPercent is the preferred sticky factor for Modern camera input.
+	// One percent steps avoid storing a floating-point preference (§16.6).
+	ZoomLockPercent int `json:"zoomLockPercent"`
 	// ExpandedSidebar uses spare modern UI height for more authored controls.
 	// This is a Nanolathe presentation preference (interface design §3.3).
 	ExpandedSidebar int `json:"expandedSidebar"`
@@ -760,6 +769,7 @@ type Presentation struct {
 func DefaultPresentation() Presentation {
 	return Presentation{
 		Renderer: "modern", FPS: 60, ExpandedSidebar: 1, GroupNumbers: 1, Arrival: 1, PlacementWeaponRanges: 1,
+		ZoomStyle: ZoomSmooth, ZoomLockPercent: ZoomLockDefaultPercent, StrategicIconStyle: StrategicIconsModern,
 		MexSnapRadius: -1, WreckSnapRadius: -1, BuildRotateKey: "/", ClickSnapOverrideKey: "alt", BuildRotationOverlay: 1, BuildDrag: 1,
 		WaterSurface: DefaultEffectSwitch, WaterMotion: DefaultEffectSwitch, WaterFoam: DefaultEffectSwitch, HovercraftLandWash: DefaultEffectSwitch, WaterReflections: DefaultEffectSwitch,
 		ModelLight: DefaultEffectSwitch, GroundLight: DefaultEffectSwitch, GroundLightStrength: DefaultEffectStrength,
@@ -847,6 +857,7 @@ func (p *Presentation) Normalize() {
 		}
 	}
 	p.normalizeMegamap()
+	p.normalizeZoom()
 }
 
 // effectSwitches lists every Enhanced effect switch Normalize repairs

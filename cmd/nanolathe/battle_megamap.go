@@ -67,8 +67,15 @@ type megamapOptions struct {
 
 func (b *battleSession) megamapOptions() megamapOptions {
 	p := b.hostPreferences()
+	enabled := p.Overview == settings.OverviewMegamap
+	switch style := b.cameraControlStyle(); {
+	case style == battleZoomDisabled:
+		enabled = true
+	case style.modern():
+		enabled = false
+	}
 	o := megamapOptions{
-		enabled: p.Overview == settings.OverviewMegamap,
+		enabled: enabled,
 		wheel:   p.MegamapWheel&1 != 0, wheelMove: p.MegamapWheelMove&1 != 0,
 		doubleClickMove: p.MegamapDoubleClickMove&1 != 0, flash: p.MegamapFlash&1 != 0,
 		thresholds: render.MegamapRingThresholds{

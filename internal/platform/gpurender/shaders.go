@@ -272,12 +272,58 @@ func palAt(idx float) vec3 {
 	return imageSrc1AtFromSrc0Pos(imageSrc0Origin()+vec2(idx+0.5, palRow+0.5)).rgb
 }
 
+// Resolve each keyed texel before filtering its premultiplied colour
+// and coverage. Transparent keys contribute zero, never their palette colour.
+func keyedColorAt(pos vec2) vec4 {
+	tex := imageSrc0At(pos)
+	if tex.g < 0.5 {
+		return vec4(0.0)
+	}
+	return vec4(palAt(floor(tex.r*255.0+0.5)), 1.0)
+}
+
+func filteredKeyedColorAt(pos vec2) vec4 {
+	q := pos - imageSrc0Origin() - vec2(0.5)
+	b := floor(q)
+	f := q - b
+	o := imageSrc0Origin() + b + vec2(0.5)
+	c00 := keyedColorAt(o)
+	c10 := keyedColorAt(o+vec2(1.0, 0.0))
+	c01 := keyedColorAt(o+vec2(0.0, 1.0))
+	c11 := keyedColorAt(o+vec2(1.0, 1.0))
+	return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y)
+}
+
+// The model page is already colour. Each block resolves four coverage samples;
+// interpolating neighbouring resolved blocks removes the final nearest jump.
+func modelCoveredColorAt(pos vec2) vec4 {
+	c := imageSrc2AtFromSrc0Pos(pos)
+	// Alpha also carries the submerged tag (254/255). It is metadata,
+	// not partial coverage; decode it before filtering premultiplied colour.
+	if c.a > 0.5 {
+		return vec4(c.rgb, 1.0)
+	}
+	return vec4(0.0)
+}
+
+func modelColorBlockAt(b vec2) vec4 {
+	o := imageSrc0Origin() + b + vec2(0.5)
+	c00 := modelCoveredColorAt(o)
+	c10 := modelCoveredColorAt(o+vec2(1.0, 0.0))
+	c01 := modelCoveredColorAt(o+vec2(0.0, 1.0))
+	c11 := modelCoveredColorAt(o+vec2(1.0, 1.0))
+	return (c00+c10+c01+c11)/4.0
+}
+
 func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 	op := int(custom.w + 0.5)
 	idx := 0.0
 	if op == ` + fmt.Sprint(sceneOpSolid) + ` {
 		idx = floor(color.r + 0.5)
 	} else if op == ` + fmt.Sprint(sceneOpKeyed) + ` {
+		if custom.x > 0.5 {
+			return filteredKeyedColorAt(srcPos)
+		}
 		tex := imageSrc0At(srcPos)
 		if tex.g < 0.5 {
 			return vec4(0.0)
@@ -348,6 +394,21 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 		albedo := palAt(idx)
 		return vec4(modelFinish(albedo, metalGlint(albedo, battleLit(albedo, color.r, custom.z), glint), finish), 1.0) * custom.y
 	} else if op == ` + fmt.Sprint(sceneOpModelDirectCommit) + ` {
+		if custom.z > 0.5 && custom.y < 0.5 {
+			q := (srcPos-imageSrc0Origin())/2.0 - vec2(0.5)
+			f := q - floor(q)
+			b := floor(q)*2.0
+			c00 := modelColorBlockAt(b)
+			c10 := modelColorBlockAt(b+vec2(2.0, 0.0))
+			c01 := modelColorBlockAt(b+vec2(0.0, 2.0))
+			c11 := modelColorBlockAt(b+vec2(2.0, 2.0))
+			c := mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y)
+			c.rgb += (vec3(c.a)-c.rgb)*color.rgb
+			if custom.x > 0.5 {
+				c *= 0.5
+			}
+			return c
+		}
 		// The direct lane's commit: srcPos interpolates the 2× atlas texel of
 		// the pixel, one texel into its block; floor back to the block and
 		// resolve the four texels by coverage (§22). With the Supersample
@@ -461,6 +522,13 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 		// copied through unchanged (§13.3).
 		return vec4(imageSrc0At(srcPos).rgb, 1.0)
 	} else if op == ` + fmt.Sprint(sceneOpTint) + ` {
+		if custom.y > 0.5 {
+			c := filteredKeyedColorAt(srcPos)
+			if custom.x > 0.5 {
+				c.rgb = min(c.rgb + (vec3(0.2)*c.a+c.rgb*0.8)*color.rgb, vec3(c.a))
+			}
+			return c*0.5
+		}
 		// The ALP families' premultiplied half-colour fragment. Source-over adds
 		// the destination's own half, which is floor((src + dst)/2) per channel up
 		// to the device's rounding [03 §4.3.4](§13.2 ALP row). The key test is the

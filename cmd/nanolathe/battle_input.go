@@ -526,14 +526,13 @@ func (b *battleSession) handleBattleShortcuts(in *input.State, cl *client.Client
 		b.adjustGameSpeed(-1)
 	}
 	// F9 and F10 are Nanolathe bindings, not retail's: retail's dispatcher has
-	// no case for either key (DESIGN_GPU_RENDERER §14.6). F9 toggles the view
-	// scale about the viewport centre; F10 asks the window adapter to swap
+	// no case for either key (DESIGN_GPU_RENDERER §14.6). F9 follows the selected
+	// host camera policy (§16.8); F10 swaps
 	// executors. Both are presentation-only — the simulation cannot tell which
 	// scale or which executor is active [I6].
 	if !ctrlHeld && kbd.KeyDown(input.KeyF9) {
-		// The modern executor cycles the same three factors as animated zoom
-		// targets; the classic one steps the record scale as it always did
-		// (DESIGN_GPU_RENDERER §16.8).
+		// Modern returns to the saved combat view on the second press; legacy
+		// controls retain their presets and Community uses its megamap.
 		b.toggleViewScale(cl.Enhanced())
 	}
 	if !ctrlHeld && kbd.KeyDown(input.KeyF10) {

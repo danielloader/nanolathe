@@ -1980,13 +1980,18 @@ end uses the original options background; battle uses the game's tiled window ba
 BUTTONS0 and stagebuttn2/3 from the game assets supply the buttons and controls.
 No retail asset is copied into the repository or changed on disk.
 
-The page contains captioned Renderer (Classic / Modern) and Gameplay
-(Strict 3.1 / Modern) rows. Compact FPS (30 / 60 / 120), Sidebar (Off / On),
-Glow, Water, Lights, Metal, Heat and Marks controls carry
-their own names. The two captioned rows use a tight caption-plus-control
-pitch and the switches sit directly together at their authored height, so the
+The page contains a captioned Gameplay (Strict 3.1 / Community 3.9 / Modern)
+row. Compact Renderer (Classic / Modern), FPS (30 / 60 / 120), Sidebar (Off / On),
+Modern Zoom (Smooth / Steps), Modern Icons (Modern / Community 3.9),
+Glow, Water, Lights, Metal, Heat and Marks controls carry their own names.
+The icon button abbreviates Community as Comm to fit the authored font; its
+help spells out the full name. The captioned row uses a tight pitch and the
+switches sit directly together at their authored height, so the
 page fits the in-battle column as well as the front-end one without reaching
-Restore Defaults or Undo Changes.
+Restore Defaults or Undo Changes. Zoom and icons preview live and share the
+ordinary page Undo, defaults, Cancel and persistence transactions. Their Modern
+mode boundary is DESIGN_GPU_RENDERER §16.6 and §18.7. The main-menu Controls
+screen's Mouse table scrolls when these and the existing rows exceed its height.
 
 Gameplay defaults to Modern, independently of the renderer, and follows
 DESIGN_WEAPONS_PROJECTILES §2.3.1. The remaining controls default to Modern,
@@ -2406,10 +2411,10 @@ by a simulation phase, and is not saved [I6].
   by a pixel from a build without the feature; the same holds at 2×
   when the factor is on the step.
 * **Its writers.** F9 in the battle, which in classic toggles the step
-  1× ↔ 2× about the viewport centre and in modern cycles
-  1× → 2× → 0.25× → 1× as animated zoom targets; **the mouse wheel over the battle
-  viewport**, which in the modern executor steps a zoom target through the
-  fixed factors about the pointer (below); middle-drag through `Drag`, which converts the
+  1× ↔ 2× about the viewport centre and in the modern prototype toggles the
+  full-map view and the saved combat view (DESIGN_GPU_RENDERER §16.8);
+  **the mouse wheel over the battle viewport**, which in the modern prototype
+  changes a target proportionally about the pointer (below); middle-drag through `Drag`, which converts the
   screen delta by the inverse of the factor before panning; `--zoom` with
   `--shot-focus`, which takes a free factor for modern and one of the two
   views for classic; and, with `--zoom` unset, native 1× at battle entry for
@@ -2421,11 +2426,20 @@ by a simulation phase, and is not saved [I6].
   goes first. What DESIGN_GPU_RENDERER §16.6 adds is a Nanolathe binding on
   the wheel the chrome did not want: over the battle viewport, outside TALK,
   with no modal open and the pointer off the minimap, and only while the modern
-  executor presents, one wheel notch moves the zoom target one step along
-  the fixed list {0.25, 1, 2}, wheel-up zooming in
-  and the world point under the pointer staying put; a trackpad's fractions
-  bank until they are worth a notch. The live factor eases toward that target
-  on the host Update grid, so a notch is a glide between two steps. The
+  executor presents, Smooth multiplies the target by 1.25 per upward
+  notch or divides it by 1.25 per downward notch, clamped to full map..2×.
+  Pinch and wheel share a configurable snap band: near targets and crossings
+  land immediately on the preferred stop, defaulting to exactly 1×. Controls →
+  Mouse owns Zoom lock (`presentation.zoomLockPercent`, default 100); 120
+  chooses approximately 1.2× and replaces the native stop in both Smooth and
+  Steps. Modern zoom also offers No zoom: fixed native 1×, no pinch, wheel,
+  F9 or whole-map Tab zoom, with panning intact and Tab opening Options.
+  The choice is Modern host policy and is ignored by Strict and
+  Community controls. Wheel input then needs 180 host milliseconds of quiet
+  before a new burst can leave the stop; pinch needs a fresh gesture.
+  The world point under the pointer stays put; fractional wheel travel banks
+  until it is worth a notch. The live wheel factor eases toward its target
+  on the host Update grid; pinch follows the fingers directly. The
   classic executor takes no wheel zoom at all.
 
 What the scale does to every world-space layer, the 2× art it selects and the
@@ -3499,12 +3513,17 @@ recorded in [community patch engine §5.10](../research/extensions/community-pat
 **Policy.** The megamap is a host presentation preference modelled on the
 ProTA 4.8 draw engine's full-screen minimap
 ([ProTA 4.8 shipped megamap](../research/extensions/draw-engine-interface.md#prota-48-shipped-megamap)).
-It never selects gameplay: it does not read `gameplay.Mode`, enters no
-digest, fingerprint or save, and reads only the committed frame, the immutable
-catalog and terrain, and host input [I6]. `presentation.overview` chooses the
-overview: `0` (**Zoom**, the default) is today's behaviour — Tab and F2 open
-options and the modern wheel is §16's smooth zoom — and `1` (**Megamap**)
-installs the view below. Both renderers draw it identically because it is one
+It enters no digest, fingerprint or save, and reads only the committed frame,
+the immutable catalog and terrain, and host input [I6].
+**Nanolathe Modern policy (user-authorized 2026-09-30):** the host selects the
+overview from the selected set's existing base layer. Modern uses camera zoom
+instead of this megamap (DESIGN_GPU_RENDERER §16.6–16.8); Tab or F9 fits the
+whole map and returns, with F2 opening Options. Community 3.9 always uses the
+megamap and disables pinch/wheel camera zoom and F9. Strict 3.1 retains the
+`presentation.overview` preference: `0` (Zoom, default) keeps Tab/F2 options and
+the earlier three camera presets; `1` (Megamap) installs the view below.
+Modern with the Classic renderer keeps its earlier Tab/F9 controls.
+Both renderers draw the community megamap identically because it is one
 indexed surface recorded after the world, not a camera factor: it is **not**
 §16's strategic view and changes no zoom step, floor or picker there. The
 simulation keeps running while it is shown.
@@ -3514,7 +3533,7 @@ with ProTA 4.8's `ProTA.ini` values as defaults except where noted:
 
 | Key | Default | Patch key |
 |---|---|---|
-| `overview` | 0 (Zoom) | `FullScreenMinimap` |
+| `overview` (Strict 3.1 only) | 0 (Zoom) | `FullScreenMinimap` |
 | `megamapWheel` | 1 | `WheelZoom` |
 | `megamapWheelMove` | 1 | `WheelMoveMegaMap` |
 | `megamapDoubleClickMove` | 0 | `DoubleClickMoveMegamap` |
@@ -3952,7 +3971,18 @@ modifiers, and names a hovered key's actions plain, with Shift and with
 Ctrl. The Mouse tab explains the two Interface Types on a drawn mouse (§3.5)
 and holds the behaviour switches: mouse buttons, selection rules,
 double-click, factory ×100, digit keys, order drag, build drag, the Tab key
-and the snap-override key.
+and the snap-override key. It also owns Modern zoom style (No zoom, Steps or
+Continuous), Zoom lock and
+strategic-icon style (DESIGN_GPU_RENDERER §§16.6 and 18.7). Zoom lock displays
+the preferred factor, with one-percent minus/plus buttons, a draggable track
+and Reset to 1.00×. The track handles broad changes while the buttons select
+an exact percentage. The row has a 30-pixel minimum height so its value,
+buttons and track remain separate at 640×480; the scrollable table keeps every
+control reachable. Changes use the ordinary draft, Apply and Cancel transaction.
+Controls presets include `presentation.zoomLockPercent`; unrelated graphics or
+rules presets and selecting a controls profile preserve it. Tests cover draft
+and saved-preset ownership, restart persistence, scoped presets and actual pointer
+hits at 640×480, 1560×900 and 1920×1080.
 
 **Live preview.** Behind everything a small real battle plays, staged off
 the game goroutine the way the film route stages its shots
@@ -4160,6 +4190,24 @@ than compiled from every feature bank per scene, about half of a scene's
 staging before. The generated strategic icon atlas is a function of the icons'
 art keys alone and is drawn once per key set (`internal/client`), although each
 scene's catalog is a fresh clone.
+
+**Content reuse and asset scope.** A content set compiles the settings screen's
+authored catalog once. Each scene composes from its own clone, including an
+unmutated comparison scene; rule preparation and mutators never write to the
+cached base. The same content set retains immutable decoded texture banks, model
+geometry and reachable feature banks across scene loads. Each battle gets fresh
+loaded-model identities and animation cursors. A content reload creates a new
+cache.
+
+Before loading art, each fixture declares every unit it can create: initial and
+scheduled units, queued products, commanders, offscreen support and placement
+ghosts. Only those models and their linked projectile/corpse/successor assets are
+prepared, along with the terrain's admitted features and independent scene
+weapons such as meteors. Ordinary battle entry keeps full preparation. Texture
+banks still use the complete namespace to preserve entry precedence; authoritative
+terrain, simulation-art metadata, HUD art and detail synthesis retain their
+existing loading paths. This scope reduces repeated catalog and art work without
+cropping the simulation map or moving file reads into a simulation tick.
 
 **Input and persistence.** A grouped-effects wheel changes only the selected row
 and stops at its endpoints. Controls wheel scrolling survives redraw; keyboard

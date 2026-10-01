@@ -6,12 +6,16 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
+	"github.com/nanolathe-gg/nanolathe/internal/session"
+	"github.com/nanolathe-gg/nanolathe/internal/settings"
 )
 
 // These lock Nanolathe's presentation choices, not retail behavior (§16.6).
-func TestPinchStopsAtNativeUntilANewGesture(t *testing.T) {
+func TestLegacyPinchStopsAtNativeUntilANewGesture(t *testing.T) {
 	b := zoomTestBattle()
+	b.sess = &session.Session{Gameplay: gameplay.Strict31}
 	b.cam.Zoom = camera.ZoomMax
 	feed := func(events ...input.PinchEvent) {
 		b.applyTrackpadGestures(&input.MouseState{Pinches: events}, true, 400, 250)
@@ -53,6 +57,7 @@ func TestPinchStopsAtNativeUntilANewGesture(t *testing.T) {
 func TestPinchCancellationAndViewportOwnership(t *testing.T) {
 	for _, cancel := range []bool{false, true} {
 		b := zoomTestBattle()
+		b.sess = &session.Session{Gameplay: gameplay.Strict31}
 		b.applyTrackpadGestures(&input.MouseState{Pinches: []input.PinchEvent{{Began: true, Delta: 0.05}}}, true, 400, 250)
 		b.applyTrackpadGestures(&input.MouseState{Pinches: []input.PinchEvent{{Cancelled: cancel, Delta: 0.5}}, PanX: 200}, cancel, 400, 250)
 		b.applyTrackpadGestures(&input.MouseState{Pinches: []input.PinchEvent{{Delta: 0.5}}}, true, 400, 250)
@@ -102,6 +107,9 @@ func TestTrackpadCameraPassOwnership(t *testing.T) {
 	for _, gate := range []string{"viewport", "classic", "unfocused", "chrome", "modal"} {
 		t.Run(gate, func(t *testing.T) {
 			b := newTestBattle(testCatalogON05(), testWorldON05(300, 300))
+			p := settings.DefaultPresentation()
+			p.ZoomStyle = settings.ZoomStepped
+			b.hostPresentation = &p
 			b.millisSource = &fakeMillisSource{}
 			cl, err := client.New(client.Options{Buffer: &frame.Buffer{}, Width: 640, Height: 480})
 			if err != nil {
@@ -135,5 +143,46 @@ func TestTrackpadCameraPassOwnership(t *testing.T) {
 				t.Fatalf("blocked camera input leaked: %+v", b.cam)
 			}
 		})
+	}
+}
+
+func TestSmoothPinchCatchesNativeAndRequiresFreshTravel(t *testing.T) {
+	b := zoomTestBattle()
+	b.cam.Zoom = camera.ZoomMax
+	feed := func(events ...input.PinchEvent) {
+		b.applyTrackpadGestures(&input.MouseState{Pinches: events}, true, 400, 250)
+	}
+	feed(input.PinchEvent{Began: true, Delta: -1})
+	if b.cam.EffectiveZoom() != camera.ZoomUnit {
+		t.Fatal("large crossing skipped native")
+	}
+	feed(input.PinchEvent{Delta: -1}, input.PinchEvent{Delta: 1, Ended: true})
+	if b.cam.EffectiveZoom() != camera.ZoomUnit {
+		t.Fatal("same gesture escaped the native latch")
+	}
+	feed(input.PinchEvent{Began: true, Delta: -0.05})
+	if b.cam.EffectiveZoom() != camera.ZoomUnit {
+		t.Fatal("fresh gesture left native too easily")
+	}
+	feed(input.PinchEvent{Delta: -0.2, Ended: true})
+	if z := b.cam.EffectiveZoom(); z >= camera.ZoomUnit-camera.ZoomNativeSnapRadius || z <= b.cam.MinZoom() {
+		t.Fatalf("fresh gesture did not leave the snap band continuously: %v", z)
+	}
+}
+
+func TestSteppedPinchVisitsFourStopsOnePerGesture(t *testing.T) {
+	b := zoomTestBattle()
+	p := settings.DefaultPresentation()
+	p.ZoomStyle = settings.ZoomStepped
+	b.hostPresentation = &p
+	b.cam.Zoom = camera.ZoomMax
+	for _, want := range []camera.Zoom{camera.ZoomUnit, camera.ZoomUnit / 4, b.cam.MinZoom()} {
+		b.applyTrackpadGestures(&input.MouseState{Pinches: []input.PinchEvent{{Began: true, Delta: -3}, {Delta: -3, Ended: true}}}, true, 400, 250)
+		for range 100 {
+			b.zoom.Step(b.cam)
+		}
+		if b.cam.EffectiveZoom() != want {
+			t.Fatalf("stepped pinch reached %v, want %v", b.cam.EffectiveZoom(), want)
+		}
 	}
 }

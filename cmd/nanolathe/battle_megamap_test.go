@@ -6,6 +6,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
@@ -13,10 +14,12 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
 )
 
-// megamapTestBattle is the ON-05 fixture with the overview preference set.
+// megamapTestBattle exercises the selectable legacy overview; the reserved
+// Modern/Community mode boundary is tested in battle_zoom_test.go.
 func megamapTestBattle(t *testing.T, overview int) (*battleSession, *client.Client) {
 	t.Helper()
 	b := newTestBattle(testCatalogON05(), testWorldON05(64, 48))
+	b.sess.Gameplay = gameplay.Strict31
 	p := settings.DefaultPresentation()
 	p.Overview = overview
 	b.hostPresentation = &p

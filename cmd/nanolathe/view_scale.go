@@ -15,6 +15,13 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 )
 
+// battleZoomReturn remembers the view F9 left, without copying camera follow
+// or bookmarks that may change while the overview is shown (§16.8).
+type battleZoomReturn struct {
+	factor camera.Zoom
+	view   camera.PresentationView
+}
+
 // battleViewCentre is the screen point a scale change is taken about: the
 // centre of the battle viewport, the world region `(128,32)..(W-1,H-33)` the
 // chrome is painted over [03 §4.1][07 R-HUD-05]. Zooming about it keeps the
@@ -66,21 +73,26 @@ func (b *battleSession) wheelZoom(x, y int32, dy float64) {
 	if b == nil || b.cam == nil {
 		return
 	}
+	b.syncCameraControls()
+	style := b.cameraControlStyle()
+	if style.disabled() || dy == 0 {
+		return
+	}
 	mx, my := beamAnchor(x, y)
 	if b.millisSource == nil {
 		b.millisSource = newMonotonicMillisSource()
 	}
-	b.zoom.Wheel(b.cam, mx, my, dy, b.millisSource.Millis32())
-}
-
-// setBattleZoom aims the battle at a free factor about the viewport centre,
-// animated. It is the modern executor's F9 (§16.8).
-func setBattleZoom(b *battleSession, z camera.Zoom) {
-	if b == nil || b.cam == nil {
-		return
+	now := b.millisSource.Millis32()
+	switch style {
+	case battleZoomStepped:
+		b.zoom.WheelStepped(b.cam, mx, my, dy, now)
+	case battleZoomLegacy:
+		b.zoom.WheelLegacy(b.cam, mx, my, dy, now)
+	default:
+		b.zoom.Wheel(b.cam, mx, my, dy, now)
 	}
-	mx, my := beamAnchor(battleViewCentre(b.cam))
-	b.zoom.SetTarget(b.cam, mx, my, z)
+	b.cam.ClearFollow()
+	b.pendingFollowInput = nil
 }
 
 // jumpBattleZoom puts the battle on a factor outright, with no animation,
@@ -124,6 +136,10 @@ func applyEntryZoom(opts Options, b *battleSession) {
 	if b == nil || b.cam == nil {
 		return
 	}
+	b.syncCameraControls()
+	if b.cameraControlStyle().disabled() {
+		return
+	}
 	z := entryZoom(opts)
 	if z == camera.ZoomUnit {
 		return
@@ -152,11 +168,17 @@ func viewZoomOf(b *battleSession) camera.Zoom {
 	return b.cam.EffectiveZoom()
 }
 
-// toggleViewScale is F9. In the classic executor it is the 1x, 2x step cycle about the viewport centre; modern cycles 1x, 2x, 0.25x as
-// animated zoom targets (§16.8). It is a Nanolathe binding,
+// toggleViewScale is F9. Classic keeps its 1x, 2x step cycle. The modern
+// controls jump to the full map, then restore the prior factor and position
+// on the next press (§16.8). It is a Nanolathe binding,
 // not a retail one — retail's dispatcher has no case for F9 or F10 (§14.6).
 func (b *battleSession) toggleViewScale(modern bool) {
 	if b == nil || b.cam == nil {
+		return
+	}
+	b.syncCameraControls()
+	style := b.cameraControlStyle()
+	if style.disabled() {
 		return
 	}
 	if !modern {
@@ -165,9 +187,29 @@ func (b *battleSession) toggleViewScale(modern bool) {
 		fmt.Fprintf(os.Stderr, "nanolathe: view scale %s\n", next)
 		return
 	}
-	next := nextZoomTarget(b.cam.RequestedZoom())
-	setBattleZoom(b, next)
-	fmt.Fprintf(os.Stderr, "nanolathe: view scale %s\n", next)
+	if style == battleZoomLegacy {
+		mx, my := beamAnchor(battleViewCentre(b.cam))
+		b.zoom.SetTargetLegacy(b.cam, mx, my, nextZoomTarget(b.cam.RequestedZoom()))
+		return
+	}
+	b.zoom.Reset()
+	b.gestures = battleGestures{}
+	mx, my := battleViewCentre(b.cam)
+	if saved := b.zoomReturn; saved.factor > 0 {
+		b.cam.SetPresentationView(saved.view)
+		b.zoomReturn = battleZoomReturn{}
+	} else {
+		factor := b.cam.EffectiveZoom()
+		factor = camera.SnapZoom(factor, factor, b.zoomLock())
+		if factor != b.cam.EffectiveZoom() {
+			jumpBattleZoom(b, mx, my, factor, true)
+		}
+		b.zoomReturn = battleZoomReturn{factor: factor, view: b.cam.PresentationView()}
+		jumpBattleZoom(b, mx, my, b.cam.MinZoom(), true)
+		b.cam.JumpToBattleViewCenter(b.cam.MapW/2, b.cam.MapH/2)
+	}
+	b.cam.ClearFollow()
+	b.pendingFollowInput = nil
 }
 
 // followExecutor returns the view to native 1x when the classic executor takes
@@ -183,13 +225,14 @@ func (b *battleSession) followExecutor(enhanced bool) {
 	if !switched {
 		return
 	}
+	b.zoomReturn = battleZoomReturn{}
 	mx, my := battleViewCentre(b.cam)
 	jumpBattleZoom(b, mx, my, camera.ZoomUnit, false)
 }
 
-// nextZoomTarget is the modern F9 cycle, 1x -> 2x -> 0.25x -> 1x (§16.8).
-// It shares the wheel's targets; a free factor goes to the first step above
-// it, wrapping to the lowest step when there is none.
+// nextZoomTarget retains the earlier F9 preset cycle for legacy controls:
+// 1x -> 2x -> 0.25x -> 1x. A free factor goes to the first step above it,
+// wrapping to the lowest step when there is none.
 func nextZoomTarget(current camera.Zoom) camera.Zoom {
 	if next, ok := camera.NextZoomStep(current, true); ok {
 		return next

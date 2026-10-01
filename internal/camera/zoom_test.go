@@ -71,28 +71,50 @@ func TestZoomAboutAPointKeepsTheWorldPointFixed(t *testing.T) {
 	}
 }
 
-// The minimum factor is the one at which the battle viewport, measured in world
-// pixels, exactly covers the playable map in the axis that runs out first, so
-// the clamp never has to letterbox (§16.7).
-func TestMinZoomFitsTheMapWithoutLetterboxing(t *testing.T) {
+// The full-map floor uses the smaller ratio rounded down, so both playable
+// axes fit. The spare axis is centred and may have space around it (§16.7).
+func TestMinZoomShowsTheFullMapAndCentresTheSpareAxis(t *testing.T) {
 	cam := &Camera{ViewW: 1024, ViewH: 768, MapW: 4096, MapH: 2048}
 	minZ := cam.MinZoom()
+	if minZ != 224 {
+		t.Fatalf("full-map floor = %s, want 0.21875x", minZ)
+	}
 	// Below the floor the request is refused outright.
 	cam.SetZoomAbout(OriginX, OriginY, minZ/2)
 	if got := cam.EffectiveZoom(); got != minZ {
 		t.Fatalf("a request below the floor gave %s, want the floor %s", got, minZ)
 	}
-	// At the floor the view fits inside the map on both axes.
-	cam.Zoom, cam.Scale = minZ, minZ.Step()
+	// At the floor the complete map fits inside the view on both axes.
 	w, h := cam.BattleView()
-	if w > cam.MapW || h > cam.MapH {
-		t.Fatalf("at the floor the battle view is %dx%d world pixels, larger than the %dx%d map", w, h, cam.MapW, cam.MapH)
+	if w < cam.MapW || h < cam.MapH {
+		t.Fatalf("at the floor the %dx%d battle view cannot show the %dx%d map", w, h, cam.MapW, cam.MapH)
 	}
-	// One unit below it, one axis would not fit — the floor is tight, not slack.
-	cam.Zoom = minZ - 1
+	x, z := cam.BattleViewOrigin()
+	if x != 0 || z+h/2 != cam.MapH/2 {
+		t.Fatalf("full map was not centred: viewport origin (%d,%d), size %dx%d", x, z, w, h)
+	}
+	// One unit above it would cut off an axis: the full-map floor is tight.
+	cam.Zoom = minZ + 1
 	w2, h2 := cam.BattleView()
-	if w2 <= cam.MapW && h2 <= cam.MapH {
-		t.Fatalf("one unit under the floor still fits (%dx%d in %dx%d); the floor is not tight", w2, h2, cam.MapW, cam.MapH)
+	if w2 >= cam.MapW && h2 >= cam.MapH {
+		t.Fatalf("one unit above the floor still shows the full map (%dx%d in %dx%d)", cam.MapW, cam.MapH, w2, h2)
+	}
+}
+
+func TestFullMapFloorRoundsDownAndKeepsNativeReachable(t *testing.T) {
+	for _, tc := range []struct {
+		viewW, viewH, mapW, mapH int32
+		want                     Zoom
+	}{
+		{897, 704, 4096, 2048, 224}, // A non-integer limiting ratio rounds down.
+		{896, 704, 2048, 4096, 176}, // The vertical ratio can be the smaller one.
+		{896, 704, 256, 256, ZoomUnit},
+		{1, 1, 1 << 20, 1 << 20, 1},
+		{0, 704, 4096, 2048, ZoomFloor},
+	} {
+		if got := MinZoomFor(tc.viewW, tc.viewH, tc.mapW, tc.mapH); got != tc.want {
+			t.Fatalf("view %dx%d map %dx%d: floor %s, want %s", tc.viewW, tc.viewH, tc.mapW, tc.mapH, got, tc.want)
+		}
 	}
 }
 

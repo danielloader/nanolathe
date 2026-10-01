@@ -69,6 +69,9 @@ func (c *Client) SetStrategicIconCatalog(icons *StrategicIconCatalog) {
 	if c == nil {
 		return
 	}
+	c.JoinPreRecord()
+	c.pausedWorldRevision++
+	c.BumpPresentationEpoch()
 	c.strategicIcons = icons
 	c.strategicDraw = strategicLayoutScratch{}
 	c.strategicPick = strategicLayoutScratch{}

@@ -6,7 +6,9 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
+	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
 
@@ -18,9 +20,10 @@ func zoomTestBattle() *battleSession {
 
 // F9 keeps the viewport's centre anchored through the renderer's target
 // cycle (DESIGN_GPU_RENDERER §16.8), including the modern wrap to 0.25x.
-func TestF9CyclesTheViewScaleAboutTheViewportCentre(t *testing.T) {
+func TestLegacyF9CyclesTheViewScaleAboutTheViewportCentre(t *testing.T) {
 	for _, modern := range []bool{false, true} {
 		b := zoomTestBattle()
+		b.sess = &session.Session{Gameplay: gameplay.Strict31}
 		b.cam.X, b.cam.Z = 2000, 1500
 		mx, my := battleViewCentre(b.cam)
 		wx, wz := b.cam.X+mx, b.cam.Z+my
@@ -48,8 +51,9 @@ func TestF9CyclesTheViewScaleAboutTheViewportCentre(t *testing.T) {
 // gesture is drawn under it once the ease has settled (§16.5, §16.6). The
 // pointer is a framebuffer point; wheelZoom is the seam that converts it to the
 // camera's beam pixels, and the judge is the drawn pixel, not the inverse.
-func TestWheelZoomKeepsTheWorldUnderThePointer(t *testing.T) {
+func TestLegacyWheelZoomKeepsTheWorldUnderThePointer(t *testing.T) {
 	b := zoomTestBattle()
+	b.sess = &session.Session{Gameplay: gameplay.Strict31}
 	b.cam.X, b.cam.Z = 2000, 1500
 	px, py := int32(400), int32(250)
 	wx, wz := b.cam.X+px, b.cam.Z+py
@@ -190,6 +194,8 @@ func TestClampedOverviewAcrossZoomInputs(t *testing.T) {
 	for _, method := range []string{"wheel", "pinch", "F9", "capture"} {
 		t.Run(method, func(t *testing.T) {
 			b := zoomTestBattle()
+			b.sess = &session.Session{Gameplay: gameplay.Strict31}
+			b.syncCameraControls()
 			b.cam.ViewW, b.cam.ViewH, b.cam.MapW, b.cam.MapH = 1920, 1080, 1600, 3968
 			// This floor exceeds 1x, so geometric zoom alone cannot distinguish
 			// the native and tactical stops.
@@ -220,6 +226,8 @@ func TestClampedOverviewAcrossZoomInputs(t *testing.T) {
 
 func TestResolutionChangeRefitsClampedOverview(t *testing.T) {
 	b := zoomTestBattle()
+	b.sess = &session.Session{Gameplay: gameplay.Strict31}
+	b.syncCameraControls()
 	b.cam.MapW, b.cam.MapH = 1600, 3968
 	c, err := client.New(client.Options{Width: 640, Height: 480})
 	if err != nil {

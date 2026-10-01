@@ -302,17 +302,21 @@ func nanolatheOptionsPage(window *gui.Window) error {
 	button.Status = 0
 	label.Link = ""
 	label.Rect.X, label.Rect.W = button.Rect.X, button.Rect.W
-	// The page has to fit the in-battle column as well as the front-end one, so
-	// the two captioned rows use a tight caption-plus-control pitch and the
-	// presentation switches carry their own names in their stage text instead of
-	// spending a caption line each (DESIGN_INTERFACE_HUD_INPUT §3.4.1).
+	// Compact Renderer leaves room for the two Modern camera preferences above
+	// Restore in the shorter battle column. Gameplay keeps its caption because
+	// a registered rule set may replace one of its stage labels
+	// (DESIGN_INTERFACE_HUD_INPUT §3.4.1).
 	const captionedPitch, switchPitch = 40, 20
 	y := label.Rect.Y
+	renderer := button
+	renderer.Name, renderer.SourceName, renderer.Text, renderer.Stages = "NRENDER", "NRENDER", "Render: Classic|Render: Modern", 2
+	renderer.Rect.Y = y
+	kept = append(kept, renderer)
+	y += switchPitch
 	for _, row := range []struct {
 		name, title, text string
 		stages            uint8
 	}{
-		{"NRENDER", "Renderer", "Classic|Modern", 2},
 		{"NGAMEPLAY", "Gameplay", "Strict 3.1|Community 3.9|Modern", 3},
 	} {
 		caption, control := label, button
@@ -330,10 +334,18 @@ func nanolatheOptionsPage(window *gui.Window) error {
 	}{
 		{"NFPS", "FPS: 30|FPS: 60|FPS: 120", 3},
 		{"NSIDEBAR", "Sidebar: Off|Sidebar: On", 2},
+		{"NZOOM", "Zoom: Smooth|Zoom: Steps|Zoom: Off", 3},
+		{"NICONS", "Icons: Modern|Icons: Comm 3.9", 2},
 	} {
 		control := button
 		control.Name, control.SourceName, control.Text, control.Stages = row.name, row.name, row.text, row.stages
 		control.Rect.Y = y
+		switch row.name {
+		case "NZOOM":
+			control.Help = "Modern camera zoom: continuous, stepped, or off at 1x. Free zoom requires the Modern renderer."
+		case "NICONS":
+			control.Help = "Modern strategic icons: generated symbols or the running content's Community 3.9 art. Missing art keeps generated symbols."
+		}
 		kept = append(kept, control)
 		y += switchPitch
 	}
@@ -372,6 +384,8 @@ func (g *gameShell) syncNanolatheOptions() {
 	}
 	optionsPanel.SetStageAt(optionsPanel.Index("NRENDER"), boolInt(g.presentation.Renderer == "modern"))
 	g.syncNanolatheFPSStage()
+	optionsPanel.SetStageAt(optionsPanel.Index("NZOOM"), g.presentation.ZoomStyle)
+	optionsPanel.SetStageAt(optionsPanel.Index("NICONS"), g.presentation.StrategicIconStyle)
 	// The Enhanced switches. Glow reads the display block; the others
 	// read the presentation block (DESIGN_GPU_RENDERER §30).
 	optionsPanel.SetStageAt(optionsPanel.Index("NGLOW"), boolInt(g.display.Glow != 0))
@@ -420,6 +434,10 @@ func (g *gameShell) activateNanolatheOption(name string) bool {
 		return true
 	case "NSIDEBAR":
 		p.ExpandedSidebar = g.retailOptionsStage(name, 2, boolInt(p.ExpandedSidebar != 0))
+	case "NZOOM":
+		p.ZoomStyle = g.retailOptionsStage(name, 3, p.ZoomStyle)
+	case "NICONS":
+		p.StrategicIconStyle = g.retailOptionsStage(name, 2, p.StrategicIconStyle)
 	case "NRENDER":
 		stage := g.retailOptionsStage(name, 2, boolInt(p.Renderer == "modern"))
 		p.Renderer = "classic"
@@ -493,12 +511,13 @@ func gameplayOptionStage(mode gameplay.Mode) int {
 
 // Each options page restores only fields it owns; host input preferences live
 // on the Orders page and share the ordinary options transaction. This page's
-// family shortcuts write every switch of their families, and Marks the trail
-// strength, so those are what its Cancel, Undo and Restore Defaults take back;
+// camera choices and family shortcuts are its fields; Marks owns the trail
+// strength too, so Undo and Restore Defaults take all of those back;
 // the glint and the soft shadows are no shortcut's and stay as they are.
 func (g *gameShell) setNanolathePreferences(p settings.Presentation) {
 	next := g.presentation
 	next.Renderer, next.FPS, next.ExpandedSidebar = p.Renderer, p.FPS, p.ExpandedSidebar
+	next.ZoomStyle, next.StrategicIconStyle = p.ZoomStyle, p.StrategicIconStyle
 	for _, f := range effectFamilies {
 		f.restore(&next, p)
 	}

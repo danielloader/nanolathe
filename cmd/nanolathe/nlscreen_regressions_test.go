@@ -233,6 +233,29 @@ func TestNLScreenScrollViewsKeepWheelPosition(t *testing.T) {
 	}
 }
 
+func TestNLScreenMouseScrollMakesLastControlReachable(t *testing.T) {
+	oldW, oldH := nlScreenW, nlScreenH
+	nlScreenW, nlScreenH = 1560, 900
+	t.Cleanup(func() { nlScreenW, nlScreenH = oldW, oldH })
+	_, s := settingsRegressionScreen(nil, settings.Defaults())
+	s.fonts = screenkit.LoadFonts()
+	s.art = &nlArt{}
+	rows := s.controlRows()
+	s.ctlScroll = len(rows)
+	r := screenkit.Rect{W: 700, H: 606}
+	s.hits.Begin()
+	s.drawMouseRows(ebiten.NewImage(900, 700), r)
+	s.hits.End()
+	if s.ctlScroll == 0 || s.ctlTable != r {
+		t.Fatal("Mouse table did not keep a scrollable viewport")
+	}
+	last := len(rows) - 1 - s.ctlScroll
+	s.hits.Update(screenkit.Input{X: 285, Y: 8 + float64(last)*58 + 26}, 0)
+	if s.hits.Hot() != "ctl-snapkey-0" {
+		t.Fatalf("last Mouse control is unreachable: hovered %q", s.hits.Hot())
+	}
+}
+
 func TestModPlacementRangeRecommendationPrecedence(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		mod := &modlibrary.Mod{Metadata: modlibrary.Metadata{Config: &modlibrary.Config{

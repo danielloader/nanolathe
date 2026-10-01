@@ -281,7 +281,7 @@ func (r *Renderer) drawKeyed(f *formats.GAFFrame, x, y, clipX, clipY, clipW, cli
 	r.sched.quad(schedOpaque,
 		float32(x+col0), float32(y+row0), float32(x+col1), float32(y+row1),
 		float32(int(e.x)+col0), float32(int(e.y)+row0), float32(int(e.x)+col1), float32(int(e.y)+row1),
-		[4]float32{}, [4]float32{0, 0, 0, sceneOpKeyed})
+		[4]float32{}, [4]float32{r.worldFilterLane(), 0, 0, sceneOpKeyed})
 }
 
 // drawPCX reproduces uiBlitPCXClippedRaw: an opaque 1:1 copy of the PCX pixels

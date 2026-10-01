@@ -104,11 +104,17 @@ type battleSession struct {
 	radarOptions uint32
 
 	// zoom is smooth zoom's state machine (DESIGN_GPU_RENDERER §16.6): the
-	// factor the wheel and F9 aim at, and the ease that carries the camera
+	// factor the wheel aims at, and the ease that carries the camera
 	// there on the host Update grid. It is presentation-only [I6] and is idle
 	// in the classic executor, which has no free zoom.
-	zoom     camera.ZoomController
-	gestures battleGestures
+	zoom                            camera.ZoomController
+	gestures                        battleGestures
+	zoomReturn                      battleZoomReturn // Modern overview's saved combat view (§16.8)
+	cameraStyle                     battleCameraStyle
+	cameraStyleSeen, zoomTabPending bool
+	iconStyle                       int
+	iconConfig                      string
+	iconStyleSeen                   bool
 	// executorSeen and executorEnhanced remember the executor the previous
 	// viewer step saw, so a switch to classic can return the view to 1x
 	// (DESIGN_GPU_RENDERER §14.6).
@@ -681,6 +687,7 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 	applyCommunityHUDOptions(cl, b.hostPreferences())
 	applyEffectStrengths(cl, b.hostPreferences())
 	b.placeEntryCamera(cl.Size())
+	b.syncCameraControls()
 	// Every successful battle rebuild, including a load, empties the visible
 	// message span before old source handles can be reused [08 R-ENTRY-01 §3].
 	cl.MessageRing().Clear()
@@ -713,11 +720,7 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 	cl.SetMessageLogos(b.hud.logos)
 	// Strategic icons use the HUD team logos; generic contacts retain the radar
 	// art/options bindings (DESIGN_GPU_RENDERER §18.4).
-	icons, iconErr := battleStrategicIcons(b.cat, b.hostPreferences().StrategicIconConfig, b.iconRoots)
-	if iconErr != nil {
-		fmt.Fprintln(os.Stderr, iconErr)
-	}
-	cl.SetStrategicIconCatalog(icons)
+	b.syncStrategicIcons(cl)
 	cl.SetHoverScripts(b.cat)
 	cl.SetStrategicBlipArt(b.hud.radarBlipGAF)
 	if b.hud.logos != nil {
@@ -1041,6 +1044,8 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 		return
 	}
 	b.followExecutor(cl.Enhanced())
+	b.syncCameraControls()
+	b.syncStrategicIcons(cl)
 	if b.stepArrival(delta, cl) {
 		return
 	}
@@ -1065,6 +1070,8 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 	defer func() {
 		if !gesturesServiced {
 			b.gestures = battleGestures{}
+			b.zoom.CancelWheel()
+			b.zoomTabPending = false
 		}
 	}()
 	if b.developer.host.enabled {
@@ -1237,7 +1244,7 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 	// The Megamap overview takes Tab: the press is consumed and its release
 	// toggles the view; the wheel enters and leaves it
 	// (DESIGN_INTERFACE_HUD_INPUT §3.15).
-	if !talkOwned && b.serviceMegamapTab(keyDown(input.KeyTab), in, cl) {
+	if !talkOwned && (b.serviceMegamapTab(keyDown(input.KeyTab), in, cl) || b.serviceZoomOverviewTab(keyDown(input.KeyTab), in, cl)) {
 		residual := *in
 		residual.ShortcutToken, residual.ShortcutTokenMode = input.Token{}, true
 		in = &residual
@@ -1404,13 +1411,15 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 		// pass only ever sees a wheel the chrome did not want, and takes it only
 		// over the world, only outside TALK, and only in the executor that can
 		// present a free factor.
-		if cl.Enhanced() && !talkActive && !modalActive && !overMinimap && !b.megamapTakesWheel() &&
-			mouse.ZoomScrollY != 0 && !b.communityPlacementWheelOwned(in) && b.overBattleViewport(mx, my) {
+		cameraInput := cl.Enhanced() && focused && !talkActive && !talkOwned && !modalActive &&
+			!overMinimap && !b.megamapShown() && !b.palettePointerOwned && !unitInfoOpen() && b.overBattleViewport(mx, my)
+		wheelInput := cameraInput && !b.megamapTakesWheel() && !b.communityPlacementWheelOwned(in)
+		if wheelInput && mouse.ZoomScrollY != 0 {
 			b.wheelZoom(mx, my, float64(mouse.ZoomScrollY))
+		} else if !wheelInput {
+			b.zoom.CancelWheel()
 		}
-		b.applyTrackpadGestures(mouse, cl.Enhanced() && focused && !talkActive && !talkOwned && !b.megamapShown() &&
-			!modalActive && !overMinimap && !b.palettePointerOwned && !unitInfoOpen() &&
-			b.overBattleViewport(mx, my), mx, my)
+		b.applyTrackpadGestures(mouse, cameraInput, mx, my)
 		gesturesServiced = true
 		// One Update of the ease, whatever produced the target. It runs
 		// unconditionally so a target set by F9 or by the wheel of an earlier

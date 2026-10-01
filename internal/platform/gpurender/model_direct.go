@@ -1366,7 +1366,7 @@ func (r *Renderer) commitModelDirect(g *drawlist.ModelGeometry) {
 	r.sched.quad(schedOpaque,
 		float32(x0), float32(y0), float32(x1), float32(y1),
 		sx0, sy0, sx0+2*float32(x1-x0), sy0+2*float32(y1-y0),
-		[4]float32{emission[0], emission[1], emission[2], 0}, [4]float32{cloak, r.modelSampleLane(), 0, sceneOpModelDirectCommit})
+		[4]float32{emission[0], emission[1], emission[2], 0}, [4]float32{cloak, r.modelSampleLane(), r.worldFilterLane(), sceneOpModelDirectCommit})
 }
 
 // commitModelDirectShadow compiles one subject's shadow commit: a command

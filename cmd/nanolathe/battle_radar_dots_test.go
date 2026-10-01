@@ -12,6 +12,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
+	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/visibility"
 )
@@ -139,6 +140,23 @@ func TestModernRadarDotLeftClickQueuesAttack(t *testing.T) {
 	pending := b.sess.PendingHumanCommands()
 	if len(pending) != 1 || pending[0].Kind != session.HumanOrder || pending[0].Order.Target != target || pending[0].Order.Code != hud.LatchToCode(input.LatchAttack) {
 		t.Fatalf("dot left click queued %+v", pending)
+	}
+}
+
+// A contextual right press over a hostile contact must reach ordinary attack
+// dispatch before the empty-ground move gesture can capture it.
+func TestModernRadarDotRightClickBypassesMoveDrag(t *testing.T) {
+	for _, queued := range []bool{false, true} {
+		b, target := radarDotBattle(t, gameplay.Modern, settings.RadarDotsAttackable)
+		b.cl.SetFocused(true)
+		b.interfaceType = settings.InterfaceTypeRightClick
+		mods := input.Modifiers{Shift: queued}
+		dragInput(b, b.cl, 320, 180, input.MouseButtonRight, "press", mods)
+		dragInput(b, b.cl, 328, 180, input.MouseButtonRight, "release", mods)
+		pending := b.sess.PendingHumanCommands()
+		if len(pending) != 1 || pending[0].Kind != session.HumanOrder || pending[0].Order.Code != hud.LatchToCode(input.LatchAttack) || pending[0].Order.Target != target || pending[0].Order.Queued != queued || b.modernDrag != nil {
+			t.Fatalf("right click with queued=%v produced %+v, want contact attack", queued, pending)
+		}
 	}
 }
 

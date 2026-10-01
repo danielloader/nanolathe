@@ -106,6 +106,12 @@ func (b *battleSession) beginCommandDrag(cl *client.Client, mouse input.MouseSta
 			if target != 0 || pos == nil || pos.HasFeature {
 				return false
 			}
+			// An admitted hostile radar dot owns the contextual attack press;
+			// it is not empty ground for a move drag (interface design
+			// "Modern radar dots"). Explicit Alt-left movement stays above.
+			if h, _ := b.pickRadarAttackTarget(mx, my, input.LatchNormal); h != 0 {
+				return false
+			}
 			button = input.MouseButtonRight
 		}
 		if len(b.dragMoveActors(f)) == 0 {

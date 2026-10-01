@@ -4863,7 +4863,10 @@ hostile contact may supply a target for a contextual order or an armed Attack
 click. The existing cursor weapon admission and ordinary typed command path
 remain authoritative; left-click follows the configured interface convention,
 and Shift retains normal queued-order behavior. An attackable contact prevents
-the Shift resource-construction shortcut from treating the dot as empty ground.
+the Shift resource-construction shortcut and idle right-click move drag from
+treating the dot as empty ground. A contextual right press attacks immediately,
+so pointer movement before release cannot turn it into a Move order; explicit
+Alt-left movement keeps its existing gesture.
 Losing contact admission,
 changing the viewer, or reusing a slot cannot preserve a cached target.
 
@@ -4877,6 +4880,7 @@ There is no new simulation mechanic or extra targeting accuracy.
 committed rule publication and rebind behavior, normal/fade/strategic zoom,
 projection/clip/overlap boundaries, lost admission and blink, and the absence of
 identified hover metadata. Command tests lock contextual/armed/queued attacks
-and the rejection of non-attack contact actions, with unchanged RNG/resource
+and the rejection of non-attack contact actions, including contextual right
+presses followed by pointer movement, with unchanged RNG/resource
 state before command application. Settings tests lock omitted/default/invalid
 values, persisted No dots and Attackable dots, mod layers and settings Apply.

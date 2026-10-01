@@ -1213,7 +1213,7 @@ what it allocates or writes:
 | 18 | path class layer | ([04 R-DOC04-B]) |
 | 19 | wind seed | wind change interval ← 5000, wind deadline ← 0, then the wind routine is called once: its gate is `deadline < globalTick`, i.e. `0 < 0`, false — **no draw**, the wind-active flag ← 0 ([05 R-PROD-01 §3], [R-CORE-02]) |
 | 20 | renderer scratch | `TEMP XFORM PTS` (2400 bytes), `TEMP PROJECTED PTS` (1600), `ASSEM PTS` (160) |
-| 21 | **scheduler block** | scaled-clock anchor ← now; global tick ← 0; kind 3 only: requested speed ← 10 and active speed ← 10; fractional carry ← 0. (Kinds 1 and 2 keep whatever the speed words already hold; their writers are open in the tail.) |
+| 21 | **scheduler block** | scaled-clock anchor ← now; global tick ← 0; kind 3 only: requested speed ← 10 and active speed ← 10; fractional carry ← 0. Kinds 1 and 2 retain the speed words loaded from preferences or changed through options. |
 | 22 | meteor scheduler | active ← 0, next strike ← the authored value, weapon resolved by name ([01 R-CORE-01], [06 §6.5]) |
 | 23 | minimap surface | ([03], [fmt tnt]) |
 | 24 | **per-player reset** | for every slot whose controller byte is non-zero: the economy/statistics block is zeroed (stocks, incomes, expenditures, the sharing thresholds and flags — [05 R-P0-01]), the per-player timers ← global tick (0), the storage-bonus flag cleared (the two bonus operands sit outside the zeroed span and keep their value — on a load the `Player%i` reader overwrites both and the flag, so a restored player holds the saved bonus, ["Player records"]), six selection/target words reset (four to 0, two to 0xffff), a per-player byte map of `(cellW/2)·(cellH/2)` entries (rounded up to 8) re-allocated and zeroed, the `SQUADS` table (ten 32-byte squad records) allocated; then **unless** the controller is 3 (remote), the **AI record** is constructed — the ten task records with their initial thresholds ([08 R-AI-01 §1]) and the strategic state, whose constructor makes the **eight simulation draws** of [R-DET-01 §4] ("AI player setup") — and the per-side classifier table entry is built. Humans get an AI record too; only remote peers do not. Then the AI profile is loaded from resource slot 7, falling back to `ai\default.txt` ([R-AI-01 §12]), and for every computer-controlled slot the difficulty tables are applied. |
@@ -1221,6 +1221,17 @@ what it allocates or writes:
 | 26 | **explosion-frame builder** | the `CalcedExplosion` tables: table 0 = 12 frames of radius 64 down by 4; table 1 = 15 frames from radius 128 stepping `(16−128)/15 = −7`; table 2 = 15 frames from 200 stepping `(32−200)/15 = −11` (C integer division); one CRT draw per generated pixel on the **worker thread's** stream (391,606 draws, [06 R-WFX-01 §6]); the explosion pool's 300 records and 1,800 debris records (the six debris animation names cycling) are initialised ([04 R-COB-04 §4/§5]); the *Explosions* percent byte goes 20 → 50 → 100 |
 | 27 | command tables | the three battle command tables registered ([07 R-CAM-01 §6]) |
 | 28 | counters | every slot's *units ever created* ← 0; the game-over latch bits cleared again; the ally-icon byte ← 0xff; the thirty statistic words and the two frame counters zeroed |
+
+**Established — single-player speed comes from the preference state.** At
+startup the preference loader reads `gamespeed` (absent → 10) into the requested
+speed word and copies it into the active speed word. The interface options
+`GAME` slider writes both through the shared speed setter `[07 R-CAM-01 §3]`;
+Restore writes 10 to both, and Undo or Cancel restores both from the options
+entry snapshot. The startup reset and world rebuild force 10 only for kind 3,
+so a fresh campaign or skirmish retains these preference/options values. During
+battle the scheduler may adapt the active word independently `[01 §4.3]`;
+an in-battle save restores its scheduler block instead
+["Scheduler and random state in saves"].
 
 Steps 24 and 26 are the only ones that draw: eight simulation draws per
 constructed AI record (slot order 0..9, humans included), and the CRT
@@ -8654,10 +8665,6 @@ body and are not restated here.
 - The identities of the eleven interface words and the one flag word the
   world rebuild resets before loading content · [R-ENTRY-01 §3] · static
   trace of their readers (doc 07).
-- The writers of the requested/active speed words in effect at a fresh
-  campaign or skirmish battle (entry writes them only for multiplayer) ·
-  [R-ENTRY-01 §3], [R-ENTRY-01 §9] · static trace of the speed words'
-  writers (options screen / registry).
 - The readers of the loading state's *watching* table, and therefore
   whether an all-zero table has any single-player effect · [R-OOS-01 §2]
   · static trace of the table's readers.

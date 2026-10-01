@@ -476,9 +476,11 @@ service stays enabled throughout supported single-player scope, so a new
 mutable enable flag is unnecessary here. I03 owns ordered token service; the
 shared I06 toggle/radio mutation path is implemented.
 
-`TODO(question)`: Nanolathe has no identified authored battle-root
-`MAIN2.GUI` opener. Retail builds that root before the successful transition;
-its integration must preserve that timing when the root owner is implemented.
+Battle HUD entry loads and builds the side-prefix `MAIN2.GUI` root before
+the first successful transition disables startup preclear; later entries
+retain that process-lifetime state.
+Its resolved header panel is retained for the empty-selection painter
+`[07 §6]` `[07 R-WGT-01 §3]`.
 Actual command, options, confirmation and result windows build at their runtime
 open, after the transition. The options caller relabels the already-built
 MISSION caption, retaining the originally assigned accelerator. Results
@@ -717,6 +719,16 @@ An immobile attacker's ATTACK shape is range-tested through
 weapon link on the committed-view copy and asked the combat service's own
 unit-to-unit or point admission gate, so an out-of-range tower shows
 `cursortoofar` `[07 §8][06 R-WPN-05 §9]`.
+
+The idle Type-0, MOVE and REPAIR assistance shapes use
+`CursorSelection.RepairAdmits`, bound to `session.CursorRepairAdmits`. A
+private queue on the committed actor copy supplies the immutable sea level to
+the order resolver's shared repair admission. Thus a construction aircraft
+does not advertise assistance on a wholly submerged structure. Idle additionally
+requires a nonzero remaining-build fraction. MOVE uses the shared admission
+without code 2's extra unsigned health comparison, preserving retail's shape
+for an over-full or death-latched live target `[07 §8][04 R-ORD-01 §7]
+[04 R-ORD-02 §7]`.
 
 The same chooser is the armed click's front door. `battle_commands.go`'s
 `orderSelected` issues an armed order only when the reduced shape is an action
@@ -1101,8 +1113,8 @@ localized possessive-tail question remains owned by `[08 R-CAMP-01 §9]`.
 block, the rail art, the GUI windows, the fonts, the radar surface and the
 display size. The rest is split by concern: `battle_hud_assets.go` is the asset
 resolution and its diagnostics; `battle_hud_pages.go` the command-window
-selection (`<prefix>gen.gui` for an empty selection, the per-unit window
-otherwise, the generated `<unit>N.GUI` numbered pages) and the gadget art and
+selection (closed for an empty selection, `<prefix>gen.gui` for generic orders
+or multiple selection, and the generated `<unit>N.GUI` numbered pages) and the gadget art and
 frame choice; `battle_hud_siderail.go` the rail draw, the command-button
 verdicts (staged, greyed, hidden) and the product captions and queue counts
 `[07 R-HUD-03 §6]` `[07 R-P0-11 §2]`; `battle_hud_input.go` the rail's click
@@ -1745,6 +1757,11 @@ its bottom border at the surface edge, where retail shows it at 640×480;
 stock CORE art ends in a purple row that a mirrored or tiled copy would repeat
 mid-rail. A surface no taller than the art keeps the retail stamp. The radar,
 strips and rail controls draw over the backdrop exactly as before.
+With no selected units, the retained side-prefix `MAIN2.GUI` header panel
+draws over that backdrop at its native authored origin and size. This reveals
+the stock faction emblem without stretching it; the host backdrop remains
+visible below the root at taller sizes. No command window is opened and no
+command input is admitted for that state `[07 §6]` `[07 R-HUD-05]`.
 `TestRailWindowReachesBelowArt` locks the extent test; seeded `--shot`
 comparisons against the retail path must match outside the rail columns.
 
@@ -1832,12 +1849,16 @@ Sound Mode's Mono-versus-3D choice is applied to the audio device (see
 DESIGN_PRESENTATION_CLIENT §2.6). `Interface Type` is consumed by the battle pointer and cursor
 paths: a shell battle reads its live in-memory stage, and a direct battle copies
 the loaded stage at entry, with no per-frame preferences read `[07 R-CAM-01
-§5]`. `gamespeed` is consumed only from the in-battle arm: the
-front-end root has no session to apply it to, and battle entry is the reader
-there.
+§5]`. Fresh campaign and skirmish battles copy the shell's live `gamespeed`
+into both scheduler speed words at client installation; direct entry uses its
+loaded preference block. The front-end slider therefore supplies the next
+battle's speed, and the in-battle arm applies changes immediately. Save loads
+retain their restored scheduler and the isolated Settings preview keeps its own
+speed `[08 R-ENTRY-01 §3]`.
 
-**C18 — the in-battle modal chain.** An empty selection activates the
-side-authored `<prefix>gen.gui`, not the underlying `<prefix>main.gui`. In a
+**C18 — the in-battle modal chain.** An empty selection closes the command
+window and its input; the retained side-authored `<prefix>main2.gui` root
+supplies the empty rail artwork `[07 §6]`. In a
 non-network battle the options window sets the single-player pause state and
 draws `igtitles.gaf:igpaused` at the live view centre using its authored GAF
 offsets `[07 R-HUD-05 "Centred in the view"]`; closing it unpauses. `EXIT`
@@ -3910,7 +3931,11 @@ on Greenhaven at the detail view's 2×. Every camera is still, since a slow
 pan moves pixel art in uneven one-pixel steps: a scene that frames a fight
 follows it through the lead-in, which is silent and never shown, and holds
 that frame from the first visible tick, and a twin compare copies its
-primary's frame. Each scene has a fixed anchor, the
+primary's frame. The construction scene's hidden lead-in includes the
+constructors' ordinary script readiness as well as their short approach to
+each site's edge, so its first visible frame shows structures rising
+([04 R-ORD-01 §5]). Both halves of a build-mutator comparison use the same
+lead-in. Each scene has a fixed anchor, the
 preview's computer player is passive (its units still shoot back), and a
 scene of the viewer's units alone keeps one far enemy building, since a side
 with nothing left has lost and the battle would stop. The main menu stages
@@ -4334,8 +4359,9 @@ Two open questions belong to the in-battle options window and are carried as
   nothing to restore. Copying them would be two dead fields. A writer reachable
   from the options family would settle it.
 
-The exit menu enables the authored `RESTART` control for campaign and
-skirmish. `battle_restart.go` owns its retained dialog state and request;
+The exit opener enables the first named, authored-inactive `RESTART` control
+for campaign and skirmish and installs the translated `Restart` caption before
+creating the retained widget panel [07 R-FE-01 §7]. `battle_restart.go` owns its retained dialog state and request;
 `RESTART.GUI` replaces `EXITMENU`, wraps the mission/map name to the authored
 label width, focuses the difficulty stage, and uses the shared indexed pointer
 service. It retains zero token mode, so Enter/Escape do not invoke header

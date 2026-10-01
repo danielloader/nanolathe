@@ -3,9 +3,9 @@ package orders
 import "testing"
 
 // TestVTOLRepairPatrolUnfinishedTargetSpawnsHelpBuildDirectly locks the second
-// half of [04 R-ORD-01 §7]'s step-4 sentence: "An unfinished `u` releases the
-// payload, explicitly spawns `VTOL_HelpBuild` on `u` at the head, gate = 0, and
-// returns *wait*."
+// half of [04 R-ORD-01 §7]'s step-4 sentence: "An admitted unfinished `u`
+// releases the payload, explicitly spawns `VTOL_HelpBuild` on `u` at the head,
+// gate = 0, and returns *wait*."
 //
 // The arm is a different route from the complete-target one, which is what the
 // stance rows prove. The issue helper for command code 8 refuses outright at
@@ -33,8 +33,8 @@ func TestVTOLRepairPatrolUnfinishedTargetSpawnsHelpBuildDirectly(t *testing.T) {
 			actor, candidates, sim, q := repairPatrolRefusalFixture(t, true)
 			actor.Flags = actor.Flags&^(stanceFieldMask<<stanceMoveShift) | row.move<<stanceMoveShift
 			for _, c := range candidates {
-				c.Remaining = 1            // unfinished: a nanoframe under construction
-				c.Health = c.Def.MaxDamage // and undamaged, so only `Remaining` selects the arm
+				c.Remaining = 0.5              // unfinished: a nanoframe under construction
+				c.Health = c.Def.MaxDamage / 2 // shared repair admission requires health != maxdamage
 			}
 			released := 0
 			q.binding.Movement.Release = func(*Node) bool { released++; return true }

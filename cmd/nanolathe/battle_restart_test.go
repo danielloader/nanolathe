@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image/png"
 	"os"
 	"strings"
@@ -27,6 +28,44 @@ func restartWindowForTest() *gui.Window {
 		{Kind: gui.KindButton, Name: "CANCEL", Active: 1, Rect: gui.Rect{X: 5, Y: 70, W: 80, H: 20}},
 		{Kind: gui.KindButton, Name: "RESTART", Active: 1, Rect: gui.Rect{X: 100, Y: 70, W: 80, H: 20}},
 	}}
+}
+
+// The authored exit choice starts inactive with no caption or shortcut.
+// Opening it must install the runtime choice before the indexed panel takes
+// its activity snapshot, so a real pointer release can reach RESTART.GUI
+// [07 R-FE-01 §7].
+func TestExitMenuActivatesRestartBeforePointerAdmission(t *testing.T) {
+	for _, kind := range []mission.Type{mission.TypeCampaign, mission.TypeSkirmish} {
+		t.Run(fmt.Sprint(kind), func(t *testing.T) {
+			exit := &gui.Window{Rect: gui.Rect{W: 150, H: 155}, Gadgets: []gui.Gadget{
+				{Kind: gui.KindPanel, Active: 1},
+				{Kind: gui.KindButton, Name: "RESTART", Rect: gui.Rect{X: 15, Y: 81, W: 120, H: 20}},
+			}}
+			b := &battleSession{
+				sess: &session.Session{Mission: &mission.Mission{Type: kind}},
+				hud:  &retailBattleHUD{exitWin: exit, restartWin: restartWindowForTest()},
+			}
+			b.openBattleMenu()
+			b.activateBattleMenuButton("EXIT", nil)
+			if p := b.hud.exitPanel; p == nil || !p.ActiveAt(1) || p.TextAt(1) != "Restart" || exit.Gadgets[1].QuickKey != 'R' {
+				t.Fatal("exit opener did not install the active, captioned restart choice and its shortcut")
+			}
+			in := input.NewState()
+			in.Mouse.SetPosition(20, 85)
+			in.Mouse.SetButton(input.MouseButtonLeft, true)
+			b.handleBattleMenuInput(in, nil)
+			in.Mouse.ResetEdges()
+			in.Mouse.SetButton(input.MouseButtonLeft, false)
+			b.handleBattleMenuInput(in, nil)
+			if b.battleState().Modal() != ui.BattleModalRestart || b.battleState().HasExitLayer() || b.restart.panel == nil {
+				t.Fatal("restart pointer release did not replace the exit menu with the restart dialog")
+			}
+			b.activateBattleMenuButton("CANCEL", nil)
+			if b.battleState().Modal() != ui.BattleModalOptions || !b.battleState().Paused() {
+				t.Fatal("restart cancel did not expose the still-paused options root")
+			}
+		})
+	}
 }
 
 func TestBattleRestartReplacesExitAndCancelReturnsToPausedRoot(t *testing.T) {

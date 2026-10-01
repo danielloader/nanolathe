@@ -81,7 +81,7 @@ type CommandDiagnostic struct {
 const (
 	State0 State = 0 // presentation clear / activate gate [05]
 	State1 State = 1 // yard-door handshake waits for in-build-stance [05]
-	State2 State = 2 // exit-spot acquisition + silent revalidation + allocation [05 C16-C18]
+	State2 State = 2 // placement + allocation; a ground frame also waits for script readiness [05 C16-C18][04 R-ORD-01 §5]
 	State3 State = 3 // work loop [05]
 	State4 State = 4 // completion [05]
 )

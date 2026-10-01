@@ -91,7 +91,7 @@ func (b *battleSession) cursorShapeForClick(latch input.Latch, mx, my int32, tar
 // shape table [07 §8][07 §9].
 func (b *battleSession) chooseCursorFor(latch input.Latch, hover hud.CursorHover) int {
 	b.fillHoverMoverMode(hover.Target)
-	sel := hud.CursorSelection{Viewer: b.sess.LocalOwner, Hostile: b.hostile, WeaponAdmits: b.sess.CursorAttackAdmits}
+	sel := hud.CursorSelection{Viewer: b.sess.LocalOwner, Hostile: b.hostile, WeaponAdmits: b.sess.CursorAttackAdmits, RepairAdmits: b.sess.CursorRepairAdmits}
 	if b.interfaceTypeRightClick() {
 		sel.InterfaceType = hud.InterfaceTypeRightClick
 	}

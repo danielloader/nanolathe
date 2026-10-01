@@ -1427,8 +1427,8 @@ else if (vertexCount != 4)        -> draw nothing
 else {
     if (resolve-at-draw-time) {
         if (team)  texture = LOGOS entry frame chosen by the owner's shade byte
-        else if (mode != cached-name-resolution) texture = entry frame 0
-        else                                     texture = resolve by authored name
+        else if (pieceSelector == live) texture = loaded primitive cursor's current frame
+        else                            texture = entry frame 0
     } else          texture = the image the loader already resolved
     -> textured quad mapper
 }
@@ -1441,6 +1441,35 @@ exactly the 6,598 primitives with no texture name and clear on exactly the
 43,845 with one, across all 608 base models — a perfect partition, so bit 0 is
 a sound flat/textured discriminator on stock content. The resolve-at-draw-time
 bit is **never** authored (0 of 50,443), confirming that the loader owns it.
+
+**Established (direct-static) — cached and live texture selection.** Both the
+shaded and unshaded composition entries use the same piece selector for the
+ordinary animated-texture lookup. The live selector reads the loaded
+primitive's current cursor frame; the cached selector and the all-piece
+composition selector read frame zero of that cursor's sequence. This lookup
+does not resolve the authored texture name again and does not reset or advance
+the cursor. Team-colour lookup continues to select the owner's colour in
+every selector, while single-frame textures and flat colours keep their
+ordinary dispatch. The direct unit-piece entry has the same frame-selection
+split; the standalone debris and projectile entries always read the current
+cursor [R-COMP-02 §6].
+
+An unfinished structure includes every visible piece in its cached composition
+and skips its live-piece pass [R-REN-03A §4]. Its ordinary multi-frame textures
+therefore stay on frame zero throughout construction, including after a
+progress-driven rebuild. Completion enables the live pieces to read the
+already-running shared cursor; it does not restart their texture animation.
+Phase 7 has no construction gate [R-COMP-02 §4]. These lamps are model-texture
+animations, rather than a rotation of the installed palette or a
+construction-specific COB animation command. **Established (asset census):**
+the stock `CORLAB` piece `blink` and `CORALAB` pieces `blinka` and `blinkb`
+reference the six-frame `flashing01` entry; `ARMESTOR` piece `texture` and
+`CORESTOR` piece `windows` reference the eight-frame `glow` entry. Every frame
+of those two entries holds for ten simulation ticks. Their stock `Create`
+scripts clear the cache bit on those named pieces. `CORALAB` also references
+`glow` on a cached piece, so those particular faces retain frame zero after
+completion as well. Cache membership, not the texture's name, chooses which
+completed faces animate.
 
 The textured quad mapper builds the ten-dword edge records of [03 §5.2] and,
 when the caller supplies no UV table, defaults the four corners to
@@ -1955,14 +1984,16 @@ not be substituted for the clip rectangle's left/top values. The HUD rail is
 composed later and may cover overlapping outline pixels. A separate
 authored-plate clip policy cannot be claimed because the plate is not drawn.
 
-**Viewport-coordinate record.** The transition-time battle viewport record
-and the beam-space projection origin are distinct. The static call chain proves
-which record the selection writer consumes, but not the record's left edge
-for every panel/mode state (the corpus contains both a visible-panel
-`(128,32,W-1,H-33)` description and a transition/input `(0,32,W-1,H-33)`
-description). Therefore the selection clip's left value outside a captured
-state is **Unknown**; a mode/panel capture of the descriptor at the selection
-call would settle it. Neither prior tuple is a universal canonical value.
+**Viewport-coordinate record.** The `HOT UNITS` collector's initialized
+battle viewport is **Established** as `(128,32,W-1,H-33)`; its complete
+writer census shows no HUD/window change [07 R-REV-01 §5]. This corrects the
+previous transition/input description with left 0. The active working
+surface's clip and the beam-space projection origin are separate records.
+The static selection call chain proves which surface descriptor the writer
+consumes, but not its left edge for every panel/mode state. That selection
+clip value therefore remains **Unknown** outside a captured state; a
+mode/panel capture of the descriptor at the selection call would settle it.
+The collector's tuple alone is not a universal selection clip.
 
 **Unknown.** The static trace does not establish a per-selected-unit plate
 pass, an additional primary-selection treatment, or any use of the authored
@@ -2629,6 +2660,12 @@ advance of [06 R-WFX-01 §1] (countdown, then frame; wrap or detach by the
 entry's loop byte). Order matters only for determinism of the step count,
 which is one per cursor per sub-tick; no random draw is made. The step is the
 same one the effect strips use, which is why [01 §4.4] groups them.
+
+The registry step has no remaining-build or instance-liveness test. An
+unfinished structure displays frame zero through its cached composition
+selector while this shared cursor continues advancing; its completed live
+pieces later read the current phase [R-REN-03A §5]. **Established
+(direct-static).**
 
 ### 2.5 Orthographic screen projection
 
@@ -5923,14 +5960,16 @@ per-unit, per-debris, per-projectile or per-call copy of it exists anywhere.
 Both standalone entries are handed the **loaded model piece itself** — a debris
 record names the loaded piece it was thrown from, and the effect entry is
 likewise given a loaded model's piece — and they reach the frame through the
-identical read the unit composition renderer performs, the same accessor on the
+identical read the unit's live-piece renderer performs, the same accessor on the
 same primitive record. What is per-instance is only the *point workspace* —
 the debris record rebuilds its own rotated copy from the loaded piece's original
 vertices — never the cursor.
 
 Consequently a piece **detached** from a unit, whether by death debris or by a
 standalone effect draw, shares the living unit's cursor and shows the same
-animation frame at the same time; it does not restart, rest at frame zero, or
+animation frame as its live-piece pass at the same time; the cached unit
+composition instead selects frame zero [R-REN-03A §5]. A detached piece does
+not restart, rest at frame zero, or
 run on a cadence of its own. The phase-7 walk reinforces this: the registry is
 populated at **model load** ([R-COMP-02 §4]), one append per multi-frame
 non-team primitive of each loaded model, and the walk steps every registered
@@ -9075,10 +9114,12 @@ closed:
   land impact variants, the burst clone, the named-alias forward, and the
   network replay.
 - **Named positional** (feature ignition): one site.
-- **Underattack**: one site, on the damage path — emitted once per
-  non-paralyzer normal damage event to a unit owned by the **view slot**
-  ([R-AUD-01 §7], which owns the sink's gate and distinguishes the view slot
-  from the local human's slot), gated on selection state, fixed category 2.
+- **Underattack**: one site, in the accepted non-heal damage reaction, except
+  kind 11. Its order-mask and previous-damage provenance tests are
+  [06 R-WPN-04 §2]'s. The sibling raiser accepts only a live, non-dying unit
+  owned by the **view slot** and absent from the retained on-screen unit list
+  [R-AUD-01 §7][07 R-HUD-03 §14.1]. This is a viewport-membership gate,
+  not a selection test, and the event slot is 2.
 - **Unit voice**: 82 sites across orders, AI, and selection — category mapping:
   1 select, 2 underattack, 3/4 activate/deactivate, 5 ok (about thirty
   order-acceptance sites, gated on a runtime status bit 0x2000), 6 arrived,
@@ -9869,10 +9910,13 @@ overrideText)`, which does exactly three things:
    insert after equal priorities. The entry copies the caption into its own
    allocation.
 
-Two sibling raisers share the gate and add one global flag test each (one
-requires it set and has no caller in the image; the other requires it clear
-and is the under-attack path's — §8.3's "gated on selection state"). The
-edge machine and the order handlers use the plain helper.
+Two sibling raisers share the gate and additionally test membership in the
+retained on-screen unit list [07 R-REV-01 §5]. The presence variant has no
+caller in the image; the absence variant is the under-attack path's. They
+read neither a global enable flag nor a selected status bit. The owning
+caption contract [07 R-HUD-03 §14.1] states the host-frame order: simulation
+damage reads the list retained from the preceding rebuild. The edge machine
+and ordinary order voices use the plain helper and have no viewport gate.
 
 **Synchronous, from inside the simulation.** The raise runs in the caller's
 own phase — the economy settlement for 14/15 ([05 R-ECO-01 §9]),
@@ -9891,6 +9935,13 @@ order — the insert's ordering rule and cooldown test depend on order and on
 the tick, not on wall-clock — and (iii) a unit removed in the same tick drops
 its pending entries. The observable difference from retail's synchronous
 insert is nil: nothing in the simulation observes the queue.
+
+The under-attack sibling additionally needs its presentation-owned retained
+viewport membership tested **before** queue insertion. Rejecting after
+insertion or resolution would consume arbitration, captions or variant draws
+that retail never consumes for an on-screen victim. A publication-boundary
+implementation may retain the preceding presentation list on the client;
+the simulation has no reader of that list or the queue [I6].
 
 **Random draws: none on the raise path.** The gate, the localisation lookup
 and the insert draw from neither stream. The only draw anywhere in the cue

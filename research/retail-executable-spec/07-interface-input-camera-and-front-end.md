@@ -710,11 +710,13 @@ The registry `unitchat` value (absent → `10`) is the unit-chat **voice** level
 byte; it is edited from the sound options screen's `SPEECH` gauge, not here
 ([03 R-AUD-01 §2]). `SwitchAlt` has no gadget ([R-CAM-01 §4]).
 
-The two slider read-outs are written by name to gadgets called
+**Established:** the two slider read-outs are written by name to gadgets called
 `TEXTSCROLLTEXT` and `MAXLINESTEXT`. Neither `SPEEDS.GUI` nor `SPEEDSRT.GUI`
-authors a gadget of either name, so the setter finds nothing and the values are
-never shown; the page's `GAMETEXT` label is authored empty and nothing writes
-it. The screen therefore draws four unlabelled slider tracks.
+authors either gadget, so those values are not shown. The frontend
+`SPEEDS.GUI` authors `GAMETEXT` with an empty caption; the in-battle
+`SPEEDSRT.GUI` authors it with the static caption `Game`. The `GAME` value
+callback writes no numeric caption to `GAMETEXT` in either form. The authored
+static headings remain, but the sliders have no numeric read-outs.
 
 **Established fact — slider value mapping.** Every slider callback computes
 its value from the slider's knob position word `pos` and range word `range`
@@ -2901,7 +2903,7 @@ performance-counter RNG, resolves the mission or skirmish schema, places
 commanders, and finishes by opening `MAIN2.GUI`, the in-game HUD — the
 `<side>main2.gui` window whose name is stored as the battle root's command-
 window name (see §6). The transition that starts the thread also fixes the
-battle viewport rectangle to `(0, 32, W-1, H-33)` and initializes the
+battle viewport rectangle to `(128, 32, W-1, H-33)` and initializes the
 player-slot ready table.
 
 #### Multiplayer
@@ -3351,8 +3353,10 @@ label `%d secs`; `MAXLINES` (max 30) → `textlines`, label `%d` or the
 The two labels are written by name to gadgets called `TEXTSCROLLTEXT` and
 `MAXLINESTEXT`, and **neither `SPEEDS.GUI` nor `SPEEDSRT.GUI` authors a gadget
 of either name**: the text setter finds nothing and the two read-outs are never
-drawn on the stock files. The page's own `GAMETEXT` label is authored empty and
-nothing writes it, so it is blank too.
+drawn on the stock files. `GAMETEXT` is authored empty in the frontend
+`SPEEDS.GUI`, while the in-battle `SPEEDSRT.GUI` gives it the static caption
+`Game`. The `GAME` value callback does not write a numeric caption to that
+gadget in either form.
 `RESTORE` sets textscroll 10, textlines 10, game speed 10, scroll speed 32,
 `LEFTCLICK` 0, unitchat 10, unitchattext 5; `UNDO` restores the snapshot.
 After the page opens every slider's value callback runs once so the labels
@@ -3461,8 +3465,16 @@ control: `WATCHING` and `GAMEOPEN` toggles of the lobby word, `LIVEPLYR<n>`
 recorded, semantics out of scope), `ALLIES` the lobby alliance panel
 (out of scope).
 
-`EXITMENU.GUI` (flags `0x1800`, centred) shows `RESTART` (authored
-inactive) only for campaign and skirmish, and hides `MAINMENU` when the
+**Established (direct-static and authored GUI).** `EXITMENU.GUI` (flags
+`0x1800`, centred) opens with `RESTART` authored inactive. For campaign and
+skirmish, the opener activates the first named `RESTART` gadget and replaces
+its caption with the translated `Restart` key before the window is serviced.
+The caption setter copies at most 128 bytes and applies ordinary button
+shortcut assignment against the window's current keys [R-WGT-01 §12]. Other
+session kinds leave the authored restart activity and caption unchanged.
+Authored inactivity suppresses both painting and pointer/keyboard admission;
+opening the dialog alone therefore does not expose the restart choice.
+The opener hides `MAINMENU` when the
 session was launched from a DirectPlay lobby. `MAINMENU` and `EXITGAME` set
 the exit-kind word (0 / 2), close, and open `YESORNO` (flags `0x1000`)
 titled `Surrender this battle and return to main menu?` / `Exit the Battle`
@@ -4241,6 +4253,21 @@ absent or stale. Named page art is resolved from
 that page's `<unit>1.gaf`, then the side/main support GAFs, then the common
 `BUTTONS0` stock-size groups. A left-button hold inside a gadget selects its
 armed frame; pointer hover alone does not tint or change an ordinary button.
+
+**Established — empty-selection panel artwork.** Battle entry selects
+`<prefix>MAIN2.GUI` from the local player's side-table prefix and builds it
+before the loading hand-off [R-WGT-01 §3]. Its header panel uses the ordinary
+window-owned GAF, common GUI GAF, then `BackTile` lookup and panel painter
+[R-WGT-01 §12][R-FE-02 §4]. The stock Arm and Core roots name `ARMPAN2` and
+`CORPAN2` in `anims/commongui.gaf`: each is a single 128×352 frame painted at
+the root's authored `(0,128)` origin. Those panels contain the faction emblem;
+the side's `PANELSIDE` backdrop does not. The root's three authored statistic
+labels have empty captions, and its callback does not populate them. Opening
+general or numbered command windows covers the root with those windows'
+ordinary panels; clearing the selection exposes the root again. The faction
+panel is selected by side identity, independently of the player's logo or
+team-color choice. Its authored size and origin remain fixed at larger display
+sizes [R-HUD-05].
 
 The stock battle resource set binds `fonts/<font>.fnt` as the side console
 font and `fonts/<fontgui>.fnt` as the side GUI/button font. The frontend
@@ -5023,11 +5050,29 @@ hold:
 
 A null caption argument is replaced by the slot's default caption from the slot
 table; the caption — given or defaulted — then goes through the localization
-table before it is queued. Two further variants of the helper exist that
-additionally require the unit to be, or not to be, in the current selection;
-only the *not selected* variant has a caller, and the *selected* variant is
-unreachable code. ([03 R-AUD-01 §3] names these same two gates "the unit's
+table before it is queued. Two further variants additionally require presence
+in, or absence from, the retained **on-screen unit list** of [R-REV-01 §5].
+Only the absence variant has a caller: the damage reaction requests event
+slot 2 through it [06 R-WPN-04 §2]. The presence variant has no caller in the
+image. Neither variant tests selection membership or a selected status bit.
+The list includes a viewing player's unit when its projected definition box
+intersects the viewport, including exact edge contact; successful model
+drawing is not a condition. The plain helper used by ordinary unit voices
+has no viewport-membership gate. ([03 R-AUD-01 §3] names the live/death gates "the unit's
 chat-enable status bit" and "the silenced bit"; the predicate is identical.)
+
+**Established — the membership is retained across the simulation batch.**
+The outer host service drains the voice queue before calling the battle
+driver. The driver advances the budgeted sub-ticks, handles hotkeys and
+scroll, rebuilds the on-screen list, then composes the world. A damage
+reaction during those sub-ticks therefore reads the preceding completed
+frame's list, not a fresh test against the camera after scrolling. The
+next-own-unit hotkey and screenshot routes also rebuild the list, as
+[R-REV-01 §5] records. There is no reclaim-specific filter later in the
+caption presenter, voice resolver or message ring. This closes the mistaken
+selection interpretation: an unselected building in view cannot enter the
+under-attack queue through this helper; a selected building outside the
+retained list can.
 
 **Established — the `Slot` column of [05 "the build-order caption census"]
 is an event slot, not a priority.** The number is the **sound event slot** of
@@ -5833,7 +5878,8 @@ unchanged to Type 1:
   this rewrite is a re-entry into the armed RECLAIM row below, so that row's
   own admission predicate still decides, and a hostile commander or a hostile
   airborne target falls back out of it; otherwise it yields `cursorrepair`
-  over a friendly target needing assistance,
+  over a friendly target accepted by the shared repair admission of
+  [04 R-ORD-01 §7] **and** whose remaining-build fraction is nonzero,
   `cursorselect` over an own finished unit, `cursorrevive` or
   `cursorreclamate` over a reclaimable feature depending on `canresurrect`
   versus `canreclamate`, `cursormove` for a `canmove` unit, and
@@ -5846,7 +5892,8 @@ unchanged to Type 1:
   target the unit-reclaim admission predicate of the RECLAIM row below admits
   — the capture arm takes a `cancapture` actor first, so this arm is reached
   only by an actor without that key — `cursorrepair` over a friendly target
-  needing assistance, `cursorunload` when a flyer targets an `isairbase` unit,
+  accepted by that same shared repair admission, `cursorunload` when a flyer
+  targets an `isairbase` unit,
   the transport pair below over a carriable target, and `cursordefend` over a
   friendly target for a `canguard` unit; anything that fails, including the
   mover gate itself, yields `cursormove`. The `cursorrevive` arm sits before
@@ -5875,9 +5922,18 @@ unchanged to Type 1:
   transport, `cursorload` for a ground one.
 * FOLLOW (latch 7) requires `canguard` and a friendly target, and refuses when
   a ground guard is pointed at an air target; otherwise `cursordefend`.
-* REPAIR (latch 8) requires a target the unit can assist and gives
-  `cursorrepair`; PATROL (latch 9) requires `canpatrol` and gives
+* REPAIR (latch 8) requires a target accepted by the shared repair admission
+  and gives `cursorrepair`; PATROL (latch 9) requires `canpatrol` and gives
   `cursorpatrol`; TELEPORT (latch 0xB) gives `cursorteleport`.
+
+  **Established — the three assistance shapes call the shared admission,**
+  including its authored nanolathe capability, signed health inequality,
+  committed airborne-mode rejection and full-model-height water clause
+  [04 R-ORD-01 §7][04 R-ORD-02 §7]. The MOVE shape does not add command code 2's
+  separate unsigned health comparison: an over-full or death-latched target
+  that remains live can show repair even though code 2 then refuses it. The
+  idle Type-0 shape additionally requires unfinished construction; the armed
+  REPAIR shape does not.
 * RECLAIM (latch 0xC) applies two tests in order, and neither of them reads
   the diplomacy row. **The feature test:** with `canreclamate` on the actor, a
   pointer whose coarse tile is inside the map and mapped for the viewing
@@ -6039,14 +6095,15 @@ state. Its projected rectangle coordinates carry the separate beam-space
 values. The later HUD rail can overwrite pixels in its own interface pass.
 No separate plate clipping rule exists because no plate is drawn.
 
-**Viewport coordinates.** The `(0,32,W-1,H-33)` battle viewport rectangle
-of §5 and the `(128,32,W-1,H-33)` subrect of [03 §4.1] describe different
-coordinate records, not one universal selection clip. The static
-call chain establishes that selection consumes the runtime surface-descriptor
-clip, but does not establish its left value for every visible/hidden-panel
-state. That selection-left value is therefore **Unknown** until a focused
-mode/panel capture records the descriptor at the selection draw. Neither
-tuple may be used as a universal canonical value.
+**Viewport coordinates.** The `HOT UNITS` producer consumes the initialized
+`(128,32,W-1,H-33)` battle viewport record [R-REV-01 §5]. Its writer census
+corrects the previous claim of a second `(0,32,W-1,H-33)` producer tuple.
+Selection consumes the active working surface's clip descriptor, a separate
+record. The static selection call chain does not establish that descriptor's
+left value for every visible/hidden-panel state. That selection-left value
+therefore remains **Unknown** until a focused mode/panel capture records the
+descriptor at the selection draw; the collector's tuple alone does not
+settle it.
 
 **Established palette/remap.** The rectangular outline's outer color is
 logical map entry **15** for an ordinary drag-selection rectangle, and its
@@ -6303,9 +6360,42 @@ exactly three tests, in this order:
    movement-mode status bits are not equal to 1, the producer queries the
    terrain record under the unit's position and, if that query returns a
    record whose height byte is smaller than the accumulated vertical term,
-   clamps the term to that byte. That the tested bits are the movement-mode
-   bits described in [04] is a **Supported inference**; what would settle it
-   is a writer census of that status word.
+   clamps the term to that byte. **Established — movement-mode mirror.** The
+   position-commit path copies the mover mode into these same low two status
+   bits; attachment follows the shared position commit. Creation seeds the
+   mirror to 1, and the air/land transition callers write modes 2/1 through
+   the same owner. [04 R-MOV-01 §8] owns that encoding and writer census;
+   [03 R-RAST-01 §7] identifies the identical mirror used by the compositor.
+
+   **Established — exact bound projection.** Read each position and each
+   definition bound as its signed high word **separately**, then form:
+
+   ```text
+   left   = unitX + minX - cameraX + 128
+   right  = unitX + maxX - cameraX + 128
+   top    = unitZ + minZ - cameraZ - ((unitY + maxY) >> 1) + 32
+   bottom = unitZ + maxZ - cameraZ - (lowerY >> 1) + 32
+   ```
+
+   `lowerY` starts as `unitY + minY`. Unless the tested two status bits
+   equal 1, a valid plot cell at the full fixed-point unit position caps it
+   to the cell's authored height byte when that byte is smaller. This is
+   the plot height, not its derived floor minimum, maximum or interpolated
+   surface. Both half-height shifts are arithmetic. Adding fixed-point
+   position and extent before taking the high word would introduce a
+   fractional carry absent from this producer. Retain the candidate exactly
+   when `left <= viewportRight`, `right >= viewportLeft`,
+   `top <= viewportBottom` and `bottom >= viewportTop`.
+
+   **Established — collector viewport record.** Battle entry initializes its
+   bounds to `(128,32,W-1,H-33)` and derives the inclusive width and height
+   from those bounds. These are the only stores to the collector's bounds
+   in the image. All uses that pass the record by reference read it without
+   writing or retaining a mutable alias; other uses copy the tuple by value
+   into a working surface. HUD/window painting therefore does not change
+   the collector's bounds. This corrects the earlier transition/input
+   description with left 0; the separate question about the selection
+   surface's clip in each panel state remains [R-SEL-02A]'s Unknown.
 3. **Ownership or foreign visibility.** A candidate whose owner byte equals
    the **viewing** player's owner byte is appended without any visibility
    query — the viewing slot, not the local one, and the two differ in a
@@ -6535,9 +6625,6 @@ uses.
 - Feature-versus-unit pointer priority; features are absent from the unit
   hover list, and reclaim families resolve features separately at the pointer
   · §8 · static trace.
-- Whether the two low status bits the producer tests before its terrain
-  clamp are the movement-mode bits of doc 04 (Supported inference) · §8
-  [R-REV-01 §5] · a writer census of that status word.
 
 
 ## 9. Selection, control groups, orders, and build pages
@@ -8902,9 +8989,6 @@ and the decider that would close it.
 - Whether a stock aircraft always outscores the stock buildings it can fly
   over (Supported inference) · §8 [R-REV-01 §9] · a census of
   `FootprintX`/`FootprintZ` and model heights over the stock definitions.
-- Whether the two low status bits the `HOT UNITS` producer tests before its
-  terrain clamp are the movement-mode bits (Supported inference) · §8
-  [R-REV-01 §5] · a writer census of that status word.
 - The selection rectangle's clip-left value for every visible/hidden-panel
   state · §8 [R-SEL-02A] · a focused mode/panel capture recording the surface
   descriptor at the selection draw.

@@ -61,6 +61,8 @@ type retailBattleHUD struct {
 	logos       *formats.GAF
 	optionsGAF  *formats.GAF
 	optionsWin  *gui.Window
+	rootWin     *gui.Window
+	rootGAF     *formats.GAF
 	talkWin     *gui.Window
 	talkPanel   *ui.Panel
 	talkBuilt   bool
@@ -216,9 +218,6 @@ type retailBattleHUD struct {
 // GUI/GAF loads are cached at battle entry in the HUD maps (windows/pages) so
 // the frame loop does not re-read VFS [07 §4].
 func loadRetailBattleHUD(fs vfs.FSOps, sess *session.Session, cat *content.Catalog, pal *palette.Tables, shell *gameShell, windowContext *battleWindowContext) (*retailBattleHUD, error) {
-	// TODO(question): identify the owned battle-root MAIN2.GUI opener. This HUD
-	// has no existing MAIN2 load path, so do not synthesize one solely to run a
-	// builder pass; its documented pre-transition build belongs at that opener.
 	if fs == nil || sess == nil || cat == nil {
 		return nil, fmt.Errorf("nanolathe: battle HUD load failed: no mounted content, session or catalog")
 	}
@@ -390,13 +389,17 @@ func loadRetailBattleHUD(fs vfs.FSOps, sess *session.Session, cat *content.Catal
 	// The chrome is laid out for the authored 640x480 surface until the
 	// composer sees the negotiated one [07 R-HUD-05].
 	h.applyDisplaySize(retailScreenW, retailScreenH)
-	// The empty-selection command page is the first page composed at battle
-	// entry. Require its authored window now so a failed battle construction
-	// cannot defer a missing GUI to a blank draw path. Numbered builder pages
-	// are checked when their committed page is selected [07 §6][07 §9].
+	// Battle entry builds the surviving MAIN2 root before the loading hand-off;
+	// command windows are built at their later open [07 §6][07 R-WGT-01 §3].
 	if side.NamePrefix == "" {
 		return nil, hudAssetError(fs, "gamedata/sidedata.tdf", "selected side has no prefix for the command GUI", fmt.Errorf("empty side prefix"))
 	}
+	rootName := strings.ToLower(side.NamePrefix) + "main2"
+	h.rootWin, h.rootGAF, err = h.loadWindowRequired(rootName)
+	if err != nil {
+		return nil, err
+	}
+	h.ensureWindowBuilt(rootName, h.rootWin, h.rootGAF)
 	if _, _, err := h.loadWindowRequired(strings.ToLower(side.NamePrefix) + "gen"); err != nil {
 		return nil, err
 	}
@@ -600,13 +603,31 @@ func (h *retailBattleHUD) openOptionsWindow() {
 	}
 }
 
-func (h *retailBattleHUD) openExitWindow() {
+func (h *retailBattleHUD) openExitWindow(kind uint8) {
 	if h == nil || h.exitBuilt {
 		return
 	}
 	h.installWindow(h.exitWin, nil)
 	h.exitBuilt = true
 	if h.exitWin != nil {
+		// RESTART is authored inactive; the exit opener exposes it for the
+		// two single-player session kinds before widget state is captured
+		// [07 R-FE-01 §7].
+		if kind == 1 || kind == 2 {
+			if i := h.exitWin.GadgetIndex("RESTART"); i >= 0 {
+				gadget := &h.exitWin.Gadgets[i]
+				gadget.Active = 1
+				gadget.Text = "Restart"
+				if captions := hudCaptionTranslator(h); captions != nil {
+					gadget.Text = captions.Translate(gadget.Text)
+				}
+				if len(gadget.Text) > 128 {
+					gadget.Text = gadget.Text[:128]
+				}
+				gadget.Labels = nil
+				gui.AssignButtonQuickKey(h.exitWin, i)
+			}
+		}
 		h.exitPanel = ui.NewPanel(h.exitWin)
 	}
 }

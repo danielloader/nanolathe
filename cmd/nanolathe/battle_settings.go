@@ -20,6 +20,24 @@ func loadedSettings() settings.Settings {
 	return s
 }
 
+// applyGameSpeedSetting transfers the startup/options speed to a fresh
+// single-player clock. Retail preserves both speed words at campaign and
+// skirmish entry; a load instead restores its scheduler [08 R-ENTRY-01 §3].
+func (b *battleSession) applyGameSpeedSetting(s settings.Settings) {
+	if b == nil || b.preview || b.entrySavedCamera != nil || b.sess == nil || b.sess.Clock == nil {
+		return
+	}
+	speed := s.GameSpeed
+	if b.shell != nil {
+		speed = b.shell.gameSpeed
+	}
+	if speed < settings.MinGameSpeed || speed > settings.MaxGameSpeed {
+		speed = settings.DefaultGameSpeed
+	}
+	// Startup loads both words without a speed-change announcement.
+	b.sess.Clock.Requested, b.sess.Clock.Active = int32(speed), int32(speed)
+}
+
 // applyDamageBarsSetting installs bit 0 of the interface-flags word from the
 // loaded block. Retail reads `damagebars` once at settings load
 // [07 R-HUD-03 §7]; the bit's only consumer is the composer's label walk

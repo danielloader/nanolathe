@@ -154,6 +154,10 @@ func TestFactoryExitValidatesInsideOwnCompletedYard(t *testing.T) {
 
 	hc, _ := w.Create(comDef, 0, world.CellToWorld(4), 0, world.CellToWorld(10))
 	com := w.Unit(hc)
+	// This fixture owns the completed plant's yard admission. Its bootstrap
+	// builder is explicitly ready; script readiness is tested separately
+	// [04 R-ORD-01 §5].
+	bindConstructionFixture(com, trivialModel(1, nil), true)
 
 	const siteX, siteZ = 6, 10
 	if err := QueueMobileBuild(com, "exitlab", world.CellToWorld(siteX), world.CellToWorld(siteZ), 1, cat); err != nil {

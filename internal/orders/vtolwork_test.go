@@ -396,7 +396,7 @@ func TestRepairWaterClause(t *testing.T) {
 		q.SetBinding(bind)
 		return u
 	}
-	targetDef := &content.UnitDef{UnitName: "tgt", MaxDamage: 100, ModelTop: 6}
+	targetDef := &content.UnitDef{UnitName: "tgt", MaxDamage: 100, ModelTop: 6, ModelTopFixed: 6 << 16}
 	air := &content.UnitDef{UnitName: "air", CanFly: true, CanReclamate: true}
 	amphibAir := &content.UnitDef{UnitName: "amphair", CanFly: true, Amphibious: true, CanReclamate: true}
 	walker := &content.UnitDef{UnitName: "walk", CanReclamate: true, MaxWaterDepth: 10}

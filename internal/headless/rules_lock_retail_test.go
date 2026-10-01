@@ -137,20 +137,33 @@ import (
 // the Community ashap/warm locks and the Modern 6000-tick lock stay unchanged.
 // Modern traffic and its fifteen-tick retry admission delay are preserved
 // (DESIGN_MOVEMENT_PATH "Modern prompt re-routing").
+//
+// Retail's ground MobileBuild waits for the script-owned INBUILDSTANCE before
+// health, resources and spray progress [04 R-ORD-01 §5][05 R-P0-06 §1]. This
+// moves every ashap lock and no benchmark lock. The Core commander's first
+// frame now holds with zero health until its script writes readiness, where
+// the previous handler worked with stance clear. Those construction timings
+// change resource and RNG history, and then the computer player's trajectory.
+// Strict and Community now reach the 54000-tick ceiling with ongoing
+// production; Modern ends at 47940. An overlay restoring only the preceding
+// construction handler reproduces all six old ashap hashes and terminal ticks.
+// Both candidate trajectories repeated identically; every benchmark initial,
+// warm and final lock remains unchanged. This is a shared retail correction,
+// with no new Modern policy.
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
 	lockAshapUnitLimit             = 250 // Strict setting; Community's table overrides it.
 	lockDifficulty                 = 1
-	lockAshapStrict6000            = "partial-v1:70eab79cd1e632ce"
-	lockAshapCommunity6000         = "partial-v1:b23e0c381c4d960b"
-	lockAshapModern6000            = "partial-v1:824232669152f4bf"
-	lockAshapStrict54000           = "partial-v1:4baa308e5eba5d5e"
-	lockAshapCommunity54000        = "partial-v1:2ce958e331ce6a19"
-	lockAshapModern54000           = "partial-v1:496c4259db863cd6"
-	lockAshapStrictEnd      uint32 = 28680
-	lockAshapCommunityEnd   uint32 = 30660
-	lockAshapModernEnd      uint32 = 42600
+	lockAshapStrict6000            = "partial-v1:aa2d3cb661ac26c4"
+	lockAshapCommunity6000         = "partial-v1:abd94817ece852a4"
+	lockAshapModern6000            = "partial-v1:a2c6fc1f6d2e6836"
+	lockAshapStrict54000           = "partial-v1:24da164ea104466e"
+	lockAshapCommunity54000        = "partial-v1:a76a48f358418a68"
+	lockAshapModern54000           = "partial-v1:4d333f1e7c9bd05a"
+	lockAshapStrictEnd      uint32 = 54000
+	lockAshapCommunityEnd   uint32 = 54000
+	lockAshapModernEnd      uint32 = 47940
 
 	lockBenchSeed             uint32 = 7
 	lockBenchWarmupTicks             = 600

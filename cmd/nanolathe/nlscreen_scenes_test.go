@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
+	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/testsupport"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
@@ -120,41 +121,64 @@ func TestNLPreviewFrameHoldsOnScreen(t *testing.T) {
 // raising a structure by the end of the lead-in, from about where it was
 // placed: one that walks off, or stands idle on a site another claimed,
 // shows the compare nothing. A builder still steps to the edge of its site
-// before it starts [04 R-ORD-01 §5], which the lead-in hides; the bound is
-// one small footprint.
+// and waits for its script's readiness write before it starts
+// [04 R-ORD-01 §5], which the lead-in hides; the movement bound is one small
+// footprint. Every reserved rule set stages the same worksite.
 func TestNLSceneWorksiteBuildsWithoutWalking(t *testing.T) {
-	st, tick := stageNLTestScene(t, "construct")
-	s := st.s
-	type start struct {
-		u    *units.Unit
-		x, z int32
-	}
-	var builders []start
-	for _, u := range s.Units.Iter() {
-		if u != nil && u.Alive && u.Owner == s.LocalOwner && u.Def != nil && u.Def.Builder && u.Def.BMCode != 0 && !u.Def.Commander {
-			builders = append(builders, start{u, int32(u.X.Int()), int32(u.Z.Int())})
-		}
-	}
-	if len(builders) != len(nlWorksite) {
-		t.Fatalf("staged %d constructors, want %d", len(builders), len(nlWorksite))
-	}
-	for i := 0; i < nlPresets["construct"].scene.PreTicks; i++ {
-		tick()
-	}
-	frames := 0
-	for _, u := range s.Units.Iter() {
-		if u != nil && u.Alive && u.Owner == s.LocalOwner && u.Remaining > 0 && u.Remaining < 1 {
-			frames++
-		}
-	}
-	if frames < len(builders) {
-		t.Fatalf("%d structures rising after the lead-in, want one per constructor (%d)", frames, len(builders))
-	}
-	for _, b := range builders {
-		dx, dz := int32(b.u.X.Int())-b.x, int32(b.u.Z.Int())-b.z
-		if dx*dx+dz*dz > 32*32 {
-			t.Errorf("constructor at %d,%d walked %d,%d", b.x, b.z, dx, dz)
-		}
+	for _, rules := range []gameplay.Mode{gameplay.Strict31, gameplay.Community39, gameplay.Modern} {
+		t.Run(string(rules), func(t *testing.T) {
+			st, tick := stageNLTestSceneUnder(t, "construct", rules)
+			s := st.s
+			type start struct {
+				u      *units.Unit
+				x, z   int32
+				waited bool
+			}
+			var builders []start
+			for _, u := range s.Units.Iter() {
+				if u != nil && u.Alive && u.Owner == s.LocalOwner && u.Def != nil && u.Def.Builder && u.Def.BMCode != 0 && !u.Def.Commander {
+					if u.COBBinding() == nil {
+						t.Fatal("constructor has no production script binding")
+					}
+					builders = append(builders, start{u: u, x: int32(u.X.Int()), z: int32(u.Z.Int())})
+				}
+			}
+			if len(builders) != len(nlWorksite) {
+				t.Fatalf("staged %d constructors, want %d", len(builders), len(nlWorksite))
+			}
+			productOf := func(b *units.Unit) *units.Unit {
+				q := orders.QueueOfUnit(b)
+				if q == nil || len(q.Primary()) == 0 {
+					return nil
+				}
+				return s.Units.Unit(q.Primary()[0].Target)
+			}
+			for i := 0; i < nlPresets["construct"].scene.PreTicks; i++ {
+				tick()
+				for k := range builders {
+					b := &builders[k]
+					if product := productOf(b.u); product != nil && !b.u.InBuildStance {
+						b.waited = true
+						if product.Health != 0 || product.Remaining != 1 {
+							t.Fatalf("constructor %d worked before script readiness", b.u.Handle)
+						}
+					}
+				}
+			}
+			for _, b := range builders {
+				if !b.waited || !b.u.InBuildStance {
+					t.Errorf("constructor %d did not pass its ordinary script readiness wait during the lead-in", b.u.Handle)
+				}
+				product := productOf(b.u)
+				if product == nil || !product.Alive || product.Owner != b.u.Owner || product.Health <= 0 || product.Remaining <= 0 || product.Remaining >= 1 {
+					t.Errorf("constructor %d has no rising structure after the lead-in", b.u.Handle)
+				}
+				dx, dz := int32(b.u.X.Int())-b.x, int32(b.u.Z.Int())-b.z
+				if dx*dx+dz*dz > 32*32 {
+					t.Errorf("constructor at %d,%d walked %d,%d", b.x, b.z, dx, dz)
+				}
+			}
+		})
 	}
 }
 

@@ -233,12 +233,20 @@ func (c *Client) collectDrawPolysLaneProjected(draw *presentationrender.UnitDraw
 			if mode == modelPrimitiveTexture {
 				switch ref.kind {
 				case texAnimated:
-					// Retail keeps exactly one playback cursor per loaded-model
-					// primitive and resolves every draw of that primitive
-					// through it: the unit renderer and both standalone entries
-					// perform the identical read on the same record, so a piece
-					// detached as debris shows the frame its living parent
-					// shows [R-COMP-02 §6]. Our binder is keyed on the loaded
+					// Cached composition reads the sequence's first frame;
+					// live/direct drawing reads its running cursor. Construction
+					// includes every piece in the cached lane, so progress-driven
+					// rebuilds keep lamps at frame zero [03 R-REN-03A §5].
+					first := !direct && lane != presentationrender.PieceLaneLive &&
+						(kind == modelCursorUnit || kind == modelCursorFeature)
+					if lane == presentationrender.PieceLaneAll && kind == modelCursorUnit && !draw.UnderConstruction && piece.DontCache {
+						// Explicit preview combines the two unit lanes in one
+						// image; a completed live piece keeps its live selector.
+						first = false
+					}
+					// Retail keeps one playback cursor per loaded primitive.
+					// Standalone debris/projectiles read the same current cursor
+					// as the live unit pass [03 R-COMP-02 §6]. Our binder is keyed on the loaded
 					// model, so it can answer only for a draw that carries one;
 					// the piece's immutable loaded-model index is the cursor's
 					// identity, so a parent and the child it selects do not
@@ -250,7 +258,7 @@ func (c *Client) collectDrawPolysLaneProjected(draw *presentationrender.UnitDraw
 					// ordinary unit or feature draw leaves SourceModel nil
 					// because Model is already that model.
 					if bound := modelTextureCursorModel(c.modelTextures, draw); bound != nil {
-						texFrame = c.modelTextures.animatedFrame(bound, piece.SourceIndex, pri, ref)
+						texFrame = c.modelTextures.animatedFrameSelected(bound, piece.SourceIndex, pri, ref, first)
 						if texFrame == nil {
 							continue
 						}
@@ -276,7 +284,7 @@ func (c *Client) collectDrawPolysLaneProjected(draw *presentationrender.UnitDraw
 						}
 						break
 					}
-					texFrame = c.modelAnimatedFrameAt(ref, kind, id, piece.SourceIndex, pri)
+					texFrame = c.modelAnimatedFrameSelected(ref, kind, id, piece.SourceIndex, pri, first)
 				case texTeam:
 					if kind == modelCursorProjectile {
 						// The standalone effect renderer has no player-colour

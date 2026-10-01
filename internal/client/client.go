@@ -384,6 +384,7 @@ type Client struct {
 	// detail scale (DESIGN_GPU_RENDERER §14.3).
 	doubledFrames map[*formats.GAFFrame]*formats.GAFFrame
 	enhanced      bool
+	radarDots     int // Modern main-view preference: none, visible, attackable.
 	// trails is the Enhanced trail layer's retained state (DESIGN_GPU_RENDERER
 	// §15): presentation only, reset with the model registry and the terrain.
 	trails trailState
@@ -636,6 +637,7 @@ func New(opts Options) (*Client, error) {
 		// renderer's GlowStrengthDefault and settings.DefaultGlowStrength.
 		glowStrength:  100,
 		trailStrength: 50,
+		radarDots:     1,
 		// The ground light and blast ring strengths start at the tuned look:
 		// the renderer's EffectStrengthDefault and settings.DefaultEffectStrength.
 		groundLightStrength: 100,

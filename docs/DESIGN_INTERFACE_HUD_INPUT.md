@@ -4780,3 +4780,49 @@ Synthetic checks cover faction cycling, retail defaults and replacement team
 banks. Installed-content checks cover Zero's backgrounds, all three side
 buttons and HUDs, construction from authored menus, and team-colour model
 captures. Their compatibility boundary is [TA_ZERO_SUPPORT](TA_ZERO_SUPPORT.md).
+
+## Modern radar dots
+
+**Nanolathe Modern policy (user-authorized 2026-10-01, issue #62).** The
+Enhanced main view offers `presentation.radarDots`: 0 **No dots**, 1
+**Visible dots** (the existing display-only default), and 2 **Attackable dots**.
+The Nanolathe settings screen and battle options persist the choice through
+ordinary presentation settings and mod layers. Strict 3.1 and Community 3.9
+bypass the feature: the existing `visibility.Rules` seam answers whether the
+main view may expose sensor-only dots, and that answer is published with the
+committed frame. Modern answers yes. A mode change takes effect on publication;
+changing the preference invalidates recorded presentation immediately.
+
+**Strict baseline.** Main-view hover uses visible model hulls
+[07 R-SEL-02B2]; minimap contacts have their own admitted picker [03 §3.9].
+The Modern addition does not change minimap or Community megamap admission,
+model visibility, strategic identification, targeting-facility behavior, weapon
+accuracy, AI observations, save data, sensor timing or either RNG stream.
+
+**Main-view boundary.** No dots removes only sensor-only main-view markers.
+Visible dots draws them through the existing committed minimap blip gate,
+including blink, at the existing fixed screen size and projection at every
+Enhanced zoom. Attackable dots uses those same bounds, clipping and reverse
+draw ordering for a separate contact-handle picker. Visible models/icons keep
+priority. A contact hit never becomes an identified `UnitView` hit: it cannot
+reveal a name, model, health, build state, weapon rings, unit-info panel or
+selection target, nor offer repair, reclaim, capture, guard or load. Only a
+hostile contact may supply a target for a contextual order or an armed Attack
+click. The existing cursor weapon admission and ordinary typed command path
+remain authoritative; left-click follows the configured interface convention,
+and Shift retains normal queued-order behavior. Losing contact admission,
+changing the viewer, or reusing a slot cannot preserve a cached target.
+
+**State and effects.** The preference is host state; the rule objects remain
+stateless. Merely drawing, picking or changing styles changes no resources,
+orders or RNG state. An accepted click issues the same ordinary attack command
+as an admitted minimap contact, with the existing live-target validation.
+There is no new simulation mechanic or extra targeting accuracy.
+
+**Verification.** Lock all three styles, the Modern/Strict/Community answers,
+committed rule publication and rebind behavior, normal/fade/strategic zoom,
+projection/clip/overlap boundaries, lost admission and blink, and the absence of
+identified hover metadata. Command tests lock contextual/armed/queued attacks
+and the rejection of non-attack contact actions, with unchanged RNG/resource
+state before command application. Settings tests lock omitted/default/invalid
+values, persisted No dots and Attackable dots, mod layers and settings Apply.

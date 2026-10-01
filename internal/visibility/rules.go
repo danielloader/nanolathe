@@ -8,6 +8,9 @@ package visibility
 type Rules interface {
 	JammerSuppresses(s *Service, viewer, jammerOwner PlayerID) bool
 	Visible(s *Service, viewer PlayerID, target Target) bool
+	// MainViewRadarDots admits the Modern presentation/attack feature.
+	// The answer is published, never read from live rules by presentation.
+	MainViewRadarDots() bool
 }
 
 // StrictRules is the retail baseline. It is zero size, so binding it and asking
@@ -18,8 +21,8 @@ type StrictRules struct{}
 // unchanged answer remains retail's [DESIGN_COMMUNITY_PATCH §2].
 type CommunityRules struct{ StrictRules }
 
-// ModernRules currently inherits both community visibility contracts without
-// another override [DESIGN_COMMUNITY_PATCH §4.4].
+// ModernRules inherits community visibility and admits main-view sensor dots
+// (DESIGN_INTERFACE_HUD_INPUT "Modern radar dots").
 type ModernRules struct{ CommunityRules }
 
 // CommunityState is the resolved feature-table projection visibility owns.
@@ -79,3 +82,11 @@ func (CommunityRules) Visible(s *Service, viewer PlayerID, target Target) bool {
 	}
 	return s.communityVisible(viewer, target)
 }
+
+// MainViewRadarDots keeps the viewport's retail hull-only contact boundary
+// [07 R-SEL-02B2]. Community inherits this answer.
+func (StrictRules) MainViewRadarDots() bool { return false }
+
+// MainViewRadarDots enables the approved Modern display/attack preference
+// (DESIGN_INTERFACE_HUD_INPUT "Modern radar dots").
+func (ModernRules) MainViewRadarDots() bool { return true }

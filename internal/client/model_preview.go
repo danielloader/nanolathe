@@ -76,6 +76,9 @@ type ModelPreviewRecord struct {
 	List       drawlist.List
 	Background uint8
 	Palette    *palette.Tables
+	// Projected is the durable fractional-position payload supplied only by
+	// RecordProjectedGeometry. Ordinary preview records leave it nil.
+	Projected *drawlist.ModelPreviewGeometry
 }
 
 // ModelPreviewRenderer retains the production model and texture caches while
@@ -227,13 +230,13 @@ func (r *ModelPreviewRenderer) recordModel(opts ModelPreviewOptions, geometryOnl
 		defer func() { c.modelOrientation = previousOrientation }()
 		draw, ok := c.unitDrawFor(view)
 		if ok {
-			geometry, err := c.projectedPreviewGeometry(draw, unitTeamColor(view), *projection, int32(opts.Width/2), int32(opts.Height/2))
+			geometry, projected, err := c.projectedPreviewGeometry(draw, unitTeamColor(view), *projection, int32(opts.Width/2), int32(opts.Height/2))
 			if err != nil {
 				return ModelPreviewRecord{}, err
 			}
 			if geometry != nil {
 				c.list.RecordModel(drawlist.Model{Geometry: geometry})
-				return ModelPreviewRecord{List: c.list.Clone(), Background: opts.Background, Palette: r.palette}, nil
+				return ModelPreviewRecord{List: c.list.Clone(), Background: opts.Background, Palette: r.palette, Projected: projected}, nil
 			}
 		}
 		return ModelPreviewRecord{}, fmt.Errorf("nanolathe: rendering projected preview: logical path %s, providers searched %s, expected drawable 3DO model", renderName, previewProviders(c.modelFS))

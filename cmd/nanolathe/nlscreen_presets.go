@@ -120,6 +120,7 @@ func settingsOf(base settings.Settings, d nlDraft) settings.Settings {
 	out.Gameplay = d.gameplay
 	out.Presentation = d.pres
 	out.Display.Glow, out.Display.GlowStrength = d.glow, d.glowStrength
+	out.Display.Width, out.Display.Height = d.resolution.W, d.resolution.H
 	out.UnitLimit = d.unitLimit
 	out.SwitchAlt = onOff(d.switchAlt)
 	out.InterfaceType = d.interfaceType

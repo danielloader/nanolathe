@@ -58,8 +58,7 @@ func (s *nlScreen) demoSidebar(screen *ebiten.Image) {
 		return
 	}
 	c := preview.sidebarProductCatalog
-	g := s.shell()
-	height := g.display.Height
+	height := s.draft.resolution.H
 	original := s.draft.pres.ExpandedSidebar == 0
 	limit := s.nlSidebarBuildLimit(&s.draft)
 	starts, layout := nlSidebarPageStarts(c, original, height, limit, s.draft.pres.SidebarOrders != 0)
@@ -132,8 +131,8 @@ func (s *nlScreen) demoSidebar(screen *ebiten.Image) {
 		s.fonts.Body.Draw(screen, fmt.Sprintf("Current count: %d per page", limit), infoX, infoY, screenkit.Style{Size: 12 * u, Top: nlAmber})
 		infoY += 28 * u
 	}
-	resolution := s.ui.text(nlTextKey{kind: "sidebar resolution", i: g.display.Width, j: height}, func() string {
-		return fmt.Sprintf("Game resolution: %d x %d", g.display.Width, height)
+	resolution := s.ui.text(nlTextKey{kind: "sidebar resolution", i: s.draft.resolution.W, j: height}, func() string {
+		return fmt.Sprintf("Game resolution: %d x %d", s.draft.resolution.W, height)
 	})
 	s.fonts.Body.Draw(screen, resolution, panel.X, panel.Y+panel.H+28*u, screenkit.Style{Size: 11 * u, Top: nlDim})
 }

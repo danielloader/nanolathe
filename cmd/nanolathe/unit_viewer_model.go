@@ -88,7 +88,6 @@ func (m *unitViewerModel) draw(cs *contentSet, def *content.UnitDef, yaw, pitch,
 		m.err = err
 		return nil
 	}
-	commands := record.List.ModelCommands()
 	if m.gpu == nil {
 		m.gpu, m.err = gpurender.NewChecked(record.Palette, w, h)
 		if m.err != nil {
@@ -98,20 +97,15 @@ func (m *unitViewerModel) draw(cs *contentSet, def *content.UnitDef, yaw, pitch,
 	var list drawlist.List
 	list.RecordClear()
 	unitViewerBackdrop(&list, record.Palette, w, h)
-	for _, cmd := range commands {
-		if cmd.ShadowOnly || cmd.Geometry == nil {
-			continue
-		}
-		g := cmd.Geometry
-		g.Shadow, g.Cache = nil, drawlist.ModelCacheKey{}
-		list.RecordModel(drawlist.Model{Geometry: g})
-	}
 	m.image = m.gpu.Execute(&list, w, h)
 	if m.image == nil {
 		m.err = fmt.Errorf("nanolathe: unit viewer rendering failed: logical path objects3d/%s.3do, providers searched [mounted content], expected model surface", def.ObjectName)
 		return nil
 	}
 	m.gpu.Expand()
+	if m.err = m.gpu.DrawModelPreview(m.image, record.Projected); m.err != nil {
+		return nil
+	}
 	m.key = key
 	return m.image
 }
@@ -162,12 +156,11 @@ func unitViewerOrientation(yaw, pitch uint16) (heading, tilt, bank uint16) {
 	return angle(y), angle(x), angle(z)
 }
 
-// Large zoomed subjects must still fit the GPU's 4096-pixel composition
-// atlas, including its 2x plane and border (DESIGN_GPU_RENDERER §22.2).
-// Reduce geometry and canvas together; the UI's final stretch preserves zoom
-// and aspect while avoiding the atlas's painter-order overflow fallback.
+// Bound both the projected geometry and the 2x preview canvas to 4096 pixels
+// (DESIGN_GPU_RENDERER §22.5). Reduce geometry and canvas together; the UI's
+// final stretch preserves zoom and aspect without rounding vertices first.
 func unitViewerRasterSize(commands []drawlist.Model, scale float64, w, h int) (float64, int, int) {
-	bound := 1.0
+	bound := float64(max(1, w, h))
 	for _, cmd := range commands {
 		g := cmd.Geometry
 		if cmd.ShadowOnly || g == nil {

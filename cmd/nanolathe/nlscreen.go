@@ -86,15 +86,21 @@ type nlScreen struct {
 	pendingPresets []json.RawMessage
 	// The Controls page: the tab, the selected row, the first row shown, a
 	// key cap waiting for a press, and where the table was drawn.
-	ctlGroup    int
-	ctlRow      int
-	ctlScroll   int
-	capture     nlCapture
-	ctlTable    screenkit.Rect
-	contentTop  int            // first row the content list shows
-	contentList screenkit.Rect // where the content list was drawn, for the wheel
-	dialog      string
-	pendingV    int
+	ctlGroup          int
+	ctlRow            int
+	ctlScroll         int
+	capture           nlCapture
+	ctlTable          screenkit.Rect
+	contentTop        int            // first row the content list shows
+	contentList       screenkit.Rect // where the content list was drawn, for the wheel
+	dialog            string
+	pendingV          int
+	resolutionModes   []retailDisplayMode
+	resolutionNative  retailDisplayMode
+	resolutionText    [2]string
+	resolutionField   int
+	resolutionReplace bool
+	resolutionError   string
 
 	toast     string
 	toastLeft float64
@@ -154,6 +160,7 @@ func (g *gameShell) openNLScreen() bool {
 
 func (s *nlScreen) show(g *gameShell) {
 	s.bindShell(g)
+	s.readResolutionModes()
 	s.capture, s.ctlGroup, s.ctlRow, s.ctlScroll = nlCapture{}, 0, 0, 0
 	s.compare, s.dialog, s.toast, s.closing = false, "", "", false
 	s.page, s.pageT, s.heroT, s.openT = 0, 0, 0, 0
@@ -333,6 +340,7 @@ func (s *nlScreen) snapshot(g *gameShell) nlDraft {
 		mutators:      g.opts.Mutators,
 		unitLimit:     g.savedUnitLimit,
 		fullscreen:    g.fullscreen,
+		resolution:    retailDisplayMode{g.display.Width, g.display.Height},
 		switchAlt:     g.switchAlt,
 		override:      g.lockOverridden(g.cs.mod),
 		interfaceType: g.interfaceType,
@@ -399,8 +407,11 @@ func (s *nlScreen) setCard(c nlCard, v int) {
 }
 
 // Selector indices cannot distinguish inherited defaults or legacy counts
-// from explicit choices. Apply/restore copy the underlying sidebar values.
+// from explicit choices or arbitrary dimensions. Apply/restore copy those values.
 func nlCardEqual(c nlCard, a, b *nlDraft) bool {
+	if c.key == "resolution" {
+		return a.resolution == b.resolution
+	}
 	if c.key == "sidebar" {
 		return a.pres.ExpandedSidebar == b.pres.ExpandedSidebar && a.pres.BuildMenuPageSize == b.pres.BuildMenuPageSize && a.pres.SidebarOrders == b.pres.SidebarOrders
 	}
@@ -408,6 +419,10 @@ func nlCardEqual(c nlCard, a, b *nlDraft) bool {
 }
 
 func nlCopyCard(c nlCard, to, from *nlDraft) {
+	if c.key == "resolution" {
+		to.resolution = from.resolution
+		return
+	}
 	if c.key == "sidebar" {
 		to.pres.ExpandedSidebar, to.pres.BuildMenuPageSize = from.pres.ExpandedSidebar, from.pres.BuildMenuPageSize
 		to.pres.SidebarOrders = from.pres.SidebarOrders
@@ -536,6 +551,8 @@ func (s *nlScreen) applyDraft(g *gameShell, draft nlDraft, touched map[string]bo
 		g.fullscreen = next.fullscreen
 		ebiten.SetFullscreen(next.fullscreen)
 	}
+	g.display.Width, g.display.Height = next.resolution.W, next.resolution.H
+	g.commitWindowSize()
 	g.saveSettings()
 	s.touched = map[string]bool{}
 	s.bindSource(g)
@@ -571,6 +588,9 @@ func (s *nlScreen) Update() {
 	}
 	s.pollInstalls()
 	switch s.dialog {
+	case "resolution":
+		s.updateResolution(in)
+		return
 	case "presets":
 		s.updatePresets(in)
 		return
@@ -652,6 +672,10 @@ func (s *nlScreen) Update() {
 }
 
 func (s *nlScreen) step(c nlCard, v, d int) {
+	if c.kind == nlResolution {
+		s.stepResolution(d)
+		return
+	}
 	if c.kind == nlGroup {
 		if len(c.parts) == 0 {
 			return
@@ -824,6 +848,8 @@ func (s *nlScreen) Draw(screen *ebiten.Image) {
 	}
 	switch s.dialog {
 	case "":
+	case "resolution":
+		s.drawResolutionDialog(screen)
 	case "presets":
 		s.drawPresets(screen)
 	case "catalog":
@@ -1561,6 +1587,8 @@ func (s *nlScreen) drawHero(screen *ebiten.Image, page nlPage, card *nlCard, idx
 	df.Draw(screen, title, x, y, screenkit.Style{Size: size, Tracking: 0.02, Top: alphaC(nlGoldTop, a), Bottom: alphaC(nlGoldBottom, a), Shadow: 0.05})
 	y += 26 * u
 	switch card.kind {
+	case nlResolution:
+		y = s.heroResolution(screen, x, y, a)
 	case nlMeter:
 		y = s.heroMeter(screen, card, v, x, y, a)
 	case nlSwitch:
@@ -2483,6 +2511,9 @@ func (s *nlScreen) drawCard(screen *ebiten.Image, c *nlCard, r screenkit.Rect, v
 		}
 	}
 	value := c.steps[min(v, n-1)]
+	if c.kind == nlResolution {
+		value = resolutionLabel(s.draft.resolution)
+	}
 	s.fonts.Body.Draw(screen, value, r.X+14*u, r.Y+177*u, screenkit.Style{Size: 10.5 * u, Top: alphaC(nlGreenText, a)})
 	s.drawCardSource(screen, c, r, a)
 	if changed {

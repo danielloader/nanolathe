@@ -3,7 +3,9 @@ package client
 import (
 	"fmt"
 	"math"
+	"slices"
 
+	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
 
@@ -17,9 +19,9 @@ type ModelPreviewProjection struct {
 }
 
 // RecordProjectedGeometry records a complete isolated model with transformed
-// vertex fractions retained until projection at the final raster scale. Its
-// Image is nil. Native and doubled corners are rounded independently, so the
-// GPU can resolve subpixel coverage without magnifying game-pixel rounding.
+// vertex fractions retained through projection at the final raster scale. Its
+// Image is nil and Projected supplies unrounded screen positions and depth.
+// The legacy List keeps independently rounded native and doubled corners.
 //
 // Scale must be zero: PixelsPerUnit supplies the entire projection scale.
 // Construction, attached children, cloak, digger and waterline options are
@@ -42,6 +44,7 @@ func isFinitePositive(v float64) bool { return v > 0 && !math.IsInf(v, 0) }
 
 type modelPreviewProjector struct {
 	projection ModelPreviewProjection
+	positions  []drawlist.ModelPreviewPosition
 	err        error
 }
 
@@ -60,5 +63,28 @@ func (p *modelPreviewProjector) vertex(v, world [3]numeric.Fixed) (x, y, x2, y2 
 		}
 		return 0, 0, 0, 0
 	}
+	// This callback runs only after the shared walk admits the whole face.
+	// Keep its precise corners in that same order without adding storage to
+	// the ordinary polygon scratch or its per-vertex packet.
+	p.positions = append(p.positions, drawlist.ModelPreviewPosition{
+		X: sx, Y: sy, Depth: float64(v[1]-world[1]) / 65536,
+	})
 	return int32(math.Floor(sx)), int32(math.Floor(sy)), int32(math.Floor(2 * sx)), int32(math.Floor(2 * sy))
+}
+
+func (p *modelPreviewProjector) geometry(faces []drawlist.ModelFace, anchorX, anchorY int32) *drawlist.ModelPreviewGeometry {
+	positions := slices.Clone(p.positions)
+	for i := range positions {
+		positions[i].X += float64(anchorX)
+		positions[i].Y += float64(anchorY)
+	}
+	out := &drawlist.ModelPreviewGeometry{Faces: make([]drawlist.ModelPreviewFace, len(faces))}
+	offset := 0
+	for i, face := range faces {
+		end := offset + len(face.Vertices)
+		face.Vertices = slices.Clone(face.Vertices)
+		out.Faces[i] = drawlist.ModelPreviewFace{Face: face, Positions: positions[offset:end:end]}
+		offset = end
+	}
+	return out
 }

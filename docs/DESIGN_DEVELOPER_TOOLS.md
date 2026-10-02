@@ -443,11 +443,11 @@ context, not historical game behavior.
 `ModelPreviewRenderer.RecordProjectedGeometry` resolves the 3DO, piece
 transforms, textures, team-color bank and palette using the same source as
 battle rendering [03 §2.4][03 §2.4.1]. The definition selects
-structure shading (`BMCode == 0`) and its key plane; no unit-name special cases
+structure shading (`BMCode == 0`); no unit-name special cases
 are added. A fixed fit radius encloses the centered bounds of the visible
 hierarchy's drawable vertices and parent translations, excluding hidden pieces,
 selection plates, undrawable primitives and attachment-only points. No terrain,
-waterline or battle shadow is claimed. The viewer uses the GPU model path under
+waterline or battle shadow is claimed. The viewer uses its isolated GPU model path under
 either battle renderer preference, without changing that preference. A missing
 model reports an error while its catalog entry and available statistics remain
 browsable.
@@ -456,20 +456,41 @@ browsable.
 `ModelPreviewProjection{PixelsPerUnit, Pivot}` to the isolated projected-geometry
 entry. `PixelsPerUnit` is the final raster scale. `Pivot` is an already-oriented
 model-relative reference point, subtracted only from screen X/Y projection.
-The native and doubled antialiasing coordinates are each projected directly
-from transformed 16.16 vertices, retaining fractions until their final raster
-coordinates are formed. The doubled plane must not double already-rounded
-native coordinates. The shared material walk, source height, UVs, shading and
-height-key comparisons are unchanged. Ordinary `RecordModel` and
+The projected record carries a separate durable `ModelPreviewGeometry` with
+floating screen coordinates and oriented, fractional model-relative height.
+The 2× antialiasing raster consumes these fractions directly; it must not double
+already-rounded native coordinates. The shared material walk, textures, UVs
+and shading remain the source of its appearance. The ordinary geometry packet
+is retained alongside it for bounds and existing diagnostic consumers. Ordinary `RecordModel` and
 `RecordGeometry` calls retain their existing arithmetic, as does every battle.
+
+**User-authorized preview surface precision.** The viewer compares geometric
+depth instead of the battle renderer's whole-unit, wrapping byte height keys.
+Interpolating those keys through rounded scanline endpoints magnifies tiny
+depth errors into sawtooth face intrusions; simply widening the stored key
+does not fix the distorted interpolation. Screen coordinates and depth now
+remain fractional through triangle rasterization. A model-relative 24-bit
+depth image resolves negative heights and models taller than 256 units.
+Texture and shade mapping retain the existing quad mapper independently of
+the depth comparison. All units use depth, including assets whose retail
+definition requests painter order.
+
+Surfaces within 1/1024 world unit, plus two depth code points for device
+rounding, use stable first-recorded priority. This is a viewer policy for
+nearly coincident authored faces and fixed-point transform noise, not a
+retail tie rule. The aircraft plant's separated pad/base surfaces retain their
+geometric order; the vehicle plant's almost coincident pad/side surface uses
+that stable priority. No unit or piece names select a bias. Transparent index-1
+texels write neither colour nor depth, and reverse-winding faces remain culled.
+The GPU implementation and its source lifetime are in DESIGN_GPU_RENDERER §22.5.
 
 The viewer captures a Create-pose bounds center in root-local coordinates and
 the reference root state once. Each view transforms that fixed point through
 the current body orientation; animated poses never recalculate it. Current
 composition bounds determine allocation only, while the canvas center remains
 the anchor. This removes bounds-driven whole-model shifts and amplified
-game-resolution rounding. Large subjects reduce the canvas and project again
-at the reduced raster scale to fit the GPU composition atlas, preserving the
+game-resolution rounding. Large subjects or canvases reduce the canvas and project again
+at the reduced raster scale to fit the bounded GPU surfaces, preserving the
 displayed zoom and aspect. Final raster quantization and authored 30 Hz COB
 pose updates remain; this preview does not change simulation animation timing.
 
@@ -494,8 +515,12 @@ fields were not parsed show unavailable statistics [02 R-CAT-01 §5].
 definition immutability, stat conversion, input ownership and release, zoom
 bounds, main-menu-only preview entry, isolated animation inputs, bounded
 playback, callback return and reload ordering, pose-cache invalidation, stable
-pivot placement, late projection rounding, independent supersample coordinates
-and unchanged ordinary preview calls. Capture the actual screen with
+pivot placement, fractional projected positions/depth, retained record ownership,
+independent supersample coordinates and unchanged ordinary preview calls.
+Real-device fixtures cover separated sloped planes, stable near-coincident
+surfaces through a turn, shared-edge coverage, negative/large depth, byte
+carries and texture holes. Visually inspect factory pads and roof/wall edges
+through full orbits and animation poses. Capture the actual screen with
 `--shot /tmp/viewer.png --shot-unit-viewer armcom --shot-size 1440x900`.
 `--shot-unit-viewer @tools` retains the unused tools-menu prototype for capture.
 Captures create no battle and write no preferences. Review narrow and wide

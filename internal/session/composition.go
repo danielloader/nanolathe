@@ -1209,6 +1209,12 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 		},
 		Weapons: &orders.WeaponAdapter{
 			Ready: func() bool { return s.Combat != nil },
+			FiringPositionBlocked: func(u, target *units.Unit, tick uint32) bool {
+				return s.Combat != nil && s.Combat.FiringPositionBlocked(u, target, tick)
+			},
+			FiringPositionClear: func(u, target *units.Unit, tick uint32, x, y, z numeric.Fixed) bool {
+				return s.Combat != nil && s.Combat.FiringPositionClear(u, target, tick, x, y, z, s.Units, s.World)
+			},
 			ReleaseSlot: func(u *units.Unit, idx int) bool {
 				return combat.ReleaseWeaponSlot(u, idx)
 			},

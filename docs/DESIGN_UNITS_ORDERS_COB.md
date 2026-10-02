@@ -643,6 +643,90 @@ Fire at Will reconsideration versus Return Fire, queue isolation, mode switching
 and retail save restoration. The session owns visibility/feasibility composition
 and the integration, visual and performance gates.
 
+### Modern firing positions
+
+**Nanolathe Modern policy — user-authorized 2026-10-01.** A mobile ground
+attacker whose shot is physically obstructed seeks a nearby reachable firing
+position, retains its target, and fires through the ordinary weapon pipeline.
+This replaces indefinitely waiting beside a rock, wreck or friendly unit with
+a local movement attempt. It is not retail behavior.
+
+**Strict baseline.** `Attack_Chase` parks after range/medium admission until a
+weapon, target or movement event wakes its gate [04 R-ORD-01 §3]. Strict and
+Community retain that machine and do not perform the Modern shot previews or
+firing-position searches. The modern launch gate still refuses obstructed
+shots, as specified in DESIGN_WEAPONS_PROJECTILES §2.3.1 and §2.3.2.
+
+**Trigger and ownership.** The existing `orders.Rules` seam selects
+`StepFiringPosition` at the primary-pump boundary. Combat supplies a transient
+observation of this exact unit visit's physical shot refusal, with the actual
+launch geometry and shooter/target identities. A reload, unfinished aim,
+resource shortage or incoming-fire coordination hold is not an obstruction.
+A successful shot at the same target prevents displacement on that visit.
+Observations are overwritten at the next unit's weapon visit; there is no
+second target registry or persistent combat controller.
+
+Orders retain the exact active attack node and target identity. `Attack_Chase`
+and a mobile automatic `Attack_NoMove` response qualify; an explicitly
+stationary attack remains stationary. Only
+live, complete, unstunned, uncarried ground movers with a visible hostile unit
+target qualify. Hold Position prevents repositioning. Automatic attacks also
+respect Hold Fire; explicit attack orders retain their existing permission to
+fire. Immobile defenses, aircraft maneuvers, ground-point attacks and work
+orders keep their own behavior. The existing attack leash bounds candidate
+destinations. An automatic stationary response in Maneuver stance uses its
+existing danger anchor and return-to-post lifetime. User commands, target loss, transport and other control heads
+take precedence over this helper.
+
+**Local search.** Candidate displacement uses a fixed compass traversal on
+four rings, 16, 32, 48 and 64 world units from the current position, nearest
+ring first, with cardinals before diagonals. Diagonal components are inward
+rounded to 11, 22, 33 and 45 units. At most 32 candidates are considered per
+decision. Movement's
+existing `DangerRouteFeasible` footprint/corridor and bounded-detour query
+admits the candidate; ordinary path scheduling and collision execute the
+movement. Combat translates the observed muzzle to the hypothetical position,
+checks range/medium and the actual obstruction/terrain preview kernels, and
+requires a clear candidate. Ballistic candidates solve a fresh arc. This is a
+current-pose prediction: the real weapon must still aim and pass every firing
+gate after moving. Unsupported or uncertain predictions supply no candidate.
+This includes guided shots whose moving-target fallback predicts only the
+first flight step, rather than a complete clear trajectory.
+Ordinary burst weapons can preview their first shot; subsequent pellets keep
+their independent admission. The helper never forces a shot through a blocker.
+
+**Execution and lifecycle.** The chosen point goal belongs to the same attack
+node, preserving its target, anchor and successors. While that movement is
+active the helper suspends only primary dispatch; secondary orders continue.
+Arrival, movement failure or a 180-tick timeout returns control to the attack
+handler. No candidate or a failed attempt waits 30 ticks before another local
+search. These distances and deadlines are Modern tuning, not retail constants.
+An enclosed unit may still wait when no reachable clear position exists; this
+is a bounded local search, not a promise of a global flanking route.
+
+Queue state owns the temporary goal and retry state. Cleanup destroys only
+that node's movement payload; replacing the head must never unbind its
+successor. Switching away from Modern removes a live helper goal and resumes
+the ordinary attack. Save projection writes an active helper as an ordinary
+phase-1 attack with no temporary movement subtype; the live queue is untouched.
+Load therefore resumes the attack and re-evaluates obstruction under the
+selected rules, with no new retail save bytes. The existing save format does
+not retain automatic-response provenance: a restored `Attack_NoMove` remains
+stationary until the ordinary controller creates a fresh automatic response.
+
+Search and prediction draw neither RNG stream, make no extra COB queries,
+charge no resources and allocate no projectiles. Actual movement, aiming and
+firing retain their normal effects. Strict fingerprint locks remain unchanged;
+Modern battles intentionally differ when attackers escape an obstructed lane.
+
+**Verification.** Focused combat/order tests cover the observation boundary,
+candidate geometry, identity and tick freshness, eligibility, retries,
+cancellation, mode switching, detached saves and RNG/resource invariance. The
+Great Divide Flash/Weasel captured-position regression runs the full movement,
+COB and combat pipeline and compares the new policy with disabled repositioning
+and Strict. Run both repository gates, the simulation-cost benchmark and the
+focused path benchmark. No renderer changes are involved.
+
 ### Modern AI move retention
 
 **Nanolathe Modern policy (user-authorized 2026-09-25).** The user approved

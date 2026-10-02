@@ -232,6 +232,9 @@ func (q *Queue) cleanupNode(n *Node) {
 	if n == nil {
 		return
 	}
+	if q.firingPosition.node == n {
+		q.firingPosition = firingPositionState{}
+	}
 	u := q.ownerUnit(n)
 	if n.DynamicGate&2 != 0 && u != nil { // cancel-notification guard: dynamic gate bit 1 (value 2) [R-ORDER-02 §2]
 		if h := DescriptorFor(n.ID).Handler; h != nil {
@@ -435,6 +438,7 @@ func (q *Queue) Push(id ID, n Node) {
 		return
 	}
 	if DescriptorFor(id).StaticGate&staticRearSegment == 0 {
+		q.stopFiringPosition(q.lastPumpTick)
 		q.Binding().rules().BeforeCommand(q)
 	}
 	queued := n.QueuedIssue // the modifier is an argument, never record state [04 R-ORD-01 §13]

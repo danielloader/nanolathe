@@ -71,7 +71,18 @@ func RetailOrderImagesWithPayload(u *units.Unit, stableID RetailStableID, target
 				return fmt.Errorf("orders: retail save: owner %d queue exceeds sequence range", ownerID)
 			}
 			snapshot := *n
-			if source != nil {
+			// Modern firing positions restart the retained attack after load.
+			// Project only the copy: the live maneuver and its goal keep running.
+			if q.firingPosition.active && q.firingPosition.node == n {
+				if q.Head() == n {
+					snapshot.Satisfied |= u.Pending & (pendTargetGone | pendDisengage)
+				}
+				normalizeFiringPositionOrder(&snapshot)
+				snapshot.RetailSubtypeCode = 0
+				snapshot.RetailSubtype = nil
+				snapshot.RetailSubtypeUnitA, snapshot.RetailSubtypeUnitB = 0, 0
+				snapshot.RetailSubtypeWords16, snapshot.RetailSubtypeWords32 = nil, nil
+			} else if source != nil {
 				payload, err := source(n)
 				if err != nil {
 					return err

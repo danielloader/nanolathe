@@ -209,9 +209,10 @@ type Node struct {
 
 // Queue holds the two segments [04 §3.2] C5.
 type Queue struct {
-	primary   []*Node
-	secondary []*Node
-	danger    dangerState
+	primary        []*Node
+	secondary      []*Node
+	danger         dangerState
+	firingPosition firingPositionState
 
 	// detachedNode is the record currently running removal cleanup after it has
 	// already been unlinked, together with whether its retained next link was
@@ -723,7 +724,9 @@ func (q *Queue) Pump(u *units.Unit, tick uint32) {
 	q.lastPumpTick = tick
 	// No order-guard write here either; see PumpUnit above and
 	// [07 R-WGT-01 §10].
-	q.pumpPrimary(u, tick)
+	if !q.Binding().rules().StepFiringPosition(u, tick) {
+		q.pumpPrimary(u, tick)
+	}
 	q.pumpSecondary(u, tick) // unconditional: the two segments are separate lists [04 R-ORD-01 §10]
 }
 

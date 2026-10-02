@@ -185,6 +185,14 @@ func (s *Service) ForgetUnit(h pool.Handle) {
 func (s *Service) StepWeaponsForUnit(u *units.Unit, tick uint32, w *units.World, vis *visibility.Service, terrain *world.Terrain, econ *economy.Service, catalog *content.Catalog, simRNG *rng.Simulation, crtRNG *rng.CRT) UnitStepSummary {
 	var sum UnitStepSummary
 	sum.DispatchSlot = -1
+	if s != nil {
+		if s.firingPosition.shooter != nil {
+			s.firingPosition = firingPositionObservation{}
+		}
+		if previewsShot(s.rules()) {
+			s.firingPosition.shooter, s.firingPosition.tick = u, tick
+		}
+	}
 	if s == nil || u == nil {
 		return sum
 	}
@@ -1433,6 +1441,7 @@ func tryFireForSlot(u *units.Unit, slot *units.Slot, idx int, tick uint32, terra
 	_, ok := TryFire(svc, &cSlot, idx, tgt, tick, ports)
 	blocked := false
 	if ports.Shot != nil {
+		svc.observeFiringPosition(ports.Shot, &cSlot, idx, ok)
 		blocked, svc.shotQuery = ports.Shot.Blocked || ports.Shot.Covered, savedQuery
 	}
 	if blocked {

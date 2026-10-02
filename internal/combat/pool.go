@@ -258,6 +258,9 @@ type Service struct {
 	// scratch owned by the attempt that arms it, which puts back the value it
 	// found; nothing outside the attempt reads it and nothing saves it.
 	shotQuery ShotQuery
+	// firingPosition belongs only to the most recent unit weapon visit.
+	// It is transient Modern observation, never saved or indexed by unit.
+	firingPosition firingPositionObservation
 
 	Events      func(Event)               // optional ordered combat event sink; nil-safe
 	pendingAims map[pendingKey]pendingAim // Aim dispatch tracking ON-04 [06 §3.3]

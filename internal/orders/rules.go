@@ -22,6 +22,9 @@ import (
 // implementation is either zero-size or a pointer to session-lifetime state.
 // Strict 3.1 draws no randomness in any of them.
 type Rules interface {
+	// StepFiringPosition temporarily lends a chasing attack's mover to a
+	// Modern firing position. True suspends only the primary pump.
+	StepFiringPosition(u *units.Unit, tick uint32) bool
 	// PreserveBuildToggle keeps an active quickkey toggle while a build is prepared.
 	PreserveBuildToggle(prepared bool, status uint8, enabled bool) bool
 	// RejectStockpileOrder selects the malformed-slot corrupt-order exit.

@@ -161,6 +161,13 @@ import (
 // every old Modern lock, isolating their effects from the other review fixes.
 // Every Strict and Community lock, the Modern initial composition and its
 // 6000-tick ashap lock remain unchanged.
+//
+// Modern firing positions (DESIGN_UNITS_ORDERS_COB "Modern firing positions")
+// move obstructed ground attackers onto locally clear lanes. This changes
+// Modern's benchmark final state and its long battle ending (now 49350), while
+// its initial, warm and 6000-tick states and all Strict/Community locks remain
+// unchanged. The captured Flash/Weasel regression isolates the new behavior:
+// disabling only repositioning leaves the Flash parked behind the rock.
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
@@ -171,10 +178,10 @@ const (
 	lockAshapModern6000            = "partial-v1:a2c6fc1f6d2e6836"
 	lockAshapStrict54000           = "partial-v1:24da164ea104466e"
 	lockAshapCommunity54000        = "partial-v1:a76a48f358418a68"
-	lockAshapModern54000           = "partial-v1:169be9e862015847"
+	lockAshapModern54000           = "partial-v1:c68fedd7da4f36d0"
 	lockAshapStrictEnd      uint32 = 54000
 	lockAshapCommunityEnd   uint32 = 54000
-	lockAshapModernEnd      uint32 = 49380
+	lockAshapModernEnd      uint32 = 49350
 
 	lockBenchSeed             uint32 = 7
 	lockBenchWarmupTicks             = 600
@@ -187,7 +194,7 @@ const (
 	lockBenchModernWarm              = "partial-v1:ad31aa25d9f87893"
 	lockBenchStrictFinal             = "partial-v1:2ccfe9ca8e307df2"
 	lockBenchCommunityFinal          = "partial-v1:67c87da793a68133"
-	lockBenchModernFinal             = "partial-v1:6ee19cc1f0eaa780"
+	lockBenchModernFinal             = "partial-v1:3854f2d414673aa0"
 )
 
 // TestStrictFingerprintIsLocked holds the retail baseline. Nothing in a Modern

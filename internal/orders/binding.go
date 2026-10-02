@@ -326,15 +326,19 @@ type WorkAdapter struct {
 // callbacks so combat remains the sole owner of authoritative weapon state
 // [P0-00 E][06 §1.2].
 type WeaponAdapter struct {
-	Ready           func() bool
-	ReleaseSlot     func(*units.Unit, int) bool
-	InhibitSlot     func(*units.Unit, int) bool
-	SetManualTarget func(*units.Unit, int, pool.Handle) bool
-	FireTarget      func(*units.Unit, int, pool.Handle, uint32) bool
-	FirePoint       func(*units.Unit, int, numeric.Fixed, numeric.Fixed, uint32) bool
-	StopFiring      func(*units.Unit, int) bool
-	Acquire         func(*units.Unit, int, uint32) (pool.Handle, bool)
-	Engaged         func(*units.Unit, int) bool
+	// FiringPositionBlocked reports a physical refusal from this unit visit.
+	FiringPositionBlocked func(shooter, target *units.Unit, tick uint32) bool
+	// FiringPositionClear previews that launch from a candidate position.
+	FiringPositionClear func(shooter, target *units.Unit, tick uint32, x, y, z numeric.Fixed) bool
+	Ready               func() bool
+	ReleaseSlot         func(*units.Unit, int) bool
+	InhibitSlot         func(*units.Unit, int) bool
+	SetManualTarget     func(*units.Unit, int, pool.Handle) bool
+	FireTarget          func(*units.Unit, int, pool.Handle, uint32) bool
+	FirePoint           func(*units.Unit, int, numeric.Fixed, numeric.Fixed, uint32) bool
+	StopFiring          func(*units.Unit, int) bool
+	Acquire             func(*units.Unit, int, uint32) (pool.Handle, bool)
+	Engaged             func(*units.Unit, int) bool
 	// TargetsInRadius queries the owner's cached primary/secondary registry
 	// around a point, without weapon scoring or new visibility checks. Wait
 	// and Guard_NoMove share this enumeration [04 R-SPEC-01 §8].

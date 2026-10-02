@@ -605,6 +605,12 @@ Two consequences are worth stating because they are observable:
   carries no rule-set name; the Nanolathe sidecar beside it does, and a load
   restores that selection (§6).
 
+The order seam also owns [Modern firing positions](DESIGN_UNITS_ORDERS_COB.md#modern-firing-positions):
+`StepFiringPosition` may temporarily suspend a blocked ground attack's primary
+pump while its ordinary movement goal runs. Combat supplies current-visit shot
+observations and read-only candidate geometry; movement supplies the existing
+local feasibility query. Strict and Community do not initiate this movement.
+
 ## 9. Extending the existing mechanism
 
 Future gameplay work uses the interfaces in §2 and the registry in §8. This

@@ -1494,6 +1494,12 @@ diagonal corners, footprint bounds, the different ground/air planes, bounded
 detour admission and execution around the friendly crowd observed in an F11
 capture on Great Divide.
 
+The same read-only `DangerRouteFeasible` query admits local destinations for
+[Modern firing positions](DESIGN_UNITS_ORDERS_COB.md#modern-firing-positions).
+That order policy chooses the candidate and retains its attack node; the normal
+point-goal payload, scheduler and traffic rules execute the accepted movement.
+It adds no second path search or movement rule selector.
+
 ### Modern crowded arrival
 
 **Nanolathe Modern policy (user-authorized prototype).** The ground follower

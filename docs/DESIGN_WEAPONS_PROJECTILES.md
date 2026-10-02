@@ -396,8 +396,10 @@ Strict mode does not undo shots or state changes made earlier in Modern.
 **Nanolathe Modern policy — user-authorized 2026-09-29.** Units hold fire
 when the current launch trajectory crosses an own or allied unit's stamped
 footprint, or a feature (including a wreck) whose height obstructs it. They
-retain their target and orders and retry as geometry changes. This implements
-the requested stop option; it does not add a maneuver order.
+retain their target and orders and retry as geometry changes. Eligible mobile
+attackers also seek a nearby clear firing position through the order-owned
+[Modern firing positions](DESIGN_UNITS_ORDERS_COB.md#modern-firing-positions)
+policy. The launch gate itself never installs movement.
 
 **Strict baseline.** Retail admission does not inspect these intervening
 objects. Projectile contact samples only each post-motion point, ignores the

@@ -20,6 +20,9 @@ func (s singlePollProvider) Poll(player int) (path.Request, path.PollResult) { r
 func (s singlePollProvider) SetPathTick(tick uint32)                         { s.p.SetPathTick(tick) }
 func (s singlePollProvider) Cancel(unit pool.Handle) bool                    { return s.p.Cancel(unit) }
 func (s singlePollProvider) HasRequest(unit pool.Handle) bool                { return s.p.HasRequest(unit) }
+func (s singlePollProvider) PathWorkBound() (int32, bool)                    { return s.p.PathWorkBound() }
+func (s singlePollProvider) SweepLen(player int) int                         { return s.p.SweepLen(player) }
+func (s singlePollProvider) EndPathTick()                                    { s.p.EndPathTick() }
 
 func idleBatchFixture(t *testing.T, batch bool) (*System, []pool.Handle) {
 	t.Helper()
@@ -86,6 +89,39 @@ func TestPathProviderIdleBatchingMatchesSinglePolls(t *testing.T) {
 	}
 	if published == 0 {
 		t.Fatal("no route was published; the comparison proves nothing")
+	}
+}
+
+// Modern's futile-sweep cutoff applies to idle polls too. An idle call must
+// leave the same cursors, and therefore the same admission order next call,
+// whether those polls were individual or batched.
+func TestPathProviderBoundedIdleBatchingMatchesSinglePolls(t *testing.T) {
+	run := func(batch bool) ([10]int, []pool.Handle) {
+		sys, handles := idleBatchFixture(t, batch)
+		sys.Rules = &ModernRules{}
+		sys.BeginTick(100)
+		sys.Scheduler.Tick(100)
+		cursors := sys.pathProvider.cursor
+		var admissions []pool.Handle
+		sys.Scheduler.SetSearch(func(r path.Request, _ int32, _ int) path.WorkResult {
+			admissions = append(admissions, r.Unit)
+			return path.WorkResult{Done: true}
+		})
+		for i, h := range handles {
+			sys.SubmitMove(h, uint8(i&1), path.Cell{X: 1, Z: 1}, path.Cell{X: 18, Z: 18})
+		}
+		sys.BeginTick(101)
+		sys.Scheduler.Tick(101)
+		if len(admissions) != len(handles) {
+			t.Fatalf("admitted %d of %d requests", len(admissions), len(handles))
+		}
+		return cursors, admissions
+	}
+	singleCursors, singleAdmissions := run(false)
+	batchCursors, batchAdmissions := run(true)
+	if singleCursors != batchCursors || !reflect.DeepEqual(singleAdmissions, batchAdmissions) {
+		t.Fatalf("batched cursors %v admissions %v, single-poll cursors %v admissions %v",
+			batchCursors, batchAdmissions, singleCursors, singleAdmissions)
 	}
 }
 

@@ -48,6 +48,17 @@ func (s *Service) rules() Rules {
 	return s.Rules
 }
 
+// JammerSuppresses answers the same policy for the sensor pass and a computer
+// player's observation. Survival teammates do not jam each other in any rule
+// set (DESIGN_SURVIVAL §4.3); otherwise the bound rule owns the answer
+// [03 R-VIS-01 §4]. It reads the supplied viewer, not the presentation viewer.
+func (s *Service) JammerSuppresses(viewer, jammerOwner PlayerID) bool {
+	if !s.rules().JammerSuppresses(s, viewer, jammerOwner) {
+		return false
+	}
+	return s == nil || viewer == jammerOwner || !validPlayer(viewer) || !validPlayer(jammerOwner) || s.team[viewer]&cellBit(jammerOwner) == 0
+}
+
 // JammerSuppresses retains retail's owner-only exemption. Pass 3 asks this
 // before either jammer callback, so the answer applies equally to radar and
 // sonar [03 R-VIS-01 §5].

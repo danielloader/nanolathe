@@ -166,7 +166,7 @@ type tourney struct {
 
 	mu       sync.Mutex
 	next     int
-	done     []bool // by queue index: finished, failed or resumed
+	done     []bool // by queue index: succeeded or resumed with a valid result
 	running  map[int]context.CancelFunc
 	finished int
 	started  time.Time
@@ -195,14 +195,14 @@ func (t *tourney) resultPath(j matchJob) string {
 	return filepath.Join(t.out, "matches", j.id+".json")
 }
 
-// run plays the queue. Games already on disk count as played (resume), and
+// run plays the queue. Valid games already on disk count as played (resume), and
 // a sequential pair's looks are re-read from them, so a resumed tournament
 // reaches the decisions an uninterrupted one would.
 func (t *tourney) run(self string, jobs int, pool *slotPool) {
 	t.started = time.Now()
 	t.mu.Lock()
 	for i, j := range t.queue {
-		if _, err := os.Stat(t.resultPath(j)); err == nil {
+		if _, err := t.readGame(j); err == nil {
 			t.done[i] = true
 			t.finished++
 		}
@@ -274,7 +274,17 @@ func (t *tourney) finish(i int, err error, cancelled bool) {
 	j := t.queue[i]
 	t.running[i]()
 	delete(t.running, i)
-	t.done[i] = true
+	if err == nil && !cancelled {
+		_, err = t.readGame(j)
+	}
+	t.done[i] = err == nil && !cancelled
+	if err != nil && !cancelled {
+		// A child may fail after creating its output. Resume must retry that
+		// game, and the summary must not count its partial result.
+		if removeErr := os.Remove(t.resultPath(j)); removeErr != nil && !os.IsNotExist(removeErr) {
+			err = fmt.Errorf("%w; removing failed result: %v", err, removeErr)
+		}
+	}
 	t.finished++
 	switch {
 	case cancelled:
@@ -288,7 +298,7 @@ func (t *tourney) finish(i int, err error, cancelled bool) {
 	t.evaluate(j.pair)
 }
 
-// evaluate runs every look of pair p whose games have all finished, in
+// evaluate runs every look of pair p whose games have all succeeded, in
 // order, and stops the pair at the first that decides it: its queued games
 // are dropped and its running games past the look are killed.
 func (t *tourney) evaluate(p int) {
@@ -313,7 +323,7 @@ func (t *tourney) evaluate(p int) {
 			g, err := t.readGame(j)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: no result for look %d: %v\n", j.id, k+1, err)
-				continue
+				return // no verdict from an incomplete map/seed/slot-order block
 			}
 			games = append(games, g)
 		}
@@ -342,16 +352,19 @@ func (t *tourney) readGame(j matchJob) (seqGame, error) {
 		return seqGame{}, err
 	}
 	var r struct {
-		Winner int `json:"winner"`
+		Winner *int `json:"winner"`
 	}
 	if err := json.Unmarshal(raw, &r); err != nil {
 		return seqGame{}, err
 	}
+	if r.Winner == nil || *r.Winner < -1 || *r.Winner >= len(j.players) {
+		return seqGame{}, fmt.Errorf("match result has no valid winner")
+	}
 	g := seqGame{mapName: j.mapName, seed: j.seed, points: 0.5}
 	switch {
-	case r.Winner == j.aSlot:
+	case *r.Winner == j.aSlot:
 		g.points = 1
-	case r.Winner >= 0:
+	case *r.Winner >= 0:
 		g.points = 0
 	}
 	return g, nil

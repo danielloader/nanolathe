@@ -133,10 +133,11 @@ Map `StartPos` specials are ignored. The human's commander is placed at the
    keeps the choice data-driven.
 3. The commander stands on the region's cell nearest that candidate.
 
-Buddies are placed on the same region, on a ring of radius `BuddyRing` around
-the centre site at evenly spaced angles starting due east, each snapped to
-the nearest cell of that region where the commander passes the spawn
-command's placement checks. A buddy's
+Buddies are placed on a ring of radius `BuddyRing` around the centre site at
+evenly spaced angles starting due east. Each uses the region of its **own
+movement class** that reaches the centre site (§6.6), snapped to the nearest
+cell of that region where the commander passes the spawn command's placement
+checks. Numeric region labels are never shared across movement classes. A buddy's
 computer player then builds around its own commander as it does in skirmish.
 
 ### 4.3 One side against the world
@@ -305,6 +306,8 @@ To make each wave distinct rather than a uniform mix:
    unlocked unit can enter from is turned an eighth of a circle at a time,
    drawing nothing; if no direction admits anything (an island start before
    `AirFrom`), air comes early rather than the wave being empty.
+   Amphibious units join the ground theme and make it eligible when they can
+   enter, even if no ordinary ground unit can. They add no separate theme weight.
 3. **Signature units.** Each direction draws 1–3 unit types from the pool of
    its domain and unlocked tiers.
 4. **Fill.** The budget is split evenly across directions; each direction
@@ -321,6 +324,9 @@ also uses. At most `SpawnPerTick` units are created
 per tick so a large wave does not land in one tick. If the attacker reaches
 its unit limit, the rest of the wave is dropped; later waves still rise in
 tier, so pressure rises through quality once quantity is capped.
+The whole unspawned tail is discarded immediately, including across entry
+directions; freed slots do not restart it. A per-definition limit drops only
+that pick, since other types may still fit the player's slice.
 
 ### 6.6 Spawn cells and reachability
 

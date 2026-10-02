@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/nanolathe-gg/nanolathe/internal/clock"
+	"github.com/nanolathe-gg/nanolathe/internal/combat"
 	"github.com/nanolathe-gg/nanolathe/internal/community"
-	"github.com/nanolathe-gg/nanolathe/internal/construction"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
@@ -54,8 +54,9 @@ type RetailLoadDeps struct {
 	// recorded (docs/DESIGN_MODS_MUTATORS.md §7.3 step 4). When set, it is
 	// the restored session's entry table in place of one resolved from the
 	// sources, so parameters fixed at the original entry — capacities, the
-	// unit limit — survive a rule-set switch made before the save. The live
-	// table is still resolved from Gameplay and CommunitySources, exactly as
+	// unit limit and weapon reload-word clamp — survive a rule-set switch
+	// made before the save. The live table is still resolved from Gameplay
+	// and CommunitySources, exactly as
 	// the command boundary resolves it.
 	EntryCommunity *community.Features
 	// AIControllers is the Modern AI controllers' record a save's sidecar
@@ -122,7 +123,15 @@ func StageRetailBattle(bank *save.Bank, deps RetailLoadDeps) (*RetailBattleStage
 	// battle owns its copies before any forced unit allocation or fix-up
 	// [08 R-SAVE-WEAPON-01].
 	cat = cat.Clone()
-	cat = prepareCommunityWeapons(cat, deps.Gameplay, entryFeatures)
+	weaponRules := RuleSetForMode(deps.Gameplay).Combat
+	if deps.EntryCommunity != nil {
+		// Rebuild the recorded entry transform even if the saved battle had
+		// since switched to Strict. Its entry table already carries Strict's
+		// zero features when it began there (DESIGN_COMMUNITY_PATCH §4.1,
+		// DESIGN_MODS_MUTATORS §7.3). Without a sidecar, use today's rules.
+		weaponRules = combat.CommunityRules{}
+	}
+	cat = prepareWeaponReloads(cat, weaponRules, entryFeatures)
 	m, err := loadRetailStageMission(deps.FS, image.Summary)
 	if err != nil {
 		return nil, fmt.Errorf("session: retail mission resolution: %w", err)
@@ -451,7 +460,7 @@ func reserveRetailUnits(w *units.World, cat *content.Catalog, records []save.Uni
 
 // allocateRetailUnit runs the ordinary constructor only when the recursive
 // reader first reaches this record [08 R-SAVE-02 §6][04 R-MOV-01 §5c].
-func allocateRetailUnit(w *units.World, cat *content.Catalog, rec save.UnitRecord, build *construction.Service) (pool.Handle, error) {
+func allocateRetailUnit(w *units.World, cat *content.Catalog, rec save.UnitRecord) (pool.Handle, error) {
 	nameBytes := rec.Data[:0x20]
 	if n := bytes.IndexByte(nameBytes, 0); n >= 0 {
 		nameBytes = nameBytes[:n]
@@ -461,9 +470,15 @@ func allocateRetailUnit(w *units.World, cat *content.Catalog, rec save.UnitRecor
 	y := numeric.Fixed(int32(binary.LittleEndian.Uint32(rec.Data[0x2f:])))
 	z := numeric.Fixed(int32(binary.LittleEndian.Uint32(rec.Data[0x33:])))
 	facing := units.FacingSouth
-	if build != nil {
+	// The heading persists existing geometry, not a new placement request.
+	// Decode only the authored building facings and valid footprint envelope
+	// (community-patch-engine.md CP-CON-5); a later rule switch cannot turn
+	// a saved building's yard back to south (DESIGN_COMMUNITY_PATCH §4.3).
+	if def != nil && def.BMCode == 0 && def.FootprintX > 0 && def.FootprintZ > 0 && def.FootprintX <= 32 && def.FootprintZ <= 32 {
 		heading := binary.LittleEndian.Uint16(rec.Data[0x39:])
-		facing = build.ResolveStructureFacing(def, units.FacingFromHeading(heading))
+		if saved := units.FacingFromHeading(heading); def.Rotations&units.FacingMask(saved) != 0 {
+			facing = saved
+		}
 	}
 	h, err := w.CreateWithForcedSlotFacing(def, rec.Data[0x20], x, y, z, pool.Handle(rec.StableID), facing)
 	if err != nil {

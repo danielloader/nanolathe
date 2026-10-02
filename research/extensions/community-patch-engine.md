@@ -1617,6 +1617,17 @@ constant addition. It introduces no rounding bias, and default rate 12 leaves
 this complete arithmetic and draw cadence unchanged. Source:
 `VeterancyHack.cpp`, `UnitDefExtensions.cpp`; author text in `tdraw.txt`.
 
+**Established — a missing definition lookup keeps the default thresholds.**
+At the pinned MIT source revision `dcff5dd`, the string-extension lookup falls
+back to the key's registered default when the requested unit definition has
+no stored value; an empty string also parses to the default threshold list.
+The damage-dealt consumer reads that list together with the shooter's retained
+kill count. When the shooter has been freed, the lack of a live definition
+therefore does not force its level to zero: the default bounded level still
+applies. This does not preserve the freed unit's custom thresholds. Source:
+`UnitDefExtensions.cpp` string lookup and `VeterancyHack.cpp` threshold parser
+and damage-dealt consumer; this is current-source extension evidence only.
+
 **CP-UD-2 (P). Placement-preview keys.** All string keys with empty defaults,
 registered only when the host's nanoframe-preview setting is not DISABLED.
 `PreviewPieces` and the per-facing `PreviewPiecesS/E/N/W` whitelist model

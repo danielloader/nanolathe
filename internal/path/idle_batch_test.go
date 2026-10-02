@@ -18,12 +18,22 @@ type slotProvider struct {
 	started  [10]bool
 	staged   map[int]Request
 	visits   int
+	bounded  bool
 }
 
 func (p *slotProvider) PlayerCount() int { return 10 }
 func (p *slotProvider) UnitLimit() int32 { return 50 }
 func (p *slotProvider) Eligible(player int) bool {
 	return player >= 0 && player < 10 && p.eligible[player]
+}
+func (p *slotProvider) PathWorkBound() (int32, bool) {
+	if p.bounded {
+		return modernCarryTestShares, true
+	}
+	return 0, false
+}
+func (p *slotProvider) SweepLen(player int) int {
+	return p.slices[player][1] - p.slices[player][0] + 1
 }
 func (p *slotProvider) Poll(player int) (Request, PollResult) {
 	p.visits++
@@ -80,10 +90,18 @@ func (p batchingSlotProvider) SkipIdle(player int, n int32) {
 // batching scheduler must make exactly the searches, publications and
 // counter changes the one-poll-at-a-time scheduler makes [04 R-PATH-01 §6].
 func TestSchedulerIdleBatchingMatchesSinglePolls(t *testing.T) {
-	for _, allowance := range []int{1333, 66650} {
-		t.Run(fmt.Sprint(allowance), func(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		allowance int
+		bounded   bool
+	}{
+		{"retail", 1333, false},
+		{"large allowance", 66650, false},
+		{"bounded large allowance", 66650, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			run := func(batch bool) ([]string, *Scheduler) {
-				plain := &slotProvider{staged: map[int]Request{}}
+				plain := &slotProvider{staged: map[int]Request{}, bounded: tc.bounded}
 				for p := 0; p < 10; p++ {
 					plain.slices[p] = [2]int{1 + p*40, 40 + p*40}
 				}
@@ -109,7 +127,7 @@ func TestSchedulerIdleBatchingMatchesSinglePolls(t *testing.T) {
 				} else {
 					s.SetCandidateProvider(plain)
 				}
-				s.SetStepAllowance(allowance)
+				s.SetStepAllowance(tc.allowance)
 				seed := uint32(12345)
 				for tick := uint32(1); tick <= 400; tick++ {
 					for k := 0; k < 3; k++ {

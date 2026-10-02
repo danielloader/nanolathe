@@ -2028,7 +2028,11 @@ optional `workBoundProvider` question, asked once per call.
    physical slots in the player's unit slice, which one sweep of the poll
    cursor visits — the player's remaining accumulator is credited to its
    service count and set to zero. An admission restarts the count; every count
-   restarts at the next call.
+   restarts at the next call. Idle-run batching stops at the full sweep;
+   the ordinary admission loop performs the next poll, which proves the
+   cutoff, and credits the remainder before advancing to the next player.
+   Batching must preserve the cursors and later admission order of individual
+   polling.
 
 Active-search continuation, admission charges, the 100-pop slice, the
 full-or-empty publication, the poll cursor and its per-slot walk are retail's.
@@ -2083,7 +2087,12 @@ banks at least nineteen shares behind a long search; the bound keeps four and
 carry plus credited polls equals retail's), `TestModernWorkBoundSweepStop` (a
 `(0, false)` answer equals a provider without the question; Modern stops after
 one sweep plus the proving poll, credits the rest, and an admission restarts
-the sweep), `movement.TestPathWorkBoundAnswers` (Strict, Community, unbound,
+the sweep), `TestSchedulerIdleBatchingMatchesSinglePolls` (bounded and
+unbounded polling preserve searches, publications, cursors and accounting
+through replenishment),
+`movement.TestPathProviderBoundedIdleBatchingMatchesSinglePolls` (an idle call
+leaves the same physical-slot cursors and next-call admission order),
+`movement.TestPathWorkBoundAnswers` (Strict, Community, unbound,
 Modern; the answer does not allocate); the Strict, Community and Modern
 `headless` fingerprint locks cover RNG and resource effects over whole battles.
 
@@ -3158,7 +3167,9 @@ tick from the routes the save carries, and what is lost is the side a unit
 was passing on and the counts of ticks it had stood, which begin again. After
 a switch to Strict 3.1 or Community 3.9 the state is kept and neither read
 nor written; a switch back resumes with it. A route published before a switch
-is followed to its end in either direction.
+is followed to its end in either direction. Waypoint passing beside a corner
+is gated by the current tick's steering policy too: retained Modern steering
+does not replace retail's five-world-unit pruning radius after a switch.
 
 **Measured effect.** The pathfinding laboratory replays moments cut from
 recorded multiplayer games under any rule set and scores each unit's trip:
@@ -3170,6 +3181,12 @@ was chosen on. The final run (2026-09-29, from main `160834d4`, artifacts
 `~/nanolathe-bench/path-redesign/out/final-v4`) measured the policy as the
 laboratory rule set `next-v4`, which answers as `ModernRules` does
 (`pathlab.TestTheAdoptedSetIsModern`), against Modern as it then was:
+
+The picker used for these historical snippet results filtered its lottery
+classes on recorded arrival outcomes or timing. The corrected picker removes
+that selection ([PATHFINDING_LAB](PATHFINDING_LAB.md)); the numbers below remain
+measurements of the selected corpus. A new comparison without that bias needs
+`mine -all` and regenerated snippets, not just another replay of the old ones.
 
 | Held-out groups and single units (592 units) | Ticks to arrive | Against Modern before | Arrived |
 |---|---|---|---|
@@ -3200,6 +3217,24 @@ than twenty cells away.
 | Retail's movement and search, same brains | 0.28% | 8.6% |
 | Modern before | 0.14% | 2.1% |
 | Modern traffic | 0.15% | 7.5% |
+
+**Announcement-review corrections.** The corrected idle-poll cutoff and
+recipient-passability checks were measured from `9ff1eb8b` to `1ae0358f` on
+all 543 path-benchmark case/rule/size combinations, with three identical
+outcome repeats per build. Strict and Community retain all 181 outcomes
+each. The Modern 256- and 1,500-unit wave cases change their later input
+commands because the fixture chooses short goals relative to current unit
+positions; those two cases are excluded from paired cost/outcome claims.
+
+Modern results remain mixed. Outside scripted waves, units entering their
+reporting radius increase from 3,093 to 3,104 of 5,862 goals, but the
+900-tick `avoid/choke_wide_friendly` case at 64 units falls from 18 to 1;
+pending goals rise from 46 to 63 and blocked unit-ticks rise by 23.5%.
+The fixed inputs and repeated outcomes establish a congestion regression,
+not a reporting change. The corrections satisfy the existing bounded-work
+and arrival-place contracts; this remaining congestion limitation needs
+separate work before claiming uniformly better movement. Historical
+measurements above describe their original revisions.
 
 **Cost to the player.**
 
@@ -3363,7 +3398,10 @@ headings, damping, and waiting a few ticks before turning.
 friend at rest is passed on), `TestSidestepLooksNoFartherThanTheWaypoint`,
 `TestWaypointBesideIsTakenFromAUnitGoingRound` (taken from a unit that is
 steering; not from one whose side was chosen long ago, that is not steering,
-or whose last step was refused), `TestRefusedMoverKeepsItsWayRound`, and the
+or whose last step was refused), `TestWaypointPassingStopsAfterARuleSwitch`
+(Strict, Community and an unbound system ignore retained steering when
+consuming a corner; switching back to Modern resumes it without RNG draws),
+`TestRefusedMoverKeepsItsWayRound`, and the
 contract tests above.
 
 #### Modern route smoothing
@@ -3550,7 +3588,10 @@ grounded mobile units, are given places (`ArrivePilot`).
    footprints centred on the point: its rows across the way the group
    travels, the units at the front taking the far rows and keeping their
    order across the way, and then any two members of one footprint whose
-   straight lines cross exchanging places. A unit sent alone to a point
+   straight lines cross exchanging places only when both new footprints
+   remain passable under their recipients' movement profiles and the owner's
+   terrain knowledge. Equal footprint size alone does not permit a swap
+   between, for example, land and amphibious units. A unit sent alone to a point
    another live order reserves, or a parked unit or the ground holds, is
    given the nearest free footprint within ten cells. A group the command
    boundary gave [destination slots](DESIGN_INTERFACE_HUD_INPUT.md#modern-group-destination-slots)
@@ -3595,6 +3636,8 @@ attack what it cannot reach does not settle. A unit that settles reports
 `Arrived`, as under unreachable moves.
 
 **Verification.** `movement.TestArrivePlacesABlock`,
+`TestArriveMixedProfilesKeepPassablePlaces` (crossing land and amphibious
+units keep passable, distinct places; Strict and Community keep their goals),
 `TestArrivePlacesASingleOffAParkedFriend`, `TestArriveExchangesATakenPlace`,
 `TestArriveSettlesAtTheEdge` (a unit at rest that refused the step settles
 the unit after twenty ticks; a friend on the move does not),

@@ -533,6 +533,9 @@ func (s *Scheduler) Tick(tick uint32) {
 	if bounded {
 		carryShares, sweepStop = bound.PathWorkBound()
 	}
+	if !sweepStop {
+		bound = nil
+	}
 	total := int32(0)
 	for p := 0; p < 10; p++ {
 		// An admitted request is removed from the provider while the global
@@ -606,7 +609,7 @@ func (s *Scheduler) Tick(tick uint32) {
 			continue
 		}
 		if idle, ok := s.provider.(idleCandidateProvider); ok {
-			total = s.skipIdleRounds(idle, total)
+			total = s.skipIdleRounds(idle, bound, total)
 			if total <= 0 {
 				break
 			}
@@ -696,8 +699,12 @@ func (s *Scheduler) swept(bound workBoundProvider, player int) bool {
 // of them reaches a poll the provider cannot vouch for; the loop takes the
 // next poll itself. Under a large step allowance almost every poll is idle,
 // and this is what keeps the loop's cost proportional to the requests it
-// finds rather than to the allowance [04 R-PATH-01 §6].
-func (s *Scheduler) skipIdleRounds(idle idleCandidateProvider, total int32) int32 {
+// finds rather than to the allowance [04 R-PATH-01 §6]. Under Modern bounded
+// path work, batching stops before the poll that exceeds a full sweep: the
+// ordinary loop must credit the remainder and stop that player at that exact
+// point in the player walk (docs/DESIGN_MOVEMENT_PATH.md "Modern bounded path
+// work"). A nil bound leaves retail's polling unchanged.
+func (s *Scheduler) skipIdleRounds(idle idleCandidateProvider, bound workBoundProvider, total int32) int32 {
 	var round [10]int
 	n := 0
 	for k := 0; k < 10; k++ {
@@ -722,6 +729,12 @@ func (s *Scheduler) skipIdleRounds(idle idleCandidateProvider, total int32) int3
 	m := total / int32(n)
 	for _, p := range round[:n] {
 		m = min(m, s.accumulator[p])
+		if bound != nil {
+			if length := bound.SweepLen(p); length > 0 {
+				remaining := max(int64(length)-s.sweepPolls[p], 0)
+				m = int32(min(int64(m), remaining))
+			}
+		}
 	}
 	for _, p := range round[:n] {
 		if m <= 0 {

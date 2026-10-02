@@ -12,10 +12,13 @@ import (
 // patch's loader fix, this is an entry operation, not a live-switch mutation
 // (community-patch-engine.md CP-DMG-5).
 func prepareCommunityWeapons(cat *content.Catalog, mode gameplay.Mode, features community.Features) *content.Catalog {
+	return prepareWeaponReloads(cat, RuleSetForMode(mode).Combat, features)
+}
+
+func prepareWeaponReloads(cat *content.Catalog, rules combat.Rules, features community.Features) *content.Catalog {
 	if cat == nil {
 		return nil
 	}
-	rules := RuleSetForMode(mode).Combat
 	owner := combat.Service{Community: features}
 	changed := false
 	for _, weapon := range cat.WeaponRecordsByID() {

@@ -366,6 +366,16 @@ func (e *executor) actorOK(w *units.World, h pool.Handle, inst *units.Unit) *uni
 	return u
 }
 
+// targetOK keeps every delayed target command tied to the observed instance,
+// including replacement and factory cleanup (docs/MODERN_AI_RESEARCH.md §2).
+func (e *executor) targetOK(w *units.World, c *Command) *units.Unit {
+	u := w.Unit(c.Target)
+	if u == nil || u != c.target || !u.Alive || u.Dying {
+		return nil
+	}
+	return u
+}
+
 func (e *executor) refill(tick uint32, persona *Persona) {
 	if persona.APM <= 0 {
 		return
@@ -443,8 +453,8 @@ func (e *executor) exec(c *Command, b *batch, tick uint32, w *units.World) bool 
 	}
 	var target *units.Unit
 	if c.Kind == CmdAttack || c.Kind == CmdGuard || c.Kind == CmdRepair || c.Kind == CmdReclaim {
-		target = w.Unit(c.Target)
-		if target == nil || target != c.target || !target.Alive || target.Dying {
+		target = e.targetOK(w, c)
+		if target == nil {
 			e.stats.Stale++
 			e.stats.Reasons[FailTarget]++
 			return false
@@ -628,8 +638,8 @@ func (e *executor) execReplace(c *Command, b *batch, tick uint32, w *units.World
 		e.stats.Reasons[FailNoActor]++
 		return false
 	}
-	old := w.Unit(c.Target)
-	if old == nil || !old.Alive || old.Dying || old.Owner != e.m.Player {
+	old := e.targetOK(w, c)
+	if old == nil || old.Owner != e.m.Player {
 		e.stats.Stale++
 		e.stats.Reasons[FailTarget]++
 		return false

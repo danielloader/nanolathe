@@ -7,7 +7,8 @@ set, and scores the recording and every replay with one scorer. It exists to
 answer one question about a movement policy: *would the games people actually
 played have gone better with it?*
 
-It is an opt-in research tool. Nothing here runs in CI, no rule set it
+It is an opt-in research tool. Recorded-game experiments stay outside CI;
+small authored contract tests check the harness. No rule set it
 registers is reachable from the game, and nothing it measures is evidence of
 retail executable behaviour: the recordings are observations of retail and
 patched engines, and the replays are Nanolathe.
@@ -120,6 +121,17 @@ that turned out to matter, each found by looking at rendered tracks:
   unit's zero request stamp holds its first request for sixty.
 - **Combat is off**: units hold fire, the computer player is passive, and the
   whole map is visible. A snippet measures movement only.
+- **Recorded lifetimes keep their identity.** An ID may be reused on the
+  same tick its former unit dies. Structures still stage before mobile
+  units, but a death names the exact snippet unit that died, even if its
+  replacement has already taken the ID. Later orders name the current ID
+  owner. The output keeps each lifetime's original ID and birth tick.
+
+`pathlab.TestReplayDeathKeepsRecordedInstanceIdentity` exercises a mobile
+unit replaced by a structure on its death tick, with distinct and reused
+IDs, and a reused ID whose new mobile unit receives the later order. The
+fixture is authored; its retail map and definitions are loaded only in the
+opt-in retail test tier.
 
 Crowds are chaotic: a one-unit nudge changes who arrives when. Every rule set
 is therefore replayed under several *jitters* — the same snippet with staged
@@ -175,9 +187,41 @@ of `trip` — since a player notices the stragglers.
 Snippets chosen *because* something went wrong in them are selection-biased:
 any replay tends to do better than the recording, by regression to the mean.
 The classes `group-random`, `group-large`, `trip-random` and `army` are drawn
-by lottery without regard to how the recording fared (`army`: groups of 32 or
-more whatever became of them, for comparing rule sets only). Comparisons
-*between rule sets* are paired on the same snippets and are not affected.
+by lottery without regard to recorded arrival share, arrival time, or
+distance actually travelled. Their populations differ:
+
+- `group-random` includes groups of at least six sent at least 300 world
+  units; `group-large` raises the size minimum to 32. These are calm
+  recording-comparison samples: no member died during its recorded trip,
+  and the existing combat measure, summed damage plus shots, is at most
+  three per member.
+- `trip-random` includes solo move episodes with a known goal at least 800
+  world units from their start, no combat and no recorded death. It does
+  not require a measured static shortest path: the miner measures those
+  only for arrivals, which would select on success.
+- `army` includes groups of at least 32 sent at least 300 world units,
+  including those under fire or taking losses. Combat-free replays of these
+  samples compare rule sets only; they do not reproduce the recording's
+  combat conditions.
+
+All four classes use the configured `-max-ticks` window, starting one tick
+before the command and shortened only by the recording's end when known.
+Zero arrivals and arrivals beyond the window do not remove a candidate or
+change its lottery weight. Deliberately selected hard-case groups retain
+their existing filters, including 60% recorded arrival, and their window
+ending sixty ticks after the last recorded arrival. Blocked and detour
+hard-case selection is unchanged.
+
+Mine lottery corpora with `mine -all`: the default miner writes only notable
+episodes, so picking from those extracts cannot recover the omitted solo
+trips. Regenerate snippets to use the corrected selection; existing snippets
+and historical measurements are unchanged. Comparisons *between rule sets*
+remain paired on the same snippets.
+
+`TestRandomGroupsDoNotSelectOnArrival`,
+`TestRandomGroupsKeepCalmAndArmyBoundaries` and
+`TestRandomTripsDoNotRequireArrivalMeasurements` in `tools/path-lab` lock
+the lottery populations and windows with authored records.
 
 **Tune on one set, report on another.** A policy's settings are chosen on the
 tuning set; the numbers quoted for it come from a held-out set drawn by
@@ -197,7 +241,7 @@ go run ./tools/tad-extract -moves -out ~/lab/moves ~/ta-demos
 go run ./cmd/nanolathe-pathlab map -all -out ~/lab/maps
 
 # 3. Mine and pick.
-go run ./tools/path-lab mine -moves ~/lab/moves -maps ~/lab/maps -out ~/lab/mined
+go run ./tools/path-lab mine -all -moves ~/lab/moves -maps ~/lab/maps -out ~/lab/mined
 go run ./tools/path-lab pick -mined ~/lab/mined -out ~/lab/snippets
 
 # 4. Replay and score one snippet under three rule sets, three jitters each.

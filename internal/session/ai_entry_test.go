@@ -60,6 +60,26 @@ func TestInitializeBattleAIPrecedesUnitDraws(t *testing.T) {
 	if mgr == nil {
 		t.Fatal("manager not installed")
 	}
+	if mgr.JammerSuppresses == nil || !mgr.JammerSuppresses(1, 2) || mgr.JammerSuppresses(1, 1) {
+		t.Fatal("unbound visibility must retain Strict jammer policy")
+	}
+	// The callback follows live rule changes and Survival's team, and must
+	// use the requested AI viewer rather than the presentation viewer.
+	s.Vis = visibility.New(terrain, 0)
+	s.Vis.Rules = visibility.CommunityRules{}
+	s.Vis.Community.AlliedJammingIgnored = true
+	s.Vis.Community.Allied = func(viewer, other visibility.PlayerID) bool { return viewer == 1 && other == 2 }
+	if mgr.JammerSuppresses(1, 2) || !mgr.JammerSuppresses(0, 2) {
+		t.Fatal("AI jammer binding ignored the current viewer's community policy")
+	}
+	s.Vis.Rules = visibility.StrictRules{}
+	if !mgr.JammerSuppresses(1, 2) {
+		t.Fatal("AI jammer binding retained Community after switching to Strict")
+	}
+	s.Vis.SetVisionTeam([]visibility.PlayerID{1, 2})
+	if mgr.JammerSuppresses(1, 2) || !mgr.JammerSuppresses(0, 2) {
+		t.Fatal("AI jammer binding did not preserve Survival's team exemption")
+	}
 	if mgr.MissionGateFlag != sessionKindCampaign {
 		t.Fatalf("campaign manager gate = %d, want authoritative session kind %d", mgr.MissionGateFlag, sessionKindCampaign)
 	}

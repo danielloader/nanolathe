@@ -289,6 +289,10 @@ type Manager struct {
 	// UnitVisible is the owner's ordinary line-of-sight predicate for one
 	// unit, bound by the session. Nil fails closed (nothing is visible).
 	UnitVisible func(viewer uint8, target *units.Unit) bool `json:"-"`
+	// JammerSuppresses is the bound visibility policy, including Survival's
+	// shared side. The observation builder calls it on the simulation thread;
+	// nil keeps Strict's owner-only exemption [03 R-VIS-01 §4].
+	JammerSuppresses func(viewer, jammerOwner uint8) bool `json:"-"`
 	// Community is the session's projected copy of the feature-table answers
 	// the think step reads: the three ProTA 4.8 package AI switches
 	// (DESIGN_COMMUNITY_PATCH §4.7). The session writes it beside Planner at

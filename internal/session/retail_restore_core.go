@@ -236,7 +236,7 @@ func RestoreRetailBattleCore(stage *RetailBattleStage) error {
 			if s.Catalog == nil {
 				return fmt.Errorf("session: retail restore: unit %d has no catalog", id)
 			}
-			if _, err := allocateRetailUnit(s.Units, s.Catalog, rec, s.Build); err != nil {
+			if _, err := allocateRetailUnit(s.Units, s.Catalog, rec); err != nil {
 				return err
 			}
 			owner = s.Units.Unit(h)

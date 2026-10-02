@@ -83,6 +83,10 @@ Host.Step(tick)
    target, and building placement is resolved on the simulation thread.
    A group order is one action. `Kit.Last` reports the previous batch's
    applied / dropped-by-APM / stale / failed counts (with reasons).
+   Target checks bind every unit command, including extractor replacement
+   and factory cleanup, to the instance observed when the command was
+   issued. Reusing its pool slot during the reaction window never redirects
+   the command to the new occupant.
 8. **Fairness.** The Obs holds own units, enemies in line of sight (typed),
    enemies inside own radar coverage (untyped blips), remembered sightings
    (last seen position; cleared only when the spot is looked at again) and
@@ -98,6 +102,21 @@ second), `Own []OwnUnit` (handle, `*UnitInfo`, position, HP, `Built`,
 and a brain-owned `Tag` set with `Kit.SetTag`), `Enemy []Contact`,
 `Memory []Remembered`, `Allies []AllyUnit`, `Allied` (the allied slots),
 `UnitCount/UnitLimit`, `WindPermille`.
+
+Instance identities advance only when an own unit or a foreign unit in sight
+is observed. A remembered sighting keeps that instance after it leaves view;
+an unseen replacement, including one detected as an untyped radar or sonar
+blip, cannot refresh its generation or become the target of its commands.
+Seeing the replacement admits a new generation. Applying a command still
+checks that the observed instance is alive in its slot.
+
+Radar and sonar ask the bound visibility service's shared jammer predicate;
+hostility alone does not decide whether a jammer suppresses contacts. Strict 3.1
+includes every foreign jammer, allies included [03 R-VIS-01 §4]
+[03 R-VIS-01 §5] [03 R-VIS-01 §7]; Community's configured allied-jamming
+exemption carries through to Modern. A Survival vision team's jammers do not
+blind its members in any mode (DESIGN_SURVIVAL §4.3). Jamming removes sensor
+contacts at its inclusive radius; sight still identifies a visible target.
 
 `Allies` (2026-09-25) are the allied players' units in the owner's sight:
 handle and instance (`Gen`), owner, `*UnitInfo`, position, `HP`/`MaxHP`,
@@ -691,7 +710,11 @@ measurement.
 **Sequential gates (adopted).** A spec's `"sequential": {"looks": [2, 4, 6,
 8]}` plays the seeds in blocks. A block is one seed on every map, in both
 slot orders. Every look sees every map with the slot order balanced, so
-the slot-0 bias cancels inside each block. At each look the runner
+the slot-0 bias cancels inside each block. Every required game must succeed
+with a valid result, including each requested start assignment. A failed,
+missing or malformed result leaves the look pending; it is never omitted
+from the block. Resume reuses only valid results and retries the rest.
+At each look the runner
 computes these statistics:
 
 - A's mean points per block;

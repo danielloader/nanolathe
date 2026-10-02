@@ -225,6 +225,58 @@ func TestStrictIgnoresTrafficStateAfterASwitch(t *testing.T) {
 	}
 }
 
+// A route published under Modern stays installed after a switch, but its
+// corner is consumed with retail's five-world-unit radius [04 §7.3]. Retained
+// sidestepping state must not discard a farther corner until Modern resumes.
+func TestWaypointPassingStopsAfterARuleSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		rules Rules
+	}{
+		{"strict", StrictRules{}},
+		{"community", CommunityRules{}},
+		{"unbound", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rng.SeedGlobal(1, 1)
+			sys, w, h, _, step := trafficFixtureUnder(t, &ModernRules{}, 0)
+			tick := uint32(1)
+			for ; tick <= 240 && !handleRow(sys.traffic, h).steering; tick++ {
+				step(tick)
+			}
+			before := handleRow(sys.traffic, h)
+			if !before.steering || before.side == 0 {
+				t.Fatal("fixture never began steering")
+			}
+			u := w.Unit(h)
+			x, z := int32(u.X>>16), int32(u.Z>>16)
+			route := handleRow(sys.Routes, h)
+			route.Publish([]Point{{X: x - 80, Z: z - 12}, {X: x - 16, Z: z - 12}, {X: x + 100, Z: z - 12}})
+			handleRow(sys.Collisions, h).Blocked = false
+			head := orders.QueueOfUnit(u).Head()
+			sim, crt := *rng.Global.Sim, *rng.Global.Crt
+			sys.Rules = tc.rules
+			sys.BeginTick(tick)
+			sys.serviceGroundFollower(u, head, route, tick)
+			if route.Count != 3 {
+				t.Fatalf("a corner twenty world units away was pruned after the switch: %d points", route.Count)
+			}
+			if handleRow(sys.traffic, h) != before {
+				t.Fatal("retained traffic state changed after the switch")
+			}
+			sys.Rules = &ModernRules{}
+			sys.BeginTick(tick + 1)
+			sys.serviceGroundFollower(u, head, route, tick+1)
+			if route.Count != 2 {
+				t.Fatal("Modern did not resume passing the corner beside the mover")
+			}
+			if *rng.Global.Sim != sim || *rng.Global.Crt != crt {
+				t.Fatal("waypoint consumption drew randomness")
+			}
+		})
+	}
+}
+
 // The rule object and its pilots are shared by every session of the process
 // and hold nothing: two battles bound to one rules value, stepped turn and
 // turn about, each go as a battle stepped alone does.

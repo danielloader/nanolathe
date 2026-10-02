@@ -150,6 +150,17 @@ import (
 // Both candidate trajectories repeated identically; every benchmark initial,
 // warm and final lock remains unchanged. This is a shared retail correction,
 // with no new Modern policy.
+//
+// Correcting Modern's idle batching and arrival-place swaps moves its long
+// ending to 49380 and its benchmark warm/final locks. Idle batching now stops
+// before the poll that proves a full sweep, preserving individual polling's
+// later admission order (DESIGN_MOVEMENT_PATH "Modern bounded path work").
+// Crossed arrival places exchange only when each remains passable under its
+// recipient's movement profile and knowledge ("Modern arrival places").
+// A diagnostic build with only these two prior implementations reproduces
+// every old Modern lock, isolating their effects from the other review fixes.
+// Every Strict and Community lock, the Modern initial composition and its
+// 6000-tick ashap lock remain unchanged.
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
@@ -160,10 +171,10 @@ const (
 	lockAshapModern6000            = "partial-v1:a2c6fc1f6d2e6836"
 	lockAshapStrict54000           = "partial-v1:24da164ea104466e"
 	lockAshapCommunity54000        = "partial-v1:a76a48f358418a68"
-	lockAshapModern54000           = "partial-v1:4d333f1e7c9bd05a"
+	lockAshapModern54000           = "partial-v1:169be9e862015847"
 	lockAshapStrictEnd      uint32 = 54000
 	lockAshapCommunityEnd   uint32 = 54000
-	lockAshapModernEnd      uint32 = 47940
+	lockAshapModernEnd      uint32 = 49380
 
 	lockBenchSeed             uint32 = 7
 	lockBenchWarmupTicks             = 600
@@ -173,10 +184,10 @@ const (
 	lockBenchModernInitial           = "partial-v1:55165c066f8b6eaa"
 	lockBenchStrictWarm              = "partial-v1:5afe0089d8db02b8"
 	lockBenchCommunityWarm           = "partial-v1:32013bdf5ea1c7ef"
-	lockBenchModernWarm              = "partial-v1:2f4b37955edc5891"
+	lockBenchModernWarm              = "partial-v1:ad31aa25d9f87893"
 	lockBenchStrictFinal             = "partial-v1:2ccfe9ca8e307df2"
 	lockBenchCommunityFinal          = "partial-v1:67c87da793a68133"
-	lockBenchModernFinal             = "partial-v1:8d095ca94d08fe55"
+	lockBenchModernFinal             = "partial-v1:6ee19cc1f0eaa780"
 )
 
 // TestStrictFingerprintIsLocked holds the retail baseline. Nothing in a Modern

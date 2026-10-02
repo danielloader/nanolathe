@@ -164,23 +164,28 @@ func themeWeights(pool *Pool, top int, tick uint32, t Tuning, opts Options, ente
 	var seen [DomainCount]bool
 	total := 0
 	for i, u := range pool.Units {
-		if u.Tier > top || seen[u.Domain] {
+		domain := u.Domain
+		// Amphibious attackers make the ground theme eligible even when
+		// ordinary ground units cannot reach this entry (DESIGN_SURVIVAL §6.4).
+		if domain == Amphibious {
+			domain = Ground
+		}
+		if u.Tier > top || seen[domain] {
 			continue
 		}
-		allowed := domainAllowed(u.Domain, tick, t, opts)
-		if early && u.Domain == Air && !opts.NoAir {
+		allowed := domainAllowed(domain, tick, t, opts)
+		if early && domain == Air && !opts.NoAir {
 			allowed = true
 		}
 		if !allowed || (enter != nil && !enter(angle, i)) {
 			continue
 		}
-		seen[u.Domain] = true
-		// Amphibious units ride with ground waves; they never theme one.
-		weights[u.Domain] = t.ThemeWeights[u.Domain]
-		if early && u.Domain == Air && weights[u.Domain] == 0 {
-			weights[u.Domain] = 1
+		seen[domain] = true
+		weights[domain] = t.ThemeWeights[domain]
+		if early && domain == Air && weights[domain] == 0 {
+			weights[domain] = 1
 		}
-		total += weights[u.Domain]
+		total += weights[domain]
 	}
 	return weights, total
 }

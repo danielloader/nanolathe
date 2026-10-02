@@ -34,6 +34,7 @@ const presetCustom = -2
 // command.
 type controlsPresetRow struct {
 	label     string
+	path      string // settings path assigned by this row, for mod-lock checks
 	community int
 	retail    int
 	zero      int
@@ -54,9 +55,9 @@ const (
 )
 
 // presentationRow assigns one field of the presentation block.
-func presentationRow(label string, community, retail, zero int, field func(*settings.Presentation) *int) controlsPresetRow {
+func presentationRow(label, path string, community, retail, zero int, field func(*settings.Presentation) *int) controlsPresetRow {
 	return controlsPresetRow{
-		label: label, community: community, retail: retail, zero: zero, names: onOffNames,
+		label: label, path: "presentation." + path, community: community, retail: retail, zero: zero, names: onOffNames,
 		get: func(g *gameShell) int {
 			p := g.presentation
 			return *field(&p)
@@ -70,14 +71,14 @@ func presentationRow(label string, community, retail, zero int, field func(*sett
 }
 
 // minimumRow keeps independently authored range thresholds visible in the offer.
-func minimumRow(label string, zero int, field func(*settings.Presentation) *int) controlsPresetRow {
-	row := presentationRow(label, 0, presetUnchanged, zero, field)
+func minimumRow(label, path string, zero int, field func(*settings.Presentation) *int) controlsPresetRow {
+	row := presentationRow(label, path, 0, presetUnchanged, zero, field)
 	row.names = nil
 	return row
 }
 
 func selectionPresetRow() controlsPresetRow {
-	row := presentationRow("Selection keys", 1, 0, 2, func(p *settings.Presentation) *int { return &p.CommunitySelection })
+	row := presentationRow("Selection keys", "communitySelection", 1, 0, 2, func(p *settings.Presentation) *int { return &p.CommunitySelection })
 	row.names = []string{"Retail", "Community", "Zero"}
 	return row
 }
@@ -90,7 +91,7 @@ func selectionPresetRow() controlsPresetRow {
 // audit"); Zero adds its documented Z for the previous build page.
 func keyboardPresetRow() controlsPresetRow {
 	return controlsPresetRow{
-		label: "Keyboard", community: 1, retail: 0, zero: 2,
+		label: "Keyboard", path: "keyBindings", community: 1, retail: 0, zero: 2,
 		names: []string{"Retail", "Community", "Zero"},
 		get:   func(g *gameShell) int { return g.keyProfileIndex() },
 		set: func(g *gameShell, value int) {
@@ -118,28 +119,28 @@ var controlsPresetRows = []controlsPresetRow{
 	// row already follows, makes Shift's factory step 100 while Ctrl is held;
 	// ProTA 4.8's recorder lists "Queue 100 units" among the interface-upgrade
 	// functions it enables (DESIGN_INTERFACE_HUD_INPUT §3.13).
-	presentationRow("Factory Ctrl+Shift 100", 1, 0, 1, func(p *settings.Presentation) *int { return &p.FactoryHundredBatch }),
-	presentationRow("Double-click select", 1, 0, 1, func(p *settings.Presentation) *int { return &p.DoubleClickSelection }),
-	presentationRow("Order drag", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.QueuedOrderDrag }),
+	presentationRow("Factory Ctrl+Shift 100", "factoryHundredBatch", 1, 0, 1, func(p *settings.Presentation) *int { return &p.FactoryHundredBatch }),
+	presentationRow("Double-click select", "doubleClickSelection", 1, 0, 1, func(p *settings.Presentation) *int { return &p.DoubleClickSelection }),
+	presentationRow("Order drag", "queuedOrderDrag", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.QueuedOrderDrag }),
 	{
-		label: "Digit keys", community: 1, retail: settings.DefaultSwitchAlt, zero: 1,
+		label: "Digit keys", path: "switchAlt", community: 1, retail: settings.DefaultSwitchAlt, zero: 1,
 		names: []string{"Pages", "Groups"},
 		get:   func(g *gameShell) int { return boolInt(g.switchAlt) },
 		set:   func(g *gameShell, value int) { g.switchAlt = value != 0 },
 	},
-	presentationRow("Counters", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.CommunityCounters }),
-	presentationRow("Reload bars", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.ReloadBars }),
-	presentationRow("Veterancy", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.VeteranLabels }),
+	presentationRow("Counters", "communityCounters", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.CommunityCounters }),
+	presentationRow("Reload bars", "reloadBars", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.ReloadBars }),
+	presentationRow("Veterancy", "veteranLabels", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.VeteranLabels }),
 	// Retail draws a unit's group digit [03 R-FX-01 §6]; the option only
 	// suppresses it, so its retail value, like its default, is On
 	// (DESIGN_INTERFACE_HUD_INPUT §3.14).
-	presentationRow("Group digits", 1, 1, presetUnchanged, func(p *settings.Presentation) *int { return &p.GroupNumbers }),
-	presentationRow("Wind/tide readout", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.WeatherReport }),
+	presentationRow("Group digits", "groupNumbers", 1, 1, presetUnchanged, func(p *settings.Presentation) *int { return &p.GroupNumbers }),
+	presentationRow("Wind/tide readout", "weatherReport", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.WeatherReport }),
 	// The megamap rows are ProTA.ini's draw-engine keys
 	// (DESIGN_INTERFACE_HUD_INPUT §3.15). The retail preset returns Tab to
 	// Options and leaves the megamap's own preferences alone.
 	{
-		label: "Tab key", community: settings.OverviewMegamap, retail: settings.OverviewZoom, zero: settings.OverviewMegamap,
+		label: "Tab key", path: "presentation.overview", community: settings.OverviewMegamap, retail: settings.OverviewZoom, zero: settings.OverviewMegamap,
 		names: []string{"Options", "Overview"},
 		get:   func(g *gameShell) int { return g.presentation.Overview },
 		set: func(g *gameShell, value int) {
@@ -148,18 +149,18 @@ var controlsPresetRows = []controlsPresetRow{
 			g.setPresentation(p)
 		},
 	},
-	presentationRow("Megamap wheel", 1, presetUnchanged, 1, func(p *settings.Presentation) *int { return &p.MegamapWheel }),
-	presentationRow("Wheel out moves camera", 1, presetUnchanged, 1, func(p *settings.Presentation) *int { return &p.MegamapWheelMove }),
-	presentationRow("Megamap double-click move", 0, presetUnchanged, 0, func(p *settings.Presentation) *int { return &p.MegamapDoubleClickMove }),
-	presentationRow("Under-attack flash", 1, presetUnchanged, 1, func(p *settings.Presentation) *int { return &p.MegamapFlash }),
-	minimumRow("Megamap radar minimum", 0, func(p *settings.Presentation) *int { return &p.MegamapRadarMinimum }),
-	minimumRow("Megamap sonar minimum", 500, func(p *settings.Presentation) *int { return &p.MegamapSonarMinimum }),
-	minimumRow("Megamap sonar jammer minimum", 0, func(p *settings.Presentation) *int { return &p.MegamapSonarJamMinimum }),
-	minimumRow("Megamap anti-nuke minimum", 512, func(p *settings.Presentation) *int { return &p.MegamapAntiNukeMinimum }),
+	presentationRow("Megamap wheel", "megamapWheel", 1, presetUnchanged, 1, func(p *settings.Presentation) *int { return &p.MegamapWheel }),
+	presentationRow("Wheel out moves camera", "megamapWheelMove", 1, presetUnchanged, 1, func(p *settings.Presentation) *int { return &p.MegamapWheelMove }),
+	presentationRow("Megamap double-click move", "megamapDoubleClickMove", 0, presetUnchanged, 0, func(p *settings.Presentation) *int { return &p.MegamapDoubleClickMove }),
+	presentationRow("Under-attack flash", "megamapFlash", 1, presetUnchanged, 1, func(p *settings.Presentation) *int { return &p.MegamapFlash }),
+	minimumRow("Megamap radar minimum", "megamapRadarMinimum", 0, func(p *settings.Presentation) *int { return &p.MegamapRadarMinimum }),
+	minimumRow("Megamap sonar minimum", "megamapSonarMinimum", 500, func(p *settings.Presentation) *int { return &p.MegamapSonarMinimum }),
+	minimumRow("Megamap sonar jammer minimum", "megamapSonarJamMinimum", 0, func(p *settings.Presentation) *int { return &p.MegamapSonarJamMinimum }),
+	minimumRow("Megamap anti-nuke minimum", "megamapAntiNukeMinimum", 512, func(p *settings.Presentation) *int { return &p.MegamapAntiNukeMinimum }),
 	{
 		// The ten-entry dot colour table as one choice: the draw engine's
 		// defaults (retail) or ProTA.ini's palette.
-		label: "Dot colours", community: playerColoursProTA, retail: playerColoursDefault, zero: playerColoursZero,
+		label: "Dot colours", path: "presentation.playerDotColors", community: playerColoursProTA, retail: playerColoursDefault, zero: playerColoursZero,
 		names: []string{"Default", "ProTA", "TA Zero"},
 		get: func(g *gameShell) int {
 			switch g.presentation.PlayerDotColors {
@@ -185,28 +186,28 @@ var controlsPresetRows = []controlsPresetRow{
 	},
 	// ProTA's draw engine squares each allied resource row in the player's
 	// dot colour (DESIGN_INTERFACE_HUD_INPUT §3.15).
-	presentationRow("Allied dot swatches", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.AlliedDotSwatches }),
+	presentationRow("Allied dot swatches", "alliedDotSwatches", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.AlliedDotSwatches }),
 	{
-		label: "Game clock", community: 1, retail: settings.DefaultClock, zero: presetUnchanged, names: onOffNames,
+		label: "Game clock", path: "clock", community: 1, retail: settings.DefaultClock, zero: presetUnchanged, names: onOffNames,
 		get: func(g *gameShell) int { return boolInt(g.clockVisible) },
 		set: func(g *gameShell, value int) { g.clockVisible = value != 0 },
 	},
 	{
-		label: "Sound", community: settings.SoundMode3D, retail: settings.DefaultSoundMode, zero: settings.SoundMode3D,
+		label: "Sound", path: "audio.soundMode", community: settings.SoundMode3D, retail: settings.DefaultSoundMode, zero: settings.SoundMode3D,
 		names: []string{"Off", "Mono", "3D"},
 		get:   func(g *gameShell) int { return g.audioPrefs.SoundMode },
 		set:   func(g *gameShell, value int) { g.audioPrefs.SoundMode = value },
 	},
-	presentationRow("Victory cue", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.VictoryCue }),
+	presentationRow("Victory cue", "victoryCue", 1, 0, presetUnchanged, func(p *settings.Presentation) *int { return &p.VictoryCue }),
 	{
 		// 128 voices is more than the mixer's 32 tracked slots, so no sound
 		// is cut off for the voice limit [03 R-AUD-01 §1].
-		label: "Sound voices", community: 128, retail: settings.DefaultMixingBuffers, zero: 128,
+		label: "Sound voices", path: "audio.mixingBuffers", community: 128, retail: settings.DefaultMixingBuffers, zero: 128,
 		get: func(g *gameShell) int { return g.audioPrefs.MixingBuffers },
 		set: func(g *gameShell, value int) { g.audioPrefs.MixingBuffers = value },
 	},
 	{
-		label: "Music", community: 2, retail: settings.DefaultCDMode, zero: 2,
+		label: "Music", path: "audio.cdMode", community: 2, retail: settings.DefaultCDMode, zero: 2,
 		names: []string{"", "Play all", "Random", "Repeat", "Custom"},
 		get:   func(g *gameShell) int { return g.audioPrefs.CDMode },
 		set:   func(g *gameShell, value int) { g.audioPrefs.CDMode = value },
@@ -216,7 +217,7 @@ var controlsPresetRows = []controlsPresetRow{
 		// `*X` selector sets it [08 R-SKIR-01 §1]. Only the rows shown
 		// change: each row keeps its controller, so the players a skirmish
 		// starts with stay the same. The retail preset never removes rows.
-		label: "Skirmish rows", community: settings.MaxPlayers, retail: presetUnchanged, zero: settings.MaxPlayers,
+		label: "Skirmish rows", path: "skirmish.numPlayers", community: settings.MaxPlayers, retail: presetUnchanged, zero: settings.MaxPlayers,
 		get: func(g *gameShell) int { return g.setup.NumPlayers },
 		set: func(g *gameShell, value int) {
 			if !g.survivalMenu {

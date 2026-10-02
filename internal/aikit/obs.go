@@ -208,9 +208,11 @@ type observer struct {
 	sensors  []sensorSource
 	jammers  []jammerSource
 	tags     []int32 // handle → brain tag
-	// inst is the unit each slot held at the last observation and gen the
-	// slot's instance count: a unit is a fresh object per creation, so a
-	// different pointer is a different unit.
+	// inst is the last own or sighted unit in each slot, and gen counts
+	// observed instance changes. A blip or an unseen replacement must not
+	// overwrite a remembered target's identity (docs/MODERN_AI_RESEARCH.md
+	// §§2–3). A unit is a fresh object per creation, so a different pointer
+	// is a different unit.
 	inst   []*units.Unit
 	gen    []uint32
 	tagGen []uint32 // the instance each slot's tag belongs to
@@ -230,8 +232,8 @@ func (b *observer) ensure(n int) {
 	}
 }
 
-// identify records the unit now in its slot and returns the slot's
-// instance count.
+// identify records an own or sighted unit and returns its observed instance
+// count. Call only after the observation admits the unit's identity.
 func (b *observer) identify(u *units.Unit) uint32 {
 	h := u.Handle
 	if b.inst[h] != u {

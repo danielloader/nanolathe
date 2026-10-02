@@ -25,10 +25,10 @@ import (
 //     therefore not on radar.
 //   - An active jammer of another player clears the radar contact (radar
 //     jam) or the sonar contact (sonar jam) of every unit within its jam
-//     distance (inclusive). The owner's own jammers never blind it; under
-//     Modern an ally's do not either (allied jamming ignored, the Community
-//     default Modern resolves, docs/DESIGN_COMMUNITY_PATCH.md §4.4), so only
-//     jammers of players the owner is not allied with count.
+//     distance (inclusive). Strict includes allied foreign jammers. The
+//     visibility rules supply the Community allied-jamming exemption
+//     (docs/DESIGN_COMMUNITY_PATCH.md §4.4), and a Survival team's jammers
+//     never blind its members (docs/DESIGN_SURVIVAL.md §4.3).
 //
 // Distances use the engine's metric: raw 16.16 coordinate differences, the
 // high word of each square, summed at 32-bit width.

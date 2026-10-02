@@ -267,7 +267,8 @@ func Replay(c *Content, s *Snippet, opt ReplayOptions) (*ReplayResult, error) {
 		res.Log.Players[i] = MovesPlayer{Number: i + 1, Units: []*MovesUnit{}}
 	}
 
-	r := &replay{sess: sess, s: s, info: info, slotOf: slotOf, byID: map[int]*staged{}, jitter: opt.Jitter}
+	r := &replay{sess: sess, s: s, info: info, slotOf: slotOf,
+		byID: map[int]*staged{}, byInstance: map[*SnipUnit]*staged{}, jitter: opt.Jitter}
 	if err := r.parkCommanders(); err != nil {
 		return nil, err
 	}
@@ -370,10 +371,14 @@ type replay struct {
 	s      *Snippet
 	info   *EngineInfo
 	slotOf map[int]uint8
-	byID   map[int]*staged
-	all    []*staged
-	guard  int
-	jitter int
+	// Orders name the current ID owner; deaths name one recorded lifetime.
+	// Structures-first staging can replace byID before the former mover's
+	// same-tick death, so a death must not resolve through that current owner.
+	byID       map[int]*staged
+	byInstance map[*SnipUnit]*staged
+	all        []*staged
+	guard      int
+	jitter     int
 	// grouped marks the group commands that were issued as such; the
 	// orders of one that could not be are given singly.
 	grouped []bool
@@ -563,6 +568,7 @@ func (r *replay) stage(su *SnipUnit, log *MovesLog) {
 		X: int(st.u.X.Raw() >> 16), Z: int(st.u.Z.Raw() >> 16)}
 	log.Players[su.Player].Units = append(log.Players[su.Player].Units, st.log)
 	r.byID[su.ID] = st
+	r.byInstance[su] = st
 	r.all = append(r.all, st)
 }
 
@@ -601,7 +607,7 @@ func (r *replay) place(def *content.UnitDef, x, z *numeric.Fixed, self *units.Un
 // kill removes a unit the recording shows dying, by the ordinary death
 // path so it leaves what its definition leaves.
 func (r *replay) kill(su *SnipUnit, now int32) {
-	st := r.byID[su.ID]
+	st := r.byInstance[su]
 	if st == nil || st.dead || st.u == nil || !st.u.Alive {
 		return
 	}

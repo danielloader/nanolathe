@@ -136,6 +136,9 @@ func initializeBattleAI(s *Session, player uint8, profile *ai.Profile, sessionKi
 	// (docs/DESIGN_SESSIONS_AI_SAVE.md "Modern AI computer player").
 	mgr.BattleSeed = s.RNGSimSeed
 	mgr.UnitVisible = s.computerPlayerSeesOwn
+	mgr.JammerSuppresses = func(viewer, jammerOwner uint8) bool {
+		return s.Vis.JammerSuppresses(visibility.PlayerID(viewer), visibility.PlayerID(jammerOwner))
+	}
 	bindAIQueue(mgr, s)
 	s.AI[player] = mgr
 	return nil

@@ -336,8 +336,10 @@ func (s *nlScreen) drawProfileBar(screen *ebiten.Image, x, y float64) float64 {
 // chooseProfile selects a profile: its keyboard keys show at once, and every
 // setting it assigns is written by Apply, as the Mods screen's offer does.
 func (s *nlScreen) chooseProfile(i int) {
-	if s.keysLocked() {
-		s.guardKeys(func() { s.chooseProfile(i) })
+	if s.profileLocked(i) {
+		s.capture = nlCapture{}
+		s.pendingAction = func() { s.chooseProfile(i) }
+		s.pendingWhat, s.dialog = "the profile's settings", "override"
 		return
 	}
 	s.draft.controls = i
@@ -358,6 +360,22 @@ func (s *nlScreen) chooseProfile(i int) {
 	if g != nil {
 		g.playMenuCue("SmallButton")
 	}
+}
+
+// A profile assigns every named row, including settings outside the keyboard
+// and visible cards. Check those paths through the same mod-lock mechanism
+// as a preset (DESIGN_MODS_MUTATORS §4.6).
+func (s *nlScreen) profileLocked(i int) bool {
+	if !s.sourceActive() || s.src.overridden || s.draft.override {
+		return false
+	}
+	paths := []string{"keyBindings"}
+	for _, row := range controlsPresetRows {
+		if row.presetValue(nlControlsPresets[i].preset) != presetUnchanged {
+			paths = append(paths, row.path)
+		}
+	}
+	return pathsLocked(paths, s.src.locks)
 }
 
 // recommendedProfile is the profile the draft content recommends, -1 for

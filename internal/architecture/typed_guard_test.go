@@ -517,9 +517,10 @@ var mapFunctionHashes = map[string]string{
 	// AI switches, and the manager copies the battle seed for a Modern
 	// controller's private generator. The two sight predicates are session
 	// methods (the retail rally one and the Modern controller's own-coverage
-	// one). The catalog-key union, its sort and the order every consumer sees
-	// are unchanged (I1).
-	"internal/session/ai_entry.go initializeBattleAI": "da22bc07e8158042bdbb851558aa6acebdd0bde7af894fe2b43e9601fbceb591",
+	// one). The jammer predicate delegates to the session's bound visibility
+	// service and introduces no iteration. The catalog-key union, its sort and
+	// the order every consumer sees are unchanged (I1).
+	"internal/session/ai_entry.go initializeBattleAI": "6060e619291cd86421ea61d2e01f14870bc07afac6e95633e27704e78739ceb6",
 	// Re-audited: both immutable membership lists are filtered after the same
 	// sorted builder-key walk; no map-order-dependent decisions were added.
 	"internal/session/mission.go pruneRestrictedBuildMenus": "c3aa02729cb3a830ca92bcefe79a443222aec45bbb113205058dbd0579365b29",

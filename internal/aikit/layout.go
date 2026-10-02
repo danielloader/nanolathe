@@ -1075,8 +1075,8 @@ func (e *executor) execUnblock(c *Command, b *batch, tick uint32, w *units.World
 		e.stats.Reasons[FailNoActor]++
 		return false
 	}
-	f := w.Unit(c.Target)
-	if f == nil || f.Dying || f.Owner != e.m.Player || f.Def == nil {
+	f := e.targetOK(w, c)
+	if f == nil || f.Owner != e.m.Player || f.Def == nil {
 		e.stats.Stale++
 		e.stats.Reasons[FailTarget]++
 		return false

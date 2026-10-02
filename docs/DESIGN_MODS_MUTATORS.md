@@ -513,7 +513,10 @@ of §4.3, one per mod in `modLockOverrides`), a locked path plays the mod's
 value whatever the player's patch says, and the player's own value there is
 kept in the patch for when they override. The Nanolathe screen marks a locked
 setting with a padlock and asks before changing it, with the network-play
-warning; overriding unlocks all of the mod's settings.
+warning; overriding unlocks all of the mod's settings. Controls profiles
+check every setting their existing assignment table names, including digit
+keys, audio and interface settings, before changing the draft. Canceling the
+override leaves the profile and draft unchanged.
 
 **Presets.** The settings key `presets` holds the player's named sets of
 mod-scoped settings. The Nanolathe screen lists them beside the original
@@ -524,6 +527,11 @@ interface, and writes to the running content's layer.
 **On the screen.** Each card says whether the running mod's recommendation
 sets its value (*Set by ProTA*) or the player changed it for that mod
 (*Changed for ProTA*, with a link back to the mod's value).
+Apply preserves the live configured unit-limit word carried by a restored
+save when only other settings change ([08 R-SESS-01 §9]), including when
+applying a preset or overriding a lock rebuilds the settings layers. Editing
+the unit-limit field still replaces that word through the normal preference
+and command-line precedence; the carried word is not itself a saved preference.
 
 ## 5. The remote catalogue
 
@@ -982,7 +990,9 @@ record naming a parameter this build does not know refuses the load.
    control shows the set the restored battle runs and a restart or the next
    battle agrees with it.
 4. **Community.** Stage with the recorded sources and entry table in place of
-   the host's.
+   the host's. Reconstruct entry transforms, including the stockpile reload
+   clamp, from that table rather than the current rule selection; a rule
+   switch made before saving did not undo the original entry transform.
 5. **Unit limit.** Set the configured limit to the recorded one before
    staging, in every mode. Strict 3.1 still sizes its pool from the pre-load
    configured word ([08 R-SESS-01 §9]); the host has only chosen that word

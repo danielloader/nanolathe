@@ -602,12 +602,9 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 	}
 	h.kit.tags = ob.tags
 	h.kit.inst = ob.inst
-	for _, u := range ob.walk {
-		ob.identify(u)
-	}
 
-	// Pass 1: own units and sensor coverage, and the jammers of every other
-	// player the owner is not allied with.
+	// Pass 1: own units and sensor coverage, and jammers admitted by the
+	// bound visibility rules (including the Survival team exemption).
 	classes := orderClassTable()
 	for i := range o.Own {
 		h.kit.ownIdx[o.Own[i].H] = -1
@@ -618,7 +615,8 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 	table := h.kit.Table
 	for _, u := range ob.walk {
 		if u.Owner != me {
-			if u.Owner < 10 && hostile[u.Owner] {
+			if d := u.Def; d != nil && u.Activated && (d.RadarDistanceJam != 0 || d.SonarDistanceJam != 0) &&
+				(m.JammerSuppresses == nil || m.JammerSuppresses(me, u.Owner)) {
 				ob.addJammer(u)
 			}
 			continue
@@ -631,7 +629,7 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 			continue
 		}
 		hd := u.Handle
-		gen := ob.gen[hd]
+		gen := ob.identify(u)
 		if ob.tagGen[hd] != gen {
 			ob.tags[hd] = 0 // a new unit in a recycled slot starts untagged
 			ob.tagGen[hd] = gen
@@ -677,7 +675,7 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 			}
 			built, progress := buildProgress(u)
 			o.Allies = append(o.Allies, AllyUnit{
-				H: u.Handle, Gen: ob.gen[u.Handle], Info: info, Owner: u.Owner,
+				H: u.Handle, Gen: ob.identify(u), Info: info, Owner: u.Owner,
 				X: fixedToWorld(int64(u.X)), Z: fixedToWorld(int64(u.Z)),
 				HP: u.Health, MaxHP: u.MaxHealth, Built: built, Progress: progress,
 			})
@@ -693,7 +691,7 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 			if u.MaxHealth > 0 {
 				pct = u.Health * 100 / u.MaxHealth
 			}
-			o.Enemy = append(o.Enemy, Contact{H: u.Handle, Gen: ob.gen[u.Handle], Info: table.Of(u.Def), Owner: u.Owner, X: x, Z: z, HPPct: pct, Visible: true, Built: u.Remaining == 0})
+			o.Enemy = append(o.Enemy, Contact{H: u.Handle, Gen: ob.identify(u), Info: table.Of(u.Def), Owner: u.Owner, X: x, Z: z, HPPct: pct, Visible: true, Built: u.Remaining == 0})
 			continue
 		}
 		if ob.blip(u, sea) {

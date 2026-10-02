@@ -21,8 +21,9 @@ import (
 // any of them installs its goal: a block of footprints centred on the point,
 // its rows across the way the group travels, the units at the front taking
 // the far rows and, row by row, keeping their order across the way; then any
-// two members of one footprint whose straight lines cross swap places. A
-// unit sent alone to a point another live order reserves, or a parked unit
+// two members of one footprint whose straight lines cross swap places when
+// both new places remain passable. A unit sent alone to a point another live
+// order reserves, or a parked unit
 // or the ground holds, is given the nearest free footprint instead. A place
 // is free when the owner believes it passable, no parked unit stands on it,
 // and no other live order reserves it. Units the command boundary spread keep
@@ -466,7 +467,7 @@ func (p ArrivePilot) placeBlock(s *System, st *arriveState, run []arriveFresh, l
 			}
 		}
 	}
-	arriveUncross(st.members)
+	s.arriveUncross(st.members, learned)
 	for i := range st.members {
 		m := &st.members[i]
 		if m.placed {
@@ -477,11 +478,17 @@ func (p ArrivePilot) placeBlock(s *System, st *arriveState, run []arriveFresh, l
 }
 
 // arriveUncross swaps the places of two members of one footprint whose
-// straight lines cross. Each swap shortens the lines' summed length, so the
-// passes settle; they are bounded all the same.
-func arriveUncross(ms []arriveMember) {
+// straight lines cross and whose new places each remain passable as their
+// owner knows the ground. A shared footprint need not mean shared terrain
+// admission. Each swap shortens the lines' summed length, so the passes
+// settle; they are bounded all the same.
+func (s *System) arriveUncross(ms []arriveMember, learned *LearnedTerrain) {
 	centre := func(m *arriveMember) (int64, int64) {
 		return int64(m.bx)*16 + int64(m.fx)*8, int64(m.bz)*16 + int64(m.fz)*8
+	}
+	passable := func(m *arriveMember, x, z int32) bool {
+		return s.slotPassable(s.existingLayer(m.u.Handle), s.slotMappingWord(m.u), learned,
+			s.ProfileFor(m.u.Handle), m.u.Owner, x, z, m.fx, m.fz)
 	}
 	for pass := 0; pass < arriveUncrossPasses; pass++ {
 		swapped, pairs := false, 0
@@ -498,7 +505,8 @@ func arriveUncross(ms []arriveMember) {
 				pairs++
 				ax, az := centre(a)
 				bx, bz := centre(b)
-				if segmentsCross(a.sx, a.sz, ax, az, b.sx, b.sz, bx, bz) {
+				if segmentsCross(a.sx, a.sz, ax, az, b.sx, b.sz, bx, bz) &&
+					passable(a, b.bx, b.bz) && passable(b, a.bx, a.bz) {
 					a.bx, b.bx = b.bx, a.bx
 					a.bz, b.bz = b.bz, a.bz
 					swapped = true

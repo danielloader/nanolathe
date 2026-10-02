@@ -124,3 +124,33 @@ func TestAuthoredVeteranLevelPreservesUpperBoundAndTailFault(t *testing.T) {
 	}()
 	AuthoredVeteranLevel(&content.UnitDef{VeterancyThresholds: []uint32{5, 5}}, 6, true)
 }
+
+// The missing-definition lookup falls back to the registered thresholds,
+// including for a pending projectile's freed shooter (CP-UD-1).
+func TestCommunityVeterancyFreedShooterUsesDefaults(t *testing.T) {
+	f := newReactionFixture(t)
+	f.attacker.Def.VeterancyThresholds = []uint32{5, 10, 15, 20, 25}
+	f.attacker.Kills = 10
+	svc := communityVeterancyService(true)
+	weapon := &content.WeaponDef{DamageDefault: 100}
+	before := svc.weaponDamageNominal(weapon, f.victim, f.w.RawUnitRecord(f.attacker.Handle), 1)
+	if before != 112 {
+		t.Fatalf("live default veteran damage=%d, want 112", before)
+	}
+	f.w.Destroy(f.attacker.Handle, units.DeathKilled)
+	if got := f.w.FinalizeDeath(f.attacker.Handle, 1); !got.Freed {
+		t.Fatalf("fixture did not free shooter: %+v", got)
+	}
+	after := svc.weaponDamageNominal(weapon, f.victim, f.w.RawUnitRecord(f.attacker.Handle), 1)
+	if after != before {
+		t.Fatalf("pending projectile damage lost veteran tier after shooter death: %d -> %d", before, after)
+	}
+	for _, kills := range []uint16{0, 4, 5, 24, 25, 30, 65535} {
+		for _, unbounded := range []bool{false, true} {
+			want := StrictRules{}.VeteranLevel(VeteranLevelRequest{Kills: kills, Unbounded: unbounded})
+			if got := AuthoredVeteranLevel(nil, kills, unbounded); got != want {
+				t.Fatalf("missing definition kills=%d unbounded=%v: got %d want %d", kills, unbounded, got, want)
+			}
+		}
+	}
+}

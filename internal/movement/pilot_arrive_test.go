@@ -111,6 +111,75 @@ func TestArrivePlacesABlock(t *testing.T) {
 	_ = near
 }
 
+// Crossing lines may exchange equally sized places only when each unit can
+// stand on the other's ground. Land and amphibious units share a footprint,
+// but water admitted for an amphibious unit is not a land unit's place.
+func TestArriveMixedProfilesKeepPassablePlaces(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		rules  Rules
+		places bool
+	}{
+		{"modern", &ModernRules{}, true},
+		{"strict", StrictRules{}, false},
+		{"community", CommunityRules{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			terrain := syntheticTerrainForIntegrate()
+			terrain.SeaLevel = 30
+			for z := int32(0); z < terrain.CellH; z++ {
+				for x := int32(0); x < terrain.CellW; x++ {
+					height := uint8(40)
+					if z == 15 && (x == 14 || x == 15) {
+						height = 0
+					}
+					c := terrain.PlotAt(x, z)
+					c.SetHeight(height)
+					c.SetMinHeight(height)
+					c.SetMaxHeight(height)
+				}
+			}
+			land := Profile{FootPrintX: 1, FootPrintZ: 1, MaxWaterDepth: 12, MinWaterDepth: -10000, MaxSlope: 255, MaxWaterSlope: 255}
+			amphibious := land
+			amphibious.MaxWaterDepth = 10000
+			sys := NewSystem(terrain, land, NewOccupancyGrid())
+			sys.Rules = tc.rules
+			w := newMovementFixtureWorld(4)
+			sys.BindWorld(w)
+			var hs []pool.Handle
+			for i, c := range [][2]int32{{12, 9}, {9, 13}, {5, 2}, {9, 10}} {
+				profile := land
+				if i >= 2 {
+					profile = amphibious
+				}
+				def := setScratchMovement(&content.UnitDef{UnitName: "mixed-places", CanMove: true}, profile)
+				h, err := w.Create(def, 0, world.CellToWorld(c[0])+8<<16, 0, world.CellToWorld(c[1])+8<<16)
+				if err != nil {
+					t.Fatal(err)
+				}
+				hs = append(hs, h)
+				arriveBind(sys, w, h)
+			}
+			ns := arriveOrder(w, hs, 15, 14, 7)
+			sys.BeginTick(7)
+			seen := map[Cell]bool{}
+			for i, n := range ns {
+				c := Cell{X: world.WorldToCell(n.GoalX), Z: world.WorldToCell(n.GoalZ)}
+				if !sys.ProfileFor(hs[i]).IsPassableFootprint(terrain, c.X, c.Z) {
+					t.Fatalf("unit %d given impassable place %v", i, c)
+				}
+				if tc.places && seen[c] {
+					t.Fatalf("place %v given twice", c)
+				}
+				seen[c] = true
+				if !tc.places && c != (Cell{X: 15, Z: 14}) {
+					t.Fatalf("retail goal changed to %v", c)
+				}
+			}
+		})
+	}
+}
+
 // A unit sent alone to a point a parked friend stands on is given the
 // nearest free footprint instead; without places it keeps the point.
 func TestArrivePlacesASingleOffAParkedFriend(t *testing.T) {

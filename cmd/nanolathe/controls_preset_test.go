@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +9,37 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 )
+
+// The lock path must cover the setting the assignment actually writes,
+// including keyboard subtrees and settings without a Nanolathe-screen card.
+func TestControlsPresetAssignmentPaths(t *testing.T) {
+	for _, row := range controlsPresetRows {
+		g := presetTestShell(t)
+		for _, preset := range []string{controlsPresetCommunity, controlsPresetRetail, controlsPresetZero} {
+			value := row.presetValue(preset)
+			if value == presetUnchanged {
+				continue
+			}
+			before := g.liveSettings()
+			row.set(g, value)
+			diff, err := settings.Diff(g.liveSettings(), before, settings.ModScoped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var doc map[string]any
+			if len(diff) > 0 {
+				if err := json.Unmarshal(diff, &doc); err != nil {
+					t.Fatal(err)
+				}
+			}
+			collectPaths(doc, "", func(path string) {
+				if path != row.path {
+					t.Errorf("%s writes %s, but locks %s", row.label, path, row.path)
+				}
+			})
+		}
+	}
+}
 
 func presetTestShell(t *testing.T) *gameShell {
 	t.Helper()

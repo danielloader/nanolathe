@@ -344,8 +344,11 @@ mission's in every mode.
 The stockpile reload-word clamp is likewise a battle-entry operation, matching
 the patch's weapon loader. It derives a private catalog only when a reload word
 changes, preserves the authored catalog and its identity, and survives a live
-rule switch. The corrupt-slot decision remains a live order rule. A fresh
-Strict battle always uses the authored reload word.
+rule switch. A save sidecar's recorded entry table replays that transform on
+restore even when the saved current rules are Strict; an entry under Strict
+records the zero table and keeps the authored word after switching away.
+The corrupt-slot decision remains a live order rule. A fresh Strict battle,
+or a save without entry metadata loaded under Strict, uses the authored word.
 
 The projectile cap is the one that matters: retail drops a shot when its pool
 is full, so a 3000-record pool is a visible gameplay change and the pool's
@@ -380,6 +383,13 @@ constant. Q3 asks what the retail save does with more than 300 records.
 | CP-CON-3 patrolling builder filters (B, per-player option) | `orders.Rules.PatrolWork` (new; the patrol's reclaim/build/repair branches) | both | reclaim-only or assist-only per movement option; the patch's defaults are **Reclaim Only for Hold Position** and Both for the other two, and Community takes those defaults | same as Community |
 | CP-CON-4 prepared-build quickkey toggle (A) | `orders.Rules.PreserveBuildToggle` projected into the host widget accelerator | normal toggle mutation | retain a nonzero low status byte while BUILD is prepared; group clearing and firing continue, with no gadget-name test | same |
 | CP-CON-5 structure rotation (B, content-driven) | `construction.Rules.AllowedFacings` (new) plus the placement command carrying a facing; footprint and yardmap rotated at creation | `Rotations` parsed, ignored; every structure faces south | the authored facings; the heading word rounded to a quarter turn is the persistent form, so save/load and resurrection need no new state | same |
+
+Save reconstruction decodes an existing building's facing from its stored
+heading and authored facings before allocation and script binding, within the
+same valid footprint envelope. It does not recheck the current placement
+policy: a live switch to Strict retains a rotated building, and loading its
+save retains the same footprint and yard. Mobile units retain their ordinary
+unrotated allocation geometry. New placement still consults the current rules.
 
 The per-player builder options of CP-CON-2/3 are, in the patch, registry
 preferences of one client (under a TADR-owned key, not the game's) that
@@ -627,7 +637,9 @@ reads the service's projected table copy. Modern embeds Community.
   two defined out-of-range answers and the exact port-73 formula; the spawn
   field set, `YPos` replacement and commander suppression; the kickout's
   target-energy rule, radius bounds, sweep and order rewrite; the rotation
-  round-trip through the heading word and a save.
+  round-trip through the heading word and a save, including a live switch to
+  Strict; the entry stockpile clamp and per-round cost across saves made
+  after switches in both directions.
 - **Modern-versus-Community locks** for every row of §4 where the two differ
   (D3, D5), so a later Modern policy cannot silently absorb or drop a
   community feature.

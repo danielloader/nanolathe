@@ -2594,7 +2594,11 @@ func (s *System) serviceGroundFollower(u *units.Unit, head *orders.Node, route *
 	}
 	if route.Count > 1 {
 		route.Prune(Point{X: int32(int64(u.X) >> 16), Z: int32(int64(u.Z) >> 16)})
-		s.passWaypoint(u, route, tick)
+		// Retained steering state is inert after a switch away from
+		// sidestepping (docs/DESIGN_MOVEMENT_PATH.md "Modern traffic").
+		if s.trafficNow.Sidestep {
+			s.passWaypoint(u, route, tick)
+		}
 	}
 	blocked := false
 	if coll := handleRow(s.Collisions, u.Handle); coll != nil {

@@ -394,7 +394,7 @@ func (s *Session) survivalChooseSite(cfg SkirmishConfig) error {
 // the start site, buddies on a ring around it. The attacker gets none.
 func (s *Session) placeSurvivalCommanders(cfg SkirmishConfig) error {
 	st := s.Survival
-	cx, cz, region := st.centreX, st.centreZ, st.startRegion
+	cx, cz := st.centreX, st.centreZ
 	buddies := cfg.NumPlayers - 2
 	info := &ai.SurvivalInfo{CentreX: cx*16 + 8, CentreZ: cz*16 + 8, Attacker: st.attacker}
 	for p := 0; p < cfg.NumPlayers; p++ {
@@ -409,8 +409,11 @@ func (s *Session) placeSurvivalCommanders(cfg SkirmishConfig) error {
 			z = cz + int32(numeric.MulRound(numeric.Sin(angle), st.tuning.BuddyRing))
 		}
 		c := s.survivalClassFor(def)
+		// Region labels belong to one movement layer. A buddy may have a
+		// different class from the human (DESIGN_SURVIVAL §4.2, §6.6).
+		region := st.baseRegion(c, s.survivalReach(def))
 		wx, wy, wz, found := s.survivalFindCell(def, c, region, x, z, survivalSpawnReach)
-		if !found {
+		if region == 0 || !found {
 			return fmt.Errorf("nanolathe: survival cannot place commander: logical path %s, providers searched [terrain], expected a free cell near (%d,%d) for slot %d", cfg.MapName, x, z, p)
 		}
 		h, err := s.Units.Create(def, uint8(p), wx, wy, wz)
@@ -746,7 +749,17 @@ func (s *Session) survivalEntry() survival.Entry {
 // (DESIGN_SURVIVAL §6.5).
 func (s *Session) survivalSpawn(tick uint32) {
 	st := s.Survival
-	for made := 0; made < st.tuning.SpawnPerTick && st.nextG < len(st.plan.Groups); {
+	for made := 0; st.nextG < len(st.plan.Groups); {
+		// Drop the entire unspawned tail at the cap, including when the last
+		// creation this tick filled the slice. It must not delay the next
+		// wave or resume as casualties free slots (DESIGN_SURVIVAL §6.5).
+		if limit := s.Units.UnitLimit(); limit > 0 && s.Units.LiveCountForPlayer(int(st.attacker)) >= limit {
+			st.nextG, st.nextP = len(st.plan.Groups), 0
+			return
+		}
+		if made >= st.tuning.SpawnPerTick {
+			return
+		}
 		g := st.plan.Groups[st.nextG]
 		if st.nextP >= len(g.Picks) {
 			st.nextG, st.nextP = st.nextG+1, 0
@@ -771,7 +784,7 @@ func (s *Session) survivalSpawn(tick uint32) {
 		}
 		h, err := s.Units.Create(pu.Def, st.attacker, x, y, z)
 		if err != nil {
-			continue // unit limit: the rest of the wave is dropped as it comes
+			continue // a per-definition limit or failed creation drops this pick
 		}
 		u := s.Units.Unit(h)
 		if u == nil {

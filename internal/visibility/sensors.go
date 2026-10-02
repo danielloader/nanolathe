@@ -332,7 +332,7 @@ func (s *Service) SensorTick(tick uint32, playerCount int, units []SensorUnit) {
 	// actual jammer and skips both callbacks when its owner is allied.
 	for i := range units {
 		e := &units[i]
-		if !e.Alive || !e.Active || (e.RadarJam == 0 && e.SonarJam == 0) || !s.rules().JammerSuppresses(s, s.local, e.Owner) || (e.Owner != s.local && s.localSide(e.Owner)) {
+		if !e.Alive || !e.Active || (e.RadarJam == 0 && e.SonarJam == 0) || !s.JammerSuppresses(s.local, e.Owner) {
 			continue
 		}
 		if e.RadarJam != 0 {

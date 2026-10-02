@@ -420,6 +420,10 @@ func (s *nlScreen) setCardDraft(c nlCard, next nlDraft) {
 	if nlCardEqual(c, &s.draft, &next) {
 		return
 	}
+	if c.key == "profile" {
+		s.chooseProfile(next.controls)
+		return
+	}
 	if s.cardLocked(c) {
 		s.guardLocked(c, func() { s.setCardDraft(c, next) })
 		return
@@ -467,6 +471,7 @@ func (s *nlScreen) apply() {
 // player touched, over the live state, so a profile keeps every row nobody
 // changed afterwards. It saves the settings file.
 func (s *nlScreen) applyDraft(g *gameShell, draft nlDraft, touched map[string]bool, presets []json.RawMessage) {
+	configuredUnitLimit, savedUnitLimit := g.setup.UnitLimit, g.savedUnitLimit
 	if draft.override != g.lockOverridden(g.cs.mod) {
 		// Settle the settings under the old lock state, then reload them
 		// under the new one, so an override brings back the player's own
@@ -512,9 +517,15 @@ func (s *nlScreen) applyDraft(g *gameShell, draft nlDraft, touched map[string]bo
 		g.keyMap = input.NewKeyMap(draft.keys.Profile(), draft.keys.Overrides())
 	}
 	g.savedUnitLimit = next.unitLimit
-	g.setup.UnitLimit = settings.Settings{UnitLimit: next.unitLimit}.ConfiguredUnitLimit()
-	if g.opts.UnitLimit != 0 {
-		g.setup.UnitLimit = g.opts.UnitLimit
+	// A restore carries its configured word independently of the preference
+	// [08 R-SESS-01 §9]. Re-layering an unrelated preset or lock override
+	// above must not replace it with the startup default.
+	g.setup.UnitLimit = configuredUnitLimit
+	if touched["unitlimit"] || next.unitLimit != savedUnitLimit {
+		g.setup.UnitLimit = settings.Settings{UnitLimit: next.unitLimit}.ConfiguredUnitLimit()
+		if g.opts.UnitLimit != 0 {
+			g.setup.UnitLimit = g.opts.UnitLimit
+		}
 	}
 	g.opts.Mutators, g.mutatorSetting = next.mutators, next.mutators.Map()
 	if next.gameplay != g.gameplay.Normalize() {

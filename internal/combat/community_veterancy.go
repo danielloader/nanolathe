@@ -9,7 +9,10 @@ import "github.com/nanolathe-gg/nanolathe/internal/content"
 // divide fault for equal final thresholds.
 func AuthoredVeteranLevel(def *content.UnitDef, kills uint16, unbounded bool) uint32 {
 	if def == nil {
-		return 0
+		// A freed shooter's raw record retains kills but has no definition.
+		// The extension lookup then supplies its registered default thresholds,
+		// the retail identity (community-patch-engine CP-UD-1).
+		return StrictRules{}.VeteranLevel(VeteranLevelRequest{Kills: kills, Unbounded: unbounded})
 	}
 	thresholds := def.VeterancyThresholds
 	n := uint32(len(thresholds))

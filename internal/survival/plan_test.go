@@ -178,3 +178,31 @@ func TestSplitIncomeIsEvenAndConserving(t *testing.T) {
 		t.Fatalf("earner gives only what it holds: %+v", c)
 	}
 }
+
+// Amphibious units join the ground theme even when ordinary ground cannot
+// reach the entry (DESIGN_SURVIVAL §6.4), without counting the theme twice.
+func TestPlanAmphibiousGroundTheme(t *testing.T) {
+	p := &Pool{Units: []Unit{{Key: "ground", Tier: 1, Domain: Ground, Cost: 100}, {Key: "amphibious", Tier: 1, Domain: Amphibious, Cost: 100}}, MaxTier: 1, Tier1Median: 100}
+	tune := DefaultTuning(PaceNormal)
+	onlyAmph := func(_ uint16, i int) bool { return p.Units[i].Domain == Amphibious }
+	r := rng.NewSimulation(7)
+	w := Plan(1, 0, p, tune, Options{NoAir: true, NoNaval: true}, onlyAmph, &r)
+	if w.Units() == 0 {
+		t.Fatal("reachable amphibious attacker omitted: planned an empty wave")
+	}
+	for _, g := range w.Groups {
+		if g.Domain != Ground {
+			t.Fatalf("amphibious attacker themed %v, want ground", g.Domain)
+		}
+		for _, i := range g.Picks {
+			if p.Units[i].Domain != Amphibious {
+				t.Fatal("unreachable ground unit admitted")
+			}
+		}
+	}
+	both, total := themeWeights(p, 1, 0, tune, Options{}, nil, 0, false)
+	amph, amphTotal := themeWeights(p, 1, 0, tune, Options{}, onlyAmph, 0, false)
+	if both != amph || total != amphTotal || total != tune.ThemeWeights[Ground] {
+		t.Fatalf("ground theme counted twice: both=%v/%d amphibious=%v/%d", both, total, amph, amphTotal)
+	}
+}

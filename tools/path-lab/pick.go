@@ -10,8 +10,8 @@ import (
 	"strings"
 )
 
-// pick chooses snippets for the test corpus from mined recordings: for
-// each problem class the worst calm incidents, spread over recordings and
+// pick chooses snippets from mined recordings: hard cases by recorded
+// difficulty and comparison samples by lottery, spread over recordings and
 // maps, on maps whose grid is exported (so the engine can replay them).
 
 type pickCandidate struct {
@@ -170,22 +170,50 @@ func lottery(rec string, n int) float64 {
 	return float64(h>>11) / float64(1<<53)
 }
 
+// sampleWindow observes a fixed number of ticks beginning just before the
+// command, capped by the recording's end when known. Neither admission nor
+// the observation window depends on whether or when a unit arrived.
+func sampleWindow(tick, lastTick, maxTicks int32) (int32, int32, bool) {
+	from := tick - 1
+	to := from + maxTicks
+	if lastTick > 0 {
+		to = min(to, lastTick)
+	}
+	return from, to, maxTicks > 0 && to > from
+}
+
 func candidatesOf(m *minedFile, maxTicks int32) []pickCandidate {
 	var out []pickCandidate
 	for i := range m.Cohorts {
 		c := &m.Cohorts[i]
+		t0, t1, sample := sampleWindow(c.T0, m.LastTick, maxTicks)
 		// Large groups however the recorded game went for them — under fire,
 		// with losses, arriving or not. A replay runs without combat, so
 		// such a snippet compares rule sets on a real army in a real place
 		// and says nothing about the recording.
-		if c.N >= 32 && c.Distance >= 300 {
-			if span := max(c.LastArr, 900) + 60; span <= maxTicks {
-				out = append(out, pickCandidate{rec: m.Rec, mapN: m.Map, class: "army", weight: lottery(m.Rec, c.Index+104729),
-					t0: c.T0 - 1, t1: c.T0 + span, cohort: c.Index,
-					note: fmt.Sprintf("group order of %d (%s), %.0f world units, drawn at random whatever became of it", c.N, c.Kinds, c.Distance)})
+		if c.N >= 32 && c.Distance >= 300 && sample {
+			out = append(out, pickCandidate{rec: m.Rec, mapN: m.Map, class: "army", weight: lottery(m.Rec, c.Index+104729),
+				t0: t0, t1: t1, cohort: c.Index,
+				note: fmt.Sprintf("group order of %d (%s), %.0f world units, drawn at random whatever became of it", c.N, c.Kinds, c.Distance)})
+		}
+		if c.N < 6 || c.Distance < 300 || c.Combat > int32(c.N)*3 || c.Died > 0 {
+			continue
+		}
+		// Calm recording comparisons retain the combat and loss gates,
+		// but do not select on the recorded arrival share or time.
+		if sample {
+			out = append(out, pickCandidate{rec: m.Rec, mapN: m.Map, class: "group-random", weight: lottery(m.Rec, c.Index),
+				t0: t0, t1: t1, cohort: c.Index,
+				note: fmt.Sprintf("group order of %d (%s), %.0f world units, drawn at random", c.N, c.Kinds, c.Distance)})
+			if c.N >= 32 {
+				out = append(out, pickCandidate{rec: m.Rec, mapN: m.Map, class: "group-large", weight: lottery(m.Rec, c.Index+7919),
+					t0: t0, t1: t1, cohort: c.Index,
+					note: fmt.Sprintf("group order of %d (%s), %.0f world units, drawn at random", c.N, c.Kinds, c.Distance)})
 			}
 		}
-		if c.N < 6 || c.Distance < 300 || c.Arrived*10 < c.N*6 || c.Combat > int32(c.N)*3 || c.Died > 0 {
+		// Deliberately selected hard cases keep their original filters and
+		// observation window, including at least 60% recorded arrival.
+		if c.Arrived*10 < c.N*6 {
 			continue
 		}
 		span := c.LastArr + 60
@@ -205,18 +233,6 @@ func candidatesOf(m *minedFile, maxTicks int32) []pickCandidate {
 		out = append(out, pickCandidate{rec: m.Rec, mapN: m.Map, class: class, weight: perUnit * math.Sqrt(float64(c.N)),
 			t0: c.T0 - 1, t1: c.T0 + span, cohort: c.Index,
 			note: fmt.Sprintf("group order of %d (%s), %.0f world units, recorded blocked %.0f ticks per unit", c.N, c.Kinds, c.Distance, perUnit)})
-		// The same groups drawn without regard to how they fared: the
-		// sample that says whether a replay reproduces the recording.
-		out = append(out, pickCandidate{rec: m.Rec, mapN: m.Map, class: "group-random", weight: lottery(m.Rec, c.Index),
-			t0: c.T0 - 1, t1: c.T0 + span, cohort: c.Index,
-			note: fmt.Sprintf("group order of %d (%s), %.0f world units, drawn at random", c.N, c.Kinds, c.Distance)})
-		// Large groups are a fifth of all unit trips and a class of their
-		// own: drawn at random too.
-		if c.N >= 32 {
-			out = append(out, pickCandidate{rec: m.Rec, mapN: m.Map, class: "group-large", weight: lottery(m.Rec, c.Index+7919),
-				t0: c.T0 - 1, t1: c.T0 + span, cohort: c.Index,
-				note: fmt.Sprintf("group order of %d (%s), %.0f world units, drawn at random", c.N, c.Kinds, c.Distance)})
-		}
 	}
 	epOf := map[[2]int]*episodeRec{}
 	for i := range m.Episodes {
@@ -252,10 +268,13 @@ func candidatesOf(m *minedFile, maxTicks int32) []pickCandidate {
 	}
 	for i := range m.Episodes {
 		e := &m.Episodes[i]
-		if e.Shortest > 0 && e.Length >= 800 && e.TEnd-e.T0 <= maxTicks && e.Combat == 0 && e.Cohort < 0 {
-			out = append(out, pickCandidate{rec: m.Rec, mapN: m.Map, class: "trip-random", weight: lottery(m.Rec, e.Unit*131+int(e.T0)), cohort: -1, units: []int{e.Unit},
-				t0: e.T0 - 1, t1: e.TEnd + 60,
-				note: fmt.Sprintf("%s alone over %.0f world units, drawn at random", e.Name, e.Length)})
+		distance := dist(e.X0, e.Z0, e.GoalX, e.GoalZ)
+		if e.Purpose == "move" && e.HasGoal && distance >= 800 && e.Combat == 0 && e.End != "died" && e.Cohort < 0 {
+			if t0, t1, ok := sampleWindow(e.T0, m.LastTick, maxTicks); ok {
+				out = append(out, pickCandidate{rec: m.Rec, mapN: m.Map, class: "trip-random", weight: lottery(m.Rec, e.Unit*131+int(e.T0)), cohort: -1, units: []int{e.Unit},
+					t0: t0, t1: t1,
+					note: fmt.Sprintf("%s alone toward a goal %.0f world units away, drawn at random", e.Name, distance)})
+			}
 		}
 		if e.Shortest > 0 && e.Length/e.Shortest >= 1.5 && e.TEnd-e.T0 <= maxTicks && e.Combat == 0 {
 			out = append(out, pickCandidate{rec: m.Rec, mapN: m.Map, class: "detour", weight: e.Length - e.Shortest, cohort: -1, units: []int{e.Unit},

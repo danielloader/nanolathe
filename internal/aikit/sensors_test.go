@@ -3,12 +3,104 @@ package aikit
 import (
 	"testing"
 
+	"github.com/nanolathe-gg/nanolathe/internal/ai"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/visibility"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
+
+// Observation uses the session's jammer policy in every mode. Strict foreign
+// jammers include allies; Survival exempts its vision team even under Strict
+// [03 R-VIS-01 §4][03 R-VIS-01 §5][03 R-VIS-01 §7].
+func TestObservationUsesBoundJammerPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		rules         visibility.Rules
+		ignored, team bool
+		own, unbound  bool
+		want          bool
+	}{
+		{name: "strict", rules: visibility.StrictRules{}},
+		{name: "unbound", unbound: true},
+		{name: "community-enabled", rules: visibility.CommunityRules{}, ignored: true, want: true},
+		{name: "community-disabled", rules: visibility.CommunityRules{}},
+		{name: "modern", rules: visibility.ModernRules{}, ignored: true, want: true},
+		{name: "survival-strict", rules: visibility.StrictRules{}, team: true, want: true},
+		{name: "own-strict", rules: visibility.StrictRules{}, own: true, want: true},
+	} {
+		for _, sonar := range []bool{false, true} {
+			name := "radar"
+			if sonar {
+				name = "sonar"
+			}
+			t.Run(tc.name+"/"+name, func(t *testing.T) {
+				sensor := &content.UnitDef{DefinitionHeader: content.DefinitionHeader{CanonicalKey: "sensor"}, UnitName: "sensor", MaxDamage: 100}
+				jammer := &content.UnitDef{DefinitionHeader: content.DefinitionHeader{CanonicalKey: "jammer"}, UnitName: "jammer", MaxDamage: 100}
+				target := &content.UnitDef{DefinitionHeader: content.DefinitionHeader{CanonicalKey: "target"}, UnitName: "target", MaxDamage: 100}
+				y := numeric.FixedFromInt(10)
+				if sonar {
+					sensor.SonarDistance, jammer.SonarDistanceJam, y = 500, 100, -y
+				} else {
+					sensor.RadarDistance, jammer.RadarDistanceJam = 500, 100
+				}
+				cat := &content.Catalog{Units: map[string]*content.UnitDef{"sensor": sensor, "jammer": jammer, "target": target}}
+				w := fixtureWorld(cat)
+				add := func(d *content.UnitDef, owner uint8, x int64, y numeric.Fixed) *units.Unit {
+					h, err := w.Create(d, owner, numeric.FixedFromInt(x), y, 100<<16)
+					if err != nil {
+						t.Fatal(err)
+					}
+					u := w.Unit(h)
+					u.Activated = true
+					return u
+				}
+				owner := uint8(2)
+				if tc.own {
+					owner = 0
+				}
+				us := []*units.Unit{add(sensor, 0, 100, 0), add(target, 1, 200, y), add(jammer, owner, 100, 0)}
+				terrain := &world.Terrain{CellW: 64, CellH: 64}
+				vis := visibility.New(terrain, visibility.ModeHistoryEnabled|visibility.ModeCurrentEnabled)
+				vis.SetLocal(0)
+				vis.Rules = tc.rules
+				vis.Community.AlliedJammingIgnored = tc.ignored
+				vis.Community.Allied = func(a, b visibility.PlayerID) bool { return a == 0 && b == 2 }
+				if tc.team {
+					vis.SetVisionTeam([]visibility.PlayerID{0, 2})
+				}
+				m := &ai.Manager{Player: 0, Catalog: cat, Terrain: terrain,
+					IsAlliance:  func(a, b uint8) bool { return a == 0 && b == 2 },
+					UnitVisible: func(uint8, *units.Unit) bool { return false }}
+				if !tc.unbound {
+					m.JammerSuppresses = func(a, b uint8) bool { return vis.JammerSuppresses(visibility.PlayerID(a), visibility.PlayerID(b)) }
+				}
+				econ := computerEconomy()
+				econ.Players[1].Exists, econ.Players[2].Exists = true, true
+				h := NewHost(m, &countBrain{}, PersonaMax)
+				h.kit.Table = BuildTable(cat, nil)
+				h.buildObs(1, w, econ)
+				inputs, status := make([]visibility.SensorUnit, len(us)), make([]uint32, len(us))
+				for i, u := range us {
+					d := u.Def
+					inputs[i] = visibility.SensorUnit{ID: uint16(u.Handle), Owner: visibility.PlayerID(u.Owner), Status: &status[i], X: u.X, Y: u.Y, Z: u.Z,
+						Alive: true, Active: true, RadarDistance: d.RadarDistance, SonarDistance: d.SonarDistance, RadarJam: d.RadarDistanceJam, SonarJam: d.SonarDistanceJam}
+				}
+				vis.SensorTick(1, 3, inputs)
+				if engine := status[1]&(visibility.SeenBit|visibility.SonarBit) != 0; engine != tc.want || (len(h.obs.Enemy) == 1) != tc.want {
+					t.Fatalf("engine contact %v, observation %+v, want %v", engine, h.obs.Enemy, tc.want)
+				}
+				// Sight follows jamming: a visible target stays identified.
+				m.UnitVisible = func(_ uint8, u *units.Unit) bool { return u == us[1] }
+				h.buildObs(2, w, econ)
+				if len(h.obs.Enemy) != 1 || !h.obs.Enemy[0].Visible || h.obs.Enemy[0].H != us[1].Handle {
+					t.Fatalf("jamming hid a sighted target: %+v", h.obs.Enemy)
+				}
+			})
+		}
+	}
+}
 
 // The observation's blips are the engine's radar and sonar contacts: a scene
 // of random sources, jammers and candidates (inactive, stealthy, submerged,

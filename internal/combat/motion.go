@@ -1,8 +1,6 @@
 package combat
 
 import (
-	"math"
-
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
@@ -299,7 +297,7 @@ func PitchFromDelta(dx, dy, dz numeric.Fixed) numeric.Angle {
 	// the signed-low-word helper, then invokes the same atan2q conversion [06 §3.3]
 	// [01 R-DET-01 §1].
 	vertical := -int64(int16((-dy.Raw()) >> 16))
-	distanceRaw := int64(numeric.TruncateFloat64ToLow32(math.Hypot(float64(dx.Raw()), float64(dz.Raw()))))
+	distanceRaw := int64(numeric.TruncatedDistance(float64(dx.Raw()), float64(dz.Raw())))
 	horizontal := int64(int16(distanceRaw >> 16))
 	return numeric.AngleFromAtan2(vertical, horizontal)
 }
@@ -344,7 +342,7 @@ func BallisticBurnBlowExpiry(now uint32, muzzle, target Vec3, pitch numeric.Angl
 	dz := int32((target.Z.Raw() - muzzle.Z.Raw()))
 	// [06 §6.4] wideDistance = trunc(hypot(...)) keeps the LOW 32 BITS on
 	// overflow [GAP T5]: truncate the double toward zero, then take low 32.
-	wide := numeric.TruncateFloat64ToLow32(math.Hypot(float64(dx), float64(dz)))
+	wide := numeric.TruncatedDistance(float64(dx), float64(dz))
 	// [06 §6.4] H = fixedCos(pitch, weaponVelocity)
 	cosPitch := numeric.Cos(pitch)
 	h := numeric.MulRound(cosPitch, weaponVelocity) // int32
@@ -376,7 +374,7 @@ func InitOrdinary(p *Projectile, w *content.WeaponDef, now uint32, muzzle, targe
 	yaw := YawFromDelta(dx, dz)
 	// The ordinary creator stores this distance once, before pitch. Burst
 	// expiry later reads it even after the muzzle or target moves [06 §6.3].
-	p.StoredPlanarDistance = numeric.Fixed(numeric.TruncateFloat64ToLow32(math.Hypot(float64(int32(dx)), float64(int32(dz)))))
+	p.StoredPlanarDistance = numeric.Fixed(numeric.TruncatedDistance(float64(int32(dx)), float64(int32(dz))))
 	pitch := numeric.AngleFromAtan2(-int64(int16((-dy.Raw())>>16)), int64(int16(p.StoredPlanarDistance.Raw()>>16)))
 	p.Yaw = yaw
 	p.Pitch = pitch

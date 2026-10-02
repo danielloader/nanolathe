@@ -91,6 +91,7 @@ func loadAuthoritativeTypedPackages(t *testing.T, root string) []typedPackage {
 		}
 		info := &types.Info{
 			Defs:  map[*ast.Ident]types.Object{},
+			Uses:  map[*ast.Ident]types.Object{},
 			Types: map[ast.Expr]types.TypeAndValue{},
 		}
 		if _, err := (&types.Config{Importer: imp}).Check(item.ImportPath, fset, files, info); err != nil {
@@ -630,7 +631,6 @@ var float64ScopeAllowances = map[string]float64Allowance{
 	"internal/construction/community_kickout.go func forwardCircleIntersection":       {39, "I2 sourced Community kickout tangent-branch circle/line geometry [CP-CON-1]"},
 	"internal/construction/community_kickout.go func kickoutQuadratic":                {10, "I2 sourced Community kickout quadratic root operation order [CP-CON-1]"},
 	"internal/construction/community_repair.go func communityRepairEnergy":            {4, "I2 Community repair energy helper working precision [CP-DMG-4]"},
-	"internal/model/model.go func *xformNode.evaluateRotation":                        {3, "I2 per-axis model rotation trigonometry [03 §2.4]"},
 	"internal/model/model.go func applyChain":                                         {18, "I2 model vertex working precision; round after each axis then narrow geometry [03 §2.4]"},
 
 	"internal/combat/meteor.go func MeteorDelay":               {2, "I2 meteor source float32, working quotient and signed64/low32 conversion [06 §6.5][01 R-DET-01 §1]"},
@@ -662,7 +662,7 @@ var float64ScopeAllowances = map[string]float64Allowance{
 
 	"internal/movement/airorders.go func airReleaseLead":  {5, "I2 AirStrike release lead [04 R-AIR-01 §8]"},
 	"internal/movement/flight.go func flightGoalDistance": {2, "I2 flight goal distance [04 R-AIR-01 §1]"},
-	"internal/movement/flight.go func rotateLeanPair":     {10, "I2 lean rotation [04 R-AIR-01 §2]"},
+	"internal/movement/flight.go func rotateLeanPair":     {8, "I2 lean rotation [04 R-AIR-01 §2]"},
 	"internal/movement/flight.go func IntegrateFlight":    {34, "I2 flight braking and integration temporaries [04 §10.1]"},
 	"internal/movement/integrate.go func groundHypotRaw":  {2, "I2 ground follower route distance [04 R-MOV-01 §3]"},
 
@@ -673,6 +673,10 @@ var float64ScopeAllowances = map[string]float64Allowance{
 	"internal/combat/damage.go func Falloff":                 {4, "I2 area-damage falloff [06 §9.3]"},
 	"internal/combat/damage.go func weaponNominal":           {2, "I2 area-damage amount product [06 §9.2]"},
 	"internal/construction/reclaim.go func UnitReclaimPulse": {2, "I2 unit-reclaim pulse divide [05 R-WORK-01 §4]"},
+
+	"internal/survival/pool.go func *Pool.Cost":               {2, "I2 exact float32 widening into defined signed-64 cost conversion (DESIGN_SURVIVAL §5)"},
+	"internal/survival/pool.go func BuildPool":                {2, "I2 exact float32 widening into defined signed-64 ratio conversion (DESIGN_SURVIVAL §5)"},
+	"internal/session/survival.go func *Session.stepSurvival": {1, "I2 exact float32 widening into defined signed-64 reward text conversion (DESIGN_SURVIVAL §6.9)"},
 
 	"internal/sim/numeric/angletable.go var angleSinCos":          {4, "I2 immutable binary64 angle table constructed with the existing angle expression (DESIGN_MULTIPLAYER §16.1 M1-C3)"},
 	"internal/sim/numeric/angletable.go func AngleSinCos":         {1, "I2 immutable binary64 angle table lookup (DESIGN_MULTIPLAYER §16.1 M1-C3)"},
@@ -962,6 +966,7 @@ func typedFixture(t *testing.T, filename, source string) typedPackage {
 	}
 	info := &types.Info{
 		Defs:  map[*ast.Ident]types.Object{},
+		Uses:  map[*ast.Ident]types.Object{},
 		Types: map[ast.Expr]types.TypeAndValue{},
 	}
 	if _, err := (&types.Config{}).Check("fixture", fset, []*ast.File{file}, info); err != nil {

@@ -562,8 +562,8 @@ type ComposeScratch struct {
 // trigNode memoizes one piece's rotation trig for the run of compositions that
 // share one model and one piece-state slice. Every piece's chain ends at the
 // root, so without it the root's cosine and sine are recomputed once per piece.
-// The cached values are the same math.Cos/math.Sin results on the same operand,
-// so the composed transform is bit-identical [03 §2.4] C21.
+// The cached values come from the portable angle table; applying a transform
+// retains each per-axis rounding boundary [03 §2.4] C21.
 type trigNode struct {
 	cx, sx, cy, sy, cz, sz float64
 	ax, ay, az             uint16
@@ -707,19 +707,13 @@ func RotatePoints(points [][3]numeric.Fixed, heading, pitch, bank uint16) {
 
 func (n *xformNode) evaluateRotation() {
 	if n.az != 0 {
-		theta := float64(n.az) * 2 * math.Pi / 65536
-		n.cz = math.Cos(theta)
-		n.sz = math.Sin(theta)
+		n.sz, n.cz = numeric.AngleSinCos(numeric.Angle(n.az))
 	}
 	if n.ax != 0 {
-		theta := float64(n.ax) * 2 * math.Pi / 65536
-		n.cx = math.Cos(theta)
-		n.sx = math.Sin(theta)
+		n.sx, n.cx = numeric.AngleSinCos(numeric.Angle(n.ax))
 	}
 	if n.ay != 0 {
-		theta := float64(n.ay) * 2 * math.Pi / 65536
-		n.cy = math.Cos(theta)
-		n.sy = math.Sin(theta)
+		n.sy, n.cy = numeric.AngleSinCos(numeric.Angle(n.ay))
 	}
 }
 
@@ -758,5 +752,5 @@ func applyChain(p, pre [3]numeric.Fixed, nodes []xformNode) [3]numeric.Fixed {
 		y += float64(n.t[1].Raw())
 		z += float64(n.t[2].Raw())
 	}
-	return [3]numeric.Fixed{numeric.Fixed(int64(x)), numeric.Fixed(int64(y)), numeric.Fixed(int64(z))}
+	return [3]numeric.Fixed{numeric.Fixed(numeric.TruncateFloat64ToInt64(x)), numeric.Fixed(numeric.TruncateFloat64ToInt64(y)), numeric.Fixed(numeric.TruncateFloat64ToInt64(z))}
 }

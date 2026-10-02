@@ -119,7 +119,7 @@ func BallisticSolve(dx, dy, dz numeric.Fixed, vel, grav numeric.Fixed, minBarrel
 	g32 := int32(grav.Raw())
 
 	// [06 §6.4] h = hypot(double(dx), double(dz))
-	h := math.Hypot(float64(dx32), float64(dz32))
+	h := numeric.Distance(float64(dx32), float64(dz32))
 	h2 := float64(h * h)
 	// Retail's solver operands are `source - target` on all three axes, not
 	// `target - source` [06 §6.4] (ordering corrected there 2026-09-16 after a
@@ -198,7 +198,7 @@ func BallisticSolve(dx, dy, dz numeric.Fixed, vel, grav numeric.Fixed, minBarrel
 		if v == 0 {
 			aPlus = math.NaN()
 		} else {
-			aPlus = math.Acos(math.Sqrt(rPlus) / v)
+			aPlus = numeric.AcosRadians(math.Sqrt(rPlus) / v)
 		}
 	}
 	if rMinus <= 0.0 || math.IsNaN(rMinus) {
@@ -207,7 +207,7 @@ func BallisticSolve(dx, dy, dz numeric.Fixed, vel, grav numeric.Fixed, minBarrel
 		if v == 0 {
 			aMinus = math.NaN()
 		} else {
-			aMinus = math.Acos(math.Sqrt(rMinus) / v)
+			aMinus = numeric.AcosRadians(math.Sqrt(rMinus) / v)
 		}
 	}
 

@@ -321,7 +321,7 @@ func Distance(x, y float64) float64 {
 // is n. The low-word conversion also preserves wrapping. All other inputs,
 // including every near-integer boundary and special value, use Distance.
 func TruncatedDistance(x, y float64) int32 {
-	m := math.Max(math.Abs(x), math.Abs(y))
+	m := max(math.Abs(x), math.Abs(y))
 	if m >= 1 && m <= 0x1p50 {
 		d := math.Sqrt(float64(x*x) + float64(y*y))
 		n := int64(d) // d < 2^51, so this conversion always fits.

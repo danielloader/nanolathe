@@ -104,7 +104,7 @@ type FlightState struct {
 // fixed-point differences, truncated toward zero. The result is a raw 16.16
 // quantity, compared against the producer's world-unit thresholds.
 func flightGoalDistance(dx, dz int64) int64 {
-	return int64(numeric.TruncateFloat64ToLow32(math.Hypot(float64(dx), float64(dz))))
+	return int64(numeric.TruncatedDistance(float64(dx), float64(dz)))
 }
 
 // bearing is the movement package's air-order adapter. It delegates the
@@ -130,13 +130,13 @@ func rotateLeanPair(x, z int32, heading uint16) (int32, int32) {
 	if heading == 0 {
 		return x, z
 	}
-	sin, cos := math.Sincos(float64(heading) * 2 * math.Pi / 65536.0)
+	sin, cos := numeric.AngleSinCos(numeric.Angle(heading))
 	// Retail forms each product as its own multiply and rounds it before the
 	// difference or the sum. The explicit conversions hold that shape on a
 	// backend with a fused multiply-add; what they feed is the authoritative
 	// bank and pitch pair (I2's [04 R-AIR-01 §2] row), not presentation.
-	px := int32(math.RoundToEven(float64(float64(x)*cos) - float64(float64(z)*sin)))
-	pz := int32(math.RoundToEven(float64(float64(x)*sin) + float64(float64(z)*cos)))
+	px := numeric.RoundFloat64ToInt32(float64(float64(x)*cos) - float64(float64(z)*sin))
+	pz := numeric.RoundFloat64ToInt32(float64(float64(x)*sin) + float64(float64(z)*cos))
 	return px, pz
 }
 
@@ -223,9 +223,9 @@ func IntegrateFlight(s *FlightState) {
 	// q = trunc((h−b)·65536) subtracted per-axis through fixed-point
 	// sine/cosine of heading (numeric.Sin/Cos tables) [04 §5.1].
 	// Keep exact mixed fixed/float instruction ORDER — no rearrangement [04 §10.1] C28.
-	h := math.Hypot(float64(s.VX), float64(s.VZ)) / 65536.0 // float64 per I2
-	b := float64(s.BrakeRate) / 65536.0                     // float64 per I2
-	if h > b {                                              // STRICT [04 §10.1] C28
+	h := numeric.Distance(float64(s.VX), float64(s.VZ)) / 65536.0 // float64 per I2
+	b := float64(s.BrakeRate) / 65536.0                           // float64 per I2
+	if h > b {                                                    // STRICT [04 §10.1] C28
 		ratio := numeric.TruncateFloat64ToLow32((b / h) * 65536.0) // trunc((b/h)·65536) [04 §10.1] C28
 		s.VX = int32((int64(s.VX) * int64(ratio)) >> 16)           // shift floors [04 §10.1]
 		s.VZ = int32((int64(s.VZ) * int64(ratio)) >> 16)
@@ -287,7 +287,7 @@ func IntegrateFlight(s *FlightState) {
 	dzRaw := float64(int64(s.Z) - int64(s.TargetZ))
 	dvxRaw := float64(int64(s.VX) - int64(s.TargetVX))
 	dvzRaw := float64(int64(s.VZ) - int64(s.TargetVZ))
-	d := math.Hypot(dxRaw, dzRaw) / 65536.0
+	d := numeric.Distance(dxRaw, dzRaw) / 65536.0
 	if d < 8.0 {
 		d = 8.0
 	}
@@ -301,7 +301,7 @@ func IntegrateFlight(s *FlightState) {
 		// authoritative state on every tick of every aircraft [04 §10.1] C29.
 		ax = (float64(dxRaw*k) - dvxRaw) / 65536.0
 		az = (float64(dzRaw*k) - dvzRaw) / 65536.0
-		if hypot := math.Hypot(ax, az); hypot > a && hypot != 0 {
+		if hypot := numeric.Distance(ax, az); hypot > a && hypot != 0 {
 			scale := a / hypot
 			ax *= scale
 			az *= scale
@@ -310,7 +310,7 @@ func IntegrateFlight(s *FlightState) {
 		ax = -dvxRaw / 65536.0
 		az = -dvzRaw / 65536.0
 		// cap at 0 when a==0 => scale to 0 if hypot>0
-		if hypot := math.Hypot(ax, az); hypot > 0 {
+		if hypot := numeric.Distance(ax, az); hypot > 0 {
 			ax = 0
 			az = 0
 		}

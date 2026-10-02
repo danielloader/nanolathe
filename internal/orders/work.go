@@ -1361,7 +1361,7 @@ func resurrectionDelay(buildTime, workerTime int32) int32 {
 	if q == 0 {
 		return 0 // the out-of-range conversion's zero low word [05 R-WORK-01 §7]
 	}
-	return int32(float64(buildTime) * 0.3 / float64(q))
+	return numeric.TruncateFloat64ToLow32(float64(buildTime) * 0.3 / float64(q))
 }
 
 // resurrectHandler is the resurrection executor. Unlike every other work

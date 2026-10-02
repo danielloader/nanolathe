@@ -22,12 +22,12 @@ const angleScale = 10430.37835047
 //
 // Retail's fpatan computes the angle in the x87 stack before the stored scale
 // is narrowed under the default x87 round-to-nearest-even control word [01
-// §8][R-DET-01 §2]. Go's math package supplies float64 intermediates; I2
+// §8][R-DET-01 §2]. The portable kernel supplies float64 intermediates; I2
 // explicitly permits this bounded transient, and the result is immediately
 // narrowed to the retail angle word.
 func AngleFromAtan2(first, second int64) Angle {
-	value := math.Atan2(float64(first), float64(second)) * angleScale
-	return Angle(uint16(int32(math.RoundToEven(value))))
+	value := Atan2Radians(float64(first), float64(second)) * angleScale
+	return Angle(uint16(RoundFloat64ToInt32(value)))
 }
 
 // sineTable is the shared 512-entry word sine table scaled by 8192 [04 §5.1].
@@ -36,7 +36,7 @@ var sineTable [512]int32
 func init() {
 	for i := range sineTable {
 		// entry i = round(8192*sin(i*2π/512)) [04 §5.1]; i*2π/512 = i*π/256.
-		sineTable[i] = int32(math.Round(8192 * math.Sin(float64(i)*math.Pi/256)))
+		sineTable[i] = TruncateFloat64ToLow32(math.Round(8192 * SinRadians(float64(i)*math.Pi/256)))
 	}
 }
 

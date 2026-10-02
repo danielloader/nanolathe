@@ -343,18 +343,18 @@ object, so the cursor thread is **always** created in retail ([R-PLAT-01 §4]).
    `GetTickCount() − lastKeepalive > 99` (signed) run the media keepalive
    walk once and stamp.
 
-**Housekeeping helper (Established; the input side is doc 07's).** In order:
-peek the key ring head — the developer-console token when the developer bit is
-set pops it and restores the display; the F2 token when the ESC-menu bit is
-set pops it, closes the menu, clears the bit and, unless the session kind is
-multiplayer, clears the pause bit; the screenshot token pops it, creates the
-`screenshots` directory beside the install, captures, and **resets the
-scaled-time anchor to the current scaled clock** (the reset §4.3 records) —
-these three peeks are [07 R-CAM-01 §1]'s "input ordering"; pop one button
-record (or copy the motion slot — [R-PLAT-01 §6]); run the sound service;
-copy the record into the canonical pointer record; then call the current
-mode's frame function unless the display object's **quit-requested** bit is
-set ([R-PLAT-02 §2]; it is set only by the quit-request routine).
+**Housekeeping helper (Established; the input side is doc 07's).** In order: peek
+the key ring head — the developer-console token when the developer bit is set pops
+it and restores the display; the F2 token when the ESC-menu bit is set pops it,
+closes the menu, clears the bit and, unless the session kind is multiplayer,
+clears the pause bit; the screenshot token pops it, creates the `screenshots`
+directory beside the install, captures, and **resets the scaled-time anchor to the
+current scaled clock** (the reset §4.3 records) — these three peeks are [07
+R-CAM-01 §1]'s "input ordering"; pop one button record (or copy the motion slot —
+[R-PLAT-01 §6]); run the gadget service pass on the window stack; run the sound
+service; copy the record into the canonical pointer record; then call the current
+mode's frame function unless the display object's **quit-requested** bit is set
+([R-PLAT-02 §2]; it is set only by the quit-request routine).
 
 **Battle host pump (Established; the mode frame function while in battle).**
 
@@ -593,7 +593,7 @@ the switch (case-insensitive). Any other letter is ignored.
 | `-P<n>` | integer | packet pacing: `n < 0` disables; `n == 0` → interval 200 ms; else `n` clamped to 2..30 and interval `1000 / n` ms; eleven slots hold `(interval × 30 + 999) / 1000` scaled units | network transport (out of scope) |
 | `-R` | rest of line | registers the application with DirectPlay (`dsetup.dll`) using the title, the executable path and the fixed GUID; on failure beeps and shows `DirectPlay registration failed.`; **the parser then returns 0 and the process exits with code 1** on both outcomes | — |
 | `-S` | — | "no DirectSound" flag | sound init |
-| `-T<n>` | integer | `atoi`; outside 30..300 → 30; stored as the peer timeout in seconds | the peer scanner drops a peer when `timeout × 30` scaled units have elapsed since its last packet (unsigned compare) |
+| `-T<n>` | integer | `atoi`; outside 30..300 → 30; stored as the peer timeout in seconds | the peer scanner opens the dialog after strictly more than `timeout × 30` scaled units of silence; `REJECT` or expiry at `timeout + 120` whole seconds removes the peer ([08 R-LEAVE-01 §6]) |
 | `-W` | — | "Windows sound" flag and the "no DirectSound" flag | sound init |
 
 **Sound backend selection.** The sound initializer ORs the `-S`/`-W` flags
@@ -2398,8 +2398,9 @@ helper thread; normal battle entry therefore uses the path that installs the
 filter and FPU setup without creating the helper thread.
 
 The executable emits debug strings and can break, raise, or show fatal dialogs.
-The network path includes an executable-integrity-breach message and can remove
-a peer or disconnect the match after an integrity violation.
+**Established.** The executable-integrity-breach receiver posts chat lines only.
+No producer exists in the image, and that arm removes no peer and ends no game
+([08 "Integrity failure"]).
 
 Peer state synchronization is push-and-overwrite, not compare-and-react: a
 background scanner polls roughly every quarter second and pushes each remote

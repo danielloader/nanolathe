@@ -849,7 +849,7 @@ structure per slot index, ascending:
    follow. The LOS sweep is not weapon/position maintenance for a type family.
 3. The deadline compare and, when due, the unconditional advance by exactly
    30.
-4. Still inside the deadline block, for the local reference slot only: the
+4. Still inside the deadline block, for the row named by the own-slot index only: the
    win/lose evaluation that arms and decrements the end-of-game countdown.
 5. Still inside the deadline block: the settlement gate chain — all of the
    following must hold before the settlement entry is called: the player
@@ -860,8 +860,8 @@ structure per slot index, ascending:
    narrowed to one of the two settling states (the third traverses but never
    settles); the game-ended flag bit is clear; and the end-of-game countdown
    is negative. When every gate passes, settlement runs.
-6. Still inside the same deadline block, the reference/view tail runs for the
-   local reference slot.
+6. Still inside the same deadline block, the sensor phase, mapped-minimap rebuild and
+   kind-3 economy report run for the row named by the viewing-slot index.
 
 The deadline catch-up edge: because the advance is a single conditional add
 rather than a loop, a slot whose deadline fell more than 30 ticks behind the
@@ -927,21 +927,17 @@ Construction handlers may add requests and accepted work before the
 settlement pass that pays them. The precise same-pass relationship varies by
 the handler's phase and is specified below where established.
 
-**Established fact — end-of-game freeze (a gate inside the deadline block,
-not the cadence).** The countdown is initialized to −1 at session setup, so
-the gate starts satisfied. One arm/decrement family sits inside the local
-player's 30-tick deadline block behind mission-end predicates and human-
-presence checks; a second site sits after the slot loop and decrements every
-tick for games with no human participants. Both arm the counter at 4 and
-decrement on their own cadence; after roughly five one-second steps it passes
-below zero and latches the game-ended flag bits — bit 0x04 always, plus
-0x40 and/or 0x10/0x20 depending on the victory/defeat/watch branch. The
-network path latches bit 0x04 directly on a game-over message. Nothing ever
-clears the game-ended bit once set, so the economy stays frozen for the rest
-of the session. The freeze pair's pacing still yields the observed ≈5-step
-confirmation delay before the latch. The semantic names of the individual
-bits and of the two mission-end predicates remain open; the bit patterns and
-the never-cleared property are established.
+**Established — end-of-game freeze.** Each machine has one signed countdown,
+initialized to −1, and one end latch. The own-row end-condition block arms 4
+on a true due and decrements on later true dues; a false due leaves it alone.
+The sixth consecutive true due completes the countdown. After the slot loop,
+in kind 3 with rule other than 2 and no live human still playing, the same
+countdown is armed or decremented every tick, so that site completes on its
+sixth consecutive tick. These two sites share state. Every locally simulated
+row’s settlement reads that machine’s pair and refuses a non-negative
+countdown or the ending bit. The unreachable peer-loss notice arm, quit,
+Continue-Watching No, leave routines and developer win/lose commands can also
+set ending; there is no game-over packet ([08 R-SKIR-01 §3], [08 R-LEAVE-01]).
 
 ### Deadline strictness and the floating-point environment [R-ECO-01 §1]
 
@@ -974,9 +970,28 @@ there: the victory and defeat polls, the shared countdown and the end latch.
 Its 30-tick due is this same `UpdateTime` word — the trigger poll owns no
 deadline of its own, and `WinLoseTime` is not it. The order within one due is
 therefore: advance; end-condition block (local slot); gate chain; settlement;
-reference-slot tail. The end-of-game freeze paragraph above ("one
-arm/decrement family sits inside the local player's 30-tick deadline block")
-describes this block.
+viewing-slot tail. The end-of-game freeze paragraph above describes the
+same block.
+
+**Established — machine scope.**
+- Step 4 of the block uses the **own**-slot index. The minimap contacts pass of step 2 and the tail of step 6 use the **viewing**-slot index.
+- Gates 6 and 7 read the machine's single latch and countdown for every row. In kind 3 they therefore refuse settlement for every row the machine settles while the countdown is non-negative or the ending bit is set.
+- With the own human in row 0, a hosted computer player is refused on the five dues from the arming due onward. It settles again on the sixth if the watch branch or the respawn left the countdown at −1 and the ending bit clear, and never again after a direct ending.
+- A predicate that turns false mid-countdown leaves the countdown non-negative, and settlement refused on that machine, until a later true due finishes it.
+
+Per-player phase work by controller (the phase's own gates only):
+
+| Work | 1 (own human) | 2 (hosted computer) | 3 (remote) |
+|---|---|---|---|
+| Row admitted, deadline compare and +30 advance | yes | yes | yes |
+| Manager entry | weapon maintenance only | classification, tasks, weapon maintenance | none (no manager) |
+| Strategic refresh | yes | yes | none (no object) |
+| LOS stamp sweep over the row's units | yes | yes | yes |
+| End-condition block | own-slot row only | never | never |
+| Settlement | yes | yes | never |
+| Minimap contacts (per tick); sensor phase, minimap rebuild, kind-3 economy report (per due) | viewing-slot row only (the report also needs the row to be 1 or 2) | same | same |
+
+Outside the phase, the automatic sharing dispatcher is called for the own-slot row only.
 
 **Established — the HUD deadline is one tick stricter.** The sibling
 `DisplayTimer` field is advanced by the same `+30` but by a **strict**
@@ -2497,8 +2512,13 @@ widths, and the producer that drives them are in [R-SHARE-01 §2] and
 control byte is `1` for a locally controlled human, `2` for a computer player,
 and `3` for a remote peer. The skirmish setup path writes `1` for the local
 human seat and `2` for each computer seat; the network join path writes `3`
-for every peer it admits; and the packet sender refuses to emit unless the
-source's control byte is `1` or `2` and the destination's is `3`. Slot
+only for a player this machine did not create, while the machine's own
+players keep the `1` (its human) or `2` (a computer player it added in the
+battleroom — in a networked session the only writer of `2` besides the
+developer `AI` command) the lobby gave them, so a computer player is `2` on
+the machine that hosts it and `3` on every other ([08 R-SKIR-01 §13]); and
+the packet sender refuses to emit unless the source's control byte is `1` or
+`2` and the destination's is `3`. Slot
 initialization also copies the control byte into the slot's option record as
 a "kind" byte whenever it is not `3`, so a remote peer's kind byte is whatever
 the lobby synchronized (`1` human, `2` computer) rather than the control byte.
@@ -2510,36 +2530,103 @@ eleven-byte rows indexed by player slot number:
   allied);
 - **row B** — each other slot's declaration toward this player, mirrored.
 
-Slot initialization zeroes both rows and sets the self entry of each to one.
-The alliance writer takes `(from, to, value, force)`: when `from` is local
-(control `1` or `2`) it writes `from.A[to] = value`, and additionally
-`from.B[to] = value` when `to` is a computer player, or a remote peer whose
-kind byte says computer, or when `force` is set; when `to` is local it writes
-`to.B[from] = value`, and additionally `to.A[from] = value` when `to` is a
-computer player or `force` is set. A computer player therefore reciprocates an
-alliance instantly; a remote human's reciprocal declaration arrives by packet.
-The skirmish setup writes row A for every pair of seats sharing an ally
-symbol — the row-to-player conversion of [08 R-SKIR-01 §2], which states the
-alliance predicate this section's sharing consumers index (`allied(i, j)` is
-column `j` of player `i`'s row A, symmetric in skirmish because it is derived
-from equal ally groups, and group 5 is allied with nobody but itself);
-[08 R-SKIR-01 §1] owns the `Allies%d` gadget and the lobby side. The
-mission setup writes only the self entries.
+**Established — every writer of the two rows** (whole-image census of stores to
+either row in every addressing form; each site read at instruction level).
 
-**Established — the predicate each simulation consumer uses.** There is no
-shared "is allied" function; each consumer indexes a row directly:
+1. *Slot initialization and seat setup* zero both rows and set the slot's own
+   entry to one in each. Seat setup also resets the slot's team symbol to "none".
+   It runs when a player joins and in the single-player setups, not when a
+   multiplayer battle starts. A multiplayer battle therefore starts with the rows
+   the battleroom left.
+2. *The alliance writer* takes `(declarer, target, value, force)` as network
+   identities. Both must resolve to slots or nothing happens.
+   - If the declarer's slot is seated and simulated here (control `1` or `2`):
+     `declarer.A[target] = value`. Also `declarer.B[target] = value` when the
+     target is a seated computer (control `2`, or control `3` with kind byte
+     computer) or `force` is non-zero.
+   - If the target's slot is seated and simulated here: `target.B[declarer] = value`.
+     Also `target.A[declarer] = value` when the target is control `2` or `force`
+     is non-zero.
+   - If the target is seated and a remote peer: the writer sends the declaration
+     packet ([08] type `0x23`) to the target's identity and to no one else.
+   - It changes no other simulation state.
+3. *An ally click* ([07 R-FE-01 §7], battle or battleroom) first flips bit 0 of
+   the local player's row-A entry for the clicked slot directly. It then calls the
+   writer with (local player, clicked player, the new byte, force 0).
+4. *Receipt of a declaration packet.* When the named target is simulated on the
+   receiving machine, the writer runs with the packet's four fields. Then,
+   whenever both identities resolve, `declarer.A[target]` is stored from the value
+   byte.
+5. *Battleroom team propagation* runs on every machine: on each battleroom
+   refresh, on a team click, and once more when the battleroom window closes.
+   - For every seated slot `s` and every slot `j` that is `s` itself, or has a
+     non-zero control byte and the same team symbol as `s` (not "none"): `s.A[j] =
+     s.B[j] = 1`, and the shared-victory bit is set in both lobby records.
+   - `s`'s shared-victory bit is then cleared when its team has fewer than two seated
+     members.
+   - It only ever sets row entries; it never clears one.
+6. *Leaving a team* (battleroom): for every other seated member of the leaver's
+   team the writer runs with (leaver, member, `0`, force `1`). The leaver's
+   shared-victory bit is cleared.
+7. *Player removal* clears, in every slot simulated on the machine, both rows'
+   entries toward the removed slot.
+8. Single-player only: the skirmish setup's row-A fill ([08 R-SKIR-01 §2]) and the
+   save reader ([08 R-SAVE-02 §15]).
 
-| Consumer | Test | Notes |
+**Established — who is told.** The declaration packet has one live sender, the
+writer's remote-target branch. An unreferenced twin of that send exists. The
+packet names one recipient. Nothing re-sends, relays or broadcasts a row. The
+player-record broadcast carries the lobby record (shared-victory bit included) and
+the team symbol, never a row.
+
+After a human declares toward a remote human:
+
+| Machine | What it holds |
+|---|---|
+| Declarer's | `declarer.A[target]` |
+| Target's | `target.B[declarer]` and `declarer.A[target]` |
+| Every other | nothing new |
+
+A machine's copy of `X.A[Y]` is therefore current exactly when `X` or `Y` is
+simulated on it. For two remote players it holds only what team propagation set
+and nothing ever cleared.
+
+**Supported inference** (the transport's delivery by identity was not read): the
+packet reaches only the machine that owns the target identity.
+
+**Established — computer players.** With a computer target the declarer's machine
+writes its own row-B entry itself. The computer's host, on receipt, writes the
+computer's rows A and B and the declarer's row A. No message returns, and the
+declarer's machine never writes the computer's row A.
+
+**Supported inference** (from the gadget gating in [07 R-FE-01 §7] and the rule
+that an inactive gadget is not serviced, [07 R-WGT-01 §1]; the click handlers do
+not re-test the target's kind): no click can target a computer, so this branch is
+reached only by a forced team break. A computer's in-battle alliances are fixed by
+battleroom teams and by player removal.
+
+**Established — breaking** is the same click with value `0`. Neither the click
+path nor the receive path has a delay, timer, consent step or test on units in
+flight.
+
+**Established — the predicate each consumer uses.**
+
+| Consumer | Row read | "I declared" vs "we both declared" |
 |---|---|---|
-| Automatic resource sharing ([R-SHARE-01 §3]) | `source.A[candidate] != 0` | one-directional: the giver's own declaration |
-| Sensor phase allied disjunct ([03 §3.2 R-VIS-01 §4]) | `owner.A[viewer] != 0` and the owner's share-radar bit (option-word bit `6`, [R-SHARE-01 §3]) | the owner's declaration toward the viewer |
-| Victory test (doc 08) | requires both `local.A[i]` and `local.B[i]` | mutual alliance |
-| All-enemies-eliminated test (doc 08) | `local.A[i] != 0` skips the slot | one-directional |
-| ALLIES screen (doc 07) | displays `B << 1 \| A` per row | presentation only |
+| Hostility in order resolution, order handlers, the target registry and the computer planner ([04 §2.1], [06 §3.1]) | acting player's row A, indexed by the other unit's owner | one-sided: my units stop treating them as hostile as soon as I declare |
+| Guard combat join and its air twin; the guard-candidate visitor ([04 R-UNIT-06 §1], [04 §14.4]) | the other owner's row A, indexed by my slot | their declaration toward me; mine is not read |
+| Automatic resource and mapping share ([R-SHARE-01 §3]) | `source.A[candidate]` | one-sided: the giver's declaration |
+| Sensor phase allied disjunct ([03 R-VIS-01 §4]) | `owner.A[viewer]` plus the owner's share-radar bit | the owner's declaration toward the viewer |
+| Chat "allies"/"enemies" routing ([07 §5]) | `local.A[i]` | one-sided |
+| Skirmish victory sweep, kind 2 ([08 R-TRIG-01 §6]) | `local.A[i]` | one-sided |
+| Multiplayer victory sweep, kind 3 ([08 R-SKIR-01 §3]) | `local.A[j]`, `local.B[j]`, and `j.A[k]` for every non-eliminated `k` | mutual; the only reader of row B and of a row between two other players |
+| Allies indicators ([07 R-FE-01 §7]) | `local.B[i] << 1 \| local.A[i]` | presentation |
 
-Nothing in the simulation reads row B for sharing; the giver shares with
-anyone it has declared alliance to, whether or not the declaration is
-returned.
+**Established** (same census): every row-A reader other than the kind-3 sweep's
+inner loop reads a pair in which one player is simulated on the reading machine.
+**Supported inference** from [04 R-MOV-03 §1] (remote owners' units are not pumped
+locally): those reads are therefore never stale. The minimap reads no row; its
+contacts come from the sensor phase's status bits.
 
 #### The two transfer helpers, exactly [R-SHARE-01 §2]
 
@@ -2785,10 +2872,9 @@ the local slot to the target, and then emits a subtype `3` request. The
 request leaves the machine only when the target is a remote slot
 ([R-SHARE-01 §4]).
 
-**Supported inference — timing.** The screen handler runs from the window
-message pump, which the main loop services between executor calls
-([01 §2.3]); the transfer therefore lands between sub-ticks, never inside a
-phase. A static trace of the pump/executor interleaving would settle it.
+**Established — timing.** The pump runs the gadget service pass before the mode
+frame function that advances the battle ([01 R-PLAT-01 §1]). The transfer lands
+between executor calls, before that iteration’s sub-ticks.
 
 ### Sensor sharing
 
@@ -7155,6 +7241,15 @@ preserve these invariants:
   burns are finite and immune to reclaim and further blast while burning.
 
 ## Missing and unknown
+
+- Whether alliance changes re-check retained targets, queued attacks and shots in
+  flight · [R-SHARE-01 §1] · trace each consumer’s retention test in docs 04 and
+  06.
+- Whether alliance rows, team symbols and shared-victory bits survive a second
+  battle in one session · [R-SHARE-01 §1] · trace player-table reset callers on
+  return to the battleroom.
+- Whether any decision path pumps remote-owned weapons and reads their own
+  alliance row · [R-SHARE-01 §1] · trace the remote-owner weapon-update gate.
 
 Open items only. Each bullet states what is unknown, the section that owns it,
 and the decider that would close it. Findings that closed an item live in the

@@ -21,10 +21,12 @@ decompiler-generated symbols, disassembly, and translated source code. Exact
 byte positions and protocol values appear only when they are part of a data or
 wire format rather than a position inside the executable.
 
-Scope is the single-player engine Nanolathe implements: skirmish and the
-campaign, and everything they need. Networking is described where the local
-path still constructs it, and is otherwise outside scope; the transport, lobby
-and codec internals are named as excluded rather than left silently missing.
+Scope covers campaign, skirmish and the established retail multiplayer
+behavior needed to distinguish machine-local work from shared outcomes.
+Nanolathe’s replacement transport and intentional online policies belong to
+DESIGN_MULTIPLAYER, not this retail reference. The single-player boundaries
+remain indexed under R-OOS-01; untraced transport and lobby behavior remains
+explicit in the owning document’s Unknown list.
 
 This is a broad but not complete design. Each document ends with a "Missing and
 unknown" list, and every item on it is open. A stated Unknown is part of the
@@ -210,7 +212,7 @@ the row's document is authoritative, not the citing one.
 
 | Anchor | Doc | Sub-sections | Establishes |
 |---|---|---|---|
-| `R-AI-01` | 08 | §1–§20 | computer-player manager entry, slot indexing, and the verified constants |
+| `R-AI-01` | 08 | §1–§21 | computer-player manager entry, slot indexing, and the verified constants |
 | `R-AI-02` | 08 | §1, §2 | the rally task's constructor state |
 | `R-AI-03` | 08 | §1–§7.4 | the metal-spot vector: builder, record, scan, consumer |
 | `R-AI-04` | 08 | §1–§6 | the task-class run is complete: seven classes and nothing else |
@@ -273,6 +275,7 @@ the row's document is authoritative, not the citing one.
 | `R-MALF-01` | 02 | §1–§11 | the loader malformed-input matrix |
 | `R-MAP-01` | 02 | §1–§9 | the map-load pipeline: entry points, order, the resource-path slots, and schema selection |
 | `R-MM-01` | 03 | §1–§3 | the minimap does carry a viewport rectangle |
+| `R-LEAVE-01` | 08 | §1–§10 | player departure, owner destruction, timeout, host migration and hosted-computer removal |
 | `R-MOV-01` | 04 | §1–§9 | the ground mover, exactly, and the movement-mode status bits |
 | `R-MOV-02A` | 04 | — | the dynamic-blocker boundary |
 | `R-MOV-03` | 04 | §1–§11 | the per-player unit sweep step by step, its three gates, the queue helpers and the purge |
@@ -324,7 +327,7 @@ the row's document is authoritative, not the citing one.
 | `R-SENSOR-01` | 03 | — | sensor phase placement in the tick |
 | `R-SESS-01` | 08 | §1–§9 | session kinds and the accessor, the player record's peer-identity sort key, and the two live-player counters |
 | `R-SHARE-01` | 05 | §1–§10 | the sharing control bytes, the two alliance rows and the alliance predicate, the two transfer helpers, and the automatic dispatcher |
-| `R-SKIR-01` | 08 | §1–§11 | the skirmish setup record and every option's consumer chain |
+| `R-SKIR-01` | 08 | §1–§13 | the skirmish setup record and every option's consumer chain |
 | `R-SLOPE-01` | 04 | §5 | the height byte's path into the movement slope test, and the footprint rule |
 | `R-SND-01` | 02 | §1, §2 | the sound-category loader: file, record, bare and numbered keys, captions |
 | `R-SPEC-01` | 04 | §0–§15 | the special-behavior FBI keys: storage, reader census, contracts |

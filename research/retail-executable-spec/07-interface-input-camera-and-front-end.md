@@ -248,10 +248,10 @@ the named sound cue played through the interface sound path.
 |---|---|---|
 | `0x09` | Tab | In a multiplayer session (session kind `3`, doc 08's kind vocabulary): toggle `TABMENU.GUI` (§11) when chat is inactive, and do nothing while chat is open. In campaign and skirmish (kinds 1 and 2) Tab runs the F2 case below, Shift included, and never opens the strip. The gate is the session kind alone; no network flag is tested. |
 | `0xE3` | F2 | Shift not held: if the options window is not open, open `ARMOPT.GUI` and set the ESC bit (§11). Shift held: retain the hovered unit for the **Unit Builder Probe**, or disable that probe when no unit is hovered. This arming path has no developer gate; drawing is a separate, unrooted path ([R-CAM-01 §9]). |
-| `0x0D` | Enter | `SmallButton` cue; open chat (§5 "Chat"). |
+| `0x0D` | Enter | `SmallButton` cue; open chat unless the local player is a watcher (§5 "Chat"). |
 | `0x1B` | Escape | Options window open: close it and clear the ESC bit. Otherwise, if the armed-order latch is idle (`1`): deselect everything (the `deselect all` path also runs the selection-changed refresh); if a latch is armed: return it to idle, clear the Shift-latch persistence bit, and reset the palette's default control. |
 | `0x21` `0x23` `0x2A` `0x60` `0x7E` | `!` `#` `*` `` ` `` `~` | Toggle the persistent "label every unit" bit (interface-flags byte bit 0) and write all settings to the registry. The composer reads it: with the bit set every on-screen own unit gets its unit marker and its group digit; with it clear only grouped units get the digit. |
-| `0x2B` `0x3D` | `+` `=` | Game speed up by one ([R-CAM-01 §3]); refused in developer film mode, for a watching player (the same player-record bit that gates `SHARE.GUI` and the Tab menu's diplomacy gadgets — *Supported inference* on the bit's name), and when the speed is already `20` (`> 19` test on the unsigned target word). |
+| `0x2B` `0x3D` | `+` `=` | Game speed up by one ([R-CAM-01 §3]); refused in developer film mode, for a watching player (lobby-word bit 6, Established [08 R-SKIR-01 §12]), and when the speed is already `20` (`> 19` test on the unsigned target word). |
 | `0x2D` `0x5F` | `-` `_` | Game speed down by one; refused under the same gates and when the speed is below `2`. |
 | `0x2C` | `,` | Previous build page of the current build-menu unit (`nextbuildmenu` cue) [R-P0-11]. |
 | `0x2E` | `.` | Next build page (`nextbuildmenu` cue). |
@@ -446,7 +446,8 @@ armed-latch rows.
 AI tuning commands (`plan`, `weight`, `limit`, mask 8) and the **battle entry
 orchestrator** registers three more tables into the same sorted command
 vector and installs the default handler; 83 commands are dispatchable from
-chat. The inline `+<digit>`/`+a`/`+e` mini-language of §5 "Chat" runs
+chat. The one-character recipient prefix and comma, colon or semicolon delimiter
+of §5 "Chat" run
 **after** the command dispatch on the same text.
 
 **Established fact — dispatch mechanics.** A `+` line is copied (at most 79
@@ -468,8 +469,9 @@ kind; mask-2 commands do **not** dispatch in campaign outside developer
 mode. After dispatch the line — including the `+` — is still sent as
 ordinary chat; when the returned mask has bit 2 the outgoing recipient mode
 is forced to `0` (everyone), so a cheat is broadcast to all players.
-**Unknown (out of scope):** how the multiplayer receive path applies the
-lobby bit before re-dispatching a received `+` line.
+**Established.** A received chat line is displayed, never re-dispatched.
+The developer phrase has no session gate and supplies developer route 7
+locally even when the host disallowed cheats ([08 "Authority"]).
 
 Handlers read word *n* as text or as its integer value: the longest signed
 decimal prefix is converted with 32-bit `atoi` semantics, trailing bytes are
@@ -488,7 +490,7 @@ controller kind is `1..3` and its side byte is not `10`.
 | `Contour` | word 1, word 2 as floats × 256, truncated, into the two contour-line parameters |
 | `ScrollSpeed n` | scroll setting byte = `n` (low byte); write settings ([R-CAM-01 §10]) |
 | `IFace n` | `Interface Type` = `n`; write settings ([R-CAM-01 §5]) |
-| `Give p n metal` / `Give p n energy` | valid slot `p`: transfer `n` (as a float) of the named resource from the viewing player to slot `p` through the sharing transfer of doc 05 (word 3 compared case-insensitively) |
+| `Give p n metal` / `Give p n energy` | valid slot `p`: transfer `n` (as a float) of the named resource from the controlling player to slot `p` through the sharing transfer of doc 05 (word 3 compared case-insensitively) |
 | `CDPlay n` / `CDStop` | CD audio track play / stop (doc 03 audio) |
 | `Sound3D` | toggle the live 3D-sound state of the audio device; invoke settings write-all, which serializes the unchanged packed `SoundMode` (see below) |
 | `Shading` `AntiAlias` `Shadow` | toggle interface bits `0x20`, `0x02`, `0x04`; rebuild the terrain renderer; write settings |
@@ -509,7 +511,7 @@ controller kind is `1..3` and its side byte is not `10`.
 | `NoMetal` / `NoEnergy`; `NoMetal p n` / `NoEnergy p n` | command-only form writes `0` to the local player's metal / energy stock; otherwise the first argument is player `p` (low byte) and the second is integer `n`, converted to a float for the stock assignment |
 | `BigBrother` | toggle a camera-flags bit; when set, write `1` to a companion camera word; when cleared, cancel the follow target ([R-CAM-01 §12]). The companion word is the 90-tick cycle counter of the unit sweep tail, paused while Shift is held ([R-CAM-01 §12], [04 R-MOV-03 §1]). |
 | `Now Film Chris Include Reload Assert` | exactly six words: command name matched case-insensitively, the five arguments matched case-sensitively as shown; set the developer bit on a match, otherwise clear it ([R-CAM-01 §9]) |
-| `Drop n` | flags bit 0 = (`n == 0`) |
+| `Drop n` | flags bit 0 = (`n == 0`); this disables the peer time-out monitor ([08 R-LEAVE-01 §6]) |
 | `ShootAll` | toggle flags bit 10 |
 | `ShareMetal` `ShareEnergy` `ShareMapping` `ShareRadar` | network mode only: toggle the local player's share bits (`2`, `4`, `0x20`, `0x40`), post `Toggled ShareX to: ON/OFF`, resend the player record (doc 05 [R-SHARE-01]) |
 | `ShareAll` | the four toggles in sequence |
@@ -589,7 +591,7 @@ are ignored.
 **Established fact — viewing and control.** `View` changes the viewing slot,
 without changing the true-local command owner or requesting a visibility
 refresh. Its player argument is narrowed to the low byte before the common
-player-record validation. `Give` uses that viewing slot as its source, narrows
+player-record validation. `Give` uses the own/controlling slot (changed by `Control`) as its source, narrows
 its destination argument to the low byte, converts the second integer argument
 to single precision, and delegates to the resource transfer of doc 05. Negative
 amounts retain that helper's signed behavior. Neither command writes settings.
@@ -2957,26 +2959,48 @@ mode byte: `0` enables a row for every eligible other player (all), `1` uses
 the local player's per-peer relation byte directly (allies), `2` uses its
 logical inverse — enabled when the relation byte is zero (enemies) — and `3`
 uses persistent per-player custom-recipient bytes written by the chat
-`+digit` mini-language. Row building walks all ten fixed-size player-slot
+one-line recipient prefix. Row building walks all ten fixed-size player-slot
 records in slot order, skipping empty slots (slot type `0x00`), blocked slots
 (`0x04`), and the local player's own slot. Activating `SENDTYPE` cycles the
 mode byte through `0..3` (values of 4 or more wrap to 0) and refreshes the
 rows; activating `SENDTO` toggles word-flag bit `0x0100`.
 
-Ordinary commits stage the text through a 79-byte-bounded copy and send it
-with ownership/routing bit value `4`; the message dispatcher selects handlers
-by masking its command-table entries against that route word. If the first
-non-space byte of the committed text is `+`, the remainder enters the command
-path instead of chat display, routed with bits `1`, or `7` when the chat-
-alias flag byte has bit `1` set, additionally OR'd with `2` when the
-entry-time cheat word is nonzero. The `+` command vocabulary — 83 commands
-over the mask-1, mask-2 and mask-4 tables plus the default handler — and the
-dispatch mechanics are [R-CAM-01 §6]. After the command dispatch the chat
-commit callback handles the mini-language inline on the same text:
-`+<digit>` (occupied slot) sets the per-player custom-recipient byte for that
-digit, `+a`/`+e` (case-insensitive) set the recipient-mode byte to allies or
-enemies with the matching label, and any other `+...` sends the whole text as
-plain chat.
+**Established — who may open chat.** The opener returns at once when the local
+player's watcher bit is set. A watcher, including a defeated player who kept
+watching, can neither chat nor type a `+` command in battle. The one exception is
+the peer time-out dialog's text box, which sends a chat line with no watcher test
+and no command dispatch.
+
+**Established — recipients.** The line is formatted as `<name> text` and sent from
+the local human:
+- mode 0: broadcast;
+- mode 1 / 2: directly to every seated remote slot the sender has, or has not,
+  declared alliance toward (its own row A);
+- mode 3: directly to each marked slot with a non-zero identity.
+
+Watchers are not excluded as recipients. The line is then posted locally with
+class 4 and no speaker.
+
+**Established — one-line recipient prefix.** If the second character of the line
+is `,`, `:` or `;` and the first is a digit, the line goes to that one slot. If
+that slot's identity word is zero, the line is discarded, unsent and unposted. A
+first character of `a` or `e` (either case) selects allies or enemies. The two
+characters are stripped, and the stored mode and marks are restored after the
+send. There is no plus sign in this syntax.
+
+**Established — `+` lines.** The dispatcher has exactly two call sites: the chat
+commit and the developer `\` replay. A `+` line is executed on the typing machine
+with route 1; route 7 with the developer bit; bit 2 added when the entry-time
+cheat word is set. The line is then also sent as chat, to everyone when the
+matched entry was a cheat. All three command tables and the default handler are
+registered in every session kind. The developer phrase has no session gate, so
+online it unlocks every cheat and developer command on that machine whatever the
+host's `Cheat Codes` bit says.
+
+**Established — receipt.** A chat packet is posted (class 8, speaker = sender's
+slot) only for the copy addressed to the local human. Nothing is parsed or
+executed. An absent player's packets fail the admission gate; the gate does not
+itself test the removal-reason byte.
 
 **Established fact — the single-player local post.** The post uses the
 registered local player name without
@@ -3087,7 +3111,7 @@ table before the transition.
 | `STARTOPT` / `PREFS` | `PREV` ("OK", Esc/Enter) | cue `Options`; preferences saved to the registry | previous screen |
 | `STARTOPT` / `PREFS` | `CANCEL` | cue `Previous`; every audio, interface and visual value restored from the entry snapshot | previous screen |
 | `ARMOPT` (Esc in battle) | `LOADGAME` / `SAVEGAME` / `PREFS` / `HELP` / `MISSION` / `EXIT` / `OK` | §7 | `LOADGAME` / `LOADGAME` / `PREFS` / `HELP` / `BRIEFING` or `GAMEOPTIONS` / `EXITMENU` / battle |
-| `TABMENU` (Tab) | `OPTIONS` / `SHARE` / `CONTROL` / `ALLIES` / `CANCEL` | §7 | `ARMOPT` / `SHARE` / `CONTROL` / lobby allies (OOS) / battle |
+| `TABMENU` (Tab) | `OPTIONS` / `SHARE` / `CONTROL` / `ALLIES` / `CANCEL` | §7 | `ARMOPT` / `SHARE` / `CONTROL` / `ALLIES` / battle |
 | `EXITMENU` | `MAINMENU` / `EXITGAME` / `RESTART` / `CANCEL` | §7 | `YESORNO` / `YESORNO` / `RESTART` / battle |
 | `YESORNO` (surrender) | `CHOICE1` "Yes" (Y) | stop sounds; teardown; main-menu variant → host mode 1 → front end; exit variant → quit | `MAINMENU` or process quit |
 | `YESORNO` | `CHOICE2` "No" (N, Enter, Esc) | — | battle |
@@ -3457,10 +3481,68 @@ cue.
 
 #### Tab options menu and manual exit
 
-`TABMENU.GUI` (Tab in a multiplayer session; the in-battle menu bar of §11):
-its `OPTIONS` sets the options-open bit and opens `ARMOPT`, `SHARE` opens the
-transfer dialog [R-HUD-03 §9], `CONTROL` opens `CONTROL.GUI`, `ALLIES` the
-lobby alliance panel (out of scope).
+`TABMENU.GUI` (Tab in a multiplayer session; the in-battle menu bar of §11): its
+`OPTIONS` sets the options-open bit and opens `ARMOPT`, `SHARE` opens the transfer
+dialog [R-HUD-03 §9], `CONTROL` opens `CONTROL.GUI`, and `ALLIES` opens the allies
+window.
+
+**Established — the allies window.** `ALLIES.GUI` is opened only by the Tab
+strip's `ALLIES` button, never by the battleroom. Opening sets a panel-open bit
+and renames the template gadgets.
+
+*Rows.* The shared row builder shows one row per seated, non-watching,
+non-eliminated player with a colour (the local player included here). Rows are
+packed upward. The name and ally gadgets of a row are renamed `LIVEPLYR<slot>` and
+`LIVEALLY<slot>`, so clicks resolve by slot number.
+
+*Ally button.* It is active only when the row's player is a live remote human and
+the local player is itself not eliminated. It is never active for a computer
+player or for the local row. It is greyed when the row's player shares the local
+player's team symbol (other than "none"): a battleroom team cannot be broken in
+battle.
+
+*Team icons.* Shown, but greyed in battle.
+
+*Indicator.* Each `LIVEALLY` stage is `local.B[slot] << 1 | local.A[slot]`: 0
+none, 1 mine only, 2 theirs only, 3 mutual. It is refreshed after a click and when
+a declaration packet arrives while the window is open.
+
+*`VICTORY` box.* It starts at the local shared-victory bit. It is greyed when the
+local player's team has two or more seated members, or the local player is a
+watcher.
+
+*Clicks.*
+- `LIVEALLY<slot>` plays `Options`, flips the local row-A entry, runs the alliance
+  writer ([05 R-SHARE-01 §1]), posts an announcement, refreshes the indicators,
+  and leaves the window open.
+- The announcement is an ordinary chat line through the chat sender. It reads `<`
+  declarer's name `>`, a space, then the text: a space, the translated `allied
+  with` or `broke alliance with`, a space, and the target's name. It obeys the
+  current chat recipient mode, evaluated after the flip, and is shown locally
+  without the arrival cue.
+- `VICTORY` only toggles the box.
+- `OK` writes the box into the local shared-victory bit, broadcasts the player
+  records when the bit changed, and closes the window.
+
+**Established — the battleroom's controls** (its own window, not `ALLIES.GUI`).
+- `ALLY<n>` is active only for a remote human row while the local player is not a
+  watcher. It is greyed once the local player is ready.
+- An `ALLY<n>` click does what the battle click does. If the clicked player is a
+  teammate, it also takes the local player out of its team: forced break with
+  every teammate, team symbol to "none", symbol broadcast. It plays `Ally` when
+  the result is allied, else `Multi`, posts the same announcement, and broadcasts
+  the player records.
+- `TEAMICONS<n>` is clickable only by the machine that simulates that row's
+  player, while not ready. A click plays `Ally`, runs the leave-team step,
+  advances the symbol `(symbol + 1) mod 6` (0–4 are teams, 5 is none), broadcasts
+  it, runs team propagation and repaints.
+- Icon frame: 10 for no team; `symbol × 2 + 1` when alone in a team; `symbol × 2`
+  with two or more members.
+
+**Established — timing.** The pump's per-iteration helper runs the gadget service
+pass, and with it a window's fired callback, before the mode frame function that
+runs the battle host pump. A screen handler therefore acts between executor calls,
+ahead of that iteration's sub-ticks, never inside a phase.
 
 **Established — the control window** (multiplayer only; edge recorded,
 semantics out of scope). `CONTROL.GUI` is the host's player control, and its
@@ -3648,12 +3730,13 @@ end title's bit written. Either answer plays `BigButton` and closes the
 window; any other gadget leaves it open. The question exists only in session
 kind 3: the skirmish branch of the same block writes the end latch directly.
 
-`CDCHECK.GUI` is raised only by the post-battle machine (§10) when a
-campaign ends and disc 2 is absent; `OK` re-checks and advances, else the
-Disc 2 `MSGBOX`. `TIMEOUT.GUI` (a lobby peer silent for `timeout × 30`
-ticks) and `REPORT.GUI` (score reporting through `reporter.dll`, with the
-`Unable to initialize scores reporting.` `MSGBOX` over background
-`ReportError`) are multiplayer-only; edges recorded, semantics out of scope.
+`CDCHECK.GUI` is raised only by the post-battle machine (§10) when a campaign ends
+and disc 2 is absent; `OK` re-checks and advances, else the Disc 2 `MSGBOX`.
+`TIMEOUT.GUI` (the peer time-out monitor after every network drain, including in
+battle; [08 R-LEAVE-01 §6]) and `REPORT.GUI` (score reporting through
+`reporter.dll`, with the `Unable to initialize scores reporting.` `MSGBOX` over
+background `ReportError`) are multiplayer-only; edges recorded, semantics out of
+scope.
 
 ### The post-battle machine and `ENDMSN` [R-FE-01 §10]
 
@@ -3802,12 +3885,12 @@ serial).
 | `NEWMULTI.GUI` | the `STARTNEW` branch of `SELGAME` | the new-game name/password form |
 | `SELGAME.GUI` | phase 0x10 substate 0 (every provider except a modem/serial *create*, which goes straight to substate 0x11) | the game list; `JOINGAME` → substate 0x12, `WATCH` → substate 0x13 (sets the watching bit), `STARTNEW` → substate 0x11, `PREVMENU` → substate 3 (session closed, back to phase 0xf) |
 | `LOUNGE2.GUI` | phase 0x11 substate 0 (after a create or a successful join, substate 0x15) | the lobby; its per-frame tick is substate 1; `START` raises the battle-start bit (substate 0x11 destroys the lobby record and enters the loading transition); leaving is substate 3 (session closed, network layer reset, lobby record destroyed, back to phase 0xf for TCP/IP and modem providers, phase 0x10 otherwise, or the lobby-exit path when launched from a DirectPlay lobby) |
-| `ALLIES.GUI` | the lobby callback, and in battle `TABMENU` → `ALLIES` ([R-FE-01 §7]) | alliance panel over the shared player-row builder (`PLAYER<n>`, `LOGO<n>`, `ALLY<n>`, `LIVEALLY<n>`, `LIVEPLYR<n>`, `TEAMICONS<n>`) |
+| `ALLIES.GUI` | in battle only, `TABMENU` → `ALLIES` ([R-FE-01 §7]) | alliance panel over the shared player-row builder (`PLAYER<n>`, `LOGO<n>`, `ALLY<n>`, `LIVEALLY<n>`, `LIVEPLYR<n>`, `TEAMICONS<n>`) |
 | `RESTRICT2.GUI` | the lobby callback | unit-restriction editor; `Save`/`Load` open `SAVELIST.GUI` / `LOADLIST.GUI` ([R-FE-01 §8]) |
 | `VIEWMAP.GUI` / `viewmap.gui` | the lobby callback and the lobby tick | map preview |
 | `TALK2.GUI` | the chat opener when the expansion flag and mission type 3 hold (§5 "Chat") | the recipient rows (`PLAYER<n>` / `LIVEPLYR<n>`) exist only in this form |
 | `GAMEOPTIONS.GUI` | `ARMOPT` → `MISSION` outside a campaign ([R-FE-01 §7]) | **shared** with skirmish; only its multiplayer rows (`Cheat Codes`, `Watching`) are out of scope |
-| `TIMEOUT.GUI` | the lobby time-out monitor (a peer silent for `timeout × 30` ticks, [R-FE-01 §9]) | `will be rejected in <n> seconds` countdown; `REJECT` kicks the peer |
+| `TIMEOUT.GUI` | the peer time-out monitor after every network drain, including in battle ([08 R-LEAVE-01 §6]) | `will be rejected in <n> seconds` countdown; `REJECT` kicks the peer |
 | `REPORT.GUI` | phase 0x10 substate 0x12 when launched from a DirectPlay lobby, and the post-battle machine for mission type 3 | score reporting through `reporter.dll` (`_RIInitializeEx`, `_RIReport`, …); a modal pump runs the GUI while the box is open |
 | `CONTROL.GUI` | `TABMENU` → `CONTROL` ([R-FE-01 §7]) | host player control |
 
@@ -3874,34 +3957,33 @@ needs no equivalent.
 
 ### The surrender teardown: what returning to the shell frees [R-FE-02 §3]
 
-**Established fact.** `Yes` on the surrender question ([R-FE-01 §7]) stops
-all sounds and runs one teardown routine before the windows are closed and
-host mode 1 is selected; the exit-to-Windows variant runs the same routine
-after clearing the display and the network half, then quits. The routine
-runs, in this order: the audio stop and the sound-engine flush; a
-feature/projectile step stub (empty in this build); the *sensor teardown* —
-every live unit is de-registered from the sensor tables, then the `HOT
-UNITS` and `HOT RADAR UNITS` lists ([R-REV-01 §5]) and the unit pool are
-freed; the *effect-system teardown* (the ten effect lists run their
-elements' destructors, doc 03 [R-FX-01]); the multiplayer elimination record
-(§1); the *per-player teardown* over the ten slots (unit-slice bounds
-zeroed, the per-player ten-entry table, the AI planner record with its ten
-planner objects, and the score buffer freed); the three minimap surfaces;
-the *map teardown* (feature definitions — every non-flagged definition's GAF
-frames on both instance lists — the instance arrays, the height/type/LOS
-word grids, the visibility grids, the path caches and the occupancy
-bitmaps); three further buffers; the builder page-record
-table; the *unit-catalog teardown* (per definition the model tree, the
-build picture and the per-definition buffers, then the weapon-name list and
-the summary/model tables); the *weapon-catalog teardown* (all 256 weapon
-records: the sound-name buffer and the projectile-model vector); the
-per-side logo table and surface; one more presentation buffer; the three
-order-descriptor tables ([R-P0-11 §3]); the unit-category name vector
-([R-CAM-01 §2]); and finally the DirectPlay close when the session's network
-bit is set (a no-op in single player). The mission record itself is
-re-allocated, not freed, when the next family is entered ([R-FE-01 §1]); its
-own teardown (the AI mission record, the start-position and census lists,
-the OTA parse tree) runs then.
+**Established fact.** `Yes` on the surrender question ([R-FE-01 §7]) stops all
+sounds and runs one teardown routine before the windows are closed and host mode 1
+is selected; the exit-to-Windows variant runs the same routine after clearing the
+display and the network half, then quits. The routine runs, in this order: the
+audio stop and the sound-engine flush; a feature/projectile step stub (empty in
+this build); the teardown kill loop — every live unit goes through the death
+preamble with cause 8 ([06 §12.1]), broadcasting locally owned deaths while the
+network session is still open ([08 R-LEAVE-01 §7]); then the `HOT UNITS` and `HOT
+RADAR UNITS` lists ([R-REV-01 §5]) and the unit pool are freed; the *effect-system
+teardown* (the ten effect lists run their elements' destructors, doc 03
+[R-FX-01]); the multiplayer elimination record (§1); the *per-player teardown*
+over the ten slots (unit-slice bounds zeroed, the per-player ten-entry table, the
+AI planner record with its ten planner objects, and the score buffer freed); the
+three minimap surfaces; the *map teardown* (feature definitions — every
+non-flagged definition's GAF frames on both instance lists — the instance arrays,
+the height/type/LOS word grids, the visibility grids, the path caches and the
+occupancy bitmaps); three further buffers; the builder page-record table; the
+*unit-catalog teardown* (per definition the model tree, the build picture and the
+per-definition buffers, then the weapon-name list and the summary/model tables);
+the *weapon-catalog teardown* (all 256 weapon records: the sound-name buffer and
+the projectile-model vector); the per-side logo table and surface; one more
+presentation buffer; the three order-descriptor tables ([R-P0-11 §3]); the
+unit-category name vector ([R-CAM-01 §2]); and finally the DirectPlay close when
+the session's network bit is set (a no-op in single player). The mission record
+itself is re-allocated, not freed, when the next family is entered ([R-FE-01 §1]);
+its own teardown (the AI mission record, the start-position and census lists, the
+OTA parse tree) runs then.
 
 Nanolathe impact: after a surrender every catalog is gone; the next battle
 entry reloads units (the pump step of §2), weapons, features and the map
@@ -8905,26 +8987,32 @@ Map selection and player-count filtering use OTA schema/start-position data.
 The lobby does not fabricate a playable map if no compatible map/schema is
 available; it displays a not-selected or unavailable state.
 
-**Battleroom slot contracts are closed.** Each of the ten fixed-size
-player-slot records carries a slot-class byte: `0x00` empty, `0x01` human
-host, `0x02` human join, `0x03` computer/AI, `0x04` blocked (`0xFF` is the
-initial/unset data filler, not an executable slot class). The populated-row
-path requires a non-null slot with class in {1, 2, 3} plus a marker/status
-condition. Ready state is bit `0x20` (bit 5) of the shared per-player word:
-the heartbeat XOR-syncs each human peer's bit 5 against the local player's
-bit 5, propagating readiness to peers; the READY gadget displays that bit and
-is grayed for every slot class except human host. The same bit position of
-the local player's own word, captured once per pass, gates map-control
-authority: SIDE editing is enabled when it is set or the slot is not human;
-ALLY and PLAYER/MEM row enablement take it directly; otherwise the gadgets
-get the disabled call. Statically one bit serves both READY display and
-local authority, and retail may assign distinct per-role meanings that static
-reading cannot separate.
+**Battleroom slot contracts are closed.** The row state of each of the ten
+player-slot records is the record's control byte itself
+([05 R-SHARE-01 §1], [08 R-SKIR-01 §13]): `0` open, `1` the local human, `2` a computer player on this
+machine, `3` a remote player, human or computer by the kind byte of its
+lobby record, and `4` blocked, a value only the host's machine holds. No
+value means "human host" or "human join": the host is marked by a flag in
+its lobby record, not by this byte. The populated-row path requires a live
+record whose byte is `1`, `2` or `3` and whose seat index is set, or a live
+watcher. Ready state is bit `0x20` (bit 5) of the lobby word
+([08 R-SKIR-01 §12]): each refresher pass copies the local human's bit onto
+every row this machine controls — its computer player, when it has one — and
+a remote row's bit arrives in that row's own lobby record. The READY gadget
+displays the row's bit and is greyed for every row except the local human's.
+The same bit of the local player's own word, captured once per pass, locks
+that player's controls: `PLAYER` and `ALLY`, and `RES` on the local human's
+row, are greyed exactly while it is set, and `SIDE` and `TEAMICONS` are
+greyed while it is set or the row is not one this machine controls (control
+byte `1` or `2`). `ALLY` is active only for a live remote human who is not a
+watcher, and only while the local player is not a watcher. One bit therefore
+serves both as the READY display and as the lock on a ready player's own
+controls.
 
 Ineligible slots hide their row gadgets (`LOGO`, `SIDE`, `ALLY`,
 `TEAMICONS`, `RES`, `PING`, `MEM`, `READY`), gray READY to value 0, and
 substitute the `PLAYER%d` label with `UNUSED`, or the translated `BLOCKED`
-truncated to 30 bytes when the slot class byte is `4`. While walking slots,
+truncated to 30 bytes when the control byte is `4`. While walking slots,
 the heartbeat tracks the minimum ping value; when a host flag is set and that
 minimum is below the host's stored value, the minimum is written back into
 the host player record and a notify runs. The battleroom heartbeat runs while
@@ -8946,9 +9034,6 @@ supported inference, not established fact.
   ready/start protocol · §12 · static trace. Multiplayer-only, out of
   Nanolathe's implementation scope.
 - Map-preview camera behavior · §12 · static trace.
-- Role separation of shared player-word bit `0x20` between READY display and
-  map-control authority; both consumers are proven and the semantics are not
-  separable statically · §12 · manual retail observation.
 
 
 ## Missing and unknown
@@ -8972,8 +9057,6 @@ and the decider that would close it.
 - The user-facing name of the F4 toggle; the `+MakePoster` argument grammar ·
   §2 [R-CAM-01 §2, §6] · static trace / manual retail observation (developer
   tooling, low priority; no implementation decision turns on either).
-- How the multiplayer receive path applies the lobby `Cheat Codes` bit before
-  re-dispatching a received `+` line · §5 [R-CAM-01 §6] · out of scope.
 - Text-input code page and IME behavior · §2, §7 · presentation-level platform
   detail; no retail contract observed beyond the ASCII token set
   (`TODO(T23)`).
@@ -9074,9 +9157,6 @@ and the decider that would close it.
 - Whether the in-battle end title stays visible under the results darkening
   (Supported inference) · §11 · retail capture of a won skirmish.
 - Campaign continuation timing · §5, doc 08 · static trace.
-- Role separation of shared player-word bit `0x20` between READY display and
-  map-control authority; both consumers are proven and the semantics are not
-  separable statically · §12 · manual retail observation.
 - Whether the Enter and Escape bindings of the `You're out!  Continue
   Watching?` question act in ordinary play: its opener sets the window's token
   mode and writes the two bindings but does not switch key navigation on, so

@@ -72,13 +72,13 @@ counters and cadences around it so the visit can be written without choosing
 anything. Every claim is Established by direct static trace unless marked
 otherwise.
 
-**The player gate.** The sweep zeroes the session's live-unit counter, then
-visits player slots 0 through 9 in order. A slot is processed only when its
-record's leading occupancy word is nonzero, its controller byte is 1, 2 or 3,
-and its ally-group byte is not 10 ([R-MOV-03 §10]). Within the slot every unit record of the player's
-slice is visited in ascending pool order; a record whose definition index is
-zero is skipped. The controller-1/2 test that gates the order pumps and the
-mover (section 8.3's "compact ground controller" closure) is re-evaluated per
+**The player gate.** The sweep zeroes the session's live-unit counter, then visits
+player slots 0 through 9 in order. A slot is processed only when its record's
+leading occupancy word is nonzero, its controller byte is 1, 2 or 3, and its
+slot-index byte is not 10 ([R-MOV-03 §10]). Within the slot every unit record of
+the player's slice is visited in ascending pool order; a record whose definition
+index is zero is skipped. The controller-1/2 test that gates the order pumps and
+the mover (section 8.3's "compact ground controller" closure) is re-evaluated per
 unit from the **owner** record, not from the slot being swept.
 
 **Per unit, in this order:**
@@ -159,53 +159,52 @@ sea level is band 4; otherwise the band starts from the previous value, then
 neither grounded nor airborne classifies as band 0. The `setSFXoccupy` start
 fires only on a change of band.
 
-### The sweep's third player gate is the ally-group byte, not an elimination state [R-MOV-03 §10]
+### The sweep's third player gate is the slot-index byte, not an elimination state
+[R-MOV-03 §10]
 
-**Established, direct.** The third byte the sweep's player gate loads is the
-row's **ally-group byte** — the byte the row constructor seeds with `10`
-([05 "Player slot"], the eleventh-row finding), the byte the alliance rows are
-indexed by ([05 R-SHARE-01 §1]) — and the test is `!= 10`. The first clause
-of the gate is the row's leading occupancy word being nonzero. No per-player
-elimination state exists in the gate: a row whose player has lost every unit
-is still swept (and trivially owns nothing to visit), and the `10` test can
-only exclude a row that was never seated. For an implementation the gate is:
-occupancy word nonzero, control byte in {1, 2, 3}, ally-group byte not 10.
-Every seated row 0–9 carries its own slot number in that byte
-([R-MOV-03 §11]), so the third clause is inert in any battle — which is why
-[05 R-SHARE-01 §3]'s parallel gate reads it as "the slot's own index is not
-10".
+**Established, direct.** The third byte the sweep's player gate loads is the row's
+**slot-index byte** — the byte the row constructor seeds with `10` ([05 "Player
+slot"], the eleventh-row finding), the byte the alliance rows are indexed by ([05
+R-SHARE-01 §1]) — and the test is `!= 10`. The first clause of the gate is the
+row's leading occupancy word being nonzero. No per-player elimination state exists
+in the gate: a row whose player has lost every unit is still swept (and trivially
+owns nothing to visit), and the `10` test can only exclude a row that was never
+seated. For an implementation the gate is: occupancy word nonzero, control byte in
+{1, 2, 3}, slot-index byte not 10. Every seated row 0–9 carries its own slot
+number in that byte ([R-MOV-03 §11]), so the third clause is inert in any battle —
+which is why [05 R-SHARE-01 §3]'s parallel gate reads it as "the slot's own index
+is not 10".
 
-### The ally-group byte holds the slot's own index: the seat-setup writer [R-MOV-03 §11]
+### The slot-index byte holds the slot's own index: the seat-setup writer
+[R-MOV-03 §11]
 
 **Established** by a direct read of the row constructor, the seat-setup
 routine, its three callers and the battleroom's renumbering pass.
 
 - The **row constructor** seeds the byte with `10` ([05 "Player slot"]).
-- The **seat-setup routine** takes `(slot, control)`. It writes the control
-  byte, sets the row's leading occupancy word to 1, writes **`slot` into the
-  ally-group byte** (and into the two bytes that follow it, whose readers this
-  unit did not trace), sets the row's own entry to 1 in both alliance tables
-  of [05 R-SHARE-01 §1], zeroes the 4 × 4 resource-cell block, and names the
-  row (`Player`, or one of the two computer names) — the rest is [08
-  R-ENTRY-01 §3]'s business.
-- Its **single-player callers** pass the row index as `slot` in every case:
-  the local pre-load state (session state 4) seats row 0 as control 1 and
-  row 1 as control 2; the skirmish entry's seat loop walks the setup record's
-  player list and seats row *i* from entry *i* — control 1 for the human
-  (also recording *i* as the local slot), 2 for a computer, 0 for an empty
-  entry. The network join path (kind 3, out of scope) passes the row index
-  too.
-- The only **other writer** is the multiplayer battleroom's renumbering
-  pass, which walks rows 0–9 and stores the row's own index into a seated
-  row (occupancy word nonzero, control 1/2/3, byte ≠ 10) and `10` into any
-  other. A second copy of that loop exists with no caller.
+- The **seat-setup routine** takes `(slot, control)`. It writes the control byte,
+  sets the row's leading occupancy word to 1, writes **`slot` into the slot-index
+  byte** (and into the two bytes that follow it, whose readers this unit did not
+  trace), sets the row's own entry to 1 in both alliance tables of [05 R-SHARE-01
+  §1], zeroes the 4 × 4 resource-cell block, and names the row (`Player`, or one
+  of the two computer names) — the rest is [08 R-ENTRY-01 §3]'s business.
+- Its **single-player callers** pass the row index as `slot` in every case: the
+  local pre-load state (session state 4) seats row 0 as control 1 and row 1 as
+  control 2; the skirmish entry's seat loop walks the setup record's player list
+  and seats row *i* from entry *i* — control 1 for the human (also recording *i*
+  as the local slot), 2 for a computer, 0 for an empty entry. The network join
+  path (kind 3, out of scope) passes the row index too.
+- The only **other writer** is the multiplayer battleroom's renumbering pass,
+  which walks rows 0–9 and stores the row's own index into a seated row (occupancy
+  word nonzero, control 1/2/3, byte ≠ 10) and `10` into any other. A second copy
+  of that loop exists with no caller.
 
-So in every session kind a seated row's ally-group byte **is** its row
-index, and the only other value the byte ever holds is `10`. No
-single-player path can make it differ. [05 R-SHARE-01 §3]'s reading of the
-sweep gate as "the slot's own index is not 10" is exact, and an
-implementation that indexes its alliance rows by the owner slot number and
-tests the slot for 10 performs retail's arithmetic without a separate byte.
+So in every session kind a seated row's slot-index byte **is** its row index, and
+the only other value the byte ever holds is `10`. No single-player path can make
+it differ. [05 R-SHARE-01 §3]'s reading of the sweep gate as "the slot's own index
+is not 10" is exact, and an implementation that indexes its alliance rows by the
+owner slot number and tests the slot for 10 performs retail's arithmetic without a
+separate byte.
 
 ### 1.2 Determinism and random state
 
@@ -10581,19 +10580,18 @@ occupancy phase**, after the per-unit sweep phase of the same tick and before
 this phase's own per-player loop ([01 §4.4] owns the absolute phase order):
 
 1. If the session's player count is zero, do nothing.
-2. Increment a call counter. When the incremented value **reaches** 150 —
-   `>= 150`, so the period is exactly 150 calls and the counter never holds
-   150 — zero it and, for each of the
-   ten player slots, compute `tier = serviceCount[p] / divisor` and set
-   `quantum[p] = base × (tier < 1 ? 6 : tier < 2 ? 3 : 1)`, then zero
-   `serviceCount[p]`. The **divisor is the session's per-player unit limit**,
+2. Increment a call counter. When the incremented value **reaches** 150 — `>=
+   150`, so the period is exactly 150 calls and the counter never holds 150 — zero
+   it and, for each of the ten player slots, compute `tier = serviceCount[p] /
+   divisor` and set `quantum[p] = base × (tier < 1 ? 6 : tier < 2 ? 3 : 1)`, then
+   zero `serviceCount[p]`. The **divisor is the session's per-player unit limit**,
    copied from the lobby unit-limit setting at battle setup. `base` is the
    compiled-in `0x18000` of [R-PATH-01 §10].
-3. For each of the ten slots whose player record exists, whose control byte
-   is 1, 2 or 3, and whose ally-group byte is not 10 ([R-MOV-03 §10]): add
+3. For each of the ten slots whose player record exists, whose control byte is 1,
+   2 or 3, and whose slot-index byte is not 10 ([R-MOV-03 §10]): add
    `stepAllowance / playerCount` (integer division; `stepAllowance` is 1333 by
-   default) to that player's **step accumulator**, and add the accumulator's
-   new value to a call-local total.
+   default) to that player's **step accumulator**, and add the accumulator's new
+   value to a call-local total.
 4. While that total is positive, run one *iteration*, then subtract the
    iteration's step charge from both the total and the current player's
    accumulator.

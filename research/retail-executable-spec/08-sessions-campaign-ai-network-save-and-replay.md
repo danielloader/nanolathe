@@ -94,19 +94,26 @@ contains:
 - per-peer send/receive and synchronization state;
 - lobby display state.
 
-Several numeric slot-state values are directly observed, but the semantic name
-of every value is not completely reconciled. Implementations should keep the
-wire values distinct even when UI labels collapse them.
+The slot's state is its control byte — `0` open, `1` local human, `2`
+computer player on this machine, `3` remote, `4` blocked — together with the
+kind byte of its lobby record, which tells a remote human from a remote
+computer player ([05 R-SHARE-01 §1], [R-SKIR-01 §13]). Implementations should
+keep the wire values distinct even when UI labels collapse them.
 
 ### The player record's peer-identity word is the kind-3 pool sort key [R-SESS-01 §7]
 
 **Established.** The `PlayerSortKey` of [04 §2.3a] is a 32-bit word of the
 player record that the rest of the executable treats as the slot's **peer
-identity**. Its writers, all of them: the *slot-activation* routine (the
+identity**. Its writers: the *slot-activation* routine (the
 one the skirmish row→player conversion of [R-SKIR-01 §2] and the lobby's
 join path call with a slot index and a controller code) stores the **slot
 index** in it while it resets the slot's statistics; the lobby's join path
-then overwrites it with the joining peer's DirectPlay identity. Its readers:
+then overwrites it with the admitted player's DirectPlay identity. The
+multiplayer lobby has three more: the transport's create-player call writes
+the new identity straight into the record of a player this machine creates —
+its human, or a computer player added in the battleroom ([R-SKIR-01 §13]) —
+before that player is admitted, and blocking a battleroom row and removing a
+peer each store the "no identity" value. Its readers:
 the "local slot's identity" accessor (the first slot whose controller is 1),
 the "record by identity" accessor (a miss returns the tenth, sentinel
 record), the peer-removal and reject paths ([R-OOS-01 §1]'s `0x1b` sender),
@@ -1036,7 +1043,13 @@ Schema choice precedes placement record instantiation so all peers agree on the 
 
 Start-position eligibility is established as three conjuncts: the ten fixed player slots are scanned in order, a slot participates only when its base value is non-zero, its control value is one, two, or three, and its **side index is not the neutral value 10**. Special records that fail the StartPos prefix test are ignored for this purpose. [P0-04]
 
-The sentinel is the decimal value `10` in the slot's side-index byte (a value coincidence with the newline code point, not a string terminator); the same word is tested by the kind-2 stamp gate of [R-ENTRY-01 §5], the two live-player counters of [R-SESS-01 §1] and the score-board row condition of [R-CAMP-01 §7]. Doc 04 carries the parallel sentinel for the movement sweep, where the byte is the ally-group byte and the same `10` marks a row that was never seated ([04 R-MOV-03 §10]). Established.
+The sentinel is the decimal value `10` in the slot's side-index byte (a value
+coincidence with the newline code point, not a string terminator); the same word
+is tested by the kind-2 stamp gate of [R-ENTRY-01 §5], the two live-player
+counters of [R-SESS-01 §1] and the score-board row condition of [R-CAMP-01 §7].
+Doc 04 carries the parallel sentinel for the movement sweep, where the byte is the
+slot-index byte and the same `10` marks a row that was never seated ([04 R-MOV-03
+§10]). Established.
 
 ### Randomization for skirmish starts — Established [P0-04]
 
@@ -1257,6 +1270,29 @@ allocated there; the storage-bonus flag is set and the bonus words ←
 centres on the local human's position, or on the map centre with mode bits
 0–1 cleared when the local player is watching.
 
+**Kind 3, who assigns the position byte — Established** (direct static trace
+of the peer-ready predicate of §1 and of the two message handlers). The host
+assigns every start position once, on the first poll of the peer-ready
+predicate that finds the assignment not yet made. The loading state polls it
+on the main thread (§1), so its draws come from the main thread's C-runtime
+stream, not the worker's (§2). The candidates are the rows that are live,
+have control byte 1, 2 or 3, a seat index other than 10 and a clear watcher
+bit, taken in the host's own row order ([R-SKIR-01 §13]); a computer player
+is a candidate like any other, whichever machine hosts it. With bit 14 of the
+host's lobby word set (fixed, [R-SKIR-01 §12]) the k-th candidate takes
+position `k`, counting from 0. With it clear the positions `0 .. n−1` are
+first shuffled by the walk of "Randomization for skirmish starts" — a gate
+draw when there are fewer than three candidates, shuffling only when that
+draw is at least 16384, then for each index `i` from 1 to `n − 1` one draw
+with bound `i` and an exchange of element `i` with element `draw mod i` — and
+the k-th candidate takes the k-th element. The host stores the position
+directly in each row it controls itself, and sends every other row's position
+to that row's own identity (type `0x1e`), again on each poll until the
+recipient acknowledges it (type `0x1f`). The receiver stores the byte in the
+addressed row, which for a computer player is on the machine that hosts it
+([R-AI-01 §21]). A watcher is not a candidate: its row is given the value
+`0xff`, which the stamp above never reads for a watcher.
+
 **Kind 2 (skirmish), no save file.** `StartLocation = 0` → the eligible
 list, the 50/50 gate draw when fewer than three are eligible, and the
 Fisher–Yates walk exactly as [R-SKIR-01 §2] states, on the **worker's** CRT
@@ -1411,7 +1447,8 @@ stamp helper's camera write would settle it.
 placement and **before** the spawner/restoration of §6 (and again at every
 commander respawn and watch-mode entry, [R-SKIR-01 §3]):
 
-1. **Mapped mask** (`cellW × cellH` bytes, the whole grid): filled with
+1. **Mapped mask** (half as many bytes as the map has 16-pixel cells: one 16-bit word
+   per visibility tile, the whole word grid): filled with
    `0xff` when mode bit 0 is **clear** (Mapped) and with `0x00` when it is
    set (Unmapped) — [03 R-VIS-01 §1]'s polarity, restated at the byte.
 2. **Per-player visible mask**: for every slot that is live, controller
@@ -1431,6 +1468,14 @@ commander respawn and watch-mode entry, [R-SKIR-01 §3]):
 Because this precedes the spawner, mission units are **not** in step 3;
 they register their own sight at allocation ([03 R-VIS-01 §2]) and the
 first sensor phase completes the picture.
+
+**Scope — Established.**
+
+- The rebuild takes no player argument.
+- With the history argument set it fills every byte of the mapping word grid, so every player's bit in every word. That is all-ones when Mapped and all-zero when Unmapped.
+- It always refills the sight byte grid of every row that is active, controller 1, 2 or 3, seat not 10. Remote rows are included.
+- With line of sight on, it restamps every defined unit in the pool, whoever owns it, into that owner's byte grid and that owner's bit of the word grid. Neither the unit loop nor the stampers test the controller.
+- Its callers are: battle entry; the four chat commands; the poster writer (twice); the deathmatch respawn; and watch entry. The last two pass the history argument. None is network-driven, so no machine rebuilds anything because a remote player respawned or became a watcher. A remote machine merely receives the new commander as an ordinary remote creation, which registers its own sight.
 
 ### The tail: main GUI, phase priming, second grant, teardown, ready [R-ENTRY-01 §8]
 
@@ -2003,7 +2048,8 @@ whose `UpdateTime <= globalTick`, the per-player phase runs, in order: the
 advance `UpdateTime += 30`; for the **local** slot only, the end-condition
 block of this section (both polls, the shared countdown, the end latch);
 the settlement gate chain and the settlement itself; then a
-reference-slot tail of per-slot helpers this unit did not trace. The
+viewing-slot tail: sensor phase, mapped-minimap rebuild and, in kind 3
+on every fourth due, the economy report. The
 end-condition block is therefore evaluated once per settlement due, before
 that due's settlement, and a load resumes it on the saved `UpdateTime`
 phase. The sibling `WinLoseTime` word is seeded with the other two
@@ -2040,6 +2086,14 @@ written — the sixth consecutive true due, 150 ticks after the first — as
 *ending* (bit 2) plus, on the won path, bits 4 and 5, or, on the lost path,
 bit 6 with bit 4 cleared. A false due neither resets nor advances the
 countdown. The presentation after the latch is the Session end section's.
+
+**Established — machine scope and viewing-row tail.**
+
+- "The local slot" is the row named by the own-slot index.
+- The viewing-row tail belongs to the row named by the **viewing**-slot index. It runs the sensor phase, then the mapped-minimap rebuild. In kind 3, on every fourth due of that row, it also sends that row's economy report to every remote registered human, provided the row is locally simulated and not removed.
+- The countdown is one per machine, shared by the won path, the lost path and the after-loop site.
+- The after-loop site runs every tick, not on a due. It applies when the kind is 3, the rule is not 2 and no live human is still playing. Its first tick arms 4 and returns; each later tick decrements; the sixth consecutive tick latches ending and lost and clears won.
+- No path resets the countdown. Its only stores are −1 at session setup, arm to 4, and decrement.
 
 ### Notification sites: removal, capture, creation [R-TRIG-01 §7]
 
@@ -2483,27 +2537,25 @@ build's test above is the only place a live pair is forced.
 
 ### Battle entry: what the record becomes [R-SKIR-01 §2]
 
-**Row-to-player conversion (skirmish only, before the loading screen).**
-For each row `i < NumSkirmishPlayers`: controller `1` copies colour and side
-into the player's lobby record, registers the slot as human, and makes it the
-local player (both local-player indices = `i`; the last `Player` row wins);
-controller `2` copies colour and side and registers the slot as computer;
-controller `0` registers it as inactive. Registration resets the slot's
-two alliance rows to zero, sets `allied[i][i] = 1` in both, stores the
-controller byte, writes the slot's score-panel **rank byte to the slot
-index** (its initial value; the kill-lead shift of [R-CAMP-01 §9] is the
-established runtime rank writer after a credited kill, while whether load
-fixups recompute ranks from restored counters is Unknown, [07 R-HUD-04 §1]),
-and (skirmish
-only) names the slot `Player` for a human or
-`Arm`/`Core` for a computer by side (`side == 0` → `Arm`). Then, for a live
-row `i`, every row `j` (`j < NumSkirmishPlayers`) with the **same ally
-group, a non-zero controller, and group ≠ 5** — or `j == i` — sets
-`allied[i][j] = 1`. **This is the alliance predicate:** `allied(i, j)` is
-the byte at column `j` of player `i`'s first alliance row; it is symmetric in
-skirmish because it is derived from equal group numbers, and group 5 rows
-are allied with nobody but themselves. The second alliance row (used by the
-multiplayer alliance screen) keeps only the diagonal in skirmish.
+**Row-to-player conversion (skirmish only, before the loading screen).** For each
+row `i < NumSkirmishPlayers`: controller `1` copies colour and side into the
+player's lobby record, registers the slot as human, and makes it the local player
+(both local-player indices = `i`; the last `Player` row wins); controller `2`
+copies colour and side and registers the slot as computer; controller `0`
+registers it as inactive. Registration resets the slot's two alliance rows to
+zero, sets `allied[i][i] = 1` in both, stores the controller byte, writes the
+slot's score-panel **rank byte to the slot index** (its initial value; the
+kill-lead shift of [R-CAMP-01 §9] is the established runtime rank writer after a
+credited kill, while whether load fixups recompute ranks from restored counters is
+Unknown, [07 R-HUD-04 §1]), and (skirmish only) names the slot `Player` for a
+human or `Arm`/`Core` for a computer by side (`side == 0` → `Arm`). Then, for a
+live row `i`, every row `j` (`j < NumSkirmishPlayers`) with the **same ally group,
+a non-zero controller, and group ≠ 5** — or `j == i` — sets `allied[i][j] = 1`.
+**This is the alliance predicate:** `allied(i, j)` is the byte at column `j` of
+player `i`'s first alliance row; it is symmetric in skirmish because it is derived
+from equal group numbers, and group 5 rows are allied with nobody but themselves.
+The second alliance row (read by the multiplayer victory sweep and shown by the
+alliance screens) keeps only the diagonal in skirmish.
 
 **Session words.** The battle-entry orchestrator, for session kind 2
 (skirmish): copies the configured unit limit into the session unit-limit
@@ -2553,31 +2605,45 @@ battle entry.
 `GAMEOPTIONS.GUI` overlay names them `Game Continues`, `Game Ends`,
 `Deathmatch` in that order; the skirmish screen offers only `0`/`1`.
 
-**Trigger site.** The kill-record handler (the function that files a unit's
-death for statistics) compares the dead unit's type name with its owner's
-side commander name. When they match it first **clears the owner's
-storage-bonus flag** (so the starting-resource capacity of §5 is lost with
-the commander under every rule value); then, when the rule word is non-zero
-and the owner's controller is human or computer, it pumps the front end until
-no panel is open, then runs the **owner sweep**: for every unit in the
-owner's pool slice that is alive and not already dying, if the unit's owner
-record is inactive or not human/computer it is destroyed silently (death
-kind 3, dying bit set, kill record filed), otherwise it receives
-`30000` damage from itself with damage kind 3 — the ordinary damage path,
-so armour and death animations apply and the units die over the following
-ticks, not in the same tick. The sweep is gated on the owner's live-unit
-count being non-zero at the time. Rule `0` skips the sweep entirely: the
-player keeps every unit and nothing else happens on commander death. Rule
-`2` runs the sweep too (the commander's other units are lost), then respawns
-(below).
+**Trigger site — Established.** Two routines share a death.
+- The *kill filing routine* runs on the machine that files the kill. It requires the unit's live bit. It compares the unit's type name with its owner's side commander name and, on a match, clears the owner's storage-bonus flag. It builds the kill record and broadcasts it only when the dead unit's owner record is active with controller 1 or 2. It then applies the kill-record handler locally.
+- Only after that, and only when the unit was the commander, the rule word is non-zero and the owner record is active with controller 1 or 2, it pumps the front end and runs the owner sweep.
+- The *kill-record handler* is also what a received kill record runs. It contains neither the storage-bonus clear nor the sweep: it counts the death (including commander kills and losses), releases the unit and decrements the owner's live count. It returns at once for a unit whose live bit is already clear.
+
+**Established — the owner sweep.** When the owner’s live-unit count is
+non-zero, visit its pool slice in ascending order, considering units that
+are alive and not already dying. An inactive or remote owner takes the
+immediate effect-and-removal branch of [R-LEAVE-01 §4]. A locally simulated
+owner instead receives 30000 self-damage with kind 3 through the ordinary
+damage path. That amount bypasses the armored-state modifier’s strict
+less-than-30000 gate ([06 §9.1]). If the resulting health is non-positive,
+the unit is death-latched and dies on a following slot visit, rather than
+being deleted in the sweep. Rule 0 skips the sweep after commander death;
+rule 2 still runs it before the later respawn.
+
+**Which machine does what in kind 3 — Established.**
+
+- The dying bit is set by the damage intake only when the victim's owner is controller 1 or 2 (`[06 R-DMG-01 §8]`), so a unit is death-latched only on its owner's machine.
+- The per-unit visit files every unit carrying the dying bit. The filing broadcast reaches each other machine once: a transport broadcast, or one directed copy per distinct machine number when some machine carries two players.
+- The receive switch runs only for packets whose sender row is not locally simulated, and runs the handler alone.
+- So the owner sweep for a commander runs only on the machine that simulates its owner. Its 30000 self-damage is not broadcast, because the victim is locally owned. Each swept unit whose health becomes non-positive dies on a later slot visit and is filed and broadcast as its own kill record; other machines see those units die only as the records arrive.
+- The sweep's silent-destroy branch is reached only when the sweep is entered for a row this machine does not simulate (peer removal, developer commands), never from a commander's death.
+
+**The countdown and the end latch are per machine — Established** (complete census of every access to both values).
+- One signed countdown and one latch word exist per machine. No player record carries a copy and no write to either is accompanied by a send.
+- Inside the tick their writers are the block of the row named by the own-slot index (won and lost paths) and the after-loop no-human site of `[R-SESS-01 §1]`.
+- Outside the tick the ending bit is set by: the quit confirmation; the Continue-Watching dialog's `No`; the two leave routines; the developer win and lose commands; and the unreachable type-`0x1c` peer-loss notice arm when its payload names this machine's own human (ending set, won cleared).
+- Session setup arms the countdown at −1; battle entry and teardown clear the latch.
+- A hosted computer player's defeat or victory is never evaluated: the end-condition block runs for the own row only. Its elimination only closes its own settlement gate, lowers the live-hosted-computer count, and posts the line.
+- Another machine's defeat, watch entry or ending changes nothing here except through: arriving kill records; the defeated player's re-broadcast lobby record (its watch bit removes it from the victory sweep and the live-human count); and, if it leaves, the removal path.
 
 #### Counters
 
-Each player carries a 16-bit *live unit count* and a 32-bit *units ever
-created*. Both unit allocators increment both; the
-kill-record handler decrements the live count when the unit is finally
-removed (the same function that clears the unit's "alive" bit), and in
-multiplayer notifies peers when it reaches zero.
+Each player carries a 16-bit *live unit count* and a 32-bit *units ever created*.
+Both unit allocators increment both; the kill-record handler decrements the live
+count when the unit is finally removed (the same function that clears the unit's
+"alive" bit), and in multiplayer posts the elimination line locally when it
+reaches zero ([R-CAMP-01 §9]); nothing is sent.
 
 #### Defeat detection
 
@@ -2599,7 +2665,7 @@ map minus a tenth on each side, accepted when all nine cells of a 3×3
 footprint probe pass the side commander's placement test, no unit is in the
 way, and — when the map has a lava/water sentinel — the terrain height
 exceeds the sea level; then create the commander at the local player, apply
-the storage-bonus setter with the local lobby record's metal and energy
+the storage-bonus setter with the host row's lobby record's metal and energy
 shorts `× 100`, and add the same energy and metal products to the new
 unit's stored energy/metal — scaled `× 0.5` for difficulty 0 and `× 0.7`
 for difficulty 1 when the owner is a computer — then rebuild visibility and
@@ -2637,23 +2703,45 @@ dies.
 
 #### Victory detection
 
-The elimination sweep run from the same due differs by kind. **Kind 3:** it
-returns false immediately when the rule word is `2` (deathmatch never ends
-by elimination). Otherwise, for every other active player `j` with a
-human/computer/remote controller, side ≠ 10 and watch-mode bit clear: if
-`j` has created no unit yet, no victory; if `j` still has live units, then
-victory continues only when both `j` and the local player have the lobby
-*shared-victory* bit set and `allied(local, j)` and `allied'(local, j)`
-(both rows) hold, and every other active, non-eliminated player `k` is in
-`j`'s alliance row; any failure is no victory. The shared-victory bit is
-written only by the `ALLIES.GUI` screen's `VICTORY` control (opened from the
-in-battle `TABMENU.GUI`'s `ALLIES` button). **Kind 2:** the sweep walks
-slots 0–9 and skips the local slot, any slot whose byte in the local
-player's first alliance row is non-zero (an ally, from the setup screen's
-team groups, §2) and any slot with a zero live-unit count; if any slot
-survives the skips there is no victory, otherwise victory — no
-shared-victory bit, no controller, elimination or rule-word test
-([R-TRIG-01 §6]).
+**Kind 3 — Established.** The sweep returns false at once under the deathmatch rule.
+Otherwise, for every slot `j` other than the local one that is seated, has
+controller 1, 2 or 3, and has its watcher bit clear:
+
+1. If `j` has created no unit, there is no victory.
+2. If `j` has no live unit, it is skipped.
+3. Otherwise victory needs all of:
+   - `j`'s shared-victory bit;
+   - the local player's shared-victory bit;
+   - `local.A[j]` and `local.B[j]` both non-zero;
+   - for every slot `k` of the ten that is seated and not eliminated (live units, or
+     nothing created yet), a non-zero `j.A[k]` as held on this machine.
+
+The `k` walk excludes neither the local player, nor `j` itself (its self entry),
+nor watchers. Any failure is no victory. With no surviving `j` the sweep is true.
+
+**Established — the shared-victory bit** is bit 1 of a lobby-record word separate
+from the lobby word and the share-option word. It has four writers:
+
+- the allies window's `OK` ([07 R-FE-01 §7]);
+- battleroom team propagation, which sets it for every member of a team of two or
+  more and clears it otherwise;
+- the leave-team step, which clears it;
+- the whole-record copy on receipt of a player-record broadcast.
+
+A battle therefore starts with it set exactly for members of teams of two or more.
+Those players cannot clear it in battle.
+
+**Supported inference** (from [05 R-SHARE-01 §1] "who is told"): `j.A[k]` for two
+players simulated elsewhere is known only from battleroom teams. A shared victory
+among three or more players allied only by declarations therefore cannot complete
+on any machine. A stale set entry also survives a battleroom team change on third
+machines.
+
+**Kind 2:** the sweep walks slots 0–9 and skips the local slot, any slot whose
+byte in the local player's first alliance row is non-zero (an ally, from the setup
+screen's team groups, §2) and any slot with a zero live-unit count; if any slot
+survives the skips there is no victory, otherwise victory — no shared-victory bit,
+no controller, elimination or rule-word test ([R-TRIG-01 §6]).
 
 ### The two live-player counters — Established [R-SESS-01 §1]
 
@@ -2670,12 +2758,13 @@ as live — the same "created nothing yet" rule the kind-3 victory sweep uses).
   slots.
 * **Live human players still playing**: the controller byte is `1`, `2` or
   `3`; then the slot must be either a local human (`1`) or a remote slot
-  (`3`) whose lobby record's registration byte equals `1` — the byte slot
-  registration writes ([R-SKIR-01 §2]); that `1` means "registered as human"
-  is **Supported inference** from that writer, the test itself is
-  Established — so a hosted computer slot (`2`) never counts; and finally the
-  lobby record's watch-mode bit (the bit the elimination handler sets,
-  [R-SKIR-01 §3]) must be clear.
+  (`3`) whose lobby record's registration byte equals `1` — the kind byte of
+  [05 R-SHARE-01 §1], which the lobby stores as `1` when it creates a human
+  player and as `2` when it creates a computer player ([R-SKIR-01 §13]), and
+  which reaches the other machines inside the lobby record — so neither a
+  computer slot hosted here (`2`) nor a computer player hosted on another
+  machine ever counts; and finally the lobby record's watch-mode bit (the bit
+  the elimination handler sets, [R-SKIR-01 §3]) must be clear.
 
 Every consumer of both counters is on the **kind-3** (multiplayer) branch of
 the block: the first decides between `You're out!  Continue Watching?` and
@@ -2851,7 +2940,10 @@ discount [05 R-ECO-01 §3]; the commander-respawn grant scaling in §3; the
 `GAMEOPTIONS.GUI` overlay's `Difficulty:` label (kinds 1/2 only — kind 3
 shows `Cheat Codes:` and `Watching:` from bits 13 and 7 of the host's lobby
 word, `Allowed`/`Disallowed`, [R-SKIR-01 §12]). The AI profile grammar is
-[R-AI-01 §12].
+[R-AI-01 §12]. The multiplayer battleroom has no difficulty control and the
+word is not synchronized between machines: the host's accepted `START` stores
+`2` on the host's machine only, and a computer player plays at the word of
+the machine that hosts it ([R-AI-01 §21]).
 
 ### Map restrictions [R-SKIR-01 §10]
 
@@ -2869,8 +2961,9 @@ restriction container (a tree keyed by definition, one record per
 definition holding a *restricted* short and a *limit* word). `Reset`
 sets every row to `100`, or to `0` when the definition's `wacky` capability
 bit is set, writing only rows whose value changed; `Cancel` (`Previous` cue)
-writes every `OLDCOUNTS` value back. The close path, when the host slot (the
-lobby record whose local flag is set) is human- or computer-controlled,
+writes every `OLDCOUNTS` value back. The close path, when this machine is the
+host (the host slot — the lobby record that carries the host flag — is live
+with control byte `1` or `2`, [R-SKIR-01 §13]),
 walks the rows and marks each definition restricted (limit
 `0`) or unrestricted through the container's two setters. The container is
 process-lifetime memory: no registry, save or file writer touches it, and the
@@ -2992,17 +3085,187 @@ AI. It repeatedly:
 - publishes local changes to peers.
 
 Human, computer, open, and blocked slot states have different editing and
-readiness rules. The lobby option word is [R-SKIR-01 §12]; the exact semantic
-name of every numeric slot state remains incomplete.
+readiness rules. The lobby option word is [R-SKIR-01 §12]; the five row
+states, the row controls and the life of a computer player in the battleroom
+are [R-SKIR-01 §13].
 
-**Out of scope.** The whole battleroom — 67 functions
-in the ledger's `LOUNGE2.GUI` cluster plus the provider/connection screens —
-is outside Nanolathe's single-player scope; nothing in it is reached from the
-campaign or skirmish paths ([R-OOS-01 §3]). The only battleroom-authored
-values the single-player session reads are the lobby word's `Cheat Codes` bit
-(via its entry-time copy, [R-OOS-01 §2]) and the watcher bit (loading-state
-table, [R-OOS-01 §2]); the skirmish screen writes the setup record instead
-([R-SKIR-01 §1]). The bullets above stay as a description, not a contract.
+**Established — single-player boundary.** The battleroom and provider screens
+are not reached from campaign or skirmish ([R-OOS-01 §3]). Their records still
+supply the entry-time cheat copy and watcher test described in [R-OOS-01 §2];
+skirmish authors its separate setup record. The multiplayer battleroom
+contracts established here are [R-SKIR-01 §12] and [R-SKIR-01 §13].
+
+**Established — starting rows in kind 3.** Each slot carries a team symbol, seeded
+"none" at seat setup. At battle start each machine holds:
+- the self entries;
+- both rows set, both ways, for every same-team pair (propagation, on every
+  machine);
+- whatever battleroom ally clicks left on the two machines concerned;
+- the shared-victory bits as in §3.
+
+`START` is refused with `Can not start game with all players on the same team.`
+when any one symbol's member count equals the number of human plus computer slots.
+Declarations are not examined.
+
+### Battleroom rows and computer players [R-SKIR-01 §13]
+
+**Established** unless a paragraph says otherwise (direct static trace of
+the battleroom callback's `PLAYER<n>`, `LOGO<n>`, `SIDE<n>` and
+`TEAMICONS<n>` branches, the battleroom opener, the row builder, the row
+refresher, the heartbeat's compaction pass, player creation, the admission
+of a transport player and the machine-number exchange; whole-image census of
+the instructions that store the control byte).
+
+**Row state.** The battleroom keeps no row state of its own: a row's state
+is its player record's control byte ([05 R-SHARE-01 §1]) — `0` open, `1` the
+local human, `2` a computer player simulated on this machine, `3` a player
+that lives on another machine, `4` blocked. Whether a remote row is a human
+or a computer is the kind byte of its lobby record, `1` or `2` — the
+registration byte of [R-SESS-01 §1]. In a networked session `4` is stored
+only by the host's click on an open row, `3` only when a transport player
+this machine did not create is admitted, and `2` only by the add path below;
+the developer `AI` command ([07 R-CAM-01 §6]) is the one other store of `2`
+in the image. A row is *seated* when its record is live, its control byte is
+`1`, `2` or `3` and its seat index is not `10`. The *host slot* is the first
+row with a non-zero control byte whose lobby record carries the host flag,
+and *this machine is the host* when that row is live with control byte `1`
+or `2`.
+
+**Rows are per machine.** Admission seats a transport player this machine
+did not create in the lowest row that is neither live nor blocked. While the
+screen is marked dirty the heartbeat also compacts the table: the lowest row
+that is neither seated nor blocked changes places with the next seated row
+above it, the vacated row is cleared, and every row's seat index is
+rewritten — its own index when seated, `10` otherwise ([04 R-MOV-03 §11]) —
+until no seated row lies above such a gap. Blocked rows do not move. A row
+number therefore means nothing on another machine; the transport identity
+([R-SESS-01 §7]) is what names a player on all of them.
+
+**Who may click `PLAYER<n>`.** Every row except the local player's own has a
+working `PLAYER<n>` button on every machine: neither the opener nor the row
+builder applies a host test to it, and the refresher greys it exactly while
+the local player's ready bit (bit 5 of its lobby word, [R-SKIR-01 §12]) is
+set. The callback ignores a click on the local row; otherwise it plays the
+`Multi` cue and acts on the row's control byte:
+
+| Row | On the host | On any other machine |
+|---|---|---|
+| open (`0`) | the row becomes blocked — control and kind byte `4`, identity cleared — and the session's maximum player count is lowered by one | the add path below |
+| blocked (`4`) | the row becomes open, the maximum is raised by one, the session description is republished, and the click goes on into the add path | does not occur: only the host's click stores `4` |
+| this machine's computer player (live, `2`) | when strictly more than 30 units of the scaled clock ([01 §4.1]: one second) have passed since the row's creation stamp, the computer player is handed to the remove-player sender with reason `1` and the row reopens; otherwise nothing | the same |
+| a live remote row (`3`), human or computer | the `Reject <name>?` question | nothing |
+
+Every branch except the closed-game refusal below then marks the screen
+dirty, republishes the session description and broadcasts this machine's
+lobby records; the refusal only marks the screen dirty.
+
+**The add path**, in this order:
+
+1. When bit 15 (game closed) of the host slot's lobby word is set, the
+   callback posts `Can't add another player when game is closed.`, leaves
+   the row open and adds nothing ([R-SKIR-01 §12]).
+2. When the host slot's commander-death rule (bits 11–12) is `2`, nothing
+   happens.
+3. When this machine already has a live row with control byte `2`, nothing
+   happens.
+4. Otherwise player creation runs for the row with control `2`. It stores
+   control byte and kind byte `2`; names the player `AI:` followed by the
+   local human's name, the whole cut to 16 characters; rewrites the record's
+   host flag as "this row is the host slot", which an added row is not; sets
+   its colour to "none"; stamps the creation time; and asks the transport to
+   create a second player object owned by this machine, which writes that
+   player's identity into the record ([R-SESS-01 §7]). When the transport
+   refuses, the row is reopened and a message box shows `Direct Play failed
+   to add new player.` and, after a blank line, `Recommended you go to
+   previous screen and re-create the game session.` on the host or
+   `Recommended you go to previous screen and re-join the game session.` on
+   any other machine.
+5. The row is then given the lowest logo index `0..9` that no seated row
+   holds, where a seated row whose colour is `9` or more — "none" included —
+   counts as holding `9`; index `0` when all ten are held.
+
+Tests 1 and 2 read the **host's** word and test 3 counts only **this
+machine's** rows, so every machine in the game may hold one computer player,
+and once that one is live the machine can add no second. This click is the
+only creator of a computer player in a networked session.
+
+**Rule 2 removes them.** On every refresher pass, a machine whose **own**
+lobby word carries commander-death rule `2` hands every live computer row it
+sees — control byte `2`, or `3` with kind byte `2` — to the remove-player
+sender with reason `11` and broadcasts its records. On the host that word is
+the rule in force; another machine's own word holds `2` only when an online
+configuration preset it ([R-SKIR-01 §7]).
+
+**How the other machines learn of it.** The transport announces the new
+player object to every machine as its player-created system message. The
+receiver acts on a system message only when it is addressed to a live row
+with control byte `1`, so the copy delivered to a hosted computer player is
+ignored. The message runs admission for the announced identity:
+
+- when the identity is already on one of this machine's rows, that row is
+  used only if its control byte is `1` or `2` and it is not yet live — the
+  creator's own row, whose control byte is kept;
+- otherwise the lowest row that is neither live nor blocked takes control
+  byte `3`; with no such row the player is not seated.
+
+Admission then reads the player's names from the transport, runs the
+slot-activation routine ([R-SKIR-01 §2]; both alliance rows cleared to the
+self entry, team byte `5`, seat index, live), stores the identity and counts
+the player. On every machine it ends by broadcasting, for each row that
+machine controls, the row's lobby record (type `0x20`, with the owning
+identity inside) and team byte (type `0x24`). A received lobby record is
+copied into the row whose identity it carries only when that row is live
+with control byte `3`. On every machine but its creator's a computer player
+is therefore control byte `3` with kind byte `2`, and its side, colour and
+lobby word are copies of its creator's. That the transport delivers its
+player-created message for a player a machine creates itself to that
+machine's own human — the only path that admits the creator's computer row —
+is a **Supported inference**: it is the transport's behaviour, not the
+executable's.
+
+**Machine number.** Each seated row also carries a machine number from 1 to
+10 that names the machine it lives on. Until the battle is live, each
+broadcast of the lobby records also resolves the rows that have no number:
+
+- on the host, each row the host controls — its human and its computer
+  player — takes `1`;
+- any other machine asks the host (type `0x21`) for a number for its human,
+  and for its computer player asks for the number of its human, naming both
+  identities;
+- for a remote row a machine asks the host which number that identity has.
+
+The host gives a human the lowest number `1..10` that no seated row holds,
+gives a computer player the number its named human has (nothing while that
+human has none), and announces each grant as an identity and a number (type
+`0x22`), which every machine stores in the matching row. A hosted computer
+player therefore carries its creator's machine number, and that is what
+removes it with its human: removing a remote human removes every row that
+carries the human's number (["Disconnect, resign, and peer loss"] owns the
+removal itself).
+
+**Side, colour, team and readiness of a computer row.**
+
+- *Side.* Player creation writes no side: the row keeps the side byte its
+  lobby record already holds, which is the first side in a record untouched
+  since the player-table reset ([R-SKIR-01 §12]).
+- *Who edits it.* `SIDE<n>` and `TEAMICONS<n>` are greyed unless the row is
+  live with control byte `1` or `2` and the local player is not ready, so
+  only the machine that created a computer player can change its side or
+  team. Its side steps to the next side and wraps to the first; the wrap
+  into watcher ([07 R-HUD-04 §1]) requires control byte `1`. Its team symbol
+  steps as a human row's does.
+- *Colour.* `LOGO<n>` is accepted on a live row with control byte `1` or
+  `2`, but the colour request it issues is always made for the **local
+  human**: a click on the computer row requests the computer row's colour
+  plus one for the human. Nothing on this path changes the computer row's
+  own colour after step 5.
+- *Ready.* `READY<n>` and `RES<n>` act only on a row with control byte `1`.
+  Each refresher pass copies the local human's ready bit onto every row this
+  machine controls, so a computer player is ready exactly when its human is.
+- *Alliance.* `ALLY<n>` is active only for a live remote human who is not a
+  watcher, and only while the local player is not a watcher: the battleroom
+  offers no alliance toggle toward a computer player, local or remote. What
+  team membership does to the alliance rows is [05 R-SHARE-01 §1]'s.
 
 ## Computer-controlled players
 
@@ -3014,7 +3277,7 @@ The executable reads these AI-related definition and mission values:
 - per-unit `ai_limit` text in a separate definition field — no reader exists: both per-definition profile passes, the weight pass and the limit pass, read the `ai_weight` field ([R-AI-01 §12]), so `ai_limit` is parsed and abandoned. It must not be wired to limits; the functioning `limit` token comes from the profile file, not this field;
 - mission `aiprofile` string via a mission resource slot that loads `ai\<profile>.txt` with fallback to `ai\default.txt`;
 - mission placement fields for AI ignore, AI priority-target, build priority, and initial group — parsed at mission load but no transfer or reader is found in the creation path, so they are inert for planning;
-- computer difficulty (`0` easy, `1` medium, `2` hard) from the registry and setup state; it gates profile `plan` directives and scales every positive production contribution whose **destination** player is computer-controlled by 0.5, 0.7 or 1.0 — the exact evaluation points and float widths are doc 05's ([05 R-ECO-01 §3]);
+- computer difficulty (`0` easy, `1` medium, `2` hard), written by the screens and loaders [R-AI-01 §12] lists and, in multiplayer, read from the hosting machine's own word ([R-AI-01 §21]); it gates profile `plan` directives and scales every positive production contribution whose **destination** player is computer-controlled by 0.5, 0.7 or 1.0 — the exact evaluation points and float widths are doc 05's ([05 R-ECO-01 §3]);
 - player control byte that gates manager execution.
 
 The strategic planner is a distinct object from the scenario unit loader.
@@ -4285,10 +4548,17 @@ player adds is only the throttle above.
 
 #### Difficulty: vocabulary, profile grammar, and the economy effect — Established [R-AI-01 §12]
 
-**The difficulty word** takes the values `0` easy, `1` medium, `2` hard. It is
-written from the registry/lobby setting and from the campaign difficulty
-control, and read by the profile grammar, the mission trigger parameter tables
-(doc 08 "Triggers"), and the resource transfer path below.
+**The difficulty word** takes the values `0` easy, `1` medium, `2` hard. Its
+writers (whole-image census of the word's accesses): the preference loader,
+from the registry `Difficulty` value; the skirmish screen ([R-SKIR-01 §9]);
+the new-campaign, end-of-mission and restart screens; a loaded save's
+`Summary` account; and the multiplayer host's `START`, which stores the
+constant `2` ([R-AI-01 §21]). Its simulation readers are the profile grammar
+below, the campaign's schema choice ("Schema and start-position selection"),
+the credit sites of [05 R-ECO-01 §11], the resource transfer path below and
+the commander-respawn grant ([R-SKIR-01 §3]); every one but the first two
+tests for a computer owner or recipient before it reads the word. No
+task-class body of the planner reads it.
 
 **Profile load order.** After the world is built, the mission's `aiprofile`
 resource is resolved; on failure the literal `ai\default.txt` is loaded. The
@@ -4670,6 +4940,83 @@ accessor. The same accessor family's integer form reads `limit`'s token
 through the runtime's `atoi`. The reference install's profiles are
 indifferent — every one of their `weight` factors is a plain decimal — so
 the grammar matters only for third-party profiles.
+
+#### Computer players in a multiplayer battle [R-AI-01 §21]
+
+**Established** unless a paragraph says otherwise (direct static trace of
+the kind-3 arm of the battle-entry orchestrator, the per-player reset, the
+peer-ready predicate and the packet receiver's case list; whole-image
+censuses of the instructions that store the control byte, of the callers of
+the slot-activation routine and of every access to the difficulty word).
+
+**Which machine runs it.** Kind-3 battle entry builds no player records —
+the row-to-player conversion is skirmish-only ([R-SKIR-01 §2]) and no caller
+of the slot-activation routine is on the kind-3 entry path — so the control
+bytes are the ones the battleroom left ([R-SKIR-01 §13]): `2` on the machine
+that added the computer player, `3` on every other. The per-player reset
+builds a planner record for every slot except a live remote one
+([R-ENTRY-01 §3] step 24), the profile passes and the manager's outer gate
+admit only control byte `2` ([R-AI-01 §1], [R-AI-01 §12]), and the unit
+sweep pumps orders, movers and weapons only for owners with control byte `1`
+or `2` ([04 R-MOV-03 §1]). A computer player's planner, its units' order
+queues and their movement therefore run on the machine that added it and on
+no other. No path rewrites a seated row's control byte from `3` to `2` or
+from `2` to `3` — in a battle the only store of `2` is the developer `AI`
+command ([07 R-CAM-01 §6]) — so the hosting machine never changes during a
+battle. A hosted computer player is removed together with its human, never
+handed to another machine ([R-SKIR-01 §13] "Machine number").
+
+**How the other machines see its play — Established.** No order travels ("Command
+canonicalization"). A hosted computer is an ordinary remote player on every other
+machine; those machines update its units through event and state packets,
+including the fixed carried and paralyze consequences, rather than running its
+planner or receiving its orders.
+
+**Battle entry, control byte `2` against `3`.**
+
+- *Start position.* The host assigns one to every seated non-watcher row,
+  computer rows included, and a computer player's is delivered to the
+  machine that hosts it ([R-ENTRY-01 §5]).
+- *The stamp.* Each machine stamps only the rows it controls
+  ([R-ENTRY-01 §5]): the hosting machine makes the two simulation draws for
+  its computer player and creates its commander exactly as it does for its
+  human; the one human-only step is remembering the position the camera
+  centres on. A control-`3` row is not stamped: its commander arrives as its
+  owner's unit.
+- *Planner record.* Constructed, with its eight simulation draws
+  ([R-ENTRY-01 §3] step 24), only on the hosting machine; the human's own
+  record is constructed there too and never dispatched ([R-AI-01 §1]).
+- *Unit identities.* Pool slices follow ascending transport identity
+  ([R-SESS-01 §7]); a computer player has an identity of its own, and so a
+  slice of its own, on every machine.
+- *Alliance rows and team.* They are the ones the battleroom left
+  ([05 R-SHARE-01 §1]).
+
+**Difficulty online.** The difficulty word ([R-AI-01 §12]) is a word of each
+machine's own session state, and nothing received from another machine is
+copied into it: the census of its accesses finds no store on the join path,
+in the battleroom opener, in battle entry or in the packet receiver. Its one
+writer on a multiplayer path is the host's accepted `START`
+([R-SKIR-01 §7]), which stores `2` after it has run the preference writer;
+`START` is greyed on every machine but the host's. Every simulation reader
+that concerns a computer player tests control byte `2` first
+([R-AI-01 §12]), and the profile's `plan` directive is evaluated at battle
+entry on each machine against that machine's word, with effect only where a
+planner record exists. So a computer player plays at the difficulty word of
+the machine that hosts it:
+
+- hosted by the game's host: hard — `plan hard` directives apply and its
+  income and transfers are unscaled;
+- hosted by any other machine: whatever that machine's word held when the
+  battle began. Which values that can be is a **Supported inference** from
+  the writer list of [R-AI-01 §12]: the registry `Difficulty` value as
+  loaded (`1`, medium, on a miss), unless a campaign or skirmish screen or a
+  loaded save changed the word earlier in the same run, or `2` when that
+  machine was itself the host of an earlier game in the run.
+
+**Watch mode.** The hold of [R-SKIR-01 §3] keys on the count of live
+computer players hosted here ([R-SESS-01 §1]), which the add path of
+[R-SKIR-01 §13] bounds at one per machine.
 
 #### Small contracts: profile-limit edges, strategic accessors, standing-order bits, the target pick's swap-remove — Established [R-AI-02 §2]
 
@@ -5446,6 +5793,65 @@ protocol; it is a transport/debug alternative.
 
 ## Packet framing and dispatch
 
+### The in-battle receiver’s admission gate, and what it trusts
+
+**Established — one gate for every packet** (direct static trace of the receiver's
+entry and of every arm of its type switch, types `0x02`–`0x2c`). For each ordinary
+message, in order:
+
+1. Sender slot is the first slot, 0–9 ascending, with a non-zero control byte
+   whose transport identity equals the message's sender identity. Recipient slot
+   is found the same way from the recipient identity. A miss is "no slot".
+2. The type's admission mask is tested against the session state ("Framing").
+3. If the sender's record is not in use, the message is discarded. The removal
+   routine is invoked for that identity with reason 6; on this path it sends
+   nothing and at most stamps the reason on a record still carrying the identity.
+4. If the sender's control byte is 1 or 2 (a player this machine simulates), the
+   message is discarded silently.
+5. If the sender's control byte is not 3, or its slot index is unassigned, it is
+   handled as in step 3.
+6. The recipient's record must be in use, with control byte 1, 2 or 3 and an
+   assigned index; otherwise the message is discarded.
+7. The sender's last-receive stamp is set, its message counter incremented, and
+   the type dispatched.
+
+Types `0x03`, `0x04`, `0x25` and `0x2b` reach no arm and are dropped. Messages
+from the transport's system identity take the system-message path, and only when
+the recipient is the local human.
+
+**Established — nothing else is checked** (same trace). No arm admitted during a
+live battle reads the host flag, the watcher bit, any lobby option, an alliance
+row or the sender's removal-reason byte. The transport sender is used only by:
+chat (speaker), unit creation (whose counters take the unit), the ready flag, the
+two arms that reply to the sender, the participant snapshot and its
+acknowledgement, loading progress, projectile creation and impact (sender record
+handed to bodies not re-read), and the unit-state stream. Every other arm acts on
+the identities and unit numbers in its payload.
+
+**Established — what a seated sender can change** (bodies read for the first six
+rows; the remaining rows from their arms and the cited sections):
+
+| Type | Effect on the receiver | Test that the named unit or player is the sender's |
+|---|---|---|
+| `0x09` creation | Builds a unit of the stated definition at the stated position in the unit record named by absolute identifier. A unit already there first goes through the ordinary death path. The record's owner is fixed by its range; the sender's player takes the live and created counts. | None. The sender's slot need only have a unit range. |
+| `0x0a` attachment | Attaches or detaches any living unit and any carrier. For an attached unit this machine simulates, with a carrier named, it flushes the unit's queue and installs the carried-unit record. | None. |
+| `0x0b` damage | Kind 10 adds health, capped at the maximum. Kind 2 adds or extends the paralyze record on a locally simulated, non-immune victim. Other kinds subtract; below 1 marks a local victim dying and clamps a remote one at 0. | None, for victim or attacker. |
+| `0x0c` death | Full death of the named living unit, with kill credit, cargo cascade and elimination announcement. | None. |
+| `0x14` transfer | Acts only where the named new owner is simulated on this machine. Allocates a replacement of the named unit's definition at its position in the new owner's range, taking health, build fraction and stockpile bytes from the packet. The named unit is not removed by this packet. | None. |
+| `0x2c` unit state | Movement state and scheduled status for units addressed by a signed 16-bit index from the sender's first unit, ending at all-ones. The stated tick becomes the sender's progress word. | Implicit in the relative index, but the index is not range-checked against the sender's range. |
+| `0x10`, `0x11`, `0x12` | Start any authored script with four arguments on any living unit; apply a state transition; make a build link. | None in the arms; bodies not re-read. |
+| `0x16` sharing | [05 R-SHARE-01 §4]. | None. |
+| `0x19` | Sets the pause bit, or the speed through the common setter (clamped 1–20). | None. |
+| `0x1b` removal | Runs the removal routine for the named player with the carried reason, on every receiver, re-broadcast once. | None; no host test. |
+| `0x20` player record | Overwrites the whole lobby record of whichever remote slot the identity inside the payload names: host flag, watcher bit, share bits, cheat bit. | None. The slot must be remote on the receiver. |
+| `0x23` alliance | As its table row. | None. |
+| `0x27` | Twelve chat lines ("Integrity failure"). | None. |
+
+**Supported inference.** Each machine finds the host slot as the first seated slot
+whose lobby record carries the host flag, so a player-record packet lets any
+seated peer change which slot other machines treat as host. Whether anything
+re-asserts the flag was not traced.
+
 ### Framing
 
 **The first byte of a packet is its type.** Dispatch is a direct indexed
@@ -5499,6 +5905,10 @@ controller layouts. `[fmt tad]` distinguishes the recorder's deduplicated
 subset and conditional corpus width estimate from this retail contract.
 
 ### Unit-sync ownership and body structure
+
+**Established.** Entry indices are signed 16-bit values relative to the sender’s
+first unit, terminated by all-ones, with no check against its slice bounds. The
+packet’s stated tick is stored as that sender’s pacing progress word.
 
 **Established — slot arithmetic.** Unit ID zero is reserved. For configured
 per-player capacity `N`, allocation block `b` starts at ID `b*N+1` and ends
@@ -5588,14 +5998,14 @@ the table alone as a complete framing grammar.
 | Type | Len | Mask | Role and payload |
 |---:|---:|---:|---|
 | `0x02` | 13 | 7 | Round-trip probe. The handler samples the wall clock and replies. |
-| `0x03` | 3 | 7 | Inline; not decoded here. |
-| `0x05` | 65 | 7 | **Chat message.** One byte of type then a 64-byte text field, passed to the message-arrival path. |
+| `0x03` | 3 | 7 | No receiver arm; discarded. |
+| `0x05` | 65 | 7 | **Chat message.** One byte of type then a 64-byte text field, posted as chat only for the copy addressed to the local human, with the sender’s slot as speaker; never dispatched as a command. |
 | `0x06` | 1 | 7 | Request; the handler finds the first active player and replies with type `0x07`. No payload. |
 | `0x07` | 1 | 7 | Reply to the above; sets a per-peer bit. No payload. |
-| `0x08` | 1 | 7 | Sets a session flag. No payload. |
-| `0x09` | 23 | 4 | **Unit creation.** Forwarded whole to the spawn path. |
+| `0x08` | 1 | 7 | Battle launched: sets the latch tested by peer removal and the player-destroyed handler ([R-LEAVE-01 §1], [R-LEAVE-01 §3]). No payload. |
+| `0x09` | 23 | 4 | **Unit creation.** Forwarded to unit creation: absolute unit identifier is not tested against the sender’s range; counts accrue to the sender’s player. |
 | `0x0a` | 7 | 4 | Unit occupancy/placement change. Forwarded whole. |
-| `0x0b` | 9 | 4 | **Damage.** Victim and attacker IDs, low-word amount, high byte of impact direction and kind. Kind 2 is paralyze; kind 6 is cargo-cascade damage. [06 §9.1] |
+| `0x0b` | 9 | 4 | **Damage.** Victim and attacker IDs, low-word amount, high byte of impact direction and kind. Kind 2 is paralyze; kind 6 is cargo-cascade damage; kind 10 adds health capped at maximum. [06 §9.1] |
 | `0x0c` | 11 | 4 | **Unit death.** Victim ID, attacker-side transport identity, attacker unit ID, signed severity and packed death-cause/corpse variant. [06 §12.1] |
 | `0x0d` | 36 | 4 | **Projectile creation.** Position and target/velocity triples, weapon ID; unit-shot tail carries interceptor bit, slot angles, target ID then shooter ID, and weapon slot. Meteor bypasses that tail. [06 §6.2] |
 | `0x0e` | 14 | 4 | **Projectile impact/removal.** Stored target triple plus weapon ID select the first matching projectile in pool order. [06 §11.2] |
@@ -5604,26 +6014,26 @@ the table alone as a complete framing grammar.
 | `0x11` | 4 | 4 | **Unit state transition.** `+1` u16 unit, `+3` u8 state. The handler applies the value once and its complement once, driving the Activate, Deactivate, StartBuilding, and StopBuilding edges. |
 | `0x12` | 5 | 4 | Build-related command. `+1` u16, `+3` u16. |
 | `0x13` | 18 | 7 | **Play a sound.** Selector u8, sound identity i32, three-component world position. Receiver uses position only for selector zero; both audited emitters set selector one. Recorder taxonomy reports 19 bytes, unverified in the available corpus. |
-| `0x14` | 24 | 4 | **Ownership transfer**, the capture path. `+1` u16, `+3` i32, remainder read by the handler. |
+| `0x14` | 24 | 4 | **Ownership transfer**, used by capture and the share screen’s unit gift; only the named new owner’s machine acts. `+1` u16, `+3` i32, remainder read by the handler. |
 | `0x15` | 1 | 6 | Sets a per-player flag, gated on a global bit. No payload; the sender comes from the transport. |
 | `0x16` | 17 | 4 | **Resource and explored-memory sharing** ([05 R-SHARE-01 §3], [05 R-SHARE-01 §4]). `+1` u32 subtype — only the exact values 1 (energy), 2 (metal) and 3 dispatch — `+5` u32 source DPID, `+9` u32 dest DPID, `+13` f32 amount. Subtype 3 asks the receiver to copy the source player's explored-memory bits to the destination player ([05 R-SHARE-01 §6]); it carries no map data, and both of its producers write zero in the amount field. Sent to the destination player alone. |
 | `0x17` | 2 | 7 | `+1` u8. Session control. |
 | `0x18` | 2 | 7 | `+1` u8. Session control. |
 | `0x19` | 3 | 7 | **Pause and game speed.** `+1` u8 selector, `+2` u8 value. Selector zero sets the pause bit from the value's low bit; otherwise the value sets the game speed. |
 | `0x1a` | 14 | 1 | Lobby-side; forwarded whole. |
-| `0x1b` | 6 | 7 | `+1` i32, `+5` u8. |
-| `0x1c` | 5 | 7 | **Peer loss notice.** `+1` i32 peer identity. Formats a translated message into the chat region, which is why the disconnect text is localized. |
+| `0x1b` | 6 | 7 | **Remove player.** Identity and removal reason; runs [R-LEAVE-01 §2] without a host or sender-ownership test, re-broadcast once. |
+| `0x1c` | 5 | 7 | **Peer loss notice.** `+1` i32 peer identity. Formats a translated message into the chat region, which is why the disconnect text is localized. Its only originating builder is unreferenced, so retail peers never send it ([R-LEAVE-01 §1]). |
 | `0x1d` | 9 | 0 | **Dead type.** Its admission mask is zero so it is rejected in every state, and its handler is a three-byte stub. |
 | `0x1e` | 2 | 6 | `+1` u8. |
 | `0x1f` | 5 | 6 | `+1` i32 peer identity, mapped to a slot index whose per-player marker is then set. |
 | `0x20` | 186 | 7 | Bulk player-info state. Retail writers copy 185 metadata bytes after the type and emit 186 bytes. The available TAD recordings contain 192-byte forms, which the inspected recorder already consumes at that size; the version-matched producing executable or preceding transformation remains unknown. [fmt tad] |
-| `0x21` | 10 | 1 | Lobby-side. `+1` u8, `+2` i32, `+6` i32. |
-| `0x22` | 6 | 1 | Lobby-side. `+1` i32, `+5` u8. |
-| `0x23` | 14 | 7 | **Alliance declaration** ([05 R-SHARE-01 §1]). `+1` u32 declarer DPID, `+5` u32 target DPID, `+9` u8 value (non-zero = allied), `+10` i32 force flag. Sent to the target alone. On receipt a non-zero value plays the `Ally` cue; when the target is simulated on the receiving machine the alliance writer runs for the pair; then the declarer's row A entry toward the target is written unconditionally. |
-| `0x24` | 6 | 7 | `+1` i32, `+5` u8. |
+| `0x21` | 10 | 1 | Machine-number request: flag, identity and optional identity whose number to copy ([R-LEAVE-01 §9]). |
+| `0x22` | 6 | 1 | Machine-number assignment: identity and number, published by the host ([R-LEAVE-01 §9]). |
+| `0x23` | 14 | 7 | **Alliance declaration** ([05 R-SHARE-01 §1]). `+1` u32 declarer DPID, `+5` u32 target DPID, `+9` u8 value (non-zero = allied), `+10` i32 force flag. Sent to the target alone. On receipt a non-zero value plays the `Ally` cue; when the target is simulated on the receiving machine the alliance writer runs for the pair; then the declarer's row A entry toward the target is written unconditionally. The sole live sender is the alliance writer’s remote-target branch; force is non-zero only for a battleroom team break. Sender identity is not compared with the declarer. Receipt refreshes the battleroom or the open allies indicators. A zero value plays no cue. Admitted in every dispatcher state. |
+| `0x24` | 6 | 7 | **Team symbol.** Player identity and symbol (0–4, 5 = none). Broadcast by the player’s machine with its lobby record and on a team click. Receipt stores the named player’s symbol and, outside battle, marks the battleroom for refresh and team propagation ([05 R-SHARE-01 §1]). |
 | `0x25` | 5 | 1 | **No case in the in-game switch.** Its mask admits it only outside the battle-loading/live-battle states, so it is handled by the lobby receiver instead. |
 | `0x26` | 41 | 7 | Forwarded whole; roster semantics observed on the receive side: an empty roster decodes to zero participants and a special class value expands to all slots. |
-| `0x27` | 17 | 7 | **Integrity breach.** `+1` i32 peer identity; formats the translated "has modified his executable" text into the chat region. The twelve trailing bytes are opaque; their producer algorithm is unresolved. |
+| `0x27` | 17 | 7 | **Integrity breach.** `+1` i32 peer identity; formats the translated "has modified his executable" text into the chat region. The line is posted twelve times and nothing else happens. No originating producer exists in the image. |
 | `0x28` | 58 | 7 | **Participant snapshot.** Echo flag; four signed score counters; current metal/energy and their capacities as f32; energy produced/requested/wasted then metal produced/requested/wasted as f32, narrowed from running doubles. See “Economy and integrity checks — overwrite-sync, not compare”. |
 | `0x29` | 3 | 7 | Snapshot acknowledgement and reciprocal-acknowledgement-seen bytes. A zero first byte ignores both; see "Economy and integrity checks — overwrite-sync, not compare". |
 | `0x2a` | 2 | 7 | `+1` u8 stored into a per-peer field. The local producer emits it as the mean of six per-peer bytes (loading progress). |
@@ -5639,18 +6049,21 @@ the several small control types.
 
 ### Command canonicalization
 
-Interface order names are first converted to small internal order identifiers
-and modifier flags. Directly observed order families include attack, blast,
-defend, repair, patrol, reclaim, capture, unload/load, ordinary build,
-stockpiled weapon build, and related special orders.
+**Established — orders are not transmitted.** Evidence: the full case list of the
+in-battle receiver; the bodies of the creation, attachment, damage, death,
+ownership-transfer and unit-state arms; and a census of all 89 call sites of the
+two send helpers by enclosing function. No packet type carries an order. No send
+site lies in the order dispatcher or order service, and no receive arm takes an
+order name, target, position or queue flag from a packet. A player's orders are
+entered and executed only on the machine that simulates that player. Other
+machines see the consequences: creation, attachment, damage, death, projectile
+creation and impact, feature events, script runs, state transitions, build links,
+sounds, ownership transfers, and the unit-state stream.
 
-The canonical order plus its target, position, selected units, queue modifier,
-and other payload state is then serialized into deterministic command frames.
-Network receipt reconstructs the same canonical order and enters it through the
-normal authoritative order service.
-
-The exact wire layout for every order is unknown. The clean-room boundary is
-the canonical command, not a serialized copy of an interface widget.
+**Established — two engine-generated records.** The only order records a receive
+arm creates are fixed consequences on a locally simulated unit: the carried-unit
+record from the attachment arm and the paralyze record from damage kind 2. Nothing
+in the packet selects them.
 
 ## Send pacing and batching
 
@@ -5779,9 +6192,9 @@ packets, and emits a periodic one-byte control message (keepalive gated on the
 scaled clock at a period of sixty scaled units). Only the simulation subsystem
 sequence stops.
 
-Residual: the pacing-scan progress dword has two competing readings of the
-same code — the remote peer's reported progress versus an earliest pending
-order time. Naming unresolved.
+**Established.** The progress word is the tick each peer states in its unit-state
+stream. Remote slots with no live units are skipped. Other writers remain an open
+census question.
 
 ### No rollback or world snapshot resync
 
@@ -5792,12 +6205,62 @@ desynchronized peer.
 
 ### Authority
 
-The peer that may change lobby/map/start state is constrained by slot and host
-flags. In-game commands are broadcast and deterministically applied.
-Host-authority migration, where performed, deterministically selects the
-numerically greatest DPID among eligible roles. The exact authority rules for
-pause, speed, resign, resource sharing, player removal, and cheat/debug
-commands are not fully closed.
+**Established — where authority lives.** Receivers apply every admitted packet
+("Packet framing and dispatch"). Host status is tested only when offering the
+in-battle control window and in lobby and join handling. The watcher bit is tested
+only by the local machine's own interface. The entry-time cheat word is tested
+only by the local chat commit. The two send helpers reject a sender with a
+removal-reason byte, so a removed machine can no longer send through them.
+
+**Established — resign.** Leaving needs nobody's consent and builds no dedicated
+packet. Both exit confirmations ("return to main menu", "exit") tear the battle
+down locally. What other machines then see and do is [R-LEAVE-01 §7].
+
+**Established — removal.** These machines can cause one:
+- The host's machine, from the in-battle control window ([07 R-FE-01 §7]): the
+  reject question removes the chosen player with the default reason; confirming
+  with watching switched off removes every remote watcher with reason 9.
+- Any machine, from the peer time-out dialog's reject button or its countdown
+  (reason 6). There is no host test.
+- Any machine, on the transport's player-destroyed notice (reason 1).
+- Any machine, on receiving a removal packet from any admitted sender. It removes
+  the player named in the payload. If that is its own human, it removes its own
+  players and its send helpers refuse from then on.
+- The peer-loss notice arm likewise removes the player its payload names.
+  Unmodified retail never originates that notice ([R-LEAVE-01 §1]).
+
+**Established — sharing and giving.**
+- The share toggles act on the typing machine's own lobby record and travel as a
+  player-record broadcast. A watcher cannot type them. The thresholds are local
+  and build no packet.
+- The share screen refuses a local watcher. Its resource gifts go to the
+  destination alone and are admitted as [05 R-SHARE-01 §4] states.
+- Its unit gifts are a broadcast transfer packet on which only the new owner's
+  machine acts, with no check that the giver owned the unit.
+- `+Give` is a mask-1 command in every session kind, with no alliance test. Its
+  source is the machine's own controlling player.
+
+**Established — alliances.** The alliance packet's declarer and target are payload
+identities, never compared with the transport sender (packet table row `0x23`; [05
+R-SHARE-01 §1]). The allies screen is not offered to a watcher.
+
+**Established — cheats.** See [07 R-CAM-01 §6]. No receiver re-checks anything.
+Other machines see only a cheat's effects, through ordinary state packets.
+
+**Established — pause and speed** (recorded, not extended).
+- Receive: the pause bit or the speed is applied from any admitted sender.
+- Send: the Pause key has no gate at all, watchers included.
+- The speed keys and the options slider refuse a local watcher; the keys also
+  refuse in film mode and at the bounds.
+- The options menu neither pauses nor sends in multiplayer.
+- The pause key and the common speed setter are the only two builders of this
+  packet. A third pause-bit writer is a save-and-restore inside the poster capture
+  routine and sends nothing.
+
+**"Soft pacing" residual — Established.** The pacing scan's progress value is the
+tick each remote peer states in its latest unit-state record; that receive arm
+writes the field the scan reads. Remote slots with no living units are skipped.
+Other writers of the field were not censused.
 
 ## Synchronization and integrity checks
 
@@ -5878,17 +6341,15 @@ establish a fixed packet-arrival interval in recordings. Echo and other callers
 also emit snapshots. Recording sender numbers require their own session mapping
 to join this transport identity to a unit ownership block.
 
-Peer divergence therefore surfaces only indirectly through the kick/chat
-flows: the executable-integrity notice posts its translated breach text into
-chat repeatedly before disconnect cleanup removes the peer, disconnect notices
-report peer loss, and a manual `+syncerr` chat command exists (handler
-inferred).
+**Established.** The integrity notice has no producer and its receiver posts
+twelve chat lines only. It performs no removal or termination. The battleroom’s
+exact `+syncerr` line posts a local diagnostic and sends nothing ("Integrity
+failure").
 
 The executable also contains a code-checksum routine that returns zero
 unconditionally in retail 3.1, leaving its guarded "Code segment checksum
 error found when switching FE states." diagnostic branch dead. Self-checks run
-only when switching front-end states, never per tick. Residual: the producer
-algorithm of packet `0x27`'s twelve opaque trailing bytes is unresolved. The
+only when switching front-end states, never per tick. The type-`0x27` notice has no producer in the image. The
 `0x28`/`0x29` handshake above has a remaining eligibility-gate lifecycle
 question, not an unresolved byte layout. The `.zrb` files are the five Smacker
 cinematics; their sequencer is the front-end movie player ([R-OOS-01 §4]) and has no
@@ -5904,28 +6365,342 @@ cadence, and mismatch path is closed.
 
 No direct evidence establishes a comprehensive per-tick hash of every world
 object. Existing hashes cover the envelope XOR-sum (weak corruption check,
-ignores last three bytes), the executable-integrity `0x27` notification
-(algorithm unresolved), and the `0x28` participant message (overwrite, not compare).
+ignores last three bytes), the `0x28` participant message (overwrite, not compare); type `0x27` is
+an unproduced chat-only notice, not a demonstrated hash exchange.
 A clean-room implementation must not describe them as a complete world-state
 hash until all payload inputs are traced.
 
 ### Integrity failure
 
-The executable can report an integrity breach, disconnect a player, or abort a
-network game. Diagnostics and exception paths may also terminate the process.
-The exact user-visible messages, broadcast order, and whether one peer can
-force global termination remain partly unresolved.
+**Established — the breach notice is chat only.** The arm for type `0x27` resolves
+the identity in the payload. If it is seated, the arm posts that player's name
+plus the translated breach text into the message ring twelve times, as chat from
+that player. It removes nobody, ends nothing, and does not compare the identity
+with the sender.
+
+**Established — no producer** (bounded negative). No instruction in the image
+stores this type value into a packet, and no call of either send helper passes its
+17-byte length except the four sharing builders. Between unmodified retail peers
+the notice never appears, and the twelve trailing bytes have no producer to
+describe. This fits the stubbed code-checksum routine.
+
+**Established — `+syncerr`.** It is a battleroom line, not a battle command. When
+the typed lobby line equals it (whole string, case-insensitive), the typing
+machine posts a local diagnostic from the unit-data exchange object and sends
+nothing. The lobby has no `+` dispatcher.
 
 ## Disconnect, resign, and peer loss
 
-Disconnect handling updates player connection state, broadcasts a control
-packet where appropriate, reports the player name, and changes the lockstep
-membership/barrier state. Resign and commander-death rules are distinct
-gameplay events even if both remove effective player control.
+### How a machine learns that a player has gone [R-LEAVE-01 §1]
 
-No complete live reconnection or late-join state-transfer protocol has been
-found. The behavior for a transient DirectPlay loss versus a permanent peer
-departure remains incomplete.
+**Established** (static trace of the network drain's system-message branch and its
+type-`0x1b` and type-`0x1c` cases; whole-image census of type-`0x1c` builders).
+
+The drain treats a message whose source is the transport as a system message. It
+acts only on the copy addressed to the local human (destination record present,
+control byte 1); copies addressed to locally hosted computer players are ignored.
+Five system kinds have a case: player created, player destroyed, player data
+changed, player name changed, session description changed. The transport's
+*session lost* and *host changed* notices have no case and are discarded.
+
+A removal starts in one of three ways:
+
+1. **Player destroyed (transport).** The identity must resolve to a record that is
+   present, with control byte 1, 2 or 3 and a slot index other than 10.
+   - With the battle-launched latch set, the remove-player routine (§2) runs with
+     reason 1.
+   - With the latch clear, and the destroyed player a remote slot carrying the host
+     flag, that slot is removed with reason 1 and then the **local** player is
+     removed with reason 10 (`The creator has left the game`).
+   - Afterwards the named record's control byte and kind byte are zeroed, the lobby
+     refresh bit is raised, and a machine whose own record carries the host flag
+     rewrites the session description.
+2. **Remove-player record received (type `0x1b`: identity, reason).** When the
+   identity resolves to a slot, the remove-player routine runs with the carried
+   reason. The case tests nothing about who sent it beyond the drain's general
+   admission (sender present, remote).
+3. **A local decision.** The time-out dialog (§6, reason 6); the host's control
+   window (`Reject: <name>` confirmed gives reason 1; `OK` with watching
+   disallowed gives reason 9 for every remote watcher); the battleroom's own
+   paths.
+
+A game packet from an identity that resolves to no present record calls the
+routine with reason 6. The identity resolves to nothing, so the call does nothing:
+late packets from a removed player are discarded.
+
+**Established (bounded negative).** The type-`0x1c` record has one builder in the
+image and nothing calls or points to it. Its receiver case therefore never runs
+between retail peers. That case would post the translated `Player %s has
+disconnected`, re-broadcast the record, remove the named peer, and set the ending
+bit with the won bit cleared when the named identity is the local human's.
+
+### The remove-player routine [R-LEAVE-01 §2]
+
+**Established** (full read of the routine in disassembly). Input: a transport
+identity and a reason byte. An identity that resolves to no slot returns with no
+effect. Otherwise it prepares a six-byte type-`0x1b` record carrying the reason
+and then:
+
+- **Named record present, control byte 1 or 2, removal-reason byte zero:**
+  - *Control 1 (the local human is being removed).* For each slot in ascending order
+    whose record is present with control 1 or 2: put that slot's identity in the
+    record and broadcast it; run peer removal (§3) on the **local human's**
+    identity, on every iteration; store the reason in that slot's removal-reason
+    byte. The broadcast's sender is the first present control-1/2 slot, and the
+    broadcast helper refuses a sender whose removal-reason byte is non-zero
+    ([R-OOS-01 §1]). So only the first iteration's record is sent. It names the
+    lowest local slot, which may be a hosted computer player.
+  - *Control 2 (a locally hosted computer player).* Broadcast its identity, then run
+    peer removal on it.
+- **Otherwise, named record present, control byte 3, removal-reason byte zero:**
+  broadcast the record with that identity, so every machine that removes a remote
+  player re-announces it once. Then:
+  - if the slot's kind byte is 1 (human), for every slot 0–9 in ascending order
+    whose machine number equals the removed slot's (no presence test), run peer
+    removal on that slot's identity and store the reason in that slot's
+    removal-reason byte;
+  - otherwise run peer removal on the one identity.
+- **In every case where the identity resolved:** store the reason in the named
+  slot's removal-reason byte.
+
+Reasons: 1 transport-destroyed and host reject; 2 a battleroom path (no message);
+3 `The game is closed`; 4 `You did not have the correct password`; 5 `The game is
+full`; 6 `You have lost connection with the game`; 7 `You need a unit you don't
+have for this game`; 8 `You need a newer version of the game to enter`; 9 `No
+watching is allowed for this game`; 10 `The creator has left the game`; 11
+deathmatch removal of computer players in the battleroom; anything else `You were
+rejected from the game`. The message is shown only on the removed machine, by the
+results sequence ([R-CAMP-01 §6]).
+
+### Peer removal [R-LEAVE-01 §3]
+
+**Established** (full read in disassembly). Input: a transport identity. It
+returns with no effect unless the identity resolves to a present record with
+control byte 1, 2 or 3 and a slot index other than 10. Then, in this order:
+
+1. Remember whether the slot's lobby record carries the host flag.
+2. For every present record with control byte 1 or 2 (ascending): zero that
+   record's row-B entry, then its row-A entry, for the removed slot. Remote
+   players' rows are not touched.
+3. Run the owner sweep (§4) on the removed slot. This precedes step 4, so the
+   sweep still sees the slot's record and control byte.
+4. Clear the record:
+   - battle-launched latch clear — a record present with control 1 or 2 first asks
+     the transport to destroy that player, then every record is cleared;
+   - latch set — the record is cleared unless it is present with control 1 or 2. A
+     local record is kept; this is the leaving machine's own case.
+   - Clearing means: control byte 0, kind byte 0, occupancy word 0, transport
+     identity all-ones, machine number 0.
+5. Decrement the session's player-count word. Clear one bit of the slot's
+   secondary lobby flag word (meaning not traced).
+6. Zero the removed slot's own row A, all eleven bytes. Its row B is left.
+7. In a multiplayer session, raise score-reporter event 3 (a no-op unless the
+   reporter library is loaded).
+8. Host-flag migration (§8).
+
+### The owner sweep on a departed player's units [R-LEAVE-01 §4]
+
+The sweep is the routine of [R-SKIR-01 §3]. It is gated on the owner's live-unit
+count being non-zero. It visits the owner's pool slice in ascending order and acts
+on each unit that is alive and not already dying.
+
+**Established — remote or absent owner** (the branch every remaining machine takes
+for a departed player, whose control byte is still 3 when the sweep runs). Per
+unit, at once and in pool order:
+
+1. The death-explosion builder is called directly with the `selfdestructas` weapon
+   ([06 R-WPN-02 §5] for the record). No severity test and no build-fraction test
+   applies, so a unit under construction is included. The record carries the
+   unit's owner byte. That owner's row is still an occupied remote-peer row, so
+   the damage gate of [06 R-DMG-01 §9] refuses it: the explosion's sound and
+   visual effects play, and **no damage is applied to anything**.
+2. The dying bit is set and the death preamble of [06 §12.1] runs with cause 3.
+   - While the unit's health is still positive (the normal case) the preamble's
+     bypass row applies: severity 0, corpse variant 0, no `Killed` script.
+   - The death record is **not** broadcast, because the owner is not locally
+     simulated.
+   - The central handler runs in local mode: orders and queues released, occupancy
+     unstamped, cargo cascaded, **no second explosion, no wreck**. It takes the
+     cause-3 partial credit: the departed player's loss counter (and
+     commander-loss counter) is incremented only while the local player's
+     requested-snapshot receipt latch for that owner is zero ([06 §12.1]); nobody
+     gets a kill or veterancy. The unit is freed.
+3. When the slot's live-unit count reaches zero, the multiplayer elimination line
+   is posted locally ([R-CAMP-01 §9]): one CRT draw masked to eight entries,
+   attributed to the departed slot. A slot with no live units gets no sweep, no
+   line and no draw.
+
+The sweep has no direct random draw; effects and script-selected death work retain
+their ordinary random behavior. Edge case: a remote unit whose health local damage
+had already clamped to exactly zero takes the full preamble — a `Killed` query, a
+second effect-only explosion and the script-selected wreck.
+
+**Established — locally simulated owner** (the leaving machine's own slots, §7).
+Each unit receives 30000 damage from itself with kind 3 through the ordinary
+damage path. When the resulting health is non-positive this arms the death
+latch; the unit dies at its next slot visit, if one ever runs.
+
+### What removal leaves untouched [R-LEAVE-01 §5]
+
+**Established** (the two routines write none of these; the per-player phase's slot
+gate was re-read).
+
+- **Resources.** Stock, capacity and running totals of the removed slot are not
+  written. The per-player phase processes a slot only while its record is present
+  with control byte 1, 2 or 3, so the slot is never settled again and its values
+  freeze. Nothing is paid to or taken from anyone. A removed slot can no longer be
+  an automatic-sharing candidate, which needs control byte 3 ([05 R-SHARE-01 §3]).
+- **Score.** Kill and loss counters and the rank byte are not written by removal;
+  the sweep's cause-3 losses are the only change. The end-of-battle score helper
+  gives the slot no row: its record is absent and its removal-reason byte is
+  non-zero ([R-CAMP-01 §7]). The Space-held score panel shortens by one row,
+  because it reads the decremented player count.
+- **Unit limit and identities.** The per-player unit limit, the slot's pool-slice
+  bounds and every other slot's slice are untouched. The departed player's block
+  of unit identities stays reserved and empty; nothing is compacted.
+- **Ownership.** No unit, resource or order is transferred to another player, and
+  no slot is re-seated or re-hosted. No code turns a remote slot into a locally
+  controlled one on departure.
+
+### The peer time-out monitor and its dialog [R-LEAVE-01 §6]
+
+**Established** (scanner, dialog opener, per-frame routine and callback read in
+disassembly). The scanner runs at the end of every network drain — in the
+battleroom, while loading, and in a live battle — and not only in the lobby.
+
+1. It returns at once when the mode-flags bit written by the chat command `+Drop
+   n` is set (`+Drop 0` sets it and so disables the monitor; any other `n` clears
+   it).
+2. While the pause bit is set it only records the current scaled clock as the
+   *pause stamp* and returns.
+3. A remote slot (record present, control byte 3) is *silent* when `now −
+   max(lastPacketStamp, pauseStamp) > timeout × 30`: unsigned, strictly greater,
+   in scaled-clock units, with `timeout` the `-T` seconds. `lastPacketStamp` is
+   refreshed by every admitted game packet from that sender.
+4. If the silent slots carry more than one distinct machine number, or none is
+   silent, an open `TIMEOUT.GUI` is closed and nothing else happens. Otherwise the
+   dialog opens, if not already open, for the lowest silent slot, titled with that
+   player's name.
+
+While open, the dialog's per-frame routine computes whole seconds `s = (now −
+lastPacketStamp) / 30` (truncating, without the pause stamp) and shows `will be
+rejected in <timeout − s + 120> seconds`. When `s ≥ timeout + 120` it runs the
+remove-player routine with reason 6 and closes. The `REJECT` button does the same
+at once. The dialog also carries a chat line.
+
+So a single silent machine is removed `timeout + 120` seconds after its last
+packet at the latest. Two or more silent machines are never removed by this
+monitor.
+
+### The leaving machine [R-LEAVE-01 §7]
+
+**Established** (surrender confirmation callback, the two leave routines, battle
+teardown and its multiplayer tail). The surrender question ([07 R-FE-01 §7]) is
+the only in-battle way to leave. In a live battle the window-close request opens
+its exit variant.
+
+- **Return to main menu, `Yes`.** Battle teardown only. No end latch is written
+  and the leaver's own slots are not put through peer removal.
+- **Exit variant, `Yes`** (`Surrender this battle and exit to Windows?` / `Exit
+  the Battle`). Set the ending bit. Run peer removal on each of the machine's own
+  slots, human and hosted computers: this clears their entries in its own rows,
+  runs the sweep's local branch (30000 self-damage to every own unit) and
+  decrements the player count. Unload the score reporter. Then the same teardown,
+  then quit.
+- **Teardown, both variants and the ordinary end-of-battle transition.** After the
+  score helper, the teardown kill loop runs the death preamble with cause 8 on
+  every live unit in the whole pool ([06 §12.1]). For a unit whose owner is
+  locally simulated the preamble broadcasts its death record, and the session is
+  still open at that point. As its last step in a multiplayer session, teardown
+  force-flushes the batch queues and closes the transport session — unless the
+  score-reporter library is loaded, in which case the session is left open — and
+  clears the networked bit.
+- **What those death records carry.** A unit with positive health goes with
+  severity 0 and variant 0; receivers delete it with no script, no explosion and
+  no wreck. A unit with non-positive health goes with severity 1–100 and its
+  `Killed`-selected variant; receivers run `Killed`, play the `explodeas`
+  explosion as an effect only (same damage gate as §4) and place the wreck. Cause
+  8 credits nobody. In the exit variant, an own unit takes the second state
+  only when the preceding self-damage makes its health non-positive. In the
+  menu variant under a non-zero commander-death rule, the commander’s preamble
+  applies the same self-damage to later own units; their resulting health
+  determines the state.
+- **Nothing else is built.** No departure packet is constructed and the
+  removal-reason byte is not written. The other machines learn of the departure
+  from the death records and, when the session closes, from the transport.
+
+**Supported inference** (from the transport's documented contract, not from the
+image): closing the session destroys the leaver's players, and the others receive
+one player-destroyed notice per player.
+
+### Host loss [R-LEAVE-01 §8]
+
+**Established.** Before the battle is launched, the host's destruction makes every
+other machine remove the host and then itself with reason 10 (§1).
+
+Once the battle-launched latch is set there is no host-specific reaction. The host
+is removed like any player, and peer removal's last step runs when the removed
+slot carried the host flag: among present records whose control byte is 3 or 1,
+take the greatest transport identity (unsigned, strictly greater than a running
+maximum starting at zero) and set the host flag in that slot's lobby record. A
+machine's own hosted computer players (control 2) are not candidates. Other
+machines' computer players, which it sees as control 3, are.
+
+A census of every writer of the ending bit finds none keyed on the host slot. The
+writers are: the elimination block; the Continue Watching `No`; the exit-variant
+surrender; the post-battle and front-end leave routines; the unreachable
+type-`0x1c` case; and the `+IWin` / `+ILose` commands. The battle continues.
+
+**Supported inference:** machines can disagree about the new host slot when a
+computer player holds the greatest identity, since its own host excludes it and
+everyone else includes it.
+
+### Hosted computer players and the machine number [R-LEAVE-01 §9]
+
+**Established.** Every slot carries a *machine number*. The host machine's own
+human and computer players take 1. Every other human asks the host, which assigns
+the smallest number in 1–10 that no present slot uses. A computer player asks for,
+and receives, the number of the human whose machine created it. The host publishes
+each assignment to all machines. These are the lobby-only types `0x21` (request)
+and `0x22` (assignment). The broadcast helper uses the number to send one copy per
+machine.
+
+"Terminating" a departed human's computer players is therefore the group step of
+§2. On every remaining machine each slot with the departed human's machine number
+goes through peer removal in ascending slot order: units destroyed as in §4,
+record emptied, removal-reason byte set. A remote computer player removed on its
+own (kind byte not 1) takes only itself.
+
+No planner state exists for it on the remaining machines ([R-ENTRY-01 §3]). On the
+departing machine its planner record is freed by the per-player step of teardown
+([07 R-FE-02 §3]). Nothing re-hosts it.
+
+### Watchers, and what peers see of a defeated player [R-LEAVE-01 §10]
+
+**Established.** The watcher bit is tested by none of these routines.
+
+- A defeated player who stays as a watcher is still a present slot. It is
+  removable. It is monitored by the time-out scanner, which tests only "present,
+  control byte 3". It is counted by the multi-machine rule. It is eligible to
+  receive the host flag.
+- Its removal clears alliance entries and the record. It destroys nothing and
+  posts no line, because its live-unit count is zero.
+- A peer that receives a player's lobby record in battle (type `0x20`) copies it
+  into that slot, when the slot is present and remote, and recomputes the
+  one-copy-per-machine switch. Nothing else happens. That copy is how peers get
+  the watcher bit, sent when the watch branch runs, before the question appears.
+- A `No` answer, or the direct ending, sends nothing of its own. That machine's
+  end transition waits for the final-snapshot exchange with every present remote
+  peer ("Economy and integrity checks"), runs teardown and closes its session. The
+  peers then remove the slot as above.
+
+**Supported inference** (from [04 R-MOV-03 §1]; the emitter's own gate was not
+re-read): a watching machine still emits its unit-state stream every tick, which
+keeps its time-out stamp fresh.
+
+**Unknown.** No complete live reconnection or late-join state-transfer protocol
+has been found; a full transport and loading-state trace would settle the
+boundary.
 
 ### The single-player boundary: packets the local path still constructs [R-OOS-01 §1]
 
@@ -5965,7 +6740,7 @@ effect:
 
 | Type | Len | Constructed by | Gate at the site | Local effect (already applied by the caller) |
 |---:|---:|---|---|---|
-| `0x05` | 65 | chat commit: the `<%s%s%s> %s` line copied into a 64-byte text field | recipient mode 0, or a line beginning `+`, uses the broadcast helper; mode 3 the direct helper per marked slot; else the direct helper to one slot | the same line is then posted to the local message ring ([07 R-CAM-01 §2]) in every kind; the `+` dispatch has already run (§2) |
+| `0x05` | 65 | chat commit: the `<%s%s%s> %s` line copied into a 64-byte text field | mode 0 broadcasts; mode 3 sends to each marked slot; modes 1/2 send to allied/non-allied remote slots. The sender’s plus-prefix test sees the already formatted `<name> text` line and never fires | the same line is then posted to the local message ring ([07 R-CAM-01 §2]) in every kind; the `+` dispatch has already run (§2) |
 | `0x06` | 1 | the keepalive request | loading state, every later frame, once per live human/computer slot (every kind); the battle pump's 60-unit keepalive is multiplayer-only | none |
 | `0x09` | 23 | unit allocator | none | the unit is already allocated ([05 R-SHARE-01 §8]) |
 | `0x0a` | 7 | occupancy/placement change (28 callers: order handlers, the death handler, the two placement helpers) | none | the caller applies the identical record locally right after the send |
@@ -5979,21 +6754,21 @@ effect:
 | `0x13` | 18 | the two sound-cue emitters ([03 R-AUD-01 §1]) | audio device open, channel mask non-zero, not muted | the sound is then started locally |
 | `0x19` | 3 | pause `{0x19, 0, bit}` and speed `{0x19, 1, speed}` | none | pause bit / speed words already written ([01 R-PLAT-01 §3]) |
 
-**Never constructed in kinds 1 and 2 (Established, gate named).** `0x0b`
-damage — built only when the victim's owner is a controller-3 (remote) slot;
-`0x14` ownership transfer — only when the new owner is controller 3; the
-`0x0f` sub-case `0xff` — kind 3 only; `0x1e`/`0x2a` loading progress — kind 3
-only; `0x20`/`0x24` lobby-record bulk and its reply — the sender tests the
-networked bit; the `0x2c` bit-stream — its one caller tests the networked bit;
-`0x02`/`0x26` probe and roster, `0x08`, `0x17` — reachable only from the
-network pre-load state (state 3, installed from the lobby screens) and the
-lobby screens; `0x1b` slot drop — built by the drop routine, whose callers are
-the `Reject <player>` confirmation, the lobby map viewer and the
-`TIMEOUT.GUI` screen; `0x28` — the scanner thread, started only on the
-networked path; the one-byte peer-ready poll — the kind-3 barrier. Kinds 1
-and 2 never hold a controller-3 slot: entry writes controllers 1 and 2 only
-([R-SKIR-01 §2], [R-ENTRY-01 §2]); a Gametype-2 save restored through the
-`Player%i` accounts is the one path that could — see "Multiplayer saves".
+**Never constructed in kinds 1 and 2 (Established, gate named).** `0x0b` damage —
+built only when the victim's owner is a controller-3 (remote) slot; `0x14`
+ownership transfer — only when the new owner is controller 3; the `0x0f` sub-case
+`0xff` — kind 3 only; `0x1e`/`0x2a` loading progress — kind 3 only; `0x20`/`0x24`
+lobby-record bulk and its reply — the sender tests the networked bit; the `0x2c`
+bit-stream — its one caller tests the networked bit; `0x02`/`0x26` probe and
+roster, `0x08`, `0x17` — reachable only from the network pre-load state (state 3,
+installed from the lobby screens) and the lobby screens; `0x1b` slot drop — built
+by the drop routine, whose callers are the network drain, the `Reject <player>`
+confirmation, control-window `OK`, battleroom, lobby map viewer and `TIMEOUT.GUI`
+screen; `0x28` — the scanner thread, started only on the networked path; the
+one-byte peer-ready poll — the kind-3 barrier. Kinds 1 and 2 never hold a
+controller-3 slot: entry writes controllers 1 and 2 only ([R-SKIR-01 §2],
+[R-ENTRY-01 §2]); a Gametype-2 save restored through the `Player%i` accounts is
+the one path that could — see "Multiplayer saves".
 
 **Implementation consequence.** A clean-room single-player engine needs no
 packet framing at all: every local mutation is made directly by the caller.
@@ -6008,25 +6783,22 @@ local bit flip.
 **Fields of the per-slot lobby record the single-player session reads
 (Established).**
 
-1. **Loading state, first frame, every kind:** the *watching* table is
-   filled from lobby-word bit 6 of every live slot's record beside the
-   participation table ([R-ENTRY-01 §1]). Every setter of that bit is
-   multiplayer-only — the wire copy of packet `0x20`, the game-selection and
-   battleroom screens and the kind-3 elimination branch
-   ([07 R-HUD-04 §1]) — so in kinds 1 and 2 the table is all-zero (Supported
-   inference — the
-   table's readers were not traced; decider: static trace of the table's
-   readers).
-2. **Battle-entry tail, every kind** ([R-ENTRY-01 §8]): the local slot's
-   record has its low option nibble and two version bytes rewritten and its
-   four option words and unit-limit word read back into the setup summary.
-3. **Kind 2 unit limit** comes from the configured-limit global, not from a
-   lobby record ([R-SKIR-01 §6]).
-4. The record's *started* bit is only ever cleared by local code; its setter
-   is the wire copy. Every reader of it (the state-3 router, the host-slot
-   finder used by `TABMENU` in kind 3 and by `RESTRICT2`, the feature-damage
-   sender's host lookup, peer removal) therefore sees 0 in kinds 1 and 2
-   (Supported inference: bounded writer census).
+1. **Loading state, first frame, every kind:** the *watching* table is filled from
+   lobby-word bit 6 of every live slot's record beside the participation table
+   ([R-ENTRY-01 §1]). Every setter of that bit is multiplayer-only — the wire copy
+   of packet `0x20`, the game-selection and battleroom screens and the kind-3
+   elimination branch ([07 R-HUD-04 §1]) — so in kinds 1 and 2 the table is
+   all-zero (Supported inference — the table's readers were not traced; decider:
+   static trace of the table's readers).
+2. **Battle-entry tail, every kind** ([R-ENTRY-01 §8]): the local slot's record
+   has its low option nibble and two version bytes rewritten and its four option
+   words and unit-limit word read back into the setup summary.
+3. **Kind 2 unit limit** comes from the configured-limit global, not from a lobby
+   record ([R-SKIR-01 §6]).
+4. **Established.** The record's **host flag** is cleared by initialization and
+   copied from the wire. Peer removal also sets it during host migration in a
+   launched network battle ([R-LEAVE-01 §8]). Its readers see it clear in kinds 1
+   and 2; this flag is distinct from the battle-launched latch.
 
 **`Cheat Codes` — closed.** The lobby word's bit 13 has two writers, both in
 the battleroom: the `CHEATING` control's click, which toggles it, and the
@@ -6040,11 +6812,10 @@ which ORs **route bit 2 into the `+` dispatcher's route word** when the word
 is non-zero. Route bit 2 is what the mask-2 (cheat) command table matches
 ([07 R-CAM-01 §6]). So: **in skirmish every mask-2 command dispatches; in
 campaign none does** (unless the developer bit supplies route `7`); in
-multiplayer they dispatch iff the host allowed `Cheat Codes`. The `+`
+multiplayer they dispatch when the host allowed `Cheat Codes` or the local
+developer bit supplies route 7. The developer phrase itself has no session gate. The `+`
 dispatcher itself and the tokenizer never read the lobby word; the local
-path consults the lobby *bit* only through this entry-time copy. The
-doc 07 tail's "how the multiplayer receive path applies the lobby bit before
-re-dispatching a received `+` line" stays open and out of scope. The OR
+path consults the lobby *bit* only through this entry-time copy. A received line is displayed only and is never re-dispatched. The OR
 goes into the command dispatcher's *route* word, not the message's
 recipient mask; the recipient mode is forced to *everyone* only afterwards,
 and only when the dispatched entry's mask had bit 2 ([07 R-CAM-01 §6]).
@@ -6134,7 +6905,7 @@ scanline handling belong to [03 §9].
 The word written per kind at battle entry ([R-ENTRY-01 §2] step 4) is the
 cheat-enable gate of the `+` dispatcher (§2): mask-2 commands dispatch in
 skirmish, never in campaign (unless the developer bit supplies route `7`),
-and in multiplayer iff the host allowed `Cheat Codes` ([07 R-CAM-01 §6]).
+and in multiplayer when the host allowed `Cheat Codes` or developer mode supplies route 7 ([07 R-CAM-01 §6]).
 The `.zrb` sequencer of §4 has no guard relationship to any checksum.
 
 
@@ -8158,16 +8929,15 @@ hidden or externally driven capture path can exist.
 
 ### What can be stated safely
 
-The retail engine already has deterministic command frames, numbered network
-packets, mission/save reconstruction, and movie/image capture. Those mechanisms
-could support re-execution or external recording, but the decompilation has not
-established a named retail command-log replay format or an in-game replay
-player.
+**Established.** Retail exchanges event and unit-state packets, not order
+frames ("Command canonicalization"). Mission/save reconstruction and
+movie/image capture are separate mechanisms. No named retail command-log
+replay format or in-game replay player has been established.
 
 A clean-room implementation of this executable should therefore:
 
 - implement save/load independently of replay;
-- preserve deterministic command framing for networking;
+- keep the event/state network contract distinct from local order entry;
 - leave a replay file format and UI as unknown unless direct retail evidence is
   recovered;
 - not label movie capture as simulation replay.
@@ -8181,24 +8951,23 @@ from authoritative player state and saved/reported using the interface and
 localization systems.
 
 The closed prefix of the post-battle order: the latch bits drive the session
-router into the results/postgame state, whose handler drains the network at
-entry, then (multiplayer) copies the last game frame, stops the music, runs a
-ten-unit timed display, performs the campaign CD check, writes campaign
-progress and enters the authored end-mission screen (outcome art, the full
-mission list ordered by W/L marks with the next unplayed mission selected,
-difficulty refresh), plays the outro movie, and finally shows the
-score/statistics screen with per-player stat bars (kills, losses, energy and
-metal produced and wasted, score) before returning to the front-end router.
-The score values come from the score helper's display array, which multiplies
-kills by the kill multiplier and the global tick over 60 by the time
-multiplier with truncation and a zero clamp ([R-CAMP-01 §7]). Resign and
-host-loss latch ended-without-win
-directly (the end-game dialog callbacks and the peer-loss path, respectively)
-and can override an armed victory, while ordinary victory/defeat run through
-the shared four-count countdown. The exact tick at which simulation stops is
-the session's switch out of the live battle state; the residual is only the
-precise presentation sequencing of the overlay transitions inside the
-front-end router.
+router into the results/postgame state, whose handler drains the network at entry,
+then (multiplayer) copies the last game frame, stops the music, runs a ten-unit
+timed display, performs the campaign CD check, writes campaign progress and enters
+the authored end-mission screen (outcome art, the full mission list ordered by W/L
+marks with the next unplayed mission selected, difficulty refresh), plays the
+outro movie, and finally shows the score/statistics screen with per-player stat
+bars (kills, losses, energy and metal produced and wasted, score) before returning
+to the front-end router. The score values come from the score helper's display
+array, which multiplies kills by the kill multiplier and the global tick over 60
+by the time multiplier with truncation and a zero clamp ([R-CAMP-01 §7]). The exit
+variant of surrender sets ending, tears down and quits in one call; return to menu
+writes no end latch. Host loss in a launched battle writes no end latch
+([R-LEAVE-01 §8]). The only peer-notice latch writer is the unreachable
+type-`0x1c` arm. Ordinary victory and defeat use the shared four-count countdown.
+The exact tick at which simulation stops is the session's switch out of the live
+battle state; the residual is only the precise presentation sequencing of the
+overlay transitions inside the front-end router.
 
 The results surface is the authored `ENDMSN.GUI`/`endmsn.gaf` family, not a
 message box. **Established:** its outcome title is frame 0 of `igvictory`
@@ -8231,7 +9000,7 @@ presentation "unit" below is one tick of the presentation clock of §2.
 
 | State | Action |
 |---|---|
-| 0 | Non-multiplayer: clear the frame-copy pointer, go to 2. Multiplayer: copy the last game frame, run the statistics collector with code 7 (§9), go to 1; if the local slot's rejection-reason byte is set and not 2, show its message (`The game is closed`, `You did not have the correct password`, `The game is full`, `You have lost connection with the host`, `You need a unit you don't have for this game`, `You need a newer version of the game`, `No watching is allowed for this game`, `The creator has left the game`, default `You were rejected from the game`) and clear the byte. |
+| 0 | Non-multiplayer: clear the frame-copy pointer, go to 2. Multiplayer: copy the last game frame, run the statistics collector with code 7 (§9), go to 1; if the local slot's rejection-reason byte is set and not 2, show its message (`The game is closed`, `You did not have the correct password`, `The game is full`, `You have lost connection with the game`, `You need a unit you don't have for this game`, `You need a newer version of the game to enter`, `No watching is allowed for this game`, `The creator has left the game`, default `You were rejected from the game`) and clear the byte. |
 | 1 | Wait until no `MSGBOX.GUI` is open, then 2 (the frame copy is restored behind the box while it is up). |
 | 2 | Set a countdown of 10, deadline `now + 1`, fade-done flag 0; go to 3. |
 | 3 | Each time `now > deadline`: draw the full-screen rectangle through the rectangle shader with level `countdown − 29`, set deadline `now + 1`, decrement; at 0 set fade-done. When fade-done: stop the music, go to 4. |
@@ -8584,21 +9353,32 @@ pause and audio pause until that root window closes [07 R-FE-01 §7].
 
 **Elimination.** In the central death handler [06 §12.1], after the victim's
 owner's live-unit count is decremented, when it reaches **0**: a multiplayer
-session (kind 3) sends the owner's elimination to the peers; a skirmish
-session (kind 2) draws `CRT rand() % 3` to pick one of the three possessive
-tails — `forces have been obliterated`, `forces have gone to a better place`,
-`vermin have been exterminated` (translated) — formats `"%s %s"` with the
-owner's name and posts it as a status line of class 4 attributed to the
-owner's slot. The eight-entry table (`has been obliterated`, `has been
-liquidated`, `has been eradicated`, `has terminated`, `has bowed out`, `has
-gone to a better place`, `has been shown the door`, `has left the scene`) has
-no reference on the single-player path — but it is **not** dead data: the
-multiplayer (kind 3) elimination branch of the same death handler reads it
-with a CRT draw masked to eight entries and posts the line locally
-([01 R-DET-01 §6]). **Determinism:** the draw is on
-the **CRT** stream [01 §7.2] and happens inside the tick, so a skirmish
-elimination advances the CRT stream by one draw; the simulation stream is
-untouched. Campaign sessions post nothing.
+session (kind 3) posts the owner's eight-entry elimination line locally unless the
+local human's removal-reason byte is 1; nothing is sent. A skirmish session (kind
+2) draws `CRT rand() % 3` to pick one of the three possessive tails — `forces have
+been obliterated`, `forces have gone to a better place`, `vermin have been
+exterminated` (translated) — formats `"%s %s"` with the owner's name and posts it
+as a status line of class 4 attributed to the owner's slot. The eight-entry table
+(`has been obliterated`, `has been liquidated`, `has been eradicated`, `has
+terminated`, `has bowed out`, `has gone to a better place`, `has been shown the
+door`, `has left the scene`) has no reference on the single-player path — but it
+is **not** dead data: the multiplayer (kind 3) elimination branch of the same
+death handler reads it with a CRT draw masked to eight entries and posts the line
+locally ([01 R-DET-01 §6]). **Determinism:** the draw is on the **CRT** stream [01
+§7.2] and happens inside the tick, so a skirmish elimination advances the CRT
+stream by one draw; the simulation stream is untouched. Campaign sessions post
+nothing.
+
+**Multiplayer elimination — Established.**
+
+- In kind 3 the kill-record handler, having taken the owner's live count to zero, calls the announcement with the owner's transport identity.
+- The announcement does nothing when this machine's own human's removal-reason byte equals 1. Otherwise it resolves the identity to a row, takes one draw from the **CRT** stream masked to eight entries, formats `"%s %s"` and posts a class-4 status line attributed to that row. It calls only the generator, the translator, the formatter and the local message ring; it sends nothing.
+- Because the handler runs wherever the record is applied, the draw happens once on every machine each time that player's count reaches zero there:
+  - on the owner's machine, at filing;
+  - on each other machine, when the kill record is drained;
+  - on every remaining machine, when a departed player's units are destroyed silently.
+- Each draw is from that machine's own CRT stream, so machines may show different phrases.
+- It fires for human and computer players alike, and again after each deathmatch respawn is lost.
 
 **Kill-lead update.** On an invocation in a kind 2 or 3 session, the routine
 proceeds only when the credited slot exists, has controller 1/2/3, side ≠ 10,
@@ -8831,9 +9611,6 @@ body and are not restated here.
 - The authored FBI key behind the definition height field whose low byte
   the death-eyeball record copies · [R-SESS-01 §3], [04 R-SPEC-01 §15] ·
   static trace of the FBI reader's key table (doc 04 / doc 02 own the key).
-- Whether the lobby record's registration byte value `1` means "registered
-  as human" for the remote-slot branch of the live-human counter ·
-  [R-SESS-01 §1] · static trace of the registration writer's value table.
 - What the lobby word's low four bits mean, and the word's initial state on
   a create route that reaches the battleroom without passing the game list
   · [R-SKIR-01 §12] · static trace of the nibble's source word and of the
@@ -8856,62 +9633,134 @@ body and are not restated here.
 - Semantic names of the order gate-mask bits the construction task tests
   (bit 3 in its build pass, bit 14 in its repositioning pass) · [R-AI-01 §3],
   doc 04 "Order descriptor table" · static trace.
+- Whether the `2` the multiplayer host's `START` stores in the difficulty
+  word can reach the registry `Difficulty` value through a later preference
+  write in the same run · [R-AI-01 §21] · static trace of the preference
+  writer's callers after a multiplayer battle.
+- Whether the participant snapshot's local-participant test admits a hosted
+  computer player, and so what the other machines hold as its stocks ·
+  [R-AI-01 §21], "Economy and integrity checks — overwrite-sync, not
+  compare" · static trace of the snapshot producer's participant test.
 
 ### Networking
 
-Nanolathe does not implement multiplayer, so every bullet in this group is
-recorded to keep the specification exhaustive rather than to gate work. The
-boundary — which packets the single-player path still constructs, which
-lobby fields it reads, which subsystems are out of scope in full, and the
-video contract — is [R-OOS-01 §1]–[R-OOS-01 §4]; nothing below is needed by
-a single-player implementation.
+These are the remaining retail multiplayer evidence gaps. The single-player
+boundary — packets still constructed locally, lobby fields read there, and
+transport services unreachable there — remains [R-OOS-01 §1]–[R-OOS-01 §4].
+Nanolathe’s online implementation and policy choices are DESIGN_MULTIPLAYER’s
+contracts; none of those choices resolves a retail Unknown.
 
-- Lobby slot-state values, host privilege, ready flag, blocked state, edit
-  permission, and start condition · "Lobby behavior" · static trace.
-- DirectPlay provider and session enumeration, lobby handoff, connection
-  setup, addressing, password, and teardown, and any provider-specific
-  transitions outside the reviewed callbacks · "Peer transport state" ·
-  static trace.
+- Whether the bodies of projectile creation and impact, feature events, script
+  run, state transition, build link and sound test ownership. Their arms do not. ·
+  ["Authority"] · Read those six bodies.
+- Whether the transport lets a peer send under another player's identity or forge
+  a system message, and whether a broadcast reaches each local player as its own
+  copy. · ["Authority"] · DirectPlay documentation or a capture; outside the
+  executable.
+- What a developer or cheat command naming another player's slot does to the other
+  machines. · ["Authority"] · Read those handlers' packet effects.
+- Other writers of the per-peer progress word. · ["Authority"] · A store census on
+  that record field.
+- The definition flag that exempts a carrier from the carried-unit install. ·
+  ["Authority"] · Trace that flag's authored key.
+- What an out-of-range unit-state index does in practice. · ["Authority"] · Read
+  the mover deserialiser; only the missing bound is established.
+- Whether anything re-asserts the host flag after a forged player record. ·
+  ["Authority"] · Trace the host flag's writers after battle entry.
+- Dynamic confirmation of the developer-phrase bypass and of removal by a
+  non-host. · ["Authority"] · A two-machine retail session with cheats disallowed.
+
+- **Order of the transport's player enumeration on the join path.** It decides whether a joiner's human is admitted first, and so gets row 0. Decider: the transport's documented enumeration order, or a two-machine retail observation that a joiner's own name is in the first battleroom row.
+- **A write to the two indices through a far-based block copy.** None was found in direct, address-of or immediate forms. Decider: data-flow over every block write whose range could cover them.
+- **Whether rows can be compacted during a battle.** The compaction sits in the battleroom heartbeat, and its callers were not re-read. It cannot move row 0 either way. Decider: a caller census of the heartbeat.
+- **Whether a hosted computer player can exist at battle time under deathmatch.** The battleroom refuses and removes them ([R-SKIR-01 §13]). This matters only for whose grids a respawn wipes. Decider: the ordering of the host's rule change, the refresher and START.
+- **Whether a hosted computer player's economy report reaches peers** by a path other than the viewing-row tail and the end handshake ([R-AI-01 §21]). Decider: a caller census of the report sender.
+
+- Whether the transport delivers a leaver's teardown death records before its
+  session closes. The image hands them over and flushes its own queues; delivery
+  is outside it. Either way the later removal destroys whatever is still alive. ·
+  [R-LEAVE-01] · A two-machine retail capture.
+- What the transport reports, and when, for a machine that crashes or loses its
+  link; and that a close yields one destroyed notice per local player. ·
+  [R-LEAVE-01] · The transport's documentation, or a capture.
+- What a silent but still present peer's units do locally between its last packet
+  and its removal ("stand as last seen" is not proved). · [R-LEAVE-01] · Static
+  trace of the remote-owner branch of the unit visit ([04 R-MOV-03 §1]) and the
+  unit-state receiver.
+- In-flight projectiles of a removed player. Once the row is unoccupied the damage
+  gate passes, so each remaining machine may apply their damage itself. ·
+  [R-LEAVE-01] · Trace of the projectile phase's gate after the record is cleared.
+- How machines reconcile differing host flags after migration, and what host-only
+  controls then do. · [R-LEAVE-01] · Trace of lobby-record broadcasts after
+  migration and the in-battle readers of the host slot.
+- When a leaver's players are destroyed if the score-reporter library keeps its
+  session open (lobby-launched sessions). · [R-LEAVE-01] · Trace of the report
+  screen's close path.
+- Meaning of the secondary lobby flag bit that peer removal clears. · [R-LEAVE-01]
+  · Its readers.
+- Whether the open time-out dialog stalls ticks or input. · [R-LEAVE-01] · The
+  dialog's window flags against the battle pump's modal tests.
+- Whether the score panel's row walk still shows a removed slot, and what its rank
+  byte does. · [R-LEAVE-01] · The panel's row gate ([07 R-HUD-04 §1]) against an
+  absent record.
+
+- Whether a battleroom watcher prevents shared victory by retaining a zero
+  created-unit counter · [R-SKIR-01 §3] · trace the watcher’s counter writers or
+  manually observe a shared victory with a watcher.
+
+- The start condition behind the host's `START` — the all-ready test, and how
+  computer rows count in it · "Lobby behavior", [R-SKIR-01 §13] · static trace of
+  the readiness predicate.
+- Whether one machine can add a second computer player before its first is
+  admitted: the one-per-machine test counts live rows, and the new row goes live
+  only when the transport's player-created message is pumped · [R-SKIR-01 §13] ·
+  manual retail observation, or a trace of how many gadget events the battleroom
+  delivers between two pumps.
+- Whether anything rewrites a computer row's colour after its creation, for
+  instance the host's handling of a colour conflict · [R-SKIR-01 §13] · static
+  trace of the colour request and grant handlers' addressee.
+- The side a computer player starts with in a row that held another player earlier
+  · [R-SKIR-01 §13] · writer census of the lobby record's side byte across peer
+  removal and compaction.
+- Whether the transport delivers its player-created message for a player a machine
+  creates itself to that machine's own human · [R-SKIR-01 §13] · the transport's
+  documentation, or retail observation of the `AI:` row appearing on the adding
+  machine.
+- DirectPlay provider and session enumeration, lobby handoff, connection setup,
+  addressing, password, and teardown, and any provider-specific transitions
+  outside the reviewed callbacks · "Peer transport state" · static trace.
 - Remaining payload semantics beyond the damage/death/projectile/script and
-  participant-snapshot traces above, and the ownership-transfer tail; ordinary
-  fixed lengths and the variable-length unit-sync exception are established
-  · "Declared packet types" · static trace.
+  participant-snapshot traces above, beyond the ownership-transfer behavior described above; ordinary
+  fixed lengths and the variable-length unit-sync exception are established ·
+  "Declared packet types" · static trace.
 - Recording-specific definition catalogs, exhaustive dynamic movement-state
   lifetime, unsupported air-controller reachability and the untransmitted
-  radial-follow distance; snapshot-completion eligibility; recorder-versus-
-  retail fixed-length discrepancies
-  · "Unit-sync ownership and body structure" · static trace and [fmt tad].
-- The lobby receiver's switch, which owns the types whose admission mask
-  excludes the battle-loading and live-battle states · "Declared packet types" ·
-  static trace.
+  radial-follow distance; snapshot-completion eligibility; recorder-versus- retail
+  fixed-length discrepancies · "Unit-sync ownership and body structure" · static
+  trace and [fmt tad].
+- The lobby receiver's switch, which owns the types whose admission mask excludes
+  the battle-loading and live-battle states · "Declared packet types" · static
+  trace.
 - Frame numbers, sequence numbers, acknowledgement fields, checksums, sender
   identity, and wrap behavior inside those payloads · "Declared packet types" ·
   static trace.
-- Guaranteed versus ordinary delivery per packet family · "Declared packet types" ·
-  static trace.
-- The local-input scheduling delay, separately from future-frame retention and
-  the delayed gameplay queues · "Lockstep advancement" · static trace.
-- Send pacing, batch flush, retransmission timeout, retry count, queue
-  overflow, and round-trip adaptation · "Lockstep advancement" · static trace.
+- Guaranteed versus ordinary delivery per packet family · "Declared packet types"
+  · static trace.
+- The local-input scheduling delay, separately from future-frame retention and the
+  delayed gameplay queues · "Lockstep advancement" · static trace.
+- Send pacing, batch flush, retransmission timeout, retry count, queue overflow,
+  and round-trip adaptation · "Lockstep advancement" · static trace.
 - Duplicate, stale, future, oversized, unknown-type, and wrong-sender packet
-  handling beyond the established malformed-custom-payload hang path
-  · "Declared packet types" · static trace.
-- Semantic identity of the pacing-scan progress dword — remote-peer reported
-  progress versus earliest pending order time, two competing readings of the
-  same code; soft pacing itself is established · "Lockstep advancement" · static
+  handling beyond the established malformed-custom-payload hang path · "Declared
+  packet types" · static trace.
+- Map, resource, economy, and other hash contents, cadence, payloads, and mismatch
+  handling; and the complete synchronization handshake beyond the established participant-state
+  control reply · "Synchronization and integrity checks" · static trace.
+- Reconnect, late join, spectator join, and temporary transport-loss behavior, or
+  a bounded absence for each · "Peer transport state" · static trace.
+- Whether all peers can reach the save callback in a multiplayer session (the
+  local callback has no guard; reach is not proved) · "Multiplayer saves" · static
   trace.
-- Command authority for host, local player, remote player, computer player,
-  observer, pause, speed, sharing, and game termination · "Lockstep advancement" ·
-  static trace.
-- Map, resource, economy, and other hash contents, cadence, payloads, and
-  mismatch handling; packet `0x27`'s
-  trailing-integrity-data producer algorithm; and the complete synchronization
-  handshake beyond the established participant-state control reply · "Synchronization and integrity checks" · static trace.
-- Reconnect, late join, spectator join, and temporary transport-loss behavior,
-  or a bounded absence for each · "Peer transport state" · static trace.
-- Whether all peers can reach the save callback in a multiplayer session
-  (the local callback has no guard; reach is not proved) · "Multiplayer
-  saves" · static trace.
 
 ### Save and replay
 

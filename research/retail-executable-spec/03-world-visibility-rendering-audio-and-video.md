@@ -3785,6 +3785,16 @@ that machine's own mapping and line-of-sight mode bits being cleared
 (`[08 R-SKIR-01 §3]`), exactly as a player who joined as a watcher does at
 battle entry (`[08 R-ENTRY-01 §5]`).
 
+**A multiplayer machine’s two slots — Established, with one inference.**
+- The search of direct stores, address-of forms, immediates and adjacent block fills finds no writer beyond the five. The nearest block fill, at session setup, ends below the two indices.
+- Outside the explicit `View` and `Control` commands, the multiplayer path writes both only at player-table reset, so both stay 0.
+- Both creators of the local human activate the row named by the own-slot index: the host path admits it at once; the join routine refuses unless its row argument equals that index.
+- The battleroom compaction only moves an occupied row down into a lower free row and never writes the indices. An occupied row 0 never moves.
+- Admission seats an unknown identity in the lowest unoccupied, non-blocked row, without testing for an activated-but-unoccupied row. On the join path the local human is admitted through the transport's player enumeration. If a remote player were enumerated first, it would take row 0 and the machine would have no local human at all. So wherever a machine has a local human it is row 0 (Established). That a joiner has one rests on the transport enumerating the local player first (**Supported inference** from working joins).
+- Consequence: a "slot index" in kind 3 is a row of that machine's own table. Row 0 is its human; other rows follow that machine's admission order. Every loop "in slot order" (the per-player phase, the per-unit visit's row walk, alliance rows, the mapping-grid bit of a player) is in per-machine row order with the own human first. The only cross-machine names are the transport identity and the unit-pool order derived from it (`[08 R-SESS-01 §7]`).
+
+**Pass 4's source gate — Established.** The per-player reset builds the player manager and the strategic object for every row that is not remote, and teardown destroys both for every row. Pass 4 reads the owner's strategic object with no null test, so "owner active with controller 1 or 2" is exactly "rows this machine simulates".
+
 **Gate.** The whole phase runs only when the active player count is strictly
 greater than one. In a session with one active player none of the five passes
 runs, so the seen, sonar and jammed bits keep the values unit construction gave
@@ -10363,11 +10373,9 @@ body — most under `R-<id>` headings — and are not restated here.
 - Whether the fog cache's `1 = NW` corner-to-bit assignment holds · §3.3
   [R-RR16-A] · manual retail observation (asymmetric fog GAF probe). Supported
   inference today.
-- Whether anything writes the own-slot or viewing-slot index other than the
-  five direct writers — a block copy or a computed pointer was not searched —
-  and therefore whether a multiplayer machine's two slots ever leave the
-  player-table reset's slot 0 · §3.4 `[R-VIS-01 §4]` · static trace of every
-  block write whose range covers the two indices.
+- Whether a far-based block write changes either perspective index · [R-VIS-01 §4] · data-flow trace of every block write whose range could cover the indices.
+- Whether the transport enumerates a joiner’s local player first · [R-VIS-01 §4] · transport enumeration documentation or manual two-machine observation.
+
 - Whether a unit marked by an ally's radar share and standing outside the
   viewer's sight shows the `S: Unidentified object` hover caption, and
   whether Permanent line of sight draws units on tiles copied by the

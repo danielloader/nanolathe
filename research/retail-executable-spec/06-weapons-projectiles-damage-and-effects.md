@@ -219,21 +219,19 @@ order, and classifies each unit whose alive bit is set and death latch is
 clear:
 
 * **hostile** — the registry owner's alliance row, indexed by the candidate
-  owner's ally group, reads zero. This is the registry owner's declaration;
+  owner's slot-index byte, reads zero. This is the registry owner's declaration;
   the candidate owner's reciprocal declaration is not read:
-  * it joins the **primary list** when the direct-visibility predicate below
-    accepts it **and** a runtime exclusion status bit is clear — bit 15 of
-    the status word, the mission `Immunity` bit, named below;
-  * it joins the **secondary list** when its runtime *seen* status bit is set.
-    The two tests are independent, so a unit can be on both lists, either, or
-    neither.
-* **own** — the candidate's owner slot byte equals the registry owner's own
-  slot byte — and fully built: it is counted into the
-  per-definition census, into an economy counter when its definition carries
-  the corresponding scalar, and into the weighted centroid; and it sets the
-  registry's **secondary-list gate** when its definition carries
-  `istargetingupgrade` and the unit is active ([04 R-SPEC-01 §8], which also
-  states the enumeration that reads the gate).
+* it joins the **primary list** when the direct-visibility predicate below accepts
+    it **and** a runtime exclusion status bit is clear — bit 15 of the status
+    word, the mission `Immunity` bit, named below;
+* it joins the **secondary list** when its runtime *seen* status bit is set. The
+    two tests are independent, so a unit can be on both lists, either, or neither.
+* **own** — the candidate's owner slot byte equals the registry owner's own slot
+  byte — and fully built: it is counted into the per-definition census, into an
+  economy counter when its definition carries the corresponding scalar, and into
+  the weighted centroid; and it sets the registry's **secondary-list gate** when
+  its definition carries `istargetingupgrade` and the unit is active ([04
+  R-SPEC-01 §8], which also states the enumeration that reads the gate).
 
 *The third list.* The same own-unit
 branch also fills a **third list**, cleared with the other two at every
@@ -581,16 +579,16 @@ controller type is 2 (computer) or the weapon is **not** `commandfire`. The
 consequence is a contract, not a nicety: a human player's units never acquire
 autonomously with a command-fire weapon and a computer player's do.
 
-**Established fact:** The scan first tries to **retain**. The current slot
-target is dropped when the scanning player's alliance row, indexed by the
-target owner's ally group, is nonzero (the reciprocal row is not read), when
-its definition index is in the slot's bad-target mask, or when the slot's
-weapon is a paralyzer and the target already carries the stunned bit. A
-surviving target ends the slot's work with no re-acquisition and no draws.
-This retention pass does not call the unit-to-unit physical gate: a target
-moving below the sea-level admission boundary or outside weapon range is not
-released for that reason. A slot held by an order is skipped by the scan's
-autonomy clause, so its target instead follows that order's own lifecycle.
+**Established fact:** The scan first tries to **retain**. The current slot target
+is dropped when the scanning player's alliance row, indexed by the target owner's
+slot-index byte, is nonzero (the reciprocal row is not read), when its definition
+index is in the slot's bad-target mask, or when the slot's weapon is a paralyzer
+and the target already carries the stunned bit. A surviving target ends the slot's
+work with no re-acquisition and no draws. This retention pass does not call the
+unit-to-unit physical gate: a target moving below the sea-level admission boundary
+or outside weapon range is not released for that reason. A slot held by an order
+is skipped by the scan's autonomy clause, so its target instead follows that
+order's own lifecycle.
 
 **Established fact:** When retention fails, the slot re-acquires by weapon
 class: an `interceptor` weapon runs the projectile scan of §11.2 and installs a
@@ -4297,13 +4295,17 @@ computer player's units take no water damage and can never be death-latched.
 
 #### The side-10 (null-shooter) record passes the damage gate: the gate's polarity and the eleventh player row [R-DMG-01 §9]
 
-A projectile carrying the neutral side byte 10 — a meteor, a death explosion,
-or any null-shooter record — does route damage through the central impact
-routine's side-slot gate, because an unoccupied row *passes*. All four findings
-below are **Established** by static trace of the central impact routine, the
-battle-block allocator, the player-row constructor, every writer of the
-occupancy word and control byte, the meteor creator, the common projectile
-initializer and the per-tick projectile loop.
+A projectile carrying the neutral side byte 10 — a meteor or a shooterless record
+initialized to that side — does route damage through the central impact routine's
+side-slot gate, because an unoccupied row *passes*. All four findings below are
+**Established** by static trace of the central impact routine, the battle-block
+allocator, the player-row constructor, every writer of the occupancy word and
+control byte, the meteor creator, the common projectile initializer and the
+per-tick projectile loop.
+
+**Established.** A death explosion instead carries the victim’s owner byte
+([R-WPN-02 §5]); its damage passes only when that owner’s row is unoccupied or is
+not a remote peer.
 
 **Established — how the side byte is resolved.** The central impact routine
 reads the record's side byte, multiplies it by the player-row size and adds
@@ -5157,22 +5159,21 @@ the same handler in **replay** mode; only replay mode dispatches `Killed`
 asynchronously, with one argument (the packet's severity byte) and only when
 that signed byte is positive. Its return value is ignored.
 
-**Established fact:** The central handler resolves the victim from the packet
-id by slot arithmetic **with no null test** — a packet naming id zero faults —
-and returns immediately unless the victim's alive bit is set. It then, in this
-order: raises a 60-tick locator presentation event when the victim's ally group
-matches the local viewer's; reconstructs the attacker pointer from the packet
-id and the attacker side from the packet's encoded side; runs the fixed
-teardown helpers (statistics hook, order/queue release, audio release,
-occupancy unstamp with the removal sentinel, and the burst-anchor sweep of
-§5.2); detaches the victim from its carrier when it has one; runs the cargo
-cascade; dispatches replay-mode `Killed`; runs the credit switch; runs the
-leader announcement; applies the cause-5 bounty; fires the death explosion;
-places the corpse; and finally tears down the script, mover and definition
-references, clears the alive bit and the two low status bits, points the unit
-at the shared dead definition, and decrements the owning player's live-unit
-count — at zero, multiplayer sessions notify the peer and skirmish sessions run
-player elimination.
+**Established fact:** The central handler resolves the victim from the packet id
+by slot arithmetic **with no null test** — a packet naming id zero faults — and
+returns immediately unless the victim's alive bit is set. It then, in this order:
+raises a 60-tick locator presentation event when the victim's ally group matches
+the local viewer's; reconstructs the attacker pointer from the packet id and the
+attacker side from the packet's encoded side; runs the fixed teardown helpers
+(statistics hook, order/queue release, audio release, occupancy unstamp with the
+removal sentinel, and the burst-anchor sweep of §5.2); detaches the victim from
+its carrier when it has one; runs the cargo cascade; dispatches replay-mode
+`Killed`; runs the credit switch; runs the leader announcement; applies the
+cause-5 bounty; fires the death explosion; places the corpse; and finally tears
+down the script, mover and definition references, clears the alive bit and the two
+low status bits, points the unit at the shared dead definition, and decrements the
+owning player's live-unit count — at zero, multiplayer sessions post the local
+elimination line and skirmish sessions run player elimination.
 
 **Established fact:** The cargo cascade is a `while` loop over the victim's
 cargo list head. Each cargo unit receives a **30,000** damage packet through
@@ -5185,10 +5186,11 @@ passed is 3 when the carrier's own cause nibble is 3 and 6 otherwise.
 cause nibble, not merely the presence of an attacker:
 
 * **causes 1 and 6** take the full path;
-* **cause 3** takes a partial path: the victim's player unit-loss counter and,
-  for a commander, its commander-loss counter are incremented, and only when
-  the local player's alliance byte for the victim's ally group is zero. No kill
-  credit, no veterancy;
+* **cause 3** takes a partial path: the victim's player unit-loss counter and, for
+  a commander, its commander-loss counter are incremented, and only when the local
+  player's requested-snapshot receipt latch for the victim's owner slot is zero
+  ([08 "Economy and integrity checks — overwrite-sync, not compare"]); that latch
+  stays zero in single player. No kill credit, no veterancy;
 * **cause 5** joins the full path only when the stored attacker side is neither
   the neutral side value 10 nor the victim's own owner byte;
 * every other cause credits nobody.

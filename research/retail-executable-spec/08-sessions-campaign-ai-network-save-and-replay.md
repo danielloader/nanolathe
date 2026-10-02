@@ -2605,17 +2605,35 @@ unit's stored energy/metal — scaled `× 0.5` for difficulty 0 and `× 0.7`
 for difficulty 1 when the owner is a computer — then rebuild visibility and
 the build menu; those shorts are written only by the multiplayer lobby, so
 in a skirmish reached with rule `2` through the registry the additions are
-zero and the bonus floors at 200); any other value → in multiplayer with watching allowed, set the
-local watch-mode bit, clear mode-word bits 0–1, rebuild visibility, and
-either post `You're out!  Continue Watching?` (`YESORNO.GUI`) or, when the
-local host still hosts live AI players, `You are placed in watch mode
-because you are hosting AI players which are still alive.  If you exit, they
-will be terminated.`; in skirmish (kind 2) it writes the end latch directly:
-`ending` bit set, `won` cleared, and `lost` set when the local record's
-end-flag byte is clear. The watch-mode path is multiplayer-only, and the
-end is never keyed on the commander itself: it is keyed on the live-unit
-count, which the owner sweep drives to zero under rules 1 and 2 and which
-reaches zero under rule 0 only when the last unit dies.
+zero and the bonus floors at 200); any other value → the watch branch or the
+direct ending.
+
+**The watch branch — Established.** It is taken only in multiplayer (kind 3),
+and only when the local player has not already been removed from the game and
+either the host allows watching (bit 7 of the host slot's lobby word,
+[R-SKIR-01 §12]) or this machine still hosts a live computer player (the first
+counter of [R-SESS-01 §1]). It sets the local watch-mode bit, clears mode-word
+bits 0–1, rebuilds visibility and broadcasts the local lobby record. Then,
+when no live computer player is hosted here, it posts `You're out!  Continue
+Watching?` (`YESORNO.GUI`); the player is already a watcher when the question
+appears, and its two answers are [07 R-FE-01 §9]. Otherwise, when a human is
+still playing (the second counter of [R-SESS-01 §1]), it posts `You are placed
+in watch mode because you are hosting AI players which are still alive.  If
+you exit, they will be terminated.` and clears the latch's `won` bit.
+
+**The direct ending — Established.** In every other case — skirmish (kind 2),
+a local player already removed from the game, or multiplayer with watching
+disallowed and no live computer player hosted here — the block writes the end
+latch directly: `ending` bit set, `won` cleared, and `lost` set when the local
+record's removal-reason byte is zero. That byte is non-zero only after the
+remove-player sender has stored a removal reason in the record (bounded writer
+census), and every caller of that sender is multiplayer code — the lobby
+screens, the peer time-out and control windows, and the network drain — so
+the byte is zero in every single-player session. The watch-mode path is
+multiplayer-only, and the end is never keyed on the commander itself: it is
+keyed on the live-unit count, which the owner sweep drives to zero under
+rules 1 and 2 and which reaches zero under rule 0 only when the last unit
+dies.
 
 #### Victory detection
 
@@ -2755,10 +2773,56 @@ save restore of the configured word apply no clamp ([R-SESS-01 §9]).
 `1` (`Fixed`) assigns slot `i` start position `i`; `0` (`Random`) shuffles as
 in §2 and "Randomization for skirmish starts". The overlay names them
 `Random`/`Fixed` from the record for kind 2 and from bit 14 of the host's
-lobby word for kind 3. The command-line switches `fixedloc`, `deathends`,
-`deathplays`, `deathmatch`, `mapping`, `circlos`, `truelos`, `permlos`,
-`cheating`, `watching` set the multiplayer host's lobby word only (they
-never touch the skirmish record).
+lobby word for kind 3.
+
+**What presets the multiplayer host's lobby word — Established** (direct
+static trace of the command-line parser, the battleroom opener and the
+battleroom callback's `START` branch; whole-image census of the references
+into the online configuration record). The command-line words `fixedloc`,
+`deathends`, `deathplays`, `deathmatch`, `mapping`, `circlos`, `truelos`,
+`permlos`, `cheating` and `watching` set nothing: the `-B` case that names
+them is inert ([01 R-PLAT-01 §2]). The word ([R-SKIR-01 §12]) is preset from
+two other sources, both applied by the battleroom opener to the opening
+machine's own lobby record.
+
+*The online configuration record*, when the `-C` switch's load through the
+online library succeeded ([01 R-PLAT-01 §2]). The executable only reads this
+record; the library fills it. Each field is applied only when it is non-zero,
+except the lock flag, which is copied whether zero or not:
+
+| Field | Effect |
+|---|---|
+| lock | bit 0 of the lobby-option word ← (field ≠ 0) |
+| unit limit | replaces the lobby record's unit-limit word and the battleroom's working limit ([R-SKIR-01 §6]) |
+| starting energy, starting metal | seed the `ENERGY` and `METAL` sliders in place of the default 1000 |
+| commander death | `1`, `2`, `3` → rule `0`, `1`, `2`, written to bits 11–12, to the `MultiCommanderDeath` preference word and to the session rule word; any other value is ignored |
+| line of sight | `1` → bits 9 and 10 set (true); `2` → bit 9 set, bit 10 clear (circular); `3` → bit 9 clear (permanent); any other value is ignored |
+| cheating | bit 13 ← (field = 2) |
+| start locations | bit 14 ← (field = 1) |
+| mapping | bit 8 ← (field = 1) |
+| watching | bit 7 ← (field = 2) |
+| map name | when non-empty, selects the multiplayer map, on a host only |
+
+The ten option words of the `-B` case name these same options. That link is a
+**Supported inference** from the names alone: the parser gives the words no
+effect, so nothing in the executable ties them to the fields.
+
+*Preferences*, on a host with no online configuration loaded: mapping (bit
+8), line of sight (bit 9) and its type (bit 10) from the `Multi*` preference
+words, commander death (bits 11–12) from `MultiCommanderDeath`, and fixed
+start locations (bit 14) from this record's `StartLocation` word.
+
+After either source the opener greys the seven option controls on every
+machine that is not the host, and on a host whose lock bit is set, and locks
+the unit-limit and starting-resource sliders under the same test. When the
+host's `START` is accepted, the callback copies the host word's mapping,
+line-of-sight, type and commander-death bits back into the `Multi*`
+preference words and its fixed-locations bit into this record's
+`StartLocation` word, then runs the preference writer, which stores that word
+as `SkirmishLocation`. Fixed or random start is therefore one preference
+shared by skirmish and multiplayer, and `StartLocation` is the only word of
+the skirmish record the battleroom reads or writes (bounded census of the
+lobby screens' references to the record).
 
 ### Player colours [R-SKIR-01 §8]
 
@@ -2785,8 +2849,9 @@ persists it as `SkirmishDifficulty`. The plain `Difficulty` registry value
 economy discount and transfer scaling [R-AI-01 §12] and the settlement
 discount [05 R-ECO-01 §3]; the commander-respawn grant scaling in §3; the
 `GAMEOPTIONS.GUI` overlay's `Difficulty:` label (kinds 1/2 only — kind 3
-shows `Cheat Codes:` and `Watching:` from bits 13 and 15 of the host word,
-`Allowed`/`Disallowed`). The AI profile grammar is [R-AI-01 §12].
+shows `Cheat Codes:` and `Watching:` from bits 13 and 7 of the host's lobby
+word, `Allowed`/`Disallowed`, [R-SKIR-01 §12]). The AI profile grammar is
+[R-AI-01 §12].
 
 ### Map restrictions [R-SKIR-01 §10]
 
@@ -2820,7 +2885,8 @@ prints `Commander Death:` (rule word → `Game Continues`/`Game Ends`/
 `Deathmatch`), `Starting Locations:`, `Mapping Mode:` (`Mapped`/`Unmapped`
 from mode bit 0), `Line of Sight:` (`Permanent` when bit 1 clear, else
 `True` when bit 2 set, else `Circular`), then for kind 3 `Cheat Codes:` and
-`Watching:`, otherwise `Difficulty:`, then `Map:`, `Starting Metal:`,
+`Watching:` (bits 13 and 7 of the host's lobby word, [R-SKIR-01 §12]),
+otherwise `Difficulty:`, then `Map:`, `Starting Metal:`,
 `Starting Energy:`, `Max Units:`. Presentation only: it reads the live words
 and writes none (reader census: this overlay and the in-battle options
 snapshot are the only readers of the rule words outside the simulation
@@ -2828,6 +2894,86 @@ sites named above). `TECHLEVL` and `COMMNDER` remain gadget-name tokens in a
 static table with no code reader found — **Unknown** whether any stock
 `.GUI` names them (decider: asset census of the stock GUI files, then a
 trace of the table's reader).
+
+
+### The multiplayer lobby word, bit by bit [R-SKIR-01 §12]
+
+**Established** (direct static trace of the battleroom callback, opener and
+heartbeat, the in-battle control window, the game-settings overlay, the
+elimination block and the host's handling of transport messages; whole-image
+census of the instructions that test or mask bits 7 and 15 of the word).
+Every player's lobby record carries one 16-bit option word. A machine edits
+the copy in its own record and broadcasts the record; battle entry and every
+reader of a host option below use the **host slot's** copy
+([R-ENTRY-01 §2] step 4).
+
+| Bits | Meaning | Battleroom control and its stages |
+|---|---|---|
+| 0–3 | a four-bit copy of a session word's low nibble, stored when the player's record is created and rewritten at the battle-entry tail ([R-OOS-01 §2]) | none |
+| 4 | battle launched: set in the host's word when its `START` is accepted | `START` |
+| 5 | ready; the same bit gates the local player's map control ([07 §12]) | `READY<n>` |
+| 6 | this player is a watcher — the *watch-mode* bit of [R-SKIR-01 §3]; its setters, clearers and readers are [07 R-HUD-04 §1] | `SIDE<n>`, cycled past the last side |
+| 7 | watching allowed | `WATCHING`: `Disallowed`, `Allowed` |
+| 8 | mapping; set means unmapped ([03 R-VIS-01 §1]) | `MAPPING`: `Unmapped`, `Mapped` |
+| 9 | line of sight in force; clear means permanent | `LOSTYPE`: `True`, `Circular`, `Permanent` |
+| 10 | line-of-sight type; set means true, clear means circular | `LOSTYPE` |
+| 11–12 | commander-death rule `0`, `1`, `2` ([R-SKIR-01 §3]) | `COMMANDER`: `Continues`, `Game ends`, `Deathmatch` |
+| 13 | cheat codes allowed ([R-OOS-01 §2]) | `CHEATING`: `Disallowed`, `Allowed` |
+| 14 | fixed start locations ([R-SKIR-01 §7]) | `FIXEDLOC`: `Random`, `Fixed` |
+| 15 | game closed | `GAMEOPEN`: `Closed`, `Open` |
+
+The stage names are the stock `LOUNGE2.GUI`'s. `MAPPING` and `GAMEOPEN` store
+the inverse of their gadget state, so the first stage (`Unmapped`, `Closed`)
+is the set bit. `CHEATING`, `FIXEDLOC` and `WATCHING` toggle their bits.
+`COMMANDER` steps the rule `0 → 1 → 2 → 0`. `LOSTYPE` steps permanent → true →
+circular → permanent: with bit 9 clear it sets bits 9 and 10, otherwise with
+bit 10 set it clears bit 10, otherwise it clears bit 9. Every one of these
+clicks plays the `Multi` cue and broadcasts the lobby records. Which machines
+may click them, and what presets the word, is [R-SKIR-01 §7].
+
+**Bit 7, watching allowed.** Three writers: the battleroom's `WATCHING`
+click, which also clears the clicking player's own watcher bit when it turns
+watching off; the in-battle control window's `WATCHING` button
+([07 R-FE-01 §7]); and the online-configuration preset ([R-SKIR-01 §7]). Its
+readers:
+
+- the game-settings overlay's `Watching:` row ([R-SKIR-01 §11]);
+- the battleroom's `SIDE<n>` control, which turns a local human into a
+  watcher on the wrap past the last side only while the host's bit is set;
+- the battleroom heartbeat: while a host slot exists and its bit is clear,
+  every present player that carries the watcher bit has it cleared and its
+  side reset to the first side, and the records are broadcast again;
+- the host's `START`, which with the bit clear removes every remote watcher
+  with the reason `No watching is allowed for this game` before it launches;
+- the host's handling of a remote player's record update, which removes with
+  the same reason a player whose record arrives carrying the watcher bit
+  while the bit is clear;
+- the control window's `OK`, likewise ([07 R-FE-01 §7]);
+- the elimination block's watch branch ([R-SKIR-01 §3]).
+
+**Bit 15, game closed.** Two writers: the battleroom's `GAMEOPEN` click, on
+the clicking machine's own record, and player creation, which clears the bit
+in the new player's record. No preference, online-configuration field or
+command-line word presets it, and the in-battle control window has no click
+path for it ([07 R-FE-01 §7]). Its readers:
+
+- the host's handling of the transport's player-joined message: with the
+  host's bit clear the joiner goes through the version and password checks,
+  whose failures have their own removal reasons; with it set the joiner is
+  removed with the reason `The game is closed`;
+- the battleroom's add-a-computer-player click on an empty slot, which with
+  the host's bit set posts `Can't add another player when game is closed.`
+  and adds nothing;
+- the `GAMEOPEN` gadget's display.
+
+Battle entry does not read bit 15: it takes bits 8–10, 11–12 and 13 and the
+unit limit from the host's record ([R-ENTRY-01 §2] step 4).
+
+**Initial state.** The player-table reset zero-fills every lobby record, and
+a host that opens the battleroom with no online configuration seeds only
+bits 8–12 and 14, from preferences ([R-SKIR-01 §7]). A game created through
+the game list therefore starts with watching disallowed, cheat codes
+disallowed and the game open.
 
 
 ## Lobby behavior
@@ -2846,15 +2992,15 @@ AI. It repeatedly:
 - publishes local changes to peers.
 
 Human, computer, open, and blocked slot states have different editing and
-readiness rules. The exact semantic name of every numeric state and every host
-privilege bit remains incomplete.
+readiness rules. The lobby option word is [R-SKIR-01 §12]; the exact semantic
+name of every numeric slot state remains incomplete.
 
 **Out of scope.** The whole battleroom — 67 functions
 in the ledger's `LOUNGE2.GUI` cluster plus the provider/connection screens —
 is outside Nanolathe's single-player scope; nothing in it is reached from the
 campaign or skirmish paths ([R-OOS-01 §3]). The only battleroom-authored
 values the single-player session reads are the lobby word's `Cheat Codes` bit
-(via its entry-time copy, [R-OOS-01 §2]) and the watching bit (loading-state
+(via its entry-time copy, [R-OOS-01 §2]) and the watcher bit (loading-state
 table, [R-OOS-01 §2]); the skirmish screen writes the setup record instead
 ([R-SKIR-01 §1]). The bullets above stay as a description, not a contract.
 
@@ -5864,9 +6010,11 @@ local bit flip.
 
 1. **Loading state, first frame, every kind:** the *watching* table is
    filled from lobby-word bit 6 of every live slot's record beside the
-   participation table ([R-ENTRY-01 §1]). Writers of that bit in the
-   recovered set are the wire copy of packet `0x20` and the battleroom only,
-   so in kinds 1 and 2 the table is all-zero (Supported inference — the
+   participation table ([R-ENTRY-01 §1]). Every setter of that bit is
+   multiplayer-only — the wire copy of packet `0x20`, the game-selection and
+   battleroom screens and the kind-3 elimination branch
+   ([07 R-HUD-04 §1]) — so in kinds 1 and 2 the table is all-zero (Supported
+   inference — the
    table's readers were not traced; decider: static trace of the table's
    readers).
 2. **Battle-entry tail, every kind** ([R-ENTRY-01 §8]): the local slot's
@@ -5880,10 +6028,12 @@ local bit flip.
    sender's host lookup, peer removal) therefore sees 0 in kinds 1 and 2
    (Supported inference: bounded writer census).
 
-**`Cheat Codes` — closed.** The lobby word's bit 13 has exactly one writer:
-the battleroom's cheat toggle (the gadget state `2` sets it, any other
-non-zero state clears it — [R-SKIR-01 §11] names the overlay that displays
-it). It has one consumer outside presentation: **battle entry** copies it
+**`Cheat Codes` — closed.** The lobby word's bit 13 has two writers, both in
+the battleroom: the `CHEATING` control's click, which toggles it, and the
+opener's online-configuration preset, which sets it for the field value `2`
+and clears it for any other non-zero value ([R-SKIR-01 §7]). [R-SKIR-01 §12]
+gives the whole word and [R-SKIR-01 §11] names the overlay that displays the
+bit. It has one consumer outside presentation: **battle entry** copies it
 into a process word — kind 1 writes 0, kind 2 writes 1, kind 3 writes the
 host's bit — and that word has exactly one reader, the chat commit callback,
 which ORs **route bit 2 into the `+` dispatcher's route word** when the word
@@ -8684,6 +8834,10 @@ body and are not restated here.
 - Whether the lobby record's registration byte value `1` means "registered
   as human" for the remote-slot branch of the live-human counter ·
   [R-SESS-01 §1] · static trace of the registration writer's value table.
+- What the lobby word's low four bits mean, and the word's initial state on
+  a create route that reaches the battleroom without passing the game list
+  · [R-SKIR-01 §12] · static trace of the nibble's source word and of the
+  front-end sub-states that enter the battleroom directly.
 
 ### Computer player
 

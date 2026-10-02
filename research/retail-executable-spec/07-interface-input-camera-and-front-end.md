@@ -246,7 +246,7 @@ the named sound cue played through the interface sound path.
 
 | Token | Key | Action |
 |---|---|---|
-| `0x09` | Tab | In battle mode (mission-mode word `3`) with chat inactive: toggle `TABMENU.GUI` (§11). In any other mode Tab falls through to the F2 case below. |
+| `0x09` | Tab | In a multiplayer session (session kind `3`, doc 08's kind vocabulary): toggle `TABMENU.GUI` (§11) when chat is inactive, and do nothing while chat is open. In campaign and skirmish (kinds 1 and 2) Tab runs the F2 case below, Shift included, and never opens the strip. The gate is the session kind alone; no network flag is tested. |
 | `0xE3` | F2 | Shift not held: if the options window is not open, open `ARMOPT.GUI` and set the ESC bit (§11). Shift held: retain the hovered unit for the **Unit Builder Probe**, or disable that probe when no unit is hovered. This arming path has no developer gate; drawing is a separate, unrooted path ([R-CAM-01 §9]). |
 | `0x0D` | Enter | `SmallButton` cue; open chat (§5 "Chat"). |
 | `0x1B` | Escape | Options window open: close it and clear the ESC bit. Otherwise, if the armed-order latch is idle (`1`): deselect everything (the `deselect all` path also runs the selection-changed refresh); if a latch is armed: return it to idle, clear the Shift-latch persistence bit, and reset the palette's default control. |
@@ -258,7 +258,7 @@ the named sound cue played through the interface sound path.
 | `0x31..0x39` | `1..9` | Build-page / group-recall mux under the `SwitchAlt` option ([R-CAM-01 §4]); group recall takes Shift as its additive argument and plays `SelectSquad`. |
 | `0x54` `0x74` | `T` `t` | Set the follow-camera tracked object to the **previous** (`T`, Shift held) or **next** (`t`) selected unit after the current tracked object in unit-slot order, wrapping within the local slot range; with nothing selected the tracked object becomes null ([R-CAM-01 §12]). |
 | `0x5C` | `\` | Developer mode only: re-run the last `+` command ([R-CAM-01 §9]). |
-| `0x68` | `h` | Battle mode, non-watcher: open `SHARE.GUI` (resource sharing, doc 05). |
+| `0x68` | `h` | In a multiplayer session (kind 3), for a local player who is not a watcher: open `SHARE.GUI` (resource sharing, doc 05). In campaign and skirmish the key does nothing. |
 | `0x6E` | `n` | Find the next own unit not yet visited by this cycle (per-unit visited bits `0x40`/`0x80` of the status word), glide the camera to it ([R-CAM-01 §12]), record it as the current unit word (a HUD word — *Supported inference* on its reader) and mark it and every on-screen own unit visited; it does **not** change the selection. When every unit has been visited, clear the visited bits on all units and restart. |
 | `0xAA` | Ctrl+A | Select every own selectable unit (additive over the current selection), clear the current build-menu unit, `selection changed` refresh. |
 | `0xAC` | Ctrl+C | Select the own selectable units whose definition is in the authored `CTRL_C` category set (replacing the selection unless Shift is held), then set the follow-camera tracked object to the last own unit in the `Commander` category set — the camera follows the commander ([R-CAM-01 §12]). |
@@ -326,8 +326,8 @@ cancelled, and the idle units get no new order from that press.
 **Established fact — Escape versus F2.** Token `0xE3` is **F2** under the
 translator table of §2 (F1..F12 → `0xE2..0xED`); Escape reaches the
 dispatcher as the `WM_CHAR` value `0x1B`, whose case is the cancel/close
-chain above. The options window is therefore opened by F2 (or Tab outside
-battle mode) and closed by either F2 or Escape. The "ESC bit" of the
+chain above. The options window is therefore opened by F2 (or by Tab in
+campaign and skirmish) and closed by either F2 or Escape. The "ESC bit" of the
 battle-interface state byte is so named because it is the bit Escape clears.
 
 ### The game-speed hotkey and its announcement [R-CAM-01 §3]
@@ -624,9 +624,9 @@ authored setup triple rather than persist the command's new live visibility
 state.
 
 **Mask 4 — developer (30, plus the default handler):** `AI p` (toggle slot
-`p` between AI and human control), `Control p q` (viewing/controlling
-indices), `Kill [p]`, `IWin`, `ILose` (set the outcome bits and end the
-battle), `Film name` (film recording flag and name), `FilmSpeed n`, `Assert` (no-op),
+`p` between AI and human control), `Control p` (valid slot `p`: the own-slot
+and viewing-slot indices both = `p`), `Kill [p]`, `IWin`, `ILose` (set the
+outcome bits and end the battle), `Film name` (film recording flag and name), `FilmSpeed n`, `Assert` (no-op),
 `Assign order x y` (issue a named order at a point), `BurnAll`, `BurnOne`,
 `DebugBreak [1|2|3]` (allocation-exhaustion / divide-by-zero / break), `DPrint` (no-op),
 `Edge w h` (play-area extents), `Include name` (run `debugdat\name.txt` as a
@@ -3457,13 +3457,23 @@ cue.
 
 #### Tab options menu and manual exit
 
-`TABMENU.GUI` (Tab; the in-battle menu bar of §11): its `OPTIONS`
-sets the options-open bit and opens `ARMOPT`, `SHARE` opens the transfer
-dialog [R-HUD-03 §9], `CONTROL` opens `CONTROL.GUI` (host-only player
-control: `WATCHING` and `GAMEOPEN` toggles of the lobby word, `LIVEPLYR<n>`
-→ a `YESORNO` "Reject: <name>" that kicks the peer — multiplayer only, edge
-recorded, semantics out of scope), `ALLIES` the lobby alliance panel
-(out of scope).
+`TABMENU.GUI` (Tab in a multiplayer session; the in-battle menu bar of §11):
+its `OPTIONS` sets the options-open bit and opens `ARMOPT`, `SHARE` opens the
+transfer dialog [R-HUD-03 §9], `CONTROL` opens `CONTROL.GUI`, `ALLIES` the
+lobby alliance panel (out of scope).
+
+**Established — the control window** (multiplayer only; edge recorded,
+semantics out of scope). `CONTROL.GUI` is the host's player control, and its
+opener does nothing for a watching local player. Its `WATCHING` button toggles
+the *watching allowed* bit of the host's lobby word ([08 R-SKIR-01 §12]), plays
+the `Options` cue and broadcasts the lobby record, leaving the window open.
+`OK` plays the same cue and, when watching is now disallowed, removes every
+remote watcher with the reason `No watching is allowed for this game`.
+`LIVEPLYR<n>` opens a `YESORNO` "Reject: <name>" that kicks the peer. The
+opener and the `WATCHING` click also push the game-open state into a gadget
+named `GAMEOPEN`, but the window has no click path for that name and no
+archive copy of `CONTROL.GUI` on the reference install authors such a gadget,
+so the game-closed flag changes only in the battleroom.
 
 **Established (direct-static and authored GUI).** `EXITMENU.GUI` (flags
 `0x1800`, centred) opens with `RESTART` authored inactive. For campaign and
@@ -3618,10 +3628,25 @@ remaining 10 sites compute their width.
 **Established fact — `YESORNO`.** Four openers: the CD-player question
 (§3), the surrender/exit question (§7), the lobby reject question
 (`%s: %s` from `Reject` and the player name, flags `0x100`), and the
-multiplayer `You're out!  Continue Watching?` (flags `0x900`, `Yes` clears
-the watching bit and refreshes the HUD, `No` raises the surrender bit).
-Each writes `Yes`/`No` into `CHOICE1`/`CHOICE2`, tests the window for
-null, and sets the Enter/Escape defaults itself (§12).
+multiplayer `You're out!  Continue Watching?` (flags `0x900`). Each writes
+`Yes`/`No` into `CHOICE1`/`CHOICE2` and tests the window for null. Three set
+the Enter/Escape defaults themselves (§12): the CD-player question and the
+watch question bind Enter to `Yes` and Escape to `No`, and the surrender
+question binds both to `No` (§7). The reject question writes neither; the
+stock file authors neither and no `CHOICE` button matches the window-open
+routine's name fallback (§12), so its Enter and Escape are unbound.
+
+**Established fact — the watch question's two answers.** The elimination
+block has already made the local player a watcher before this window opens
+([08 R-SKIR-01 §3]); neither answer sets or clears the watcher bit. `Yes`
+re-broadcasts the local lobby record, clears the end latch's won bit
+([08 R-TRIG-01 §6]) and, when score reporting is active, files a
+score-reporter event; the player stays in the battle as a watcher. `No` sets
+the latch's ending bit — the bit the exit confirmation's surrender path sets
+(§7) — and clears the won bit, so the battle ends on this machine with neither
+end title's bit written. Either answer plays `BigButton` and closes the
+window; any other gadget leaves it open. The question exists only in session
+kind 3: the skirmish branch of the same block writes the end latch directly.
 
 `CDCHECK.GUI` is raised only by the post-battle machine (§10) when a
 campaign ends and disc 2 is absent; `OK` re-checks and advances, else the
@@ -5432,23 +5457,42 @@ touches the byte, and its only other writer is the kill-lead shift of
 `0..9` in slot order, distinct, and the panel's rank walk draws the
 qualifying slots in ascending slot order with vacated ranks compacted.
 **Established.** *Watcher:* the lobby record's watcher bit (`0x40`) has
-exactly two setters, both multiplayer-only: the battleroom's `SIDE%d`
-control, which turns a human slot into a watcher when the side is cycled
-past the last side (and back when clicked again), and the kind-3 branch of
-the elimination handler (`You're out!  Continue Watching?`), which sets the
-eliminated slot's bit so the player stays in the session as a spectator.
-The skirmish elimination branch, the registration helper and battle entry
-never set it (registration and the lobby screens only clear neighbouring
-bits or clear this one). In every single-player session the bit is
-therefore constantly clear, and it is **not** derived from the settlement
-gate's observer byte ([05 "Authoritative settlement order"]), which is a
-different field. What reads it: this panel's row gate, the score helper's
-row gate and the statistics rows' flag bit 3 ([08 R-CAMP-01 §7, §10]), the
-kill-lead scan's "non-watcher" filter ([08 R-CAMP-01 §9]), the elimination
-and participant filters, the multiplayer camera placement at battle start
-([08 R-ENTRY-01 §5] "when the local player is watching") and the lobby's
-`Watching:` label. **Established** (bounded census of the bit's writers over
-the recovered function set).
+four local setters, all multiplayer-only:
+
+- the game-selection screen's `WATCH` button ([R-FE-02 §1]);
+- the front end's join-as-watcher sub-state that the button requests, which
+  sets the bit again before the join (a further store in the sub-state that
+  follows a successful join is conditioned on the join-as-watcher sub-state
+  still being current, and was not shown reachable);
+- the battleroom's `SIDE%d` control, which turns a local human slot into a
+  watcher when the side is cycled past the last side while the host allows
+  watching, and back into a player on the first side when clicked again;
+- the kind-3 branch of the elimination block, which sets the eliminated local
+  slot's bit before it asks `You're out!  Continue Watching?`, so the player
+  stays in the session as a spectator. The question itself neither sets nor
+  clears the bit ([R-FE-01 §9]).
+
+A remote player's bit arrives by wholesale copy of that player's lobby
+record. The bit is cleared by the game-selection screen's `JOINGAME`, by
+`SIDE%d` on a watcher, by a host that turns *watching allowed* off in the
+battleroom (its own bit), by the battleroom heartbeat for every present
+player while watching is disallowed ([08 R-SKIR-01 §12]), and by the
+player-table reset, which zero-fills every lobby record. The skirmish
+elimination branch, the registration helper and battle entry never set it. In
+every single-player session the bit is therefore constantly clear, and it is
+**not** derived from the settlement gate's observer byte
+([05 "Authoritative settlement order"]), which is a different field. What
+reads it: this panel's row gate, the score helper's row gate and the
+statistics rows' flag bit 3 ([08 R-CAMP-01 §7, §10]), the kill-lead scan's
+"non-watcher" filter ([08 R-CAMP-01 §9]), the elimination and participant
+filters, the multiplayer camera placement at battle start
+([08 R-ENTRY-01 §5] "when the local player is watching"), the battle
+end-title gate (§11), the game-speed hotkeys' refusal ([R-CAM-01 §2]), and
+the gates of the in-battle Tab strip, share dialog and control window (§11,
+[R-FE-01 §7]). The game-settings overlay's `Watching:` row is not one of its
+readers: it shows the host's separate *watching allowed* bit
+([08 R-SKIR-01 §12]). **Established** (bounded census of the bit's writers
+over the recovered function set).
 
 #### The in-battle options window unfold [R-HUD-04 §2]
 
@@ -8677,12 +8721,19 @@ In-battle options and message-box panels are modal. Load/save, restart, CD
 check, and exit flows all use dialog GUIs and share text, button, list, and
 scrollbar rendering.
 
-**Tab strip and manual exit.** In a non-network battle, the Tab key
-plays `SmallButton` and opens the hard-coded `guis/tabmenu.gui` window — a
-510×33 top strip (authored origin `y=-33`) carrying `OPTIONS`, `SHARE`,
-`ALLIES`, and `CONTROL`; this name is not side-prefixed. A second Tab while it
-is open closes it (the Tab-menu word bit `0x20` toggles). In battle mode the
-opener hides the diplomacy gadgets for non-diplomatic contexts. F2 (token
+**Tab strip and manual exit.** In a multiplayer battle only (session kind 3,
+with chat inactive), the Tab key plays `SmallButton` and opens the hard-coded
+`guis/tabmenu.gui` window — a 510×33 top strip (authored origin `y=-33`)
+carrying `OPTIONS`, `SHARE`, `ALLIES`, and `CONTROL`; this name is not
+side-prefixed. A second Tab while it is open closes it (the Tab-menu word bit
+`0x20` toggles), with the same cue. The opener shows `ALLIES` and `SHARE` only
+when the local player is not a watcher and at least one of the ten slots other
+than a local human's has its watcher bit clear; empty slots count, so in
+practice the two are shown whenever the local player is not a watcher. It
+shows `CONTROL` only on the machine that controls the host player, and only
+while the lobby lock bit is clear ([08 R-SKIR-01 §7]). A watching player is
+left with `OPTIONS` alone. In campaign and skirmish the Tab key never opens
+the strip: its token runs the F2 case ([R-CAM-01 §2]). F2 (token
 `0xE3`, [R-CAM-01 §2]) while the battle-interface ESC bit is clear opens the
 hard-coded `guis/armopt.gui` window with `anims/armopt.gaf`; this name is not
 side-prefixed. Opening it sets both the battle modal bit and the
@@ -8759,7 +8810,7 @@ while ENDMSN gives a watcher the defeat title. Both titles use the
 view-centre anchor `((W + 128) / 2, H / 2)`, less the frame's authored
 offsets ([R-HUD-05]). The composer draws them over the world and chrome,
 before the game-clock line and the open windows, so a modal window covers a
-title. The watcher bit's two setters are both multiplayer-only
+title. Every setter of the watcher bit is multiplayer-only
 ([R-HUD-04 §1]), so in campaign and skirmish the gate always passes. There the
 title depends only on the latch bit.
 
@@ -9026,6 +9077,21 @@ and the decider that would close it.
 - Role separation of shared player-word bit `0x20` between READY display and
   map-control authority; both consumers are proven and the semantics are not
   separable statically · §12 · manual retail observation.
+- Whether the Enter and Escape bindings of the `You're out!  Continue
+  Watching?` question act in ordinary play: its opener sets the window's token
+  mode and writes the two bindings but does not switch key navigation on, so
+  they act only if navigation is already on when the elimination block opens
+  the window · §5 [R-FE-01 §9], §3 [R-WGT-01 §1] · static trace of the
+  navigation switch's state at that moment, or a retail multiplayer
+  observation.
+- What the watch question's `Yes` guards against by clearing the end latch's
+  won bit: the bit's two setters, the won path of the end-condition block and
+  the `IWin` developer command, both end the battle when they run · §5
+  [R-FE-01 §9] · none needed; no implementation decision turns on it.
+- Whether the watcher-bit store in the front end's post-join sub-state is
+  reachable: its condition names the join-as-watcher sub-state while the
+  post-join one is current · §6 [R-HUD-04 §1] · static trace of the front-end
+  controller's sub-state copy order.
 - Multiplayer pause authorization, speed UI synchronization, chat/pause packet
   forwarding authority, serial/modem/TCP setup semantics, lobby timeout
   progression, and the complete ready/start protocol · §11, §12 · static

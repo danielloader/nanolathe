@@ -2890,12 +2890,15 @@ a plain one-bit copy — no inversion anywhere:
 | skirmish | setup record's Mapping field `& 1` | its LineOfSight field `& 1` | its LOSType field `& 1` |
 | multiplayer | session rule word bit 8 | rule word bit 9 | rule word bit 10 |
 
-The multiplayer session rule word is a 16-bit field in the local player's
-option record; the same word carries the commander-death rule in bits 11–12
-(copied to the commander-death global at battle entry), the cheat flag in bit
-13, fixed start locations in bit 14 and the game-closed flag in bit 15
-`[08 "Skirmish configuration"]`. The skirmish setup record is doc 08's object;
-only its three visibility fields are named here.
+The multiplayer session rule word is a 16-bit field of every player's lobby
+record, and battle entry reads the **host slot's** copy
+(`[08 R-ENTRY-01 §2]`). The same word carries the *watching allowed* option in
+bit 7, the commander-death rule in bits 11–12 (copied to the commander-death
+global at battle entry), the cheat flag in bit 13, fixed start locations in
+bit 14 and the game-closed flag in bit 15 `[08 "Skirmish configuration"]`;
+`[08 R-SKIR-01 §12]` gives the whole word bit by bit, with each option's
+control and the writers and readers of bits 7 and 15. The skirmish setup
+record is doc 08's object; only its three visibility fields are named here.
 
 **Polarity, pinned by the bulk rebuild's fill constants.** The wipe-and-
 rebuild (`[R-LAYER §1]` write site 2) fills the mapping word grid with the byte
@@ -3742,12 +3745,34 @@ the minimum-cloak proximity scan are separate walks, and the phase's first
 pass is both the friendly-marking pass and the clear.
 
 **Which observer.** Two per-battle globals hold a player slot: the local
-player's **own** slot, and the **viewing** slot. They are written together at
-battle entry and re-pointed together when the local player becomes an observer.
-Every read in this phase, in the mode-selected visibility probes of §3.2, and
-in the minimap contacts pass of §3.9 uses the **viewing** slot. Nanolathe must
-carry both and must not collapse them: in an observer session they differ, and
-the entire secondary target list of `[06 §3.1]` follows the viewing slot.
+player's **own** slot, and the **viewing** slot. Every read in this phase, in
+the mode-selected visibility probes of §3.2, and in the minimap contacts pass
+of §3.9 uses the **viewing** slot. Nanolathe must carry both and must not
+collapse them: the `View` command moves the viewing slot alone, and the entire
+secondary target list of `[06 §3.1]` follows the viewing slot.
+
+**Who writes the two slots — Established** (bounded census of the direct
+stores to the two indices across the recovered image; a store through a block
+copy or a computed pointer is not excluded). Five events write them, and all
+but the last write both together:
+
+- the player-table reset — run when the single-player menu opens, on entry
+  to the front end's multiplayer phase `0x10` (`[07 R-FE-01 §1]`), and on
+  one branch of the multiplayer join routine — sets both to slot 0;
+- the skirmish row-to-player conversion sets both to the index of the last
+  `Player` row (`[08 R-SKIR-01 §2]`);
+- a save load sets the own slot from the `Human Player` integer and copies it
+  to the viewing slot (`[08 R-SAVE-02 §12]`);
+- the developer chat command `Control` sets both to its player argument, after
+  the same player-record validation `View` applies (`[07 R-CAM-01 §6]`);
+- the chat command `View` sets the viewing slot alone (`[07 R-CAM-01 §6]`).
+
+Nothing re-points either slot when the local player becomes a watcher. The
+multiplayer elimination watch branch writes neither: a defeated player who
+becomes a watcher keeps both slots, and gets the watcher's unmasked view from
+that machine's own mapping and line-of-sight mode bits being cleared
+(`[08 R-SKIR-01 §3]`), exactly as a player who joined as a watcher does at
+battle entry (`[08 R-ENTRY-01 §5]`).
 
 **Gate.** The whole phase runs only when the active player count is strictly
 greater than one. In a session with one active player none of the five passes
@@ -10316,6 +10341,11 @@ body — most under `R-<id>` headings — and are not restated here.
 - Whether the fog cache's `1 = NW` corner-to-bit assignment holds · §3.3
   [R-RR16-A] · manual retail observation (asymmetric fog GAF probe). Supported
   inference today.
+- Whether anything writes the own-slot or viewing-slot index other than the
+  five direct writers — a block copy or a computed pointer was not searched —
+  and therefore whether a multiplayer machine's two slots ever leave the
+  player-table reset's slot 0 · §3.4 `[R-VIS-01 §4]` · static trace of every
+  block write whose range covers the two indices.
 - Whether the sensor phase's allied-vision gate reads the option word by
   mistake: the bit it tests has no writer in the recovered image, while the
   same bit number in the adjacent rule word is the written defeated/observer

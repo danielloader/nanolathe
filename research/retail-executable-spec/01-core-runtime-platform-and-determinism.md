@@ -582,7 +582,7 @@ the switch (case-insensitive). Any other letter is ignored.
 
 | Switch | Value form | Effect (Established) | Reader |
 |---|---|---|---|
-| `-B<word>` / `-B <word>` | word | `lock` sets bit 0 of the lobby-option word. Every other recognised word — `deathends`, `deathplays`, `deathmatch`, `fixedloc`, `mapping`, `circlos`, `truelos`, `permlos`, `cheating`, `watching` — is compared and **writes nothing** on either outcome | the ALLIES/SHARE gadget enable and the lobby record toggle read bit 0 |
+| `-B<word>` / `-B <word>` | none is read | **Inert.** Alone among the switches that take a value, this case does not step past the two switch characters. Its "take the next token" branch tests the switch character itself and so never runs, and every comparison is a whole-token, case-insensitive compare that includes the leading `-` or `/`. `lock` — whose match would set bit 0 of the lobby-option word — therefore never matches. Neither do `deathends`, `deathplays`, `deathmatch`, `fixedloc`, `mapping`, `circlos`, `truelos`, `permlos`, `cheating` and `watching`, which have no store on either outcome in any case. A separate word typed after `-B` is an ordinary non-switch token and overwrites the language slot | none through this switch. Bit 0 of the lobby-option word is live through its other writer, the online configuration that `-C` loads ([08 R-SKIR-01 §7]). Its readers are the battleroom opener, which greys the host's seven option controls and locks the unit-limit and starting-resource sliders, and the in-battle Tab strip, which hides `CONTROL` ([07 §11]) |
 | `-C<file>` | name | online library present and its version above 2 → load the named online configuration into the online record (0x150 bytes); then sets the restricted-config flag | `1.zrb` list load is skipped when the flag is set |
 | `-D` / `-Df` | — | display mode 3, or 2 when the third character is `f`/`F` | startup only: bit 0 of the display flags word (`~mode & 1`) |
 | `-E<n>` | integer | `atoi`; a leading `-` yields −1; outside 0..100 → 0 | **none** in the recovered image (retained-and-inert) |
@@ -2782,9 +2782,6 @@ stated in the body, not here.
 - Whether a writer of the display object's frame-presented word exists
   beyond the two found (present sets it, surface restore clears it) · §2.2
   [R-PLAT-02 §6] · static trace over the unrecovered regions.
-- The purpose of the ten `-B` words that the parser compares and never acts on
-  (`deathends` … `watching`); they are inert in retail and have no
-  implementation impact · §3.1 [R-PLAT-01 §2] · none needed.
 - TLS destructor and `DeleteCriticalSection` callsites: the thread and lock
   census is bounded by the recovered function window, and these sites fall
   outside it · §5.1, §5.2 · static trace over the unrecovered regions.

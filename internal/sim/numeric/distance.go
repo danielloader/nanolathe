@@ -274,8 +274,14 @@ func Distance(x, y float64) float64 {
 	if b > a {
 		m, s = b, a
 	}
-	if m == 0 {
-		return 0
+	if s == 0 {
+		// With one zero operand, the smaller quotient and its square are zero;
+		// the sum and root are one, and the mantissa product is half of m's
+		// normalized mantissa [01 R-DET-01 §7]. Restoring exponents yields m.
+		// Even for a subnormal m, the final shift discards only the zero
+		// bits introduced by normalization. Both-zero returns positive zero
+		// because a and b above have already had their sign bits cleared.
+		return m
 	}
 	mm, me := decompose(m)
 	sm, se := decompose(s)

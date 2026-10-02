@@ -190,7 +190,7 @@ never a guess. Established unless marked:
 
 | Rule | Retail | Lockstep form |
 |---|---|---|
-| Host options | At battle entry every peer copies the host's commander-death rule, cheat gate, mapping and line-of-sight bits and unit limit `[08 R-ENTRY-01 §2]`. | Part of the agreed configuration (§8.1). |
+| Host options | At battle entry every peer copies the host's commander-death rule, cheat gate, mapping and line-of-sight bits and unit limit `[08 R-ENTRY-01 §2]`. Two further host options are not copied there: *watching allowed*, off in a new game, gates watcher joins, the side control's watcher choice and the defeat watch offer; *game closed* gates joins and added computer players `[08 R-SKIR-01 §12]`. No command-line word presets a host option; an online service's configuration file can preset all of them but *game closed* `[01 R-PLAT-01 §2]` `[08 R-SKIR-01 §7]`. | Part of the agreed configuration (§8.1), watching allowed included. Game closed is lobby admission and stays with the room (§12.4). |
 | Commander death | *Game continues*, *game ends* (the commander's death destroys all of its owner's units) or *deathmatch* (the same sweep, then a respawn; never ends by elimination) `[08 R-SKIR-01 §3]`. | `SkirmishConfig.CommanderDeath`, already modelled; the sweep runs for every seat (§6). |
 | Mapping, line of sight | Mapped or unmapped; permanent, circular or true `[03 R-VIS-01 §1]`. | Configuration, already modelled. |
 | Unit limit | The battleroom's maximum, an equal slice per player `[08 R-SKIR-01 §6]` `[05 R-SHARE-01 §7]`. | Configuration, already modelled. |
@@ -198,14 +198,14 @@ never a guess. Established unless marked:
 | Unit restrictions | Multiplayer only: a per-unit limit of 0–100 or none; units marked `wacky` default to 0; `norestrict` units are not offered `[08 R-SKIR-01 §10]` `[05 R-SHARE-01 §9]`. | **Not modelled today**: a new configuration field and lobby screen. |
 | Unit roster | Peers keep only units every peer selected and holds compatibly `[08 "Unit-data negotiation and catalog retention"]`. | Identical catalogs are required instead (§8.2); negotiating a common roster is §15 Q15. |
 | Cheats | Allowed online only when the host enabled *Cheat Codes* `[08 R-OOS-01 §5]`; a cheat line reaches every player `[07 R-CAM-01 §6]`. | A lobby option; cheat commands are stream entries only when it is on (§7.1). |
-| Alliances | Two alliance rows per seat; declarations change in battle through the allies screen; a computer reciprocates at once, a human by its own declaration `[05 R-SHARE-01 §1]`. The in-battle protocol is **Unknown**. | Declarations are seat commands. |
-| Allied sight | Sight grids never merge between allies `[03 §3.2]`. Explored-map sharing exists behind a share-mapping bit `[05 R-SHARE-01 §6]`, which `[03 R-VIS-01 §7]` contradicts. | As retail; the conflict is §19 O3. Shared allied vision, as Survival already does for its team, would be a separate Modern policy. |
+| Alliances | Two alliance rows per seat; declarations change in battle through the allies screen; a computer reciprocates at once, a human by its own declaration `[05 R-SHARE-01 §1]`. A declaration travels to its target alone and the receiving machine writes the declarer's row; the allies screen's sending side is **Unknown** (§19 O5). | Declarations are seat commands. |
+| Allied sight | Current sight is per player and never merged `[03 §3.2]`. Two opt-in shares exist, off at the start and toggled in battle by chat commands. *Share mapping* copies the sharer's explored tiles, every 450 ticks, into each surviving remote human it has declared alliance toward — or once, from the share screen, toward anyone — and under Permanent line of sight an explored tile is also a visible one `[05 R-SHARE-01 §6]`. *Share radar* marks the sharer's own units as friendly contacts for viewers it has declared alliance toward, and passes on none of its detections `[03 R-VIS-01 §7]`. | As retail (§6.3). Shared allied vision, as Survival already does for its team, would be a separate Modern policy. |
 | Automatic sharing | Every 60 ticks, for the local player only, surplus above a threshold flows to an allied, surviving remote human with less stock; computer players never receive it `[05 R-SHARE-01 §3]`. | Runs for every human seat, slots ascending (§6). |
 | Giving | The share screen gives resources (no alliance test) and units other than airborne, transported and commander units `[05 R-SHARE-01 §5]`. A transferred unit is always replaced by a fresh record without its kills, orders or groups; for a remote new owner the sender only kills its copy and sends the transfer, the receiver creates the replacement, and the stockpile bytes travel under a different gate `[05 R-WORK-01 §15]`. | Seat commands; a transfer between seats of different machines takes the remote branch's copy rules (§6). |
 | Pause and speed | Any player's key toggles pause and broadcasts it; speed is 1–20, refused to watchers; unpausing gives no catch-up burst `[07 R-CAM-01 §2]` `[01 §4.3]`. A battle starts unpaused at speed 10 `[08 R-ENTRY-01 §2]` `[08 R-ENTRY-01 §3]`. Who *may* pause or change speed is **Unknown** `[08 "Lockstep advancement"]`. | Not offered online in the first releases: normal speed, no pause (§15 Q5). When it is offered it is relay pacing, not world state (§4.4). |
 | Ending | Each machine judges its own player every 30 ticks; authored map triggers are never checked online; defeat is having no live units; victory needs every other active non-watching player eliminated or a mutual ally with shared victory; a result locks after six consecutive true checks `[08 R-SKIR-01 §3]` `[08 R-TRIG-01 §6]`. With no human left playing a countdown ends the battle `[08 R-SESS-01 §1]`. | The end-condition block runs for every human seat (§6). |
-| Defeated players | May keep watching ("You're out! Continue Watching?"); one hosting live computer players is held in watch mode, because leaving would terminate them `[08 R-SKIR-01 §3]`. | Per seat (§6.6, §11.1). |
-| Watchers | A watcher holds a seat with no commander — its placement draws are still taken — sees everything, and is left out of scores and elimination `[08 R-ENTRY-01 §5]`. | Observer rows in the configuration (§11.4). |
+| Defeated players | Where the host allows watching, a defeated player becomes a watcher at its defeat latch and is then asked "You're out!  Continue Watching?": *Yes* changes nothing further and *No* leaves `[07 R-FE-01 §9]`. Where it does not, the player takes the ordinary lost ending, as in skirmish. One hosting live computer players is put in watch mode without the question, whatever the option says, because leaving would terminate them `[08 R-SKIR-01 §3]`. | Per seat (§6.6, §11.1). |
+| Watchers | A watcher holds a seat with no commander — its placement draws are still taken — sees everything, and is left out of scores and elimination `[08 R-ENTRY-01 §5]`. Joining as one needs the host's *watching allowed* option; the host can switch it off in battle, which removes the remote watchers `[08 R-SKIR-01 §12]` `[07 R-HUD-04 §1]`. | Observer rows in the configuration (§11.4). |
 | Resign, host loss, timeout | Resigning or losing the host ends the battle without a win `[08 "Session end and reporting"]`; a silent peer is dropped after the `-T` peer timeout `[01 R-PLAT-01 §2]`; no reconnect or late-join protocol has been found `[08 "Disconnect, resign, and peer loss"]`. What happens to a departed player's units and resources is **Unknown**. | §11.1. |
 | Saving | Disabled in multiplayer `[08 R-SAVE-02 §4]` `[08 "Multiplayer saves"]`. | Not offered (§11.5). |
 | Replays | Retail has none `[08 "Replay"]` `[08 "Bounded absence"]`; the community recorder's files are `[fmt tad]`. | A Nanolathe feature, not a rule (§10). |
@@ -550,21 +550,22 @@ installer builds with that setting cleared.
 
 **Which results are right is a retail question, not a portability one.**
 Retail's two-argument distance routine runs with a 64-bit significand
-`[01 R-DET-01 §3]`. A 2026-10-01 trace of its arithmetic reads: both operands
-are divided by the larger, the two squares are summed in one
-extended-precision expression, the root is taken at that precision, and each
-of those results and the final product is stored to a double. That reading
-is a **Supported inference** until it is recorded under the research anchor
-and re-verified (§19 O18). A software model of the sequence, compared with
-the library after the engine's truncation:
+`[01 R-DET-01 §3]`, and `[01 R-DET-01 §7]` records its arithmetic step by
+step from two independent traces: both operands are divided by the larger,
+the two squares are summed in one extended-precision expression, the root is
+taken at that precision, and each of those results and the final product is
+stored to a double. Six of its thirty-nine call sites keep the double, so the
+whole result is observable and not only its truncation. A software model of
+the sequence, compared with the library after the engine's truncation:
 
 | Inputs | arm64 library | amd64 library |
 |---|---|---|
 | 4,504,501 unordered integer pairs in 0–3000 | 0 differ | 49 differ — the 98 ordered pairs above |
 | 6,000,000 raw 16.16 deltas of 2^8–2^28 | 0 differ | 17 differ |
 
-The arm64 build's fused `1 + q·q`, rounded once, reproduces retail's
-extended-precision sum; the amd64 assembly rounds twice and is the outlier.
+After truncation the arm64 build's fused `1 + q·q`, rounded once, agrees with
+retail's sequence on every pair sampled; the amd64 assembly rounds twice and
+is the outlier.
 `Hypot(165, 52)` is 173.00000000000003 in the model, as on arm64. The model
 is itself one below the exact whole answer on 722 ordered pairs, as retail's
 routine then is, so exactness is not the target either. Before truncation
@@ -575,12 +576,15 @@ the flight brake.
 The fix (§16, M1) is therefore defined by retail, function by function:
 
 - **Distance.** An in-repository routine performs retail's rounding sequence
-  in integer and software-float arithmetic, identical on every architecture
-  by construction. A version "with every product rounded before it is added"
-  would standardise every platform on the amd64 values and move the
-  arm64-recorded locks away from retail. With the retail sequence the
-  truncating call sites should leave those locks where they are; a lock that
-  does move is evidence about a float-consuming site and is explained as such.
+  in integer arithmetic, identical on every architecture by construction. A
+  version "with every product rounded before it is added" would standardise
+  every platform on the amd64 values and move the arm64-recorded locks away
+  from retail. A prototype of the retail sequence (2026-10-01) matched a
+  big-number model of `[01 R-DET-01 §7]` on twenty-one million operand
+  pairs and, substituted at all thirteen call sites, left the fifteen locks
+  unchanged on arm64 and on amd64. It costs about 50 ns a call against the
+  library's 2 ns, so M1 measures it in the simulation benchmark and adds a
+  proven shortcut for the truncating sites only if the tick needs one.
 - **Sine and cosine.** The engine's angles are 65,536 values. A table of the
   results, built once by a routine compiled under the fusion guard, replaces
   the calls on the piece-rotation chain and the flight lean and takes the
@@ -589,6 +593,12 @@ The fix (§16, M1) is therefore defined by retail, function by function:
   the fusion guard. No narrowed result differed in the measurements above, so
   these should move no lock; their retail forms are recorded where a stored
   value could change.
+
+The library implements sine, cosine, tangent, arctangent and arccosine in
+portable Go on both architectures; the two differ only where the arm64
+compiler fuses a multiply-add inside them. An in-repository form with every
+product rounded therefore returns the amd64 library's bits on every
+platform, and the amd64 build already holds every lock.
 
 **Conversions are part of the same hazard.** Go leaves a floating-point to
 integer conversion implementation-defined when the value does not fit, and
@@ -659,20 +669,36 @@ the host in three ways:
 - **The viewer.** The COB effect gate (§6.3) decides whether an emit produces
   a frame event, and that event is admitted to the same pool.
 - **The event window.** Events reach the pool through a per-tick window of
-  4,096 that positional audio shares. Audio events exist only on a host with
-  an audio service, and only where the viewing seat can hear them.
+  4,096 that positional audio and status events share. An audio event is
+  emitted only where the viewing seat can hear it, so the window's occupancy
+  follows the viewer as well. In play it stays far from its bound (below).
 
 Measured on 2026-10-01 with the Strict 3.1 benchmark fight (three 250-unit
 armies) and a resolver supplying the per-frame holds the window reads from
-the same art: the pool first reaches 300 at tick 3,284, where without the
-resolver it peaks at 286. The two runs' partial fingerprints are equal
-through tick 3,000 and different at tick 4,500 and at every later
-checkpoint. A window and a headless host therefore already compute different
-battles from the same inputs, and every fingerprint lock is headless. The
-Community and Modern scenes, with their larger pools, did not fill within
-3,000 ticks. ARCHITECTURE §2 already states the intent for `SimArt` — "so
-headless and windowed battles run one simulation" — and this reader of art
-was left behind when the others moved there.
+the same art: the pool first reaches 300 at tick 3,283, where without the
+resolver it peaks at 286. In that tick's unit phase it refuses three shatter
+fragments and ten other admissions, which leaves the simulation stream 24
+draws and the CRT stream 10 draws behind the other run. The two runs'
+partial fingerprints are equal through step 3,000 and different at step
+4,500 and at every later checkpoint. A window and a headless host therefore
+already compute different battles from the same inputs, and every
+fingerprint lock is headless.
+
+A census of the same day shows how narrow the exposure is. Each scene ran
+with and without that resolver under each reserved rule set:
+
+| Scene | Strict 3.1 (300 records) | Community 3.9 (3,000) | Modern (3,000) |
+|---|---|---|---|
+| Benchmark fight, 15,000 steps | full from tick 3,283, in 30 ticks; 30 fragments and 81 other admissions refused | peak 392 | peak 431 |
+| Computer-player game, to 54,000 ticks | peak 18 | peak 43 | peak 159 |
+| Survival, to its defeat | peak 126 | peak 260 | peak 124 |
+
+Only the Strict fight diverges. Every other pair of runs keeps equal
+fingerprints to its end, and no existing lock constant changes with the
+resolver. The event window peaks at 48 events in a tick against its bound of
+4,096 and drops nothing. ARCHITECTURE §2 already states the intent for
+`SimArt` — "so headless and windowed battles run one simulation" — and this
+reader of art was left behind when the others moved there.
 
 The fix (§16, M1): the holds become simulation content, compiled into
 `SimArt` beside the entry lengths and feature sequences it already carries
@@ -683,8 +709,8 @@ snapshot (§9.1), and their code — today in `internal/render`, which the
 determinism guards exempt as presentation by package — comes under those
 guards (§14). The viewer gate and the audio share of the window are the
 multi-seat half and belong to §6.3. The windowed timing is the researched
-one, so M1 moves the headless fingerprints wherever a pool fills and leaves
-the window's battles as they are.
+one, so M1 moves a headless fingerprint only where a pool fills — in none of
+today's locked scenes — and leaves the window's battles as they are.
 
 ### 5.4 Invariant amendments
 
@@ -745,15 +771,17 @@ map cells, the unit-state and economy packets `[04 R-COLL-01 §4]`
 ### 6.2 Perspective slots
 
 Retail keeps two slots per machine, the local player's own slot and the
-viewing slot; they are written together at battle entry and re-pointed
-together when the local player becomes a watcher, and the sensor phase, the
-visibility probes and the minimap contacts all read the viewing slot
-`[03 R-VIS-01 §4]`. The `+View` cheat moves only the viewing slot
-`[07 R-CAM-01 §6]`.
+viewing slot; they are written together at battle entry, and the sensor
+phase, the visibility probes and the minimap contacts all read the viewing
+slot `[03 R-VIS-01 §4]`. The `+View` cheat moves only the viewing slot
+`[07 R-CAM-01 §6]`. A multiplayer player who becomes a watcher at defeat
+sees everything because its machine clears its own mapping and line-of-sight
+mode bits; that branch writes neither slot `[08 R-SKIR-01 §3]`
+`[03 R-VIS-01 §4]`.
 
 A lockstep battle keeps one **perspective** per human seat: an own slot (the
-seat) and a viewing slot (the seat, until that seat's watch or `+View`, both
-of which are stream entries, moves it). Every authoritative read of "the local
+seat) and a viewing slot (the seat, until `+View`, a stream entry, moves it).
+Every authoritative read of "the local
 player" or "the viewing slot" becomes a read of a perspective, chosen by who
 is acting:
 
@@ -782,17 +810,17 @@ sensor source gate — which the rows now carry.
 
 | Work | Contract | Today | Lockstep form |
 |---|---|---|---|
-| Sensor phase | Five unit walks that write the seen, sonar, jammed and decloak-timer bits from the viewing slot, inside that player's 30-tick settlement deadline, only when more than one player is active; a defeated or watching viewer marks every unit friendly `[03 R-SENSOR-01]` `[03 R-VIS-01 §4]`. Every unit's fallback targeting reads the seen set `[06 §3.1]`; the sonar bit exempts underwater rejection; the decloak bit feeds cloak upkeep. | Runs in the viewing owner's due block (`step.go`); passes in `internal/visibility/sensors.go`; new units of the viewing owner get the sonar bit at creation (`session/visibility.go`). | One pass per perspective, in that seat's own deadline block. The bits it writes are held per perspective; each reader reads its acting unit's perspective. Pass 4's source gate, which retail writes as "the owner's controller is 1 or 2" and means "simulated on this machine" (`ownerLocallySimulated`), becomes "this perspective's seat or a computer seat it hosts": with every human seat control 1, the unchanged gate would let each perspective's pass write every seat's decloak bit. |
+| Sensor phase | Five unit walks that write the seen, sonar, jammed and decloak-timer bits from the viewing slot, inside that player's 30-tick settlement deadline, only when more than one player is active; a defeated or watching viewer marks every unit friendly `[03 R-SENSOR-01]` `[03 R-VIS-01 §4]`, and the first walk also marks the units of an owner that has declared alliance toward the viewer and shares radar `[03 R-VIS-01 §7]`. Every unit's fallback targeting reads the seen set `[06 §3.1]`; the sonar bit exempts underwater rejection; the decloak bit feeds cloak upkeep. | Runs in the viewing owner's due block (`step.go`); passes in `internal/visibility/sensors.go`; new units of the viewing owner get the sonar bit at creation (`session/visibility.go`). | One pass per perspective, in that seat's own deadline block. The bits it writes are held per perspective; each reader reads its acting unit's perspective. The alliance rows and radar-share options the first walk reads are per-seat battle state. Pass 4's source gate, which retail writes as "the owner's controller is 1 or 2" and means "simulated on this machine" (`ownerLocallySimulated`), becomes "this perspective's seat or a computer seat it hosts": with every human seat control 1, the unchanged gate would let each perspective's pass write every seat's decloak bit. |
 | Direct-visibility predicate | Reads the local player's coverage bit even for a query on behalf of another record `[03 §3.2]`. | `internal/visibility/predicate.go`, reached by every side's target-list rebuild, Modern targeting, danger and repair-pad queue, the Classic computer player's rally sight `[08 R-AI-01 §7]`, and the COB effect gate below. | Reads the querying record's perspective. |
-| COB effects | The effect opcode first tests whether the viewing player can see the unit; a failed test does nothing at all, which is why the research places the gate outside the deterministic contract `[04 R-COB-03 §6]`. A passing test spawns strip objects that take pool slots and CRT draws `[03 R-STRIP-01 §1]` and a record in the fixed effect pool `[03 §1]`, whose occupancy decides simulation-stream draws as well (L9). Draw counts on both streams are behaviour [I4], so the viewer decides both stream positions. | The gate in `composition.go` reads the viewing owner; the passing path also emits the frame event the pool admits in phase 4. | Spawned when the unit is visible to **any** perspective. The union is taken ahead of the strips and the pool, so both hold the same records on every client. Each client then draws only what its own seat may see: that filter is presentation and runs after the pool. |
-| Effect pool | A fixed pool whose records live for their animation players' authored holds `[03 §1]` `[06 R-WFX-01 §1]`; at capacity it refuses shatter fragments and land-dust puffers before their draws `[04 R-COB-04 §3]` `[03 R-FX-01 §3]`. | Timed by a resolver only the windowed host installs, and fed through an event window that positional audio shares; audio events exist only with an audio service and only where the viewing seat can hear (L9). | Timed from simulation content on every host (M1). Admission of the events that feed the pool does not depend on audio or status events: those are produced for the local seat after the pool, or counted in a window of their own. |
+| COB effects | The effect opcode first tests whether the viewing player can see the unit; a failed test does nothing at all. A passing test spawns strip objects that take pool slots and, in the sprinkle and smoke families, CRT draws `[04 R-COB-03 §6]` `[03 R-STRIP-01 §1]`. Draw counts are behaviour [I4], so on one machine the viewer decides the CRT stream's position. | The gate in `composition.go` reads the viewing owner; the passing path also emits a frame event that the fixed effect pool `[03 §1]` admits in phase 4, so the viewer reaches the pool's occupancy and, through it, the simulation stream as well (L9). | Spawned when the unit is visible to **any** perspective. The union is taken ahead of the strips and the pool, so both hold the same records on every client. Each client then draws only what its own seat may see: that filter is presentation and runs after the pool. |
+| Effect pool | A fixed pool whose records live for their animation players' authored holds `[03 §1]` `[06 R-WFX-01 §1]`; at capacity it refuses shatter fragments and land-dust puffers before their draws `[04 R-COB-04 §3]` `[03 R-FX-01 §3]`. | Timed by a resolver only the windowed host installs, and fed through an event window that positional audio shares; an audio event is emitted only where the viewing seat can hear it (L9). | Timed from simulation content on every host (M1). Admission of the events that feed the pool does not depend on audio or status events: those are produced for the local seat after the pool, or counted in a window of their own. |
 | Temporary sight | Recorded only for victims the viewing slot owns, at most 20 `[08 R-SESS-01 §3]`; expired in the executor tail `[01 R-PLAT-02 §5]`. | `internal/session/eyeball.go`; expiry in `post_loop.go`, once per host pump. | One list of 20 per perspective; expiry after every tick in lockstep (§4.5). |
 | End condition | Each machine evaluates its own player in that player's deadline block; online, authored map triggers are never polled `[08 R-TRIG-01 §6]` `[08 R-SKIR-01 §3]`. | `endConditionBlock` runs only on the local owner's due (`step.go`, `result.go`): with two humans the lower seat's defeat is never evaluated and the higher seat's ends the battle for everyone. | Every human seat's block evaluates that seat (§6.5). |
 | End countdown | The countdown and the ending bit are globals that each slot's settlement gates read `[05 R-ECO-01 §1]`, written from inside the local player's block. | `publishEndCountdown` (`result.go`) mirrors the one latch onto all ten player records, and settlement stops for every record while it runs. | Each human seat has its own latch, countdown and ending bit, written by its own block. A seat's countdown gates that seat's settlement and that of the computer seats it hosts, so one seat's defeat no longer freezes another's economy. Retail's scope on a machine that hosts several players is §19 O20. |
 | Commander death | The sweep and the game-over path run for local owners `[08 R-SKIR-01 §3]` `[06 §12.1]`. | `processPendingCommanderDeaths` runs per owner and branches on the control byte; the deathmatch respawn is the local owner's only (`commander_death.go`). | Every seat; every human seat is control 1. The respawn's full visibility rebuild `[08 R-ENTRY-01 §7]` refills every player's grids today (`RebuildEntry`); in lockstep it is confined to the grids the respawning seat's machine would have held — its own and its hosted computer seats' — as watcher entry is. Retail's scope with other players present is §19 O20. |
 | Watcher entry | A watching local player clears the global mapping and line-of-sight mode bits and rebuilds visibility, so it sees the unmasked map `[08 R-SKIR-01 §3]` `[08 R-ENTRY-01 §7]`. | `clearWatcherVisibilityMasks` in `ai_entry.go`, at entry and restore. | That seat's perspective only; the battle's mode bits stay as configured. |
 | Automatic sharing | The local slot only, every 60 ticks, multiplayer only `[05 R-SHARE-01 §3]`. | Inert: the economy's networked flag is never set. | Every human seat, ascending. |
-| Explored-map sharing | Sent to allied remote humans every 450 ticks behind the share-mapping bit `[05 R-SHARE-01 §6]`. | Not implemented. | Every human seat, pending §19 O3. |
+| Explored-map sharing | Behind the share-mapping option, every 450 ticks the sharer's machine asks each surviving remote human it has declared alliance toward to copy the sharer's explored tiles; the recipient's machine then sets the recipient's bit in every mapping-grid word that carries the sharer's. The share screen's map-information gift does the same once, toward anyone, and is applied on the giver's machine at once `[05 R-SHARE-01 §3]` `[05 R-SHARE-01 §6]`. The copied bit feeds the path probe and the placement gates and, under Permanent line of sight, the visibility predicate. | Not implemented; `internal/economy/tick.go` only counts eligibility. | A world operation on the one mapping grid at each tick divisible by 450: for every human seat ascending whose option is set, and every other surviving human seat ascending that its alliance row names, set the recipient's bit wherever the sharer's is set. Retail applies it a transport delay later on the recipient's machine; the same tick is the lockstep form. Computer seats never send and are never automatic recipients. The gift is a seat command (§7.1). |
 | Unit transfer | A local and a remote branch with different copy rules `[05 R-WORK-01 §15]`. | Local branch only. | Chosen by whether old and new owner share a machine. |
 | Player-record cheats | `+Give`, `+ATM` and their kin act for the local player `[07 R-CAM-01 §6]`. | Give debits the viewing owner; ATM and the Modern spawn command act for the local owner (`commands.go`, `spawn_command.go`). | The issuing seat (§7.1). |
 | Builder options | The Community builder preference belongs to the host player (DESIGN_COMMUNITY_PATCH §4.3). | Installed only for the local owner (`builder_options.go`). | Each seat's own, as a seat command. |
@@ -806,8 +834,12 @@ Retail branches on the session kind in many places beyond transport: kind 3
 starts at speed 10, takes its cheat gate and options from the host, offers
 watchers, restrictions and sharing, never polls authored triggers, and
 disables saving `[08 R-ENTRY-01 §2]` `[08 R-OOS-01 §5]` `[08 R-TRIG-01 §1]`
-`[08 R-SAVE-02 §4]`. The engine never builds kind 3 today (`skirmish.go`), and
-the session's network preload state exists but is unreachable. **A lockstep
+`[08 R-SAVE-02 §4]`. Its interface differs too: only in kind 3 does Tab open
+the strip of Options, Allies, Share and, on the host's machine, Control, and
+only there does `h` open the share screen; in a single-player battle Tab is
+the options key `[07 R-CAM-01 §2]` `[07 §11]`. The engine never builds kind 3
+today (`skirmish.go`), and the session's network preload state exists but is
+unreachable. **A lockstep
 battle is kind 3** for every branch the research establishes, minus the
 transport; a single-player battle stays kind 2. Each kind-3 branch an
 implementation unit meets is checked against its research section, and one
@@ -884,7 +916,7 @@ Every `HumanCommandKind` falls into one of four classes:
 | `Give` | `+Give p n metal`, open in every session kind: a transfer from the viewing player to seat `p` through the sharing transfer `[07 R-CAM-01 §6]`. | **Seat command** whose source is the issuing seat. |
 | `SetResource` | `+NoMetal p n` and `+NoEnergy p n`, also open in every session kind, write any player's stock `[07 R-CAM-01 §6]`. In retail multiplayer a write to another player's stock lasted only until that player's next economy snapshot overwrote it `[08 "Economy and integrity checks"]`. | **Seat command limited to the issuing seat's own stock and gated by the online cheat permission.** This authorization policy applies in every online gameplay mode, including Strict 3.1 (§15 Q8); it is Nanolathe's and not a claim about retail. |
 | `SetLogo` | `+Logo n p` sets any seat's insignia `[07 R-CAM-01 §6]` by writing the player record's logo, which saves and result rows carry. | **Local**: a presentation override on the issuing client. The record keeps its configured logo. |
-| *(new)* share toggles and thresholds, alliance declarations, the share screen's gifts | `+ShareMetal`, `+ShareEnergy`, `+ShareMapping`, `+ShareRadar`, `+SetShareMetal`, `+SetShareEnergy` are network-only `[07 R-CAM-01 §6]`; the allies and share screens `[05 R-SHARE-01 §1]` `[05 R-SHARE-01 §5]`. | **New seat commands.** |
+| *(new)* share toggles and thresholds, alliance declarations, the share screen's gifts | `+ShareMetal`, `+ShareEnergy`, `+ShareMapping`, `+ShareRadar`, `+ShareAll`, `+SetShareMetal`, `+SetShareEnergy` are network-only; each toggle flips the issuing player's own option, clear at the start `[07 R-CAM-01 §6]` `[05 R-SHARE-01 §3]`. The allies and share screens `[05 R-SHARE-01 §1]` `[05 R-SHARE-01 §5]`. Retail's receiver does not check that a share names the player that sent it `[05 R-SHARE-01 §4]`. | **New seat commands** acting on the issuing seat; the relay's seat stamp is the source (§7.2). The share options are per-seat battle state inside the digest (§9.1), not agreed configuration. |
 | `View`, `ATM`, `DoubleShot`, `HalfShot`, `Visibility`, `Meteor`, `MakeSelectable`, `Spawn` | Retail cheats, most of them behind the cheat gate `[08 R-OOS-01 §5]`, and the Modern testing spawn. The engine holds no cheat flag: the host refuses the gated ones outside a skirmish session and enqueues the rest unconditionally. Two are ungated in retail too, in every session kind `[07 R-CAM-01 §6]`: `MakeSelectable`, whose bit order resolution, trigger evaluation and the computer player read, and the line-of-sight-type half of `Visibility`, which rewrites the battle's one mode word. `DoubleShot` and `HalfShot` change every shot; the argument-free meteor arms a storm with four CRT draws; the spawn creates a unit and is gated only on the Modern rule set. | **Seat commands only when the lobby enabled cheats** (§15 Q8), the two ungated ones included. The sending UI refuses them when disabled, and every receiving simulation independently enforces that permission before dispatch. `View` moves only the issuing seat's perspective; the others act on the whole battle. |
 | *(not yet a command)* `ShootAll` | A retail toggle, ungated in every session kind `[07 R-CAM-01 §6]`, of a mode bit that target admission reads `[06 §3.2]`. The engine has the seam (`combat.Service.ShootAll`) and no typed command. | **Seat command** when it is added, setting that seat's bit: on a retail machine the bit governs the units that machine simulates. Whether it needs the cheat permission is part of Q8. |
 | `Gameplay` | Switches the rule set at the phase-1 boundary (DESIGN_GAMEPLAY_RULES §5). | **Lobby only**; refused in a lockstep battle. |
@@ -999,7 +1031,8 @@ policies that constrain its participating clients:
    `AutomatedPlayers`, the arena's switch, is never set in a lockstep battle.
 4. **The seat assignment**: which connection owns each human row.
 5. **The remaining online configuration**: computer host seats, unit
-   restrictions, cheat permission, pause/drop policy, scheduling policy,
+   restrictions, cheat permission, watching permission, pause/drop policy,
+   scheduling policy,
    spectator/replay release policy and the match view policy (§8.4).
    Its canonical encoding is versioned and covers every effective field,
    including defaults. No battle-affecting option may remain an unagreed
@@ -1435,8 +1468,10 @@ Two different things, kept apart:
   (`SkirmishControllerObserver` already exists), chosen in the lobby, with
   everything retail gives it — no commander, its placement draws still taken,
   the whole map visible, no score `[08 R-ENTRY-01 §5]`. Watchers are part of
-  the battle and fixed at its start. A defeated seat that keeps watching
-  becomes one at its defeat tick.
+  the battle and fixed at its start, and a room offers the row only when its
+  host allows watching `[08 R-SKIR-01 §12]`. A defeated seat becomes one at
+  its defeat tick where watching is allowed, and takes the ordinary lost
+  ending where it is not `[08 R-SKIR-01 §3]`.
 - **A spectator** is Nanolathe's: a stream consumer with no row. It receives
   the stream delayed by a lobby-chosen interval to reduce live intelligence
   sharing, sends nothing but permitted chat, may join at any time by
@@ -1578,6 +1613,14 @@ reference for what the lobby offers (§3.3); its screens are designed with
 M6. The first hosted lobby is a room reached by its code; a room list
 follows. Accounts, ratings and matchmaking
 come last (§16) and are ordinary web services beside the relay.
+
+Two of retail's host options are room state rather than battle
+configuration: *game closed* stops further joins and added computer seats,
+and *watching allowed* decides whether a watcher may join
+`[08 R-SKIR-01 §12]`. The room keeps the first for itself and passes the
+second into the configuration (§8.1). Retail's host presets its options from
+preferences or from an online service's configuration file, never from the
+command line `[08 R-SKIR-01 §7]`; a Nanolathe room has its own defaults.
 
 ### 12.5 Operations
 
@@ -1744,7 +1787,7 @@ every single-player battle bit-identical except where it says so.
 | Milestone | Delivers | Done when |
 |---|---|---|
 | **M0 Adoption** | The §15 decisions; scope changes in ARCHITECTURE and the agent instructions; the online authorization and view policies; the invariant amendments (§5.4). | Done 2026-10-01: the maintainer decided §15 and the documents agree. |
-| **M1 One simulation on every host** | Effect holds in `SimArt`, the pool timed from them on every host and the resolver seam removed (L9). The retail-defined distance routine, the angle tables, the in-repository `Atan2`/`Acos`/`Tan`, the defined conversions, their moved call sites and the two I2 source guards (L1). Two standing ratchets in the retail gate: the fingerprint locks from an amd64 build as well as an arm64 one, and a lock scene long enough to fill the Strict effect pool. | The distance routine's rounding sequence is recorded in the retail research and re-verified (§19 O18). Bit-pattern and engine-narrowing vectors agree on native darwin/arm64, linux/amd64 and windows/amd64. The truncating distance sites leave the arm64 locks unchanged; every lock that does move is explained by a pool that now fills or by a float-consuming site. A windowed and a headless run of one scene agree past the tick at which the pool fills. Complete cross-platform world equivalence is tested after M3, not claimed from these vectors alone. |
+| **M1 One simulation on every host** | Effect holds in `SimArt`, the pool timed from them on every host and the resolver seam removed (L9). The retail-defined distance routine, the angle tables, the in-repository `Atan2`/`Acos`/`Tan`, the defined conversions, their moved call sites and the two I2 source guards (L1). Two standing ratchets in the retail gate: the fingerprint locks from an amd64 build as well as an arm64 one, and a lock scene long enough to fill the Strict effect pool. | The distance routine implements `[01 R-DET-01 §7]`. Bit-pattern and engine-narrowing vectors agree on native darwin/arm64, linux/amd64 and windows/amd64. The fifteen existing locks are unchanged on both architectures, or each move is explained. A new Strict lock past the tick at which the pool fills equals the windowed probe's fingerprint, and a windowed and a headless run of one scene agree past that tick. Complete cross-platform world equivalence is tested after M3, not claimed from these vectors alone. |
 | **M2 Commands, configuration and identity** | Seat-attributed commands, receiver-side permissions, allocation serials, local interface state, explicit wire schemas with the payload audit of §7.4, complete content/build/configuration identities and match view policy fields. | Codec fuzz/round-trip and hostile-input tests; script/model/SimArt mismatches refused; every effective match field changes identity as intended. Existing fingerprints move only by removed interface bits, demonstrated with those bits masked. |
 | **M3 Canonical checkpoints and digest** | Reviewed state inventory with the effect pool in it, canonical writer and sub-digests, the tick ring, pump ends and the computer seats' applied-command hashes (§9). | Scripted single-seat scenes agree per checkpoint across supported platforms, host schedules and host kinds; a seeded one-field fault is located to its tick and owner from two rings alone; a checkpoint costs the same with AI workers idle and busy; state-owner checks and measured encoding budgets pass. Exact restore is not yet promised. |
 | **M4 Replays** | Recorder, playback, pump ends, pacing notes, digest checks and a headless replay command. | Long Strict and Modern replays agree across platforms and between a windowed recording and headless playback, through pauses, speed changes and late AI workers. Reproducible desync diagnostics retain common-boundary evidence. |
@@ -1782,7 +1825,8 @@ fairness or integrity of rated matches.
 - **Host kinds.** The same stream through a windowed client and a headless
   host, past the tick at which the Strict effect pool fills, with matching
   digests; a recording from either plays on the other. The 2026-10-01 probe
-  is the failing baseline: equal through tick 3,000, different from 4,500.
+  is the failing baseline: equal through step 3,000 and different from step
+  4,500, the first refusal falling at tick 3,283.
 - **Standing ratchets from M1.** The fingerprint locks from an amd64 build
   and an arm64 build on every retail gate run whose host can execute both
   (they agreed fifteen of fifteen on 2026-10-01), and a lock scene that
@@ -1829,10 +1873,10 @@ fairness or integrity of rated matches.
   room creator's state after it; in a rated room nothing continues (§9.3).
   Report a false digest and a false summary and check that neither moves an
   honest seat.
-- **Fingerprint locks.** Unchanged by every milestone except M1 and M2. M1
-  moves a lock only where a headless pool now fills as a window's does (L9)
-  or where a float-consuming distance site changes (L1); the truncating
-  distance sites are expected to move none. M2 moves them by the interface
+- **Fingerprint locks.** Unchanged by every milestone except M2, as far as
+  is measured: no locked scene fills its effect pool (L9) and a prototype of
+  the distance routine left all fifteen unchanged (L1), so a lock that M1
+  does move is explained before it lands. M2 moves them by the interface
   bits that leave the hashed status words. Each move carries its reason.
 - **Cost.** Measure serialization time per checkpoint and the tick ring's
   cost per tick, relay fan-out/retention, and live-target catch-up on large
@@ -1846,11 +1890,11 @@ fairness or integrity of rated matches.
 | Research | Used for |
 |---|---|
 | `[08 "Lockstep advancement"]`, `[08 "Soft pacing — no per-tick input barrier"]`, `[08 "No rollback or world snapshot resync"]`, `[08 "Full-world hash"]`, `[08 "Synchronization and integrity checks"]`, `[08 "Economy and integrity checks"]`, `[08 "Unit-sync ownership and body structure"]`, `[08 "DirectPlay transport"]`, `[04 R-MOV-03 §1]`, `[06 R-DMG-01 §9]`, `[05 R-SHARE-01 §1]`, `[01 §7.1]` | The retail model and why it is not reproduced (§3.1, §3.2) |
-| `[08 R-ENTRY-01 §2]`, `[08 R-ENTRY-01 §3]`, `[08 R-ENTRY-01 §5]`, `[08 R-SKIR-01 §3]`, `[08 R-SKIR-01 §6]`, `[08 R-SKIR-01 §10]`, `[08 R-TRIG-01 §1]`, `[08 R-TRIG-01 §6]`, `[08 R-SESS-01 §1]`, `[08 R-OOS-01 §5]`, `[08 R-SAVE-02 §4]`, `[08 "Multiplayer saves"]`, `[08 "Bounded absence"]`, `[08 "Session end and reporting"]`, `[08 "Disconnect, resign, and peer loss"]`, `[08 "Unit-data negotiation and catalog retention"]`, `[05 R-SHARE-01 §3]`, `[05 R-SHARE-01 §5]`, `[05 R-SHARE-01 §6]`, `[05 R-SHARE-01 §7]`, `[05 R-SHARE-01 §9]`, `[05 R-WORK-01 §15]`, `[07 R-CAM-01 §2]`, `[07 R-CAM-01 §6]`, `[07 §5]`, `[01 R-PLAT-01 §2]`, `[03 R-VIS-01 §1]`, `[03 §3.2]` | The player-visible rules a Strict 3.1 online battle keeps (§3.3, §7.1, §11) |
+| `[08 R-ENTRY-01 §2]`, `[08 R-ENTRY-01 §3]`, `[08 R-ENTRY-01 §5]`, `[08 R-SKIR-01 §3]`, `[08 R-SKIR-01 §6]`, `[08 R-SKIR-01 §10]`, `[08 R-TRIG-01 §1]`, `[08 R-TRIG-01 §6]`, `[08 R-SESS-01 §1]`, `[08 R-OOS-01 §5]`, `[08 R-SAVE-02 §4]`, `[08 "Multiplayer saves"]`, `[08 "Bounded absence"]`, `[08 "Session end and reporting"]`, `[08 "Disconnect, resign, and peer loss"]`, `[08 "Unit-data negotiation and catalog retention"]`, `[05 R-SHARE-01 §3]`, `[05 R-SHARE-01 §5]`, `[05 R-SHARE-01 §6]`, `[05 R-SHARE-01 §7]`, `[05 R-SHARE-01 §9]`, `[05 R-WORK-01 §15]`, `[07 R-CAM-01 §2]`, `[07 R-CAM-01 §6]`, `[07 §5]`, `[07 §11]`, `[07 R-FE-01 §9]`, `[07 R-HUD-04 §1]`, `[01 R-PLAT-01 §2]`, `[03 R-VIS-01 §1]`, `[03 R-VIS-01 §7]`, `[03 §3.2]`, `[05 R-SHARE-01 §4]`, `[08 R-SKIR-01 §7]`, `[08 R-SKIR-01 §12]` | The player-visible rules a Strict 3.1 online battle keeps (§3.3, §6.4, §7.1, §11) |
 | `[03 R-SENSOR-01]`, `[03 R-VIS-01 §4]`, `[08 R-SESS-01 §3]`, `[08 R-ENTRY-01 §7]`, `[04 R-COB-03 §6]`, `[03 R-STRIP-01 §1]`, `[04 R-P0-08-B §1]`, `[08 R-AI-01 §7]`, `[06 §3.1]`, `[06 §12.1]`, `[05 R-ECO-01 §1]`, `[05 R-FEAT-01 §8]`, `[04 R-COLL-01 §4]`, `[07 R-CAM-01 §12]` | Per-viewer and per-owner work (§6) |
 | `[01 §4.3]`, `[01 §4.4]`, `[01 R-PLAT-02 §5]`, `[01 R-PLAT-02 §7]`, `[03 R-COMP-02 §2]` | The clock, the pump and the executor tail (§4) |
 | `[fmt tad]` | The community recorder's files, which Nanolathe replays do not read (§3.3) |
-| `[01 R-DET-01 §3]`, `[03 §1]`, `[06 R-WFX-01 §1]`, `[04 R-COB-04 §3]`, `[03 R-FX-01 §3]`, `[06 §3.2]`, `[08 R-CAMP-01 §9]` | One simulation on every host: the distance routine's precision, the effect pool and what it gates, an ungated mode bit, and a kind-3 branch with a draw (§5.3, §6.4, §7.1) |
+| `[01 R-DET-01 §3]`, `[01 R-DET-01 §7]`, `[03 §1]`, `[06 R-WFX-01 §1]`, `[04 R-COB-04 §3]`, `[03 R-FX-01 §3]`, `[06 §3.2]`, `[08 R-CAMP-01 §9]` | One simulation on every host: the distance routine's precision and arithmetic, the effect pool and what it gates, an ungated mode bit, and a kind-3 branch with a draw (§5.3, §6.4, §7.1) |
 
 ## 19. Open questions
 
@@ -1864,12 +1908,12 @@ invent a retail rule while implementing an independent transport feature.
 |---|---|---|
 | O1 | Retail's authority rules for pause, speed, resign, sharing, player removal and cheat commands `[08 "Lockstep advancement"]` | A static trace of the pause and speed receivers' sender checks, or a retail multiplayer capture. Pause and speed are parked by §15 Q5; the trace still informs resign, sharing, removal and cheats. |
 | O2 | What happens to a departed player's units and resources, and what "terminating" a host's computer players does `[08 "Disconnect, resign, and peer loss"]` `[08 R-SKIR-01 §3]` | A trace of the peer-loss handler's unit and slot work. Settles §15 Q6. |
-| O3 | Explored-map sharing: `[05 R-SHARE-01 §6]` describes it behind the share-mapping bit; `[03 R-VIS-01 §7]` says nothing is shared | Reconcile the two documents. |
+| O3 | Explored-map sharing: `[05 R-SHARE-01 §6]` described it behind the share-mapping bit; `[03 R-VIS-01 §7]` said nothing is shared | **Settled 2026-10-01.** Both held of different stores: current sight is never merged, explored memory is copied on request, and the radar share marks the sharer's own units (§3.3, §6.3). Whether the share options survive into a second battle of one session stays **Unknown** in the research. |
 | O4 | Which machine hosts a retail computer player, and which difficulty it plays at online, where kind 3 shows no difficulty row `[08 R-SKIR-01 §9]` | A trace of the battleroom's computer-slot handling. Settles §15 Q4. |
 | O5 | The in-battle alliance protocol and the moment a declaration takes effect `[05 R-SHARE-01 §1]` | A trace of the allies screen's sender and receiver. |
-| O6 | A defeated player's end when the host has forbidden watching `[08 R-SKIR-01 §3]` | A trace of the watch-mode gate's other branch. |
-| O7 | Conflicting statements: host bit 15 is "game closed" in `[03 R-VIS-01 §1]` and "Watching" in `[08 R-SKIR-01 §9]`; the lobby words besides `-Block` write nothing per `[01 R-PLAT-01 §2]` but set the host's lobby word per `[08 R-SKIR-01 §7]`; the Tab menu is multiplayer-only per `[07 R-CAM-01 §2]` but described among non-network battle features in `[07 §11]`; "Continue Watching" differs between `[07 R-FE-01 §9]` and `[07 R-HUD-04 §1]` | Reconcile each pair before the lobby screens implement it. |
-| O8 | `[04 R-COB-03 §6]` places the effect gate outside the deterministic contract because a failed gate does nothing; I4 counts the passing path's CRT draws as behaviour | Reword the research section to say which contract it means. |
+| O6 | A defeated player's end when the host has forbidden watching `[08 R-SKIR-01 §3]` | **Settled 2026-10-01** for the defeated machine: with watching forbidden and no live computer player hosted there, it latches the ordinary lost ending, as in skirmish. What the other machines then do with its slot is O2. |
+| O7 | Four pairs of research statements that conflicted: which host option the overlay's `Watching:` row reads; whether the lobby's command-line words preset the host's options; whether the Tab strip exists outside multiplayer; and which step makes a defeated player a watcher | **Settled 2026-10-01.** Bit 15 is *game closed* and the `Watching:` row reads bit 7 `[08 R-SKIR-01 §12]`. No command-line word presets the lobby; an online service's configuration file does `[01 R-PLAT-01 §2]` `[08 R-SKIR-01 §7]`. The Tab strip and the `h` key are multiplayer-only `[07 R-CAM-01 §2]`. The elimination block makes the watcher, and neither answer to the question changes that `[07 R-FE-01 §9]`. |
+| O8 | `[04 R-COB-03 §6]` placed the effect gate outside the deterministic contract because a failed gate does nothing, while I4 counts the passing path's CRT draws as behaviour | **Settled 2026-10-01.** The section now says the failing branch is inert, the passing branch reaches the CRT stream and the strip pool, and the gate breaks no contract between retail's machines. |
 | O9 | Floating-point results under `GOAMD64=v3` and on native amd64 hardware; only Rosetta was measured | M1's cross-architecture job. |
 | O10 | Checkpoint and tick-ring cost, and a complete state inventory | M3's measurements and owner review; M8's exact-restore and continuation evidence. |
 | O11 | Rejoin time on the largest/late battles and whether snapshot recovery must precede hosted release | Live-target catch-up measurements before promising M7 rejoin; advance M8 if the supported window cannot be met. |
@@ -1879,7 +1923,8 @@ invent a retail rule while implementing an independent transport feature.
 | O15 | Ranked integrity level: full-state lockstep with verified results, or filtered state delivery | An explicit product decision before advertising ranked guarantees; prototype and budget the different presentation/state protocol if required. |
 | O16 | Whether competitive view policy also equalizes world viewport coverage | Decide whether resolution/aspect advantages are acceptable; otherwise define a common world-area bound and test all view/resize routes. No numeric viewport cap is assumed. |
 | O17 | Final wire field bounds, start/pacing/reconnect state tables and supported build manifests | M2 schemas and hostile/state-machine tests; implementation must not infer these from Go layouts or sender UI behavior. |
-| O18 | Retail's two-argument distance routine: the rounding sequence read on 2026-10-01 (L1), and the retail forms of the other library calls wherever a stored value could change `[01 R-DET-01 §3]` | Record the sequence under that anchor in the retail research and re-verify it against the executable before M1 depends on it. Its special-value and overflow exits were not traced. |
-| O19 | How often the effect pool fills in play under each rule set, and whether the 4,096-event window is ever reached | A pool and event census on the benchmark, path-benchmark and long computer-player scenes. It settles how many locks M1 moves, not whether L9 is fixed. |
+| O18 | Retail's two-argument distance routine: the rounding sequence read on 2026-10-01 (L1), and the retail forms of the other library calls wherever a stored value could change `[01 R-DET-01 §3]` | **Settled 2026-10-01** for the distance routine: `[01 R-DET-01 §7]`, from two independent traces, its exits included. Still open: a manual retail observation that would confirm it (a reach test at an offset such as 20 by 99, where the routine's truncated distance is 100 and the exact one 101), and the retail forms of the other library calls. |
+| O19 | How often the effect pool fills in play under each rule set, and whether the 4,096-event window is ever reached | **Settled 2026-10-01** by the census in L9: only the Strict benchmark fight fills its pool, no existing lock moves, and the event window peaks at 48 of 4,096. The path benchmark's players are all allied, so nothing there fires. |
 | O20 | Retail's scope, on a machine with other players present, for the end countdown and ending bit, the deathmatch respawn's visibility rebuild and the kind-3 elimination draw `[05 R-ECO-01 §1]` `[08 R-SKIR-01 §3]` `[08 R-CAMP-01 §9]` | A trace of each writer's player test in session kind 3. Until then the per-machine scope in §6.3 is a **Supported inference** from §6.1. |
 | O21 | Whether restarting Modern controllers from observation at a snapshot tick is acceptable play (§9.1, §15 Q21) | Play-test computer seats across forced restarts and compare with a save and load, which already restarts them. |
+| O22 | Strict fidelity where the engine takes an exact integer root or compares squares and retail calls its distance routine on whole numbers — candidates seen while reading for M1 are the leash test, the guard and nano ranges and the air order distance. The routine truncates to one below the exact root on 722 ordered whole-number pairs up to 3,000, such as 20 by 99 `[01 R-DET-01 §7]`. This is not a lockstep hazard: integer code computes the same everywhere | An audit of each candidate against its research section. Then, if the user wants it, one Strict change after M1 lands the routine, with every lock it moves explained. |

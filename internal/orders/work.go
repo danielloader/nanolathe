@@ -170,12 +170,12 @@ func hasMover(u *units.Unit) bool {
 	return u != nil && u.Def != nil && u.Def.BMCode == 1
 }
 
-// footprintPad is one end's half-footprint diagonal in whole world units:
-// trunc(8 · hypot(footX, footZ)) [05 R-WORK-01 §2]. Eight is half of the
-// sixteen world units a footprint cell spans, and 8·sqrt(n) is sqrt(64n).
+// footprintPad is one end's half-footprint diagonal [05 R-WORK-01 §2].
+// Signed footprint words enter the distance helper before multiplication by
+// eight and truncation; an exact integer root differs [01 R-DET-01 §7].
 func footprintPad(footX, footZ int32) int32 {
-	r := int64(footX)*int64(footX) + int64(footZ)*int64(footZ)
-	return int32(numeric.ISqrt64(64 * r))
+	distance := numeric.Distance(float64(int16(footX)), float64(int16(footZ)))
+	return numeric.TruncateFloat64ToLow32(8 * distance)
 }
 
 // inBuildRange is the reach test shared by `MobileBuild`, `RepairUnit`,
@@ -194,9 +194,10 @@ func inBuildRange(builder *units.Unit, targetX, targetZ numeric.Fixed, targetFoo
 	if builder == nil || builder.Def == nil {
 		return false
 	}
-	dx := int64(builder.X) - int64(targetX)
-	dz := int64(builder.Z) - int64(targetZ)
-	distFixed := numeric.ISqrt64(dx*dx + dz*dz)
+	// The raw coordinate differences wrap as signed 32-bit before widening.
+	dx := int32(builder.X) - int32(targetX)
+	dz := int32(builder.Z) - int32(targetZ)
+	distFixed := numeric.TruncatedDistance(float64(dx), float64(dz))
 	// The high word is read as a signed 16-bit quantity out of a 32-bit
 	// register, not as a shift of the whole value: a separation of 32768 world
 	// units or more reads negative [05 R-WORK-01 §2].

@@ -1997,9 +1997,10 @@ func (a *SimArt) EffectEntryHolds(bank, entry string) ([]int32, bool)
   composition before the first unit script runs. No host can supply timing
   afterwards, and the late hydration of records admitted without it is gone.
 - **M1-C9 The pool lock.** The Strict benchmark scene is locked at step
-  4,500, past tick 3,283 where its pool fills. The constant equals the
-  2026-10-01 windowed probe's fingerprint at that step. The fifteen existing
-  locks are unchanged.
+  4,500, past tick 3,283 where its pool fills. At M1 landing the constant equalled the
+  2026-10-01 windowed probe's fingerprint at that step. O22 subsequently
+  corrects its dogfight threshold, as recorded in DESIGN_MOVEMENT_PATH §3.4;
+  the original fifteen locks remain unchanged.
 - **M1-C10 Guards.** After U4 the map-order, float, fusion, goroutine and
   import guards read the pool's code, and `internal/render` holds no state
   that a tick reads.
@@ -2135,4 +2136,4 @@ invent a retail rule while implementing an independent transport feature.
 | O19 | How often the effect pool fills in play under each rule set, and whether the 4,096-event window is ever reached | **Settled 2026-10-01** by the census in L9: only the Strict benchmark fight fills its pool, no existing lock moves, and the event window peaks at 48 of 4,096. The path benchmark's players are all allied, so nothing there fires. |
 | O20 | Machine scope of end state, respawn visibility and elimination draws | **Settled** by `[08 R-SKIR-01 §3]` `[08 R-ENTRY-01 §7]` `[08 R-CAMP-01 §9]` `[05 R-ECO-01 §1]`: per-machine countdown/latch, complete machine-grid rebuild, and one local CRT draw per elimination on each machine. Q24 leaves the history projection open; transport enumeration and remaining writer/caller scope questions stay in research. |
 | O21 | Whether restarting Modern controllers from observation at a snapshot tick is acceptable play (§9.1, §15 Q21) | Play-test computer seats across forced restarts and compare with a save and load, which already restarts them. |
-| O22 | Strict fidelity where the engine takes an exact integer root or compares squares and retail calls its distance routine on whole numbers — candidates seen while reading for M1 are the leash test, the guard and nano ranges and the air order distance. The routine truncates to one below the exact root on 722 ordered whole-number pairs up to 3,000, such as 20 by 99 `[01 R-DET-01 §7]`. This is not a lockstep hazard: integer code computes the same everywhere | An audit of each candidate against its research section. Then the authorized separate Strict change after M1 lands the routine, with every lock it moves explained. |
+| O22 | Strict fidelity where the engine takes an exact integer root or compares squares and retail calls its distance routine on whole numbers — candidates seen while reading for M1 are the leash test, the guard and nano ranges and the air order distance. The routine truncates to one below the exact root on 722 ordered whole-number pairs up to 3,000, such as 20 by 99 `[01 R-DET-01 §7]`. This is not a lockstep hazard: integer code computes the same everywhere | **Settled.** `[04 R-STANCE-01 §4]`, `[04 R-AIR-01 §8]` and `[05 R-WORK-01 §2]` establish the caller widths and routine identity. Leash, work/construction reach and air-order distances now use the portable kernel. Ordinary guard arrival and unit reclaim remain genuinely squared tests. The dogfight reads a signed high word before comparing with 160; correcting it alone explains the changed Strict tick-4,500 lock (DESIGN_MOVEMENT_PATH §3.4). The original fifteen locks are unchanged. |

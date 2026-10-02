@@ -1047,6 +1047,16 @@ is its only writer `[04 §2.3]` `[05 "Construction target state"]`.
 
 ### 3.2 Orders — C4…C9
 
+**Range arithmetic.** The pursuit leash and ground work reach use the portable
+retail distance kernel, with the caller's signed words and truncation order
+preserved `[04 R-STANCE-01 §4]` `[05 R-WORK-01 §2]`. Exact integer roots and
+squared-distance substitutes differ at integer boundaries
+`[01 R-DET-01 §7]`. `retail_distance_test.go` locks the boundary, signed leash,
+raw subtraction wrap and footprint narrowing. Guard point arrival and unit
+reclaim retain their separately researched squared tests. These are shared
+retail-baseline corrections; the approved Modern guard and movement policies
+continue through their existing rules.
+
 **C4 — the descriptor table.** Four static batches of 23, 22, 22 and 1 records;
 after every batch the whole table re-sorts ascending by canonical name, and an
 order's identity is its index in the final sorted table. The empty name sorts to

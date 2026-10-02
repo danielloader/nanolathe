@@ -409,17 +409,17 @@ func targetOf(u *units.Unit, n *Node) *units.Unit {
 // The compare is inclusive, so a leash of 0 is "no leash" rather than "never
 // move".
 //
-// `trunc(hypot(dx,dz)) >= leash` is exactly `dx² + dz² >= leash²` over
-// non-negative integers, so the test is done in 64-bit integers and never
-// touches a square root or a float (I2).
+// The rounded distance can sit just below an exact integer root, so a
+// squared-distance comparison is not equivalent [01 R-DET-01 §7]. Both
+// position high words are signed 16-bit; the leash comparison is signed.
 func leashBroken(u *units.Unit, n *Node) bool {
 	if n == nil || n.Param3 == 0 || u == nil {
 		return false
 	}
-	dx := int64(u.X.Raw()>>16) - int64(n.GuardX)
-	dz := int64(u.Z.Raw()>>16) - int64(n.GuardY)
-	leash := int64(n.Param3)
-	return dx*dx+dz*dz >= leash*leash
+	dx := int32(int16(u.X.Raw()>>16)) - int32(n.GuardX)
+	dz := int32(int16(u.Z.Raw()>>16)) - int32(n.GuardY)
+	distance := numeric.TruncatedDistance(float64(dx), float64(dz))
+	return distance >= int32(n.Param3)
 }
 
 // ---------------------------------------------------------------------------

@@ -813,6 +813,20 @@ later claims without retaining a stale policy.
 
 ### 3.4 Flight and transports — C26…C31
 
+**Air-order distances.** Attack legs use `numeric.TruncatedDistance` with
+wrapping signed raw deltas and a signed low-word result, then each caller's
+comparison or signed halving `[04 R-AIR-01 §8]`. The dogfight intercept reads
+the signed high word before its whole-unit threshold. The tests in
+`retail_distance_test.go` preserve these boundaries and confirm the threshold
+arm spends no RNG draw. Modern path, traffic and repair-pad rules are unchanged.
+
+This O22 correction changes only the Strict tick-4,500 fingerprint from
+`8ea359e7670a471c` to `7ff5d4238edd1720`. The dogfight no longer installs an
+intercept for distances from 160 through just below 161 whole units. A test
+overlay restoring only the old raw-distance comparison reproduces the old
+hash exactly; the other fifteen locks remain unchanged. This explains a
+retail correction, not a Modern policy departure.
+
 **C26 — the mode gate.** The flight integrator runs only when the mover's low
 mode bits equal 2. Any other mode zeroes all three velocity components, the
 scalar speed word and the sixteen-bit turn residual, with no partial step

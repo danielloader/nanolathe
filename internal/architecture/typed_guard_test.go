@@ -624,6 +624,13 @@ var float64FieldAllowances = map[string]string{
 // names the precise retail operation that needs binary64; all other float64
 // occurrences still use the shrink-only per-file baseline.
 var float64ScopeAllowances = map[string]float64Allowance{
+	"internal/orders/combat.go func leashBroken":                       {2, "I2 signed whole-unit leash distance through retail helper [04 R-STANCE-01 §4][01 R-DET-01 §7]"},
+	"internal/orders/work.go func footprintPad":                        {2, "I2 signed footprint words through retail distance before scaling and truncation [05 R-WORK-01 §2]"},
+	"internal/orders/work.go func inBuildRange":                        {2, "I2 wrapping raw coordinate differences through retail distance before signed high-word read [05 R-WORK-01 §2]"},
+	"internal/construction/factory.go func nanoFootprintPad":           {2, "I2 signed footprint words through retail distance before scaling and truncation [05 R-WORK-01 §2]"},
+	"internal/construction/factory.go func *Service.isWithinNanoRange": {2, "I2 wrapping raw coordinate differences through retail distance before signed high-word read [05 R-WORK-01 §2]"},
+	"internal/movement/airorders.go func airPlanarDistance":            {2, "I2 wrapping raw coordinate differences through retail distance before signed low-word truncation [04 R-AIR-01 §8]"},
+
 	"internal/effects/fragment.go func buildFragmentGeometry": {3, "I2 stored binary32 normal scaled for signed-low-word extrusion and velocity conversion [04 R-COB-04 §3]"},
 	"internal/effects/fragment.go func fragmentNormal":        {42, "I2 shatter normal differences, exact binary32-widened products, square root and division; named components narrow to binary32 [04 R-COB-04 §3]"},
 	"internal/effects/fragment.go const fragmentVertexScale":  {1, "I2 authored binary32 reciprocal-65535 coordinate conversion [04 R-COB-04 §3]"},

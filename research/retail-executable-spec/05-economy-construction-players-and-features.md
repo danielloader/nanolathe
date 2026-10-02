@@ -4403,19 +4403,42 @@ a `buildcostenergy > 0` guard around the decay is not retail.
 
 #### Build-distance range test and approach radii [R-WORK-01 §2]
 
-**Established.** The range test shared by mobile construction, repair and the
-VTOL twins is two-dimensional in X and Z, ignores Y entirely, and is
-footprint-aware on both ends. All three magnitudes go through a double-precision
-two-argument hypotenuse helper and then through the truncating conversion:
+**Established.** The range test in the ground `MobileBuild`, `RepairUnit`
+and `Capture` handlers is two-dimensional in X and Z, ignores Y entirely,
+and is footprint-aware on both ends. All three magnitudes call the specific
+two-argument distance routine of [01 R-DET-01 §7], then use the truncating
+conversion of [01 R-DET-01 §1]. With `wrap32` meaning retain the low 32 bits
+and interpret them as signed, the sequence is:
 
 ```
-distFixed  = trunc( hypot(builder.x - target.x, builder.z - target.z) )  // 16.16
-distWorld  = (int16)(distFixed >> 16)     // the signed high word, not a shift
-                                          // of the full 32-bit value
-builderPad = trunc(  8.0 * hypot(builder.footprintX, builder.footprintZ) )
-targetPad  = trunc( -8.0 * hypot(target.footprintX,  target.footprintZ ) )
-inRange    = (distWorld - builderPad + targetPad) <= (uint16)builddistance
+dx         = wrap32(builder.x - target.x)             // raw 16.16
+dz         = wrap32(builder.z - target.z)             // raw 16.16
+distFixed  = wrap32(trunc(distance(dx, dz)))
+distWorld  = (int16)((uint32)distFixed >> 16)           // signed high half
+builderPad = trunc( 8.0 * distance((int16)builder.footprintX,
+                                 (int16)builder.footprintZ))
+targetPad  = trunc(-8.0 * distance((int16)target.footprintX,
+                                 (int16)target.footprintZ))
+inRange    = wrap32(distWorld - builderPad + targetPad) <= (uint16)builddistance
 ```
+
+**Established — operation order and widths.** Subtract the raw positions
+with 32-bit wrap before converting the signed differences exactly to
+binary64. Do not subtract widened positions and retain the wider result.
+Likewise, sign-extend each footprint's 16-bit cell count before conversion.
+The distance routine returns its stored binary64 result; multiply that result
+by plus or minus eight **before** truncation, retaining the low 32 bits of
+each converted pad. These power-of-two scales are exact for the footprint
+inputs. The final subtraction and addition are 32-bit, and the inclusive
+comparison is signed against the zero-extended 16-bit build distance.
+
+The distinction from an exact root is observable: footprint `(20, 99)` gives
+`distance = 100.99999999999999`, a positive pad of 807 and a negative pad of
+−807. Taking the exact root would produce pads of 808 and −808. Truncating
+the distance first and then multiplying would instead produce 800 and −800;
+neither replacement preserves the call sequence. The same routine's
+rounding also remains observable in the centre distance before the high-half
+read.
 
 `targetPad` is computed with a **negative** eight, so both pads subtract: the
 test is centre distance minus each end's half-footprint diagonal, in world

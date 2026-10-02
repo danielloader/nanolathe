@@ -221,6 +221,10 @@ func (g *gameShell) liveSettings() settings.Settings {
 		Gameplay:         g.gameplay.Normalize(),
 		GameplayFeatures: g.gameplayFeatures,
 		BuilderOptions:   g.builderOptions,
+		// A selected library mod may temporarily supersede this saved mount
+		// input; unrelated writes keep it for the next base-content start
+		// (DESIGN_MODS_MUTATORS §4.3).
+		ContentProfile:   g.baseSettings.ContentProfile,
 		Mod:              g.modSetting,
 		Mutators:         g.mutatorSetting,
 		ModernAI:         g.modernAISetting,

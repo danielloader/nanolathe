@@ -974,7 +974,6 @@ func (p *nlPreview) render(g *nlGPU, inst *nlPreviewInstance, r nlRender, into *
 	frac := float32(inst.acc)
 	cl.SetTickFraction(frac)
 	cl.SetCameraFraction(frac)
-	cl.SetTrailStrength(r.trailStrength)
 	if r.classic {
 		if inst.enhanced {
 			cl.SetEnhanced(false)
@@ -999,8 +998,7 @@ func (p *nlPreview) render(g *nlGPU, inst *nlPreviewInstance, r nlRender, into *
 	// The recorder keeps every effect family on so its history (trails,
 	// wakes) survives a compare; the executor applies the selection, which is
 	// where each family's look is composed (DESIGN_GPU_RENDERER §30).
-	cl.BeginPresentationFrame()
-	list := cl.RecordModernFrame()
+	list := recordNLPreviewFrame(cl, r.trailStrength)
 	if list == nil {
 		return
 	}
@@ -1047,6 +1045,44 @@ func (p *nlPreview) render(g *nlGPU, inst *nlPreviewInstance, r nlRender, into *
 	sub := img.SubImage(image.Rect(film.ChromeInsetX, film.ChromeInsetY, film.ChromeInsetX+w, film.ChromeInsetY+h)).(*ebiten.Image)
 	// A sub-image draws with its own top-left at the origin.
 	(*into).DrawImage(sub, nil)
+}
+
+// recordNLPreviewFrame keeps one trail history for both pictures. Setting the
+// client's strength to zero retires that history (GPU design §30), so an Off
+// comparison hides only this record's marks; the next record rebuilds their
+// strengths from the retained world-space marks (interface design §3.17).
+func recordNLPreviewFrame(cl *client.Client, trailStrength int) *drawlist.List {
+	cl.SetTrailStrength(max(1, trailStrength))
+	cl.BeginPresentationFrame()
+	list := cl.RecordModernFrame()
+	if list != nil && trailStrength <= 0 {
+		list.Replay(nlPreviewHideTrails{})
+	}
+	return list
+}
+
+// Replay lends the per-frame mark arena, not the client's retained trail
+// history. Other command families are untouched and keep their ordinary order.
+type nlPreviewHideTrails struct{}
+
+func (nlPreviewHideTrails) Clear()                   {}
+func (nlPreviewHideTrails) Terrain(drawlist.Terrain) {}
+func (nlPreviewHideTrails) Sprite(drawlist.Sprite)   {}
+func (nlPreviewHideTrails) Glyphs(drawlist.Glyphs)   {}
+func (nlPreviewHideTrails) Fill(drawlist.Fill)       {}
+func (nlPreviewHideTrails) Line(drawlist.Line)       {}
+func (nlPreviewHideTrails) Points(drawlist.Points)   {}
+func (nlPreviewHideTrails) Flash(drawlist.Flash)     {}
+func (nlPreviewHideTrails) Halo(drawlist.Halo)       {}
+func (nlPreviewHideTrails) Model(drawlist.Model)     {}
+func (nlPreviewHideTrails) Fog(drawlist.Fog)         {}
+func (nlPreviewHideTrails) Surface(drawlist.Surface) {}
+func (nlPreviewHideTrails) Cursor(drawlist.Cursor)   {}
+func (nlPreviewHideTrails) Expand()                  {}
+func (nlPreviewHideTrails) Trails(batch drawlist.Trails) {
+	for i := range batch.Marks {
+		batch.Marks[i].Strength = 0
+	}
 }
 
 // Close retires every staged scene. A scene still being staged is closed

@@ -166,12 +166,55 @@ func (g *gameShell) syncCommunityPlacementOptions() {
 		{"NWRECKSNAP", p.WreckSnapRadius, g.communityPlacementRadiusSpec(false)},
 	} {
 		optionsPanel.SetStageAt(optionsPanel.Index(radius.name), communityPlacementRadiusStage(radius.value, radius.spec))
-		retailGreyGadget(optionsAssets.window, radius.name, radius.spec.inBattle && radius.spec.maximum == 0)
 	}
 	optionsPanel.SetStageAt(optionsPanel.Index("NSNAPMOD"), communityPlacementModifierStage(p.ClickSnapOverrideKey))
+	g.syncCommunityPlacementAvailability()
+}
+
+func (g *gameShell) communityPlacementOptionUnavailable(name string) string {
+	switch name {
+	case "NROVERLAY":
+		if !g.configurationFeatures().StructureRotation {
+			return "The selected rules do not enable structure rotation."
+		}
+	case "NMEXSNAP", "NWRECKSNAP":
+		features := g.configurationFeatures()
+		enabled, maximum := features.WreckSnap, features.WreckSnapRadiusMax
+		if name == "NMEXSNAP" {
+			enabled, maximum = features.MexSnap, features.MexSnapRadiusMax
+		}
+		if !enabled || maximum <= 0 {
+			return "The selected rules do not enable this placement snap."
+		}
+		if spec := g.communityPlacementRadiusSpec(name == "NMEXSNAP"); spec.inBattle && spec.maximum == 0 {
+			return "This battle does not enable this placement snap."
+		}
+	case "NSNAPMOD":
+		features := g.configurationFeatures()
+		p := g.presentation
+		mex := effectiveClickSnapRadius(p.MexSnapRadius, features.MexSnapRadius, features.MexSnapRadiusMax, features.MexSnap)
+		wreck := effectiveClickSnapRadius(p.WreckSnapRadius, features.WreckSnapRadius, features.WreckSnapRadiusMax, features.WreckSnap)
+		if p.QueuedOrderDrag == 0 && !features.ConstructionKickout && !features.StructureRotation && mex == 0 && wreck == 0 {
+			return "Enable an order-drag, rotation, kickout or snapping control first."
+		}
+	}
+	return ""
+}
+
+func (g *gameShell) syncCommunityPlacementAvailability() {
+	if optionsState == nil || optionsState.page != "placement" || optionsPanel == nil {
+		return
+	}
+	for _, name := range []string{"NROVERLAY", "NMEXSNAP", "NWRECKSNAP", "NSNAPMOD"} {
+		syncConfigurationOption(optionsPanel, name, g.communityPlacementOptionUnavailable(name), "")
+	}
 }
 
 func (g *gameShell) activateCommunityPlacementOption(name string) bool {
+	if g.communityPlacementOptionUnavailable(name) != "" {
+		g.syncCommunityPlacementOptions()
+		return true
+	}
 	p := g.presentation
 	switch name {
 	case "NPREVIEW":

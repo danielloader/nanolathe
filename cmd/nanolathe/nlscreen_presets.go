@@ -89,10 +89,8 @@ type nlPresetEntry struct {
 // that recommends settings, then the player's own.
 func (s *nlScreen) presetEntries() []nlPresetEntry {
 	var out []nlPresetEntry
-	if base, err := json.Marshal(settings.Defaults()); err == nil {
-		if patch, err := settings.Restrict(base, settings.ModScoped); err == nil {
-			out = append(out, nlPresetEntry{name: "Original game", source: "Built in", patch: patch, user: -1})
-		}
+	if patch, err := nlCompletePreset(settings.Defaults()); err == nil {
+		out = append(out, nlPresetEntry{name: "Original game", source: "Built in", patch: patch, user: -1})
 	}
 	for i := range s.mods {
 		m := &s.mods[i]
@@ -108,10 +106,111 @@ func (s *nlScreen) presetEntries() []nlPresetEntry {
 	return out
 }
 
-// draftSettings is the draft as a settings block: the shell's live settings
-// with every draft field over them.
-func (s *nlScreen) draftSettings() settings.Settings {
-	return settingsOf(s.shell().liveSettings(), s.draft)
+// A complete preset must encode Auto and default keys explicitly: the normal
+// settings file omits them, but omission in a patch would keep the previous
+// content's explicit limit or bindings. Mod recommendations remain partial.
+func nlCompletePreset(st settings.Settings) (json.RawMessage, error) {
+	data, err := json.Marshal(struct {
+		settings.Settings
+		UnitLimit   int                  `json:"unitLimit"`
+		KeyBindings settings.KeyBindings `json:"keyBindings"`
+	}{Settings: st, UnitLimit: st.UnitLimit, KeyBindings: st.KeyBindings})
+	if err != nil {
+		return nil, err
+	}
+	return settings.Restrict(data, settings.ModScoped)
+}
+
+// draftSettings composes the same value Apply will write, without calling
+// live shell setters: profile, pending presets, then touched cards and keys
+// (DESIGN_INTERFACE_HUD_INPUT §3.17). The full settings value retains pending
+// rows that have no card, such as audio, clock and gameplay feature overrides.
+func (s *nlScreen) draftSettings() (settings.Settings, error) {
+	g := s.shell()
+	base := g.liveSettings()
+	target := g.contentMod()
+	if !g.cs.manualRoots {
+		target = s.modAt(s.draft.mod)
+	}
+	if !sameMod(target, g.contentMod()) || s.draft.override != g.lockOverridden(target) {
+		// A pending content switch or lock override first reloads the settings
+		// layers. Resolve those layers from a captured value, without changing
+		// either shell or its stored lock approvals.
+		file := g.captureSettings()
+		if target != nil {
+			file.ModLockOverrides = slices.DeleteFunc(slices.Clone(file.ModLockOverrides), func(id string) bool { return id == target.ID })
+			if s.draft.override {
+				file.ModLockOverrides = append(file.ModLockOverrides, target.ID)
+			}
+		}
+		layers := gameShell{cs: &contentSet{mod: target}}
+		base = layers.effectiveSettings(file)
+		base.Presentation = startupPresentation(g.opts, base.Presentation)
+		base.Gameplay = startupGameplay(g.opts, base.Gameplay)
+	}
+	profile, err := nlControlsPresetPatch(base, nlControlsPresets[s.draft.controls].preset, g.survivalMenu)
+	if err != nil {
+		return base, err
+	}
+	patches := append([]json.RawMessage{profile}, s.pendingPresets...)
+	base, err = settings.Layer(base, patches...)
+	if err != nil {
+		return base, err
+	}
+	next := s.draftOf(base)
+	for _, page := range s.pages() {
+		for _, c := range page.cards {
+			if s.touched[c.key] && c.key != "content" {
+				nlCopyCard(c, &next, &s.draft)
+			}
+		}
+	}
+	if s.draft.keys != nil && (s.touched["keys"] || s.draft.controls != 0) {
+		next.keys = s.draft.keys
+	}
+	if minimum, ok := modMinimumGameplay(target); ok && gameplayBelow(next.gameplay, minimum) && !s.draft.override {
+		next.gameplay = minimum
+	}
+	return settingsOf(base, next), nil
+}
+
+// nlControlsPresetPatch reads the existing assignment table as a settings
+// patch. Its setters also update live presentation, so draft export must not
+// call them. The keyboard and dot-colour rows encode named compound values;
+// every other row already carries its saved scalar.
+func nlControlsPresetPatch(base settings.Settings, preset string, survivalMenu bool) (json.RawMessage, error) {
+	doc := map[string]any{}
+	for _, row := range controlsPresetRows {
+		value := row.presetValue(preset)
+		if value == presetUnchanged || (row.path == "skirmish.numPlayers" && survivalMenu) {
+			continue
+		}
+		var stored any = value
+		switch row.path {
+		case "keyBindings":
+			keys := base.KeyBindings
+			keys.Profile = keyProfiles[value]
+			stored = keys
+		case "presentation.playerDotColors":
+			stored = settings.DefaultPlayerDotColors
+			if value == playerColoursProTA {
+				stored = settings.ProTAPlayerDotColors
+			} else if value == playerColoursZero {
+				stored = settings.ZeroPlayerDotColors
+			}
+		}
+		path, into := strings.Split(row.path, "."), doc
+		for _, part := range path[:len(path)-1] {
+			child, ok := into[part].(map[string]any)
+			if !ok {
+				child = map[string]any{}
+				into[part] = child
+			}
+			into = child
+		}
+		into[path[len(path)-1]] = stored
+	}
+	return json.Marshal(doc)
 }
 
 // settingsOf lays a draft's fields over a settings block.
@@ -158,8 +257,15 @@ func (s *nlScreen) applyPresetToDraft(e nlPresetEntry, scopes []bool) {
 			return
 		}
 	}
-	before := s.draft
-	next, err := settings.Layer(s.draftSettings(), patch)
+	current, err := s.draftSettings()
+	if err != nil {
+		s.toast, s.toastLeft = err.Error(), 3
+		return
+	}
+	before := s.draftOf(current)
+	before.mod, before.controls, before.override = s.draft.mod, s.draft.controls, s.draft.override
+	before.fullscreen, before.mutators = s.draft.fullscreen, s.draft.mutators
+	next, err := settings.Layer(current, patch)
 	if err != nil {
 		s.toast, s.toastLeft = err.Error(), 3
 		return
@@ -168,6 +274,7 @@ func (s *nlScreen) applyPresetToDraft(e nlPresetEntry, scopes []bool) {
 	d.gameplay = next.Gameplay
 	d.pres = next.Presentation
 	d.glow, d.glowStrength = next.Display.Glow, next.Display.GlowStrength
+	d.shadows, d.vehicleShadows = next.Display.Shadows, next.Display.VehicleShadows
 	d.unitLimit = next.UnitLimit
 	d.switchAlt = next.SwitchAltEnabled()
 	d.interfaceType = next.InterfaceType
@@ -198,11 +305,12 @@ func (s *nlScreen) savePreset(name string) {
 	if g == nil || name == "" {
 		return
 	}
-	data, err := json.Marshal(s.draftSettings())
+	draft, err := s.draftSettings()
 	if err != nil {
+		s.toast, s.toastLeft = err.Error(), 3
 		return
 	}
-	patch, err := settings.Restrict(data, settings.ModScoped)
+	patch, err := nlCompletePreset(draft)
 	if err != nil {
 		return
 	}

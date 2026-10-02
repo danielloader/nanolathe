@@ -80,6 +80,9 @@ func TestNLScreenZoomStyleAndIconsApplyIndependently(t *testing.T) {
 				t.Setenv(settings.EnvPath, filepath.Join(t.TempDir(), "settings.json"))
 				g, s := settingsRegressionScreen(nil, settings.Defaults())
 				g.settingsWritable = true
+				// Choose the icon preference while zoom is available. Turning
+				// zoom off then preserves it for the next time zoom is enabled.
+				s.setCard(configurationCard(t, s, "iconstyle"), icons)
 				for _, c := range s.controlRows() {
 					switch c.key {
 					case "zoomstyle":

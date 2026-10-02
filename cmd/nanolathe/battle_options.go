@@ -129,6 +129,7 @@ func (b *battleSession) serviceBattleOptionsWidgets(p *ui.Panel, in *input.State
 		return true
 	}
 	g := b.shell
+	g.syncConfigurationAvailability()
 	for i, gad := range p.Window.Gadgets {
 		if gad.Kind == gui.KindScrollBar {
 			if s := g.retailOptionsSliderAt(i); s != nil {

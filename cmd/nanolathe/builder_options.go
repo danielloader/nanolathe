@@ -122,9 +122,47 @@ func (g *gameShell) syncBuilderOptions() {
 			optionsPanel.SetStageAt(optionsPanel.Index(name), values[i])
 		}
 	}
+	g.syncBuilderAvailability()
+}
+
+func (g *gameShell) builderOptionUnavailable(name string) string {
+	if name == "NOVERVIEW" {
+		return configurationUnavailable("tab", g.configurationMode(), g.presentation)
+	}
+	for group, names := range builderOptionNames {
+		for _, candidate := range names {
+			if name != candidate {
+				continue
+			}
+			features := g.configurationFeatures()
+			if group == 0 && !features.GuardingBuildersHold {
+				return "The selected rules do not enable builder guard preferences."
+			}
+			if group == 1 && !features.PatrollingBuilderFilters {
+				return "The selected rules do not enable builder patrol preferences."
+			}
+		}
+	}
+	return ""
+}
+
+func (g *gameShell) syncBuilderAvailability() {
+	if optionsState == nil || optionsState.page != "builders" || optionsPanel == nil {
+		return
+	}
+	for _, names := range builderOptionNames {
+		for _, name := range names {
+			syncConfigurationOption(optionsPanel, name, g.builderOptionUnavailable(name), "")
+		}
+	}
+	syncConfigurationOption(optionsPanel, "NOVERVIEW", g.builderOptionUnavailable("NOVERVIEW"), "Choose whether Tab opens Options or the mode's overview.")
 }
 
 func (g *gameShell) activateBuilderOption(name string) bool {
+	if g.builderOptionUnavailable(name) != "" {
+		g.syncBuilderOptions()
+		return true
+	}
 	if name == "NSWITCHALT" {
 		g.setSwitchAlt(g.retailOptionsStage(name, 2, boolInt(g.switchAlt)) != 0)
 		g.syncBuilderOptions()

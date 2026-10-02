@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 )
 
@@ -88,6 +89,7 @@ type nlShotStep struct {
 	gameSize     image.Point // logical game size for a sidebar layout sample
 	// The Controls page: which tab, and a key cap waiting for a press.
 	ctlGroup  int
+	ctlScroll int
 	capturing bool
 	profile   int
 	// part is the grouped card's part to select, for a part with a scene of
@@ -98,6 +100,42 @@ type nlShotStep struct {
 }
 
 func nlShotSteps(s *nlScreen, only string) []nlShotStep {
+	if only == "availability" {
+		var steps []nlShotStep
+		for _, sample := range []struct {
+			name, key      string
+			mode           gameplay.Mode
+			renderer       string
+			bottom, noZoom bool
+		}{
+			{"classic-effects", "water", gameplay.Modern, "classic", false, false},
+			{"strict-radar", "radardots", gameplay.Strict31, "modern", false, false},
+			{"strict-controls", "zoomlock", gameplay.Strict31, "modern", true, false},
+			{"community-controls", "tab", gameplay.Community39, "modern", true, false},
+			{"classic-controls", "zoomstyle", gameplay.Modern, "classic", true, false},
+			{"no-zoom-controls", "zoomlock", gameplay.Modern, "modern", true, true},
+			{"modern-controls", "zoomlock", gameplay.Modern, "modern", true, false},
+		} {
+			for pi, page := range s.pages() {
+				for ci, card := range page.cards {
+					if card.key != sample.key {
+						continue
+					}
+					step := nlShotStep{name: sample.name, page: pi, card: ci, draft: func(d *nlDraft) {
+						d.gameplay, d.pres.Renderer = sample.mode, sample.renderer
+						if sample.noZoom {
+							d.pres.ZoomStyle = settings.ZoomNone
+						}
+					}}
+					if sample.bottom {
+						step.ctlGroup, step.ctlScroll = len(nlControlGroups)-1, len(s.controlRows())
+					}
+					steps = append(steps, step)
+				}
+			}
+		}
+		return steps
+	}
 	if only == "cache" {
 		return []nlShotStep{
 			{name: "cache-1-cold", page: 0, card: 0},
@@ -284,7 +322,7 @@ func (g *nlShotGame) Draw(screen *ebiten.Image) {
 			}
 			s.presetSel, s.presetTop = 15, 12
 		}
-		s.ctlGroup, s.ctlRow, s.ctlScroll, s.capture = step.ctlGroup, 1, 0, nlCapture{}
+		s.ctlGroup, s.ctlRow, s.ctlScroll, s.capture = step.ctlGroup, 1, step.ctlScroll, nlCapture{}
 		if step.profile != 0 {
 			s.chooseProfile(step.profile)
 		}

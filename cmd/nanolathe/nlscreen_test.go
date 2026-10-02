@@ -159,7 +159,8 @@ func TestNLScreenPresetsSaveAndApplyPart(t *testing.T) {
 	g.attachSettings()
 	s := newNLScreen(func() *gameShell { return g })
 	s.draft = s.freshDraft(g)
-	s.draft.pres.Glint, s.draft.switchAlt = 0, true
+	s.setPart(configurationCard(t, s, "metal"), 1, 0)
+	s.setCard(configurationCard(t, s, "digits"), 1)
 	s.savePreset("Mine")
 	saved, err := settings.Load()
 	if err != nil {
@@ -167,6 +168,10 @@ func TestNLScreenPresetsSaveAndApplyPart(t *testing.T) {
 	}
 	if len(saved.Presets) != 1 || saved.Presets[0].Name != "Mine" {
 		t.Fatalf("saved presets %+v", saved.Presets)
+	}
+	exported, err := settings.Layer(settings.Defaults(), saved.Presets[0].Settings)
+	if err != nil || exported.Presentation.Glint != 0 || !exported.SwitchAltEnabled() {
+		t.Fatalf("preset lost pending edits: glint %d switchAlt %d: %v", exported.Presentation.Glint, exported.SwitchAlt, err)
 	}
 	// Back to the original game's graphics only: glint returns, the digit
 	// keys stay as the player set them.

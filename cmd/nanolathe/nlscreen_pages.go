@@ -19,18 +19,19 @@ import (
 // nlDraft is the screen's working copy. Nothing reaches the shell until
 // Apply, except that the live preview always shows the draft.
 type nlDraft struct {
-	gameplay     gameplay.Mode
-	mod          int // 0 is the original game, then the installed mods in order
-	override     bool
-	pres         settings.Presentation
-	glow         int
-	glowStrength int
-	mutators     content.Mutators
-	unitLimit    int
-	resolution   retailDisplayMode
-	fullscreen   bool
-	switchAlt    bool
-	controls     int // index into nlControlsPresets; 0 keeps the current rows
+	gameplay                gameplay.Mode
+	mod                     int // 0 is the original game, then the installed mods in order
+	override                bool
+	pres                    settings.Presentation
+	glow                    int
+	glowStrength            int
+	shadows, vehicleShadows int
+	mutators                content.Mutators
+	unitLimit               int
+	resolution              retailDisplayMode
+	fullscreen              bool
+	switchAlt               bool
+	controls                int // index into nlControlsPresets; 0 keeps the current rows
 	// keys is the draft keyboard map the Controls page edits; Apply hands a
 	// copy to the shell (DESIGN_INTERFACE_HUD_INPUT §3.6 "Rebinding").
 	keys          *input.KeyMap
@@ -51,16 +52,18 @@ const (
 )
 
 type nlCard struct {
-	key   string
-	label string
-	pics  []string // unit pictures for the card, first that exists wins
-	kind  nlKind
-	steps []string
-	subs  []string // per-step sub caption for halves and layers
-	get   func(d *nlDraft) int
-	set   func(d *nlDraft, v int)
-	desc  func(d *nlDraft, v int) string
-	chips []string
+	key       string
+	label     string
+	pics      []string // unit pictures for the card, first that exists wins
+	kind      nlKind
+	steps     []string
+	subs      []string // per-step sub caption for halves and layers
+	get       func(d *nlDraft) int
+	set       func(d *nlDraft, v int)
+	copy      func(to, from *nlDraft) // preserve exact values behind grouped selectors
+	valueText func(d *nlDraft) string
+	desc      func(d *nlDraft, v int) string
+	chips     []string
 	// scene is the preview preset for value v.
 	scene func(d *nlDraft, v int) string
 	// render applies value v to a frame's parameters.
@@ -210,7 +213,14 @@ func (s *nlScreen) gameCards() []nlCard {
 			get: func(d *nlDraft) int {
 				return gameplayOptionStage(d.gameplay)
 			},
-			set: func(d *nlDraft, v int) { d.gameplay = nlRuleModes[v] },
+			set:  func(d *nlDraft, v int) { d.gameplay = nlRuleModes[v] },
+			copy: func(to, from *nlDraft) { to.gameplay = from.gameplay },
+			valueText: func(d *nlDraft) string {
+				if mode := d.gameplay.Normalize(); mode != gameplay.Strict31 && mode != gameplay.Community39 && mode != gameplay.Modern {
+					return string(mode)
+				}
+				return gameplayLabel(d.gameplay)
+			},
 			desc: func(d *nlDraft, v int) string {
 				return [...]string{
 					"The original game exactly as TotalA.exe 3.1 plays it, known faults included.",
@@ -233,9 +243,16 @@ func (s *nlScreen) gameCards() []nlCard {
 				}
 				return 0
 			},
-			set: func(d *nlDraft, v int) { d.unitLimit = nlUnitLimits[v] },
+			set:  func(d *nlDraft, v int) { d.unitLimit = nlUnitLimits[v] },
+			copy: func(to, from *nlDraft) { to.unitLimit = from.unitLimit },
+			valueText: func(d *nlDraft) string {
+				if d.unitLimit == 0 {
+					return "Auto"
+				}
+				return fmt.Sprint(d.unitLimit)
+			},
 			desc: func(d *nlDraft, v int) string {
-				if v == 0 {
+				if d.unitLimit == 0 {
 					limit, source := s.shell().effectiveUnitLimit()
 					if source != "" {
 						return fmt.Sprintf("The most units each player may have. Auto uses %d, set by %s.", limit, source)
@@ -387,12 +404,18 @@ func (s *nlScreen) graphicsCards() []nlCard {
 				}
 				return 1
 			},
-			set: func(d *nlDraft, v int) { d.pres.FPS = nlFPS[v] },
+			set:  func(d *nlDraft, v int) { d.pres.FPS = nlFPS[v] },
+			copy: func(to, from *nlDraft) { to.pres.FPS = from.pres.FPS },
+			valueText: func(d *nlDraft) string {
+				if d.pres.FPS == 0 {
+					return "Display"
+				}
+				return fmt.Sprint(d.pres.FPS)
+			},
 			desc: func(d *nlDraft, v int) string {
 				return "How often Enhanced draws a frame. The battle always runs at 30 ticks a second; faster rates draw the motion in between."
 			},
 			scene:    func(*nlDraft, int) string { return "armor" },
-			render:   func(d *nlDraft, v int, r *nlRender) { r.fps = nlFPS[v] },
 			enhanced: true,
 		},
 		s.sidebarCard(),
@@ -419,6 +442,7 @@ func (s *nlScreen) effectCards() []nlCard {
 		return nlPart{key: key, label: label, sub: sub, steps: []string{"Off", "On"},
 			get:    func(d *nlDraft) int { return onOff(*f(&d.pres) != 0) },
 			set:    func(d *nlDraft, v int) { *f(&d.pres) = v },
+			copy:   func(to, from *nlDraft) { *f(&to.pres) = *f(&from.pres) },
 			render: func(r *nlRender, v int) { apply(r, v != 0) }}
 	}
 	strengths := []int{25, 50, 100, 150, 200}
@@ -436,8 +460,10 @@ func (s *nlScreen) effectCards() []nlCard {
 				}
 				return best
 			},
-			set:    func(d *nlDraft, v int) { *f(&d.pres) = strengths[v] },
-			render: func(r *nlRender, v int) { apply(r, strengths[v]) }}
+			set:       func(d *nlDraft, v int) { *f(&d.pres) = strengths[v] },
+			copy:      func(to, from *nlDraft) { *f(&to.pres) = *f(&from.pres) },
+			valueText: func(d *nlDraft) string { return fmt.Sprintf("%d%%", *f(&d.pres)) },
+			render:    func(r *nlRender, v int) { apply(r, strengths[v]) }}
 	}
 	// amount includes zero: a family may emit nothing while the overall glow
 	// and the neighbouring families remain at the player's chosen amounts.
@@ -445,15 +471,27 @@ func (s *nlScreen) effectCards() []nlCard {
 	amount := func(key, label, sub string, f field, apply func(r *nlRender, pct int)) nlPart {
 		return nlPart{key: key, label: label, sub: sub, meter: true, steps: []string{"Off", "25%", "50%", "100%", "150%", "200%"},
 			get: func(d *nlDraft) int {
+				if *f(&d.pres) <= 0 {
+					return 0
+				}
+				// Positive custom amounts remain distinct from Off, even below
+				// the first labelled notch, so Compare can disable the effect.
 				best := 3
 				for i, pct := range amounts {
-					if abs(pct-*f(&d.pres)) < abs(amounts[best]-*f(&d.pres)) {
+					if i > 0 && abs(pct-*f(&d.pres)) < abs(amounts[best]-*f(&d.pres)) {
 						best = i
 					}
 				}
 				return best
 			},
-			set:    func(d *nlDraft, v int) { *f(&d.pres) = amounts[v] },
+			set:  func(d *nlDraft, v int) { *f(&d.pres) = amounts[v] },
+			copy: func(to, from *nlDraft) { *f(&to.pres) = *f(&from.pres) },
+			valueText: func(d *nlDraft) string {
+				if *f(&d.pres) == 0 {
+					return "Off"
+				}
+				return fmt.Sprintf("%d%%", *f(&d.pres))
+			},
 			render: func(r *nlRender, v int) { apply(r, amounts[v]) }}
 	}
 	pres := func(get func(p *settings.Presentation) *int) field { return get }
@@ -547,6 +585,13 @@ func (s *nlScreen) effectCards() []nlCard {
 						d.glowStrength = v * 50
 					}
 				},
+				copy: func(to, from *nlDraft) { to.glow, to.glowStrength = from.glow, from.glowStrength },
+				valueText: func(d *nlDraft) string {
+					if d.glow == 0 || d.glowStrength <= 0 {
+						return "Off"
+					}
+					return fmt.Sprintf("%d%%", d.glowStrength)
+				},
 				render: func(r *nlRender, v int) { r.glow, r.glowStrength = v != 0, v*50 }},
 			amount("weaponGlowStrength", "Weapon glow", "Lasers, lightning and projectile bodies", pres(func(p *settings.Presentation) *int { return &p.WeaponGlowStrength }),
 				func(r *nlRender, pct int) { r.effects.WeaponGlowStrength = pct }),
@@ -587,7 +632,14 @@ func (s *nlScreen) effectCards() []nlCard {
 					}
 					return 3
 				},
-				set:    func(d *nlDraft, v int) { d.pres.TrailStrength = [...]int{0, 25, 50, 100}[v] },
+				set:  func(d *nlDraft, v int) { d.pres.TrailStrength = [...]int{0, 25, 50, 100}[v] },
+				copy: func(to, from *nlDraft) { to.pres.TrailStrength = from.pres.TrailStrength },
+				valueText: func(d *nlDraft) string {
+					if d.pres.TrailStrength == 0 {
+						return "Off"
+					}
+					return fmt.Sprintf("%d%%", d.pres.TrailStrength)
+				},
 				render: func(r *nlRender, v int) { r.trailStrength = [...]int{0, 25, 50, 100}[v] }}, "trails"),
 		),
 		s.groupCard("softshadows", "Soft shadows", []string{"armhawk", "armthund"}, "air",
@@ -616,6 +668,8 @@ type nlPart struct {
 	choices         bool // named choices shown together rather than numeric lamps
 	get             func(d *nlDraft) int
 	set             func(d *nlDraft, v int)
+	copy            func(to, from *nlDraft)
+	valueText       func(d *nlDraft) string
 	render          func(r *nlRender, v int)
 	scene           string // the preview for this part, when not the card's
 }
@@ -653,6 +707,15 @@ func (s *nlScreen) groupCard(key, label string, pics []string, scene, text strin
 	return nlCard{
 		key: key, label: label, pics: pics, kind: nlGroup, parts: parts, steps: []string{""},
 		get: pack,
+		copy: func(to, from *nlDraft) {
+			for _, p := range parts {
+				if p.copy != nil {
+					p.copy(to, from)
+				} else {
+					p.set(to, p.get(from))
+				}
+			}
+		},
 		set: func(d *nlDraft, code int) {
 			for i, v := range unpack(code) {
 				parts[i].set(d, v)
@@ -666,8 +729,11 @@ func (s *nlScreen) groupCard(key, label string, pics []string, scene, text strin
 			return scene
 		},
 		render: func(d *nlDraft, code int, r *nlRender) {
+			// Selectors show the nearest notch; the preview keeps the exact
+			// stored amounts unless this is the compared part's alternative.
+			applyNLDraftEffects(d, r)
 			for i, v := range unpack(code) {
-				if parts[i].render != nil {
+				if v != parts[i].get(d) && parts[i].render != nil {
 					parts[i].render(r, v)
 				}
 			}

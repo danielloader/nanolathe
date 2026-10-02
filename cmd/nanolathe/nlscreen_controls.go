@@ -358,6 +358,24 @@ func (s *nlScreen) chooseProfile(i int) {
 	s.draft.keys = input.NewKeyMap(profile, s.draft.keys.Overrides())
 	s.touched["keys"] = true
 	if g != nil {
+		// Show the values Apply will use before a player edits a row. Otherwise
+		// clicking its apparently selected value is discarded as unchanged,
+		// only for the pending profile to replace it on Apply.
+		if next, err := s.draftSettings(); err == nil {
+			draft := s.draftOf(next)
+			// These host/battle choices are outside profile and preset scope;
+			// draftOf describes only the settings those layers can compose.
+			draft.fullscreen, draft.mutators = s.draft.fullscreen, s.draft.mutators
+			for _, page := range s.pages() {
+				for _, c := range page.cards {
+					if c.key != "content" && c.key != "profile" && !s.touched[c.key] {
+						nlCopyCard(c, &s.draft, &draft)
+					}
+				}
+			}
+		}
+	}
+	if g != nil {
 		g.playMenuCue("SmallButton")
 	}
 }
@@ -693,21 +711,33 @@ func (s *nlScreen) drawMouseRows(screen *ebiten.Image, r screenkit.Rect) {
 			continue
 		}
 		v := c.get(&s.draft)
+		reason := s.cardUnavailable(*c)
 		bf.Draw(screen, c.label, r.X+16*u, y+22*u, screenkit.Style{Size: 13.5 * u, Top: nlCream, Shadow: 0.1})
-		if len(c.subs) > v {
+		if reason != "" {
+			bf.Draw(screen, reason, r.X+16*u, y+42*u, screenkit.Style{Size: 10.5 * u, Top: nlAmber})
+		} else if c.key == "zoomstyle" && s.draft.pres.Renderer == "classic" && v != settings.ZoomNone {
+			bf.Draw(screen, "Native 1× / 2× zoom", r.X+16*u, y+42*u, screenkit.Style{Size: 10.5 * u, Top: nlDim})
+		} else if len(c.subs) > v {
 			bf.Draw(screen, c.subs[v], r.X+16*u, y+42*u, screenkit.Style{Size: 10.5 * u, Top: nlDim})
 		}
 		bx := r.X + 250*u
 		for i, step := range c.steps {
+			disabled := reason != "" || configurationValueUnavailable(c.key, i, s.draft.gameplay, s.draft.pres) != ""
+			if c.key == "zoomstyle" && s.draft.pres.Renderer == "classic" && i == settings.ZoomSmooth {
+				step = "Classic"
+			}
 			st := screenkit.Style{Size: max(7, 12*u), Tracking: 0.06, Upper: true, Align: 1}
 			w := max(70*u, df.Measure(step, st)+24*u)
 			br := screenkit.Rect{X: bx, Y: y + 10*u, W: w, H: 32 * u}
 			id := s.ui.id("ctl-", c.key, i, -1)
 			on := i == v
-			s.buttonPlate(screen, id, br, on, false)
+			s.buttonPlate(screen, id, br, on, disabled)
 			st.Top = nlCream
+			if disabled {
+				st.Top = nlDim
+			}
 			s.buttonCaption(screen, step, br.X+w/2, br.Y+br.H/2+st.Size/2, st)
-			s.hits.Add(screenkit.Region{ID: id, Rect: br, Click: func() { s.setCard(*c, i) }})
+			s.hits.Add(screenkit.Region{ID: id, Rect: br, Disable: disabled, Click: func() { s.setCard(*c, i) }})
 			bx += w + 6*u
 		}
 		y += rowH
@@ -728,12 +758,18 @@ func (s *nlScreen) drawMouseRows(screen *ebiten.Image, r screenkit.Rect) {
 func (s *nlScreen) drawZoomLockRow(screen *ebiten.Image, c nlCard, r screenkit.Rect) {
 	u := s.u()
 	bf, df := s.fonts.Body, s.fonts.Display
+	reason := s.cardUnavailable(c)
+	disabled := reason != ""
 	bf.Draw(screen, c.label, r.X+16*u, r.Y+max(11, 22*u), screenkit.Style{Size: max(8, 13.5*u), Top: nlCream, Shadow: 0.1})
-	bf.Draw(screen, "Modern; reset to 1.00×", r.X+16*u, r.Y+max(23, 42*u), screenkit.Style{Size: max(6, 10.5*u), Top: nlDim})
+	sub := "Modern; reset to 1.00×"
+	if disabled {
+		sub = reason
+	}
+	bf.Draw(screen, sub, r.X+16*u, r.Y+max(23, 42*u), screenkit.Style{Size: max(6, 10.5*u), Top: nlDim})
 	minus, value, plus, reset, track := nlZoomLockRects(r, u)
-	s.button(screen, "ctl-zoomlock-minus", minus, "-", false, false, func() { s.step(c, c.get(&s.draft), -1) })
-	s.button(screen, "ctl-zoomlock-plus", plus, "+", false, false, func() { s.step(c, c.get(&s.draft), 1) })
-	s.button(screen, "ctl-zoomlock-reset", reset, "Reset", false, false, func() {
+	s.settingButton(screen, "ctl-zoomlock-minus", minus, "-", disabled, func() { s.step(c, c.get(&s.draft), -1) })
+	s.settingButton(screen, "ctl-zoomlock-plus", plus, "+", disabled, func() { s.step(c, c.get(&s.draft), 1) })
+	s.settingButton(screen, "ctl-zoomlock-reset", reset, "Reset", disabled, func() {
 		s.setCard(c, settings.ZoomLockDefaultPercent-settings.ZoomLockMinPercent)
 	})
 	v := c.get(&s.draft)
@@ -748,7 +784,11 @@ func (s *nlScreen) drawZoomLockRow(screen *ebiten.Image, c nlCard, r screenkit.R
 	kx := track.X + track.W*float64(v)/float64(len(c.steps)-1)
 	screenkit.Line(screen, track.X, cy, kx, cy, max(1, 2*u), nlGreen)
 	screenkit.Disc(screen, kx, cy, max(2, 4*u), nlCream)
-	s.hits.Add(screenkit.Region{ID: "ctl-zoomlock-track", Rect: track, Drag: func(x, _ float64) {
+	if disabled {
+		screenkit.Fill(screen, value, color.RGBA{8, 12, 8, 145})
+		screenkit.Fill(screen, track.Inset(-3), color.RGBA{8, 12, 8, 145})
+	}
+	s.hits.Add(screenkit.Region{ID: "ctl-zoomlock-track", Rect: track, Disable: disabled, Drag: func(x, _ float64) {
 		fraction := clamp((x-track.X)/track.W, 0, 1)
 		s.setCard(c, int(math.Round(fraction*float64(len(c.steps)-1))))
 	}})
@@ -812,6 +852,9 @@ func (s *nlScreen) drawMouse(screen *ebiten.Image, r screenkit.Rect) {
 		wheelText = "Modern zoom steps include Zoom lock."
 	} else if s.draft.pres.ZoomStyle == settings.ZoomNone {
 		wheelText = "Modern camera zoom is disabled."
+	}
+	if reason := configurationUnavailable("zoomlock", s.draft.gameplay, s.draft.pres); reason != "" {
+		wheelText = reason
 	}
 	row(top+170*u, "Wheel", wheelText)
 	row(top+250*u, "On the minimap", mini)

@@ -333,10 +333,11 @@ func (s *nlScreen) finishHide() {
 // snapshot reads the shell's live preferences into a draft.
 func (s *nlScreen) snapshot(g *gameShell) nlDraft {
 	d := nlDraft{
-		gameplay:      g.gameplay.Normalize(),
-		pres:          g.presentation,
-		glow:          g.display.Glow,
-		glowStrength:  g.display.GlowStrength,
+		gameplay:     g.gameplay.Normalize(),
+		pres:         g.presentation,
+		glow:         g.display.Glow,
+		glowStrength: g.display.GlowStrength,
+		shadows:      g.display.Shadows, vehicleShadows: g.display.VehicleShadows,
 		mutators:      g.opts.Mutators,
 		unitLimit:     g.savedUnitLimit,
 		fullscreen:    g.fullscreen,
@@ -398,6 +399,9 @@ func (s *nlScreen) dirty() int {
 }
 
 func (s *nlScreen) setCard(c nlCard, v int) {
+	if s.cardUnavailable(c) != "" || configurationValueUnavailable(c.key, v, s.draft.gameplay, s.draft.pres) != "" {
+		return
+	}
 	if c.kind != nlGroup && (v < 0 || v >= len(c.steps)) {
 		return
 	}
@@ -415,6 +419,12 @@ func nlCardEqual(c nlCard, a, b *nlDraft) bool {
 	if c.key == "sidebar" {
 		return a.pres.ExpandedSidebar == b.pres.ExpandedSidebar && a.pres.BuildMenuPageSize == b.pres.BuildMenuPageSize && a.pres.SidebarOrders == b.pres.SidebarOrders
 	}
+	if c.copy != nil {
+		var left, right nlDraft
+		c.copy(&left, a)
+		c.copy(&right, b)
+		return left == right
+	}
 	return c.get(a) == c.get(b)
 }
 
@@ -428,10 +438,17 @@ func nlCopyCard(c nlCard, to, from *nlDraft) {
 		to.pres.SidebarOrders = from.pres.SidebarOrders
 		return
 	}
+	if c.copy != nil {
+		c.copy(to, from)
+		return
+	}
 	c.set(to, c.get(from))
 }
 
 func (s *nlScreen) setCardDraft(c nlCard, next nlDraft) {
+	if s.cardUnavailable(c) != "" {
+		return
+	}
 	if nlCardEqual(c, &s.draft, &next) {
 		return
 	}
@@ -444,6 +461,11 @@ func (s *nlScreen) setCardDraft(c nlCard, next nlDraft) {
 		return
 	}
 	nlCopyCard(c, &s.draft, &next)
+	if c.key == "content" {
+		if g := s.shell(); g != nil {
+			s.bindSource(g)
+		}
+	}
 	s.touched[c.key] = true
 	if g := s.shell(); g != nil {
 		g.playMenuCue("SmallButton")
@@ -458,6 +480,9 @@ func (s *nlScreen) apply() {
 		return
 	}
 	target := s.modAt(s.draft.mod)
+	if s.guardApplyLocks() {
+		return
+	}
 	if !sameMod(target, g.cs.mod) && !g.cs.manualRoots {
 		// A different content switches first, and the rest of the draft is
 		// applied to the new content's settings once it is bound
@@ -649,7 +674,7 @@ func (s *nlScreen) Update() {
 		}
 		s.selectPage((s.page + d) % len(pages))
 	case in.KeyPressed(ebiten.KeySpace):
-		if card.compare != nil {
+		if s.compareAvailable(card) {
 			s.compare = !s.compare
 		}
 	}
@@ -672,6 +697,9 @@ func (s *nlScreen) Update() {
 }
 
 func (s *nlScreen) step(c nlCard, v, d int) {
+	if s.cardUnavailable(c) != "" {
+		return
+	}
 	if c.kind == nlResolution {
 		s.stepResolution(d)
 		return
@@ -680,10 +708,9 @@ func (s *nlScreen) step(c nlCard, v, d int) {
 		if len(c.parts) == 0 {
 			return
 		}
-		part := c.parts[s.selectedPart(&c)]
-		next := s.draft
-		part.set(&next, max(0, min(len(part.steps)-1, part.get(&next)+d)))
-		s.setCardDraft(c, next)
+		i := s.selectedPart(&c)
+		part := c.parts[i]
+		s.setPart(c, i, max(0, min(len(part.steps)-1, part.get(&s.draft)+d)))
 		return
 	}
 	next := v + d
@@ -1064,16 +1091,12 @@ func (s *nlScreen) noteDeviceScale(scale float64) {
 func (s *nlScreen) plan(card nlCard, v int) (nlSceneKey, nlRender, *nlRender) {
 	d := &s.draft
 	r := nlRender{
-		effects: presentationEffects(d.pres),
-		glow:    d.glow != 0, glowStrength: d.glowStrength, trailStrength: d.pres.TrailStrength,
 		classic: d.pres.Renderer == "classic",
 		// The background repaints at the rate a battle would present at
 		// (nlCadence); the Frame rate card shows its own value.
 		fps: d.pres.FPS,
 	}
-	if card.enhanced {
-		r.classic = false
-	}
+	applyNLDraftEffects(d, &r)
 	if card.render != nil {
 		card.render(d, v, &r)
 	}
@@ -1087,7 +1110,7 @@ func (s *nlScreen) plan(card nlCard, v int) (nlSceneKey, nlRender, *nlRender) {
 		key.mutators = s.ui.mutatorKey(d.mutators)
 	}
 	var alt *nlRender
-	if s.compare && card.compare != nil {
+	if s.compare && s.compareAvailable(card) {
 		if bv, ok := card.compare(d, v); ok {
 			if card.usesMutators {
 				// A mutator changes the simulation, so its compare is a twin
@@ -1099,7 +1122,7 @@ func (s *nlScreen) plan(card nlCard, v int) (nlSceneKey, nlRender, *nlRender) {
 				return key, r, &a
 			}
 			a := r
-			a.classic = d.pres.Renderer == "classic" && !card.enhanced
+			a.classic = d.pres.Renderer == "classic"
 			if card.render != nil {
 				card.render(d, bv, &a)
 			}
@@ -1107,6 +1130,13 @@ func (s *nlScreen) plan(card nlCard, v int) (nlSceneKey, nlRender, *nlRender) {
 		}
 	}
 	return key, r, alt
+}
+
+func applyNLDraftEffects(d *nlDraft, r *nlRender) {
+	r.effects = presentationEffects(d.pres)
+	r.glow, r.glowStrength = d.glow != 0, d.glowStrength
+	r.trailStrength = d.pres.TrailStrength
+	r.groundLightStrength, r.blastRingStrength = d.pres.GroundLightStrength, d.pres.BlastRingStrength
 }
 
 // nlBlinkPhase is how long a blink compare holds each value, seconds: long
@@ -1280,7 +1310,7 @@ func (s *nlScreen) drawPaired(screen *ebiten.Image, card nlCard, v int) {
 	for i, r := range [2]screenkit.Rect{left, right} {
 		label := card.steps[bv]
 		if i == 1 {
-			label = card.steps[v]
+			label = nlCardValueText(card, &s.draft)
 		}
 		edge := color.RGBA{90, 90, 80, 255}
 		if i == 1 {
@@ -1412,10 +1442,14 @@ func (s *nlScreen) button(screen *ebiten.Image, id string, r screenkit.Rect, lab
 		a := 0.35 + 0.25*math.Sin(s.clock*4)
 		screenkit.Glow(screen, screenkit.Rect{X: r.X - 20*u, Y: r.Y - 16*u, W: r.W + 40*u, H: r.H + 32*u}, alphaC(color.RGBA{255, 205, 80, 255}, a))
 	}
-	s.buttonPlate(screen, id, r, gold, false)
+	disabled := click == nil
+	s.buttonPlate(screen, id, r, gold, disabled)
 	text := color.RGBA{244, 236, 206, 255}
 	if gold {
 		text = nlCream
+	}
+	if disabled {
+		text = nlDim
 	}
 	size := max(8, 14*u)
 	st := screenkit.Style{Size: size, Tracking: 0.06, Top: text, Upper: true, Align: 1, Shadow: 0.1}
@@ -1424,7 +1458,14 @@ func (s *nlScreen) button(screen *ebiten.Image, id string, r screenkit.Rect, lab
 	}
 	// The caption stays still while the authored plate changes [07 R-WGT-01 §3].
 	s.buttonCaption(screen, label, r.X+r.W/2, r.Y+r.H/2+st.Size/2, st)
-	s.hits.Add(screenkit.Region{ID: id, Rect: r, Click: click})
+	s.hits.Add(screenkit.Region{ID: id, Rect: r, Disable: disabled, Click: click})
+}
+
+func (s *nlScreen) settingButton(screen *ebiten.Image, id string, r screenkit.Rect, label string, disabled bool, click func()) {
+	if disabled {
+		click = nil
+	}
+	s.button(screen, id, r, label, false, false, click)
 }
 
 // buttonCaption retains readable stock-style pale lettering with a dark
@@ -1586,6 +1627,7 @@ func (s *nlScreen) drawHero(screen *ebiten.Image, page nlPage, card *nlCard, idx
 	y += 22*u + size
 	df.Draw(screen, title, x, y, screenkit.Style{Size: size, Tracking: 0.02, Top: alphaC(nlGoldTop, a), Bottom: alphaC(nlGoldBottom, a), Shadow: 0.05})
 	y += 26 * u
+	controlTop := y
 	switch card.kind {
 	case nlResolution:
 		y = s.heroResolution(screen, x, y, a)
@@ -1603,6 +1645,9 @@ func (s *nlScreen) drawHero(screen *ebiten.Image, page nlPage, card *nlCard, idx
 		y = s.heroHalves(screen, card, v, x, y, a)
 	case nlContent:
 		y = s.heroContent(screen, card, v, x, y, a)
+	}
+	if card.kind != nlGroup && s.cardUnavailable(*card) != "" {
+		screenkit.Fill(screen, screenkit.Rect{X: x - 4*u, Y: controlTop - 4*u, W: 648 * u, H: y - controlTop + 8*u}, color.RGBA{8, 12, 8, 145})
 	}
 	y += 22 * u
 	{
@@ -1667,10 +1712,10 @@ func (s *nlScreen) drawHero(screen *ebiten.Image, page nlPage, card *nlCard, idx
 			if s.compare {
 				label = "Hide compare"
 			}
-			s.button(screen, "compare", screenkit.Rect{X: cx + 6*u, Y: y - 4*u, W: 150 * u, H: 36 * u}, label, false, false, func() { s.compare = !s.compare })
+			s.settingButton(screen, "compare", screenkit.Rect{X: cx + 6*u, Y: y - 4*u, W: 150 * u, H: 36 * u}, label, !s.compareAvailable(*card), func() { s.compare = !s.compare })
 		}
 	}
-	if s.compare && card.compare != nil && s.preview.alt != nil && !s.paired {
+	if s.compare && s.compareAvailable(*card) && s.preview.alt != nil && !s.paired {
 		bv, _ := card.compare(&s.draft, v)
 		xw := clamp(s.wipe, 0.02, 0.98) * s.w()
 		tag := func(text string, tx float64, align int) {
@@ -1689,7 +1734,7 @@ func (s *nlScreen) drawHero(screen *ebiten.Image, page nlPage, card *nlCard, idx
 			var off, on string
 			if card.kind == nlGroup {
 				p := card.parts[s.selectedPart(card)]
-				off, on = p.label+" "+p.steps[0], p.label+" "+p.steps[p.get(&s.draft)]
+				off, on = p.label+" "+p.steps[0], p.label+" "+nlPartValueText(p, &s.draft)
 			} else {
 				off, on = card.steps[bv], card.steps[v]
 			}
@@ -1712,7 +1757,7 @@ func (s *nlScreen) drawHero(screen *ebiten.Image, page nlPage, card *nlCard, idx
 		} else if card.kind == nlGroup {
 			p := card.parts[s.selectedPart(card)]
 			tag(p.label+" "+p.steps[0], xw-14*u, 2)
-			tag(p.label+" "+p.steps[p.get(&s.draft)], xw+14*u, 0)
+			tag(p.label+" "+nlPartValueText(p, &s.draft), xw+14*u, 0)
 		} else {
 			tag(card.steps[bv], xw-14*u, 2)
 			tag(card.steps[v], xw+14*u, 0)
@@ -1721,8 +1766,13 @@ func (s *nlScreen) drawHero(screen *ebiten.Image, page nlPage, card *nlCard, idx
 }
 
 func (s *nlScreen) cardNote(card nlCard, v int) string {
-	if card.enhanced && s.draft.pres.Renderer == "classic" {
-		return "Enhanced renderer only. The preview shows Enhanced; your renderer is Classic."
+	if reason := s.cardUnavailable(card); reason != "" {
+		return reason
+	}
+	if card.kind == nlGroup {
+		if reason := s.partUnavailable(card, card.parts[s.selectedPart(&card)]); reason != "" {
+			return reason
+		}
 	}
 	switch card.kind {
 	case nlLayers:
@@ -1894,7 +1944,7 @@ func (s *nlScreen) heroSwitch(screen *ebiten.Image, card *nlCard, v int, x, y, a
 		lampC = nlGreen
 	}
 	s.lamp(screen, knob.X+22*u, knob.Y+knob.H/2, 8*u, lampC, true)
-	s.hits.Add(screenkit.Region{ID: id, Rect: r, Click: func() { s.setCard(*card, 1-v) }})
+	s.hits.Add(screenkit.Region{ID: id, Rect: r, Disable: s.cardUnavailable(*card) != "", Click: func() { s.setCard(*card, 1-v) }})
 	label := s.ui.upperCase(card.steps[v])
 	vc := nlGreenText
 	if v == 0 {
@@ -1919,6 +1969,8 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card *nlCard, x, y, a float64
 	// the carousel, including the five-row Glow and Heat cards at 16:9.
 	rowH := min(58*u, max(44*u, (float64(s.carouselTop())-y-150*u)/float64(len(card.parts))-6*u))
 	for i, p := range card.parts {
+		reason := s.partUnavailable(*card, p)
+		disabled := reason != ""
 		r := screenkit.Rect{X: x, Y: y + float64(i)*(rowH+6*u), W: 640 * u, H: rowH}
 		id := s.ui.id("part-", card.key, i, -1)
 		v := p.get(&s.draft)
@@ -1930,7 +1982,11 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card *nlCard, x, y, a float64
 			screenkit.Outline(screen, r, 1*u, alphaC(lerpRGBA(color.RGBA{58, 58, 51, 255}, color.RGBA{150, 150, 130, 255}, s.hits.HoverAmount(id)), a))
 		}
 		df.Draw(screen, s.ui.upperCase(p.label), r.X+18*u, r.Y+min(25*u, rowH-25*u), screenkit.Style{Size: 16 * u, Tracking: 0.08, Top: alphaC(nlCream, a)})
-		bf.Draw(screen, p.sub, r.X+18*u, r.Y+rowH-13*u, screenkit.Style{Size: 11 * u, Top: alphaC(color.RGBA{169, 162, 131, 255}, a)})
+		sub := p.sub
+		if disabled {
+			sub = reason
+		}
+		bf.Draw(screen, sub, r.X+18*u, r.Y+rowH-13*u, screenkit.Style{Size: 11 * u, Top: alphaC(color.RGBA{169, 162, 131, 255}, a)})
 		controlWidth := 230 * u
 		var choiceWidths []float64
 		if p.choices {
@@ -1957,12 +2013,7 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card *nlCard, x, y, a float64
 					ink = nlCream
 				}
 				df.Draw(screen, p.steps[k], cr.X+cr.W/2, cr.Y+cr.H/2+4*u, screenkit.Style{Size: 11 * u, Top: alphaC(ink, a), Align: 1})
-				s.hits.Add(screenkit.Region{ID: lid, Rect: cr, Click: func() {
-					s.partSel[card.key] = i
-					d := s.draft
-					p.set(&d, k)
-					s.setCardDraft(*card, d)
-				}})
+				s.hits.Add(screenkit.Region{ID: lid, Rect: cr, Disable: disabled, Click: func() { s.setPart(*card, i, k) }})
 				lx += w + 4*u
 			}
 		} else if !p.meter {
@@ -1986,13 +2037,7 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card *nlCard, x, y, a float64
 			screenkit.VGradient(screen, knob, color.RGBA{122, 122, 114, 255}, color.RGBA{56, 56, 50, 255})
 			screenkit.Bevel(screen, knob, 1.5*u, color.RGBA{214, 214, 206, 255}, color.RGBA{24, 24, 22, 255}, false)
 			screenkit.Outline(screen, sr, 1*u, color.RGBA{0, 0, 0, 255})
-			s.hits.Add(screenkit.Region{ID: sid, Rect: sr, Click: func() {
-				s.partSel[card.key] = i
-				nv := 1 - v
-				d := s.draft
-				p.set(&d, nv)
-				s.setCardDraft(*card, d)
-			}})
+			s.hits.Add(screenkit.Region{ID: sid, Rect: sr, Disable: disabled, Click: func() { s.setPart(*card, i, 1-v) }})
 		} else {
 			n := len(p.steps)
 			sw, gap := 30*u, 6*u
@@ -2008,14 +2053,12 @@ func (s *nlScreen) heroGroup(screen *ebiten.Image, card *nlCard, x, y, a float64
 				}
 				lid := s.ui.id("part-seg-", card.key, i, k)
 				s.segment(screen, lr, state, s.hits.HoverAmount(lid))
-				s.hits.Add(screenkit.Region{ID: lid, Rect: lr.Inset(-3 * u), Click: func() {
-					s.partSel[card.key] = i
-					d := s.draft
-					p.set(&d, k)
-					s.setCardDraft(*card, d)
-				}})
+				s.hits.Add(screenkit.Region{ID: lid, Rect: lr.Inset(-3 * u), Disable: disabled, Click: func() { s.setPart(*card, i, k) }})
 			}
-			df.Draw(screen, p.steps[v], lx-12*u, r.Y+r.H/2+6*u, screenkit.Style{Size: 14 * u, Tracking: 0.04, Top: alphaC(nlGreenText, a), Align: 2})
+			df.Draw(screen, nlPartValueText(p, &s.draft), lx-12*u, r.Y+r.H/2+6*u, screenkit.Style{Size: 14 * u, Tracking: 0.04, Top: alphaC(nlGreenText, a), Align: 2})
+		}
+		if disabled {
+			screenkit.Fill(screen, screenkit.Rect{X: r.X + r.W - controlWidth, Y: r.Y, W: controlWidth, H: r.H}, color.RGBA{8, 12, 8, 145})
 		}
 	}
 	return y + float64(len(card.parts))*(rowH+6*u)
@@ -2048,7 +2091,7 @@ func (s *nlScreen) heroMeter(screen *ebiten.Image, card *nlCard, v int, x, y, a 
 		}
 		id := s.ui.id("seg-", card.key, i, -1)
 		s.segment(screen, r, state, s.hits.HoverAmount(id))
-		s.hits.Add(screenkit.Region{ID: id, Rect: r.Inset(-4 * u), Click: func() {
+		s.hits.Add(screenkit.Region{ID: id, Rect: r.Inset(-4 * u), Disable: s.cardUnavailable(*card) != "", Click: func() {
 			if i == 0 && v == 0 {
 				s.setCard(*card, 1)
 			} else {
@@ -2099,11 +2142,12 @@ func (s *nlScreen) well(screen *ebiten.Image, r screenkit.Rect, alpha float64) {
 func (s *nlScreen) heroStepper(screen *ebiten.Image, card *nlCard, v int, x, y, a float64) float64 {
 	u := s.u()
 	bh := 66 * u
-	s.arrow(screen, s.ui.id("prev-", card.key, -1, -1), screenkit.Rect{X: x, Y: y + 8*u, W: 50 * u, H: 50 * u}, true, v > 0, func() { s.setCard(*card, v-1) })
+	enabled := s.cardUnavailable(*card) == ""
+	s.arrow(screen, s.ui.id("prev-", card.key, -1, -1), screenkit.Rect{X: x, Y: y + 8*u, W: 50 * u, H: 50 * u}, true, enabled && v > 0, func() { s.setCard(*card, v-1) })
 	box := screenkit.Rect{X: x + 62*u, Y: y, W: 330 * u, H: bh}
 	s.well(screen, box, a)
-	s.fonts.Display.Draw(screen, card.steps[v], box.X+box.W/2, box.Y+bh/2+14*u, screenkit.Style{Size: 29 * u, Tracking: 0.04, Top: alphaC(nlCream, a), Align: 1})
-	s.arrow(screen, s.ui.id("next-", card.key, -1, -1), screenkit.Rect{X: box.X + box.W + 12*u, Y: y + 8*u, W: 50 * u, H: 50 * u}, false, v < len(card.steps)-1, func() { s.setCard(*card, v+1) })
+	s.fonts.Display.Draw(screen, nlCardValueText(*card, &s.draft), box.X+box.W/2, box.Y+bh/2+14*u, screenkit.Style{Size: 29 * u, Tracking: 0.04, Top: alphaC(nlCream, a), Align: 1})
+	s.arrow(screen, s.ui.id("next-", card.key, -1, -1), screenkit.Rect{X: box.X + box.W + 12*u, Y: y + 8*u, W: 50 * u, H: 50 * u}, false, enabled && v < len(card.steps)-1, func() { s.setCard(*card, v+1) })
 	// A notch per value under the readout; click one to jump there.
 	n := len(card.steps)
 	span := box.W - 40*u
@@ -2119,7 +2163,7 @@ func (s *nlScreen) heroStepper(screen *ebiten.Image, card *nlCard, v int, x, y, 
 		if !lit && s.hits.HoverAmount(id) > 0 {
 			screenkit.Ring(screen, cx, cy, 8*u, 1.5*u, alphaC(nlGreen, s.hits.HoverAmount(id)))
 		}
-		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: cx - 12*u, Y: cy - 12*u, W: 24 * u, H: 24 * u}, Click: func() { s.setCard(*card, i) }})
+		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: cx - 12*u, Y: cy - 12*u, W: 24 * u, H: 24 * u}, Disable: !enabled, Click: func() { s.setCard(*card, i) }})
 	}
 	return y + bh + 30*u
 }
@@ -2230,7 +2274,7 @@ func (s *nlScreen) heroHalves(screen *ebiten.Image, card *nlCard, v int, x, y, a
 		if len(card.subs) > i {
 			bf.Draw(screen, card.subs[i], r.X+r.W/2, r.Y+92*u, screenkit.Style{Size: 10 * u, Top: alphaC(color.RGBA{169, 162, 131, 255}, a), Align: 1})
 		}
-		s.hits.Add(screenkit.Region{ID: id, Rect: r, Click: func() { s.setCard(*card, i) }})
+		s.hits.Add(screenkit.Region{ID: id, Rect: r, Disable: s.cardUnavailable(*card) != "", Click: func() { s.setCard(*card, i) }})
 	}
 	return y + h
 }
@@ -2299,7 +2343,7 @@ func (s *nlScreen) heroContent(screen *ebiten.Image, card *nlCard, v int, x, y, 
 				badge(gameplayLabel(minimum)+"+", nlAmber)
 			}
 		}
-		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: r.X, Y: r.Y, W: r.W - 40*u, H: r.H}, Click: func() { s.setCard(*card, i) }})
+		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: r.X, Y: r.Y, W: r.W - 40*u, H: r.H}, Disable: s.cardUnavailable(*card) != "", Click: func() { s.setCard(*card, i) }})
 		// Badges can move the remove cap inside the row's selection region.
 		// Register it last so the visible cap receives the click
 		// (DESIGN_MODS_MUTATORS §8.2).
@@ -2368,7 +2412,6 @@ func (s *nlScreen) drawCarousel(screen *ebiten.Image, page nlPage, focus int, dt
 	goal = clamp(goal, 0, math.Max(0, total-visible))
 	s.scroll += (goal - s.scroll) * min(1, dt*10)
 	s.scroll = clamp(s.scroll, 0, math.Max(0, total-visible))
-	classic := s.draft.pres.Renderer == "classic"
 	for i := range page.cards {
 		c := &page.cards[i]
 		// Cards arrive with a short stagger when a page opens.
@@ -2390,8 +2433,8 @@ func (s *nlScreen) drawCarousel(screen *ebiten.Image, page nlPage, focus int, dt
 		r := screenkit.Rect{X: x, Y: y, W: cw, H: ch}
 		cv := c.get(&s.draft)
 		alpha := appear
-		if classic && c.enhanced {
-			// Enhanced-only cards dim under Classic.
+		if s.cardUnavailable(*c) != "" {
+			// Unavailable cards remain inspectable, with their choices dimmed.
 			alpha = appear * 0.45
 		}
 		s.drawCard(screen, c, r, cv, i == focus, alpha, !nlCardEqual(*c, &s.saved, &s.draft))
@@ -2510,7 +2553,7 @@ func (s *nlScreen) drawCard(screen *ebiten.Image, c *nlCard, r screenkit.Rect, v
 			s.segment(screen, lr, state, 0)
 		}
 	}
-	value := c.steps[min(v, n-1)]
+	value := nlCardValueText(*c, &s.draft)
 	if c.kind == nlResolution {
 		value = resolutionLabel(s.draft.resolution)
 	}

@@ -211,6 +211,7 @@ func (g *gameShell) rendererChanged(mode ebitenapp.RendererMode) {
 	if g.retailOptionsActive() {
 		optionsState.snapshot.presentation.Renderer = p.Renderer
 		g.syncNanolatheOptions()
+		g.syncBuilderOptions()
 	}
 	if !g.settingsWritable {
 		return
@@ -343,14 +344,7 @@ func nanolatheOptionsPage(window *gui.Window) error {
 		control := button
 		control.Name, control.SourceName, control.Text, control.Stages = row.name, row.name, row.text, row.stages
 		control.Rect.Y = y
-		switch row.name {
-		case "NZOOM":
-			control.Help = "Modern camera zoom: continuous, stepped, or off at 1x. Free zoom requires the Modern renderer."
-		case "NICONS":
-			control.Help = "Modern strategic icons: generated symbols or the running content's Community 3.9 art. Missing art keeps generated symbols."
-		case "NRADARDOTS":
-			control.Help = "Radar dots in the main view require Modern gameplay and the Enhanced renderer: hidden, display only, or attack hostile contacts without unit details. Minimap contacts are unchanged."
-		}
+		control.Help = nanolatheConfigurationHelp(row.name)
 		kept = append(kept, control)
 		y += switchPitch
 	}
@@ -404,7 +398,7 @@ func (g *gameShell) syncNanolatheOptions() {
 	}
 	optionsPanel.SetStageAt(optionsPanel.Index("NRENDER"), boolInt(g.presentation.Renderer == "modern"))
 	g.syncNanolatheFPSStage()
-	optionsPanel.SetStageAt(optionsPanel.Index("NZOOM"), g.presentation.ZoomStyle)
+	g.syncNanolatheZoomStage()
 	optionsPanel.SetStageAt(optionsPanel.Index("NICONS"), g.presentation.StrategicIconStyle)
 	optionsPanel.SetStageAt(optionsPanel.Index("NRADARDOTS"), g.presentation.RadarDots)
 	// The Enhanced switches. Glow reads the display block; the others
@@ -417,6 +411,73 @@ func (g *gameShell) syncNanolatheOptions() {
 	for _, f := range effectFamilies {
 		optionsPanel.SetStageAt(optionsPanel.Index(f.gadget), boolInt(f.on(g.presentation)))
 	}
+	g.syncNanolatheAvailability()
+}
+
+func nanolatheConfigurationKey(name string) string {
+	switch name {
+	case "NFPS":
+		return "fps"
+	case "NSIDEBAR":
+		return "sidebar"
+	case "NZOOM":
+		return "zoomstyle"
+	case "NICONS":
+		return "iconstyle"
+	case "NRADARDOTS":
+		return "radardots"
+	case "NGLOW":
+		return "glow"
+	case "NWATER":
+		return "water"
+	case "NLIGHTS":
+		return "lights"
+	case "NFINISH":
+		return "finish"
+	case "NHEAT":
+		return "heat"
+	case "NMARKS":
+		return "marks"
+	}
+	return ""
+}
+
+func nanolatheConfigurationHelp(name string) string {
+	switch name {
+	case "NZOOM":
+		return "Modern camera zoom: continuous, stepped, or off at 1x. Classic offers native 1x/2x or Off. Free zoom requires the Enhanced renderer."
+	case "NICONS":
+		return "Modern strategic icons: generated symbols or the running content's Community 3.9 art. Missing art keeps generated symbols."
+	case "NRADARDOTS":
+		return "Radar dots in the main view require Modern gameplay and the Enhanced renderer: hidden, display only, or attack hostile contacts without unit details. Minimap contacts are unchanged."
+	}
+	return ""
+}
+
+func (g *gameShell) syncNanolatheAvailability() {
+	if optionsState == nil || optionsState.page != "nanolathe" || optionsPanel == nil {
+		return
+	}
+	mode := g.configurationMode()
+	for _, name := range []string{"NFPS", "NSIDEBAR", "NZOOM", "NICONS", "NRADARDOTS", "NGLOW", "NWATER", "NLIGHTS", "NFINISH", "NHEAT", "NMARKS"} {
+		reason := configurationUnavailable(nanolatheConfigurationKey(name), mode, g.presentation)
+		syncConfigurationOption(optionsPanel, name, reason, nanolatheConfigurationHelp(name))
+	}
+}
+
+func (g *gameShell) syncNanolatheZoomStage() {
+	index := optionsPanel.Index("NZOOM")
+	if index < 0 {
+		return
+	}
+	labels := []string{"Zoom: Smooth", "Zoom: Steps", "Zoom: Off"}
+	if g.presentation.Renderer == "classic" {
+		// Keep a saved Steps preference intact, but describe the native
+		// behavior both non-Off values select with this renderer.
+		labels[0], labels[1] = "Zoom: Classic", "Zoom: Classic"
+	}
+	optionsPanel.Window.Gadgets[index].Labels = labels
+	optionsPanel.SetStageAt(index, g.presentation.ZoomStyle)
 }
 
 func (g *gameShell) syncNanolatheFPSStage() {
@@ -438,6 +499,10 @@ func (g *gameShell) syncNanolatheFPSStage() {
 
 func (g *gameShell) activateNanolatheOption(name string) bool {
 	p := g.presentation
+	if key := nanolatheConfigurationKey(name); key != "" && configurationUnavailable(key, g.configurationMode(), p) != "" {
+		g.syncNanolatheOptions()
+		return true
+	}
 	switch name {
 	case "NGAMEPLAY":
 		// Cycling selects one of the three reserved sets, so it also replaces a
@@ -462,6 +527,9 @@ func (g *gameShell) activateNanolatheOption(name string) bool {
 		}
 	case "NZOOM":
 		p.ZoomStyle = g.retailOptionsStage(name, 3, p.ZoomStyle)
+		if configurationValueUnavailable("zoomstyle", p.ZoomStyle, g.configurationMode(), p) != "" {
+			p.ZoomStyle = (p.ZoomStyle + 1) % 3
+		}
 	case "NICONS":
 		p.StrategicIconStyle = g.retailOptionsStage(name, 2, p.StrategicIconStyle)
 	case "NRADARDOTS":

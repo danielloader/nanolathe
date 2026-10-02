@@ -29,6 +29,7 @@ func settingsRegressionScreen(mod *modlibrary.Mod, file settings.Settings) (*gam
 	g := &gameShell{cs: &contentSet{mod: mod}}
 	g.applySettings(file)
 	s := newNLScreen(func() *gameShell { return g })
+	s.canvasScale = 1
 	if mod != nil {
 		s.mods = []modlibrary.Mod{*mod}
 	}
@@ -181,6 +182,7 @@ func TestNLScreenEffectsWheelChangesSelectedPart(t *testing.T) {
 			continue
 		}
 		for i, part := range card.parts {
+			s.draft = s.draftOf(settings.Defaults())
 			s.partSel[card.key] = i
 			for _, delta := range []int{1, -1} {
 				before := s.draft

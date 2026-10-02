@@ -4160,9 +4160,10 @@ Card portraits and mutator examples follow the same content selection. When a
 capability is absent, the preview uses a compatible demonstration and explains
 the limitation. This is settings presentation policy, user-authorized 2026-09-30.
 
-**Graphics and Effects pages.** Graphics holds the choices that shape the
-whole picture in either renderer: the renderer itself, the frame rate, the
-game resolution, sidebar and fullscreen. Resolution offers monitor-derived presets
+**Graphics and Effects pages.** Graphics holds the renderer, frame rate,
+game resolution, sidebar and fullscreen. Renderer, resolution and fullscreen
+work with both renderers; frame rate and the adaptive sidebar require Enhanced.
+Resolution offers monitor-derived presets
 and editable dimensions through the host transaction in DESIGN_PRESENTATION_CLIENT
 §2.1. Effects holds Enhanced's own looks, the player
 switches of DESIGN_GPU_RENDERER §30, plus Commander arrival (§36) and Placement
@@ -4300,12 +4301,49 @@ scene's catalog is a fresh clone.
 **Input and persistence.** A grouped-effects wheel changes only the selected row
 and stops at its endpoints. Controls wheel scrolling survives redraw; keyboard
 selection scrolls its row into view. Preset lists scroll by wheel and keyboard.
+Unavailable settings are dimmed, explain their requirement, and reject pointer,
+drag, wheel and keyboard edits. Their saved values survive mode changes. Both
+settings surfaces follow the existing runtime consumers: Enhanced effects,
+sidebar and build drag require Enhanced; radar dots require the bound rule set's
+main-view radar policy as well. Modern zoom preferences follow the rule set's
+base mode. Classic retains its native zoom or No zoom, with the free Steps choice
+disabled; Zoom lock and strategic icons require enabled Enhanced Modern zoom.
+The Tab preference is disabled where the selected mode fixes its behavior.
+Optional selection controls, queued-order dragging and mutators remain usable in
+Strict. Legacy builder and rotation rows follow the resolved feature table;
+snap controls follow their admitted radii and gesture consumers. Health-bar
+counters and reload bars require health bars. The battle options refresh these
+gates after committed rule changes.
+
+Effect amounts require an active consumer: ground light, blast rings or soft
+shadows for their respective amounts, and Overall glow for weapon/explosion
+bloom. Nano amount remains usable through local lighting when bloom is off.
+Soft shadows also require the existing master and vehicle shadow switches.
+The independent family switches retain their existing behavior. Comparisons of
+unavailable treatments are disabled, and the background keeps the chosen
+renderer. Trail comparison hides the Off picture's recorded marks without
+erasing the shared history. Every scene carries the saved ground-light and
+ring strengths. Selectors may highlight the nearest preset notch, but exact
+custom values are displayed and preserved through sibling edits, previews and
+Apply, including custom frame caps, unit limits and registered rule-set names.
+
 Every key mutation, including clear and reset, waits for a locked mod's approval.
 The pending captured chord retains its action until that approval completes.
+The selected content's locks apply before its reload too; Apply validates the
+final composed settings so earlier edits cannot bypass a subsequently selected
+mod's locks. A command-line asset stack disables content selection, and an
+explicit command-line unit limit disables that preference for the run.
 Apply records approval before reloading layers; startup reads it before layering
 the player patch. Saving base content or applying a preset preserves the complete
 mod-settings table and preset library. Graphics preset scopes include Smooth
 edges, Commander arrival and Placement weapon rings.
+Saving a preset composes the pending profile, presets and explicit card/key
+edits in Apply order, including settings without cards, without changing live
+settings. Complete presets explicitly encode Auto unit limit and default keys
+so applying them can clear earlier choices. A profile immediately displays the
+mouse values Apply will use, allowing an explicit subsequent choice to win.
+Ordinary saves retain the selected content-profile path. Detached direct battles
+use their installed host presentation settings for sidebar options too.
 
 **Apply.** The screen edits a draft. Apply writes a chosen controls profile
 first, then only the cards the player touched, over the live state, so a
@@ -4332,6 +4370,10 @@ include a later sample to inspect the moving ghost and ring. Cache contracts
 verify composition-key isolation, paused clocks, eviction of paired/exhausted
 scenes and complete retirement; the placement contract validates each moved site
 and the fixed camera.
+`--nl-shot-only availability` captures disabled settings under Classic, Strict,
+Community and No zoom, alongside enabled Modern controls. The configuration
+regressions cover inactive input, dependent amounts, raw-value preservation,
+pending preset export, target-content locks and detached sidebar preferences.
 
 **Open.** Mouse buttons are not rebindable: the Mouse tab offers the
 retail Interface Types and the existing switches. A mod's own key profile is

@@ -73,8 +73,31 @@ func (g *gameShell) syncCommunityHUDOptions() {
 	for _, row := range communityHUDSwitches(&p) {
 		optionsPanel.SetStageAt(optionsPanel.Index(row.name), *row.value)
 	}
+	g.syncCommunityHUDAvailability()
 }
+
+func communityHUDOptionUnavailable(name string) string {
+	if (name == "NCOUNTERS" || name == "NRELOAD") && !client.DamageBars() {
+		return "Enable Health bars first."
+	}
+	return ""
+}
+
+func (g *gameShell) syncCommunityHUDAvailability() {
+	if optionsState == nil || optionsState.page != "communityhud" || optionsPanel == nil {
+		return
+	}
+	p := g.presentation
+	for _, row := range communityHUDSwitches(&p) {
+		syncConfigurationOption(optionsPanel, row.name, communityHUDOptionUnavailable(row.name), row.help)
+	}
+}
+
 func (g *gameShell) activateCommunityHUDOption(name string) bool {
+	if communityHUDOptionUnavailable(name) != "" {
+		g.syncCommunityHUDOptions()
+		return true
+	}
 	if name == "NHEALTH" {
 		g.setCommunityHealthBars(g.retailOptionsStage(name, 2, boolInt(client.DamageBars())) != 0)
 		g.syncCommunityHUDOptions()

@@ -27,7 +27,7 @@ type nlSource struct {
 // bindSource computes the running content's layers.
 func (s *nlScreen) bindSource(g *gameShell) {
 	s.src = nlSource{paths: map[string][]string{}}
-	m := g.contentMod()
+	m := s.modAt(s.draft.mod)
 	if m == nil || m.Config == nil {
 		return
 	}
@@ -55,6 +55,7 @@ func (s *nlScreen) draftOf(st settings.Settings) nlDraft {
 	d := nlDraft{
 		gameplay: st.Gameplay.Normalize(), pres: st.Presentation,
 		glow: st.Display.Glow, glowStrength: st.Display.GlowStrength,
+		shadows: st.Display.Shadows, vehicleShadows: st.Display.VehicleShadows,
 		unitLimit: st.UnitLimit, switchAlt: st.SwitchAltEnabled(), interfaceType: st.InterfaceType,
 		keys:       keyMapFromSettings(st.KeyBindings),
 		resolution: retailDisplayMode{st.Display.Width, st.Display.Height},
@@ -124,11 +125,10 @@ func collectPaths(doc map[string]any, prefix string, add func(string)) {
 	}
 }
 
-// sourceActive reports whether the markers apply: the draft content is the
-// running mod, which has a config.
+// Source markers and edit guards follow the selected content, including a mod
+// awaiting Apply. Its locks must be approved before changes survive its reload.
 func (s *nlScreen) sourceActive() bool {
-	g := s.shell()
-	return s.src.mod != "" && g != nil && sameMod(s.modAt(s.draft.mod), g.cs.mod)
+	return s.src.mod != ""
 }
 
 // cardLocked reports whether the running mod locks something the card
@@ -167,6 +167,49 @@ func (s *nlScreen) guardLocked(c nlCard, change func()) {
 		return
 	}
 	s.pendingAction, s.pendingWhat, s.dialog = change, c.label, "override"
+}
+
+// A profile or edit can precede selecting locked content. Check the final
+// composed value too, before reload, so Apply cannot create a live override
+// that persistence subsequently drops (DESIGN_MODS_MUTATORS §4.6).
+func (s *nlScreen) guardApplyLocks() bool {
+	if !s.sourceActive() || s.src.overridden || s.draft.override || len(s.src.locks) == 0 {
+		return false
+	}
+	final, err := s.draftSettings()
+	if err != nil {
+		s.toast, s.toastLeft = err.Error(), 3
+		return true
+	}
+	g, target := s.shell(), s.modAt(s.draft.mod)
+	recommended, err := settings.Layer(g.baseSettings, modRecommendations(target))
+	if err != nil {
+		s.toast, s.toastLeft = err.Error(), 3
+		return true
+	}
+	// Compare against what the target would bind: command-line selections,
+	// the content's minimum rules and the canonical keyboard representation
+	// already apply before a player edits anything on this screen.
+	recommended.Presentation = startupPresentation(g.opts, recommended.Presentation)
+	recommended.Gameplay = startupGameplay(g.opts, recommended.Gameplay)
+	if minimum, ok := modMinimumGameplay(target); ok && gameplayBelow(recommended.Gameplay, minimum) {
+		recommended.Gameplay = minimum
+	}
+	recommended.KeyBindings = keyBindingsSetting(keyMapFromSettings(recommended.KeyBindings))
+	patch, err := settings.Diff(final, recommended, settings.ModScoped)
+	if err != nil {
+		s.toast, s.toastLeft = err.Error(), 3
+		return true
+	}
+	var doc map[string]any
+	_ = json.Unmarshal(patch, &doc)
+	var paths []string
+	collectPaths(doc, "", func(path string) { paths = append(paths, path) })
+	if !pathsLocked(paths, s.src.locks) {
+		return false
+	}
+	s.pendingAction, s.pendingWhat, s.dialog = s.apply, "the selected content's settings", "override"
+	return true
 }
 
 // cardSource is the card's marker: "set" when the mod's recommendation sets
@@ -223,10 +266,14 @@ func (s *nlScreen) drawSource(screen *ebiten.Image, c *nlCard, x, y, a float64) 
 			}
 		}
 		st := screenkit.Style{Size: 10.5 * u, Tracking: 0.12, Top: alphaC(lerpRGBA(nlKicker, nlCream, s.hits.HoverAmount(id)), a), Upper: true}
+		disabled := s.cardUnavailable(*c) != ""
+		if disabled {
+			st.Top = alphaC(nlDim, a)
+		}
 		lx := x + w + 12*u
 		lw := df.Draw(screen, label, lx, y+15.5*u, st)
 		screenkit.Fill(screen, screenkit.Rect{X: lx, Y: y + 19*u, W: lw, H: 1 * u}, alphaC(nlKicker, a))
-		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: lx - 4*u, Y: y, W: lw + 8*u, H: 22 * u}, Click: func() {
+		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: lx - 4*u, Y: y, W: lw + 8*u, H: 22 * u}, Disable: disabled, Click: func() {
 			s.setCardDraft(*c, s.src.rec)
 		}})
 	}

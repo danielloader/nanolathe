@@ -114,9 +114,21 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	}
 	g.activateRetailOptionsGadget("NRENDER")
 	g.activateRetailOptionsGadget("NFPS")
-	if mode, fps := host.PresentationSettings(); mode != ebitenapp.RendererClassic || fps != 120 {
+	if mode, fps := host.PresentationSettings(); mode != ebitenapp.RendererClassic || fps != 60 {
 		t.Fatalf("preview %v %d", mode, fps)
 	}
+	before := g.presentation
+	for _, name := range append([]string{"NSIDEBAR", "NZOOM", "NICONS", "NRADARDOTS"}, effectGadgets...) {
+		g.activateRetailOptionsGadget(name)
+	}
+	if g.presentation != before || g.display.Glow != settings.DefaultGlow {
+		t.Fatal("inactive Classic/Strict controls changed stored preferences")
+	}
+	// The same controls become editable when their consumers are selected.
+	g.activateRetailOptionsGadget("NGAMEPLAY")
+	g.activateRetailOptionsGadget("NGAMEPLAY")
+	g.activateRetailOptionsGadget("NRENDER")
+	g.activateRetailOptionsGadget("NFPS")
 	// Every Enhanced switch previews through the same poll the host makes, and
 	// glow previews straight onto the live client (DESIGN_GPU_RENDERER §30).
 	for _, name := range effectGadgets {
@@ -156,7 +168,6 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	}
 	openOptions()
 	g.activateRetailOptionsGadget("NANOLATHE")
-	g.activateRetailOptionsGadget("NRENDER")
 	g.activateRetailOptionsGadget("NFPS")
 	g.activateRetailOptionsGadget("NWATER")
 	g.activateRetailOptionsGadget("NMARKS")
@@ -166,6 +177,8 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 	g.activateRetailOptionsGadget("NICONS")
 	g.activateRetailOptionsGadget("NRADARDOTS")
 	g.activateRetailOptionsGadget("NRADARDOTS")
+	// Disabling the renderer retains the values for its next activation.
+	g.activateRetailOptionsGadget("NRENDER")
 	g.activateRetailOptionsGadget("PREV")
 	saved, err := settings.Load()
 	if err != nil {
@@ -219,9 +232,10 @@ func TestNanolatheOptionsPreviewCancelAndPersistence(t *testing.T) {
 		t.Fatalf("undo left glow at %d (live %v)", g.display.Glow, cl.Glow())
 	}
 	// F10 is independently persisted and must not save this pending cap.
+	g.activateRetailOptionsGadget("NRENDER")
 	g.activateRetailOptionsGadget("NFPS")
-	g.activateRetailOptionsGadget("NZOOM")
 	g.activateRetailOptionsGadget("NICONS")
+	g.activateRetailOptionsGadget("NZOOM")
 	g.activateRetailOptionsGadget("NRADARDOTS")
 	host.RendererChanged(ebitenapp.RendererModern)
 	after, err := settings.Load()
@@ -274,6 +288,11 @@ func TestBattleNanolatheOptionsPointerAndLayout(t *testing.T) {
 	if g.presentation.Renderer != "classic" {
 		t.Fatalf("pointer cycled renderer incorrectly: %+v", g.presentation)
 	}
+	click("NFPS")
+	if g.presentation.FPS != 60 {
+		t.Fatalf("Classic's inactive cap changed: %+v", g.presentation)
+	}
+	click("NRENDER")
 	click("NFPS")
 	if g.presentation.FPS != 120 {
 		t.Fatalf("pointer cycled cap incorrectly: %+v", g.presentation)

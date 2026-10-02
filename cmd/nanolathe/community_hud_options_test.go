@@ -41,15 +41,19 @@ func TestCommunityHUDOptionsTransaction(t *testing.T) {
 	}
 	reload := optionsPanel.Window.PlacedRect(optionsPanel.Index("NRELOAD"))
 	g.updateHoverHelp(reload.X+1, reload.Y+1)
-	if got, want := optionsPanel.TextOf("HELPTEXT"), optionsPanel.HelpOf("NRELOAD"); got != want {
+	if got, want := optionsPanel.TextOf("HELPTEXT"), "Enable Health bars first."; got != want {
 		t.Fatalf("reload hint = %q, want %q", got, want)
 	}
 	if dir := os.Getenv("NANOLATHE_OPTIONS_SHOT"); dir != "" {
 		writeShellShot(t, cl, filepath.Join(dir, "community-hud.png"))
 	}
 	g.activateRetailOptionsGadget("NCOUNTERS")
-	g.activateRetailOptionsGadget("NGROUPS")
+	if g.presentation.CommunityCounters != 0 {
+		t.Fatal("counters changed while their health-bar prerequisite was off")
+	}
 	g.activateRetailOptionsGadget("NHEALTH")
+	g.activateRetailOptionsGadget("NCOUNTERS")
+	g.activateRetailOptionsGadget("NGROUPS")
 	if !cl.CommunityHUDOptions().Counters || !cl.CommunityHUDOptions().DisableGroupNumbers || !client.DamageBars() {
 		t.Fatal("live HUD preferences not applied")
 	}
@@ -129,6 +133,9 @@ func syntheticOptionsPage(t *testing.T, page string, build func(*gui.Window) err
 // only its drawn stage, and the next click on any other switch redrew every
 // row from the preferences and turned it back off.
 func TestCommunityHUDEverySwitchCommits(t *testing.T) {
+	previous := client.DamageBars()
+	client.SetDamageBars(true)
+	t.Cleanup(func() { client.SetDamageBars(previous) })
 	g, panel, cl := syntheticOptionsPage(t, "communityhud", communityHUDOptionsPage)
 	g.syncCommunityHUDOptions()
 	// The Victory cue switch goes first, so every other switch is clicked

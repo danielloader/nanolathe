@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nanolathe Unit Authoring"
+  short_description: "Build textured quad units in Blender for Nanolathe"
+  default_prompt: "Use $nanolathe-unit-authoring to turn this concept into a faction-consistent Blender unit with reusable textures, a named piece hierarchy, and a verified Nanolathe export."

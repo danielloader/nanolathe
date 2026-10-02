@@ -3,6 +3,7 @@ package combat
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
+	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
 
@@ -12,6 +13,13 @@ import (
 // Motion still comes from the real creators and advance kernels. No live
 // projectile, feature cache, random stream or unit state is changed.
 func modernObstructedShot(q *ShotQuery) bool {
+	// Explicit point fire may intentionally cross a friend or hit a feature.
+	// Enemy-target air attacks also store point slots [04 R-AIR-01 §8], so
+	// require the order's intent, or the burst's snapshot of that intent.
+	if q.manualAttack() && ((q.Burst == nil && q.Launch.Target.Kind == TargetPoint && explicitGroundAttack(q.Shooter)) ||
+		(q.Burst != nil && q.Burst.GroundAttackBurst)) {
+		return false
+	}
 	w := q.Launch.Weapon
 	if w == nil || q.Terrain == nil || q.Shooter == nil || w.Interceptor || w.Cruise ||
 		w.Range < 0 || w.Range >= 32768 || w.WeaponVelocity < 0 || w.StartVelocity < 0 || w.WeaponAcceleration < 0 ||
@@ -123,6 +131,31 @@ func modernObstructedShot(q *ShotQuery) bool {
 	return false
 }
 
+func (q *ShotQuery) manualAttack() bool {
+	if q.Burst != nil {
+		return q.Burst.OrderedBurst && !q.Burst.AutomaticAttackBurst
+	}
+	return slotOrdered(q.Launch.Flags) && !automaticAttack(q.Shooter)
+}
+
+// Read order intent through the unit's existing opaque queue link. The queue
+// owns descriptor/target history; combat.Rules.AdmitShot owns the policy.
+func automaticAttack(u *units.Unit) bool {
+	if u == nil {
+		return false
+	}
+	q, ok := u.Orders.(interface{ AutomaticAttack() bool })
+	return ok && q.AutomaticAttack()
+}
+
+func explicitGroundAttack(u *units.Unit) bool {
+	if u == nil {
+		return false
+	}
+	q, ok := u.Orders.(interface{ ExplicitGroundAttack(*units.Unit) bool })
+	return ok && q.ExplicitGroundAttack(u)
+}
+
 func modernPastAim(muzzle, aim, point Vec3) bool {
 	dx, dz := aim.X.Raw()-muzzle.X.Raw(), aim.Z.Raw()-muzzle.Z.Raw()
 	if numeric.Abs(dx) >= numeric.Abs(dz) {
@@ -224,7 +257,10 @@ func modernObstructedCell(q *ShotQuery, cx, cz, low, high int32, terminalTarget 
 			if !contact {
 				continue
 			}
-			if u.Owner == q.Shooter.Owner || (q.Service != nil && q.Service.Reaction != nil && q.Service.Reaction.Allied != nil && q.Service.Reaction.Allied(q.Shooter.Owner, u.Owner)) {
+			// A manual unit attack exempts only the intended victim. Friends
+			// in front of any other target still require a clear firing place.
+			if (u != q.Target || !q.manualAttack()) && (u.Owner == q.Shooter.Owner ||
+				(q.Service != nil && q.Service.Reaction != nil && q.Service.Reaction.Allied != nil && q.Service.Reaction.Allied(q.Shooter.Owner, u.Owner))) {
 				return true
 			}
 			if u == q.Target {

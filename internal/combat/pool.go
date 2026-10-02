@@ -91,10 +91,20 @@ type Projectile struct {
 	SmokeDeadline  uint32 // smoke deadline [06 §5.1]
 
 	// OrderedBurst marks a burst anchor whose root shot left a slot an order
-	// held. It is implementation policy, not retail record state: only the
-	// Modern Hold Fire retirement reads it, and Strict 3.1 never does
-	// (DESIGN_WEAPONS_PROJECTILES §2.6.1).
+	// held. It is implementation policy, not retail record state: Modern's
+	// Hold Fire retirement and obstruction override read it; Strict 3.1 never
+	// does (DESIGN_WEAPONS_PROJECTILES §2.6.1 and §2.3.2).
 	OrderedBurst bool
+	// AutomaticAttackBurst retains a known automatic producer's protection
+	// if its target becomes friendly or the shooter takes a manual order.
+	// Like GroundAttackBurst, this is launch-time Modern policy provenance.
+	AutomaticAttackBurst bool
+	// GroundAttackBurst snapshots explicit point-attack intent at launch.
+	// An enemy-target bomber's derived point is not an explicit ground attack.
+	// Stamped in every mode so a later Modern switch reads the original intent;
+	// only Modern obstruction admission consumes it (DESIGN_WEAPONS_PROJECTILES
+	// §2.3.2). Whole-record burst copies and compaction retain it.
+	GroundAttackBurst bool
 
 	// Phase/latch flags [06 §5.1] "phase/latch flags"; visual propeller orientation, beam latch, two-phase state [06 §6.1].
 	BeamLatch    bool          // beam latch [06 §6.1]

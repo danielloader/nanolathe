@@ -430,6 +430,30 @@ still blocks. A target crossed only between samples
 cannot shield a friend, because the live projectile may skip it. Obstructions
 beyond the resolved aim plane are outside the slot-launch check.
 
+**Manual attacks — user-authorized 2026-10-02.** A shot from a slot held by
+an order may deliberately attack a friendly unit or a ground point. An
+explicit ground attack (including D-gun fire and the `Suppress` order
+produced by clicking a friendly unit) bypasses this friendly/feature sweep.
+For an ordered unit-target shot, only the intended target is exempt: another
+own or allied unit in the path still blocks, even when the target is an enemy
+the player explicitly ordered attacked. That refusal continues to feed the
+existing Modern firing-position search. The slot's established autonomy bit
+identifies order ownership [06 R-WPN-05 §3]. The queue projects the active
+order's intent through the unit's existing opaque queue link; the answer is
+read-only and the policy remains in `AdmitShot`. A point-valued slot alone is
+insufficient: an enemy-target `AirStrike` also fires at cached coordinates
+[04 R-AIR-01 §8]. The order's retained target-observer bit distinguishes those
+unit attacks even after losing the target [04 R-MOV-03 §7]. `AttackSpecial`
+preserves that history when resolving to `Suppress` [04 R-ORD-01 §2]; only a
+still-live friendly target permits its point exception. Neither a weapon's
+command-fire flag nor a missing live target grants an override. Autonomous
+slots and orders with known automatic provenance (auto-engage, danger response,
+or stationary guard) retain the full sweep, even if their target becomes
+friendly before the order updates. As with Modern Hold Fire (§2.6.1), restored
+and Strict-produced attacks have no transient producer tag and retain the
+existing explicit fallback. Terrain admission, aiming, resources, projectile
+collision and damage keep their existing rules.
+
 **Bursts.** The slot gate checks the initial trajectory even for a burst.
 Each due pellet is checked again after the ordinary muzzle refresh, using its
 inherited template velocity (including the preceding spray), and the first
@@ -437,12 +461,20 @@ movement sample on the next tick (appends lie outside the captured phase span
 [06 §4.3][06 §5.1]), before count,
 deadline, allocation, sound or RNG work. A blocked pellet cancels the
 unlaunched remainder. Already emitted pellets continue; the original launch's
-resource charge is retained. No refund or new persistent burst state is added.
+resource charge is retained without a refund.
 Pellets trace to actual contact or nominal expiry without an aim-plane cutoff:
 the ballistic creator deliberately retains an unrelated stored target point
 [06 §6.1][06 §6.4], so that field cannot safely bound a burst's trajectory.
 The public pure burst scheduler has no world geometry and keeps its existing
 behavior; the authoritative projectile driver supplies the world and terrain.
+The manual override uses the anchor's existing `OrderedBurst` provenance and
+snapshots known automatic provenance as `AutomaticAttackBurst` and explicit
+ground intent as `GroundAttackBurst` at launch. These are stamped in every mode,
+retained by whole-record copies and compaction, and read by Modern admission.
+Order replacement or a later mode switch therefore cannot grant an
+enemy-target or known automatic burst permission to cross a friend. Unit-target
+bursts retain their intended-unit exemption. No saved field or rule registry
+is added, and Strict and Community admission remains unchanged.
 
 **Effects and boundaries.** A refused slot launch consumes no accuracy draws,
 reload, ammunition, energy, metal, Fire/Rock callback or launch event. The
@@ -462,9 +494,14 @@ continues to describe retail behavior.
 distinctions, vertical boundaries, feature-byte/fringe resolution, fast shots
 in all eight directions, clear artillery arcs, guided shots at mobile targets,
 blocked/recovered firing, stockpile ammunition, RNG/resources, burst
-cancellation and Strict bypass. Run the affected combat/session and citation
-checks, both repository gates and the displayless simulation-cost benchmark;
-this changes authoritative firing only.
+cancellation, manual ground/friendly targeting, intervening-friend protection
+for ordered unit attacks, automatic orders on newly friendly targets, burst
+intent after order replacement/mode changes,
+and Strict and Community bypass. Order tests lock original ground intent and
+lost special-attack targets; movement tests exercise enemy-target bomber point
+conversion with a friendly blocker and a burst-capable weapon. Run the affected
+combat/session and citation checks, both repository gates and the displayless
+simulation-cost benchmark; this changes authoritative firing only.
 
 ### Modern threat targeting and incoming fire
 
@@ -924,8 +961,8 @@ Consequences that follow from that choice, each deliberate:
   saved; guessing it would cancel orders the player gave.
 
 **Burst remainders.** The spawner stamps a burst anchor with the provenance of
-the slot that launched it (`Projectile.OrderedBurst`, implementation state that
-only this policy reads). The projectile phase silently retires a held
+the slot that launched it (`Projectile.OrderedBurst`, also read by Modern
+obstruction admission in §2.3.2). The projectile phase silently retires a held
 shooter's parked anchors that are *not* ordered before their next clone
 attempt, even before the next pellet deadline; the cancelled remainder is
 neither refunded nor replayed, and a cancelled burst can only restart as a

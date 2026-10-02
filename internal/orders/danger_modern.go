@@ -669,7 +669,7 @@ func (*ModernRules) PreserveAutomaticTarget(u *units.Unit, slot int) bool {
 		return false
 	}
 	n := q.primary[0]
-	if n != q.danger.response && !n.automaticAttack && DescriptorFor(n.ID).Name != "Guard_NoMove" {
+	if !q.AutomaticAttack() {
 		return false
 	}
 	s := u.SlotAt(slot)

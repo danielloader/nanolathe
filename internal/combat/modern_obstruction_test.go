@@ -5,6 +5,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
@@ -24,6 +25,114 @@ func obstructionFixture(t *testing.T) ShotQuery {
 	svc := &Service{Rules: &ModernRules{}, Reaction: &ReactionSeams{Allied: func(a, b uint8) bool { return a == b || (a == 0 && b == 2) }}}
 	return ShotQuery{Service: svc, World: w, Shooter: w.Unit(h), Terrain: terrain,
 		Launch: Slot{Weapon: modernTerrainWeapon()}, Muzzle: muzzle, Aim: aim, Tick: 10, Wind: &world.Wind{}}
+}
+
+type groundAttackIntent bool
+
+func (intent groundAttackIntent) ExplicitGroundAttack(*units.Unit) bool { return bool(intent) }
+
+type automaticAttackIntent struct{ groundAttackIntent }
+
+func (automaticAttackIntent) AutomaticAttack() bool { return true }
+
+// Nanolathe Modern policy: DESIGN_WEAPONS_PROJECTILES §2.3.2. Explicit ground
+// fire and the intended friendly target are allowed; intervening friends on
+// a unit-target shot still block, even when an order owns that slot.
+func TestModernOrderedShotObstruction(t *testing.T) {
+	for _, mode := range []struct {
+		name  string
+		rules Rules
+	}{
+		{"modern", &ModernRules{}},
+		{"community", CommunityRules{}},
+		{"strict", StrictRules{}},
+	} {
+		for _, tc := range []struct {
+			name                      string
+			ordered, ground, command  bool
+			derivedPoint, automatic   bool
+			targetOwner               uint8
+			blockerOwner              int
+			feature, terrain, blocked bool
+		}{
+			{name: "ground through own building", ordered: true, ground: true, targetOwner: 1, blockerOwner: 0},
+			{name: "D-gun through own building", ordered: true, ground: true, command: true, targetOwner: 1, blockerOwner: 0},
+			{name: "ground through ally", ordered: true, ground: true, targetOwner: 1, blockerOwner: 2},
+			{name: "own target", ordered: true, targetOwner: 0, blockerOwner: -1},
+			{name: "allied target", ordered: true, command: true, targetOwner: 2, blockerOwner: -1},
+			{name: "enemy behind own building", ordered: true, targetOwner: 1, blockerOwner: 0, blocked: true},
+			{name: "enemy behind ally", ordered: true, command: true, targetOwner: 1, blockerOwner: 2, blocked: true},
+			{name: "friendly target behind another friend", ordered: true, targetOwner: 2, blockerOwner: 0, blocked: true},
+			{name: "autonomous ground", ground: true, targetOwner: 1, blockerOwner: 0, blocked: true},
+			{name: "autonomous friendly target", targetOwner: 0, blockerOwner: -1, blocked: true},
+			{name: "automatic order on now-friendly target", ordered: true, automatic: true, targetOwner: 0, blockerOwner: -1, blocked: true},
+			{name: "automatic order using ground slot", ordered: true, automatic: true, ground: true, targetOwner: 1, blockerOwner: 0, blocked: true},
+			{name: "ground at wreck", ordered: true, ground: true, targetOwner: 1, blockerOwner: -1, feature: true},
+			{name: "enemy behind wreck", ordered: true, targetOwner: 1, blockerOwner: -1, feature: true, blocked: true},
+			{name: "ground behind ridge", ordered: true, ground: true, targetOwner: 1, blockerOwner: -1, terrain: true, blocked: true},
+			{name: "enemy attack using point slot", ordered: true, ground: true, derivedPoint: true, targetOwner: 1, blockerOwner: 0, blocked: true},
+		} {
+			t.Run(mode.name+"/"+tc.name, func(t *testing.T) {
+				q := obstructionFixture(t)
+				q.Service.Rules = mode.rules
+				q.Shooter.Orders = groundAttackIntent(tc.ground && !tc.derivedPoint)
+				if tc.automatic {
+					q.Shooter.Orders = automaticAttackIntent{groundAttackIntent(tc.ground)}
+				}
+				weapon := q.Launch.Weapon
+				weapon.Turret, weapon.Accuracy, weapon.ReloadTime = true, 128, 30
+				weapon.EnergyPerShot, weapon.MetalPerShot = 100, 5
+				weapon.CommandFire = tc.command
+				idx := 0
+				if tc.command {
+					idx = 2
+				}
+				q.Shooter.InstallWeapon(idx, weapon)
+				slot := q.Shooter.SlotAt(idx)
+				if tc.ordered {
+					slot.Flags &^= units.SlotFlagAutonomous
+				}
+				targetDef := contactDef(contactModelTop)
+				targetDef.ModelTop = contactModelTop >> 16
+				target, err := q.World.Create(targetDef, tc.targetOwner, q.Aim.X, 0, q.Aim.Z)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stampGroundRect(q.Terrain, 12, 1, 1, 1, target)
+				slot.Target = units.Target{Kind: units.TargetUnit, Unit: target}
+				if tc.ground {
+					slot.Target = units.Target{Kind: units.TargetGround, X: q.Aim.X, Z: q.Aim.Z}
+				}
+				if tc.blockerOwner >= 0 {
+					h, err := q.World.Create(contactDef(contactModelTop), uint8(tc.blockerOwner), cellCentre(4), 0, cellCentre(1))
+					if err != nil {
+						t.Fatal(err)
+					}
+					stampGroundRect(q.Terrain, 4, 1, 1, 1, h)
+				}
+				if tc.feature {
+					q.Terrain.FeatureDefs[0].Height = 64
+					q.Terrain.PlotAt(4, 1).SetFeature(0)
+				}
+				if tc.terrain {
+					q.Terrain.PlotAt(4, 1).SetMinHeight(64)
+				}
+				var econ economy.Service
+				econ.Players[0].Stock = [2]float32{50, 500}
+				random := rng.NewSimulation(7)
+				before, pending := random, q.Shooter.Pending
+				var summary UnitStepSummary
+				q.Service.firePreparedSlot(q.Shooter, slot, idx, &slotPrep{weapon: weapon, tgtPos: q.Aim}, q.Tick, q.Terrain, &econ, &random, q.World, nil, &summary)
+				if mode.name == "modern" && tc.blocked {
+					if summary.Fired != 0 || q.Service.Count() != 0 || slot.Reload != 0 || random != before || q.Shooter.Pending != pending || econ.Players[0].Stock != [2]float32{50, 500} {
+						t.Fatal("blocked shot spent resources, randomness or order state")
+					}
+				} else if summary.Fired != 1 || q.Service.Count() != 1 || slot.Reload != 30 || random.Draws()-before.Draws() != 2 || econ.Players[0].Stock != [2]float32{45, 400} {
+					t.Fatalf("ordered/retail shot failed: fired=%d count=%d reload=%d draws=%d stock=%v", summary.Fired, q.Service.Count(), slot.Reload, random.Draws()-before.Draws(), econ.Players[0].Stock)
+				}
+			})
+		}
+	}
 }
 
 // These lock Nanolathe Modern policy, not a change to retail contact [06 §8.1].
@@ -102,6 +211,140 @@ func TestModernFeatureShotObstruction(t *testing.T) {
 				t.Fatal("removed wreck still blocks")
 			}
 		})
+	}
+}
+
+func TestModernOrderedBurstObstruction(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		ordered, unit, blocker bool
+		automatic              bool
+		targetOwner            uint8
+		blocked                bool
+	}{
+		{name: "ordered ground", ordered: true, blocker: true},
+		{name: "autonomous ground", blocker: true, blocked: true},
+		{name: "ordered own target", ordered: true, unit: true},
+		{name: "ordered allied target", ordered: true, unit: true, targetOwner: 2},
+		{name: "autonomous own target", unit: true, blocked: true},
+		{name: "automatic order on now-friendly target", ordered: true, automatic: true, unit: true, blocked: true},
+		{name: "ordered enemy behind friend", ordered: true, unit: true, blocker: true, targetOwner: 1, blocked: true},
+		{name: "ordered friend behind another friend", ordered: true, unit: true, blocker: true, targetOwner: 2, blocked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := obstructionFixture(t)
+			weapon := q.Launch.Weapon
+			weapon.Burst, weapon.BurstRate, weapon.SprayAngle, weapon.RandomDecay = 2, 3, 128, 4
+			var target pool.Handle
+			if tc.unit {
+				var err error
+				target, err = q.World.Create(contactDef(contactModelTop), tc.targetOwner, q.Aim.X, 0, q.Aim.Z)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stampGroundRect(q.Terrain, 12, 1, 1, 1, target)
+			}
+			if tc.blocker {
+				ally, err := q.World.Create(contactDef(contactModelTop), 2, cellCentre(4), 0, cellCentre(1))
+				if err != nil {
+					t.Fatal(err)
+				}
+				stampGroundRect(q.Terrain, 4, 1, 1, 1, ally)
+			}
+			h, ok := q.Service.Reserve()
+			if !ok {
+				t.Fatal("reserve burst template")
+			}
+			p := &q.Service.Records[int(h)-1]
+			p.Shooter, p.ShooterSide = q.Shooter.Handle, q.Shooter.Owner
+			InitOrdinary(p, weapon, 1, q.Muzzle, q.Aim, target)
+			p.BurstRemaining, p.BurstDeadline, p.OrderedBurst = 2, q.Tick, tc.ordered
+			p.GroundAttackBurst = tc.ordered && !tc.unit
+			p.AutomaticAttackBurst = tc.automatic
+			// The live slot no longer represents the burst's original order.
+			q.Shooter.InstallWeapon(0, weapon)
+			q.Shooter.SlotAt(0).Flags &^= units.SlotFlagAutonomous
+			q.Shooter.SlotAt(0).Target = units.Target{Kind: units.TargetGround, X: q.Aim.X, Z: q.Aim.Z}
+			random := rng.NewSimulation(7)
+			lookup := func(id int32) (*content.WeaponDef, bool) { return weapon, id == weapon.ID }
+			clones := q.Service.advanceBurstAt(0, q.Tick, &random, lookup, nil, q.World, q.Terrain)
+			if tc.blocked {
+				if clones != 0 || !p.Dead || p.BurstRemaining != 0 || q.Service.Count() != 1 || random.Draws() != 0 || p.BurstDeadline != q.Tick {
+					t.Fatal("blocked burst emitted or spent RNG")
+				}
+			} else if clones != 1 || p.Dead || p.BurstRemaining != 1 || q.Service.Count() != 2 || random.Draws() != 2 || p.BurstDeadline != q.Tick+3 {
+				t.Fatal("ordered burst failed to preserve emission and RNG")
+			}
+		})
+	}
+}
+
+func TestGroundBurstSnapshotsAttackIntent(t *testing.T) {
+	for _, ground := range []bool{false, true} {
+		for _, modern := range []bool{false, true} {
+			q := obstructionFixture(t)
+			q.Service.Rules = rulesForModern(modern)
+			q.Shooter.Orders = groundAttackIntent(ground)
+			q.Launch.Weapon.Burst, q.Launch.Weapon.BurstRate = 2, 3
+			q.Launch.Target = Target{Kind: TargetPoint, X: q.Aim.X, Y: q.Aim.Y, Z: q.Aim.Z}
+			h, fired := TryFire(q.Service, &q.Launch, 0, q.Launch.Target, q.Tick, FirePorts{
+				Shooter: q.Shooter, Origin: q.Muzzle, Shot: &q,
+				ShooterHealth: 100, ShooterMaxHealth: 100,
+			})
+			if !fired {
+				t.Fatal("initial clear shot failed")
+			}
+			p := &q.Service.Records[int(h)-1]
+			if !p.OrderedBurst || p.GroundAttackBurst != ground {
+				t.Fatal("burst did not snapshot the original point-attack intent")
+			}
+			// A different order and rule set after launch cannot change intent.
+			q.Shooter.Orders = groundAttackIntent(!ground)
+			q.Service.Rules = &ModernRules{}
+			q.Terrain.FeatureDefs[0].Height = 64
+			q.Terrain.PlotAt(4, 1).SetFeature(0)
+			weapon := q.Launch.Weapon
+			lookup := func(id int32) (*content.WeaponDef, bool) { return weapon, id == weapon.ID }
+			clones := q.Service.advanceBurstAt(0, p.BurstDeadline, nil, lookup, nil, q.World, q.Terrain)
+			if (clones == 1) != ground {
+				t.Fatalf("ground=%v started modern=%v: emitted %d pellets after order replacement", ground, modern, clones)
+			}
+		}
+	}
+}
+
+func TestAutomaticBurstKeepsSafetyAfterOrderReplacement(t *testing.T) {
+	q := obstructionFixture(t)
+	q.Shooter.Orders = automaticAttackIntent{}
+	q.Launch.Weapon.Burst, q.Launch.Weapon.BurstRate = 2, 3
+	def := contactDef(contactModelTop)
+	def.ModelTop = contactModelTop >> 16
+	target, err := q.World.Create(def, 1, q.Aim.X, 0, q.Aim.Z)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.Target = q.World.Unit(target)
+	stampGroundRect(q.Terrain, 12, 1, 1, 1, target)
+	q.Launch.Target = Target{Kind: TargetUnit, Unit: target}
+	h, fired := TryFire(q.Service, &q.Launch, 0, q.Launch.Target, q.Tick, FirePorts{
+		Shooter: q.Shooter, Origin: q.Muzzle, Shot: &q,
+		TargetWorld:   func(pool.Handle) (Vec3, bool) { return q.Aim, true },
+		ShooterHealth: 100, ShooterMaxHealth: 100,
+	})
+	if !fired {
+		t.Fatal("initial clear enemy shot failed")
+	}
+	p := &q.Service.Records[int(h)-1]
+	if !p.OrderedBurst || !p.AutomaticAttackBurst || p.GroundAttackBurst {
+		t.Fatal("burst lost automatic order provenance")
+	}
+	q.Target.Owner = q.Shooter.Owner
+	q.Shooter.Orders = groundAttackIntent(true)
+	weapon := q.Launch.Weapon
+	lookup := func(id int32) (*content.WeaponDef, bool) { return weapon, id == weapon.ID }
+	random := rng.NewSimulation(7)
+	if clones := q.Service.advanceBurstAt(0, p.BurstDeadline, &random, lookup, nil, q.World, q.Terrain); clones != 0 || !p.Dead || random.Draws() != 0 {
+		t.Fatal("automatic burst inherited manual permission after target became friendly")
 	}
 }
 

@@ -495,6 +495,8 @@ func TryFire(svc *Service, slot *Slot, slotIdx int, tgt Target, tick uint32, por
 		if w.Burst > 0 {
 			// An ordered shot's burst belongs to the order that launched it.
 			p.OrderedBurst = ordered
+			p.AutomaticAttackBurst = automaticAttack(ports.Shooter)
+			p.GroundAttackBurst = ordered && tgt.Kind == TargetPoint && explicitGroundAttack(ports.Shooter)
 			p.BurstDeadline = tick + uint32(w.BurstRate) // interval added to next deadline [06 §4.3]
 		} else {
 			p.BurstDeadline = 0

@@ -586,6 +586,40 @@ func spawnImmediateSelfDestruct(u *units.Unit, n *Node) {
 	q.PushHead(id, spawned)
 }
 
+// AutomaticAttack projects existing producer provenance through the unit's
+// opaque queue link. Unknown/restored producers keep the existing explicit
+// fallback (DESIGN_WEAPONS_PROJECTILES §2.6.1).
+func (q *Queue) AutomaticAttack() bool {
+	n := q.Head()
+	return n != nil && (n.automaticAttack || q.danger.response == n || DescriptorFor(n.ID).Name == "Guard_NoMove")
+}
+
+// ExplicitGroundAttack projects the active order's point-attack intent through
+// the unit's opaque queue link. It is read-only; combat.Rules.AdmitShot owns
+// the Modern obstruction exception (DESIGN_WEAPONS_PROJECTILES §2.3.2).
+// A bomber's unit-target order also arms a point slot [04 R-AIR-01 §8]; its
+// retained target-observer bit distinguishes that from an issued point even
+// after the unit reference is cleared [04 R-MOV-03 §7].
+func (q *Queue) ExplicitGroundAttack(u *units.Unit) bool {
+	n := q.Head()
+	if n == nil || q.AutomaticAttack() {
+		return false
+	}
+	switch DescriptorFor(n.ID).Name {
+	case "Suppress":
+		if n.StaticGate&staticTargetObserver == 0 {
+			return true
+		}
+		// AttackSpecial preserves its target history when it re-identifies
+		// as Suppress [04 R-ORD-01 §2]. A vanished enemy is not point intent.
+		target := targetOf(u, n)
+		return target != nil && target.Alive && !isHostile(u, target)
+	case "AirStrike", "AirToGround", "AirToGroundHover":
+		return n.StaticGate&staticTargetObserver == 0
+	}
+	return false
+}
+
 // ---------------------------------------------------------------------------
 // AttackSpecial [04 R-ORD-01 §2]
 // ---------------------------------------------------------------------------

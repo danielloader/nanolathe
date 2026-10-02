@@ -109,3 +109,55 @@ func TestAirStrikeFiresOnlyAfterRelease(t *testing.T) {
 		t.Fatalf("bombs fired after break: %d", got)
 	}
 }
+
+// AirStrike's point slot can still belong to a unit-target order [04 R-AIR-01
+// §8]. Only an issued ground attack receives Modern's obstruction exception
+// (DESIGN_WEAPONS_PROJECTILES §2.3.2), including on burst-capable mixed flags.
+func TestAirStrikeRetainsAttackIntent(t *testing.T) {
+	for _, ground := range []bool{false, true} {
+		sys, w, u := wideAirFixture(t)
+		target := airTargetFor(t, sys, w, 30, 16)
+		blocker := airTargetFor(t, sys, w, 23, 16)
+		blocker.Owner = u.Owner
+		blocker.Def.ModelTop, blocker.Def.ModelTopFixed = 128, 128<<16
+		sys.Terrain.PlotAt(23, 16).SetOccupantA(int16(blocker.Handle))
+		u.Y = 100 << 16
+		weapon := &content.WeaponDef{ID: 41, Range: 1000, Dropped: true, LineOfSight: true,
+			WeaponVelocity: 32 << 16, Tolerance: 32767, AreaOfEffect: 32, ReloadTime: 5, Burst: 2, BurstRate: 3}
+		u.InstallWeapon(0, weapon)
+		q := orders.QueueForUnit(u)
+		q.Binding().Weapons = &orders.WeaponAdapter{ReleaseSlot: combat.ReleaseWeaponSlot, FirePoint: combat.FireWeaponPoint}
+		n := orders.Node{Owner: u.Handle, Target: target.Handle, Phase: 5,
+			GoalX: target.X, GoalY: target.Y, GoalZ: target.Z, GoalSupplied: true}
+		if ground {
+			n.Target = 0
+		}
+		q.Push(orders.Lookup("AirStrike"), n)
+		sys.legAirStrike(u, q.Head(), 0, 100)
+		if u.Slots[0].Target.Kind != units.TargetGround {
+			t.Fatal("release failed to install primary point target")
+		}
+		cat := &content.Catalog{Weapons: map[string]*content.WeaponDef{"bomb": weapon}}
+		cat.RebuildWeaponIndex()
+		svc := combat.Service{Rules: &combat.ModernRules{}}
+		want := 0
+		if ground {
+			want = 1
+		}
+		if got := svc.StepWeaponsForUnit(u, 101, w, nil, sys.Terrain, nil, cat, q.Binding().SimRNG, nil).Fired; got != want {
+			t.Fatalf("ground=%v: fired %d through friendly blocker, want %d", ground, got, want)
+		}
+		if !ground {
+			// Once the path clears, the enemy order may fire but its burst
+			// must not acquire ground permission from the derived point slot.
+			sys.Terrain.PlotAt(23, 16).SetOccupantA(0)
+			if got := svc.StepWeaponsForUnit(u, 102, w, nil, sys.Terrain, nil, cat, q.Binding().SimRNG, nil).Fired; got != 1 {
+				t.Fatalf("clear enemy attack fired %d slots", got)
+			}
+		}
+		anchor := &svc.Records[0]
+		if anchor.BurstRemaining != 2 || !anchor.OrderedBurst || anchor.GroundAttackBurst != ground {
+			t.Fatalf("ground=%v: burst lost original attack intent", ground)
+		}
+	}
+}

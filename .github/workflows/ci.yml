@@ -25,6 +25,58 @@ jobs:
       - name: advance synthetic authoritative session
         run: go test ./internal/headless ./cmd/nanolathe-headless
 
+  # Execute the kernel vectors on each supported platform; cross-compilation
+  # alone cannot detect differences in floating-point results.
+  numeric-kernel:
+    name: numeric kernel (${{ matrix.goos }}/${{ matrix.goarch }}, ${{ matrix.goamd64 || 'native' }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+            goamd64: v1
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+            goamd64: v3
+          - runner: macos-15
+            goos: darwin
+            goarch: arm64
+            goamd64: ""
+          - runner: windows-2025
+            goos: windows
+            goarch: amd64
+            goamd64: v1
+    runs-on: ${{ matrix.runner }}
+    env:
+      GOMAXPROCS: "4"
+      GOFLAGS: -trimpath -p=4
+      GOAMD64: ${{ matrix.goamd64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: verify native Go platform
+        shell: bash
+        env:
+          EXPECTED_PLATFORM: ${{ matrix.goos }}/${{ matrix.goarch }}
+          EXPECTED_GOAMD64: ${{ matrix.goamd64 }}
+        run: |
+          target="$(go env GOOS)/$(go env GOARCH)"
+          host="$(go env GOHOSTOS)/$(go env GOHOSTARCH)"
+          level="$(go env GOAMD64)"
+          echo "Go host=$host target=$target GOAMD64=$level expected=$EXPECTED_PLATFORM/$EXPECTED_GOAMD64"
+          test "$host" = "$EXPECTED_PLATFORM"
+          test "$target" = "$EXPECTED_PLATFORM"
+          test "$level" = "$EXPECTED_GOAMD64"
+      - name: execute numeric kernel tests and vectors
+        shell: bash
+        run: go test -count=1 ./internal/sim/numeric
+
   # Formatting and static checks. Cheap, so it gates the rest.
   hygiene:
     runs-on: ubuntu-latest

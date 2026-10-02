@@ -31,6 +31,10 @@ while [ "$#" -gt 0 ]; do
 	esac
 done
 [ "$#" -gt 0 ] || set -- ./...
+whole_tree=false
+if [ "$#" -eq 1 ] && [ "$1" = ./... ]; then
+	whole_tree=true
+fi
 
 if [ -z "${NANOLATHE_RETAIL_ASSETS:-}" ] && [ -n "${NANOLATHE_TA_ROOT:-}" ]; then
 	NANOLATHE_RETAIL_ASSETS="$NANOLATHE_TA_ROOT"
@@ -67,6 +71,42 @@ echo "==> go test (retail corpus, tagged, short=$short)"
 # The three reserved gameplay modes make the command package's combined retail
 # trajectories longer than Go's ten-minute default on development machines.
 go test -tags retail -short="$short" -p "$NANOLATHE_TEST_P" -timeout "${NANOLATHE_TEST_TIMEOUT:-20m}" "$@"
+
+# M1-C11: execute the same locked constants on amd64, not just a cross-build.
+# Keep every fingerprint lock (including the Strict pool-fill scene) in this
+# selection. Scoped package arguments must not narrow this ratchet.
+run_amd64_fingerprints() {
+	set -- -tags retail -short="$short" -p "$NANOLATHE_TEST_P" \
+		-timeout "${NANOLATHE_TEST_TIMEOUT:-20m}" -run '^Test.*Fingerprint.*Locked$' "$@"
+	[ "$fresh" = false ] || set -- -count=1 "$@"
+	GOOS="$host_os" GOARCH=amd64 go test "$@" ./internal/headless
+	echo "==> amd64 fingerprint locks: PASSED"
+}
+host_os=$(go env GOHOSTOS)
+host_arch=$(go env GOHOSTARCH)
+echo "==> amd64 fingerprint locks (short=$short)"
+case "$host_os/$host_arch" in
+*/amd64)
+	if [ "$whole_tree" = true ] && [ "$(go env GOOS)/$(go env GOARCH)" = "$host_os/amd64" ]; then
+		echo "==> amd64 fingerprint locks: PASSED (covered by the native retail suite above)"
+	else
+		run_amd64_fingerprints
+	fi
+	;;
+darwin/arm64)
+	# This system binary probes Rosetta independently of our test executable.
+	# Once the probe succeeds, compilation or execution failures are failures;
+	# never turn a broken lock into an unsupported-host skip.
+	if /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
+		run_amd64_fingerprints -exec '/usr/bin/arch -x86_64'
+	else
+		echo "==> amd64 fingerprint locks: SKIPPED (Rosetta cannot execute amd64 on this host)"
+	fi
+	;;
+*)
+	echo "==> amd64 fingerprint locks: SKIPPED (no supported amd64 execution path on $host_os/$host_arch)"
+	;;
+esac
 
 # The modern executor's authored pixel fixtures are the only pixel-level lock on
 # the model lane, the pass scheduler and the Enhanced effect layers, and they can

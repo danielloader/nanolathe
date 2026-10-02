@@ -434,7 +434,8 @@ build/vet/test during iteration. `tools/check-retail` exports
 `NANOLATHE_RETAIL_ASSETS` (default `~/TotalAnnihilation`, also honouring
 `NANOLATHE_TA_ROOT`), checks the install, runs pinned staticcheck and both
 deadcode ratchets, then retail-tagged vet and short tests, plus device fixtures.
-Package arguments narrow vet/test; lint and device coverage stay whole-tree.
+Package arguments narrow vet/test; lint, amd64 fingerprint locks and device
+coverage stay whole-tree.
 Both tiers reuse Go's test cache. The reference retail install is treated as
 immutable during normal development. `tools/check-retail --fresh` bypasses the
 cache for one invocation and combines with `--full`; it does not replace older
@@ -543,7 +544,9 @@ or encoding requires a new version.
 Community 3.9 and Modern separately against constants in
 `rules_lock_retail_test.go`. Each normal retail check runs the Ashap scene at
 6,000 ticks and the benchmark composition at its initial state, 600 and 1,500
-steps. The full tier also runs the Ashap scene to its 54,000-tick bound or
+steps. M1 U3 adds a Strict pool-fill lock at step 4,500 to the short tier;
+the amd64 selector below includes it once added. The full tier additionally
+runs the Ashap scene to its 54,000-tick bound or
 locked terminal tick. A separate assertion checks that the combat scenes
 distinguish all three rule sets. Limits are explicit so host profile preferences
 cannot move the digest. These are partial fingerprints, not whole-state proofs.
@@ -551,6 +554,30 @@ To update a constant, run the failing subtest and explain the changed behavior
 in the commit: Strict changes need their research citation, and intentional
 Community/Modern changes need their owning design contract [I11]. A changed
 fingerprint alone is never justification for replacing an expected value.
+
+**Cross-platform numeric ratchets.** `tools/check-retail` also executes
+`internal/headless` tests named `Test*Fingerprint*Locked` in an amd64 build,
+comparing against the same constants as the native run (DESIGN_MULTIPLAYER
+§16.1 M1-C11). New fingerprint locks must follow that naming pattern. On a
+native amd64 toolchain the whole-tree retail suite already covers them;
+a scoped invocation runs the locks separately. On darwin/arm64 the gate
+probes Rosetta with `arch -x86_64` and runs the tests through it. If that
+capability is absent, or the host has no supported amd64 execution path, it
+reports `amd64 fingerprint locks: SKIPPED`. After a successful capability
+probe, a build or execution failure fails the gate. This step inherits
+`--full`, `--fresh`, the worker budget and the retail timeout; it uses Go's
+normal cache. No emulator or translation layer is installed by the gate.
+
+The no-assets `numeric-kernel` CI job executes all `internal/sim/numeric`
+tests, including the committed kernel vectors, on Linux amd64, Darwin arm64
+and Windows amd64 hosted runners. Linux runs both `GOAMD64=v1` and `v3`;
+Windows runs `v1`. It reads the Go version from `go.mod` and checks both the
+Go host and target OS/architecture and the selected `GOAMD64` level before
+testing, so a changed runner label or cross-compilation cannot count as native
+execution. These are configured CI platforms, not a claim that a local gate
+has executed on that hardware.
+These kernel vectors and partial fingerprint locks do not certify complete
+cross-platform replays; that acceptance remains DESIGN_MULTIPLAYER §17.
 
 **Visual evidence.** `nanolathe --shot` renders a frame headlessly; a
 screenshot is reviewed, an assertion that it should look right is not. Retail

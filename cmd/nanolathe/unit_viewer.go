@@ -1,0 +1,403 @@
+package main
+
+// Tools and the unit viewer are host presentation, independent of gameplay
+// mode. They borrow immutable content, never a battle or its random streams
+// (DESIGN_DEVELOPER_TOOLS §7).
+
+import (
+	"math"
+	"strings"
+	"time"
+
+	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/input"
+	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
+	"github.com/nanolathe-gg/nanolathe/internal/ui"
+)
+
+var toolsScreenInst *toolsScreen
+
+const unitViewerWidth, unitViewerHeight = 1200, 750
+
+// frontendScreens keeps both host screens behind the existing full-window
+// input boundary, including its release barrier on return to the retail menu.
+type frontendScreens struct {
+	settings *nlScreen
+	tools    *toolsScreen
+}
+
+func (s *frontendScreens) Active() bool { return s.tools.Active() || s.settings.Active() }
+func (s *frontendScreens) Update() {
+	if s.tools.Active() {
+		s.tools.Update()
+	} else if s.settings.Active() {
+		s.settings.Update()
+	}
+}
+func (s *frontendScreens) Draw(dst *ebiten.Image) {
+	if s.tools.Active() {
+		s.tools.Draw(dst)
+	} else if s.settings.Active() {
+		s.settings.Draw(dst)
+	}
+}
+func (s *frontendScreens) OwnsPointer() bool {
+	return !s.tools.Active() && s.settings.OwnsPointer()
+}
+
+// The unfinished viewer is an unadvertised main-menu preview. Keep its host
+// shortcut out of ordinary widget quickkeys and the public keymap
+// (DESIGN_DEVELOPER_TOOLS §7).
+func (g *gameShell) openUnitViewerPreview(in *input.State) bool {
+	if g == nil || g.frontend == nil || toolsScreenInst == nil || toolsScreenInst.Active() ||
+		g.frontend.Mode != modeMenuMain || g.frontend.Panels.Len() != 1 || g.frontend.Panels.Modal() != nil ||
+		in == nil || in.Kbd == nil || !in.Kbd.KeyHeld(input.KeyCtrl) || !in.Kbd.KeyDown(input.KeyU) ||
+		in.Kbd.HasShift() || in.Kbd.KeyHeld(input.KeyAlt) {
+		return false
+	}
+	p := g.activePanel()
+	if p == nil || p.Window == nil || p.EditorCaptured() {
+		return false
+	}
+	p.ResetPress()
+	p.CancelScrollDrag()
+	in.DiscardTokens(in.PendingTokens())
+	toolsScreenInst.show(g)
+	toolsScreenInst.openViewer()
+	return true
+}
+
+type unitViewerLoad struct {
+	entries []unitViewerEntry
+	err     error
+}
+
+type toolsScreen struct {
+	open, closing, viewer  bool
+	cs                     *contentSet
+	contentName            string
+	shell                  *gameShell
+	panel                  *ui.Panel
+	fonts                  screenkit.Fonts
+	art                    *nlArt
+	uiClock                float64
+	tokens                 []input.Token
+	canvas                 screenkit.Rect
+	animationPaused        bool
+	widgetHeld             bool
+	action                 string
+	weapon                 int
+	last                   time.Time
+	loading                chan unitViewerLoad
+	loadErr                error
+	entries, filtered      []unitViewerEntry
+	selected               *content.UnitDef
+	query                  string
+	searchFocus, selectAll bool
+	top, visible           int
+	listRect, viewRect     screenkit.Rect
+	infoRect               screenkit.Rect
+	scale                  float64
+	yaw, pitch, zoom       float64
+	spinning, dragging     bool
+	dragX, dragY           float64
+	model                  unitViewerModel
+}
+
+func (s *toolsScreen) Active() bool { return s != nil && s.open }
+
+func (s *toolsScreen) show(g *gameShell) {
+	s.release()
+	s.open, s.closing, s.viewer = true, false, false
+	s.cs = g.cs
+	s.contentName = "Total Annihilation"
+	if g.cs != nil && g.cs.mod != nil {
+		s.contentName = g.cs.mod.Name
+	} else if g.cs != nil && g.cs.manualRoots {
+		s.contentName = "Custom content"
+	}
+	s.last = time.Time{}
+	s.action, s.weapon, s.animationPaused = "Idle", 1, false
+	s.initializeRetail(g)
+	s.query, s.top = "", 0
+	s.searchFocus, s.selectAll, s.spinning = true, false, true
+	s.resetView()
+	g.playMenuCue("BigButton")
+}
+
+func (s *toolsScreen) openViewer() {
+	s.viewer, s.searchFocus, s.dragging = true, true, false
+	s.buildPanel()
+	if s.entries != nil || s.loading != nil || s.loadErr != nil {
+		return
+	}
+	// The content cannot change until this screen closes. Closing joins the
+	// worker before the host may unmount it; only plain catalog data crosses.
+	ch, cs := make(chan unitViewerLoad, 1), s.cs
+	s.loading = ch
+	go func() {
+		cat, err := cs.nlPreviewCatalog()
+		ch <- unitViewerLoad{entries: unitViewerEntries(cat), err: err}
+	}()
+}
+
+func (s *toolsScreen) pollLoad() {
+	if s.loading == nil {
+		return
+	}
+	select {
+	case result := <-s.loading:
+		s.loading = nil
+		s.entries, s.loadErr = result.entries, result.err
+		s.filter()
+	default:
+	}
+}
+
+func (s *toolsScreen) release() {
+	if s == nil {
+		return
+	}
+	if s.loading != nil {
+		<-s.loading
+		s.loading = nil
+	}
+	s.model.release()
+	s.entries, s.filtered, s.selected, s.cs = nil, nil, nil, nil
+	s.loadErr, s.open, s.closing = nil, false, false
+	s.shell, s.panel, s.art = nil, nil, nil
+	s.fonts, s.uiClock = screenkit.Fonts{}, 0
+	s.tokens = nil
+}
+
+func (s *toolsScreen) back() {
+	s.dragging = false
+	s.closing = true
+}
+
+func (s *toolsScreen) resetView() {
+	s.yaw, s.pitch, s.zoom = 40960, 8192, 1
+	s.dragging = false
+}
+
+func (s *toolsScreen) filter() {
+	defer s.refreshLists()
+	s.filtered = filterUnitViewerEntries(s.entries, s.query)
+	s.top = 0
+	for _, e := range s.filtered {
+		if e.Def == s.selected {
+			s.revealSelection()
+			return
+		}
+	}
+	s.selectUnit(nil)
+	if len(s.filtered) > 0 {
+		s.selectUnit(s.filtered[0].Def)
+	}
+}
+
+func (s *toolsScreen) selectUnit(def *content.UnitDef) {
+	if s.selected == def {
+		return
+	}
+	s.selected = def
+	s.model.selectUnit()
+	s.action, s.weapon, s.animationPaused = "Idle", 1, false
+	s.refreshInfo()
+	s.refreshControls()
+	s.resetView()
+}
+
+func (s *toolsScreen) selectionIndex() int {
+	for i, e := range s.filtered {
+		if e.Def == s.selected {
+			return i
+		}
+	}
+	return -1
+}
+
+func (s *toolsScreen) revealSelection() {
+	i := s.selectionIndex()
+	if i < 0 {
+		return
+	}
+	if s.panel != nil {
+		s.panel.SetListSelection("UNITS", i, max(1, s.visible))
+	}
+	n := max(1, s.visible)
+	if i < s.top {
+		s.top = i
+	} else if i >= s.top+n {
+		s.top = i - n + 1
+	}
+}
+
+func (s *toolsScreen) moveSelection(delta int) {
+	if len(s.filtered) == 0 {
+		return
+	}
+	i := max(0, min(len(s.filtered)-1, s.selectionIndex()+delta))
+	s.selectUnit(s.filtered[i].Def)
+	s.revealSelection()
+}
+
+func (s *toolsScreen) Update() {
+	now := time.Now()
+	dt := 0.0
+	if !s.last.IsZero() {
+		dt = max(0, min(0.1, now.Sub(s.last).Seconds()))
+	}
+	s.last = now
+	s.pollLoad()
+	in := screenkit.ReadInput()
+	shortcut := ebiten.IsKeyPressed(ebiten.KeyControl) || ebiten.IsKeyPressed(ebiten.KeyMeta)
+	s.updateInput(in, ebiten.AppendInputChars(nil), shortcut, dt)
+}
+
+func (s *toolsScreen) updateInput(in screenkit.Input, typed []rune, shortcut bool, dt float64) {
+	if s.closing {
+		if !in.Held && s.loading == nil {
+			s.release()
+		}
+		return
+	}
+	if in.KeyPressed(ebiten.KeyEscape) {
+		s.back()
+		return
+	}
+	s.uiClock += max(0, dt)
+	if s.scale > 0 {
+		in.X = (in.X - s.canvas.X) / s.scale
+		in.Y = (in.Y - s.canvas.Y) / s.scale
+	}
+	p := s.panel
+	for _, pair := range []struct {
+		from ebiten.Key
+		to   input.Key
+	}{{ebiten.KeyEnter, input.KeyEnter}, {ebiten.KeyTab, input.KeyTab}} {
+		if in.KeyPressed(pair.from) {
+			s.tokens = append(s.tokens, input.Token{Kind: input.TokenEdit, Key: pair.to})
+		}
+	}
+	if !s.viewer {
+		s.serviceWidgets(in.X, in.Y, in.Down, in.Pressed, in.Released, dt)
+		return
+	}
+	if shortcut && in.KeyPressed(ebiten.KeyF) && p != nil {
+		p.FocusEditor(p.Index("SEARCH"))
+		s.selectAll = true
+	}
+	if p != nil {
+		s.searchFocus = p.EditorCaptured()
+	}
+	if s.searchFocus && shortcut && in.KeyPressed(ebiten.KeyA) {
+		s.selectAll = true
+	}
+	if in.Pressed && s.viewRect.Contains(in.X, in.Y) {
+		s.dragging, s.searchFocus = true, false
+		if p != nil {
+			p.SetFocus(-1)
+		}
+		s.dragX, s.dragY = in.X, in.Y
+	}
+	if s.dragging {
+		if in.Down {
+			s.yaw = math.Mod(s.yaw+(in.X-s.dragX)*90+65536, 65536)
+			s.pitch = math.Mod(s.pitch+(in.Y-s.dragY)*90+65536, 65536)
+			s.dragX, s.dragY = in.X, in.Y
+		} else {
+			s.dragging = false
+		}
+	}
+	if in.WheelY != 0 {
+		switch {
+		case s.viewRect.Contains(in.X, in.Y):
+			s.changeZoom(in.WheelY)
+		case p != nil && s.listRect.Contains(in.X, in.Y):
+			p.ScrollTextListAt(p.Index("UNITS"), float32(-in.WheelY*3))
+		case p != nil && s.infoRect.Contains(in.X, in.Y):
+			p.ScrollTextListAt(p.Index("INFO"), float32(-in.WheelY*3))
+		}
+	}
+	if in.KeyPressed(ebiten.KeyArrowDown) {
+		s.moveSelection(1)
+	}
+	if in.KeyPressed(ebiten.KeyArrowUp) {
+		s.moveSelection(-1)
+	}
+	if in.KeyPressed(ebiten.KeyPageDown) {
+		s.moveSelection(max(1, s.visible))
+	}
+	if in.KeyPressed(ebiten.KeyPageUp) {
+		s.moveSelection(-max(1, s.visible))
+	}
+	if s.searchFocus && p != nil && s.selectAll && (len(typed) > 0 || in.KeyPressed(ebiten.KeyBackspace) || in.KeyPressed(ebiten.KeyDelete)) {
+		p.SetText("SEARCH", "")
+		p.FocusEditor(p.Index("SEARCH"))
+		s.selectAll = false
+	}
+	if !shortcut {
+		for _, r := range typed {
+			if !s.searchFocus && r == ' ' {
+				continue // Space belongs to the viewer's rotate shortcut.
+			}
+			s.tokens = append(s.tokens, input.Token{Kind: input.TokenText, Rune: r})
+		}
+	}
+	for _, pair := range []struct {
+		from ebiten.Key
+		to   input.Key
+	}{{ebiten.KeyBackspace, input.KeyBackspace}, {ebiten.KeyDelete, input.KeyDelete}, {ebiten.KeyHome, input.KeyHome}, {ebiten.KeyEnd, input.KeyEnd}, {ebiten.KeyArrowLeft, input.KeyLeft}, {ebiten.KeyArrowRight, input.KeyRight}} {
+		if !s.searchFocus && (pair.from == ebiten.KeyArrowLeft || pair.from == ebiten.KeyArrowRight) {
+			continue // Orbit shortcuts must not also move native widget focus.
+		}
+		if in.KeyPressed(pair.from) {
+			s.tokens = append(s.tokens, input.Token{Kind: input.TokenEdit, Key: pair.to})
+		}
+	}
+	if !s.searchFocus {
+		if in.KeyPressed(ebiten.KeySpace) {
+			s.spinning = !s.spinning
+		}
+		if in.KeyPressed(ebiten.KeyR) {
+			s.resetView()
+		}
+		if in.KeyPressed(ebiten.KeyArrowLeft) {
+			s.yaw -= 2048
+		}
+		if in.KeyPressed(ebiten.KeyArrowRight) {
+			s.yaw += 2048
+		}
+		if in.KeyPressed(ebiten.KeyEqual) {
+			s.changeZoom(1)
+		}
+		if in.KeyPressed(ebiten.KeyMinus) {
+			s.changeZoom(-1)
+		}
+	}
+	wasViewer := s.viewer
+	s.serviceWidgets(in.X, in.Y, in.Down, in.Pressed, in.Released, dt)
+	if wasViewer != s.viewer || s.closing {
+		return
+	}
+	if s.spinning && !s.dragging {
+		s.yaw += dt * 65536 / 18
+	}
+	s.yaw = math.Mod(s.yaw+65536, 65536)
+	if !s.animationPaused {
+		s.model.updateAnimation(dt)
+	}
+}
+
+func (s *toolsScreen) changeZoom(steps float64) {
+	s.zoom = max(0.35, min(3, s.zoom*math.Pow(1.12, max(-20, min(20, steps)))))
+}
+
+func unitViewerName(def *content.UnitDef) string {
+	if name := strings.TrimSpace(def.Name); name != "" {
+		return name
+	}
+	return def.UnitName
+}

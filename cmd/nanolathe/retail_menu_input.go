@@ -34,6 +34,9 @@ func (g *gameShell) menuInput(cl *client.Client) {
 	if p == nil || p.Window == nil {
 		return
 	}
+	if g.openUnitViewerPreview(in) {
+		return
+	}
 	g.serviceMenuWidgets(p, in)
 }
 

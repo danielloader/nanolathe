@@ -479,7 +479,9 @@ func runGameShell(launch, opts Options, cs *contentSet) error {
 	defer func() { host.shell.closeIntro(cl) }()
 	options := host.windowOptions()
 	nlScreenInst = newNLScreen(func() *gameShell { return host.shell })
-	options.Screen = nlScreenInst
+	toolsScreenInst = &toolsScreen{}
+	defer toolsScreenInst.release()
+	options.Screen = &frontendScreens{settings: nlScreenInst, tools: toolsScreenInst}
 	// A trace of menu play is the player's own session, not a benchmark: it
 	// takes no benchmark lock (a game should not wait on one) and saves
 	// settings as usual. It starts at the first battle.
@@ -1010,7 +1012,7 @@ func (g *gameShell) step(delta float64, cl *client.Client) {
 	// The Nanolathe screen gets ready while the main menu idles, so it opens
 	// onto a staged scene (nlscreen.go).
 	if nlScreenInst != nil && g.frontend != nil {
-		if g.frontend.Mode == modeMenuMain {
+		if g.frontend.Mode == modeMenuMain && !toolsScreenInst.Active() {
 			nlScreenInst.warm(g)
 		} else if !nlScreenInst.open && nlScreenInst.warmed != nil {
 			// Leaving the main menu another way releases the staged scene.

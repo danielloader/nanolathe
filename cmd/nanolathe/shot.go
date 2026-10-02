@@ -98,6 +98,9 @@ func (s *shotMillisSource) Millis32() uint32 {
 // pixel comes from the production composer, and the session is stepped through
 // the ordinary viewer step so the frame captured is a genuinely committed one.
 func runShot(opts Options, cs *contentSet) error {
+	if opts.ShotUnitViewer != "" {
+		return runUnitViewerShot(opts, cs)
+	}
 	if err := validateShotOptions(opts); err != nil {
 		return err
 	}

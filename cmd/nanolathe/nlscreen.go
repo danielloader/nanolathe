@@ -2271,7 +2271,10 @@ func (s *nlScreen) heroContent(screen *ebiten.Image, card *nlCard, v int, x, y, 
 				badge(gameplayLabel(minimum)+"+", nlAmber)
 			}
 		}
-		// A removable mod has a remove cap at the row's end.
+		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: r.X, Y: r.Y, W: r.W - 40*u, H: r.H}, Click: func() { s.setCard(*card, i) }})
+		// Badges can move the remove cap inside the row's selection region.
+		// Register it last so the visible cap receives the click
+		// (DESIGN_MODS_MUTATORS §8.2).
 		if m != nil && !sameMod(m, s.shell().cs.mod) {
 			rid := s.ui.id("content-remove", "", i, -1)
 			xr := screenkit.Rect{X: bx - 30*u, Y: r.Y + r.H/2 - 12*u, W: 24 * u, H: 24 * u}
@@ -2281,7 +2284,6 @@ func (s *nlScreen) heroContent(screen *ebiten.Image, card *nlCard, v int, x, y, 
 			mod := *m
 			s.hits.Add(screenkit.Region{ID: rid, Rect: xr, Click: func() { s.removing, s.dialog = mod, "remove" }})
 		}
-		s.hits.Add(screenkit.Region{ID: id, Rect: screenkit.Rect{X: r.X, Y: r.Y, W: r.W - 40*u, H: r.H}, Click: func() { s.setCard(*card, i) }})
 	}
 	// Scroll arrows when the list is longer than its window.
 	if n > shown {

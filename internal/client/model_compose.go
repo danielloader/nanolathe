@@ -178,6 +178,12 @@ func (c *Client) collectDrawPolysLane(draw *presentationrender.UnitDraw, selecto
 // collectDrawPolysLaneProjected keeps the cache-lane material walk shared while
 // selecting either the local cached projection or direct live projection.
 func (c *Client) collectDrawPolysLaneProjected(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, lane presentationrender.PieceLane, direct bool) []screenPoly {
+	return c.collectDrawPolysProjection(draw, selector, id, kind, lane, direct, nil)
+}
+
+// The optional preview projector changes only final screen coordinates. The
+// material walk, height keys and shading remain shared with ordinary models.
+func (c *Client) collectDrawPolysProjection(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, lane presentationrender.PieceLane, direct bool, preview *modelPreviewProjector) []screenPoly {
 	if c == nil || c.cam == nil || draw == nil || draw.Model == nil {
 		return nil
 	}
@@ -365,7 +371,9 @@ func (c *Client) collectDrawPolysLaneProjected(draw *presentationrender.UnitDraw
 				// the two differ by a pixel for fractional coordinates
 				// [03 R-RAST-01 §2].
 				var lx, ly, ry int32
-				if direct {
+				if preview != nil {
+					lx, ly, poly.x2[corner], poly.y2[corner] = preview.vertex(v, draw.WorldPos)
+				} else if direct {
 					lx, ly = c.modelDirectVertex(v, draw.WorldPos)
 					poly.x2[corner], poly.y2[corner] = c.modelDirectVertexDoubled(v, draw.WorldPos)
 					ry = int32(v[1].Floor())

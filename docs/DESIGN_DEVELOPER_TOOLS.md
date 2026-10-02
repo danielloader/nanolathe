@@ -342,3 +342,165 @@ views, construction-admission explanations, pinned comparisons and exporting a
 selected subject into the existing diagnostic bundle. These are ideas, not
 retail claims or committed feature behavior. Design them after the recovered
 views work and prove that observation leaves the battle unchanged.
+
+## 7. 3D unit viewer preview
+
+**User-authorized Nanolathe presentation policy (2026-10-01).** The unit
+viewer is an unfinished, hidden preview: there is no main-menu Tools button
+or public shortcut listing. Ctrl+U at the main menu opens the viewer directly;
+the shortcut is inactive in child windows, modal dialogs and text editors.
+This maintainer contract records the entry without advertising it in the UI.
+The searchable catalog and textured, rotatable unit model are inspired by the
+official Cavedog viewer. This is Nanolathe tooling, not a reconstruction of
+that program's interface or behavior, and is available in every gameplay mode
+without developer authorization.
+
+The user-authorized refinement matches the Nanolathe settings screen
+(DESIGN_INTERFACE_HUD_INPUT §3.17): its existing original metal button art,
+dark textured surfaces, bundled display/body fonts, gold headings and green
+active indicators. `screenkit` draws at device resolution. A detached
+`ui.Panel` retains editor, list, scrollbar, button and keyboard-focus behavior;
+input measurement uses the same typefaces and sizes as the painted controls.
+The catalog, model and scrollable unit data retain distinct regions with
+consistent spacing. The selected animation has a visible active indicator;
+unsupported callbacks keep disabled controls. A subdued drafting grid and
+circular guide decorate the model bay; they remain fixed to the display and
+represent neither terrain nor a battle shadow. No GUI artwork is copied into
+the repository and no settings-screen state is changed by opening the viewer.
+
+The catalog is the running content set's immutable preview catalog, with the
+same directory layout and content limits as the game's loader. It lists every
+retained definition, including units outside build menus and records hidden by
+duplicate lookup names. Display order is name, internal unit ID, definition
+number, then catalog ordinal to break ties. Search is case-insensitive; each
+whitespace-separated token must match a name or internal ID field. Filtering
+preserves order and selection when the selected record remains present. No
+match clears the preview. Switching content rebuilds the screen from the new
+mount, so stale definitions cannot cross a content boundary.
+
+Click a list row or use Up/Down and Page Up/Page Down to select. Drag inside
+the model stage to rotate horizontally and vertically, including the underside.
+Wheel over the stage zooms from 35% to 300%; wheel over either sidebar scrolls
+that sidebar. The model turns once every eighteen host seconds by default,
+pauses while dragged, and resumes on release. **Rotate** toggles this;
+**Reset view** restores orientation and fit. Ctrl/Cmd+F focuses search,
+Ctrl/Cmd+A arms replacement of its text; the native editor supplies caret,
+Home/End, Delete and Backspace behavior and its existing byte and width limits.
+Tab traverses the native controls;
+outside search, Space toggles rotation, R resets, Left/Right turn and +/- zoom.
+Esc or Back returns directly to the main menu. Closing consumes held keys
+and buttons until release. These constants are viewer preferences, not retail
+gameplay arithmetic.
+
+The turntable applies yaw before display-space tilt, converted to the model
+renderer's existing body orientation order [03 §2.4], C21. This keeps its vertical
+axis upright throughout a turn instead of making the unit wobble as it rotates.
+At a vertical orbit pole the equivalent orientation uses zero bank. The default
+tilt is 45 degrees, using 94% of the conservative projection fit; both are
+presentation preferences. Stable placement and final-resolution projection
+below keep the orbit from amplifying game-resolution rounding.
+
+`cmd/nanolathe/unit_viewer*.go` owns the screen and detached view state.
+The control adapter uses a private panel and shared immutable menu assets;
+it does not change the underlying menu panel.
+`frontendScreens` routes it and the settings screen through the existing
+`ebitenapp.FullScreen` boundary (DESIGN_INTERFACE_HUD_INPUT §3.17), which
+suppresses input to the underlying menu. Catalog compilation runs in a host
+worker; closing joins it before the content can unmount. GPU resources and
+model caches belong to this screen and are released on close. No unit
+allocator, simulation clock or authoritative RNG is used.
+
+**User-authorized animation preview policy.** Each selected action owns a fresh
+isolated presentation VM and first runs authored `Create`. Idle advances its
+remaining threads; Walk invokes authored `StartMoving`. Aim uses the selected
+active weapon's `AimPrimary`, `AimSecondary` or `AimTertiary` with a fixed heading
+of 45 degrees and pitch of approximately 15 degrees. Fire requires both matching
+Aim and Fire callbacks. It waits for an explicit nonzero Aim return, invokes
+Fire followed by authored `RockUnit` when present, waits at least the selected
+weapon's compiled base reload interval, then starts a fresh aim. The minimum
+repeat interval is one preview tick; this timing is viewer policy, not predicted
+battle cadence. Aim alone runs once and allows authored restore threads to
+continue. Pause stops animation independently of rotation; choosing an action
+again restarts it, and changing the selected unit restores Idle and weapon 1.
+
+The preview runs at 30 Hz with at most five ticks per host update, dropping
+excess elapsed time. Each thread retains the existing 4,096-instruction
+execution bound. An aim that has not completed after 300 preview ticks stops
+playback with a visible status; zero returns and interrupted callbacks never
+authorize firing. Missing callbacks disable their controls.
+
+Authored `SetMaxReloadTime`, when present, receives the longest compiled reload
+across all three definition pointers through the existing deferred callback
+after Create [04 R-CB-01 §2]. The VM retains the existing detached model flags,
+full-health and complete-construction context. Other unbound reads return zero;
+random requests return their low bound without drawing. No world, allocator,
+authoritative RNG, projectile, resource, sound or effect sink is connected.
+Diagnostics and instruction exhaustion fall back to labeled authored geometry.
+The fit radius is calculated from the zero-time Create pose and retained across
+playback and action changes. These inputs are an explicit Nanolathe preview
+context, not historical game behavior.
+
+`ModelPreviewRenderer.RecordProjectedGeometry` resolves the 3DO, piece
+transforms, textures, team-color bank and palette using the same source as
+battle rendering [03 §2.4][03 §2.4.1]. The definition selects
+structure shading (`BMCode == 0`) and its key plane; no unit-name special cases
+are added. A fixed fit radius encloses the centered bounds of the visible
+hierarchy's drawable vertices and parent translations, excluding hidden pieces,
+selection plates, undrawable primitives and attachment-only points. No terrain,
+waterline or battle shadow is claimed. The viewer uses the GPU model path under
+either battle renderer preference, without changing that preference. A missing
+model reports an error while its catalog entry and available statistics remain
+browsable.
+
+**User-authorized smooth preview projection.** The viewer supplies
+`ModelPreviewProjection{PixelsPerUnit, Pivot}` to the isolated projected-geometry
+entry. `PixelsPerUnit` is the final raster scale. `Pivot` is an already-oriented
+model-relative reference point, subtracted only from screen X/Y projection.
+The native and doubled antialiasing coordinates are each projected directly
+from transformed 16.16 vertices, retaining fractions until their final raster
+coordinates are formed. The doubled plane must not double already-rounded
+native coordinates. The shared material walk, source height, UVs, shading and
+height-key comparisons are unchanged. Ordinary `RecordModel` and
+`RecordGeometry` calls retain their existing arithmetic, as does every battle.
+
+The viewer captures a Create-pose bounds center in root-local coordinates and
+the reference root state once. Each view transforms that fixed point through
+the current body orientation; animated poses never recalculate it. Current
+composition bounds determine allocation only, while the canvas center remains
+the anchor. This removes bounds-driven whole-model shifts and amplified
+game-resolution rounding. Large subjects reduce the canvas and project again
+at the reduced raster scale to fit the GPU composition atlas, preserving the
+displayed zoom and aspect. Final raster quantization and authored 30 Hz COB
+pose updates remain; this preview does not change simulation animation timing.
+
+The projected-geometry entry is intentionally for complete isolated models.
+It rejects explicit view scale, attached children, construction,
+cloak and special silhouette options rather than silently changing their
+ordinary preview contracts. `Scale` must remain zero; `PixelsPerUnit` supplies
+the scale. Each projected call also samples the supplied orientation without
+retaining the battle cache's small-angle threshold. No gameplay rule or new
+renderer preference selects this projection.
+
+Information comes only from the compiled definition: authored description,
+health, costs, build work, movement, sensor ranges and each active linked
+weapon's name, range and base reload. Costs and movement reuse the established
+unit-info conversions [07 R-HUD-03 §8]. Build work is not elapsed construction
+time [05 "Construction arithmetic"], and base reload is compiled ticks divided
+by 30, not predicted firing cadence [02 "Weapon record"]. Statistics are
+explicitly base values before mutators. Discovery-only records whose gameplay
+fields were not parsed show unavailable statistics [02 R-CAT-01 §5].
+
+**Verification.** Focused tests cover identity-preserving search and selection,
+definition immutability, stat conversion, input ownership and release, zoom
+bounds, main-menu-only preview entry, isolated animation inputs, bounded
+playback, callback return and reload ordering, pose-cache invalidation, stable
+pivot placement, late projection rounding, independent supersample coordinates
+and unchanged ordinary preview calls. Capture the actual screen with
+`--shot /tmp/viewer.png --shot-unit-viewer armcom --shot-size 1440x900`.
+`--shot-unit-viewer @tools` retains the unused tools-menu prototype for capture.
+Captures create no battle and write no preferences. Review narrow and wide
+windows, buildings, mobile units and aircraft, plus search and drag states
+through the native window or the Ebitengine VM host. Run the ordinary fast
+and short retail landing gates,
+plus matching classic and modern live-battle performance checks for changes to
+the shared geometry collector.

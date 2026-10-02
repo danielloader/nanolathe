@@ -717,6 +717,25 @@ func (c *Client) directModelGeometry(draw *presentationrender.UnitDraw, selector
 	return g
 }
 
+// projectedPreviewGeometry keeps the tool's pivot at a fixed screen anchor.
+// The changing bounds only allocate storage; they never recenter the model.
+// Native and doubled corners have already been projected independently at
+// the requested display scale (DESIGN_DEVELOPER_TOOLS §7).
+func (c *Client) projectedPreviewGeometry(draw *presentationrender.UnitDraw, selector teamColor, projection ModelPreviewProjection, anchorX, anchorY int32) (*drawlist.ModelGeometry, error) {
+	projector := modelPreviewProjector{projection: projection}
+	polys := c.collectDrawPolysProjection(draw, selector, 0, modelCursorUnit, presentationrender.PieceLaneAll, false, &projector)
+	if projector.err != nil || len(polys) == 0 {
+		return nil, projector.err
+	}
+	width, height, originX, originY := directModelExtent(polys)
+	supersample := c.modelSupersampleGeometry(polys, draw.KeyPlane, width, height, doubledPlacement{originX: originX, originY: originY, exact: true})
+	placeFaces(polys, originX, originY, 1)
+	g := c.borrowModelPacket(polys, int32(width), int32(height), originX, originY, anchorX, anchorY, 1, draw.KeyPlane, drawlist.ModelFallbackNone)
+	g.Supersample = supersample
+	c.setModelLightingHeight(g, draw)
+	return g, nil
+}
+
 // directModelExtent is modelExtent for direct-projected corners: seeded at the
 // first corner rather than at the model origin, because the corners are screen
 // offsets and screen (0,0) has nothing to do with the subject. The exact

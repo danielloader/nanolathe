@@ -1,0 +1,283 @@
+package main
+
+import (
+	"fmt"
+	"image/color"
+	"math"
+	"strings"
+
+	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/nanolathe-gg/nanolathe/internal/gui"
+	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
+)
+
+// Draw paints at device resolution using the settings screen's type and stock
+// metal art. The panel remains in logical coordinates for input and scrolling.
+func (s *toolsScreen) Draw(dst *ebiten.Image) {
+	s.layout(float64(dst.Bounds().Dx()), float64(dst.Bounds().Dy()))
+	s.preparePaint()
+	s.drawBackground(dst)
+	if s.panel == nil {
+		return
+	}
+	s.refreshControls()
+	s.drawHeader(dst)
+	if s.viewer {
+		s.drawViewer(dst)
+	} else {
+		s.label(dst, "Your loaded content, up close.", screenkit.Rect{X: 320, Y: 256, W: 560, H: 58}, screenkit.Style{Size: 38, Top: nlGoldTop, Bottom: nlGoldBottom, Align: 1}, true)
+		s.label(dst, "Explore units, compare statistics and play their animations.", screenkit.Rect{X: 310, Y: 336, W: 580, H: 28}, screenkit.Style{Size: 14, Top: nlBody, Align: 1}, false)
+	}
+	for i, g := range s.panel.Window.Gadgets {
+		if i == 0 || !s.panel.ActiveAt(i) {
+			continue
+		}
+		r := unitViewerRect(s.panel.Window.PlacedRect(i))
+		switch g.Kind {
+		case gui.KindButton:
+			s.drawButton(dst, i, g, r)
+		case gui.KindTextBox:
+			s.drawSearch(dst, i, r)
+		case gui.KindListBox:
+			if g.Name == "UNITS" {
+				s.drawLibrary(dst, i, g, r)
+			} else {
+				s.drawInfo(dst, i, g, r)
+			}
+		case gui.KindScrollBar:
+			s.drawScrollbar(dst, i, r)
+		}
+	}
+}
+
+func (s *toolsScreen) drawBackground(dst *ebiten.Image) {
+	full := screenkit.Rect{W: float64(dst.Bounds().Dx()), H: float64(dst.Bounds().Dy())}
+	dst.Fill(color.RGBA{12, 15, 12, 255})
+	if s.art.texture != nil {
+		nlTileArt(dst, s.art.texture, full, max(0.5, s.scale))
+	}
+	screenkit.Fill(dst, full, color.RGBA{4, 9, 6, 214})
+	screenkit.VGradient(dst, full, color.RGBA{0, 0, 0, 70}, color.RGBA{0, 0, 0, 170})
+	if s.viewer {
+		// Quiet side surfaces leave the selected model as the hero. There is
+		// one original riveted frame around the stage, no nested list bevels.
+		for _, r := range []screenkit.Rect{{X: 20, Y: 94, W: 258, H: 622}, {X: 924, Y: 94, W: 256, H: 622}} {
+			screenkit.Fill(dst, s.deviceRect(r), color.RGBA{5, 9, 6, 100})
+		}
+	}
+}
+
+func (s *toolsScreen) drawHeader(dst *ebiten.Image) {
+	if wm := s.art.wordmark; wm != nil {
+		b := wm.Bounds()
+		screenkit.Image(dst, wm, s.deviceRect(screenkit.Rect{X: 32, Y: 22, W: float64(b.Dx()) * 34 / float64(b.Dy()), H: 34}), 1, true)
+	} else {
+		s.label(dst, "NANOLATHE", screenkit.Rect{X: 32, Y: 24, W: 244, H: 40}, screenkit.Style{Size: 30, Tracking: 0.06, Top: nlGoldTop, Bottom: nlGoldBottom}, true)
+	}
+	s.label(dst, "UNIT VIEWER", screenkit.Rect{X: 306, Y: 27, W: 360, H: 29}, screenkit.Style{Size: 20, Tracking: 0.1, Top: nlCream}, true)
+	s.label(dst, s.contentName, screenkit.Rect{X: 306, Y: 58, W: 690, H: 20}, screenkit.Style{Size: 12, Top: nlDim}, false)
+	s.label(dst, "PREVIEW", screenkit.Rect{X: 920, Y: 38, W: 90, H: 20}, screenkit.Style{Size: 11, Tracking: 0.12, Top: nlGreenText, Align: 2}, true)
+	screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: 306, Y: 52, W: 141, H: 2}), nlGreenText)
+	screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: 32, Y: 84, W: 1136, H: 1}), color.RGBA{123, 119, 86, 100})
+}
+
+func (s *toolsScreen) drawViewer(dst *ebiten.Image) {
+	kicker := screenkit.Style{Size: 14, Tracking: 0.12, Top: nlKicker, Upper: true}
+	s.label(dst, "Unit library", screenkit.Rect{X: 32, Y: 108, W: 234, H: 24}, kicker, true)
+	s.label(dst, fmt.Sprintf("%d / %d units", len(s.filtered), len(s.entries)), screenkit.Rect{X: 34, Y: 191, W: 230, H: 16}, screenkit.Style{Size: 10, Top: nlDim}, false)
+	s.label(dst, "Unit data", screenkit.Rect{X: 946, Y: 108, W: 210, H: 24}, kicker, true)
+	if s.selected != nil {
+		s.label(dst, unitViewerName(s.selected), screenkit.Rect{X: 306, Y: 105, W: 596, H: 51}, screenkit.Style{Size: 40, Top: nlGoldTop, Bottom: nlGoldBottom, Shadow: 0.06, Upper: true}, true)
+		s.label(dst, strings.ToUpper(s.selected.UnitName), screenkit.Rect{X: 308, Y: 157, W: 590, H: 19}, screenkit.Style{Size: 11, Tracking: 0.08, Top: nlGreenText}, true)
+	}
+	stage := s.deviceRect(s.viewRect)
+	screenkit.Fill(dst, stage, color.RGBA{10, 14, 12, 255})
+	if s.selected != nil && s.loadErr == nil {
+		k := min(1, 2048/max(stage.W, stage.H))
+		if img := s.model.draw(s.cs, s.selected, s.yaw, s.pitch, s.zoom, max(1, int(stage.W*k)), max(1, int(stage.H*k))); img != nil {
+			screenkit.Image(dst, img, stage, 1, false)
+		}
+	}
+	if s.art.frame != nil {
+		screenkit.NineSlice(dst, s.art.frame, s.deviceRect(s.viewRect.Inset(-6)), nlFrameEdge, 0.5*s.scale, false)
+	} else {
+		screenkit.Outline(dst, stage, max(1, s.scale), color.RGBA{75, 79, 61, 255})
+	}
+	status := s.action
+	if s.model.poseNote != "" {
+		status = s.model.poseNote
+	}
+	if s.animationPaused {
+		status += " (paused)"
+	}
+	s.label(dst, status, screenkit.Rect{X: 312, Y: 611, W: 500, H: 24}, screenkit.Style{Size: 12, Top: nlDim}, false)
+	s.label(dst, fmt.Sprintf("%.0f%%", 100*s.zoom), screenkit.Rect{X: 828, Y: 611, W: 68, H: 24}, screenkit.Style{Size: 12, Top: nlKicker, Align: 2}, false)
+	message := ""
+	switch {
+	case s.loadErr != nil:
+		message = "Catalog unavailable\r" + s.loadErr.Error()
+	case s.loading != nil:
+		message = "Loading units..."
+	case s.selected == nil:
+		message = "No matching units.\rTry another name or unit ID."
+	case s.model.err != nil:
+		message = "Model unavailable\r" + s.model.err.Error()
+	}
+	if message != "" {
+		for i, line := range retailWrapLines(message, unitViewerTextWidth, 508) {
+			if i >= 10 {
+				break
+			}
+			s.label(dst, line, screenkit.Rect{X: 348, Y: 300 + float64(i)*26, W: 508, H: 25}, screenkit.Style{Size: unitViewerBodySize, Top: nlBody, Align: 1}, false)
+		}
+	}
+	s.label(dst, "Arrows / page keys select", screenkit.Rect{X: 32, Y: 734, W: 260, H: 16}, screenkit.Style{Size: 10, Top: nlDim}, false)
+	s.label(dst, "Drag to rotate  /  Wheel to zoom", screenkit.Rect{X: 306, Y: 734, W: 570, H: 16}, screenkit.Style{Size: 10, Top: nlDim}, false)
+	s.label(dst, "Base values / before mutators", screenkit.Rect{X: 936, Y: 734, W: 232, H: 16}, screenkit.Style{Size: 10, Top: nlDim}, false)
+}
+
+func (s *toolsScreen) drawButton(dst *ebiten.Image, index int, g gui.Gadget, r screenkit.Rect) {
+	p := s.panel
+	device := s.deviceRect(r)
+	disabled := g.GrayedOut != 0
+	down := p.DownAt(index) != 0
+	if !s.art.drawButton(dst, device, down, disabled) {
+		screenkit.Fill(dst, device, color.RGBA{55, 59, 51, 255})
+		screenkit.Bevel(dst, device, max(1, 2*s.scale), color.RGBA{139, 141, 121, 255}, color.RGBA{19, 24, 17, 255}, down)
+	}
+	if p.Hovered() == index && !disabled {
+		screenkit.Fill(dst, s.deviceRect(r.Inset(3)), color.RGBA{255, 255, 255, 8})
+	}
+	if p.Focused() == index {
+		screenkit.Outline(dst, device, max(1, s.scale), nlKicker)
+	}
+	if g.Attribs&0x1800 != 0 {
+		// These are the builder's associated arrow controls, serviced by the
+		// same panel as the track and thumb.
+		x, y := device.X+device.W/2, device.Y+device.H/2
+		dy := device.H * 0.18
+		if g.Attribs&0x1000 != 0 {
+			dy = -dy
+		}
+		screenkit.Poly(dst, []float64{x, y + dy, x - device.W*0.2, y - dy, x + device.W*0.2, y - dy}, nlBody)
+		return
+	}
+	selected := s.selected != nil && !disabled && strings.EqualFold(g.Name, s.action)
+	if g.Name == "SPIN" && s.spinning {
+		selected = true
+	}
+	if selected {
+		screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: r.X + 7, Y: r.Y + r.H - 5, W: r.W - 14, H: 2}), nlGreenText)
+	}
+	c := nlCream
+	if disabled {
+		c = color.RGBA{118, 121, 101, 255}
+	}
+	st := screenkit.Style{Size: 14, Tracking: 0.06, Top: c, Upper: true, Align: 1}
+	caption := screenkit.Rect{X: r.X + 6, Y: r.Y + (r.H-st.Size)/2, W: r.W - 12, H: st.Size + 5}
+	// The settings captions keep a dark outline over the original metal.
+	outline := st
+	outline.Top = color.RGBA{6, 9, 6, 240}
+	for _, d := range [4][2]float64{{-0.7, 0}, {0.7, 0}, {0, -0.7}, {0, 0.7}} {
+		run := caption
+		run.X, run.Y = run.X+d[0], run.Y+d[1]
+		s.label(dst, p.TextAt(index), run, outline, true)
+	}
+	s.label(dst, p.TextAt(index), caption, st, true)
+}
+
+func (s *toolsScreen) drawSearch(dst *ebiten.Image, index int, r screenkit.Rect) {
+	focused := s.panel.EditorCaptured() && s.panel.EditorIndex() == index
+	screenkit.Fill(dst, s.deviceRect(r), color.RGBA{5, 10, 6, 230})
+	edge := color.RGBA{75, 82, 65, 255}
+	if focused {
+		edge = nlKicker
+	}
+	screenkit.Outline(dst, s.deviceRect(r), max(1, s.scale), edge)
+	text := s.panel.TextAt(index)
+	tr := screenkit.Rect{X: r.X + unitViewerTextInset, Y: r.Y + (r.H-unitViewerBodySize)/2 - 1, W: r.W - 2*unitViewerTextInset, H: unitViewerTextMetric}
+	if text == "" {
+		s.label(dst, "Search name or ID", tr, screenkit.Style{Size: unitViewerBodySize, Top: alphaC(nlDim, 0.7)}, false)
+	}
+	if focused && s.selectAll && text != "" {
+		screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: tr.X, Y: tr.Y - 2, W: math.Min(tr.W, float64(unitViewerTextWidth(text))), H: unitViewerTextMetric + 2}), color.RGBA{64, 109, 57, 130})
+	}
+	s.label(dst, text, tr, screenkit.Style{Size: unitViewerBodySize, Top: nlBody}, false)
+	if focused && int(s.uiClock*2)%2 == 0 {
+		caret := min(len(text), max(0, s.panel.EditorCaret()))
+		x := tr.X + unitViewerMeasure(text[:caret], screenkit.Style{Size: unitViewerBodySize}, false)
+		screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: min(x, tr.X+tr.W-1), Y: tr.Y - 1, W: 1.2, H: unitViewerBodySize + 4}), nlGreenText)
+	}
+}
+
+func (s *toolsScreen) drawLibrary(dst *ebiten.Image, index int, g gui.Gadget, r screenkit.Rect) {
+	rows, selected, top, ok := s.panel.ListValuesAt(index)
+	if !ok {
+		return
+	}
+	target := s.clip(dst, r)
+	if target == nil {
+		return
+	}
+	for i := top; i < len(rows); i++ {
+		y := r.Y + 2 + float64(i-top)*float64(g.ItemHeight)
+		if y+unitViewerTextMetric > r.Y+r.H {
+			break
+		}
+		row := screenkit.Rect{X: r.X, Y: y, W: r.W, H: float64(g.ItemHeight) - 4}
+		name, id, _ := strings.Cut(rows[i], "\r")
+		c := nlBody
+		if i == selected {
+			screenkit.Fill(target, s.deviceRect(row), color.RGBA{34, 63, 30, 185})
+			screenkit.Fill(target, s.deviceRect(screenkit.Rect{X: row.X, Y: row.Y, W: 3, H: row.H}), nlGreenText)
+			c = nlCream
+		}
+		s.label(target, name, screenkit.Rect{X: row.X + 10, Y: y + 7, W: row.W - 20, H: 21}, screenkit.Style{Size: 15, Top: c, Upper: true}, true)
+		s.label(target, id, screenkit.Rect{X: row.X + 10, Y: y + 29, W: row.W - 20, H: 16}, screenkit.Style{Size: 10, Top: nlDim}, false)
+	}
+	if s.panel.Focused() == index {
+		screenkit.Outline(target, s.deviceRect(r), max(1, s.scale), color.RGBA{102, 101, 71, 200})
+	}
+}
+
+func (s *toolsScreen) drawInfo(dst *ebiten.Image, index int, g gui.Gadget, r screenkit.Rect) {
+	rows, _, top, ok := s.panel.ListValuesAt(index)
+	if !ok {
+		return
+	}
+	target := s.clip(dst, r)
+	if target == nil {
+		return
+	}
+	width := r.W - 2*unitViewerTextInset
+	for i := top; i < len(rows); i++ {
+		y := r.Y + 2 + float64(i-top)*float64(g.ItemHeight)
+		if y+unitViewerTextMetric > r.Y+r.H {
+			break
+		}
+		label, value, pair := strings.Cut(rows[i], "\t")
+		c := nlBody
+		if pair || strings.HasSuffix(label, ":") {
+			c = nlDim
+		}
+		line := screenkit.Rect{X: r.X + unitViewerTextInset, Y: y, W: width, H: unitViewerTextMetric + 2}
+		s.label(target, label, line, screenkit.Style{Size: unitViewerBodySize, Top: c}, false)
+		if pair {
+			s.label(target, value, line, screenkit.Style{Size: unitViewerBodySize, Top: nlBody, Align: 2}, false)
+		}
+	}
+	if s.panel.Focused() == index {
+		screenkit.Outline(target, s.deviceRect(r), max(1, s.scale), color.RGBA{102, 101, 71, 200})
+	}
+}
+
+func (s *toolsScreen) drawScrollbar(dst *ebiten.Image, index int, r screenkit.Rect) {
+	screenkit.Fill(dst, s.deviceRect(r), color.RGBA{12, 19, 12, 220})
+	// The very same native metrics and origin govern hit testing and dragging.
+	size, _ := s.panel.SliderMetricsAt(index, unitViewerTextMetric)
+	thumb := screenkit.Rect{X: r.X + 3, Y: r.Y + 2 + float64(s.panel.SliderKnobAt(index)), W: r.W - 6, H: float64(size)}
+	screenkit.Fill(dst, s.deviceRect(thumb), color.RGBA{97, 133, 86, 255})
+	if s.panel.Focused() == index || s.panel.Hovered() == index {
+		screenkit.Outline(dst, s.deviceRect(thumb), max(1, s.scale), nlGreenText)
+	}
+}

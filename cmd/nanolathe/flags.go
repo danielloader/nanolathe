@@ -129,6 +129,7 @@ type Options struct {
 	ShotContour        string      // contour spacing and optional offset in captures
 	ShotSelect         bool        // run the Ctrl+A select-all before --shot captures, so the command page is open
 	ShotSize           string      // "WxH" surface size for --shot; empty composes at the authored 640x480
+	ShotUnitViewer     string      // unit ID for a full-screen viewer capture
 	ShotDebris         string      // directory for the --shot-debris tick sequence; empty runs no debris capture
 	ShotDebrisUnit     string      // unit blown up by --shot-debris
 	ShotDebrisCount    int         // how many of them
@@ -277,6 +278,7 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	set.StringVar(&opts.FilmOut, "film-out", "", "where --film writes: a directory of PNG frames, or \"-\" for a raw RGBA stream on stdout")
 	set.IntVar(&opts.FilmFrames, "film-frames", 0, "stop a --film capture after this many frames (0 captures the whole script)")
 	set.StringVar(&opts.NLShot, "nl-shot", "", "render every card of the Nanolathe screen to PNGs in this directory, with no visible window")
+	set.StringVar(&opts.ShotUnitViewer, "shot-unit-viewer", "", "with --shot, capture the unit viewer for this unit ID (or @tools for the Tools menu)")
 	set.StringVar(&opts.NLShotSize, "nl-shot-size", "1920x1080", "canvas size for --nl-shot, as WxH")
 	set.StringVar(&opts.NLShotOnly, "nl-shot-only", "", "comma-separated card keys (or page:card) --nl-shot captures; empty captures every card")
 	set.StringVar(&opts.ShotModal, "shot-modal", "", "open a battle modal before --shot captures: \"options\" (Tab), \"exit\", \"confirm\", \"settings\", \"help\", or \"briefing\" (needs --mission)")

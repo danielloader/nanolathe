@@ -110,17 +110,17 @@ func NewModelPreviewRenderer(fs *vfs.FS, teamLogos ...string) (*ModelPreviewRend
 // It is a static pose renderer: PiecePoses represent supplied committed lanes,
 // not COB activation or animation.
 func (r *ModelPreviewRenderer) RecordModel(opts ModelPreviewOptions) (ModelPreviewRecord, error) {
-	return r.recordModel(opts, false)
+	return r.recordModel(opts, false, nil)
 }
 
 // RecordGeometry produces a modern-only preview packet. It performs the model
 // transform and texture resolution but never allocates or rasterizes a CPU
 // composition image. Its Image is nil; callers replay List on the GPU.
 func (r *ModelPreviewRenderer) RecordGeometry(opts ModelPreviewOptions) (ModelPreviewRecord, error) {
-	return r.recordModel(opts, true)
+	return r.recordModel(opts, true, nil)
 }
 
-func (r *ModelPreviewRenderer) recordModel(opts ModelPreviewOptions, geometryOnly bool) (ModelPreviewRecord, error) {
+func (r *ModelPreviewRenderer) recordModel(opts ModelPreviewOptions, geometryOnly bool, projection *ModelPreviewProjection) (ModelPreviewRecord, error) {
 	if r == nil || r.client == nil || r.palette == nil {
 		return ModelPreviewRecord{}, fmt.Errorf("nanolathe: rendering model preview: renderer is not initialized")
 	}
@@ -217,6 +217,27 @@ func (r *ModelPreviewRenderer) recordModel(opts ModelPreviewOptions, geometryOnl
 	}
 	wasRecordingGeometry := c.recordModelGeometry
 	c.recordModelGeometry = true
+	defer func() { c.recordModelGeometry = wasRecordingGeometry }()
+	if projection != nil {
+		// The tool samples every supplied camera angle. Its fresh orientation
+		// cache cannot retain the battle path's small-angle threshold or alter
+		// a later ordinary preview's cached orientation [03 §5.2].
+		previousOrientation := c.modelOrientation
+		c.modelOrientation = nil
+		defer func() { c.modelOrientation = previousOrientation }()
+		draw, ok := c.unitDrawFor(view)
+		if ok {
+			geometry, err := c.projectedPreviewGeometry(draw, unitTeamColor(view), *projection, int32(opts.Width/2), int32(opts.Height/2))
+			if err != nil {
+				return ModelPreviewRecord{}, err
+			}
+			if geometry != nil {
+				c.list.RecordModel(drawlist.Model{Geometry: geometry})
+				return ModelPreviewRecord{List: c.list.Clone(), Background: opts.Background, Palette: r.palette}, nil
+			}
+		}
+		return ModelPreviewRecord{}, fmt.Errorf("nanolathe: rendering projected preview: logical path %s, providers searched %s, expected drawable 3DO model", renderName, previewProviders(c.modelFS))
+	}
 	children := append([]frame.UnitView(nil), opts.Children...)
 	for i := range children {
 		children[i].X += view.X

@@ -1083,6 +1083,12 @@ with the row ([07 R-WGT-01 §4]), which is too dim to read at this size.
 Retail windows keep the retail heading. Nanolathe-authored art for these
 windows is a possible follow-up, not a need.
 
+On the Nanolathe screen, an installed mod's X opens a removal confirmation.
+Its click target takes precedence over row selection, including when rule or
+controls badges move the X into the row. *Keep* leaves the install unchanged;
+*Remove* deletes it from the library and refreshes the list. The running mod
+has no X and cannot be removed.
+
 **The Mutators dialog.** *Change...* opens a modal over the screen built
 from the mutator catalogue (`content.MutatorCatalog`), so a new mutator needs
 no layout work: a scrolling list with a heading row per group (Economy,
@@ -1166,6 +1172,7 @@ dependencies.
 | Metadata disagreeing with the manifest refuses the install; unmet `requires` block selection | `modlibrary` |
 | Catalogue replacement preserves the original version, verifies the archive, keeps the old install on failure and recovers interrupted publication before staging cleanup; manual duplicates still refuse | `modlibrary.TestCatalogueReplacementKeepsOldInstallUntilValidated`, `modlibrary.TestReplacementRequiresVerifiedArchiveIdentity`, `modlibrary.TestOpenRecoversInterruptedReplacement` |
 | Both mod screens require id/version/hash agreement for current status and protect mounted versions before download and across asynchronous install/reload, including manual root aliases | `main.TestCatalogueCurrentRequiresVersionAndArchiveHash`, `main.TestBothModScreensRefuseUpdatingMountedVersion`, `main.TestModUpdateGuardAcrossAsynchronousInstall`, `main.TestModUpdateRefusesManuallyMountedDirectory` |
+| A mod row's X receives clicks with any badge combination, opens confirmation without selecting the mod, and removes it only after confirmation | `main.TestNLScreenModRemovePointer` |
 | A negative build page lock is refused; a config carries it as `content.presentation.build_menu_page_size`, and the player's settings value wins | `modlibrary.TestBuildMenuPageSizeMetadata`, `main.TestContentBuildMenuPageSize`, `main.TestExpandedSidebarBuildPageLock` |
 | Precedence: `--mod` over setting, a manual stack disables both, a mod's own config beats a saved `contentProfile`, `--mod-config` beats both, a removed profile name is ignored with the notice, a command line below the minimum is rejected | `modlibrary`, `main.TestContentConfigPrecedenceWithoutAMod`, `main.TestManualStackWithoutAConfigShowsTheNotice` |
 | Every config section is closed and validated (content, reserved gameplay words, feature bounds, settings keys and types, reserved settings keys, keyboard actions and chords, lock paths); the settings layer applies only what it names | `modlibrary.TestParseConfigDocument`, `modlibrary.TestParseConfigDocumentRefusals`, `modlibrary.TestConfigSettingsLayer` |

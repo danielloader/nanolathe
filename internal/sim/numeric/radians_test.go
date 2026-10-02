@@ -2,15 +2,16 @@ package numeric
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 )
 
-// These vectors were generated from the Go 1.27.1 amd64 library, independently
+// These vectors were generated from the Go 1.27.1 amd64/v1 library, independently
 // of the adapted source. They preserve full bits, not just narrowed headings.
 func TestRadiansCommittedVectors(t *testing.T) {
 	f, err := os.Open("testdata/radians-amd64.txt")
@@ -42,10 +43,28 @@ func TestRadiansCommittedVectors(t *testing.T) {
 	}
 }
 
-func TestRadiansAgainstAMD64Library(t *testing.T) {
-	if runtime.GOARCH != "amd64" {
-		t.Skip("amd64 is the reference library")
+// Digest generated independently from Go 1.27.1 math on amd64/v1 using
+// eachRadiansSample's operand stream. Each row hashes x, y, Sin(x), Cos(x),
+// Tan(x), Atan2(y, x), Acos(x), as little-endian binary64 bits, including NaNs.
+// This checks the dense sample on every target, including those whose library
+// fuses arithmetic and therefore cannot serve as the unfused reference [I2].
+func TestRadiansAMD64Digest(t *testing.T) {
+	h := sha256.New()
+	var row [56]byte
+	eachRadiansSample(func(x, y float64) {
+		values := [...]float64{x, y, SinRadians(x), CosRadians(x), TanRadians(x), Atan2Radians(y, x), AcosRadians(x)}
+		for j, v := range values {
+			binary.LittleEndian.PutUint64(row[j*8:], math.Float64bits(v))
+		}
+		h.Write(row[:])
+	})
+	const want = "20d451bd1cb4517b3476476f485f8d4fb273f228186d8aa31ee87d8b172b1896"
+	if got := fmt.Sprintf("%x", h.Sum(nil)); got != want {
+		t.Fatalf("radian sample digest %s want %s", got, want)
 	}
+}
+
+func eachRadiansSample(check func(x, y float64)) {
 	r := xorshift(0x781276321)
 	for i := 0; i < 16384; i++ {
 		x, y := math.Float64frombits(r.next()), math.Float64frombits(r.next())
@@ -53,12 +72,6 @@ func TestRadiansAgainstAMD64Library(t *testing.T) {
 			x = float64(int64(r.next())) / 0x1p63
 			y = float64(int64(r.next())) / 0x1p63
 		}
-		got := [5]float64{SinRadians(x), CosRadians(x), TanRadians(x), Atan2Radians(y, x), AcosRadians(x)}
-		want := [5]float64{math.Sin(x), math.Cos(x), math.Tan(x), math.Atan2(y, x), math.Acos(x)}
-		for j := range got {
-			if math.Float64bits(got[j]) != math.Float64bits(want[j]) {
-				t.Fatalf("(%g,%g) function %d: %016x want %016x", x, y, j, math.Float64bits(got[j]), math.Float64bits(want[j]))
-			}
-		}
+		check(x, y)
 	}
 }

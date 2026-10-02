@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"runtime"
 	"testing"
 )
 
@@ -14,16 +13,13 @@ func TestAngleSinCosAllWords(t *testing.T) {
 		radians := float64(a) * 2 * math.Pi / 65536
 		sin, cos := AngleSinCos(Angle(a))
 		wantSin, wantCos := SinRadians(radians), CosRadians(radians)
-		if runtime.GOARCH == "amd64" {
-			wantSin, wantCos = math.Sin(radians), math.Cos(radians)
-		}
 		if math.Float64bits(sin) != math.Float64bits(wantSin) || math.Float64bits(cos) != math.Float64bits(wantCos) {
 			t.Fatalf("angle %d: %.17g,%.17g want %.17g,%.17g", a, sin, cos, wantSin, wantCos)
 		}
 	}
 }
 
-// Digest generated independently with Go 1.27.1 math on amd64, over sine then
+// Digest generated independently with Go 1.27.1 math on amd64/v1, over sine then
 // cosine binary64 bits in little-endian order for every ascending angle.
 func TestAngleSinCosAMD64Digest(t *testing.T) {
 	h := sha256.New()

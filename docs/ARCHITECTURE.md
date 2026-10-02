@@ -473,7 +473,8 @@ when the claim concerns sustained combat. See the benchmark documents.
 
 **Fusion guard.** `internal/architecture.TestAuthoritativeArithmeticIsNotFused`
 is the one fast-tier test that runs the compiler itself: it builds the
-authoritative packages with the assembly listing enabled, for `GOARCH=arm64` and
+authoritative packages, and the load-time packages whose output the simulation
+reads, with the assembly listing enabled, for `GOARCH=arm64` and
 again for `GOAMD64=v3` whatever the host is, and fails on a fused multiply-add
 outside its shrink-only allowlist [I2]. It reads the generated code rather than
 the source because the backend fuses across statements and through inlining. It

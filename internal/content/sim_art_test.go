@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
@@ -336,6 +337,96 @@ func TestSimArtEffectHoldsFromSortedBanks(t *testing.T) {
 		if _, ok := empty.EffectEntryHolds("", "primary"); ok {
 			t.Fatal("empty table invented timing")
 		}
+	}
+}
+
+// simArtEmptyCanvasBank authors one entry of `frames` distinct side×side RLE
+// frames whose rows are all zero-length records [fmt gaf]. Each frame costs
+// 2·side bytes of file but counts side² pixels against the validation budget,
+// so a file of a few kilobytes can exceed the eager loader's pixel budget.
+func simArtEmptyCanvasBank(name string, frames int, side uint16, hold uint32) []byte {
+	const header, entryHeader, frameHeader = 12, 40, 24
+	le := binary.LittleEndian
+	entry := header + 4
+	refs := entry + entryHeader
+	first := refs + 8*frames
+	frameBytes := frameHeader + 2*int(side)
+	data := make([]byte, first+frames*frameBytes)
+	le.PutUint32(data[0:], 0x00010100)
+	le.PutUint32(data[4:], 1)
+	le.PutUint32(data[header:], uint32(entry))
+	le.PutUint16(data[entry:], uint16(frames))
+	copy(data[entry+8:entry+entryHeader], name)
+	for i := range frames {
+		at := first + i*frameBytes
+		le.PutUint32(data[refs+8*i:], uint32(at))
+		le.PutUint32(data[refs+8*i+4:], hold)
+		le.PutUint16(data[at:], side)
+		le.PutUint16(data[at+2:], side)
+		data[at+9] = 1 // row-length-prefixed records; every length stays zero
+		le.PutUint32(data[at+16:], uint32(at+frameHeader))
+	}
+	return data
+}
+
+// A bank above the eager default budget but within the shared effect-bank
+// policy compiles its holds, as the client draws it; a bank that is absent or
+// refused is recorded as a diagnostic in sorted bank order instead of vanishing.
+func TestSimArtEffectBankPolicyAndDiagnostics(t *testing.T) {
+	// Nine distinct 4096×4096 frames: 144 Mi pixels, over the default 128 Mi
+	// and under the policy's 512 Mi.
+	big := simArtEmptyCanvasBank("Boom", 9, 4096, 3)
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "anims"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string][]byte{
+		"big.gaf":    big,
+		"broken.gaf": big[:len(big)/2],
+		"fx.gaf":     simArtEmptyCanvasBank("smoke 1", 1, 1, 2),
+	} {
+		if err := os.WriteFile(filepath.Join(root, "anims", name), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fs := vfs.New()
+	defer fs.Close()
+	if err := fs.MountDirectory(root, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := formats.LoadGAFMetadataFile(fs, "anims/big.gaf"); err == nil || !strings.Contains(err.Error(), "aggregate decoded pixels exceed limit") {
+		t.Fatalf("fixture must exceed the eager default budget; default load error = %v", err)
+	}
+	art := CompileSimArt(fs, &Catalog{Weapons: map[string]*WeaponDef{
+		"a": {ExplosionGaf: "missing", WaterExplosionGaf: "BIG"},
+		"b": {ExplosionGaf: "broken"},
+	}})
+	if holds, ok := art.EffectEntryHolds("big", "boom"); !ok || !slices.Equal(holds, []int32{3, 3, 3, 3, 3, 3, 3, 3, 3}) {
+		t.Fatalf("large bank holds = %v, ok=%v; want nine holds of 3 under the shared policy", holds, ok)
+	}
+	if holds, ok := art.EffectEntryHolds("", "smoke 1"); !ok || !slices.Equal(holds, []int32{2}) {
+		t.Fatalf("default bank holds = %v, ok=%v", holds, ok)
+	}
+	diagnostics := art.Diagnostics()
+	if len(diagnostics) != 2 {
+		t.Fatalf("diagnostics = %+v, want the broken and the missing bank", diagnostics)
+	}
+	broken, missing := diagnostics[0], diagnostics[1]
+	if broken.Bank != "broken" || broken.Path != "anims/broken.gaf" || len(broken.Providers) != 1 || broken.Reason == "" {
+		t.Fatalf("broken bank diagnostic = %+v", broken)
+	}
+	if missing.Bank != "missing" || missing.Path != "anims/missing.gaf" || len(missing.Providers) != 0 || missing.Reason == "" {
+		t.Fatalf("missing bank diagnostic = %+v", missing)
+	}
+	if got := missing.String(); !strings.HasPrefix(got, "nanolathe: effect bank timing unavailable: logical path anims/missing.gaf, providers searched [], expected ") {
+		t.Fatalf("diagnostic text %q is not in the engine's diagnostic shape", got)
+	}
+	diagnostics[0].Bank = "changed"
+	if art.Diagnostics()[0].Bank != "broken" {
+		t.Fatal("caller altered the compiled diagnostics")
+	}
+	if (*SimArt)(nil).Diagnostics() != nil || CompileSimArt(fs, nil).Diagnostics() != nil {
+		t.Fatal("a table with nothing unreadable reported diagnostics")
 	}
 }
 

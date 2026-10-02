@@ -198,6 +198,45 @@ func TestModernRepairDepartureUsesVisibleThreatsOnly(t *testing.T) {
 	}
 }
 
+// TestModernRepairDistancesDoNotWrap locks the queue's own exact planar
+// distance at both of its sites. Retail's attack-leg distance reads a signed low
+// word, so a separation of 32,768 world units or more comes back negative
+// [04 R-AIR-01 §8]; the Modern queue must instead rank a base or threat across
+// a large map as far away (DESIGN_MOVEMENT_PATH "Modern repair-pad queue").
+func TestModernRepairDistancesDoNotWrap(t *testing.T) {
+	const far = numeric.Fixed(24000 << 16) // diagonal offset: about 33,941 world units
+	if airPlanarDistance(0, 0, far, far) >= 0 {
+		t.Fatal("precondition: the retail distance must wrap at this separation")
+	}
+	if got := repairPlanarDistance(0, 0, far, far) >> 16; got != 33941 {
+		t.Fatalf("queue distance = %d world units, want 33941", got)
+	}
+
+	s, w, pad, planes := repairQueueFixture(t, 1)
+	u := planes[0]
+	distant := spawnAirBasePad(t, w, s.Terrain, "distant", 256<<16, 256<<16)
+	distant.X, distant.Z = u.X+far, u.Z+far
+	if got := s.replacementRepairPad(u); got != pad {
+		t.Fatal("replacement selection preferred a base beyond 32,768 world units over a near one")
+	}
+
+	enterRepairQueue(s, u, 1)
+	e := s.repairLandings[0]
+	near := spawnAirBasePadFor(t, w, s.Terrain, "near", 1, 16<<16, 256<<16)
+	near.SlotAt(0).Weapon = &content.WeaponDef{Range: 200}
+	remote := spawnAirBasePadFor(t, w, s.Terrain, "remote", 1, 256<<16, 256<<16)
+	remote.SlotAt(0).Weapon = &content.WeaponDef{Range: 200}
+	remote.X, remote.Z = pad.X+far, pad.Z+far
+	b := orders.QueueForUnit(u).Binding()
+	b.DangerVisible = func(_, target *units.Unit) bool { return target == near }
+	nearOnly := s.repairDeparturePoint(e)
+	b.DangerVisible = func(_, target *units.Unit) bool { return target == near || target == remote }
+	both := s.repairDeparturePoint(e)
+	if nearOnly.X <= pad.X || both != nearOnly {
+		t.Fatalf("departure near-only %+v, with remote threat %+v: a threat beyond 32,768 world units must not dominate clearance", nearOnly, both)
+	}
+}
+
 func TestModernRepairQueueRestoreReacquiresBeforeTouchdown(t *testing.T) {
 	for _, phase := range []uint8{1, 3, 5, 6} {
 		t.Run(string(rune('0'+phase)), func(t *testing.T) {

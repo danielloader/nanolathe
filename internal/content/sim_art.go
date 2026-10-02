@@ -40,7 +40,9 @@ package content
 // presentation edge [I6].
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/vfs"
@@ -52,6 +54,54 @@ import (
 // two smoke entries and `flamestream` — is one of its rows, so a request
 // published without a bank is by construction one of those.
 const DefaultEffectBank = "fx"
+
+// EffectBankMaxBytes is the most of one effect bank's file either reader
+// accepts. Together with EffectBankGAFLimits it is the single Nanolathe host
+// loader policy for `anims/<bank>.gaf` effect banks: the simulation's timing
+// table below and the graphical client's on-demand effect art both read
+// through it, so every bank the client can draw is a bank whose frame holds
+// time the fixed effect pool (DESIGN_PRESENTATION_CLIENT "On-demand effect
+// art"). These are host safety bounds, not retail limits.
+const EffectBankMaxBytes = 256 << 20
+
+// EffectBankGAFLimits is the validation budget of that policy. It keeps the
+// eager loader's reference, depth, per-frame and RLE limits and raises only
+// the unique and expanded pixel budgets, to 512 Mi each, which admits the
+// large banks of the audited mods (TA Zero's ModFX, Escalation's nuke and
+// weapon banks) without decoding any pixel. Eager loaders keep
+// formats.DefaultGAFLimits.
+func EffectBankGAFLimits() formats.GAFLimits {
+	limits := formats.DefaultGAFLimits()
+	limits.MaxDecodedPixels, limits.MaxExpandedPixels = 512<<20, 512<<20
+	return limits
+}
+
+// EffectBankPath is the logical path of a canonical effect bank name, the path
+// retail constructs from the authored bank name [06 R-WFX-01 §1].
+func EffectBankPath(bank string) string { return "anims/" + bank + ".gaf" }
+
+// EffectBankDiagnostic records one effect bank SimArt could not compile. The
+// bank's events then have no frame holds, so their primary players stay
+// inactive and the records retire sooner than a drawn bank's would; the
+// battle still runs, as the client still draws nothing for that bank.
+type EffectBankDiagnostic struct {
+	// Bank is the canonical bank name a weapon or the default slot table names.
+	Bank string
+	// Path is the logical path searched.
+	Path string
+	// Providers lists the content providers that hold the path; it is empty
+	// when no mounted provider supplies the file.
+	Providers []string
+	// Reason is the read or validation error, with a filesystem path error
+	// reduced to its operation and cause.
+	Reason string
+}
+
+// String renders the diagnostic in the engine's diagnostic shape.
+func (d EffectBankDiagnostic) String() string {
+	return fmt.Sprintf("nanolathe: effect bank timing unavailable: logical path %s, providers searched [%s], expected an animation bank within the effect-bank loader policy for bank %q: %s",
+		d.Path, strings.Join(d.Providers, ", "), d.Bank, d.Reason)
+}
 
 // simArtFrame is one frame's contribution: the geometry pass 3a scales by, and
 // the authored delay that decides how many visits it holds for.
@@ -77,6 +127,10 @@ type SimArt struct {
 	// sequences maps "filename|sequence" (both lower-cased) to the compiled
 	// entry, or to nil for a compiled miss.
 	sequences map[string]*simArtSequence
+	// diagnostics names every effect bank that did not compile, in the sorted
+	// bank order compilation visits them. Load-time host diagnostics only: no
+	// phase reads them.
+	diagnostics []EffectBankDiagnostic
 }
 
 // CompileSimArt builds the table from the battle's VFS and compiled catalog.
@@ -92,7 +146,9 @@ type SimArt struct {
 // A file or entry that will not resolve is simply absent from the table, which
 // makes every consumer report "unknown" rather than a plausible substitute
 // [I9]. Compilation never fails: a missing animation bank is a content gap, not
-// a reason to refuse a battle.
+// a reason to refuse a battle. An effect bank that is absent or refused by the
+// loader policy is recorded in Diagnostics, as the client records the same
+// bank when it cannot draw it.
 func CompileSimArt(fs vfs.FSOps, cat *Catalog) *SimArt {
 	art := &SimArt{
 		effects:   make(map[string][]int32),
@@ -157,14 +213,20 @@ func CompileSimArt(fs vfs.FSOps, cat *Catalog) *SimArt {
 // compileEffectBank records every entry's frame holds in one animation bank. The
 // bank's logical path is `anims/<name>.gaf`, the path retail constructs from
 // the authored bank name [06 R-WFX-01 §1]; the name is ASCII-folded per the VFS
-// canonical rules (I1).
+// canonical rules (I1). It reads under the shared effect-bank loader policy,
+// never the eager default, so it accepts exactly the banks the client draws.
 func (a *SimArt) compileEffectBank(fs vfs.FSOps, name string) {
 	bank := CanonicalKey(name)
 	if bank == "" {
 		bank = DefaultEffectBank
 	}
-	gaf, err := formats.LoadGAFMetadataFile(fs, "anims/"+bank+".gaf")
-	if err != nil || gaf == nil {
+	path := EffectBankPath(bank)
+	gaf, err := formats.LoadGAFMetadataFileWithLimits(fs, path, EffectBankMaxBytes, EffectBankGAFLimits())
+	if err != nil {
+		a.diagnostics = append(a.diagnostics, EffectBankDiagnostic{
+			Bank: bank, Path: path, Providers: searchedProviderIDs(fs, path),
+			Reason: portableContentCause(err).Error(),
+		})
 		return
 	}
 	for i := range gaf.Entries {
@@ -263,6 +325,21 @@ func (a *SimArt) EffectEntryHolds(bank, entry string) ([]int32, bool) {
 		return nil, false
 	}
 	return append([]int32(nil), holds...), true
+}
+
+// Diagnostics reports every effect bank compilation could not read, in sorted
+// bank order, as a fresh copy. A battle entry surfaces them as load-time host
+// diagnostics; a nil table reports none.
+func (a *SimArt) Diagnostics() []EffectBankDiagnostic {
+	if a == nil || len(a.diagnostics) == 0 {
+		return nil
+	}
+	out := make([]EffectBankDiagnostic, len(a.diagnostics))
+	for i, d := range a.diagnostics {
+		d.Providers = append([]string(nil), d.Providers...)
+		out[i] = d
+	}
+	return out
 }
 
 // FeatureSequence reports the geometry of the frame a cursor is on after

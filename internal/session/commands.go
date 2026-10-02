@@ -870,9 +870,13 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 		if p == nil || !p.Exists || p.ControllerState < 1 || p.ControllerState > 3 || p.Side == 10 {
 			return
 		}
-		// Resolve the source at drain time so a preceding View in the same
-		// input batch takes effect [07 R-CAM-01 §6][05 R-SHARE-01 §2].
-		s.Econ.Transfer(s.ViewingOwner, uint8(c.Give.Player), c.Give.Resource, c.Give.Amount)
+		// The source is the own/controlling slot, LocalOwner here — the slot
+		// retail's developer `Control` command moves — never the viewing slot.
+		// `View` writes only the viewing slot, so a View earlier in the same
+		// input batch changes presentation but not whose stock Give debits
+		// [07 R-CAM-01 §6][05 R-SHARE-01 §2]. The source is still read at
+		// drain time.
+		s.Econ.Transfer(s.LocalOwner, uint8(c.Give.Player), c.Give.Resource, c.Give.Amount)
 		return
 	case HumanVisibility:
 		if s.Vis == nil {

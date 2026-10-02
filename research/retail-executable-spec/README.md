@@ -272,10 +272,10 @@ the row's document is authoritative, not the citing one.
 | `R-HUD-05` | 07 | — | the battle chrome at display modes larger than 640×480 |
 | `R-KEYS-01` | 02 | §1–§6 | the key consumer table: unit- and weapon-record consumers not stated elsewhere |
 | `R-LAYER` | 03 | §1–§4 | the mapping word grid is the path search's owner/building mask; the wreck-smoke trigger is the corpse finalizer's land path; strip 5 has no combat producer |
+| `R-LEAVE-01` | 08 | §1–§10 | player departure, owner destruction, timeout, host migration and hosted-computer removal |
 | `R-MALF-01` | 02 | §1–§11 | the loader malformed-input matrix |
 | `R-MAP-01` | 02 | §1–§9 | the map-load pipeline: entry points, order, the resource-path slots, and schema selection |
 | `R-MM-01` | 03 | §1–§3 | the minimap does carry a viewport rectangle |
-| `R-LEAVE-01` | 08 | §1–§10 | player departure, owner destruction, timeout, host migration and hosted-computer removal |
 | `R-MOV-01` | 04 | §1–§9 | the ground mover, exactly, and the movement-mode status bits |
 | `R-MOV-02A` | 04 | — | the dynamic-blocker boundary |
 | `R-MOV-03` | 04 | §1–§11 | the per-player unit sweep step by step, its three gates, the queue helpers and the purge |

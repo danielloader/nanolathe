@@ -818,14 +818,19 @@ wrapping signed raw deltas and a signed low-word result, then each caller's
 comparison or signed halving `[04 R-AIR-01 §8]`. The dogfight intercept reads
 the signed high word before its whole-unit threshold. The tests in
 `retail_distance_test.go` preserve these boundaries and confirm the threshold
-arm spends no RNG draw. Modern path, traffic and repair-pad rules are unchanged.
+arm spends no RNG draw. Modern path and traffic rules are unchanged. The
+Modern repair-pad queue ranks bases and threats by its own exact,
+non-wrapping distance (`repairPlanarDistance`), not by this retail helper,
+whose signed low word reads negative from 32,768 world units.
 
-This O22 correction changes only the Strict tick-4,500 fingerprint from
-`8ea359e7670a471c` to `7ff5d4238edd1720`. The dogfight no longer installs an
-intercept for distances from 160 through just below 161 whole units. A test
-overlay restoring only the old raw-distance comparison reproduces the old
-hash exactly; the other fifteen locks remain unchanged. This explains a
-retail correction, not a Modern policy departure.
+This O22 correction changed only the Strict pool-lock fingerprint of the time
+(the seed-7 benchmark scene at step 4,500) from `8ea359e7670a471c` to
+`7ff5d4238edd1720`. The dogfight no longer installs an intercept for distances
+from 160 through just below 161 whole units. A test overlay restoring only the
+old raw-distance comparison reproduced the old hash exactly; the other fifteen
+locks remained unchanged. This explains a retail correction, not a Modern
+policy departure. That scene then no longer filled its effect pool, so the pool
+lock moved to seed 5 (DESIGN_MULTIPLAYER §16.1 M1-C9).
 
 **C26 — the mode gate.** The flight integrator runs only when the mover's low
 mode bits equal 2. Any other mode zeroes all three velocity components, the

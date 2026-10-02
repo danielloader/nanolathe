@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
 
 // Factor is an exact rational multiplier from the fixed step list
@@ -924,12 +926,15 @@ func (f Factor) scaleArea(area int32) int32 {
 // scaleCost multiplies a unit cost as the integer it was authored as and
 // stores the result as a single float, which is exact below 2^24
 // (docs/DESIGN_MODS_MUTATORS.md §6.4). A cost that is not positive is
-// returned untouched, bit for bit.
+// returned untouched, bit for bit. checkIntegralCost has already bounded a
+// positive cost to at most 2^31, where the defined signed-64 conversion is the
+// raw one; it is used so no catalog value rests on Go's processor-dependent
+// out-of-range conversion (I2).
 func (f Factor) scaleCost(v float32) float32 {
 	if !(v > 0) {
 		return v
 	}
-	return float32(f.scale(int64(v), mutatorUnitCostLimit))
+	return float32(f.scale(numeric.TruncateFloat64ToInt64(float64(v)), mutatorUnitCostLimit))
 }
 
 // checkIntegralCost refuses a positive cost that the unit compiler could not
@@ -939,7 +944,7 @@ func checkIntegralCost(u *UnitDef, key string, v float32) error {
 	if !(v > 0) {
 		return nil
 	}
-	if v > float32(1<<31) || float32(int64(v)) != v {
+	if v > float32(1<<31) || float32(numeric.TruncateFloat64ToInt64(float64(v))) != v {
 		return fmt.Errorf("content: mutator build cost: unit %q %s %v is not an integral 32-bit store", u.UnitName, key, v)
 	}
 	return nil

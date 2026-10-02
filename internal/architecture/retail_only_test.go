@@ -11,6 +11,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -37,6 +38,11 @@ import (
 // the asynchronous host's worker is the one justified goroutine carve-out
 // (authoritativeGoroutines below); neither relaxes any audit for another
 // package.
+//
+// mods/example is here for the same reason: it is a registered, selectable
+// rule set whose order answer runs inside the tick. Nothing in the session's
+// imports can reach a package under mods/ (the dependency runs the other
+// way), so a rule set joins this list by hand when it is added.
 var authoritativeDirs = []string{
 	"internal/ai",
 	"internal/aikit",
@@ -64,6 +70,92 @@ var authoritativeDirs = []string{
 	"internal/visibility",
 	"internal/world",
 	"mods/aikit",
+	"mods/example",
+}
+
+// loadTimeSimulationInputDirs are the load-time packages whose output the
+// simulation reads: the mounted files (vfs), the parsers that turn them into
+// numbers (formats), the catalog compiler, its mutators and content profiles
+// (internal/content), the Community tables (internal/community) and gameplay
+// mode selection (internal/gameplay). None runs inside a tick, but every host
+// in a lockstep battle compiles its own catalog from them, so a value they
+// compute differently on another processor becomes a different simulation.
+//
+// They get the numeric guards — TestAuthoritativeNumericPortability and both
+// fused-arithmetic tests — and nothing else. A floating-to-integer conversion
+// out of range, a library approximation and a fused multiply-add are the three
+// ways the same source compiles to different answers on arm64, amd64 and
+// amd64-v3, and they matter wherever a simulation input is computed. The
+// other audits over authoritativeDirs — float64 scope, map order, goroutines
+// and imports — protect what a tick does; load-time code legitimately ranges
+// catalog maps and parses binary64, and the cinematic decoder imports time.
+// Admitting it to authoritativeDirs would mean allowlisting all of that for a
+// weaker guard.
+//
+// The formats tree comes in whole, its cinematic decoder included; every
+// parser there is a candidate input. TestNumericGuardsCoverTheSessionClosure
+// keeps this list complete against the session's imports.
+var loadTimeSimulationInputDirs = []string{
+	"formats",
+	"internal/community",
+	"internal/content",
+	"internal/gameplay",
+	"vfs",
+}
+
+// sessionClosureHostEdges are the in-module packages internal/session imports
+// that are neither authoritative nor simulation inputs, each with the reason.
+// The numeric guards do not read them; their arithmetic is presentation.
+var sessionClosureHostEdges = map[string]string{
+	"internal/audio":   "sound playback, mixing and positional gain; the session emits cues into it",
+	"internal/camera":  "view geometry, reached through internal/hud",
+	"internal/hud":     "interface layout and drawing; the selection-group and build-page helpers the session applies from commands are integer-only",
+	"internal/input":   "pointer and key state, reached through internal/hud",
+	"internal/palette": "display palette rebuilds, reached through internal/hud",
+	"internal/render":  "draw lists, reached through internal/hud",
+}
+
+// numericGuardDirs is the scope of the numeric-portability and fused-arithmetic
+// guards: the authoritative packages and the load-time simulation inputs.
+func numericGuardDirs() []string {
+	return append(append([]string(nil), authoritativeDirs...), loadTimeSimulationInputDirs...)
+}
+
+// TestNumericGuardsCoverTheSessionClosure fails when internal/session comes to
+// import an in-module package that is neither guarded nor named as a host edge,
+// so a new load-time input cannot slip outside the numeric guards.
+func TestNumericGuardsCoverTheSessionClosure(t *testing.T) {
+	root := repositoryRoot(t)
+	module := modulePath(t, root)
+	command := exec.Command("go", "list", "-deps", "./internal/session")
+	command.Dir = root
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("list session dependencies: %v", err)
+	}
+	guarded := numericGuardDirs()
+	seen := map[string]bool{}
+	var failures []string
+	for _, importPath := range strings.Fields(string(output)) {
+		relative, ok := strings.CutPrefix(importPath, module+"/")
+		if !ok || isImportPathUnder(importPath, guarded) {
+			continue
+		}
+		if _, edge := sessionClosureHostEdges[relative]; edge {
+			seen[relative] = true
+			continue
+		}
+		failures = append(failures, relative+" (in the session's imports but neither numerically guarded nor a named host edge)")
+	}
+	for relative := range sessionClosureHostEdges {
+		if !seen[relative] {
+			failures = append(failures, relative+" (stale host edge: the session no longer imports it)")
+		}
+	}
+	if len(failures) != 0 {
+		sort.Strings(failures)
+		t.Fatalf("numeric guard scope is out of date: %s", strings.Join(failures, "; "))
+	}
 }
 
 // TestAuthoritativePackagesDoNotImportHostOrNondeterministicRuntime checks
@@ -164,8 +256,14 @@ type fileVisitor func(path string, file *ast.File, fset *token.FileSet) []string
 
 func scanAuthoritativeFiles(t *testing.T, root string, visit fileVisitor) []string {
 	t.Helper()
+	return scanSourceFiles(t, root, authoritativeDirs, visit)
+}
+
+// scanSourceFiles visits every non-test Go file at or below dirs.
+func scanSourceFiles(t *testing.T, root string, dirs []string, visit fileVisitor) []string {
+	t.Helper()
 	var violations []string
-	for _, relativeDir := range authoritativeDirs {
+	for _, relativeDir := range dirs {
 		dir := filepath.Join(root, filepath.FromSlash(relativeDir))
 		err := guardWalkDir(dir, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {

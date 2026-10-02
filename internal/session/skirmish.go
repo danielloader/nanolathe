@@ -583,9 +583,10 @@ type SkirmishEntryOptions struct {
 	AIOverrides AIOverrides
 	// SimArt is the authored animation table content.CompileSimArt builds
 	// from this entry's VFS and catalog, when the caller already holds one: it
-	// depends only on the files and the feature definitions, which neither
-	// rules nor mutators change, and is never written after compilation, so
-	// battles over one content set may share it. Nil compiles it at
+	// depends only on the files, the feature definitions and the explosion
+	// banks the weapon definitions name, none of which rules or mutators
+	// change, and is never written after compilation, so battles over one
+	// content set may share it. Nil compiles it at
 	// composition, as every battle entry otherwise does.
 	SimArt *content.SimArt
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
+	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
@@ -254,10 +255,14 @@ func (c *Client) resolveProjectileGAF(req render.ProjectileGAFRequest) (*formats
 // bound from `fx` at startup [06 R-WFX-01 §1], and the smoke-puff entry the
 // strip families blit is one of its rows, so an entry published without a bank
 // is by construction one of those.
-const defaultEffectBank = "fx"
+const defaultEffectBank = content.DefaultEffectBank
 
+// effectBankKey folds an authored bank name exactly as the simulation's timing
+// table does (content.CanonicalKey: ASCII letters folded, TDF whitespace
+// trimmed, other bytes literal), so a bank name resolves to the same file here
+// as in content.SimArt and the client draws exactly the banks the pool times.
 func effectBankKey(name string) string {
-	key := strings.ToLower(strings.TrimSpace(name))
+	key := content.CanonicalKey(name)
 	if key == "" {
 		key = defaultEffectBank
 	}
@@ -294,7 +299,7 @@ func (c *Client) EffectBank(name string) *formats.GAF {
 	}
 	var bank *formats.GAF
 	if c.modelFS != nil {
-		path := "anims/" + key + ".gaf"
+		path := content.EffectBankPath(key)
 		if loaded, err := c.effectSourceLocked(key); err == nil {
 			bank = effectBankMetadata(loaded)
 		} else {
@@ -317,11 +322,7 @@ func (c *Client) effectEntry(bankName, entryName string) (*formats.GAFEntry, boo
 	}
 	entry, ok := bank.Find(entryName)
 	if !ok || entry == nil || len(entry.Frames) == 0 {
-		key := strings.ToLower(strings.TrimSpace(bankName))
-		if key == "" {
-			key = defaultEffectBank
-		}
-		c.recordArtDiagnostic("anims/"+key+".gaf", strings.ToLower(entryName), "missing or empty animation entry")
+		c.recordArtDiagnostic(content.EffectBankPath(effectBankKey(bankName)), strings.ToLower(entryName), "missing or empty animation entry")
 		return nil, false
 	}
 	return entry, true

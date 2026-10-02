@@ -5,14 +5,21 @@ import (
 	"fmt"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
+	"github.com/nanolathe-gg/nanolathe/internal/content"
 )
 
 // Nanolathe host storage policy, DESIGN_PRESENTATION_CLIENT "On-demand effect
 // art". The observed largest Escalation root is below 24 Mi pixels. A 32 Mi
 // root allowance includes its parent canvas and children; source-bank geometry
 // is validated separately. These are cache bounds, not gameplay/art limits.
+//
+// Which banks load at all is not decided here: the read cap and validation
+// budget are content's effect-bank loader policy, shared with the simulation's
+// timing table, so the client never draws a bank whose holds the simulation
+// lacks. The encoded-source LRU is as large as that read cap, so any bank the
+// policy admits can also be retained.
 const (
-	effectSourceBytes       = 256 << 20
+	effectSourceBytes       = content.EffectBankMaxBytes
 	effectFrameBytes        = 96 << 20
 	effectVariantBytes      = 256 << 20
 	effectRootPixels        = 32 << 20
@@ -81,9 +88,7 @@ func (c *Client) effectSourceLocked(key string) (*formats.GAFSource, error) {
 	if source, ok := cache.sources.get(key); ok {
 		return source, nil
 	}
-	limits := formats.DefaultGAFLimits()
-	limits.MaxDecodedPixels, limits.MaxExpandedPixels = 512<<20, 512<<20
-	source, err := formats.LoadGAFSourceFile(c.modelFS, "anims/"+key+".gaf", effectSourceBytes, limits)
+	source, err := formats.LoadGAFSourceFile(c.modelFS, content.EffectBankPath(key), content.EffectBankMaxBytes, content.EffectBankGAFLimits())
 	if err != nil {
 		cache.errors[key] = err
 		return nil, err
@@ -173,7 +178,7 @@ func (c *Client) effectFrame(bankName, entryName string, index int32) (*formats.
 			return f, true
 		}
 	}
-	c.recordArtDiagnosticLocked("anims/"+key+".gaf", entryName, err.Error())
+	c.recordArtDiagnosticLocked(content.EffectBankPath(key), entryName, err.Error())
 	return nil, false
 }
 

@@ -76,6 +76,24 @@ func (s *System) usableRepairPad(u, pad *units.Unit) bool {
 		b.World.DeclaresAlliance(u.Owner, pad.Owner) && b.World.DeclaresAlliance(pad.Owner, u.Owner)
 }
 
+// repairPlanarDistance is the raw 16.16 planar distance the queue ranks
+// replacement bases and threat clearance by. It is Nanolathe Modern policy
+// arithmetic (DESIGN_MOVEMENT_PATH "Modern repair-pad queue"), not a retail
+// distance: the exact integer floor of the Euclidean distance over 64-bit
+// differences, which never wraps. The retail attack-leg distance,
+// airPlanarDistance, wraps its raw differences and reads a signed low word
+// [04 R-AIR-01 §8], so from 32,768 world units it reads negative — nearer than
+// anything — and would let a base or threat across a large map outrank a close
+// one. This form is exact for any separation below 65,536 world units on each
+// axis (raw differences below 2^32, so the sum of squares fits the unsigned
+// 64-bit radicand), which covers every retail-sized map; the map format's own
+// ceiling is larger, and beyond that bound this would wrap as well.
+func repairPlanarDistance(ax, az, bx, bz numeric.Fixed) int64 {
+	dx := int64(ax) - int64(bx)
+	dz := int64(az) - int64(bz)
+	return int64(isqrt(uint64(dx*dx + dz*dz)))
+}
+
 // Only a lost/unavailable base triggers a new selection. A full base retains
 // its queue, so patients do not chase the same newly freed piece elsewhere.
 func (s *System) replacementRepairPad(u *units.Unit) *units.Unit {
@@ -85,7 +103,7 @@ func (s *System) replacementRepairPad(u *units.Unit) *units.Unit {
 		if pad == u || !s.usableRepairPad(u, pad) {
 			continue
 		}
-		d := airPlanarDistance(u.X, u.Z, pad.X, pad.Z)
+		d := repairPlanarDistance(u.X, u.Z, pad.X, pad.Z)
 		if best == nil || d < distance {
 			best, distance = pad, d
 		}
@@ -288,7 +306,7 @@ func (s *System) repairDeparturePoint(e *repairLanding) Vec3 {
 				continue
 			}
 			for i, p := range points {
-				clearance[i] = min(clearance[i], (airPlanarDistance(p.X, p.Z, threat.X, threat.Z)>>16)-int64(weaponRange))
+				clearance[i] = min(clearance[i], (repairPlanarDistance(p.X, p.Z, threat.X, threat.Z)>>16)-int64(weaponRange))
 			}
 		}
 	}

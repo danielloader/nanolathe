@@ -38,8 +38,9 @@ func (c *contentSet) nlPreviewCatalog() (*content.Catalog, error) {
 // battle composes with: compiled once per content set from its VFS and
 // authored catalog instead of once per staged scene, where reading every
 // feature bank in the catalog was about half of a scene's staging. It depends
-// only on the files and the feature definitions, which neither rules nor
-// mutators change (session.SkirmishEntryOptions.SimArt).
+// only on the files, the feature definitions and the explosion banks the
+// weapon definitions name, none of which rules or mutators change
+// (session.SkirmishEntryOptions.SimArt).
 func (c *contentSet) nlPreviewSimArt(cat *content.Catalog) *content.SimArt {
 	c.preview.simArtOnce.Do(func() {
 		c.preview.simArt = content.CompileSimArt(c.fs, cat)

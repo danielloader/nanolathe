@@ -183,12 +183,20 @@ in its existing entry shape; its frame pointers are geometry placeholders.
 Only `effectFrame` resolves those placeholders to decoded art. It preserves
 first-match lookup, authored holds, one-shot timing, frame clamping, and blast
 extent measurement. Strips use the same resolver. Explicitly supplied eager
-banks remain valid. No simulation metadata or gameplay rule changes.
+banks remain valid. No gameplay rule changes.
 
-Encoded banks use a 256 MiB, 256-entry LRU with a matching per-file read cap.
-The source reader validates up to 512 Mi pixels of unique and expanded bank
-geometry, retaining the existing reference, depth, per-frame geometry and RLE
-command limits. A selected root may contain at most 32 Mi unique and expanded
+Which banks load at all is one loader policy shared with the simulation: a
+bank is read with at most `content.EffectBankMaxBytes` (256 MiB) and validated
+under `content.EffectBankGAFLimits` — up to 512 Mi pixels of unique and
+expanded bank geometry, retaining the existing reference, depth, per-frame
+geometry and RLE command limits. `content.CompileSimArt` compiles the fixed
+effect pool's frame holds under the same policy, so every bank the client can
+draw is one whose holds time the pool, in a windowed or a headless battle
+alike. A bank the policy refuses or no provider supplies draws nothing here,
+records an art diagnostic here, and is reported by `Session.SimArtDiagnostics`
+once the battle is composed. Encoded banks use a 256 MiB,
+256-entry LRU, as large as the read cap so any admitted bank can be retained.
+A selected root may contain at most 32 Mi unique and expanded
 pixels across its parent canvas and child graph. This admits the audited Escalation roots
 below 24 Mi pixels without allocating every frame of their large banks.
 The eager format-loader defaults remain unchanged.

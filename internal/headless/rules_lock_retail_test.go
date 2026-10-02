@@ -203,35 +203,78 @@ func TestStrictFingerprintIsLocked(t *testing.T) {
 	runFingerprintLock(t, gameplay.Strict31, lockAshapStrict6000, lockAshapStrict54000, lockAshapStrictEnd, lockBenchStrictInitial, lockBenchStrictWarm, lockBenchStrictFinal)
 }
 
-// The Strict pool fills after the short benchmark lock. Its occupancy gates
-// shatter draws [04 R-COB-04 §3], so this longer scene locks authored effect
-// timing even when no graphical host exists (DESIGN_MULTIPLAYER §16.1 M1-C9).
-// M1 matched the original window-like probe at partial-v1:8ea359e7670a471c.
-// The O22 retail correction changes only this lock: AirToAir tests the signed
-// high word of distance, so 160 plus a fraction no longer installs an
-// intercept [04 R-AIR-01 §8]. Restoring only that old comparison reproduces
-// the M1 constant exactly; the other fifteen locks are unchanged.
+// The Strict pool lock runs the benchmark scene past the point where its
+// 300-record pool fills. Occupancy gates shatter draws [04 R-COB-04 §3], and a
+// record lives for its primary player's authored frame holds
+// [06 R-WFX-01 §1], so this lock is what catches a change to effect timing
+// when no graphical host exists (DESIGN_MULTIPLAYER §16.1 M1-C9). The other
+// locked scenes stay below their pools' capacity (the census under
+// DESIGN_MULTIPLAYER L9), so they cannot see it.
+//
+// M1 locked seed 7, whose pool first filled at tick 3283, at the window-like
+// probe's partial-v1:8ea359e7670a471c. The O22 retail correction (AirToAir
+// tests the signed high word of distance, so 160 plus a fraction no longer
+// installs an intercept [04 R-AIR-01 §8]) changed that battle: its pool then
+// peaked at 296 records and never filled through 15,000 steps, so the lock
+// stopped exercising a full pool and forcing the timing lookup off moved no
+// lock at all. The scene now uses seed 5, otherwise unchanged: the pool is
+// first seen full at the end of the step reaching tick 2255, and by step 4500
+// the effect service has refused 143 admissions because the pool was full
+// (its cumulative RefusedAtCapacity count; shatter quads refused inside the
+// pool are not included). Forcing the timing lookup off moves this constant.
+//
+// The test asserts that the pool refused at capacity as well as the
+// fingerprint, so a later behaviour change that leaves the pool below capacity
+// fails here with that message instead of silently turning this back into a
+// lock that cannot see timing.
+const (
+	lockPoolSeed           uint32 = 5
+	lockPoolSteps                 = 4500
+	lockPoolStrictAt4500          = "partial-v1:4627ce44dbf37671"
+	lockPoolStrictCapacity        = 300 // retail's fixed active-effect pool [03 §1]
+)
+
 func TestStrictEffectPoolFingerprintIsLocked(t *testing.T) {
 	catalog, fs := retailcat.Shared(t)
 	composed, _, err := ComposeSimBenchBattle(SimBenchOptions{
-		Gameplay: gameplay.Strict31, Map: SimBenchDefaultMap, Seed: lockBenchSeed,
+		Gameplay: gameplay.Strict31, Map: SimBenchDefaultMap, Seed: lockPoolSeed,
 		Difficulty: lockDifficulty, UnitLimit: SimBenchDefaultUnitLimit,
 	}, fs, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for step := 0; step < 4500; step++ {
-		simBenchStep(composed.Session)
+	sess := composed.Session
+	// The lock is only about timing if every bank the scene names was timed.
+	if diagnostics := sess.SimArtDiagnostics(); len(diagnostics) != 0 {
+		t.Fatalf("stock effect banks did not compile for the pool: %v", diagnostics)
 	}
-	got, err := composed.Session.PartialStateFingerprint()
+	// firstFull is an end-of-step sample, logged for context only: a pool can
+	// fill and drain within one step. The proof is the cumulative count.
+	var firstFull uint32
+	for step := 1; step <= lockPoolSteps; step++ {
+		simBenchStep(sess)
+		live, capacity, _ := sess.EffectPoolOccupancy()
+		if capacity != lockPoolStrictCapacity {
+			t.Fatalf("Strict effect pool capacity = %d, want %d", capacity, lockPoolStrictCapacity)
+		}
+		if live >= capacity && firstFull == 0 {
+			firstFull = sess.Clock.GlobalTick
+		}
+	}
+	_, _, refused := sess.EffectPoolOccupancy()
+	if refused == 0 {
+		t.Fatalf("Strict effect-pool scene refused no admission at capacity by step %d (first full end-of-step sample: tick %d): the lock no longer exercises effect timing; choose a scene whose pool fills",
+			lockPoolSteps, firstFull)
+	}
+	got, err := sess.PartialStateFingerprint()
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = "partial-v1:7ff5d4238edd1720"
-	if got != want {
-		t.Fatalf("Strict effect-pool scene at step 4500 = %s, want retail-corrected reference %s", got, want)
+	if got != lockPoolStrictAt4500 {
+		t.Fatalf("Strict effect-pool scene at step %d = %s, want the locked %s (first full end-of-step sample tick %d, %d refusals at capacity): a diff that intends this must say which behaviour changed",
+			lockPoolSteps, got, lockPoolStrictAt4500, firstFull, refused)
 	}
-	t.Logf("Strict effect-pool scene at step 4500: %s", got)
+	t.Logf("Strict effect-pool scene at step %d: %s; first full end-of-step sample tick %d, %d refusals at capacity", lockPoolSteps, got, firstFull, refused)
 }
 
 // TestCommunityFingerprintIsLocked holds the approved mainline feature table.

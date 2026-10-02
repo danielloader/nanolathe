@@ -539,33 +539,47 @@ func TestHumanGroupDoesNotWriteAIUnits(t *testing.T) {
 	}
 }
 
-func TestViewThenGiveUsesQueuedViewingOwner(t *testing.T) {
-	s := &Session{Econ: &economy.Service{}}
-	for i := 0; i < 3; i++ {
+// TestViewThenGiveDebitsOwnSlot locks the Give source: the own/controlling slot
+// that `Control` changes, not the viewing slot that `View` changes. A View
+// queued ahead of Give in the same batch moves only the viewing slot, so Give
+// still debits the own slot [07 R-CAM-01 §6]; the recipient validation and the
+// staged mirror credit are unchanged [05 R-SHARE-01 §2]. The own slot is 1 so
+// a source hard-wired to slot 0 would also fail.
+func TestViewThenGiveDebitsOwnSlot(t *testing.T) {
+	s := &Session{Econ: &economy.Service{}, LocalOwner: 1, ViewingOwner: 1}
+	for i := 0; i < 4; i++ {
 		s.Econ.Players[i] = economy.Player{Exists: true, ControllerState: 1}
 		s.Econ.Players[i].Stock[economy.Metal] = 30
 	}
-	view := HumanCommand{Kind: HumanView, View: HumanViewCommand{Player: 1}}
+	view := HumanCommand{Kind: HumanView, View: HumanViewCommand{Player: 3}}
 	give := HumanCommand{Kind: HumanGive, Give: HumanGiveCommand{Player: 2, Resource: economy.Metal, Amount: 20}}
 	for _, c := range []HumanCommand{view, give} {
 		if err := s.EnqueueHumanCommand(c); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if s.ViewingOwner != 0 || s.Econ.Players[1].Stock[economy.Metal] != 30 {
+	if s.ViewingOwner != 1 || s.Econ.Players[1].Stock[economy.Metal] != 30 {
 		t.Fatal("queued input mutated live state before draining")
 	}
 	s.applyHumanCommands(1)
-	if s.ViewingOwner != 1 || s.LocalOwner != 0 || s.Econ.Players[0].Stock[economy.Metal] != 30 || s.Econ.Players[1].Stock[economy.Metal] != 10 || s.Econ.Players[2].Mirror[economy.Metal].Production != 20 {
-		t.Fatal("Give did not debit the preceding View's player and stage the credit")
+	if s.ViewingOwner != 3 || s.LocalOwner != 1 {
+		t.Fatalf("View moved slots view=%d own=%d, want view 3 own 1", s.ViewingOwner, s.LocalOwner)
+	}
+	for i, want := range [4]float32{30, 10, 30, 30} {
+		if got := s.Econ.Players[i].Stock[economy.Metal]; got != want {
+			t.Fatalf("slot %d metal=%v, want %v: Give must debit the own slot, not the viewing slot", i, got, want)
+		}
+	}
+	if got := s.Econ.Players[2].Mirror[economy.Metal].Production; got != 20 {
+		t.Fatalf("recipient staged credit=%v, want 20", got)
 	}
 	s.Mission = &mission.Mission{Type: mission.TypeCampaign}
 	view.View.Player = 0
 	give.Give.Amount = 5
 	s.applyHumanCommand(view, 2)
 	s.applyHumanCommand(give, 2)
-	if s.ViewingOwner != 1 || s.Econ.Players[1].Stock[economy.Metal] != 5 {
-		t.Fatal("campaign gates must reject View but permit Give")
+	if s.ViewingOwner != 3 || s.Econ.Players[1].Stock[economy.Metal] != 5 || s.Econ.Players[3].Stock[economy.Metal] != 30 {
+		t.Fatal("campaign gates must reject View but permit Give from the own slot")
 	}
 	s.Econ.Players[2].Side = 10
 	s.applyHumanCommand(give, 3)

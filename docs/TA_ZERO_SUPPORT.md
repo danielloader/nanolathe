@@ -91,8 +91,12 @@ The content profile selects Zero's main, single-player and loading backgrounds
 and `LogoZ.gaf` team-colour bank. All three faction HUDs and builder pages
 come from the mounted side and GUI definitions. Ten-frame team textures follow
 the player's colour; they do not animate through other player colours.
-Large effect banks, including `ModFX.gaf`, load timing and geometry first, then
-decode the requested frames through bounded CPU and GPU caches.
+Large effect banks, including `ModFX.gaf`, are read under the one effect-bank
+loader policy the simulation and the client share. The simulation compiles
+their frame holds at battle entry, so Zero's weapon explosions keep their
+authored holds in the effect pool whether or not a window is open; the client
+loads timing and geometry first, then decodes the requested frames through
+bounded CPU and GPU caches.
 
 On first selection, the optional **Recommended settings** offer applies only
 settings documented in Alpha 5's `TAZero.ini` and the author's controls page:
@@ -137,7 +141,8 @@ weather schemas. Frontend checks cover the three-way side selector, resource
 selection and team colours. The effects audit decoded every frame in `ModFX`,
 `ModFX2` and `ModFX3` while checking resident cache bounds; the optional package
 test also locks admission and bounded residency for a large frame in each
-`ModFX` entry. The earlier bounded audit also loaded and ticked
+`ModFX` entry, and the content-profile test that the simulation compiles
+`ModFX`'s holds. The earlier bounded audit also loaded and ticked
 all fifteen map-pack maps and checked that Direct leaves a busy factory
 unchanged. These checks do not establish full-match AI strength
 or a visual comparison against the historical Windows engine.

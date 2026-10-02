@@ -160,6 +160,22 @@ func LoadGAFMetadataFile(fs vfs.FSOps, name string) (*GAFMetadata, error) {
 	return LoadGAFMetadata(data)
 }
 
+// LoadGAFMetadataFileWithLimits reads at most maxBytes of an animation bank
+// from the VFS and indexes it under explicit host limits. It applies the same
+// read cap and validation as LoadGAFSourceFile with the same arguments but
+// retains no encoded bytes, so a caller that needs only timing and geometry
+// accepts exactly the banks such an on-demand source accepts.
+func LoadGAFMetadataFileWithLimits(fs vfs.FSOps, name string, maxBytes int64, limits GAFLimits) (*GAFMetadata, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("gaf: invalid source byte limit")
+	}
+	data, err := readVFSWithLimit(fs, name, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	return LoadGAFMetadataWithLimits(data, limits)
+}
+
 // Find returns the first matching entry in authored table order.
 func (g *GAFMetadata) Find(name string) (*GAFMetadataEntry, bool) {
 	if g == nil {

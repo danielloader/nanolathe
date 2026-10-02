@@ -2638,7 +2638,7 @@ as local chat. The implemented handlers are:
 | `Sound3D` | toggle the live audio output mode; write settings while retaining the separate stored sound-mode preference |
 | `Sing` | toggle the existing voice queue's audible alias override; preserve captions, arbitration and random draws; no settings write |
 | `View p` | skirmish only; queue the low-byte viewing slot without changing command ownership or requesting a visibility refresh |
-| `Give p n metal/energy` | queue a signed resource transfer from the viewing player at drain time through the existing economy ledger; no settings write |
+| `Give p n metal/energy` | queue a signed resource transfer from the own/controlling player, read at drain time, through the existing economy ledger `[07 R-CAM-01 §6]`; no settings write |
 | `Logo n p` | validate the signed logo index against authored `32xlogos` frame count and the low-byte player argument against the current committed player row; enqueue the authoritative logo-byte assignment; no settings write |
 | `NoMetal`, `NoEnergy` | command alone sets local stock to zero; otherwise the first argument's low byte selects the player and the second supplies the stock value, subject to the established player-record gates |
 | `Selectable` | enqueue the alive-unit walk, setting only the selectable status bit |

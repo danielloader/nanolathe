@@ -21,6 +21,7 @@ func (s *Session) DebugSnapshot() map[string]any {
 		"entry_gameplay_features":  s.EntryCommunity,
 		"gameplay_features_digest": s.Community.Digest(),
 		"schema_spawn_attempts":    append([]string(nil), s.communitySchema.diagnostics...),
+		"sim_art_diagnostics":      s.SimArtDiagnostics(),
 		"rules":                    s.Rules.Name,
 		"rng_sim_state":            s.rngSim.State,
 		"rng_crt_state":            s.rngCrt.State,

@@ -52,7 +52,11 @@ type EffectService struct {
 	nextID       uint32
 	lastSequence uint64
 	dropped      uint64
-	art          *content.SimArt
+	// refusedAtCapacity counts every admission refused because the pool was
+	// full, from construction on, and is never reset. It is a host diagnostic:
+	// no tick reads it, and it is neither fingerprinted nor saved.
+	refusedAtCapacity uint64
+	art               *content.SimArt
 }
 
 // newEffectService creates the effect admission adapter. max <= 0 uses
@@ -75,12 +79,40 @@ func NewEffectServiceWithPool(max int, owner EffectPool, art *content.SimArt) *E
 	return s
 }
 
-// Dropped is the running count of events the service refused, for diagnostics.
+// Dropped is the number of events the service has refused since its last
+// Advance, which resets it, for diagnostics. Refusals by synchronous
+// admissions earlier in a tick are cleared by that tick's Advance.
 func (s *EffectService) Dropped() uint64 {
 	if s == nil {
 		return 0
 	}
 	return s.dropped
+}
+
+// RefusedAtCapacity is the number of admissions refused because the pool was
+// full since the service was built, never reset: the service's own capacity
+// test and the canonical pool declining the append, which FixedEffectPool
+// does only at its capacity. Identity exhaustion and shatter quads (refused
+// inside the pool's AdmitShatter) are not counted. Diagnostics and tests only;
+// no tick reads it, and it is neither fingerprinted nor saved [03 §1].
+func (s *EffectService) RefusedAtCapacity() uint64 {
+	if s == nil {
+		return 0
+	}
+	return s.refusedAtCapacity
+}
+
+// Occupancy reports the canonical pool's live records and the capacity
+// admission compares them with, for diagnostics and tests. It reads only and
+// changes nothing [03 §1].
+func (s *EffectService) Occupancy() (live, capacity int) {
+	if s == nil {
+		return 0, 0
+	}
+	if s.owner != nil {
+		return s.owner.Len(), s.max
+	}
+	return len(s.pending), s.max
 }
 
 // Advance updates the canonical pool once and admits the current ordered event
@@ -193,6 +225,7 @@ func copyEffectViews(dst, src []frame.EffectView) []frame.EffectView {
 func (s *EffectService) admit(now uint32, e Event) bool {
 	if s.owner != nil && s.owner.Len() >= s.max {
 		s.noteDrop()
+		s.noteCapacityRefusal()
 		return false
 	}
 	id := e.ID
@@ -256,7 +289,9 @@ func (s *EffectService) admit(now uint32, e Event) bool {
 	}
 	if s.owner != nil {
 		if !s.owner.AppendView(view) {
+			// The canonical pool declines an append only at its capacity.
 			s.noteDrop()
+			s.noteCapacityRefusal()
 			return false
 		}
 	} else {
@@ -289,6 +324,12 @@ func (s *EffectService) removePending(source, target pool.Handle) {
 func (s *EffectService) noteDrop() {
 	if s.dropped != ^uint64(0) {
 		s.dropped++
+	}
+}
+
+func (s *EffectService) noteCapacityRefusal() {
+	if s.refusedAtCapacity != ^uint64(0) {
+		s.refusedAtCapacity++
 	}
 }
 

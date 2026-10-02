@@ -1,10 +1,12 @@
 package session
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
 func TestDebugCaptureDoesNotCreateQueuesOrMintIdentities(t *testing.T) {
@@ -33,10 +35,18 @@ func TestDebugCaptureDoesNotCreateQueuesOrMintIdentities(t *testing.T) {
 		t.Fatal("snapshot aliases unit")
 	}
 	s.result.Winners = []int{1}
+	// An empty mount supplies no default effect bank, so the battle's table
+	// reports it and the capture carries that line.
+	empty := vfs.New()
+	t.Cleanup(func() { _ = empty.Close() })
+	s.simArt = content.CompileSimArt(empty, nil)
 	d := s.DebugSnapshot()
 	s.result.Winners[0] = 2
 	if d["result"].(Result).Winners[0] != 1 {
 		t.Fatal("result aliases live state")
+	}
+	if lines, _ := d["sim_art_diagnostics"].([]string); len(lines) != 1 || !strings.Contains(lines[0], "logical path anims/fx.gaf") {
+		t.Fatalf("sim_art_diagnostics = %v, want the missing default bank", d["sim_art_diagnostics"])
 	}
 }
 

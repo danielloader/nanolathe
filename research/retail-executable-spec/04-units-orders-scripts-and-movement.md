@@ -159,8 +159,7 @@ sea level is band 4; otherwise the band starts from the previous value, then
 neither grounded nor airborne classifies as band 0. The `setSFXoccupy` start
 fires only on a change of band.
 
-### The sweep's third player gate is the slot-index byte, not an elimination state
-[R-MOV-03 §10]
+### The sweep's third player gate is the slot-index byte, not an elimination state [R-MOV-03 §10]
 
 **Established, direct.** The third byte the sweep's player gate loads is the row's
 **slot-index byte** — the byte the row constructor seeds with `10` ([05 "Player
@@ -175,8 +174,7 @@ number in that byte ([R-MOV-03 §11]), so the third clause is inert in any battl
 which is why [05 R-SHARE-01 §3]'s parallel gate reads it as "the slot's own index
 is not 10".
 
-### The slot-index byte holds the slot's own index: the seat-setup writer
-[R-MOV-03 §11]
+### The slot-index byte holds the slot's own index: the seat-setup writer [R-MOV-03 §11]
 
 **Established** by a direct read of the row constructor, the seat-setup
 routine, its three callers and the battleroom's renumbering pass.

@@ -40,8 +40,15 @@ type listedPackage struct {
 
 func loadAuthoritativeTypedPackages(t *testing.T, root string) []typedPackage {
 	t.Helper()
+	return loadTypedPackages(t, root, authoritativeDirs)
+}
+
+// loadTypedPackages type-checks every package at or below dirs. The numeric
+// guards call it with a wider list than the other typed audits.
+func loadTypedPackages(t *testing.T, root string, dirs []string) []typedPackage {
+	t.Helper()
 	args := []string{"list", "-deps", "-export", "-json"}
-	for _, dir := range authoritativeDirs {
+	for _, dir := range dirs {
 		args = append(args, "./"+dir+"/...")
 	}
 	cmd := exec.Command("go", args...)
@@ -78,7 +85,7 @@ func loadAuthoritativeTypedPackages(t *testing.T, root string) []typedPackage {
 	imp := importer.ForCompiler(fset, "gc", lookup)
 	var packages []typedPackage
 	for _, item := range listed {
-		if !isAuthoritativeImportPath(item.ImportPath) {
+		if !isImportPathUnder(item.ImportPath, dirs) {
 			continue
 		}
 		files := make([]*ast.File, 0, len(item.GoFiles))
@@ -102,9 +109,9 @@ func loadAuthoritativeTypedPackages(t *testing.T, root string) []typedPackage {
 	return packages
 }
 
-func isAuthoritativeImportPath(path string) bool {
+func isImportPathUnder(path string, dirs []string) bool {
 	const prefix = "github.com/nanolathe-gg/nanolathe/"
-	for _, dir := range authoritativeDirs {
+	for _, dir := range dirs {
 		base := prefix + dir
 		if path == base || strings.HasPrefix(path, base+"/") {
 			return true

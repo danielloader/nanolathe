@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -552,8 +553,29 @@ func composeBattleEntryWithDetail(sess *session.Session, cat *content.Catalog, c
 // camera is applied only to this candidate and is installed at the same
 // render-thread commit as the rest of the battle presentation [08
 // R-SAVE-02 §11–§12].
+//
+// An ordinary battle reports its load-time content diagnostics here, once per
+// entry; settings previews compose through the models variant and do not
+// repeat them per scene.
 func composeBattleEntryDetached(sess *session.Session, cat *content.Catalog, cs *contentSet, shell *gameShell, savedCamera *save.Camera) (*battleSession, error) {
-	return composeBattleEntryDetachedWithModels(sess, cat, cs, shell, savedCamera, nil)
+	b, err := composeBattleEntryDetachedWithModels(sess, cat, cs, shell, savedCamera, nil)
+	if err != nil {
+		return nil, err
+	}
+	writeBattleEntryDiagnostics(os.Stderr, sess)
+	return b, nil
+}
+
+// writeBattleEntryDiagnostics writes each effect bank the battle's animation
+// table could not compile (session.SimArtDiagnostics), one line apiece, at
+// battle entry and never from a tick. Those banks' events carry no frame
+// holds. The source installer's launcher appends standard error to its run
+// log (writeFrontendStartupReport), so a player whose mod effects vanish early
+// can send the line that names the bank.
+func writeBattleEntryDiagnostics(w io.Writer, sess *session.Session) {
+	for _, line := range sess.SimArtDiagnostics() {
+		fmt.Fprintln(w, line)
+	}
 }
 
 // composeBattleEntryDetachedWithModels accepts model resources prepared by the

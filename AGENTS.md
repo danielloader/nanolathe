@@ -111,8 +111,14 @@ entering human/hosted-computer reset scope, and request-tick map sharing.
 Computer difficulty is explicit per seat; computers are excluded from
 Deathmatch initially. Strict keeps one computer per human; Modern/Community
 allow multiple within available seats through the existing `RuleSet`.
-These policies and their tests are owned by DESIGN_MULTIPLAYER §6.6–§6.7
-and Q22–Q25; they do not change single-player. Nothing a relay, a lobby or a
+Departure policies approved 2026-10-02: a disconnected seat stays idle until
+the connected, still-playing humans pass a removal vote — no connected seat
+can be voted out, resignation needs no vote, and no timer removes a seat —
+and at a human's final removal Strict removes its hosted computers with it as
+retail does, while Modern/Community keep them running through the existing
+`RuleSet`.
+These policies and their tests are owned by DESIGN_MULTIPLAYER §6.6–§6.7,
+§11.1 and Q22–Q27; they do not change single-player. Nothing a relay, a lobby or a
 host supplies may change what a tick
 computes, and a single-seat battle is untouched: every fingerprint lock runs
 single-player. It is owned by

@@ -108,6 +108,11 @@ type Report struct {
 	// Survival is the Survival director's state, outcome and wave plans
 	// (docs/DESIGN_SURVIVAL.md §10); absent for every other battle.
 	Survival *session.SurvivalReport `json:"survival,omitempty"`
+	// EffectBankDiagnostics names each effect bank the battle's animation
+	// table could not compile, in sorted bank order
+	// (session.SimArtDiagnostics); those banks' events carry no frame holds.
+	// Absent when every bank compiled.
+	EffectBankDiagnostics []string `json:"effect_bank_diagnostics,omitempty"`
 }
 
 // attackFamily is the set of canonical command names the order resolver
@@ -226,6 +231,7 @@ func buildReport(request Request, kind ScenarioKind, identity string, sess *sess
 	if sess.Snapshot != nil {
 		report.PresentationEventsDropped, _ = sess.Snapshot.RetainedEventsDropped()
 	}
+	report.EffectBankDiagnostics = sess.SimArtDiagnostics()
 	for i := range report.Players {
 		report.Players[i].Player = i
 		if sess.Units != nil {

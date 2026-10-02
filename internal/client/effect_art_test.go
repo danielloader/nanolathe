@@ -1,10 +1,14 @@
 package client
 
 import (
+	"encoding/binary"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
+	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/effects"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
@@ -70,6 +74,91 @@ func TestEffectArtResolvesAgainstStockBanks(t *testing.T) {
 	// it clamps rather than vanishing mid-animation.
 	if _, ok := c.resolveEffectFrame(view, 1<<20); !ok {
 		t.Fatal("a cursor past the last frame must clamp into the entry")
+	}
+	// The pool's timing for these entries no longer comes from this client:
+	// the census of stock holds and the one-shot admission are locked against
+	// content.SimArt in internal/content/profiles (TestStockEffectHoldsMatchTheCensus).
+}
+
+// The client draws exactly the effect banks the simulation times. A bank above
+// the eager default pixel budget loads in both, with the same holds, and a
+// missing bank resolves in neither (DESIGN_PRESENTATION_CLIENT "On-demand
+// effect art").
+func TestEffectBanksTheClientDrawsAreTheBanksSimArtTimes(t *testing.T) {
+	// Nine distinct 4096×4096 RLE frames whose rows are all empty records
+	// [fmt gaf]: 144 Mi pixels of geometry in about 74 KB of file.
+	const frames, side, hold = 9, 4096, 4
+	le := binary.LittleEndian
+	refs := 12 + 4 + 40
+	first := refs + 8*frames
+	frameBytes := 24 + 2*side
+	data := make([]byte, first+frames*frameBytes)
+	le.PutUint32(data[0:], 0x00010100)
+	le.PutUint32(data[4:], 1)
+	le.PutUint32(data[12:], 16)
+	le.PutUint16(data[16:], frames)
+	copy(data[24:56], "Boom")
+	for i := range frames {
+		at := first + i*frameBytes
+		le.PutUint32(data[refs+8*i:], uint32(at))
+		le.PutUint32(data[refs+8*i+4:], hold)
+		le.PutUint16(data[at:], side)
+		le.PutUint16(data[at+2:], side)
+		data[at+9] = 1
+		le.PutUint32(data[at+16:], uint32(at+24))
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "anims"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The second spelling carries a non-ASCII letter, which bank keys keep
+	// literal while folding ASCII [I1].
+	for _, name := range []string{"big.gaf", "BÏG.gaf"} {
+		if err := os.WriteFile(filepath.Join(root, "anims", name), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fs := vfs.New()
+	t.Cleanup(func() { _ = fs.Close() })
+	if err := fs.MountDirectory(root, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := formats.LoadGAFMetadataFile(fs, "anims/big.gaf"); err == nil {
+		t.Fatal("fixture must exceed the eager default pixel budget")
+	}
+	art := content.CompileSimArt(fs, &content.Catalog{Weapons: map[string]*content.WeaponDef{
+		"a": {ExplosionGaf: "big", ExplosionArt: "boom"},
+		"b": {ExplosionGaf: "missing", ExplosionArt: "boom"},
+		"c": {ExplosionGaf: "BÏG", ExplosionArt: "boom"},
+	}})
+	c := &Client{}
+	c.SetModelFS(fs)
+	for _, name := range []string{"BIG", "bÏG"} {
+		bank := c.EffectBank(name)
+		holds, timed := art.EffectEntryHolds(name, "boom")
+		if bank == nil || !timed {
+			t.Fatalf("%q: client bank loaded=%v, simulation timed=%v; both must accept a bank within the shared policy (%+v)", name, bank != nil, timed, c.artDiagnostics)
+		}
+		entry, ok := bank.Find("boom")
+		if !ok || len(entry.Frames) != len(holds) {
+			t.Fatalf("%q: client entry %v frames, simulation %d holds", name, entry, len(holds))
+		}
+		for i, ref := range entry.Frames {
+			if max(int32(ref.Value), 1) != holds[i] {
+				t.Fatalf("%q frame %d: client hold %d, simulation hold %d", name, i, ref.Value, holds[i])
+			}
+		}
+	}
+	if c.EffectBank("missing") != nil {
+		t.Fatal("the client loaded a bank no provider supplies")
+	}
+	if _, ok := art.EffectEntryHolds("missing", "boom"); ok {
+		t.Fatal("the simulation timed a bank no provider supplies")
+	}
+	// The fixture has no default bank either; both absences are reported, in
+	// sorted bank order.
+	if d := art.Diagnostics(); len(d) != 2 || d[0].Bank != "fx" || d[1].Bank != "missing" {
+		t.Fatalf("simulation diagnostics = %v, want the fx and missing banks", d)
 	}
 }
 

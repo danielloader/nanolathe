@@ -1090,8 +1090,12 @@ func (s *System) World() *units.World {
 	return s.world
 }
 
-// isqrt returns floor(sqrt(n)) with integer arithmetic. It is used only for a
-// diagnostic distance; authoritative completion uses the squared domain.
+// isqrt returns floor(sqrt(n)) with integer arithmetic. Retail completion
+// tests stay in the squared domain or call the distance routine
+// [01 R-DET-01 §7]; this exact root serves the goal-distance diagnostic,
+// Nanolathe's own Modern arithmetic (route claims, the repair-pad queue) and
+// the velocity marker's steering, which is never set in play
+// [04 R-AIR-01 §14].
 func isqrt(n uint64) uint64 {
 	if n == 0 {
 		return 0

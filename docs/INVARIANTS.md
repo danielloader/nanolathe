@@ -102,18 +102,21 @@ default amd64, so one source has three answers. Retail has no fused
 multiply-add: every product is rounded to the working precision before it is
 added, which is what rows like "narrowed by **one** store at the end" and
 "combined and truncated **once**" already describe. So in an authoritative
-package every product that feeds an add or a subtract — including one formed in
-an earlier statement — carries an explicit floating-point conversion, the
-specification's rounding barrier. It changes no operand width, no constant, no
-evaluation order and no narrowing point. Presentation packages are exempt.
+package, and in a load-time package whose output the simulation reads (the
+file system, format parsers, catalog compiler, Community tables and gameplay
+selection), every product that feeds an add or a subtract — including one
+formed in an earlier statement — carries an explicit floating-point
+conversion, the specification's rounding barrier. It changes no operand
+width, no constant, no evaluation order and no narrowing point. Presentation
+packages are exempt.
 
 **Library functions and conversions — in force** (DESIGN_MULTIPLAYER M1).
 The standard library's transcendental functions
 do not return the same bits on every architecture: `math.Hypot` is assembly
 on amd64 and fused Go on arm64, and package `math` itself is compiled with
 fused multiply-adds on arm64, where the guard below cannot see it. An
-authoritative package therefore calls only the exactly rounded library
-functions — `math.Sqrt`, `math.Abs`, `math.Floor`, `math.Ceil`, `math.Trunc`,
+authoritative or load-time simulation-input package therefore calls only the
+exactly rounded library functions — `math.Sqrt`, `math.Abs`, `math.Floor`, `math.Ceil`, `math.Trunc`,
 `math.Round`, `math.RoundToEven` — and takes distance, sine, cosine,
 arctangent, arccosine and tangent from the in-repository implementations in
 `internal/sim/numeric`, each defined by the retail routine it stands for
@@ -129,12 +132,16 @@ payloads, which remain the explicit distance-kernel research Unknown.
 
 **Check.** `grep -rn "float64\|float32" internal/` — every hit maps to a row
 above or is presentation-only. `internal/architecture`'s
-`TestAuthoritativeArithmeticIsNotFused` compiles the authoritative packages for
-arm64 and for `GOAMD64=v3` and fails on a fused instruction outside its
-shrink-only allowlist, each entry of which argues that its product is exact.
-`TestAuthoritativeNumericPortability` enforces both library-function identity
-and floating-to-integer conversion types, including aliases, named types and
-generic constraints; no caller outside `internal/sim/numeric` is exempt.
+`TestAuthoritativeArithmeticIsNotFused` compiles the authoritative packages,
+and the load-time packages whose output the simulation reads (the file system,
+format parsers, catalog compiler with its mutators, Community tables and
+gameplay selection), for arm64 and for `GOAMD64=v3` and fails on a fused
+instruction outside its shrink-only allowlist, each entry of which argues that
+its product is exact. `TestAuthoritativeNumericPortability` reads the same
+packages and enforces both library-function identity and floating-to-integer
+conversion types, including aliases, named types and generic constraints; no
+caller outside `internal/sim/numeric` is exempt. Only these two guards read the
+load-time packages; the other authoritative audits do not.
 
 ## I3 — Truncation toward zero
 
@@ -174,7 +181,7 @@ A* heuristic scale as a full signed 64-bit product arithmetically shifted, and
 | Operation | Rule | Helper |
 |---|---|---|
 | definition float → integer | signed-64 truncation, retain low 32 bits (`__ftol`) `[01 R-DET-01 §1]` | `numeric.TruncateFloat64ToLow32` |
-| in-range float → integer | truncate toward zero (`__ftol`) | `int32(f)`, `Fixed.Int` |
+| in-range float → integer | truncate toward zero (`__ftol`) | `numeric.TruncateFloat64ToLow32` and its siblings (a raw `int32(f)` is refused by the portability guard, I2), `Fixed.Int` |
 | world → cell | floor with sign correction `[03 §2.1]` | `world.WorldToCell` |
 | fixed × fixed | floor (arithmetic shift) | `Fixed.Mul` |
 | fixed ÷ fixed | truncate toward zero (`idiv`) | `Fixed.Div` |

@@ -39,8 +39,10 @@ import (
 // internal/client, internal/platform/gpurender, internal/upscale,
 // internal/camera, internal/audio, internal/hud, internal/gui, internal/input,
 // internal/drawlist and cmd/nanolathe are all free to fuse, and most of the
-// repository's fused instructions live there. The guard scans authoritativeDirs
-// and nothing else, so adding a package to that list is what brings it in.
+// repository's fused instructions live there. The guard scans numericGuardDirs
+// — authoritativeDirs and the load-time simulation inputs, whose compiled
+// catalog every lockstep host builds for itself — and nothing else, so adding a
+// package to one of those lists is what brings it in.
 
 // fusionAllowance is one declaration whose fused instructions are provably
 // harmless. `sites` is the number of distinct source lines that fuse inside the
@@ -55,7 +57,7 @@ type fusionAllowance struct {
 }
 
 // fusionAllowances names every remaining fused multiply-add in the
-// authoritative packages. Each one multiplies by an exact value, so the single
+// guarded packages. Each one multiplies by an exact value, so the single
 // rounding a fused instruction performs is the same value two roundings give.
 var fusionAllowances = map[string]fusionAllowance{
 	"internal/ai/strategic.go func *Strategic.refreshCountsAndCenter": {
@@ -90,7 +92,7 @@ var assemblyLine = regexp.MustCompile(`^\s+0x[0-9a-f]+\s+\d+\s+\(([^()]+\.go):(\
 // allowed above.
 func TestAuthoritativeArithmeticIsNotFused(t *testing.T) {
 	root := repositoryRoot(t)
-	declarations := authoritativeDeclarations(t)
+	declarations := guardedDeclarations(t, root)
 
 	arm := fusionSites(t, root, "arm64", "", func(mnemonic string) bool { return fusedARM64[mnemonic] })
 	counts := attributeFusion(t, arm, declarations)
@@ -122,7 +124,7 @@ func TestAuthoritativeArithmeticIsNotFused(t *testing.T) {
 // a guarantee, so it is asserted instead of assumed.
 func TestAuthoritativeArithmeticIsNotFusedOnAMD64V3(t *testing.T) {
 	root := repositoryRoot(t)
-	declarations := authoritativeDeclarations(t)
+	declarations := guardedDeclarations(t, root)
 
 	sites := fusionSites(t, root, "amd64", "v3", func(mnemonic string) bool { return fusedAMD64.MatchString(mnemonic) })
 	counts := attributeFusion(t, sites, declarations)
@@ -144,7 +146,7 @@ func TestAuthoritativeArithmeticIsNotFusedOnAMD64V3(t *testing.T) {
 	}
 }
 
-// fusionSites compiles every authoritative package with the assembly listing
+// fusionSites compiles every guarded package with the assembly listing
 // enabled and returns the repository-relative `file:line` of each fused
 // instruction. stderr is streamed, never buffered: the dumps run to tens of
 // megabytes.
@@ -155,11 +157,12 @@ func fusionSites(t *testing.T, root, arch, amd64Level string, fused func(string)
 	}
 	module := modulePath(t, root)
 	// The package-qualified form is required: a bare -S can replay a cached
-	// build without reprinting the listing.
-	// No -o: every authoritative package is a library, so the build writes
+	// build without reprinting the listing. It names the whole module because
+	// guarded packages live outside internal/ too (formats, vfs, mods/aikit).
+	// No -o: every guarded package is a library, so the build writes
 	// nothing at all. -o would need a directory and a main package to fill it.
-	args := []string{"build", "-gcflags=" + module + "/internal/...=-S"}
-	for _, dir := range authoritativeDirs {
+	args := []string{"build", "-gcflags=" + module + "/...=-S"}
+	for _, dir := range numericGuardDirs() {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(dir))); err != nil {
 			continue // package not present in this worktree
 		}
@@ -214,10 +217,15 @@ type fusionDeclaration struct {
 	first, end int
 }
 
-func authoritativeDeclarations(t *testing.T) map[string][]fusionDeclaration {
+func guardedDeclarations(t *testing.T, root string) map[string][]fusionDeclaration {
 	t.Helper()
 	byPath := map[string][]fusionDeclaration{}
-	scanAuthoritativeSources(t, func(path string, fset *token.FileSet, file *ast.File, _ func(int) string) {
+	scanSourceFiles(t, root, numericGuardDirs(), func(absolute string, file *ast.File, fset *token.FileSet) []string {
+		path, err := filepath.Rel(root, absolute)
+		if err != nil {
+			t.Fatalf("relative path of %s: %v", absolute, err)
+		}
+		path = filepath.ToSlash(path)
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
@@ -230,6 +238,7 @@ func authoritativeDeclarations(t *testing.T) map[string][]fusionDeclaration {
 				end:   fset.Position(fn.End()).Line,
 			})
 		}
+		return nil
 	})
 	return byPath
 }
@@ -237,7 +246,7 @@ func authoritativeDeclarations(t *testing.T) map[string][]fusionDeclaration {
 // attributeFusion maps each fused instruction back to the declaration that
 // CONTAINS the source line, not to the symbol the instruction was emitted in.
 // Inlining puts one source line in many symbols; the declaration is stable.
-// Sites outside authoritativeDirs are ignored — the package-qualified -S flag
+// Sites outside numericGuardDirs are ignored — the package-qualified -S flag
 // also dumps presentation dependencies, which are out of scope.
 func attributeFusion(t *testing.T, sites map[string]int, declarations map[string][]fusionDeclaration) map[string][]string {
 	t.Helper()

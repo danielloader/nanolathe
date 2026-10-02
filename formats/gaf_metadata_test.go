@@ -2,8 +2,12 @@ package formats
 
 import (
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
 func TestGAFMetadataMatchesPixelLoaderAndPreservesAliases(t *testing.T) {
@@ -186,6 +190,64 @@ func TestGAFMetadataPreservesDepthAndReferenceBudgets(t *testing.T) {
 	limits.MaxFrameRefs = 1
 	if _, err := LoadGAFMetadataWithLimits(data, limits); err == nil || !strings.Contains(err.Error(), "aggregate frame references") {
 		t.Fatalf("metadata reference budget error = %v", err)
+	}
+}
+
+// The file entry point with explicit limits accepts and refuses exactly what an
+// on-demand source with the same arguments does, while the default-limit entry
+// point keeps its own budget.
+func TestGAFMetadataFileWithLimitsMatchesSourcePolicy(t *testing.T) {
+	data, err := EncodeGAF([]GAFWriteEntry{{Name: "wide", Frames: []GAFWriteFrame{
+		{Width: 2, Height: 2, Duration: 3, Pixels: []byte{1, 2, 3, 4}},
+		{Width: 2, Height: 2, Duration: 0, Pixels: []byte{4, 3, 2, 1}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "bank.gaf"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	fs := vfs.New()
+	defer fs.Close()
+	if err := fs.MountDirectory(root, 0); err != nil {
+		t.Fatal(err)
+	}
+	tight := DefaultGAFLimits()
+	tight.MaxDecodedPixels = 7 // the two unique 2x2 frames need 8
+	roomy := DefaultGAFLimits()
+	roomy.MaxDecodedPixels = 8
+	size := int64(len(data))
+	for _, tc := range []struct {
+		name     string
+		maxBytes int64
+		limits   GAFLimits
+		want     string
+	}{
+		{"pixels", size, tight, "aggregate decoded pixels exceed limit"},
+		{"bytes", size - 1, roomy, "exceeds"},
+		{"accepted", size, roomy, ""},
+	} {
+		meta, metaErr := LoadGAFMetadataFileWithLimits(fs, "bank.gaf", tc.maxBytes, tc.limits)
+		_, sourceErr := LoadGAFSourceFile(fs, "bank.gaf", tc.maxBytes, tc.limits)
+		if (metaErr == nil) != (sourceErr == nil) {
+			t.Fatalf("%s: metadata error %v, source error %v", tc.name, metaErr, sourceErr)
+		}
+		if tc.want == "" {
+			if metaErr != nil || len(meta.Entries) != 1 || meta.Entries[0].Frames[0].Value != 3 {
+				t.Fatalf("%s: metadata = %+v, %v", tc.name, meta, metaErr)
+			}
+			continue
+		}
+		if metaErr == nil || !strings.Contains(metaErr.Error(), tc.want) {
+			t.Fatalf("%s: metadata error = %v, want %q", tc.name, metaErr, tc.want)
+		}
+	}
+	if _, err := LoadGAFMetadataFileWithLimits(fs, "bank.gaf", 0, roomy); err == nil {
+		t.Fatal("a zero read cap was accepted")
+	}
+	if _, err := LoadGAFMetadataFile(fs, "bank.gaf"); err != nil {
+		t.Fatalf("default-limit entry point refused a small bank: %v", err)
 	}
 }
 

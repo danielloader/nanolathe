@@ -16,9 +16,11 @@ import (
 // Numeric portability is stricter than the floating-storage allowance: every
 // conversion outside the kernel must name its narrowing store (I2/I3), and
 // library arithmetic must have a platform-independent rounding contract.
+// It reads numericGuardDirs: the authoritative packages and the load-time
+// packages that compute what the simulation reads.
 func TestAuthoritativeNumericPortability(t *testing.T) {
 	root := repositoryRoot(t)
-	failures := numericPortabilityViolations(root, loadAuthoritativeTypedPackages(t, root))
+	failures := numericPortabilityViolations(root, loadTypedPackages(t, root, numericGuardDirs()))
 	if len(failures) != 0 {
 		t.Fatal(strings.Join(failures, "\n"))
 	}

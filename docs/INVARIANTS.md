@@ -441,7 +441,13 @@ that seat's own retail machine would have run it, because retail multiplayer
 has no single outcome to match. Its online policies (cheat permission for
 world-changing commands, no pause or speed change in the first releases,
 room-wide view restrictions) are Nanolathe's in every mode and are recorded
-as such, not as retail behavior. A single-seat battle is unchanged, and every
+as such, not as retail behavior. Q22–Q25, approved 2026-10-02, additionally
+define shared directed declarations, canonical per-player exploration with
+own/hosted reset scope, request-tick map sharing, explicit per-computer
+difficulty and initial computer exclusion from Deathmatch. Strict retains
+one computer per human; Modern/Community allow multiple within available
+seats through the existing RuleSet, as documented in DESIGN_MULTIPLAYER
+§6.6–§6.7. A single-seat battle is unchanged, and every
 fingerprint lock runs single-player. It is owned by
 [DESIGN_MULTIPLAYER](DESIGN_MULTIPLAYER.md) and is not yet implemented.
 

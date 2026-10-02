@@ -101,11 +101,19 @@ gameplay mode, Strict 3.1 included. Retail multiplayer has no single outcome
 to match, so "Strict 3.1 online" is defined by owner-machine equivalence —
 each seat's work runs as that seat's own retail machine would have run it —
 and it neither reproduces retail's transport nor interoperates with it.
-Three online policies apply in every mode and are Nanolathe's, not retail's:
+The online policies apply in every mode and are Nanolathe's, not retail's:
 a command that changes the world needs the lobby's cheat permission even
 where retail leaves it ungated; online battles run at normal speed with no
 pause in the first releases; and a room may restrict views for all its
-players. Nothing a relay, a lobby or a host supplies may change what a tick
+players. Follow-up policies approved 2026-10-02 use one shared directed
+alliance matrix, canonical per-player explored histories with only the
+entering human/hosted-computer reset scope, and request-tick map sharing.
+Computer difficulty is explicit per seat; computers are excluded from
+Deathmatch initially. Strict keeps one computer per human; Modern/Community
+allow multiple within available seats through the existing `RuleSet`.
+These policies and their tests are owned by DESIGN_MULTIPLAYER §6.6–§6.7
+and Q22–Q25; they do not change single-player. Nothing a relay, a lobby or a
+host supplies may change what a tick
 computes, and a single-seat battle is untouched: every fingerprint lock runs
 single-player. It is owned by
 [DESIGN_MULTIPLAYER](docs/DESIGN_MULTIPLAYER.md), which stages the work in

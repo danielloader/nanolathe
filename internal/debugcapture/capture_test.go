@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -15,6 +16,9 @@ func TestDebugCapturePartialFailureAndUniqueDirectory(t *testing.T) {
 	c, err := Begin(base, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if filepath.Dir(c.Directory) != base || !strings.HasPrefix(filepath.Base(c.Directory), "nanolathe-diagnostics-") {
+		t.Fatalf("capture location/name is not recognizable: %s", c.Directory)
 	}
 	c.JSON("bad.json", math.NaN())
 	c.JSON("good.json", struct{ Tick int }{7})

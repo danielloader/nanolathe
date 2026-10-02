@@ -2,9 +2,16 @@
 
 Press **Ctrl+Shift+F11** in a battle to pause and write a diagnostic bundle.
 The shortcut also works while paused or in a battle modal. Each key-down edge
-creates a unique directory under `~/Nanolathe/diagnostics`; holding the keys
-does not repeat. The status line and standard error report the directory and
-any incomplete result. Resume with the normal pause or menu controls.
+creates a unique `nanolathe-diagnostics-<timestamp>-<suffix>` folder on the
+user's Desktop; holding the keys does not repeat. Zip that entire folder to
+attach it to a bug report. The status line and standard error report the
+location and any incomplete result. Resume with the normal pause or menu controls.
+
+macOS uses `~/Desktop`. Windows asks the shell for the current user's Desktop,
+including redirected locations. Linux reads `XDG_DESKTOP_DIR` from
+`$XDG_CONFIG_HOME/user-dirs.dirs` (default `~/.config/user-dirs.dirs`), falling
+back to `~/Desktop` when no valid entry exists. Desktop resolution or write
+failures are reported; captures are not silently redirected elsewhere.
 
 This is a Nanolathe development feature, not a retail binding. Capture consumes
 the triggering input sample before gameplay dispatch, joins background recording,
@@ -37,6 +44,15 @@ files were written successfully; it does not erase the documented omissions.
 | `construction-admissions.json` | Bounded recent factory admission outcomes, rejection reasons, attempted footprints, existing builder identities, total and evicted counts |
 | `client.json`, `battle.json` | Camera/zoom, viewport/input/modal state, interpolation, recorder counters, cache sizes, main and individual worker model scratch, cached body/shadow storage |
 | `renderer.json`, `last-frame.png` | Device counters, Ebitengine backend and backing-texture memory estimate, actual triangle submission totals and peak Execute, paused-world reuse counts and retained image size, and one readback of the retained last composition; no additional render pass |
+
+Economy data lives in `session.json` under `economy`. `Players` includes stocks,
+capacities, live and archived settlement buckets, last-pass production and
+consumption, AI aggregates, cumulative produced/consumed totals and waste,
+settlement deadlines, storage bonuses, alliances and resource-sharing settings.
+`Units` includes each live unit's resource buckets and archived production/request
+values, activation and remaining construction fraction. Resource arrays are
+ordered `[metal, energy]`. These are current accounting snapshots, not a history
+of transactions.
 
 Units use raw signed 16.16 fixed point and 65536 angle units per circle. A
 publication identity of zero means this exact unit occupant has not been

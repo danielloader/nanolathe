@@ -1646,8 +1646,10 @@ snapshot carry their own collection time/identity where they cannot describe an
 identical instant. A diagnostic bundle is not itself a restore/save format.
 
 Implemented capture details and the explicit coverage limits live in
-[DEBUG_CAPTURE.md](DEBUG_CAPTURE.md). The host writes synchronously under
-`~/Nanolathe/diagnostics`, with one unique directory per shortcut edge. Initial
+[DEBUG_CAPTURE.md](DEBUG_CAPTURE.md). The host writes synchronously to the user's
+Desktop, with one unique `nanolathe-diagnostics-<timestamp>-<suffix>` directory
+per shortcut edge. Windows uses the shell's Desktop location; Linux honors the
+configured XDG Desktop; macOS uses `~/Desktop`. Initial
 runtime statistics and profiles precede the detached engine snapshots. macOS
 OS memory tools inspect only this process, with independent five-second limits.
 The device owner copies the retained image through one `ReadPixels` call before

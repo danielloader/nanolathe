@@ -38,7 +38,7 @@ type battleSession struct {
 	developer                              battleDeveloperState
 	// Host diagnostic request/result state; synchronous writes serialize captures.
 	debugCaptureBusy  bool
-	debugCaptureBase  string // empty uses the per-user diagnostics directory
+	debugCaptureBase  string // empty uses the user's Desktop
 	debugCapturePath  string
 	debugCaptureError error
 

@@ -39,20 +39,20 @@ type Capture struct {
 }
 
 // Begin captures initial runtime statistics before engine snapshots allocate.
-// base is an explicit host/test override; the default lives outside the repo.
+// base is an explicit host/test override; the default is the user's Desktop.
 func Begin(base string, metadata any) (*Capture, error) {
 	if base == "" {
-		home, err := os.UserHomeDir()
+		var err error
+		base, err = desktopDirectory()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("nanolathe: locating the Desktop failed: logical path <Desktop>, providers searched [user desktop directory], expected a capture destination: %w", err)
 		}
-		base = filepath.Join(home, "Nanolathe", "diagnostics")
 	}
 	if err := os.MkdirAll(base, 0700); err != nil {
 		return nil, err
 	}
 	start := time.Now()
-	dir, err := os.MkdirTemp(base, start.UTC().Format("20060102T150405.000000000Z")+"-")
+	dir, err := os.MkdirTemp(base, "nanolathe-diagnostics-"+start.UTC().Format("20060102T150405.000000000Z")+"-")
 	if err != nil {
 		return nil, err
 	}

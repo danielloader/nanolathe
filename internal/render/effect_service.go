@@ -1,6 +1,7 @@
 package render
 
 import (
+	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 )
@@ -25,25 +26,13 @@ const (
 // EffectCapacity is the fixed active-effect pool bound [01 §6.1][03 §1].
 const EffectCapacity = 300 // [03 §1] fixed active-effect pool capacity
 
-// FrameTiming is optional authored GAF timing supplied by a read-only asset
-// resolver. Missing or malformed timing is not replaced by a cursor guess
-// [03 §4.4][03 §5.5][I9].
-type FrameTiming struct {
-	Durations []int32
-	Loop      bool
-}
-
-// TimingResolver resolves authored timing for an already admitted event.
-type TimingResolver func(Event) (FrameTiming, bool)
-
 // EffectPool is the sole mutable active-effect owner supplied by composition.
-// Presentation only admits detached views into it and reads snapshots back;
-// it never implements a second cursor or retirement clock [03 §1][I6].
+// The session admits detached event views and advances it; presentation only
+// reads snapshots, never a second cursor or retirement clock [03 §1][I6].
 type EffectPool interface {
 	Len() int
 	Update(uint32)
 	AppendView(frame.EffectView) bool
-	resolveUnresolvedPrimary(TimingResolver)
 	SnapshotViews() []frame.EffectView
 	RemoveMatching(pool.Handle, pool.Handle, string)
 	SnapshotViewsInto([]frame.EffectView) []frame.EffectView
@@ -53,7 +42,7 @@ type EffectPool interface {
 }
 
 // EffectService is an admission/snapshot adapter around the one canonical
-// render.FixedEffectPool. It owns no second cursor, expiration, or retirement
+// FixedEffectPool. It owns no second cursor, expiration, or retirement
 // lifecycle; Advance updates that pool once, then appends this window's
 // detached event views [03 §1][I6].
 type EffectService struct {
@@ -63,10 +52,10 @@ type EffectService struct {
 	nextID       uint32
 	lastSequence uint64
 	dropped      uint64
-	resolver     TimingResolver
+	art          *content.SimArt
 }
 
-// newEffectService creates the presentation admission adapter. max <= 0 uses
+// newEffectService creates the effect admission adapter. max <= 0 uses
 // the fixed pool capacity; a smaller value is retained only as a presentation
 // admission bound for existing callers.
 func newEffectService(max int) *EffectService {
@@ -76,29 +65,14 @@ func newEffectService(max int) *EffectService {
 	return &EffectService{max: max, nextID: 1}
 }
 
-// NewEffectServiceWithPool binds the non-advancing presentation adapter to
-// the canonical fixed pool owned by composition.
-func NewEffectServiceWithPool(max int, owner EffectPool) *EffectService {
+// NewEffectServiceWithPool binds the canonical pool and immutable authored
+// timing at composition, before any unit script can emit effects. A nil art
+// table leaves named players inactive; timing is never guessed [03 §1][I9].
+func NewEffectServiceWithPool(max int, owner EffectPool, art *content.SimArt) *EffectService {
 	s := newEffectService(max)
 	s.owner = owner
+	s.art = art
 	return s
-}
-
-// SetTimingResolver installs the resolver that supplies an admitted event's
-// authored frame timing. A nil resolver leaves timing unresolved, which keeps
-// the frame player inactive rather than inventing a lifetime [03 §4.4] [I9].
-func (s *EffectService) SetTimingResolver(resolver TimingResolver) {
-	if s == nil {
-		return
-	}
-	s.resolver = resolver
-	// COB Create can admit named art before the shell has installed its
-	// asset-backed resolver. Hydrate only those unresolved primary players in
-	// the canonical owner; this neither changes record order nor retries from
-	// the per-frame path [03 §1][I6].
-	if resolver != nil && s.owner != nil {
-		s.owner.resolveUnresolvedPrimary(resolver)
-	}
 }
 
 // Dropped is the running count of events the service refused, for diagnostics.
@@ -273,11 +247,11 @@ func (s *EffectService) admit(now uint32, e Event) bool {
 	// so the condition was never true for an impact and its named art was
 	// admitted with no player at all — art that could only ever appear as a
 	// static frame 0, for exactly as long as the flash kept the record alive.
-	if s.resolver != nil && e.Graphic != "" &&
-		!validTiming(FrameTiming{Durations: view.DurationsA, Loop: view.LoopA}) {
-		if timing, ok := s.resolver(e); ok && validTiming(timing) {
-			view.DurationsA = append([]int32(nil), timing.Durations...)
-			view.LoopA = timing.Loop
+	if e.Graphic != "" && !validDurations(view.DurationsA) {
+		if holds, ok := s.art.EffectEntryHolds(e.AssetID, e.Graphic); ok {
+			view.DurationsA = holds
+			// Effect holders clear the authored loop byte [06 R-WFX-01 §1].
+			view.LoopA = false
 		}
 	}
 	if s.owner != nil {
@@ -316,18 +290,6 @@ func (s *EffectService) noteDrop() {
 	if s.dropped != ^uint64(0) {
 		s.dropped++
 	}
-}
-
-func validTiming(t FrameTiming) bool {
-	if len(t.Durations) == 0 {
-		return false
-	}
-	for _, d := range t.Durations {
-		if d <= 0 {
-			return false
-		}
-	}
-	return true
 }
 
 func effectKind(k Kind) bool {

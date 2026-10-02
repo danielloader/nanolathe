@@ -71,30 +71,6 @@ func TestEffectArtResolvesAgainstStockBanks(t *testing.T) {
 	if _, ok := c.resolveEffectFrame(view, 1<<20); !ok {
 		t.Fatal("a cursor past the last frame must clamp into the entry")
 	}
-
-	// Authored timing: the frame reference's second word is the per-frame hold
-	// in whole ticks [fmt gaf], and explosion art does not loop, because the
-	// weapon parser clears the entry's loop byte at bind time.
-	timing, ok := c.EffectFrameTiming("fx", "Explosion")
-	if !ok {
-		t.Fatal("no authored timing for the stock Explosion entry")
-	}
-	if timing.Loop {
-		t.Fatal("explosion art must not loop; its loop byte is cleared when the weapon binds it")
-	}
-	if len(timing.Durations) == 0 {
-		t.Fatal("resolved an empty duration list")
-	}
-	for i, d := range timing.Durations {
-		if d < 1 {
-			t.Fatalf("frame %d hold %d; a frame with hold h is shown for max(h,1) advances", i, d)
-		}
-	}
-	// The census in [06 R-WFX-01 §1] records the stock `Explosion` entry at a
-	// hold of 2 ticks a frame.
-	if timing.Durations[0] != 2 {
-		t.Fatalf("stock Explosion frame 0 hold = %d, want 2", timing.Durations[0])
-	}
 }
 
 // TestExplosionArtActuallyReachesTheBlitter closes the loop the resolver test

@@ -1653,7 +1653,9 @@ func createAndBindServices(s *Session) error {
 	// The authored animation metadata the AUTHORITATIVE phases read: a burning
 	// feature's current frame geometry and a die/reclaim/burn lifetime in visits
 	// [05 R-FEAT-01 §10], and an effect entry's frame count, which is what a
-	// smoke puff's own last frame is drawn against [03 R-STRIP-01 §2].
+	// smoke puff's own last frame is drawn against [03 R-STRIP-01 §2]. The
+	// same table supplies per-frame holds to the fixed effect pool: its occupancy
+	// gates simulation draws [06 R-WFX-01 §1][04 R-COB-04 §3].
 	//
 	// It is compiled here, from the battle's own VFS, because this is the last
 	// point that precedes BOTH producers: the strip table below, whose
@@ -1680,7 +1682,8 @@ func createAndBindServices(s *Session) error {
 	}
 	// Composition is the central topology site for the session's committed-frame
 	// publication boundary [01 §4.4][03 §1]. The helper is idempotent so an
-	// existing staged event window or effect pool survives re-binding.
+	// existing staged event window or effect pool survives re-binding. Timing
+	// binds from s.simArt at construction, before the first unit Create script.
 	s.ensurePublicationState()
 	// Radar surface cadence is transient and rebuilt at every battle entry,
 	// including save/load re-entry; it is not restored from save data

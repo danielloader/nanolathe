@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
@@ -263,4 +264,87 @@ func TestSimArtRetainsNoFilesystem(t *testing.T) {
 	if _, _, _, _, _, ok := art.FeatureSequence("trees", "nosuchseq", 0); ok {
 		t.Fatal("a miss resolved after unmount")
 	}
+}
+
+// The fixed pool reads all default and weapon-named bank entries, not just
+// entries selected by a particular weapon [06 R-WFX-01 §1].
+func TestSimArtEffectHoldsFromSortedBanks(t *testing.T) {
+	frame := func(hold uint32) formats.GAFWriteFrame {
+		return formats.GAFWriteFrame{Width: 1, Height: 1, Duration: hold, Pixels: []byte{1}}
+	}
+	data, err := formats.EncodeGAF([]formats.GAFWriteEntry{
+		{Name: "primary", Frames: []formats.GAFWriteFrame{frame(0), frame(3), frame(^uint32(0))}},
+		{Name: "other", Frames: []formats.GAFWriteFrame{frame(2)}},
+		{Name: "PRIMARY", Frames: []formats.GAFWriteFrame{frame(9)}},
+		{Name: "empty", Frames: []formats.GAFWriteFrame{frame(1)}},
+		{Name: "EMPTY", Frames: []formats.GAFWriteFrame{frame(9)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Author a zero-frame first match; the second same-name entry must not
+	// supply a substitute [fmt gaf][06 R-WFX-01 §1].
+	emptyOffset := binary.LittleEndian.Uint32(data[12+3*4:])
+	binary.LittleEndian.PutUint16(data[emptyOffset:], 0)
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "anims"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, bank := range []string{"fx", "land", "water", "lava", "unused"} {
+		if err := os.WriteFile(filepath.Join(root, "anims", bank+".gaf"), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fs := vfs.New()
+	if err := fs.MountDirectory(root, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+	ordered := &simArtReadOrder{FSOps: fs}
+	art := CompileSimArt(ordered, &Catalog{Weapons: map[string]*WeaponDef{
+		"z":   {ExplosionGaf: " LAND ", WaterExplosionGaf: "water", LavaExplosionGaf: "lava"},
+		"a":   {ExplosionGaf: "land", WaterExplosionGaf: "missing"},
+		"nil": nil,
+	}})
+	if want := []string{"anims/fx.gaf", "anims/land.gaf", "anims/lava.gaf", "anims/missing.gaf", "anims/water.gaf"}; !slices.Equal(ordered.names, want) {
+		t.Fatalf("compiled banks = %v, want sorted unique %v", ordered.names, want)
+	}
+	fs.Close() // no per-tick VFS reads
+	for _, bank := range []string{"", "FX", "land", "water", "LAVA"} {
+		holds, ok := art.EffectEntryHolds(bank, "PRIMARY")
+		if !ok || !slices.Equal(holds, []int32{1, 3, 1}) {
+			t.Fatalf("%q holds = %v, ok=%v", bank, holds, ok)
+		}
+		holds[0] = 900
+		again, _ := art.EffectEntryHolds(bank, "primary")
+		if again[0] != 1 {
+			t.Fatal("caller altered immutable content")
+		}
+		if other, ok := art.EffectEntryHolds(bank, "other"); !ok || !slices.Equal(other, []int32{2}) {
+			t.Fatal("unnamed bank entry omitted")
+		}
+		if _, ok := art.EffectEntryHolds(bank, "empty"); ok {
+			t.Fatal("empty first match replaced by duplicate")
+		}
+	}
+	for _, key := range [][2]string{{"unused", "primary"}, {"missing", "primary"}, {"fx", "absent"}, {"fx", ""}, {"fx", " primary "}} {
+		if holds, ok := art.EffectEntryHolds(key[0], key[1]); ok || holds != nil {
+			t.Fatalf("%v resolved to %v", key, holds)
+		}
+	}
+	for _, empty := range []*SimArt{nil, {}, CompileSimArt(nil, nil)} {
+		if _, ok := empty.EffectEntryHolds("", "primary"); ok {
+			t.Fatal("empty table invented timing")
+		}
+	}
+}
+
+type simArtReadOrder struct {
+	vfs.FSOps
+	names []string
+}
+
+func (fs *simArtReadOrder) ReadFileLimit(name string, limit int64) ([]byte, error) {
+	fs.names = append(fs.names, name)
+	return fs.FSOps.ReadFileLimit(name, limit)
 }

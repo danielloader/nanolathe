@@ -14,7 +14,7 @@ import (
 func nanoSegmentFixture(t *testing.T) *Session {
 	t.Helper()
 	s, _ := newStripTestSession(21, 21)
-	s.publication = newPublicationState(frame.NewEventBuffer(frame.Limits{}), 0)
+	s.publication = newPublicationState(frame.NewEventBuffer(frame.Limits{}), 0, nil)
 	return s
 }
 
@@ -204,7 +204,7 @@ func TestNanoSegmentGeometryFollowsPublishedBox(t *testing.T) {
 // spends.
 func TestNanoSegmentDrawsSurviveFrameWindowOverflow(t *testing.T) {
 	s, _ := newStripTestSession(22, 22)
-	s.publication = newPublicationState(frame.NewEventBuffer(frame.Limits{MaxEvents: 1}), 0)
+	s.publication = newPublicationState(frame.NewEventBuffer(frame.Limits{MaxEvents: 1}), 0, nil)
 	s.Build = &construction.Service{}
 	s.bindBuildPresentation()
 

@@ -14,7 +14,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
-	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/visibility"
@@ -1351,28 +1350,6 @@ func publishedCarriedPiece(piece int) int16 {
 		return -1
 	}
 	return int16(piece)
-}
-
-// SetEffectTimingResolver installs the authored-timing resolver the
-// presentation effect pool asks for when an admitted event names art but
-// carries no per-frame durations of its own [03 §1][06 R-WFX-01 §1].
-//
-// The durations are a GAF entry's own per-frame holds, which live in the
-// asset the shell loads, not in the simulation — so the session exposes the
-// seam and the composer that owns the VFS fills it. A session with no
-// resolver (every headless run) admits the same events and gives their
-// animation players the pool's own default step; nothing authoritative reads
-// either, because the effect pool is presentation state on the far side of
-// the publication boundary [I6].
-func (s *Session) SetEffectTimingResolver(resolver render.TimingResolver) {
-	if s == nil {
-		return
-	}
-	pub := s.ensurePublicationState()
-	if pub == nil || pub.effects == nil {
-		return
-	}
-	pub.effects.SetTimingResolver(resolver)
 }
 
 // publishHullGateInputs retains the exact definition bounds independently of

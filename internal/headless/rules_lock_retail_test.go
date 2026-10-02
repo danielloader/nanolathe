@@ -203,6 +203,33 @@ func TestStrictFingerprintIsLocked(t *testing.T) {
 	runFingerprintLock(t, gameplay.Strict31, lockAshapStrict6000, lockAshapStrict54000, lockAshapStrictEnd, lockBenchStrictInitial, lockBenchStrictWarm, lockBenchStrictFinal)
 }
 
+// The Strict pool fills after the short benchmark lock. Its occupancy gates
+// shatter draws [04 R-COB-04 §3], so this longer scene locks authored effect
+// timing even when no graphical host exists (DESIGN_MULTIPLAYER §16.1 M1-C9).
+// The constant is the pre-change window-like probe's step-4500 fingerprint.
+func TestStrictEffectPoolFingerprintIsLocked(t *testing.T) {
+	catalog, fs := retailcat.Shared(t)
+	composed, _, err := ComposeSimBenchBattle(SimBenchOptions{
+		Gameplay: gameplay.Strict31, Map: SimBenchDefaultMap, Seed: lockBenchSeed,
+		Difficulty: lockDifficulty, UnitLimit: SimBenchDefaultUnitLimit,
+	}, fs, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for step := 0; step < 4500; step++ {
+		simBenchStep(composed.Session)
+	}
+	got, err := composed.Session.PartialStateFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "partial-v1:8ea359e7670a471c"
+	if got != want {
+		t.Fatalf("Strict effect-pool scene at step 4500 = %s, want window-like reference %s", got, want)
+	}
+	t.Logf("Strict effect-pool scene at step 4500: %s", got)
+}
+
 // TestCommunityFingerprintIsLocked holds the approved mainline feature table.
 func TestCommunityFingerprintIsLocked(t *testing.T) {
 	runFingerprintLock(t, gameplay.Community39, lockAshapCommunity6000, lockAshapCommunity54000, lockAshapCommunityEnd, lockBenchCommunityInitial, lockBenchCommunityWarm, lockBenchCommunityFinal)

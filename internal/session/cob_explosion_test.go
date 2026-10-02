@@ -1,18 +1,23 @@
 package session
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
+	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/clock"
 	"github.com/nanolathe-gg/nanolathe/internal/cob"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/mission"
 	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
+	"github.com/nanolathe-gg/nanolathe/internal/world"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
@@ -23,6 +28,11 @@ const bitmapOnlyFlag = 0x20
 // the sink through a test-only VM hook [04 R-COB-04 §1][R-CB-01 §4].
 func bitmapExplosionFixture(t *testing.T, flags uint32, y numeric.Fixed) (*Session, *units.Unit) {
 	t.Helper()
+	return bitmapExplosionFixtureWithTiming(t, flags, y, false)
+}
+
+func bitmapExplosionFixtureWithTiming(t *testing.T, flags uint32, y numeric.Fixed, authoredTiming bool) (*Session, *units.Unit) {
+	t.Helper()
 	root := t.TempDir()
 	writeCompositionModel(t, root, "fixture", 1)
 	writeCompositionCOBProgram(t, root, "bitmapunit", []uint32{
@@ -31,6 +41,21 @@ func bitmapExplosionFixture(t *testing.T, flags uint32, y numeric.Fixed) (*Sessi
 		0x10071000, 1,
 		0x10065000,
 	}, []string{"Create"}, []uint32{0}, []string{"modelroot", "modelchild"})
+	if authoredTiming {
+		data, err := formats.EncodeGAF([]formats.GAFWriteEntry{{Name: "explosion", Loop: true, Frames: []formats.GAFWriteFrame{
+			{Width: 1, Height: 1, Duration: 2, Pixels: []byte{1}},
+			{Width: 1, Height: 1, Duration: 3, Pixels: []byte{1}},
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(root, "anims"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "anims/fx.gaf"), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	fs := vfs.New()
 	if err := fs.MountDirectory(root, 10); err != nil {
 		t.Fatal(err)
@@ -54,13 +79,22 @@ func bitmapExplosionFixture(t *testing.T, flags uint32, y numeric.Fixed) (*Sessi
 		rngSim:         rng.NewSimulation(71),
 		rngCrt:         rng.NewCRT(19),
 		rngInitialized: true,
-		publication:    newPublicationState(frame.NewEventBuffer(frame.Limits{}), 0),
+		publication:    newPublicationState(frame.NewEventBuffer(frame.Limits{}), 0, nil),
 		strips:         newStripTable(),
 	}
 	w := units.NewSliced(8, cat)
 	s.Units = w
 	w.SetCOBSource(fs, globalCobLoader)
-	w.SetCOBBinder(func(u *units.Unit) error { return s.bindUnitCOB(fs, u) })
+	if authoredTiming {
+		s.publication = nil // exercise production pool construction at composition
+		s.Wind = &world.Wind{}
+		s.Mission = &mission.Mission{}
+		if err := createAndBindServices(s); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		w.SetCOBBinder(func(u *units.Unit) error { return s.bindUnitCOB(fs, u) })
+	}
 	h, err := w.Create(def, 0, numeric.FixedFromInt(40), y, numeric.FixedFromInt(80))
 	if err != nil {
 		t.Fatalf("create bitmap unit: %v", err)
@@ -208,33 +242,15 @@ func TestWholeDebrisGroundImpactAdmitsBeforeDust(t *testing.T) {
 	})
 }
 
-// TestCOBBitmapExplosionHydratesAfterCreateTimingBinding exercises the
-// production sequence where Create admits bitmap art before the client binds
-// authored GAF timing. The existing record gains its named primary without a
-// second admission or a calculated-flash change [04 R-COB-04 §1][03 §1].
-func TestCOBBitmapExplosionHydratesAfterCreateTimingBinding(t *testing.T) {
-	s, _ := bitmapExplosionFixture(t, bitmapOnlyFlag|0x100, numeric.FixedFromInt(11))
-	before := s.publication.effects.Snapshot()
-	if len(before) != 1 || before[0].ActiveA || !before[0].ActiveB {
-		t.Fatalf("pre-binding bitmap view = %+v, want unresolved named art and live table 2", before)
-	}
-	id, secondarySeq := before[0].ID, before[0].SeqB
-	secondary := append([]int32(nil), before[0].DurationsB...)
-	resolved := 0
-	s.SetEffectTimingResolver(func(e render.Event) (render.FrameTiming, bool) {
-		resolved++
-		if e.AssetID != "fx" || e.Graphic != "explosion" {
-			return render.FrameTiming{}, false
-		}
-		return render.FrameTiming{Durations: []int32{2, 3}}, true
-	})
-	after := s.publication.effects.Snapshot()
-	if resolved != 1 || len(after) != 1 || after[0].ID != id {
-		t.Fatalf("timing binding changed bitmap admission: calls=%d views=%+v", resolved, after)
-	}
-	if !after[0].ActiveA || len(after[0].DurationsA) != 2 || !after[0].ActiveB ||
-		after[0].SeqB != secondarySeq || !slices.Equal(after[0].DurationsB, secondary) {
-		t.Fatalf("timing binding players = %+v, want active named art and unchanged calculated flash", after[0])
+// Authored timing must already be bound when the first Create script emits
+// its bitmap, before any window or art cache exists [04 R-COB-04 §1][03 §1].
+func TestCOBBitmapExplosionHasContentTimingDuringCreate(t *testing.T) {
+	s, _ := bitmapExplosionFixtureWithTiming(t, bitmapOnlyFlag|0x100, numeric.FixedFromInt(11), true)
+	views := s.publication.effects.Snapshot()
+	if len(views) != 1 || !views[0].ActiveA || !views[0].ActiveB ||
+		!slices.Equal(views[0].DurationsA, []int32{2, 3}) || views[0].LoopA ||
+		!slices.Equal(views[0].DurationsB, render.FlashFrameDurations(2)) {
+		t.Fatalf("Create bitmap = %+v, want both authored players immediately active", views)
 	}
 }
 
@@ -287,7 +303,7 @@ func TestCOBBitmapExplosionPoolAndSeaBoundary(t *testing.T) {
 		t.Cleanup(func() { fs.Close() })
 		def := &content.UnitDef{DefinitionHeader: content.DefinitionHeader{CanonicalKey: "bitmapunit"}, UnitName: "bitmapunit", ObjectName: "fixture", BMCode: 1, MaxDamage: 10, Limit: -1}
 		cat := &content.Catalog{Units: map[string]*content.UnitDef{def.CanonicalKey: def}}
-		s := &Session{Catalog: cat, World: minimalTerrain(), Clock: &clock.State{GlobalTick: 17}, rngSim: rng.NewSimulation(71), rngCrt: rng.NewCRT(19), rngInitialized: true, publication: newPublicationState(frame.NewEventBuffer(frame.Limits{}), 0), strips: newStripTable()}
+		s := &Session{Catalog: cat, World: minimalTerrain(), Clock: &clock.State{GlobalTick: 17}, rngSim: rng.NewSimulation(71), rngCrt: rng.NewCRT(19), rngInitialized: true, publication: newPublicationState(frame.NewEventBuffer(frame.Limits{}), 0, nil), strips: newStripTable()}
 		s.World.SeaLevel = 10
 		for i := 0; i < render.EffectCapacity; i++ {
 			if !s.publication.effects.Admit(0, frame.Event{Kind: frame.KindExplosion, Tick: 1}) {

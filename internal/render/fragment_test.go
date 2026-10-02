@@ -59,7 +59,7 @@ func TestShatterAdmissionAndCollision(t *testing.T) {
 	}
 
 	var pool FixedEffectPool
-	service := NewEffectServiceWithPool(FixedEffectCap, &pool)
+	service := NewEffectServiceWithPool(FixedEffectCap, &pool, nil)
 	for i := 0; i < FixedEffectCap-1; i++ {
 		if !pool.Append(persistentEffect(i)) {
 			t.Fatalf("filler %d admission failed", i)

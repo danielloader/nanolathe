@@ -281,9 +281,7 @@ func (c *Client) EffectBank(name string) *formats.GAF {
 		return nil
 	}
 	key := effectBankKey(name)
-	// The session's effect-timing resolver reaches this from the simulation
-	// goroutine while a recording pass may resolve art (§13.13). A miss loads
-	// under the lock, so each bank still costs one VFS attempt.
+	// Serialize presentation cache fills so each bank costs one VFS attempt.
 	if mu := c.artMu; mu != nil {
 		mu.Lock()
 		defer mu.Unlock()
@@ -305,37 +303,6 @@ func (c *Client) EffectBank(name string) *formats.GAF {
 	}
 	c.effectBanks[key] = bank
 	return bank
-}
-
-// EffectFrameTiming reports one effect entry's authored per-frame holds and
-// loop flag, for the presentation pool's animation player [06 R-WFX-01 §1].
-//
-// Every GAF entry in every retail file carries 1 in its loop word, so a
-// sequence loops by default; the weapon parser CLEARS that byte for explosion
-// art, which is what makes an impact play once and retire instead of flashing
-// forever. This resolver reports `loop = false` for that reason: it serves the
-// art holders, whose loop byte retail clears at bind time. The per-frame holds
-// are the entry's own — the stock effect entries hold 2 or 3 ticks a frame —
-// and a frame with hold h is shown for max(h, 1) advances.
-func (c *Client) EffectFrameTiming(bankName, entryName string) (render.FrameTiming, bool) {
-	entry, ok := c.effectEntry(bankName, entryName)
-	if !ok {
-		return render.FrameTiming{}, false
-	}
-	durations := make([]int32, 0, len(entry.Frames))
-	for i := range entry.Frames {
-		// The frame reference's second word is the per-frame display duration
-		// in whole simulation ticks [fmt gaf].
-		hold := int32(entry.Frames[i].Value)
-		if hold < 1 {
-			hold = 1 // "a frame with hold h is shown for max(h, 1) advances"
-		}
-		durations = append(durations, hold)
-	}
-	if len(durations) == 0 {
-		return render.FrameTiming{}, false
-	}
-	return render.FrameTiming{Durations: durations, Loop: false}, true
 }
 
 // effectEntry finds one entry by name in one bank, both resolved by authored
@@ -386,7 +353,7 @@ func (c *Client) effectDrawOptions() EffectDrawOptions {
 // fixed effect-slot table, which is bound from `fx`.
 //
 // The frame index is the pool's animation cursor, already advanced against the
-// authored holds this client supplied through EffectFrameTiming. It is clamped
+// authored holds compiled into content.SimArt. It is clamped
 // into the entry rather than rejected, because a cursor that has run past the
 // end belongs to a sequence the pool is about to retire.
 func (c *Client) resolveEffectFrame(view frame.EffectView, frameIndex int32) (*formats.GAFFrame, bool) {

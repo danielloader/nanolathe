@@ -71,7 +71,7 @@ func TestPublishedPieceLanesCarryTheScriptLink(t *testing.T) {
 	defer fs.Close()
 	def := &content.UnitDef{DefinitionHeader: content.DefinitionHeader{CanonicalKey: "pieceslot"}, UnitName: "pieceslot", ObjectName: "pieceslot", MaxDamage: 10, Limit: -1}
 	cat := &content.Catalog{Units: map[string]*content.UnitDef{def.CanonicalKey: def}}
-	s := &Session{rngSim: rng.NewSimulation(77), rngCrt: rng.NewCRT(9), rngInitialized: true, publication: newPublicationState(frame.NewEventBuffer(frame.Limits{}), 0)}
+	s := &Session{rngSim: rng.NewSimulation(77), rngCrt: rng.NewCRT(9), rngInitialized: true, publication: newPublicationState(frame.NewEventBuffer(frame.Limits{}), 0, nil)}
 	w := units.NewSliced(2, cat)
 	w.SetCOBSource(fs, globalCobLoader)
 	w.SetCOBBinder(func(u *units.Unit) error { return s.bindUnitCOB(fs, u) })

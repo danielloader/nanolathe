@@ -2,7 +2,7 @@ package content
 
 // Authored animation metadata the SIMULATION depends on.
 //
-// Two authoritative facts are properties of a GAF entry rather than of a TDF
+// These authoritative facts are properties of a GAF entry rather than of a TDF
 // record, so they cannot be answered from the compiled catalogs alone:
 //
 //   - The burning-feature smoke of [05 R-FEAT-01 §10] pass 3a scales its two
@@ -15,6 +15,8 @@ package content
 //     frame count [03 R-STRIP-01 §2][03 R-FX-01 §3][06 R-WFX-01 §5], and the
 //     two flame families wrap on the same quantity for `flamestream`
 //     [03 R-FX-02 §2].
+//   - A fixed effect's primary player lives for its authored frame holds;
+//     pool occupancy gates shatter draws [06 R-WFX-01 §1][04 R-COB-04 §3].
 //
 // These used to be read through the graphical client, which is the only place
 // in the build that held a GAF cache. A headless run installed no resolver, so
@@ -70,8 +72,8 @@ type simArtSequence struct {
 // The zero value and a nil pointer both answer "unknown" to every question,
 // which is the same answer an unresolvable entry gives.
 type SimArt struct {
-	// effects maps "bank|entry" (both lower-cased) to the entry's frame count.
-	effects map[string]int
+	// effects maps "bank|entry" (both lower-cased) to immutable per-frame holds.
+	effects map[string][]int32
 	// sequences maps "filename|sequence" (both lower-cased) to the compiled
 	// entry, or to nil for a compiled miss.
 	sequences map[string]*simArtSequence
@@ -80,8 +82,8 @@ type SimArt struct {
 // CompileSimArt builds the table from the battle's VFS and compiled catalog.
 //
 // It compiles exactly what the simulation asks for and nothing else: the
-// default effect bank's entry lengths, and the three EVENT sequences plus
-// their three shadow twins of every feature definition — burn, die and
+// default and weapon-named effect banks' frame holds, and the three EVENT
+// sequences plus their three shadow twins of every feature definition — burn, die and
 // reclamate. Shadow entries do not time a cursor, but attachment must record
 // whether the named shadow resolved so the runtime draw path can admit it.
 // A definition's rest sequences remain presentation-only and stay out of this
@@ -93,13 +95,34 @@ type SimArt struct {
 // a reason to refuse a battle.
 func CompileSimArt(fs vfs.FSOps, cat *Catalog) *SimArt {
 	art := &SimArt{
-		effects:   make(map[string]int),
+		effects:   make(map[string][]int32),
 		sequences: make(map[string]*simArtSequence),
 	}
 	if fs == nil {
 		return art
 	}
-	art.compileEffectBank(fs, DefaultEffectBank)
+	// Gather bank names first and load each once, in sorted order (I4).
+	banks := map[string]struct{}{DefaultEffectBank: {}}
+	if cat != nil {
+		for _, def := range cat.Weapons {
+			if def == nil {
+				continue
+			}
+			for _, name := range [...]string{def.ExplosionGaf, def.WaterExplosionGaf, def.LavaExplosionGaf} {
+				if bank := CanonicalKey(name); bank != "" {
+					banks[bank] = struct{}{}
+				}
+			}
+		}
+	}
+	bankNames := make([]string, 0, len(banks))
+	for bank := range banks {
+		bankNames = append(bankNames, bank)
+	}
+	sort.Strings(bankNames)
+	for _, bank := range bankNames {
+		art.compileEffectBank(fs, bank)
+	}
 	if cat == nil || len(cat.Features) == 0 {
 		return art
 	}
@@ -110,9 +133,9 @@ func CompileSimArt(fs vfs.FSOps, cat *Catalog) *SimArt {
 	// Sorted, so the order files are opened in — and therefore anything that
 	// could observe that order — is the same in every run (I4).
 	sort.Strings(keys)
-	// banks memoises one validated metadata index per feature filename for the
-	// compile, including the failures: a nil value means "tried, absent".
-	banks := make(map[string]*formats.GAFMetadata)
+	// featureBanks memoises one validated metadata index per feature filename,
+	// including the failures: a nil value means "tried, absent".
+	featureBanks := make(map[string]*formats.GAFMetadata)
 	for _, key := range keys {
 		def := cat.Features[key]
 		if def == nil || trimTDFSemantic(def.Filename) == "" {
@@ -125,13 +148,13 @@ func CompileSimArt(fs vfs.FSOps, cat *Catalog) *SimArt {
 			if trimTDFSemantic(seq) == "" {
 				continue
 			}
-			art.compileFeatureSequence(fs, banks, def.Filename, seq)
+			art.compileFeatureSequence(fs, featureBanks, def.Filename, seq)
 		}
 	}
 	return art
 }
 
-// compileEffectBank records every entry length in one animation bank. The
+// compileEffectBank records every entry's frame holds in one animation bank. The
 // bank's logical path is `anims/<name>.gaf`, the path retail constructs from
 // the authored bank name [06 R-WFX-01 §1]; the name is ASCII-folded per the VFS
 // canonical rules (I1).
@@ -146,10 +169,16 @@ func (a *SimArt) compileEffectBank(fs vfs.FSOps, name string) {
 	}
 	for i := range gaf.Entries {
 		entry := &gaf.Entries[i]
-		if len(entry.Frames) == 0 {
+		key := simArtEffectKey(bank, entry.Name)
+		// Entry lookup takes the first case-insensitive match [06 R-WFX-01 §1].
+		if _, exists := a.effects[key]; exists {
 			continue
 		}
-		a.effects[simArtEffectKey(bank, entry.Name)] = len(entry.Frames)
+		holds := make([]int32, len(entry.Frames))
+		for j, ref := range entry.Frames {
+			holds[j] = max(int32(ref.Value), 1) // [06 R-WFX-01 §1]
+		}
+		a.effects[key] = holds
 	}
 }
 
@@ -215,11 +244,25 @@ func (a *SimArt) EffectEntryFrameCount(bank, entry string) (int, bool) {
 	if entry == "" {
 		return 0, false
 	}
-	n, ok := a.effects[simArtEffectKey(bank, entry)]
-	if !ok || n <= 0 {
+	holds, ok := a.effects[simArtEffectKey(bank, entry)]
+	if !ok || len(holds) == 0 {
 		return 0, false
 	}
-	return n, true
+	return len(holds), true
+}
+
+// EffectEntryHolds reports each frame's max(authored hold, 1) advances
+// [06 R-WFX-01 §1]. An empty bank selects fx; missing or empty entries report
+// unknown. The caller owns the returned copy, keeping compiled content immutable.
+func (a *SimArt) EffectEntryHolds(bank, entry string) ([]int32, bool) {
+	if a == nil || entry == "" {
+		return nil, false
+	}
+	holds, ok := a.effects[simArtEffectKey(bank, entry)]
+	if !ok || len(holds) == 0 {
+		return nil, false
+	}
+	return append([]int32(nil), holds...), true
 }
 
 // FeatureSequence reports the geometry of the frame a cursor is on after

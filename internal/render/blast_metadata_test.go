@@ -10,7 +10,7 @@ import (
 // Compaction preserves each survivor's metadata and relative admission order.
 func TestBlastProfileSurvivesPoolCompaction(t *testing.T) {
 	p := &FixedEffectPool{}
-	s := NewEffectServiceWithPool(EffectCapacity, p)
+	s := NewEffectServiceWithPool(EffectCapacity, p, nil)
 	events := []Event{
 		{ID: 1, Sequence: 1, Kind: KindExplosion, Graphic: "shared", Source: 4, DurationsA: []int32{1}, HasBlastProfile: true, BlastAreaOfEffect: 511, BlastDamage: 1001},
 		{ID: 2, Sequence: 2, Kind: KindExplosion, Graphic: "shared", Source: 4, DurationsA: []int32{10}, HasBlastProfile: true, BlastAreaOfEffect: 129, BlastDamage: 0},

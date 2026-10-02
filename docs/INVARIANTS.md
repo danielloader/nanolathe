@@ -298,11 +298,11 @@ battle's one human seat is the perspective every such read resolves to. And
 nothing a host supplies after composition — a renderer, an art cache, an
 audio service, a preference — may change a lifetime, a pool's occupancy or a
 draw. The fixed effect pool is authoritative state although it is kept
-beside the publication boundary. Two parts of the engine do not yet meet
-this paragraph and are that design's work: the effect timing resolver only
-the windowed host installs (its milestone M1, §5.3 L9), and the reads of the
-local seat and viewing slot listed in its §6.3 (its milestone M5). A diff
-must not add a third.
+beside the publication boundary. Its authored holds come from the battle's
+immutable `content.SimArt`, bound before the first unit script; no host timing
+resolver exists (DESIGN_MULTIPLAYER §5.3 L9, M1). The reads of the local seat
+and viewing slot listed in that design's §6.3 do not yet meet this paragraph
+and remain its milestone M5 work. A diff must not add another exception.
 
 **Why.** Retail's draw path samples the accumulators exactly as committed at
 the current tick; no interpolation between updates exists `[03 §2.4]`.

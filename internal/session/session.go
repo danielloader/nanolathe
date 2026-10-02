@@ -99,14 +99,14 @@ type Phase7Service interface {
 	StepPhase7()
 }
 
-func newPublicationState(events *frame.EventBuffer, explosionCapacity int) *publicationState {
+func newPublicationState(events *frame.EventBuffer, explosionCapacity int, art *content.SimArt) *publicationState {
 	if events == nil {
 		events = frame.NewEventBuffer(frame.Limits{})
 	}
 	pool := render.NewFixedEffectPool(explosionCapacity)
 	return &publicationState{
 		events:  events,
-		effects: render.NewEffectServiceWithPool(pool.Cap(), pool),
+		effects: render.NewEffectServiceWithPool(pool.Cap(), pool, art),
 	}
 }
 
@@ -119,7 +119,7 @@ func (s *Session) ensurePublicationState() *publicationState {
 		return nil
 	}
 	if s.publication == nil {
-		s.publication = newPublicationState(nil, s.EntryCommunity.ExplosionCapacity)
+		s.publication = newPublicationState(nil, s.EntryCommunity.ExplosionCapacity, s.simArt)
 	}
 	return s.publication
 }

@@ -544,8 +544,8 @@ or encoding requires a new version.
 Community 3.9 and Modern separately against constants in
 `rules_lock_retail_test.go`. Each normal retail check runs the Ashap scene at
 6,000 ticks and the benchmark composition at its initial state, 600 and 1,500
-steps. M1 U3 adds a Strict pool-fill lock at step 4,500 to the short tier;
-the amd64 selector below includes it once added. The full tier additionally
+steps. The short tier also includes the Strict pool-fill lock at step 4,500;
+the amd64 selector below includes it. The full tier additionally
 runs the Ashap scene to its 54,000-tick bound or
 locked terminal tick. A separate assertion checks that the combat scenes
 distinguish all three rule sets. Limits are explicit so host profile preferences

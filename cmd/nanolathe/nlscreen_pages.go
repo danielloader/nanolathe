@@ -27,6 +27,7 @@ type nlDraft struct {
 	glowStrength int
 	mutators     content.Mutators
 	unitLimit    int
+	resolution   retailDisplayMode
 	fullscreen   bool
 	switchAlt    bool
 	controls     int // index into nlControlsPresets; 0 keeps the current rows
@@ -39,13 +40,14 @@ type nlDraft struct {
 type nlKind int
 
 const (
-	nlMeter   nlKind = iota // a row of lamps; the first is Off
-	nlSwitch                // an Off/On throw switch
-	nlGroup                 // several related settings on one card
-	nlStepper               // ◄ value ► with a notch per value
-	nlLayers                // the three rule layers
-	nlHalves                // big choices side by side
-	nlContent               // the mod chooser
+	nlMeter      nlKind = iota // a row of lamps; the first is Off
+	nlSwitch                   // an Off/On throw switch
+	nlGroup                    // several related settings on one card
+	nlStepper                  // ◄ value ► with a notch per value
+	nlLayers                   // the three rule layers
+	nlHalves                   // big choices side by side
+	nlContent                  // the mod chooser
+	nlResolution               // monitor presets and custom dimensions
 )
 
 type nlCard struct {
@@ -353,6 +355,7 @@ var nlFPS = []int{30, 60, 120, 144, 0}
 
 func (s *nlScreen) graphicsCards() []nlCard {
 	return []nlCard{
+		s.resolutionCard(),
 		{
 			key: "renderer", label: "Renderer", pics: []string{"armrad", "armarad"}, kind: nlHalves,
 			steps: []string{"Classic", "Enhanced"}, subs: []string{"8-bit · 30 fps · pixel-exact", "True colour · smooth · effects"},

@@ -58,11 +58,11 @@ const (
 // read the pair, comparing it to the presentation window's
 // current size and resizing when they differ [07 R-FE-01 §6]
 // [07 R-FE-01 §11]. The missing-value defaults are 640 and 480
-// [02 R-KEYS-01 §5]. Nanolathe also uses this pair for the stable host window
-// size (DESIGN_PRESENTATION_CLIENT §2.1).
+// [02 R-KEYS-01 §5]. Nanolathe defaults to 800x600 and also uses this pair
+// for the stable host window size (DESIGN_PRESENTATION_CLIENT §2.1).
 const (
-	DefaultDisplaymodeWidth  = 640
-	DefaultDisplaymodeHeight = 480
+	DefaultDisplaymodeWidth  = 800
+	DefaultDisplaymodeHeight = 600
 	// The logical front-end canvas always runs at 640x480 whatever the pair holds
 	// [07 R-FE-02 §2]; modes below that are dropped from the slider's table
 	// [07 R-FE-01 §6], so the pair can never name a smaller surface.

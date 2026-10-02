@@ -198,15 +198,15 @@ func TestRetailSliderArithmetic(t *testing.T) {
 // those modes — so the loader repairs it rather than resizing to it.
 func TestSettingsDisplayBlockDefaultsAndRepair(t *testing.T) {
 	d := settings.DefaultDisplay()
-	if d.Width != 640 || d.Height != 480 || d.Gamma != 12 {
-		t.Fatalf("display defaults are %+v; want 640x480 gamma 12 [02 R-KEYS-01 §5]", d)
+	if d.Width != 800 || d.Height != 600 || d.Gamma != 12 {
+		t.Fatalf("display defaults are %+v; want Nanolathe 800x600 default and retail gamma 12", d)
 	}
 	if d.AntiAlias == 0 || d.Shadows == 0 || d.FeatureShadows == 0 || d.VehicleShadows == 0 || d.Shading == 0 {
 		t.Fatalf("display defaults are %+v; want every option bit set [02 R-KEYS-01 §5]", d)
 	}
 	broken := settings.Display{Width: 320, Height: 200, Gamma: 99}
 	broken.Normalize()
-	if broken.Width != 640 || broken.Height != 480 || broken.Gamma != 99 {
+	if broken.Width != 800 || broken.Height != 600 || broken.Gamma != 99 {
 		t.Fatalf("repaired block is %+v; want default size and preserved gamma", broken)
 	}
 	// A stored zero is "off" for a bit and must survive; only a negative value
@@ -291,6 +291,7 @@ func writeShellShot(t *testing.T, cl *client.Client, path string) {
 // are also written there as PNGs.
 func TestRetailOptionsScreenVisualsPageDrivesDisplayMode(t *testing.T) {
 	shell, _, cl := retailAssetShell(t)
+	shell.display.Width, shell.display.Height = 640, 480
 	shotDir := os.Getenv("NANOLATHE_OPTIONS_SHOT")
 
 	window := shell.windowOptions()

@@ -290,6 +290,19 @@ the options root's OK commits it and resizes the window once, after closing the
 widgets. Cancel restores the entry selection without resizing. This prevents
 resizing during a drag from moving the pointer relative to its captured widget.
 
+Nanolathe defaults the game and host window size to 800×600 (user-authorized
+2026-10-02). Existing valid saved dimensions, including 640×480, remain intact;
+retail's established missing-value default remains 640×480 in the research.
+The logical front-end canvas remains 640×480. Graphics in the Nanolathe screen
+exposes the same monitor-derived presets and a Custom size dialog. New custom
+entries accept integer widths 640–8192 and heights 480–8192; the upper bound
+limits accidental surface allocations and does not normalize existing files.
+Opening the screen refreshes monitor metrics. The draft retains the exact
+selected pair, even when absent from the presets. Use size edits only the draft;
+Cancel discards text edits, Back discards the draft, and Apply commits the host
+window and saves the dimensions for battle entry. Resolution remains a global
+host preference outside mod recommendations and preset scopes.
+
 The resolution slider retains the original modes and their desktop gates,
 and adds 1280×720, 1600×900 and 1920×1080 as Nanolathe presentation choices.
 The three 16:9 render sizes are always available, independent of monitor aspect

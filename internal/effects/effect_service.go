@@ -1,4 +1,4 @@
-package render
+package effects
 
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/content"
@@ -6,7 +6,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 )
 
-// Event and Kind are local aliases for the ordered cue input; routing and admission remain outside the renderer.
+// Event and Kind are local aliases for the ordered cue input; routing and admission belong to this authoritative service.
 type Event = frame.Event
 type Kind = frame.Kind
 

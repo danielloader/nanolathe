@@ -515,7 +515,12 @@ it has had applied lies inside it. Nothing else may matter:
   visibility and the computer players (L5). It bounds L1; it does not
   dismiss it.
 
-### 5.3 What does not hold yet
+### 5.3 Audit findings and their resolution
+
+L1 and the timing/package-ownership portion of L9 describe the pre-M1
+audit. M1 resolves those parts through the kernel, content timing and
+`internal/effects`; the perspective and event-window work in L9 remains for
+M5. The other findings retain their milestone gates below.
 
 **L1 — Floating-point library results differ by architecture.** The
 authoritative packages call seven standard-library functions: `math.Hypot`
@@ -1818,12 +1823,11 @@ Guards in `internal/architecture` grow with it:
   the desktop.
 - **Authoritative list.** Any new authoritative package joins
   `authoritativeDirs` and inherits the determinism guards.
-- **Effect pool.** The fixed pool and its fragment and debris arithmetic are
-  simulation state (L9) and live in `internal/render`, which the guards
-  exempt as presentation by package. The code moves into an authoritative
-  package or its files join the guarded set, so the map-order, float, fusion
-  and goroutine guards read it, and a guard keeps any host from installing
-  something the pool reads after composition.
+- **Effect pool.** The fixed pool, admission service, fragment and whole-piece
+  debris arithmetic live in `internal/effects` after M1. The package joins
+  `authoritativeDirs`, so all determinism guards cover it. Authoritative
+  packages cannot import `internal/render`; presentation-only trails and
+  drawing stay there. Effect timing is immutable `SimArt` bound at composition.
 - **Conversions and library calls.** The two I2 source guards of §5.4.
 
 DESIGN_MODS_MUTATORS decision D5 — the client uses the network for the mod
@@ -1889,9 +1893,17 @@ every single-player battle bit-identical except where it says so.
 
 ### 16.1 M1 work units
 
-M1 is five units. Each is one commit, owns its files exclusively, and lands
+M1 is five units. Each owns its files exclusively and lands
 on its own through the gates of ARCHITECTURE §6. U1, U3 and U5 are
 independent; U2 follows U1; U4 follows U2 and U3.
+
+**Implementation status.** All five units are implemented. Local verification
+covers native Darwin/arm64 and executed Darwin/amd64 builds under Rosetta:
+all sixteen partial fingerprint locks agree, including Strict at tick 4,500,
+and both renderer benchmarks retain identical captures and scene census.
+The native Linux/amd64 and Windows/amd64 vector jobs are configured in CI
+but have not run; their platform gate remains pending. This is not complete
+cross-platform world equivalence, which still awaits M3.
 
 | Unit | Delivers | Files it owns |
 |---|---|---|

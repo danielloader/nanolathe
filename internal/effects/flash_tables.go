@@ -1,4 +1,4 @@
-package render
+package effects
 
 // The calculated-explosion table geometry of [06 R-WFX-01 §2].
 //

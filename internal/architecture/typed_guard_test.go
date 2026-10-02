@@ -624,6 +624,11 @@ var float64FieldAllowances = map[string]string{
 // names the precise retail operation that needs binary64; all other float64
 // occurrences still use the shrink-only per-file baseline.
 var float64ScopeAllowances = map[string]float64Allowance{
+	"internal/effects/fragment.go func buildFragmentGeometry": {3, "I2 stored binary32 normal scaled for signed-low-word extrusion and velocity conversion [04 R-COB-04 §3]"},
+	"internal/effects/fragment.go func fragmentNormal":        {42, "I2 shatter normal differences, exact binary32-widened products, square root and division; named components narrow to binary32 [04 R-COB-04 §3]"},
+	"internal/effects/fragment.go const fragmentVertexScale":  {1, "I2 authored binary32 reciprocal-65535 coordinate conversion [04 R-COB-04 §3]"},
+	"internal/effects/fragment.go func fragmentVertexFloat":   {2, "I2 retained vertex coordinate multiplied by the stored binary32 reciprocal, then narrowed to binary32 [04 R-COB-04 §3]"},
+
 	"internal/construction/community_kickout.go const kickoutPi,kickoutQuarterPi":     {2, "I2 sourced Community kickout angle constants [CP-CON-1]"},
 	"internal/construction/community_kickout.go func CommunityRules.YieldObstruction": {2, "I2 sourced Community kickout random bearing [CP-CON-1]"},
 	"internal/construction/community_kickout.go func *Service.shouldKickout":          {4, "I2 sourced Community kickout invested-energy test [CP-CON-1]"},

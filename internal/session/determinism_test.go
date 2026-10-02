@@ -175,6 +175,7 @@ func TestRS06_GlobalInventory(t *testing.T) {
 func TestRS06_FloatAudit(t *testing.T) {
 	root := findRepoRoot(t)
 	allowlist := map[string]bool{
+		"internal/effects/fragment.go":                     true, // shatter normal square root at working precision before named binary32 component stores [I2][04 R-COB-04 §3]
 		"internal/drawlist/lens.go":                        true, // startup-only presentation lens map, narrowed to integer offsets [I2][03 R-FX-01 §4]
 		"internal/combat/aim.go":                           true, // ballistic discriminant [I2]
 		"internal/combat/motion.go":                        true, // projectile motion wide calc [I2][06 §6.5] transient

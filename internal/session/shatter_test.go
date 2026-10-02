@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/cob"
+	"github.com/nanolathe-gg/nanolathe/internal/effects"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/model"
-	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
 
@@ -29,8 +29,8 @@ func TestShatterSamplesSimulationPoseAndPublishesDetachedGeometry(t *testing.T) 
 		{VertexIndices: []uint16{0, 1, 2, 3}},
 	}
 	binding.VM.Pieces[1].Trans = [3]numeric.Fixed{7 << 16, 3 << 16, 2 << 16}
-	s.SetFragmentMaterialResolver(func(def uint16, piece, primitive int, colour uint8) render.FrozenFragmentMaterial {
-		return render.FrozenFragmentMaterial{UnitDefID: def, PieceIndex: piece, PrimitiveIndex: primitive, FrameIndex: 2, Valid: true}
+	s.SetFragmentMaterialResolver(func(def uint16, piece, primitive int, colour uint8) effects.FrozenFragmentMaterial {
+		return effects.FrozenFragmentMaterial{UnitDefID: def, PieceIndex: piece, PrimitiveIndex: primitive, FrameIndex: 2, Valid: true}
 	})
 	sink := &cobExplosionSink{presentation: &cobPresentationSink{session: s, publication: s.publication, source: u.Handle}}
 	request := cob.ShatterExplosion{PhysicalExplosion: cob.PhysicalExplosion{Source: cob.ExplosionSource{Identity: cob.ExplosionPieceIdentity{COBPiece: 1}}}}

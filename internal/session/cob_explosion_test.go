@@ -11,9 +11,9 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/cob"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
+	"github.com/nanolathe-gg/nanolathe/internal/effects"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/mission"
-	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
@@ -138,7 +138,7 @@ func TestCOBBitmapExplosionBindsBeforeCreate(t *testing.T) {
 			view.X != u.X.Add(origin[0]) || view.Y != u.Y.Add(origin[1]) || view.Z != u.Z.Add(origin[2]) {
 			t.Fatalf("bitmap record %d = %+v, want %s at child world point", i, view, wantGraphic[i])
 		}
-		if !view.HasCalculatedFlash || view.CalculatedTable != 2 || !view.ActiveB || len(view.DurationsB) != len(render.FlashFrameDurations(2)) {
+		if !view.HasCalculatedFlash || view.CalculatedTable != 2 || !view.ActiveB || len(view.DurationsB) != len(effects.FlashFrameDurations(2)) {
 			t.Fatalf("bitmap record %d calculated player = %+v, want active table 2", i, view)
 		}
 	}
@@ -205,7 +205,7 @@ func TestCOBWholePieceExplosionPublishesDetachedSlot(t *testing.T) {
 func TestWholeDebrisGroundImpactAdmitsBeforeDust(t *testing.T) {
 	admitStoppedPiece := func(t *testing.T, s *Session) {
 		t.Helper()
-		if !s.debris.Admit(render.DebrisRequest{
+		if !s.debris.Admit(effects.DebrisRequest{
 			Points:       make([][3]numeric.Fixed, 3),
 			Position:     [3]numeric.Fixed{0, numeric.FixedFromInt(11), 0},
 			Velocity:     [3]numeric.Fixed{0, numeric.FixedFromInt(-2), 0},
@@ -229,7 +229,7 @@ func TestWholeDebrisGroundImpactAdmitsBeforeDust(t *testing.T) {
 	})
 	t.Run("refused bitmap suppresses dust", func(t *testing.T) {
 		s, _ := bitmapExplosionFixture(t, 0, numeric.FixedFromInt(11))
-		for i := 0; i < render.EffectCapacity; i++ {
+		for i := 0; i < effects.EffectCapacity; i++ {
 			if !s.publication.effects.Admit(0, frame.Event{Kind: frame.KindExplosion, Tick: 1}) {
 				t.Fatalf("prefill admission %d failed", i)
 			}
@@ -249,7 +249,7 @@ func TestCOBBitmapExplosionHasContentTimingDuringCreate(t *testing.T) {
 	views := s.publication.effects.Snapshot()
 	if len(views) != 1 || !views[0].ActiveA || !views[0].ActiveB ||
 		!slices.Equal(views[0].DurationsA, []int32{2, 3}) || views[0].LoopA ||
-		!slices.Equal(views[0].DurationsB, render.FlashFrameDurations(2)) {
+		!slices.Equal(views[0].DurationsB, effects.FlashFrameDurations(2)) {
 		t.Fatalf("Create bitmap = %+v, want both authored players immediately active", views)
 	}
 }
@@ -305,7 +305,7 @@ func TestCOBBitmapExplosionPoolAndSeaBoundary(t *testing.T) {
 		cat := &content.Catalog{Units: map[string]*content.UnitDef{def.CanonicalKey: def}}
 		s := &Session{Catalog: cat, World: minimalTerrain(), Clock: &clock.State{GlobalTick: 17}, rngSim: rng.NewSimulation(71), rngCrt: rng.NewCRT(19), rngInitialized: true, publication: newPublicationState(frame.NewEventBuffer(frame.Limits{}), 0, nil), strips: newStripTable()}
 		s.World.SeaLevel = 10
-		for i := 0; i < render.EffectCapacity; i++ {
+		for i := 0; i < effects.EffectCapacity; i++ {
 			if !s.publication.effects.Admit(0, frame.Event{Kind: frame.KindExplosion, Tick: 1}) {
 				t.Fatalf("prefill admission %d failed", i)
 			}
@@ -325,8 +325,8 @@ func TestCOBBitmapExplosionPoolAndSeaBoundary(t *testing.T) {
 		if len(u.RenderPieceFlags) < 2 || u.RenderPieceFlags[1]&1 == 0 {
 			t.Fatalf("full-pool bitmap-only explode hid source piece: flags=%#v", u.RenderPieceFlags)
 		}
-		if got := len(s.publication.effects.Snapshot()); got != render.EffectCapacity {
-			t.Fatalf("full-pool bitmap effect count = %d, want %d", got, render.EffectCapacity)
+		if got := len(s.publication.effects.Snapshot()); got != effects.EffectCapacity {
+			t.Fatalf("full-pool bitmap effect count = %d, want %d", got, effects.EffectCapacity)
 		}
 		if got := len(s.strips.strips[9]); got != 0 {
 			t.Fatalf("refused bitmap requests built %d land-dust emitters", got)

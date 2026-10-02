@@ -5,9 +5,9 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
+	"github.com/nanolathe-gg/nanolathe/internal/effects"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
-	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/testsupport"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
@@ -291,8 +291,8 @@ func TestFinishedEffectPlayerStopsDrawing(t *testing.T) {
 	}
 	// Unequal timing: two ticks of art (two frames held one tick each) against
 	// six ticks of flash (three frames held two ticks each).
-	admit := func(durationsA, durationsB []int32) *render.FixedEffectPool {
-		p := &render.FixedEffectPool{}
+	admit := func(durationsA, durationsB []int32) *effects.FixedEffectPool {
+		p := &effects.FixedEffectPool{}
 		if !p.AppendView(frame.EffectView{
 			ID: 1, Kind: frame.KindExplosion.String(), Strip: -1,
 			Graphic: "Explosion", AssetID: "fx",
@@ -358,7 +358,7 @@ func TestFinishedEffectPlayerStopsDrawing(t *testing.T) {
 	// name nor the record's survival stands in for one [I9]. The production
 	// impact is NOT this case — its art is resolved as the primary player
 	// beside the flash's secondary timing [06 R-WFX-01 §2], which
-	// render.TestEffectServiceResolvesPrimaryTimingBesideACalculatedFlash
+	// effects.TestEffectServiceResolvesPrimaryTimingBesideACalculatedFlash
 	// covers.
 	r := admit(nil, []int32{2, 2, 2})
 	r.Update(1)

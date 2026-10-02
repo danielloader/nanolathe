@@ -2,8 +2,8 @@ package session
 
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/cob"
+	"github.com/nanolathe-gg/nanolathe/internal/effects"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
-	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
 
@@ -56,7 +56,7 @@ func (s *cobExplosionSink) AdmitWholePiece(request cob.WholePieceExplosion) bool
 		defName = u.Def.CanonicalKey
 	}
 	presentation.session.ensureDebris()
-	return presentation.session.debris.Admit(render.DebrisRequest{
+	return presentation.session.debris.Admit(effects.DebrisRequest{
 		Source:       presentation.source,
 		DefID:        presentation.session.Units.DefIDForHandle(presentation.source),
 		DefName:      defName,
@@ -123,7 +123,7 @@ func (s *cobExplosionSink) AdmitBitmap(request cob.BitmapExplosion) bool {
 		Z:                  pos[2],
 		HasCalculatedFlash: true,
 		CalculatedTable:    2,
-		DurationsB:         render.FlashFrameDurations(2),
+		DurationsB:         effects.FlashFrameDurations(2),
 	}
 	if !s.presentation.publication.effects.Admit(tick, event) {
 		return false

@@ -1,4 +1,4 @@
-package render
+package effects
 
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"

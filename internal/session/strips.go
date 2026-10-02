@@ -3,8 +3,8 @@ package session
 import (
 	"math"
 
+	"github.com/nanolathe-gg/nanolathe/internal/effects"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
-	"github.com/nanolathe-gg/nanolathe/internal/render"
 
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
@@ -609,7 +609,7 @@ func (o *stripObject) advanceParticles(tick uint32, crt *rng.CRT, wind *world.Wi
 				p.frameDelay--
 				if p.frameDelay == 0 && o.frameDelayParam > 0 {
 					p.frame++
-					p.frameDelay = render.SmokeFrameHold(o.frameDelayParam, crt.Rand())
+					p.frameDelay = effects.SmokeFrameHold(o.frameDelayParam, crt.Rand())
 				}
 			}
 			// "it is removed when its frame index REACHES its last frame"
@@ -860,7 +860,7 @@ func (o *stripObject) spawnOnce(tick uint32, crt *rng.CRT) {
 		// the puff's last frame is finished later from this same draw, never
 		// from a second one.
 		p.lastFrameDraw, p.lastFrameDrawn = crt.Rand(), true
-		p.lastFrame = render.SmokeLastFrame(o.frameCountBase, p.lastFrameDraw)
+		p.lastFrame = effects.SmokeLastFrame(o.frameCountBase, p.lastFrameDraw)
 		// No tick deadline: a puff's only exit is its frame cursor reaching its
 		// own drawn last frame [06 R-WFX-01 §5][03 R-FX-02 §6]. The container's
 		// lifetime — the producer's literal — lives in windowEnd and bounds the
@@ -949,9 +949,9 @@ func (o *stripObject) spawnOnce(tick uint32, crt *rng.CRT) {
 			// 9362/65536 at 7, not 1/6 and 1/7 [03 R-FX-01 §3]. Corrected
 			// 2026-09-02; this used the exact quotient and overshot the target
 			// by a fraction of a unit per tick.
-			p.vx = render.FlameTrailStep(o.dst[0].Sub(o.src[0]), o.particleLife)
-			p.vy = render.FlameTrailStep(o.dst[1].Sub(o.src[1]), o.particleLife)
-			p.vz = render.FlameTrailStep(o.dst[2].Sub(o.src[2]), o.particleLife)
+			p.vx = effects.FlameTrailStep(o.dst[0].Sub(o.src[0]), o.particleLife)
+			p.vy = effects.FlameTrailStep(o.dst[1].Sub(o.src[1]), o.particleLife)
+			p.vz = effects.FlameTrailStep(o.dst[2].Sub(o.src[2]), o.particleLife)
 		}
 		o.particles = append(o.particles, p)
 	}
@@ -1662,7 +1662,7 @@ func (s *Session) resolveSmokeFrameCounts() {
 				if p.lastFrame != 0 || !p.lastFrameDrawn {
 					continue
 				}
-				p.lastFrame = render.SmokeLastFrame(o.frameCountBase, p.lastFrameDraw)
+				p.lastFrame = effects.SmokeLastFrame(o.frameCountBase, p.lastFrameDraw)
 			}
 		}
 	}

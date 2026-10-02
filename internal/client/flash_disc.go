@@ -4,7 +4,7 @@ import (
 	"math"
 
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
-	"github.com/nanolathe-gg/nanolathe/internal/render"
+	"github.com/nanolathe-gg/nanolathe/internal/effects"
 )
 
 // The calculated (procedural) explosion frames of [06 R-WFX-01 §2].
@@ -27,7 +27,7 @@ import (
 // draws it: the census is what makes "nothing passes table 1" a finding rather
 // than an omission, and building it costs only memory.
 const (
-	flashTableCount   = render.FlashTableCount
+	flashTableCount   = effects.FlashTableCount
 	flashTransparent  = 0xFF
 	flashRingIndex    = 0x6E
 	flashRampTop      = 0x6F
@@ -108,7 +108,7 @@ func buildFlashDisc(n int, crt *flashRand) flashDisc {
 
 // buildFlashTable generates one whole table in frame order.
 func buildFlashTable(table int, crt *flashRand) []flashDisc {
-	sides := render.FlashTableSides(table)
+	sides := effects.FlashTableSides(table)
 	out := make([]flashDisc, 0, len(sides))
 	for _, n := range sides {
 		out = append(out, buildFlashDisc(n, crt))

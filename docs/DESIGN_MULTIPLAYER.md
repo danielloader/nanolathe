@@ -1970,6 +1970,14 @@ func (a *SimArt) EffectEntryHolds(bank, entry string) ([]int32, bool)
   all thirteen sites costs about eight percent in the Modern 750-unit fight
   (1.82 ms to 1.98 ms a tick) and changes no fingerprint there, so the five
   sites that truncate the result call `TruncatedDistance`.
+  Verified on 2026-10-02 with Go 1.27.1, Darwin/arm64 and two runtime
+  workers: three alternating matched pairs of the Modern 750-unit scene
+  (1,200 warm-up and 3,000 measured ticks; profiling and phase/thread timing
+  disabled) measured median process CPU of 2.051 → 2.095 ms/tick, +2.15%.
+  Each pair was below 3%; all scene metadata, fingerprints, RNG counts and
+  census samples matched. The baseline was `6258e24b`, the implementation
+  candidate `1749396c`; this is local cost evidence, not a universal timing
+  guarantee.
 - **M1-C7 Holds.** `SimArt` holds every entry of the default effect bank and
   of every bank a weapon definition names, compiled in sorted order from the
   battle's own files. A missing bank or entry reports unknown.

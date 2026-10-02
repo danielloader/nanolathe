@@ -6,6 +6,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/mission"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
@@ -13,8 +14,8 @@ import (
 )
 
 // scorePanelStage renders only the score panel so the composed framebuffer is
-// exactly what [07 R-HUD-04 §1] paints. `--shot` cannot hold Space, so the
-// visual evidence for this panel is these pixel assertions rather than a PNG.
+// exactly what [07 R-HUD-04 §1] paints. The optional retail capture test
+// uses this stage to inspect the panel with installed fonts and logos.
 type scorePanelStage struct {
 	hud    *retailBattleHUD
 	battle *battleSession
@@ -83,7 +84,7 @@ func scorePanelFixtureWith(t *testing.T, campaign bool, players [frame.PlayerRow
 	if err := buf.Publish(1); err != nil {
 		t.Fatal(err)
 	}
-	sess := &session.Session{}
+	sess := &session.Session{Gameplay: gameplay.Strict31}
 	if campaign {
 		sess.Mission = &mission.Mission{Type: mission.TypeCampaign}
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 )
@@ -43,26 +44,12 @@ func (h *retailBattleHUD) drawScorePanel(c *client.Client, b *battleSession, cur
 	if !visible || cur == nil {
 		return
 	}
-	width, _ := c.Size()
-	// The player-count word is the number of occupied player slots, which the
-	// committed frame publishes one economy row per [I6].
-	rect := hud.ScorePanelGeometry(int32(width), h.score, len(cur.Economy))
-	c.UIShadeRect(h.pal, int(rect.X0), int(rect.Y0), int(rect.X1-rect.X0), int(rect.Y1-rect.Y0), hud.ScorePanelShadeLevel)
-	// The localised headings: `Kills` at (x0+2, 32), `Losses` right-aligned at
-	// (x1 - textWidth - 2, 32), both at width limit 119 and light row 0.
-	h.drawScoreText(c, "Kills", int(rect.X0)+2, hud.ScorePanelTop, 0)
-	lossesHeading := "Losses"
-	h.drawScoreText(c, lossesHeading, int(rect.X1)-retailGAFTextWidth(h.modalFont, lossesHeading)-2, hud.ScorePanelTop, 0)
-
 	// Rows are emitted in rank order over the ten player slots the committed
 	// frame publishes every tick, filtered on the row filter's six terms
 	// [07 R-HUD-04 §1]. Both the filter and the rank scan with its vacated-rank
 	// compaction live in internal/hud; this loop only paints what they return.
 	// The compacted rank bytes are dropped: retail writes them back to the slot
-	// records, and presentation may not write simulation state [I6]. With the
-	// ranks published in slot order and the kill-lead maintenance of
-	// [08 R-CAMP-01 §9] not implemented (the marker is on the publisher), no
-	// frame presents a vacated rank to write back.
+	// records, and presentation may not write simulation state [I6].
 	slots := make([]hud.ScoreSlot, frame.PlayerRowSlots)
 	for i := range cur.Players {
 		row := cur.Players[i]
@@ -77,9 +64,57 @@ func (h *retailBattleHUD) drawScorePanel(c *client.Client, b *battleSession, cur
 		}
 	}
 	order, _ := hud.ScoreRowOrder(slots, len(cur.Economy))
-	for drawn, slot := range order {
-		h.drawScoreRow(c, b, cur, rect, drawn, slot, cur.Players[slot])
+	status := scorePanelStatusFor(b, cur, order)
+	width, _ := c.Size()
+	// Retail sizes the body by occupied slots. Modern fits the drawn rows and
+	// adds one heading line (DESIGN_INTERFACE_HUD_INPUT "Modern defeated players").
+	playerCount, headingY, rowOffset := len(cur.Economy), hud.ScorePanelTop, 0
+	if status.modern {
+		playerCount, rowOffset = len(order), 15
+		headingY += rowOffset
 	}
+	rect := hud.ScorePanelGeometry(int32(width), h.score, playerCount)
+	rect.Y1 += int32(rowOffset)
+	c.UIShadeRect(h.pal, int(rect.X0), int(rect.Y0), int(rect.X1-rect.X0), int(rect.Y1-rect.Y0), hud.ScorePanelShadeLevel)
+	if status.modern {
+		h.drawScoreText(c, fmt.Sprintf("Remaining: %d/%d", status.remaining, status.total), int(rect.X0)+2, hud.ScorePanelTop, 0)
+	}
+	h.drawScoreText(c, "Kills", int(rect.X0)+2, headingY, 0)
+	lossesHeading := "Losses"
+	h.drawScoreText(c, lossesHeading, int(rect.X1)-retailGAFTextWidth(h.modalFont, lossesHeading)-2, headingY, 0)
+	for drawn, slot := range order {
+		h.drawScoreRow(c, b, cur, rect, hud.ScoreRowTop(drawn)+int32(rowOffset), slot, cur.Players[slot], status.defeated[slot])
+	}
+}
+
+// scorePanelStatus is a transient presentation view, never a result latch or
+// an elimination flag. The Modern policy reads only committed live counts;
+// the mode is the bound base and Survival's slot layout is immutable setup [I6].
+type scorePanelStatus struct {
+	modern           bool
+	remaining, total int
+	defeated         [frame.PlayerRowSlots]bool
+}
+
+func scorePanelStatusFor(b *battleSession, cur *frame.Frame, order []int) scorePanelStatus {
+	var status scorePanelStatus
+	if b == nil || b.sess == nil || cur == nil || b.sess.Gameplay.Normalize() != gameplay.Modern {
+		return status
+	}
+	status.modern = true
+	for _, slot := range order {
+		// Survival's commanderless wave owner is the final configured seat;
+		// it cannot be defeated between waves (DESIGN_SURVIVAL §4.1).
+		if cur.Survival.Active && slot == b.sess.Skirmish.NumPlayers-1 {
+			continue
+		}
+		status.total++
+		status.defeated[slot] = cur.Players[slot].LiveUnits == 0
+		if !status.defeated[slot] {
+			status.remaining++
+		}
+	}
+	return status
 }
 
 // stepScoreFlash arms and then decays the two flash arrays, at most once per
@@ -124,8 +159,7 @@ func (h *retailBattleHUD) stepScoreFlash(cur *frame.Frame, armed bool) {
 // drawScoreRow paints one player's row: the local player's two lightening
 // passes, the player name, and the kill and loss counts with their flash
 // brightness [07 R-HUD-04 §1].
-func (h *retailBattleHUD) drawScoreRow(c *client.Client, b *battleSession, cur *frame.Frame, rect hud.ScorePanelRect, drawn, slot int, row frame.PlayerRow) {
-	y := hud.ScoreRowTop(drawn)
+func (h *retailBattleHUD) drawScoreRow(c *client.Client, b *battleSession, cur *frame.Frame, rect hud.ScorePanelRect, y int32, slot int, row frame.PlayerRow, defeated bool) {
 	if slot >= 0 && slot < hud.ScorePanelSlots && uint8(slot) == cur.Selection.LocalPlayer {
 		// (x0+4, y-1)-(x1-4, y+38), lightened at 31 then 20.
 		x, w := int(rect.X0)+4, int(rect.X1-rect.X0)-8
@@ -145,7 +179,17 @@ func (h *retailBattleHUD) drawScoreRow(c *client.Client, b *battleSession, cur *
 			int(rect.X0)+7, int(y)+1, hud.ScorePanelLogoWidth, hud.ScorePanelLogoHeight,
 			0, 0, width, height)
 	}
-	h.drawScoreText(c, row.Name, int(rect.X0)+9, int(y)+6, 0)
+	nameY, countersY := int(y)+6, int(y)+21
+	if defeated {
+		// Dim the artwork before writing the three readable text lines. Keep
+		// the 40-pixel rows so ten players fit at 640x480; these offsets and
+		// shade are Nanolathe Modern presentation policy, not retail constants
+		// (DESIGN_INTERFACE_HUD_INPUT "Modern defeated players").
+		c.UIShadeRect(h.pal, int(rect.X0)+4, int(y)-1, hud.ScorePanelWidth-8, hud.ScorePanelRowHeight, -12)
+		nameY, countersY = int(y)+1, int(y)+26
+		h.drawScoreText(c, "Defeated", int(rect.X0)+9, int(y)+13, 0)
+	}
+	h.drawScoreText(c, row.Name, int(rect.X0)+9, nameY, 0)
 	kills, losses := hud.ScoreCounters(row, commanderDeathOption(b))
 	killText := fmt.Sprintf("%d", kills)
 	lossText := fmt.Sprintf("%d", losses)
@@ -154,8 +198,8 @@ func (h *retailBattleHUD) drawScoreRow(c *client.Client, b *battleSession, cur *
 		killShade = int(h.scoreFlash.Kills[slot])
 		lossShade = int(h.scoreFlash.Losses[slot])
 	}
-	h.drawScoreText(c, killText, int(rect.X0)+9, int(y)+21, killShade)
-	h.drawScoreText(c, lossText, int(rect.X0)+119-retailGAFTextWidth(h.modalFont, lossText)-2, int(y)+21, lossShade)
+	h.drawScoreText(c, killText, int(rect.X0)+9, countersY, killShade)
+	h.drawScoreText(c, lossText, int(rect.X0)+119-retailGAFTextWidth(h.modalFont, lossText)-2, countersY, lossShade)
 }
 
 // sideLogoFrame resolves the side-logo frame for a lobby colour byte. Both

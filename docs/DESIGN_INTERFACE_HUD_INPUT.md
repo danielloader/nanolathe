@@ -1516,6 +1516,58 @@ selection and health, projectiles, explosions, gadgets, squad overlays. The
 compositor is DESIGN_PRESENTATION_CLIENT's; this document owns the gadget
 layer's contents `[07 §6]` `[03 §1]`.
 
+#### Modern defeated players
+
+**Nanolathe Modern policy** (user-authorized 2026-10-01, issue #61).
+The Space-held/F4 score panel retains defeated players, dims their row artwork,
+prints `Defeated` on a separate line, and adds `Remaining: alive/total` above
+the Kills/Losses headings. Names, rank order, both counter pairs and kill/loss
+flashes remain available. Selection uses the bound session's central
+`gameplay.Mode` base: Modern, including sets derived from it, enables this
+presentation; Strict 3.1 and Community 3.9 retain the retail panel.
+
+**Retail baseline — Established.** The score-panel filter keeps a player whose
+last unit was lost, because its auxiliary word remains zero; there is no defeat
+label or remaining count `[07 R-HUD-04 §1]` `[08 R-CAMP-01 §7]`. The ordinary
+skirmish defeat and victory predicates read the live-unit count
+`[08 R-SKIR-01 §3]` `[08 R-TRIG-01 §6]`. The economy's distinct elimination
+predicate also reads the created-unit count, which is rebuilt from surviving
+units after load `[05 R-ECO-01 §12]`.
+
+**Display contract.** Among the rows the existing filter/rank scan actually
+draws, zero committed live units means `Defeated`; every other such row counts
+as remaining. This is a display classification, not a stored elimination bit
+or a change to any end condition. It works for an empty player restored from a
+save even when its created count is zero, and clears if a subsequent committed
+frame has live units again. Unused, inactive, neutral and watcher slots excluded
+by the existing row filter contribute neither to the count nor the rows.
+In Survival, the final configured seat is the commanderless wave attacker
+(DESIGN_SURVIVAL §4.1): its existing score row is retained, but it contributes
+neither to the survivor count nor to defeat labels during empty wave intervals.
+Campaign sessions still have no score panel.
+
+**Layout.** The panel retains its 125-pixel width and 40-pixel row advance.
+Modern adds 15 pixels of heading space and sizes the body to the drawn rows,
+so ten rows end at scanline 461 on a 640×480 surface. A defeated row darkens its
+artwork at shade level −12 before writing readable text: name at row+1,
+`Defeated` at row+13, counters at row+26. Active rows keep the retail text
+offsets. These dimensions and the shade are presentation choices.
+
+**Boundary and verification.** The painter reads committed player rows, the
+bound mode and immutable slot setup, with no new persistent state, save fields,
+RNG draws or resource effects. The existing `RuleSet` binds the reserved base into
+`Session.Gameplay`; no gameplay algorithm asks a new question, so a new rules
+interface would serve no owner. A mode switch selects the display afresh on
+the next composition, with no marker state to migrate. This adds no selector
+or renderer preference.
+`TestModernScorePanelDefeatUsesOnlyDrawnPlayers` covers mode/default selection,
+the row exclusions, revival and Survival's wave slot.
+`TestModernDefeatedScoreRowDrawsMarkerAndKeepsCounters` checks the composed
+marker/counter pixels, the Strict/Community bypass, and unchanged resources and
+both RNG draw counts. The optional installed-art capture
+`TestRetailDefeatedScorePanelCapture` exercises three and ten rows, a defeated
+local player, and the retail layout at 640×480 for visual inspection.
+
 #### Oversized authored build pages
 
 **Nanolathe host presentation policy.** The authored-layout path fits oversized

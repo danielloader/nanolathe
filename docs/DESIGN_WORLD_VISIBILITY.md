@@ -653,7 +653,9 @@ subtick blink phase, including catch-up publication.
 **C9** **Ally vision is never OR'd.** The writer sets only the source unit's own
 slot bit, every reader tests one bit, and allied owners hold distinct player
 records so the owner bypass cannot fire cross-owner `[03 §3.2]`
-`[03 R-VIS-01 §7]`.
+`[03 R-VIS-01 §7]`. Retail's two multiplayer shares — an explored-memory copy
+on request and a radar marking of the sharer's own units — are not built here;
+DESIGN_MULTIPLAYER §6.3 owns them.
 
 **C10** Cloak is a predicate early-out, never a mask edit. The exception is the
 proximity breach within the authored minimum cloak distance, compared as a
@@ -719,8 +721,9 @@ rebuild fills and underneath the observer publication `[03 §3.3]`
   Every stock definition authors a sight distance of at least 55, so no shipped
   unit reaches it `[03 R-COMP-02 §1]`.
 * **Allied sensor sharing.** The friendly pass's allied disjunct is implemented
-  as never firing, because no writer anywhere sets the option bit it would gate
-  on — an established absence, not an omission `[03 R-VIS-01 §7]`.
+  as never firing. Its gate is the owner's ShareRadar bit, which only a chat
+  command in a networked session sets, so it cannot fire in campaign or
+  skirmish `[03 R-VIS-01 §7]`. The multiplayer form is DESIGN_MULTIPLAYER §6.3.
 
 ## 4. Divergences
 
@@ -783,7 +786,7 @@ column (W7, `[03 R-TERR-01 §4]`).
 | The sensor phase's five passes; the seam is inside the fifth tick phase | `[03 §3.4]`, `[03 R-VIS-01 §4]`, `[03 R-SENSOR-01]` |
 | The radius visitor and the three contact callbacks | `[03 R-VIS-01 §5]` |
 | Cloak, stealth, the decloak deadline | `[03 R-VIS-01 §6]` |
-| Allied sensor sharing: the bounded absence | `[03 R-VIS-01 §7]` |
+| Allied sharing: what is shared, and what never is | `[03 R-VIS-01 §7]` |
 | What the sensor and LOS phases publish to presentation | `[03 R-VIS-01 §8]`, `[03 §2.4]` |
 | The dead sensor definitions and the activation-bit writer census | `[03 R-VIS-01 §9]` |
 | Fog, unexplored edges, the two-channel cache | `[03 §3.3]`, `[03 R-RR16-A §1]` |

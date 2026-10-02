@@ -229,9 +229,10 @@ func TestSensorSeenBitClearsAtFrameStart(t *testing.T) {
 // Correction (2026-08-30). This test previously fed an allied predicate and
 // asserted "allied unit status lacks the friendly mask" against an ally of the
 // local player, i.e. that the friendly pass marks allies. [R-VIS-01 §7]
-// establishes the opposite: pass 1's allied disjunct gates on an option-word
-// bit that no writer anywhere in the image sets, so allies get nothing from
-// this pass — an ally's radar contact never reaches the viewer's minimap and an
+// establishes otherwise for every session without a radar share: pass 1's
+// allied disjunct gates on the owner's ShareRadar bit, which only a chat
+// command in a networked session sets, so here allies get nothing from this
+// pass — an ally's radar contact never reaches the viewer's minimap and an
 // ally's submerged units are not exempted on the viewer's behalf. The friendly
 // pair goes to own units, and to everything only when the viewer is defeated
 // [R-VIS-01 §4] pass 1.

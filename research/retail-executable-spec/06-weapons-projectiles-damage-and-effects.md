@@ -314,8 +314,9 @@ contracts:
    leaves the list at the first rebuild after a sensor pass stops marking it;
 2. `radardistancejam` **does** have an authoritative effect: it clears the same
    bit and therefore removes the candidate from every side's secondary list
-   until the line-of-sight pass or an allied-vision pass sets the bit again
-   later in the same tick `[R-WPN-02 §4]`. Jamming has no authoritative effect
+   until the line-of-sight probe later in the same sensor pass, or the next
+   pass's friendly marking, sets the bit again `[R-WPN-02 §4]`
+   `[03 R-VIS-01 §4]`. Jamming has no authoritative effect
    on the minimap surfaces, where overlap is last-writer-wins and never ORs
    into the word mask;
 3. because the phase evaluates one observer, every side's secondary list is

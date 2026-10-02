@@ -5606,7 +5606,7 @@ the table alone as a complete framing grammar.
 | `0x13` | 18 | 7 | **Play a sound.** Selector u8, sound identity i32, three-component world position. Receiver uses position only for selector zero; both audited emitters set selector one. Recorder taxonomy reports 19 bytes, unverified in the available corpus. |
 | `0x14` | 24 | 4 | **Ownership transfer**, the capture path. `+1` u16, `+3` i32, remainder read by the handler. |
 | `0x15` | 1 | 6 | Sets a per-player flag, gated on a global bit. No payload; the sender comes from the transport. |
-| `0x16` | 17 | 4 | **Resource and sensor sharing.** `+1` u8 subtype (1/2/3), `+2` 3-byte reserved, `+5` u32 source DPID, `+9` u32 dest DPID, `+13` f32 value. Subtype 3 copies visibility bits; float is zero in traced subtype-3 producer. |
+| `0x16` | 17 | 4 | **Resource and explored-memory sharing** ([05 R-SHARE-01 §3], [05 R-SHARE-01 §4]). `+1` u32 subtype — only the exact values 1 (energy), 2 (metal) and 3 dispatch — `+5` u32 source DPID, `+9` u32 dest DPID, `+13` f32 amount. Subtype 3 asks the receiver to copy the source player's explored-memory bits to the destination player ([05 R-SHARE-01 §6]); it carries no map data, and both of its producers write zero in the amount field. Sent to the destination player alone. |
 | `0x17` | 2 | 7 | `+1` u8. Session control. |
 | `0x18` | 2 | 7 | `+1` u8. Session control. |
 | `0x19` | 3 | 7 | **Pause and game speed.** `+1` u8 selector, `+2` u8 value. Selector zero sets the pause bit from the value's low bit; otherwise the value sets the game speed. |
@@ -5619,7 +5619,7 @@ the table alone as a complete framing grammar.
 | `0x20` | 186 | 7 | Bulk player-info state. Retail writers copy 185 metadata bytes after the type and emit 186 bytes. The available TAD recordings contain 192-byte forms, which the inspected recorder already consumes at that size; the version-matched producing executable or preceding transformation remains unknown. [fmt tad] |
 | `0x21` | 10 | 1 | Lobby-side. `+1` u8, `+2` i32, `+6` i32. |
 | `0x22` | 6 | 1 | Lobby-side. `+1` i32, `+5` u8. |
-| `0x23` | 14 | 7 | `+1` i32, `+5` i32, `+9` u8, `+10` i32. |
+| `0x23` | 14 | 7 | **Alliance declaration** ([05 R-SHARE-01 §1]). `+1` u32 declarer DPID, `+5` u32 target DPID, `+9` u8 value (non-zero = allied), `+10` i32 force flag. Sent to the target alone. On receipt a non-zero value plays the `Ally` cue; when the target is simulated on the receiving machine the alliance writer runs for the pair; then the declarer's row A entry toward the target is written unconditionally. |
 | `0x24` | 6 | 7 | `+1` i32, `+5` u8. |
 | `0x25` | 5 | 1 | **No case in the in-game switch.** Its mask admits it only outside the battle-loading/live-battle states, so it is handled by the lobby receiver instead. |
 | `0x26` | 41 | 7 | Forwarded whole; roster semantics observed on the receive side: an empty roster decodes to zero participants and a special class value expands to all slots. |

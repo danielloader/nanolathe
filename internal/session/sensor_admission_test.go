@@ -44,9 +44,10 @@ func radarContactFor(f *frame.Frame, h pool.Handle) (frame.RadarContactView, boo
 // when the session's alliance row called it allied, and a default lobby leaves
 // every slot at the unassigned sentinel ally group, so every enemy came out
 // carrying 0x300 and every enemy blip was admitted. [R-VIS-01 §7] establishes
-// that pass 1's allied disjunct cannot fire at all — the option bit it gates on
-// has no writer anywhere — so the friendly pair goes to own units only, and to
-// everything only when the viewer has been defeated [R-VIS-01 §4] pass 1.
+// that pass 1's allied disjunct needs the owner's ShareRadar bit, which no
+// single-player session carries, so the friendly pair goes to own units only,
+// and to everything only when the viewer has been defeated [R-VIS-01 §4]
+// pass 1.
 func TestEnemyMinimapAdmissionRequiresSensorCoverage(t *testing.T) {
 	cell := func(n int32) numeric.Fixed { return numeric.Fixed(int64(n) << 16) }
 

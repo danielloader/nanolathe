@@ -202,10 +202,11 @@ func (s *Service) sensorCandidates(source *SensorUnit, radius int32) []int {
 // [R-VIS-01 §4] "Ordering and outputs", "Random draws".
 //
 // Under Strict, no pass consults an alliance row. Pass 1's allied disjunct
-// cannot fire in retail — [R-VIS-01 §7] establishes that no writer anywhere
-// sets the option bit it gates on — so an ally's radar contact never appears on
-// the viewer's minimap and an ally's units are not exempted from the underwater
-// rejection on the viewer's behalf. Community CP-FIX-6 changes only pass 3:
+// needs the owner's ShareRadar bit, which only a chat command in a networked
+// session sets [R-VIS-01 §7]. No session built today carries that bit, so an
+// ally's units are not marked friendly and are not exempted from the underwater
+// rejection on the viewer's behalf; the multiplayer form is
+// docs/DESIGN_MULTIPLAYER.md §6.3. Community CP-FIX-6 changes only pass 3:
 // its rule may exempt an allied jammer. Pass 4 used to take an alliance
 // predicate to separate hostiles from friends in a live-unit scan; it no longer
 // scans, because hostility was settled once, for the whole side, when that

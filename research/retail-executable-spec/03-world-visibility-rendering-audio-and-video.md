@@ -2785,10 +2785,11 @@ states.
    ORs a **destination** player slot's bit in — an idempotent copy of one
    player's explored memory into another's, with no sight, unit or feature
    input. It has exactly two static callers and no data reference: the
-   in-battle `MAPINFO` console command (which passes the local player's slot
-   and the command's argument slot) and one arm of the in-battle
-   message/command dispatcher. Neither is on an ordinary single-player path,
-   and Nanolathe implements no mapping-share path.
+   share screen's map-information check control, which passes the local
+   player's slot and the selected target's slot, and the network drain's
+   sharing arm, which passes the two slots a received request names
+   (`[05 R-SHARE-01 §6]`). Both are multiplayer-only, so no single-player
+   path reaches it.
 5. **The saved-game restore — Established.** The battle-restore chain's
    mapping step selects the save's `Mapping` section and its `Data` box,
    computes the expected byte count as attribute width × attribute height ÷ 2
@@ -3205,10 +3206,11 @@ not a raw pixel grid. Evaluation order:
 3. Base point: center plus definition extents in 16.16 world units. Unless
    the unit’s 32-bit runtime status field carries the underwater-exemption bit
    (mask 0x200), a base height below sea level returns not-visible. Because
-   the sensor phase’s friendly marking sets that same bit on owned and allied
-   units (section 3.4), those units are implicitly exempt. **Sea level here is
-   the map header byte scaled to world units — the same `byte × 65,536`
-   comparison as section 2.2, not a comparison against zero.**
+   the sensor phase’s friendly marking sets that same bit on the viewer's own
+   units and on a radar-sharing ally's (section 3.4, `[R-VIS-01 §7]`), those
+   units are implicitly exempt. **Sea level here is the map header byte scaled
+   to world units — the same `byte × 65,536` comparison as section 2.2, not a
+   comparison against zero.**
 4. Each sample projects with the half-height shear (`v = (Z - (Y >> 1)) >> 5`,
    `u = X >> 5`, pixel components) and unsigned bounds against the queried
    record’s grid dimensions; the mode-selected source is that record’s
@@ -3250,13 +3252,20 @@ extents — first corner at the cell origin (sheared), then a single corner
 displaced by the footprint offsets (§5.1.5); the sensor phase's final pass
 inlines a single-point test.
 
-**Ally semantics: never OR’d.** The writer ORs only the source
-unit’s own player-slot bit into each cell, and every reader tests only the
-local player’s bit. No routine merges an alliance group into a cell before
-test, and allied owners hold distinct player records, so the owner bypass
-cannot fire cross-owner. Allied vision sharing does not exist through this
-mechanism; the only residual question is whether some unresolved identity
-path shares grids by other means.
+**Ally semantics: nothing is OR’d at stamp or test time. Established.** The
+coverage raster ORs only the stamping unit's owner bit into each mapping tile
+and increments only that owner's current-sight grid. Every reader samples one
+player: the viewing slot's mapping bit or current-sight grid, or, for the path
+probe, the requesting player's mapping bit. No routine combines an alliance
+group before a test, and allied owners hold distinct player records, so the
+owner bypass cannot fire across owners.
+
+Current sight is therefore never shared. Explored memory can be: the two-slot
+mapping-share routine (`[R-LAYER §1]` write site 4, `[05 R-SHARE-01 §6]`)
+copies one slot's bits into another's on request, in multiplayer only. Under
+Permanent line of sight that copy also carries sight, because the predicate
+then reads the mapping grid. The radar share of `[R-VIS-01 §7]` changes unit
+status bits, not either grid.
 
 **Cloak is a predicate early-out, not a mask edit.** Cloaking does not erase or
 dim the LOS mask; the visibility predicate returns not-visible for cloaked
@@ -3683,9 +3692,11 @@ on due viewing-player entries and when more than one player is present
 unit status bits; `[R-VIS-01 §4]` states them in order, at implementable
 precision, and `[R-VIS-01 §5]` states the radius visitor and the three
 callbacks. In summary: a first pass clears the decloak-timer bit for every live
-unit and sets the friendly status pair `0x300` on own units (plus everything,
-when the viewing player has been defeated) while clearing `0x700` otherwise; a
-second pass, over the viewing player's units only, emits one radar/sonar
+unit and sets the friendly status pair `0x300` on own units, on the units of
+an owner who has declared alliance toward the viewer and shares radar
+(`[R-VIS-01 §7]`), and on everything when the viewing player has been
+defeated, while clearing `0x700` otherwise; a second pass, over the viewing
+player's units only, emits one radar/sonar
 contact query per active unit with a nonzero radar or sonar distance; a third
 pass emits radar-jam and sonar-jam queries from every active unit not owned by
 the viewing player; a fourth performs the minimum-cloak proximity scan; a fifth
@@ -3806,8 +3817,10 @@ status = (own or allied or observer) ? (status | 0x300) : (status & ~0x700)
 
 `allianceRow` is an eleven-byte row in the player record indexed by player
 slot, loaded from the mission/save `Alliances` list, with a player's own entry
-always set. The observer disjunct is what makes a defeated player see
-everything: the defeat handler sets that rule-word bit, clears mode-word bits
+always set. Option-word bit 6 is the owner's *ShareRadar* bit, which only a
+multiplayer chat command sets (`[R-VIS-01 §7]`). The observer disjunct is what
+makes a defeated player see everything: the defeat handler sets that rule-word
+bit, clears mode-word bits
 0 and 1 (`[R-VIS-01 §1]`: Mapped + Permanent — both grids fill all-visible),
 and forces one bulk rebuild.
 
@@ -4136,55 +4149,64 @@ This table is the contract.
 **Cloak is still a predicate early-out, not a mask edit** (§3.2): nothing in
 this path writes either visibility grid.
 
-#### R-VIS-01 §7 — allied sensor sharing: what is shared, and the bounded absence
+#### R-VIS-01 §7 — allied sharing: what is shared, and what never is
 
-**Established** that no allied sharing occurs anywhere in the
-recovered image; **Unknown** whether the gate bit the phase reads is the one
-retail's authors intended.
+**Established** (static trace of the share-toggle handlers and their command
+records, the player-record resend and its receive arm, the
+alliance-declaration receive arm, sensor passes 1, 2 and 5, and the
+mapping-share routine and its callers; census of every byte and word access
+to the option word). Two opt-in shares exist. Both are multiplayer-only and
+off at session start (`[05 "Sensor sharing"]`).
 
-Doc 05 records only the option and cadence: every 450 authoritative ticks a
-separate option can emit a radar/sensor share command for allied players, and
-defers the shared state to this document. The answer is that **no shared state
-exists on the receiving side in the recovered image**, on any of the three
-channels a clone might expect:
+1. **Explored memory is copied on request, never OR'd.** As §3.2 says, no
+   stamp and no test combines players. The copy is `[R-LAYER §1]` write site
+   4; its senders are `[05 R-SHARE-01 §3]` and `[05 R-SHARE-01 §5]`, and its
+   arithmetic is `[05 R-SHARE-01 §6]`.
+2. **The current-sight byte grids are never merged.** Each is incremented and
+   decremented only by footprints published under its own owner — that
+   owner's units and, for the viewing player, its temporary-sight records —
+   filled only by the bulk rebuild, and read only through its own player
+   record.
+3. **The radar share marks the sharer's own units.** Pass 1's allied disjunct
+   (`[R-VIS-01 §4]`) fires for a unit when both hold: its owner has declared
+   alliance toward the viewing player — the owner's row A entry for the
+   viewing player's slot, as the viewing machine holds it
+   (`[05 R-SHARE-01 §1]`) — and bit 6 of the owner's option word is set. Bit 6
+   is *ShareRadar*: the `ShareRadar` and `ShareAll` chat commands flip it in
+   the local player's record (`[07 R-CAM-01 §6]`), and the record reaches the
+   other machines whole (`[05 R-SHARE-01 §3]`). The viewer's own declaration
+   toward the owner is not read.
 
-1. **The mapping word grid is never OR'd across players** (§3.2, "Ally
-   semantics are closed"): the writer ORs only the source unit's own slot bit,
-   and every reader tests one slot's bit.
-2. **The per-player current-sight byte grids are never merged.** Each is
-   incremented and decremented only by its owner's footprints, filled only by
-   the bulk rebuild, and read only through its own player record.
-3. **The sensor phase's allied disjunct cannot fire.** Pass 1's second
-   disjunct requires a bit of a 16-bit option word in the candidate owner's
-   option record. A complete reference census of that word across the whole
-   recovered image finds twenty-six sites; **every one except this read tests
-   bit 0**, the "this slot is me" flag, and **no site anywhere writes bit 6**.
-   The structurally parallel bit — the same bit number in the *other* 16-bit
-   option word four bytes further into the same record — is written, by the
-   defeat handler and by two session-transition cases, and is exactly the
-   defeated/observer flag that pass 1's *third* disjunct reads.
+**What a marked unit gains for that viewer.** The friendly pair (seen and
+sonar, `0x300`) is rewritten on every due sensor pass. The unit is therefore
+a minimap contact wherever it is, because the contacts gate accepts either
+bit (§3.9); it is exempt from the predicate's below-sea-level rejection
+(§3.2); and it is in the seen set, which matters only to a locally built
+target registry whose owner treats the sharer as hostile (`[06 §3.1]`).
 
-So the friendly marking in the recovered image marks own units and, when the
-viewing player has been defeated, everything; allied units get nothing. The
-consequence for a clone is concrete: an ally's radar contact never appears on
-your minimap, an ally's units are not exempted from §3.2's underwater
-rejection on your behalf, and an ally's vision never enters the secondary
-candidate list.
+**What it does not gain.** The predicate has no alliance input, and the
+on-screen unit list admits only own units and units that pass the predicate.
+A marked unit is drawn in the main view only where the viewer's own
+visibility state admits it.
 
-**Unknown:** whether reading the option word rather than the rule word at that
-one site is a retail defect (the two are adjacent words of one record and the
-bit number is the same in both) or a deliberate second flag whose writer lies
-outside the recovered functions. *Deciders, in order:* a static trace over the
-unrecovered regions and the lobby/session option parser for any writer of that
-bit; failing that, a manual retail observation — an authored two-human-ally
-skirmish probe in which one ally alone has radar coverage of a third player's
-unit, checking whether the other ally's minimap shows the contact. Until one of
-those lands, Nanolathe must implement the bounded behavior — no allied sensor
-sharing — and must not "restore" sharing on the grounds that it seems intended.
+**What is not carried.** Pass 2 emits from the viewing player's own units
+only and pass 5 samples the viewing player's own state only, so an ally's
+radar, sonar and sight never mark a third player's unit: an ally's radar
+contact never appears on the viewer's minimap, and an ally's vision never
+enters the secondary candidate list.
 
-**What the 450-tick command does carry** is doc 05's and doc 08's question,
-not this document's: nothing in the recovered visibility or sensor path
-consumes an incoming share.
+**Jammers.** Pass 3 treats an allied jammer as any foreign jammer
+(`[R-VIS-01 §4]`). Its radar jam clears the seen bit on a sharer's units
+inside it; the sonar bit, and so the minimap contact, survives.
+
+**Single-player.** The toggle commands return at once outside a networked
+session, so no option word carries a share bit, the disjunct never fires and
+the copy never runs. In campaign and skirmish the friendly marking goes to
+own units and, when the viewing player has been defeated, to everything;
+allied units get nothing.
+
+**Supported inference** (from this marking and `[07 R-HUD-03 §2]`): hovering
+a marked contact outside the viewer's sight shows `S: Unidentified object`.
 
 #### R-VIS-01 §8 — what the sensor and LOS phases publish to presentation
 
@@ -10346,18 +10368,16 @@ body — most under `R-<id>` headings — and are not restated here.
   and therefore whether a multiplayer machine's two slots ever leave the
   player-table reset's slot 0 · §3.4 `[R-VIS-01 §4]` · static trace of every
   block write whose range covers the two indices.
-- Whether the sensor phase's allied-vision gate reads the option word by
-  mistake: the bit it tests has no writer in the recovered image, while the
-  same bit number in the adjacent rule word is the written defeated/observer
-  flag · §3.4 `[R-VIS-01 §7]` · static trace over the unrecovered regions and
-  the lobby option parser first; failing that, manual retail observation
-  (two-human-ally skirmish probe in which only one ally has radar coverage of
-  a third player's unit). Until it lands, the bounded behavior — no allied
-  sensor sharing on any channel — is what Nanolathe implements.
-- What the 450-tick allied radar/sensor share command carries on the receiving
-  side; nothing in the recovered visibility or sensor path consumes an
-  incoming share · doc 05 "Sensor sharing", doc 08 · static trace of the
-  command's receive handler.
+- Whether a unit marked by an ally's radar share and standing outside the
+  viewer's sight shows the `S: Unidentified object` hover caption, and
+  whether Permanent line of sight draws units on tiles copied by the
+  explored-memory share; both follow from the static trace and neither has
+  been watched · §3.4 `[R-VIS-01 §7]` · manual retail observation in a
+  two-human multiplayer session.
+- Whether anything reads or writes the option word's share bits through a
+  wider load or store that overlaps the word from a neighbouring field; the
+  census covers byte and word accesses at the word itself · §3.4
+  `[R-VIS-01 §7]` · a typed data-flow pass over the option record.
 - Legacy terrain header slot 12 and attribute bytes 1, 3, 4, 5, 7: no reader
   in the loader · §2.2 `[R-TERR-01 §1]` · static trace over the unrecovered
   regions; inert until one is found.

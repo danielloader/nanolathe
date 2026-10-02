@@ -913,15 +913,15 @@ The high-level pass is:
 Periodic allied sharing is not part of each player's settlement call. The
 sharing dispatcher runs in the sub-tick tail **after all twelve phases** —
 not straight after the player phase, which is phase 5 — immediately before
-the packet-transport flush, for the reference player only, and **only in a
-networked session**: the whole tail is skipped when the session's networked
-bit is clear, and the dispatcher gates itself on the same bit
+the packet-transport flush, for the local player's own slot only, and **only
+in a networked session**: the whole tail is skipped when the session's
+networked bit is clear, and the dispatcher gates itself on the same bit
 ([R-SHARE-01 §3], [01 §4.4]). When it does run it self-gates its work:
 metal/energy transfers run only when the global tick is a multiple of sixty
-and sensor sharing when it is a multiple of 450. In a networked session
-sharing therefore mutates live stocks between settlement passes and affects
-subsequent passes; in single-player it never fires at all, which is what
-makes [R-SHARE-01 §3]'s "multiplayer-only" framing true.
+and the explored-memory share when it is a multiple of 450. In a networked
+session sharing therefore mutates live stocks between settlement passes and
+affects subsequent passes; in single-player it never fires at all, which is
+what makes [R-SHARE-01 §3]'s "multiplayer-only" framing true.
 
 Construction handlers may add requests and accepted work before the
 settlement pass that pays them. The precise same-pass relationship varies by
@@ -2532,7 +2532,7 @@ shared "is allied" function; each consumer indexes a row directly:
 | Consumer | Test | Notes |
 |---|---|---|
 | Automatic resource sharing ([R-SHARE-01 §3]) | `source.A[candidate] != 0` | one-directional: the giver's own declaration |
-| Sensor phase allied disjunct ([03 §3.2 R-VIS-01 §4]) | `owner.A[viewer] != 0` and an option-word bit with no writer | the owner's declaration toward the viewer |
+| Sensor phase allied disjunct ([03 §3.2 R-VIS-01 §4]) | `owner.A[viewer] != 0` and the owner's share-radar bit (option-word bit `6`, [R-SHARE-01 §3]) | the owner's declaration toward the viewer |
 | Victory test (doc 08) | requires both `local.A[i]` and `local.B[i]` | mutual alliance |
 | All-enemies-eliminated test (doc 08) | `local.A[i] != 0` skips the slot | one-directional |
 | ALLIES screen (doc 07) | displays `B << 1 \| A` per row | presentation only |
@@ -2643,8 +2643,11 @@ packet through the same helpers without the debit flag ([R-SHARE-01 §4]).
 **Established — where it runs.** The tick executor calls the dispatcher once
 per sub-tick for the **local player's slot only**, after the twelve phases of
 [01 §4] and before the presentation flush, and only when the sub-tick is an
-advancing one. Inside, the dispatcher returns immediately unless the session
-flag word's "networked session" bit is set; that bit is raised when the
+advancing one. The call is also skipped while packet pacing is disabled —
+pacing is on by default, and a negative `-P` value turns it off
+([01 R-PLAT-01 §2]) — which stops every automatic share, resources included.
+Inside, the dispatcher returns immediately unless the session flag word's
+"networked session" bit is set; that bit is raised when the
 front end finds a live network session. Everything below is therefore
 multiplayer-only behavior; Nanolathe's single-player build reproduces it as a
 no-op.
@@ -2667,22 +2670,47 @@ metal then energy:
    `0.5` (energy), the multiply in single precision; then the resource's
    transfer helper is called with the debit flag set.
 
-The threshold fields are both zero throughout play (zeroed at battle setup,
-never written), so step 1's compare is `0 < stock` and step 3's product is
-`stock × k`. No random draw is consumed.
+The threshold fields are zeroed at battle setup. Their only writers are the
+`SetShareMetal` and `SetShareEnergy` chat commands, which act only in a
+networked session and store the argument, or the storage capacity when the
+argument exceeds it ([07 R-CAM-01 §6]). Until a player uses one, step 1's
+compare is `0 < stock` and step 3's product is `stock × k`. No random draw is
+consumed.
 
-**Established — the 450-tick mapping pass.** When `tick mod 450 == 0` and
-option-word bit `5` is set, every slot passing the same candidate predicate
-(plus `source slot != 10`) is sent a type `0x16` subtype `3` packet carrying
-the source and destination network identities. The consumer is
-[R-SHARE-01 §6].
+**Established — the 450-tick mapping pass.** The pass runs when
+`tick mod 450 == 0` (unsigned) and the source's option-word bit `5` is set.
+It scans slots `0..9` ascending, and a slot qualifies when all of these hold:
+the slot exists; its control byte is `1`, `2` or `3`; its own index is not
+`10`; it is not eliminated (`live unit count != 0` or `total units ever
+created == 0`); **its control byte equals `3`** and its option record's kind
+byte equals `1` — a remote human; `source.A[slot] != 0`; and the source's own
+slot index is not `10`. There is no stock comparison and no last-candidate
+rule: **every** qualifying slot is sent one seventeen-byte type `0x16` packet
+carrying the 32-bit subtype `3`, the source's network identity, the
+destination's network identity and a 32-bit zero
+([08 "Packet framing and dispatch"]). The packet is addressed to the
+destination alone. The sending machine performs **no** merge; the consumer is
+the recipient's drain ([R-SHARE-01 §4], [R-SHARE-01 §6]). The global tick is
+advanced before the phases run, so the first pass is at tick 450.
 
-**Established — what the option bits are.** The simulation reads exactly
-three bits of the slot's option word for sharing: bit `1` share metal, bit `2`
-share energy, bit `5` share mapping. Their only live writers are whole-word
-copies on the lobby/network synchronization paths (doc 08 owns them); the
-bit-level toggles (`Toggled ShareMetal to: %s` and siblings) live in the
-unreferenced console region noted above.
+**Established — what the option bits are.** The sharing bits of the slot's
+option word are `1` (share metal), `2` (share energy), `5` (share mapping)
+and `6` (share radar). The dispatcher reads the first three and the sensor
+phase reads the fourth ([03 R-VIS-01 §7]); bit `3` is the dead ShareLOS bit
+("Sensor sharing" below).
+
+- All are zero at session initialization: the all-slots initializer
+  zero-fills every option record.
+- Their only bit-level writers are the chat commands `ShareMetal`,
+  `ShareEnergy`, `ShareMapping`, `ShareRadar` and `ShareAll`
+  ([07 R-CAM-01 §6]). These are ordinary registered commands; each flips —
+  it does not set — the bit in the **local player's** record, and returns at
+  once outside a networked session.
+- Each flip re-sends the machine's player records: one 186-byte type `0x20`
+  packet per locally simulated slot, to every peer. The receiver copies a
+  remote slot's whole option record verbatim
+  ([08 "Packet framing and dispatch"]).
+- No computer player's bits are ever flipped.
 
 #### The receive side and its phase [R-SHARE-01 §4]
 
@@ -2696,10 +2724,24 @@ credits the destination's bucket but never debits (the sender debited
 locally); `3` → the mapping-grid merge of [R-SHARE-01 §6]. No comparison,
 threshold, or alliance test is applied on receipt.
 
+**Established — admission.** The drain admits the sharing packet only in the
+live-battle session state ([08 "Packet framing and dispatch"], mask `4`). It
+acts on it only when the transport-level sender resolves to an existing
+remote slot (control byte `3`, index not `10`) and the transport-level
+recipient to an existing slot of control byte `1`, `2` or `3`. It then
+resolves the two identities carried in the packet independently, each to the
+first match in ascending slot order among slots with a non-zero control
+byte. The carried identities are not compared with the transport's sender or
+recipient, the destination need not be the local player, and no alliance
+row, option bit or visibility mode is consulted. The subtype is a whole
+32-bit field: only the exact values `1`, `2` and `3` dispatch.
+
 **Established — the sender's packet gate.** The packet emitter is a no-op
 unless the session flag word's networked bit is set, the source slot's control
-byte is `1` or `2`, and the destination's is `3`. Consequently in a
-single-player battle every share, manual or automatic, is applied exactly once
+byte is `1` or `2`, the destination's is `3`, and neither slot's
+removal-reason byte is set ([08 R-SKIR-01 §3]). The packet goes to the
+destination alone; it is not a broadcast. Consequently in a single-player
+battle every share, manual or automatic, is applied exactly once
 by the local helper call and never re-applied by the drain.
 
 #### The SHARE screen producer and unit sharing [R-SHARE-01 §5]
@@ -2711,6 +2753,13 @@ Confirming resolves the selected list row to a network identity and then to a
 slot; the target must exist, have control byte `1`, `2` or `3`, have an
 assigned slot index, not carry the rule word's defeated bit, and not be
 eliminated. **There is no alliance test** — a player may share with an enemy.
+
+**Established — reach.** The screen has two openers, the `h` key and the Tab
+strip's `SHARE` button. Both require the multiplayer session kind and a local
+player whose rule word's defeated bit is clear — the watcher bit of
+[08 R-SKIR-01 §12] ([07 R-CAM-01 §2], [07 §11]). Its list offers every
+existing, surviving slot without that bit except a local human: computer
+players and remote players are both offered.
 
 **Established — amounts.** Each slider's read-back value is truncated to a
 32-bit integer through `ftol` ([07 R-HUD-03 §9] gives the knob/range
@@ -2730,9 +2779,11 @@ bitset. The transfer re-allocates the unit in the target's pool slice through
 the allocator of [R-SHARE-01 §8], so it fails silently when the target's
 slice is full or the definition's limit is reached.
 
-**Established — map information.** With `MAPINFO` checked, the mapping-grid
-merge of [R-SHARE-01 §6] is applied locally from the local slot to the target
-and a subtype `3` packet is emitted.
+**Established — map information.** With `MAPINFO` checked, confirming applies
+the mapping-grid merge of [R-SHARE-01 §6] at once on the giver's machine, from
+the local slot to the target, and then emits a subtype `3` request. The
+request leaves the machine only when the target is a remote slot
+([R-SHARE-01 §4]).
 
 **Supported inference — timing.** The screen handler runs from the window
 message pump, which the main loop services between executor calls
@@ -2741,26 +2792,75 @@ phase. A static trace of the pump/executor interleaving would settle it.
 
 ### Sensor sharing
 
-Every 450 authoritative ticks, the share-mapping option emits a packet for
-every allied remote human ([R-SHARE-01 §3]); the receiver merges the sender's
-**mapped-memory word grid** bits into its own. Nothing about line of sight,
-radar, or the visibility mode word is transferred: the consumer
-([R-SHARE-01 §6]) touches only the mapping (explored-memory) word grid of
-[03 §3.1], and doc 03's sensor phase does not read any shared state
-([03 §3.2 R-VIS-01 §7]). The old `ShareRadar`/`ShareLOS` console strings are
-unreferenced.
+Two opt-in options share sensor knowledge in a networked battle. Both are
+bits of the player's option word, both are clear at session initialization,
+and each is flipped in battle by its own chat command ([07 R-CAM-01 §6]). The
+commands return at once outside a networked session and act only on the local
+human's record, so neither share exists in campaign or skirmish.
+**Established** (static trace of the toggle handlers and the slot
+initializer; census of every byte and word access to the option word).
+
+*Share mapping* (bit 5) shares **explored memory**. Every 450 ticks the
+dispatcher asks each surviving remote human the player has declared alliance
+toward to copy the sharer's explored tiles into its own ([R-SHARE-01 §3]);
+the recipient's machine performs the copy ([R-SHARE-01 §6]). The request
+carries no map data: every machine already keeps every player's explored
+bits, because its coverage sweep stamps the units of every active player,
+remote ones included ([03 R-LAYER §1] write site 3). **Established.**
+
+*Share radar* (bit 6) shares **the sharer's own units as contacts**. It sends
+nothing periodically. The bit reaches the other machines inside the player
+record, and each ally's sensor phase marks the sharer's units friendly
+([03 R-VIS-01 §4] pass 1, [03 R-VIS-01 §7]). **Established.**
+
+Nothing transfers or merges current line of sight, and neither option passes
+on an ally's radar or sonar detections. A third toggle, *ShareLOS* (bit 3),
+is dead: its handler exists, but no command record points at it and nothing
+reads the bit. **Established** (image-wide search for a pointer to the
+handler; option-word access census).
 
 #### The mapping-grid merge [R-SHARE-01 §6]
 
-**Established.** Given `(source slot, destination slot)`, the merge walks the
-mapping word grid of [03 §3.1] — `(map cell width × map cell height) / 4`
-sixteen-bit words, the signed division truncating toward zero — and for every
-word whose source bit is set, ORs in the destination bit. Bits are
-`1 << (slot & 31)` within a sixteen-bit word, so slots `0..9` map to bits
-`0..9`. It is idempotent, copies only in one direction, and consumes no random
-draw. It is reached from the 450-tick emitter's packet (phase 1 of the
-receiver's sub-tick), from the SHARE screen's `MAPINFO` control (locally and
-by packet), and from nowhere else.
+**Established** (static trace of the routine and both callers; no other
+caller and no pointer to it exists in the image). Given `(source slot,
+destination slot)`, the merge walks the whole mapping word grid of
+[03 §3.1] — `(map cell width × map cell height) / 4` sixteen-bit words, the
+signed division truncating toward zero — and for every word whose source bit
+is set, ORs in the destination bit. Bits are `1 << (slot & 31)` tested within
+the sixteen-bit word, so slots `0..9` are bits `0..9`.
+
+- It has no window and no incremental form.
+- It is idempotent and one-directional. Nothing undoes it short of a bulk
+  rebuild of the grid, so switching the option off removes nothing.
+- It reads no alliance row, option bit or mode word, touches no current-sight
+  byte grid, and consumes no random draw.
+- It raises neither presentation dirty flag: the fog cache and the minimap
+  composite show the new tiles at their next rebuild for another reason.
+
+**Callers.** There are exactly two: the network drain's sharing arm, with the
+slots the packet's two identities resolve to ([R-SHARE-01 §4]), and the SHARE
+screen's `MAPINFO` control, with the local slot as source
+([R-SHARE-01 §5]). The 450-tick emitter does not call it. An automatic share
+is therefore applied on the recipient's machine only; a map-information gift
+is applied on the giver's machine at once and on the recipient's on arrival.
+
+**What is copied.** The receiver copies its own record of the source's
+exploration, built by its own coverage sweep from its replica of the
+source's units ([03 R-LAYER §1] write site 3).
+
+**What the destination bit feeds.** Where the destination is a machine's
+viewing slot: the fog cache's unexplored channel ([03 §3.3]); the minimap's
+explored test ([03 §3.8]); the placement and order-resolution known-site
+gates; and, when the mode word selects the word grid, the direct-visibility
+predicate and the sensor phase's seen probe ([03 §3.2], [03 R-VIS-01 §4]
+pass 5). Where the destination's units are path-searched on that machine, it
+also feeds the passability probe's explored gate ([04 R-PATH-01 §2]).
+
+| Mapping | Line of sight | Effect on the recipient |
+|---|---|---|
+| Mapped | any | None: the grid is already all ones. |
+| Unmapped | Permanent | Copied tiles are explored **and visible**: units on them pass the predicate and the seen probe. |
+| Unmapped | Circular or True | Copied tiles are explored but fogged; no unit is revealed. |
 
 ## Unit creation and limits
 
@@ -7018,7 +7118,8 @@ preserve these invariants:
 - Factory products occupy the primary order list; the secondary list carries
   only stockpile-weapon builds and self-destructs.
 - Automatic resource sharing runs every sixty authoritative ticks.
-- Sensor-sharing commands run every 450 authoritative ticks.
+- The explored-memory share request is sent every 450 authoritative ticks, in
+  a networked session only; the radar share sends nothing periodically.
 - Repair admission is energy-only: the energy resource term is always added to
   energy requested and is added to energy accepted only when energy carry is
   non-positive, with no metal ledger effect.
@@ -7119,6 +7220,10 @@ body and are not restated here.
   the transfer helpers do not guard, and a negative amount reverses the
   transfer · [R-SHARE-01 §2], [R-SHARE-01 §5] · static trace of the slider's
   range against its `ftol` read-back.
+- Whether the share bits survive a return to the battleroom and a second
+  battle in one network session; the all-slots initializer clears them, and
+  whether it runs on that path was not traced · [R-SHARE-01 §3] · static
+  trace of the option-record clears on the return-to-battleroom path.
 - Whether the SHARE screen's transfer lands between sub-ticks (the handler
   runs from the window message pump the main loop services between executor
   calls) — a Supported inference · [R-SHARE-01 §5] · static trace of the

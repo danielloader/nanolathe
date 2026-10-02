@@ -411,7 +411,8 @@ func (s *Session) stepSensorPhase(tick uint32) {
 		})
 	}
 	// No alliance row reaches the phase any more. Pass 1's allied disjunct
-	// cannot fire in retail [R-VIS-01 §7], and pass 4 — the one pass that used
+	// fires only for an owner whose ShareRadar bit is set, which no session
+	// built today carries [R-VIS-01 §7], and pass 4 — the one pass that used
 	// to consult a row, to separate hostiles from friends in a live-unit scan —
 	// now reads the per-side primary candidate lists, where hostility was
 	// settled once at the registry rebuild against the alliance rows economy

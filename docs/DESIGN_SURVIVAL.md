@@ -141,8 +141,8 @@ computer player then builds around its own commander as it does in skirmish.
 
 ### 4.3 One side against the world
 
-Retail never shares vision between allies — every reader tests only the local
-player's own bit [03 R-VIS-01 §7] — and shares resources only with remote
+Retail never shares current sight between allies — every reader tests one
+player's own state [03 R-VIS-01 §7] — and shares resources only with remote
 humans in a networked session [05 R-SHARE-01 §3]. Survival adds both, for the
 survivors only, in every mode:
 

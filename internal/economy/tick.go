@@ -337,8 +337,9 @@ func (s *Service) shareSensors(ref int, w *units.World) {
 			// deferred network transport is implemented [05 R-SHARE-01 §3].
 			// This counter records eligibility only; it publishes no mapping.
 			// The receive half is equally unbuilt: nothing decodes a resource
-			// packet's no-debit credit [05 R-SHARE-01 §4] or merges a received
-			// mapping grid [05 R-SHARE-01 §5-§6].
+			// packet's no-debit credit [05 R-SHARE-01 §4] or applies a mapping
+			// request, which carries no grid — the receiver copies the sharer's
+			// explored bits out of its own mapping grid [05 R-SHARE-01 §6].
 			s.SensorShareCalls++
 		}
 	}

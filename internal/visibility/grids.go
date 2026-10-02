@@ -280,7 +280,8 @@ func validPlayer(p PlayerID) bool { return p < 10 }
 // radar: every member's coverage is stamped into every member's grids, radar
 // and sonar from any member's units count for each of them, and a member's
 // jammers never blind the others. It is not retail behaviour — retail never
-// merges an ally's coverage [03 R-VIS-01 §7] — and only a Survival battle
+// merges an ally's current sight, and copies explored memory only on request
+// in multiplayer [03 R-VIS-01 §7] — and only a Survival battle
 // calls it, once at battle entry, before any coverage is published
 // (docs/DESIGN_SURVIVAL.md §4.3). Reference counts stay balanced because the
 // team is fixed for the battle: a stamp and its later removal reach the same

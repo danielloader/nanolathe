@@ -136,6 +136,7 @@ type UnitHUDView struct {
 // authoritative handle or a serialized simulation generation [I6].
 type UnitView struct {
 	InstanceID           uint64
+	AllocationSerial     uint64 // authoritative command identity; independent of InstanceID [I5]
 	Slot                 pool.Handle
 	DefID                uint16
 	Owner                uint8

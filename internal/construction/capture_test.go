@@ -41,6 +41,7 @@ func captureTransferFixture(t *testing.T) (*Service, *units.Unit) {
 // placeholder for a "cargo predicate" that turns out to be the stockpile.
 func TestTransferOwnershipCopyList(t *testing.T) {
 	svc, victim := captureTransferFixture(t)
+	oldReference := svc.World.Reference(victim.Handle)
 	victim.Health = 37
 	victim.Remaining = 0
 	victim.Kills = 9
@@ -74,6 +75,10 @@ func TestTransferOwnershipCopyList(t *testing.T) {
 	repl, ok := svc.TransferOwnership(victim, 0)
 	if !ok || repl == nil {
 		t.Fatalf("transfer of a live, differently owned, unlatched victim was refused")
+	}
+	if repl.AllocationSerial == 0 || repl.AllocationSerial == oldReference.Serial ||
+		svc.World.LookupReference(pool.UnitRef{Handle: repl.Handle, Serial: oldReference.Serial}) != nil {
+		t.Fatal("ownership transfer copied the victim's allocation serial (M2-C1)")
 	}
 	if repl.Owner != 0 {
 		t.Fatalf("replacement owner = %d, want the new owner 0", repl.Owner)

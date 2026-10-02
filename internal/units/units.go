@@ -342,12 +342,15 @@ const (
 // uses named Go fields in a slot-indexed array parallel to pool.Units and
 // does not reproduce packed bytes (I13).
 type Unit struct {
-	Handle    pool.Handle // slot index, 0 null [01 §6.1] [P0-16 §2.1]; slot number retained stale after free [P0-16 §3.4]
-	Def       *content.UnitDef
-	Owner     uint8 // 0..9 [04 §2]
-	X, Y, Z   numeric.Fixed
-	Health    int32 // current health; max from Def?
-	MaxHealth int32
+	// AllocationSerial identifies this successful creation for command references.
+	// It does not change retail slot identity [I5]; DESIGN_MULTIPLAYER §16.2 M2-C1.
+	AllocationSerial uint64
+	Handle           pool.Handle // slot index, 0 null [01 §6.1] [P0-16 §2.1]; slot number retained stale after free [P0-16 §3.4]
+	Def              *content.UnitDef
+	Owner            uint8 // 0..9 [04 §2]
+	X, Y, Z          numeric.Fixed
+	Health           int32 // current health; max from Def?
+	MaxHealth        int32
 	// LastDamageSide/Cause retain the provenance used by repair-patrol
 	// admission. Cause 5 is the unit-reclaim bite [04 R-ORD-02 §4].
 	// LastDamageSide is the attacker-side SNAPSHOT the damage intake stores
@@ -1061,6 +1064,12 @@ type World struct {
 	// slot that has not created a unit yet [05 "Player slot"][08 R-SKIR-01 §3].
 	createdCounters [10]uint32
 
+	// Allocation references use one battle-wide counter, independent of owners
+	// and publication. Pending reservations protect nested COB binders against
+	// exhaustion; they are transient and zero outside creation calls.
+	lastAllocationSerial     uint64
+	pendingAllocationSerials uint64
+
 	// COB loader for per-unit VM creation [04 §4.1][P1-I01].
 	cobFS     vfs.FSOps
 	cobLoader *cob.CachedLoader
@@ -1772,6 +1781,15 @@ func (w *World) create(def *content.UnitDef, owner uint8, x, y, z numeric.Fixed,
 	if limit == -1 {
 		limitEnabled = false
 	}
+	if err := w.reserveAllocationSerial(); err != nil {
+		return 0, err
+	}
+	serialPending := true
+	defer func() {
+		if serialPending {
+			w.pendingAllocationSerials--
+		}
+	}()
 	h, ok := w.pool.AllocForPlayerWithDef(player, defID, limitEnabled, limit)
 	if !ok {
 		// Distinguish per-def limit vs slice-full vs forced OOB; all return NULL in retail
@@ -1840,6 +1858,12 @@ func (w *World) create(def *content.UnitDef, owner uint8, x, y, z numeric.Fixed,
 		w.pool.Free(h)
 		return 0, fmt.Errorf("units: strict COB binding for %q: %w", def.UnitName, err)
 	} // per-unit VM with statics/pieces, Create run [04 §4.1][P1-I01]
+	// Binding is the last fallible boundary. Commit before any creation hook
+	// can publish a command reference (DESIGN_MULTIPLAYER §16.2 M2-C1).
+	w.lastAllocationSerial++
+	u.AllocationSerial = w.lastAllocationSerial
+	w.pendingAllocationSerials--
+	serialPending = false
 	// The ordinary common initializer and COB Create see grounded mode first.
 	// The wrapper then writes its two-bit mode argument; capture supplies the
 	// replaced unit's mode through that argument [05 R-WORK-01 §15]. Mark a
@@ -2098,6 +2122,15 @@ func (w *World) createWithForcedSlotFacing(def *content.UnitDef, owner uint8, x,
 	if limit == -1 {
 		limitEnabled = false
 	}
+	if err := w.reserveAllocationSerial(); err != nil {
+		return 0, err
+	}
+	serialPending := true
+	defer func() {
+		if serialPending {
+			w.pendingAllocationSerials--
+		}
+	}()
 	h, ok := w.pool.AllocForcedWithDef(player, defID, forced, limitEnabled, limit)
 	if !ok {
 		return 0, fmt.Errorf("units: forced slot %d rejected (OOB/occupied/limit)", forced)
@@ -2144,6 +2177,12 @@ func (w *World) createWithForcedSlotFacing(def *content.UnitDef, owner uint8, x,
 		w.pool.Free(h)
 		return 0, fmt.Errorf("units: strict COB binding for %q: %w", def.UnitName, err)
 	} // [P1-I01] VM per-unit for forced slot
+	// Binding is the last fallible boundary. Commit before any creation hook
+	// can publish a command reference (DESIGN_MULTIPLAYER §16.2 M2-C1).
+	w.lastAllocationSerial++
+	u.AllocationSerial = w.lastAllocationSerial
+	w.pendingAllocationSerials--
+	serialPending = false
 	// Save reconstruction runs the same allocator, so the same tail runs here;
 	// the restore adapter that follows writes the saved position, orientation
 	// and mode over everything it produced [08 R-SAVE-02 §6].

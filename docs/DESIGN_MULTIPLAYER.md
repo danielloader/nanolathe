@@ -1176,6 +1176,267 @@ session/replay kind, never from a payload's request to elevate itself to a
 single-player command. Online admission refuses them. Pure selection,
 page browsing and camera changes need no authoritative stream entry.
 
+#### 7.4.1 Version 1 primitives and limits
+
+The following are **Nanolathe protocol contracts**, not retail findings.
+The command schema version is `1`, negotiated outside the payload. The
+payload starts with one kind byte. Context is supplied by the admitted
+session or replay header, never by that byte or another payload field.
+
+| Notation | Encoding and accepted domain |
+|---|---|
+| `u8` / `bool` | One byte; a boolean is exactly 0 or 1. Enumerations accept only the listed values. |
+| `u16`, `u32`, `u64` | Shortest unsigned base-128 varint, limited to the named width; reject overflow and overlong encodings. |
+| `s32`, `s64` | Zigzag of the named signed width, then shortest unsigned varint. No narrowing through Go `int`. |
+| `fixed` | `s64`, the raw value of `numeric.Fixed`. Its 16 fractional bits do **not** imply a 32-bit storage width. |
+| `point` | X, Y, Z, each `fixed`, in that order. A decoder accepts the full representation. Preserve each owning command's coordinate semantics as specified below; there is no generic on-map test. |
+| `ref` | Handle `u16`, then allocation serial `u64`. Both zero is null; exactly one zero is invalid. Non-null references have handle 1..65535 and serial 1..MaxUint64. |
+| `actors` | Count `u16`, then that many non-null `ref` values in captured order. At most the agreed per-player unit limit; duplicate references or repeated handles are invalid. Empty means no actors, never implicit selection. |
+| `key` | Byte length `u16`, then 1..255 bytes of the canonical content key returned by `content.CanonicalKey`, with no NUL. Preserve bytes above ASCII literally, as that function does; keys need not be UTF-8. Encode canonical keys; refuse noncanonical input on decode. An explicitly optional key permits zero length. This length ceiling is protocol admission policy: reject content whose command-addressable keys exceed it before ready. |
+| `amount` | Four little-endian bytes of IEEE binary32. Online: finite, signed, and positive zero only (the encoder canonicalizes negative zero). Single-player replay: preserve all 32 bits, including the existing local input's exceptional values. Never round through decimal or integer amounts. |
+| `position` | `point`, InterfaceType `u8` (0 left, 1 right), HasFeature `bool`. The latter records the captured contextual feature intent. |
+
+`ResolvePos.IsWreck` and `FeatureResurrectable` have producers but no
+authoritative readers in the audited tree. They have no wire fields; the
+adapter sets them false. `HasFeature` does select a resolver branch and
+remains explicit. It does not prove a feature exists or confer visibility:
+feature work still resolves through the owning world service. In particular,
+do not replace the captured click with a new visibility test; that would
+change delayed orders and belongs to the separately gated ranked contract.
+`StagedCount` remains an internal replay-staging input, not a recorded
+human command field.
+
+Version 1 admits the existing startup unit-limit range **20..3276**. Ten
+owner slices then contain at most 32760 units, within the positive signed
+occupancy domain as well as `pool.Handle`. Definition limits are a different
+quantity. Each area list permits **65535 entries**, independently of the
+unit pool: feature targets are not unit allocations. Its count is `u16`;
+each entry is `{Target ref, Position position}`. Entries, including repeated
+entries, retain their captured order. A command permits at most **4 MiB**
+(4,194,304 bytes); check this before parsing, then every count and remaining
+byte requirement before allocating a collection. These are representation
+ceilings, not a claim that every room can run the largest battle (§17).
+An oversized gesture is refused visibly before submission; no implicit
+split, truncation, next-tick continuation or area-to-click fallback exists.
+The context-only codec checks the absolute 3276-actor ceiling; receiver
+admission checks the smaller agreed unit limit before dispatch.
+
+The largest `Order` is bounded even with maximum serials and signed
+coordinates: one ref uses at most 3+10=13 bytes; one position at most
+30+2=32; an area entry at most 45. The schema below therefore needs at most
+`1 + 2 + 3276*13 + 1 + 13 + 32 + 3 + 3 + 65535*45 = 2,991,718`
+bytes (the actor count uses two bytes at this admitted limit). All other
+kinds are smaller, including the 255-byte queue-receipt product. This
+guarantees one maximum advertised selection and maximum area list fit in
+one atomic command. U6 tests these maxima, not just small examples.
+
+#### 7.4.2 Kind and payload table
+
+Numbers are explicit protocol constants. Existing numbers are retained for
+recognition, but the codec must not derive them from `iota` or Go layout.
+`S` means supported seat schema in M2; `D` means a reserved seat schema whose
+online application is deferred to M5; `L` means local-only, with no online
+or authoritative replay payload; `R` means single-player replay only.
+All S and D commands also have a single-player replay form where the local
+operation exists. M2 can test their codec without claiming D application.
+Unimplemented contexts reject the kind before mutation.
+
+Fields below are in wire order. An `actors` field replaces every selected-
+unit fallback and the stance/cloak selection scan. Singular actors are
+non-null `ref`. A target is nullable and may belong to any player. The
+labels are the payload record names under `session.SeatCommand`; records
+contain exactly the named semantic fields, using the primitive Go types
+above (`[]pool.UnitRef` for actors, `numeric.Fixed` for fixed values).
+
+| Number | Kind / class | Fields after kind byte |
+|---|---|---|
+| 1 | SelectionReplace / L | None; reserved, reject in codecs |
+| 2 | SelectionToggle / L | None; reserved, reject in codecs |
+| 3 | SelectionClear / L | None; reserved, reject in codecs |
+| 4 | Order / S | Actors `actors`, Code `u8` 1..14, Target `ref`, Position `position`, Queued `bool`, AssignedPosition `bool`, TrackQueuedMove `bool`, Targets area list |
+| 5 | Stop / S | Actors `actors` |
+| 6 | Activation / S | Unit `ref`, Activate `bool`, Queued `bool` |
+| 7 | MobileBuild / D | Builder `ref`, Product `key`, Position `point`, Facing `u8` 0..3, Queued `bool`, AppendOnly `bool` |
+| 8 | FactoryBuild / S | Builder `ref`, Product `key`, Count `s32` (nonzero, bounded below) |
+| 9 | CancelProduction / S | Unit `ref` |
+| 10 | Stockpile / S | Unit `ref`, Count `s32` (nonzero, bounded below) |
+| 11 | BuildPage / L | None; reserved, reject in codecs |
+| 12 | GroupAssign / S | Group `u8` 1..9, Members `actors` |
+| 13 | GroupRecall / L | None; reserved, reject in codecs |
+| 14 | Stance / S | Actors `actors`, Fire `bool`, Value `u8` 0..2 |
+| 15 | Cloak / S | Actors `actors`, Cloak `bool` |
+| 16 | SelfDestruct / S | Actors `actors`, Queued `bool` |
+| 17 | NoShake / R | No fields; toggles the single-player driver. Online uses a local visual preference only. |
+| 18 | ATM / S, cheat | No fields; issuing seat's existing credit operation |
+| 19 | SetResource / S, cheat | Resource `u8` (0 metal, 1 energy), Amount `amount`; replay adds Player `u8` 0..9 **before** Resource |
+| 20 | SetLogo / R | Player `u8` 0..9, Logo `u8` 0..255; online is a local override only |
+| 21 | View / D, cheat | Player `u8` 0..9 |
+| 22 | Give / S | Player `u8` 0..9 (recipient), Resource `u8` (0 metal, 1 energy), Amount `amount` |
+| 23 | MakeSelectable / S, cheat | No fields |
+| 24 | Visibility / D, cheat | ToggleMask `u8` 0..7, ClearMask `u8` 0..7; overlapping bits retain toggle-then-clear semantics |
+| 25 | DoubleShot / S, cheat | No fields; toggle |
+| 26 | HalfShot / S, cheat | No fields; toggle |
+| 27 | Meteor / S, cheat | ArgumentPresent `bool`, Enabled `bool`; Enabled must be false when ArgumentPresent is false |
+| 28 | BigBrother / L | None; reserved, reject in codecs |
+| 29 | ShiftState / L | None; reserved, reject in codecs |
+| 30 | CancelQueuedMove / S | Sequence `u64` 1..MaxUint64, Actors `actors` |
+| 31 | Spawn / S, cheat | Unit `key`, Position `point`; still requires the owning rule's existing spawn permission |
+| 32 | BuilderOptions / S | Guard[0..2], then Patrol[0..2], six `u8` values each 0..2; replay adds Owner `u8` 0..9 first |
+| 33 | CommunityOrderDrag / D | Unit `ref`, Index `u16`, DescriptorID `s32`, CreationTick `u32`, Target `ref` (must be null in v1), Goal `point`, BuildProduct optional `key`, BuildFacing `u8` 0..3, Destination `point` |
+| 34 | CommunityKickout / S | Unit `ref`, Destination `point`; requires the existing Community feature |
+| 35..43 | ShareMetal, ShareEnergy, ShareMapping, ShareRadar, ShareAll, SetShareMetal, SetShareEnergy, ShareGift, DeclareAlliance / D | Reserved in the listed order; no v1 payload, reject even when a receiver has local helpers |
+| 44 | SharedVictory / D | Reserved; no v1 payload |
+| 45 | ShootAll / D, cheat | Reserved; no v1 payload |
+| 255 | Gameplay / R; lobby-only online | Mode name `key`; resolve through the existing registered rule sets, never a payload-defined registry |
+
+Every unlisted number is invalid. New sharing/alliance schemas require M5's
+owning service contract and a new supported command-schema version; reserving
+their numbers does not authorize guessed threshold or gift arithmetic.
+`GroupAssign` has no Preserve or filter Mask: those belong only to recall.
+Replay `Give` retains drain-time `ViewingOwner` as its source; online uses
+the stamp. Replay `SetLogo`, `NoShake`, `View`, `BuilderOptions` and `Gameplay`
+retain their existing authoritative effects and local authorization. Online
+context cannot request these replay-specific fields or bypass cheat checks.
+Signed `Give` amounts retain the researched transfer direction
+`[05 R-SHARE-01 §2]`; this schema does not silently replace them with a
+positive-only gift operation. SetResource still requires the cheat permission.
+
+Online counted production accepts -32767..-1 and 1..32767. This is a bounded
+command-input policy, not a new queue capacity; the gameplay producer still
+owns accumulation/cancellation. The local adapter normalizes Count=0 to 1
+before recording. Single-player replay accepts other nonzero signed-32
+counts except MinInt32 (whose negation is not representable), retaining
+existing valid local producers. Never coalesce or split counted commands.
+
+`AssignedPosition` accepts only a single actor, Code=2, null Target, empty
+Targets and TrackQueuedMove=false. `TrackQueuedMove` requires Code=2,
+Queued=true, null Target, empty Targets and AssignedPosition=false.
+An area list requires null outer Target and both special flags false;
+the ordinary Code and Queued retain their existing meaning. The outer
+Position remains encoded for fidelity even when that path does not use it.
+These conditions describe current gesture producers, not new gameplay.
+
+#### 7.4.3 Application and stale data
+
+Validate the complete payload and issuer first. A live foreign actor rejects
+the **whole command**, before any friendly actor mutates. A dead or
+serial-mismatched actor is stale, not foreign; remove stale actors while
+preserving the relative order of survivors. Empty survivor lists do nothing
+except `GroupAssign`: its complete surviving membership, including empty,
+replaces that group's membership among the issuer's units. Capability gates
+then run in the existing gameplay order. In particular `SelfDestruct` keeps
+its whole-selection cancellation pass before deciding whether to issue.
+Ordinary `Order` actors are a set visited in ascending handle order, as the
+current consumer sorts them; its encoder emits that order and decoder refuses
+an unsorted list. Area orders preserve actor order as well as target order.
+The local adapter deduplicates ordinary captured selections before encoding;
+the wire never accepts duplicates. Stance/cloak producers capture their
+former ascending selection scan in that same order.
+
+A stale singular actor makes that command a no-op. A stale ordinary explicit
+target makes the entire order a no-op; it must not turn into a ground click.
+For an area order, drop only stale explicit-target entries, keep targetless
+feature entries and their order, and retain area semantics even when no
+entries survive. A changed queue receipt makes the drag a no-op. Compare its
+entire receipt before interruption; no publication `InstanceID` is accepted.
+Current draggable orders are targetless, so Target must be the null ref;
+expanding that set requires a future schema and target-lifetime contract.
+
+Mobile build is D because its known-site admission needs the issuing seat's
+M5 perspective. Its receiver must derive the canonical placement centre and
+height through the owning placement service and reject mismatching input
+before queue mutation, including the owning known-site/occupancy check for
+both a new click and cancellation. Once placement is admitted, keep the
+existing repeated-click match and cancellation before insertion; a delayed
+click whose site is no longer admissible does nothing. Community drag retains interruption **before** its
+gameplay placement test once the payload, ownership and receipt are valid.
+Neither command may borrow a client's viewer or temporarily swap `LocalOwner`.
+`View` and `Visibility` likewise await M5 perspective/history application.
+
+Order and CommunityKickout retain their existing coordinate semantics,
+including targetless points outside the map; do not add build-placement or
+current-visibility gates to them. U2 audits their arithmetic/indexing for
+the full accepted representation and rejects unrepresentable intermediate
+values before mutation rather than narrowing accidentally. Spawn retains
+`spawnCommandPlacement`: X/Z cell coordinates must be within terrain bounds,
+then the existing mission position fixup; it does not acquire the ordinary
+build site's occupancy test. MobileBuild and Community drag use the placement
+predicates above, at their distinct specified points in application.
+
+Malformed encoding, forbidden kind/role, invalid scalar/combination, missing
+content key and live foreign actors reject before any gameplay service, queue,
+resource or RNG mutation. Authorized gameplay failure keeps the owning
+service's partial-work semantics. Every admitted stream entry consumes its
+position even if rejected or entirely stale. A receipt distinguishes rejected,
+no-op and applied; it does not claim every actor achieved the requested order.
+
+#### 7.4.4 Public boundary for U1, U2 and U6
+
+The following names and signatures are the shared contract; implementations
+stay in their owning packages. `pool.UnitRef` is only a value type, not a
+generation added to the allocator. `frame.UnitView` adds `AllocationSerial
+uint64` beside Slot; `InstanceID` remains presentation-cache identity.
+
+```go
+// internal/pool
+type UnitRef struct { Handle Handle; Serial uint64 }
+
+// internal/units
+// Unit adds AllocationSerial uint64. World owns the battle counter.
+func (w *World) Reference(h pool.Handle) pool.UnitRef
+func (w *World) LookupReference(r pool.UnitRef) *Unit
+func (w *World) LastAllocationSerial() uint64
+
+// internal/session
+type CommandContext uint8 // explicit constants: OnlineCommand=1, SinglePlayerReplay=2
+type SeatCommandKind uint8 // explicit numbers from the table
+type SeatCommand struct { /* Kind plus one named typed payload from the table */ }
+type CommandStamp struct { Seat uint8; Tick uint32; Position uint64 }
+type CommandReceipt struct { Stamp CommandStamp; Outcome CommandOutcome }
+type CommandOutcome uint8 // explicit constants: CommandApplied=1, CommandNoOp=2, CommandRejected=3
+func EncodeSeatCommand(context CommandContext, c SeatCommand) ([]byte, error)
+func DecodeSeatCommand(context CommandContext, payload []byte) (SeatCommand, error)
+func (s *Session) EnqueueSeatCommand(stamp CommandStamp, c SeatCommand) error
+func (s *Session) DrainCommandReceipts() []CommandReceipt
+```
+
+The tagged value has `Kind` and payload fields named exactly as the table's
+kinds (fieldless kinds need no payload record); each payload type is named
+`<Kind>Payload`, with the table's field names, widths and order. `Actors` and
+`Members` are `[]pool.UnitRef`; `Position` is `CommandPosition` containing
+`X,Y,Z numeric.Fixed`, `InterfaceType uint8`, `HasFeature bool`. Plain points
+use `CommandPoint { X,Y,Z numeric.Fixed }`. `Targets` is
+`[]CommandTarget { Target pool.UnitRef; Position CommandPosition }`.
+Replay-only Player/Owner fields are retained in their typed records, must be
+zero in online values, and are absent from online bytes. Unselected payload
+records must be zero, preventing silently discarded data. Go arrays represent
+Guard/Patrol, and `gameplay.Mode` represents the typed Gameplay choice; only
+its registered name is encoded. Resource fields use `economy.Res` with the
+explicit wire mapping above. Amount is `float32`, Count is `int32`.
+
+`Reference` returns null for an absent/dead unit; `LookupReference` returns
+nil for null, dead or mismatched references. A new World starts at counter
+zero. Allocate the serial at the successful-creation boundary before
+`OnCreate`; check exhaustion before allocation or creation RNG work.
+Creation failures leave the counter unchanged and preserve the allocator's
+existing failed-creation draws. Only the future exact snapshot restore may
+set the counter/live serials; no public setter permits reuse. A retail-save
+load creates a new session; discard prior commands and local reference maps
+even if the same numeric pair appears in that new namespace.
+
+The session's admitted kind chooses context; callers cannot pass context to
+`EnqueueSeatCommand`. It copies variable payload storage, validates stamp
+order/bounds and queues for phase 1. Stamps have seat 0..9, nonzero position,
+and a future unsealed tick; the stream driver owns grants and battle identity.
+Position gaps for non-command entries are legal; repeats/backward positions
+are not. Queue-time errors do not advance simulation, and phase-1 rejection
+still yields a receipt. Drain receipts outside the tick and deep-copy them.
+Keep `EnqueueHumanCommand` as the single-player compatibility adapter while
+migrating producers: capture explicit references/membership at submission,
+retain paused-prefix behavior only there, and call the same phase-1 payload
+implementation. Tracked-order Sequence uses the accepted stream Position;
+an unacknowledged local client sequence is never a cancellation target.
+
 ## 8. Battle configuration and identity
 
 ### 8.1 What the seats agree
@@ -1360,6 +1621,227 @@ Using explicit schemas rather than Go memory layouts is sufficient hygiene
 now; it does not commit the project to a general engine interoperability
 layer. The distinct future state-delivery architecture in §12.6 serves the
 competitive requirement and likewise promises no cross-engine adapters.
+
+### 8.6 Effective configuration contract for U5
+
+Configuration version 1 is a fully explicit value. Resolve host preferences
+once, then validate, freeze, encode and compose **that same value**. Decoding
+never calls `SkirmishConfig.ApplyDefaults` or `Normalize`: their private
+missing-value state and zero-resource defaults can change a deliberately
+selected Easy, randomized, off or zero choice. A local request adapter may
+use those functions before freezing; a decoded effective configuration may
+not. Unused rows and irrelevant fields are canonical zero values, not a
+second source of defaults.
+
+Use §7.4.1 integer/bool encodings. `text(N)` means `u32` byte length then
+valid UTF-8 without NUL, at most N bytes; lengths are checked before
+allocation. `digest` is exactly 32 bytes, `id` exactly 16. Collections below
+have a `u32` count and the stated order; reject duplicate or unsorted map
+keys. The complete configuration is at most 2 MiB. Its identity is SHA-256
+of the literal UTF-8 domain `nanolathe/match-config/1` followed by the
+following positional encoding; the domain has no trailing NUL. There are
+no optional unknown fields or trailing bytes. A field addition requires a
+new version, even if its Go zero value would appear harmless.
+
+| Order / effective field | Representation and normalization |
+|---|---|
+| 1. SessionKind | `u8`: 1 online skirmish, 2 online Survival. Campaign and single-player recording headers have separate admission; this constructor cannot create them. |
+| 2. RuleName, RuleBase | `key`, then `u8` (1 Strict 3.1, 2 Modern, 3 Community 3.9). Custom named sets use their registered base; resolve through the existing registry, reject unknown names or disagreement rather than normalizing an unknown name to Modern. |
+| 3. MapName, MapSchema | Canonical logical map `text(1024)`, selected schema `u32`. Selection is resolved by the existing map-entry code, not a client-local rescan at composition. |
+| 4. NumPlayers, Players | `u8` 2..10, then exactly that many rows in slot order (row format below). Clear rows beyond this count. At least one human; watcher admission requires WatchingAllowed. Survival keeps its attacker-last and survivor-alliance invariants and permits multiple human survivors; do not import the single-player convenience constructor's human/computer menu layout into online admission. |
+| 5. Difficulty, Location, CommanderDeath, Mapping, LineOfSight, LOSType | Six `u8`: difficulty 0..2; location 0 randomized/1 identity; commander-death 0..2; the last three 0..1. Preserve the global difficulty word while any entry consumer uses it; explicit computer difficulty is additional and routes through per-seat consumers in M5. |
+| 6. UnitLimit, SimulationSeed, CRTSeed | `u16` 20..3276, then two `u32`. The effective Community unit-limit override has already been applied. Seeds are explicit, including zero if supplied; composition uses the existing seed constructors. |
+| 7. Survival | Pace `u8` (0 normal, 1 relaxed, 2 relentless), NoAir `bool`, NoNaval `bool`. All zero for SessionKind=1; no redundant Enabled bit. |
+| 8. Mod | ID `text(255)`, Version `text(255)`, Archive `digest`. All empty/zero for base content; a selected mod requires all three. These are public mod identities, not local archive paths. |
+| 9. Content profile | Name `text(255)`, at most 64 directory pairs `{From text(255), To text(1024)}` in canonical logical-key order, then effective Units `u32`, Weapons `u32`, TNTBytes `u64`, LOSBytes `u64`. Units 1..65536, Weapons 1..MaxInt32, byte caps 1..MaxInt64; use content defaults 512/256/16 MiB/1 MiB for absent local inputs. Reject redundant identity directory mappings. These are metadata limits, never remote instructions to allocate those sizes. Validate against the locally admitted content profile before loading/allocating. Detect markers and presentation defaults are not simulation fields. |
+| 10. Community | Length `u32` and at most 16 KiB of the existing canonical `community.Features` JSON used by `Features.Digest`; that closed field vocabulary, integer validation and named `RepairRate` subrecord are the version-1 schema. Encode the resolved value, refuse unknown fields and require exact re-encoding. Strict requires exactly the zero feature value, a separate case from non-Strict complete-table validation (whose repair multipliers must be positive). Preserve that existing digest contract; source-layer spelling/provider paths are diagnostic only. |
+| 11. Mutators | Eleven `u8` step indices in this order: BuildSpeed, BuildCost, Health, Damage, AreaOfEffect, Sight, Radar, Income, Salvage, FireRate, UnitSpeed. Indices 0..7 mean ¼, ½, ¾, 1, 1½, 2, 3, 4; missing/zero Factor and 1/1 both encode 3. Apply once to the battle's catalog clone. |
+| 12. Unit restrictions | At most 65535 records `{DefinitionID u16, Unit key, Limit u8}` in ascending nonzero definition-ID order; limit 0..100. Resolve wacky/norestrict/default behavior through the researched restriction contract before freezing. Omitted means unrestricted, not zero. Verify each key against that immutable record, preserving duplicate-name identities; reject duplicate IDs and ineligible definitions. Enforcement remains after the first networked release (Q16); until then only the implemented baseline restriction selection is admissible, never silently ignore an encoded choice. |
+| 13. Permissions | CheatsAllowed `bool`, WatchingAllowed `bool`. Neither local developer state nor interface preferences add permissions. GameClosed is room admission and excluded from battle identity. |
+| 14. View | Player, Spectator, Replay view records, each `{MinimumScale u16, MaximumScale u16, FullMap bool}`; 64 ≤ minimum ≤ maximum ≤ 2048 in existing 1/1024 zoom units. Native-no-zoom-out uses minimum 1024 and FullMap=false. Enforce camera's map-dependent feasibility separately in M6; ordinary minimap is unaffected. |
+| 15. Online policies | Policy revision `u16` =1, Scheduling `u8` =1 (casual earliest-unsealed tick), Pacing `u8` =1 (normal speed/no pause), Drop `u8` =1 (§11.1), Audience `u8` =1 (§11.4). Explicit RejoinGraceMilliseconds `u32`, SpectatorDelayMilliseconds `u32`, ReplayReleaseDelayMilliseconds `u32`. No implicit timeout is invented here: the room must supply these values before ready; M6 validates service bounds and enforces them. Competitive or alternative policies are unsupported. |
+
+Each player row is positional:
+
+1. Role `u8`: 1 human, 2 computer, 3 watcher, 4 Survival scenario attacker;
+   Side `u8` (0..min(admitted side count−1,255)), Color `u8` 0..9, AllyGroup `u8`
+   0..5, Nickname `text(16)`, Metal `s32`, Energy `s32`. Finalized resources
+   are nonnegative; do not replace explicit zero with 1000. Protocol names
+   are valid UTF-8 within 16 bytes; local byte-truncated invalid names must
+   be corrected before ready, not hashed differently by platform.
+2. Participant `id`, HostSeat `u8`, ComputerKind `u8`, Difficulty `u8`.
+   Human/watcher participant IDs are nonzero and unique public opaque IDs,
+   not credentials. Others use zero. Added computers have HostSeat 0..9
+   naming an initially human row, ComputerKind 0 Classic/1 Modern, and
+   difficulty 0..2. Other roles use HostSeat=255, ComputerKind=0,
+   Difficulty=0; the scenario attacker is not an added computer counted by
+   Q23. Validate Strict's one-computer cap through the owning RuleSet;
+   reject computers in Deathmatch. No socket, token or machine name enters
+   the value.
+3. SharedVictory `bool`, then the six Guard/Patrol bytes of §7.4.2.
+   Teams initialize Q22's directed matrix from the agreed team rows; there
+   is no independently editable initial matrix. Same-team shared victory
+   and the all-in-one-team refusal remain the owning entry checks.
+4. EffectiveAIParams: at most 128 `{Key text(32), Value text(32)}` pairs in
+   lexical key order, at most 8192 encoded bytes per row. Resolve existing
+   All → difficulty → player precedence; validate names/values through
+   the controller's owning validator. Do not flatten to guessed defaults:
+   omitted and explicit values are equivalent only when that controller's
+   contract says so. Preserve applicability of effective parameters to
+   existing managers until the consumer migration proves them irrelevant.
+
+The row, pair and string bounds above are protocol admission limits, not
+retail claims. Every `SkirmishEntryOptions` member is accounted for:
+BuilderOptions becomes the row's six values; CommunitySources becomes the
+resolved table; ContentLimits and Mutators are explicit above; AIOverrides
+becomes the merged per-row values. AutomatedPlayers is false. Progress is
+local and excluded. SimArt is in frozen content identity; pointer presence
+is not a configuration distinction. Presentation profile recommendations,
+local provenance and override-layer text do not enter the identity.
+
+U5 must not import `mods/aikit` into session to validate AI parameters (that
+would cycle). Put the controller's vocabulary validator in its existing
+lower owning AI package and reuse it from both the mod and admission.
+M5 must give computers distinct effective profiles: the current shared
+`*ai.Profile` and global difficulty mutation cannot implement Q23 merely by
+adding fields to the hash. Until those consumers land, an admitted config
+can be inspected/compared but cannot start a multi-seat battle.
+
+### 8.7 Frozen content and build contracts for U4/U5
+
+Capture sources **before** compiling the catalog. `content.SimulationSources`
+owns that closed source snapshot; catalog compilation, map/schema resolution
+and rule/mutator preparation consume its read-only VFS. Then
+`content.SimulationInputs` clones the prepared catalog and freezes SimArt, all admitted unit
+scripts and authoritative models, and retains the selected map/schema and
+AI inputs. Its VFS view never falls through to live providers, including
+failed/missing lookups. Late creation consumes only this view and the frozen
+compiled objects. A second battle reads/revalidates provider bytes before
+reusing a parsed cache; path/provider metadata alone cannot validate cached
+content after a loose-file edit. The capture covers the known simulation
+resource families and the selected map's inputs, using the existing loader
+discovery order and recording misses. It exposes no arbitrary resource
+registry. Supplied catalog/SimArt values from another capture are rejected;
+neither a previously cached catalog nor a matching path is provenance for
+this capture. U4 must carry the capture identity through compilation and
+preparation. Do not reread live sources to "validate" an old compiled value
+and then continue using it.
+
+Manifest entries are `{Family u8, Key text(1024), Ordinal u32,
+Presence u8, SemanticDigest digest}` in family, ordinal, key order.
+Presence is 0 defined absence, 1 present, 2 owning-loader fallback;
+fallback entries also contain the resolved fallback key `text(1024)` (empty
+for states 0/1). Families are explicit: 1 catalog, 2 COB, 3 model,
+4 simulation art, 5 map, 6 AI, 7 extension/mutator inputs. Ordinal preserves
+record identity where names repeat. Hash domain `nanolathe/sim-content/1`,
+then entry count `u32` and entries. Diagnostic provider/path/byte-size data
+is returned separately and excluded. This manifest composes semantic family
+digests; it does not reinterpret `Catalog.Hash` as complete.
+
+| Family | Complete identity/consumer requirement |
+|---|---|
+| Catalog | Unit record-ID order, including duplicate names; weapon slots; side order; feature/movement/category definitions; build membership/download placement order; LOS and meteor definitions; compiled SightShapes from the authored visibility-mask GAF. Keep the current regression hash unchanged. U4's family encoder inventories every compiled field read by simulation, including scripts and derived model heights omitted by that hash. |
+| COB/model | Every admitted unit's resolved program and missing/fallback state, including units not yet created; parsed model hierarchy, piece origins, authoritative geometry and derived heights. Compile/bind from the frozen result. Never hash only a filename. |
+| SimArt | Canonical sequence names and defined misses, ordered frame geometry/holds and feature animation metadata consumed by simulation. Nil-versus-present cache pointers with equal effective content agree. |
+| Map | Exact selected OTA/TNT inputs and schema used by entry, plus any scenario inputs actually consumed. `Map` identity remains separately diagnosable in admission. |
+| AI | Selected profile and default-fallback state; preserve ordered directives and argument order. Runtime `ai.LoadProfile` rereads authored directives whose repeated multipliers do not commute; unordered `AIProfile.Plans` is insufficient. The frozen VFS supplies these reads without a content→ai import. |
+| Extensions/mutators | Effective Community table and the applied mutator vector, tied to the prepared clone; never apply a mutator a second time when composing admitted content. |
+
+The common build manifest uses domain `nanolathe/sim-build/1` and these
+fields in order: SourceTree `digest`; GoVersion `text(64)`; GoMod and GoSum
+digests; module count (at most 4096) and `{Path text(1024), Version text(255),
+Sum text(255)}` sorted by path/version; build tags (at most 64 keys, sorted);
+GOEXPERIMENT `text(1024)`; CGOEnabled `bool`; ordered build arguments
+(at most 64 `text(1024)`); variant count (1..16) and sorted records
+`{GOOS key, GOARCH key, ArchitectureLevel key, ToolchainArchive digest}`.
+Whole manifest ≤1 MiB. Platform variant differs within that common manifest,
+not between common build identities. Explicitly include installer settings
+such as readonly modules, trimpath, buildvcs and ldflags; clear uncontrolled
+environment inputs as the installer already does.
+
+SourceTree hashes the canonical build-source inventory: relative UTF-8 paths
+in lexical order, file kind/executable mode, lengths and file bytes, including
+all actual build inputs and dependency replacements. The stamp generated
+from that inventory is excluded to avoid self-reference; no other source
+file may be silently excluded because it is dirty or untracked. Installer
+archive hashes and revision are provenance diagnostics. A release manifest
+is stamped only from the pinned verified source; a development manifest
+must be an explicit common source inventory, never an inferred clean flag.
+Missing/dirty/unstamped release provenance rejects normal-room admission.
+
+Binary hashes and native-equivalence evidence are **detached attestations**
+keyed by common build digest and variant. They cannot be embedded into a
+manifest that their own binary contains. The release gate supplies this
+evidence after building/testing all admitted variants; its absence prevents
+normal release admission. M2 does not create a signature/attestation service
+or claim a client-reported digest proves integrity.
+
+### 8.8 Public identity API
+
+These values are package-owned, with private effective storage and copying
+constructors/accessors. No method returns a mutable map/slice alias into a
+frozen value. Catalog/model pointers follow the existing immutable-definition
+convention; instances and mutator transforms use per-battle clones.
+
+```go
+// internal/content
+type SimulationSources struct { /* private immutable captured source set */ }
+func CaptureSimulationSources(fs vfs.FSOps, mapName string) (*SimulationSources, error)
+func (s *SimulationSources) Filesystem() vfs.FSOps
+type SimulationInputRequest struct {
+    Catalog *Catalog // prepared once under the selected rules/mutators
+    SimArt *SimArt   // optional precompiled value, validated against snapshot
+    MapOTA, MapTNT string
+    MapSchema uint32
+    AIProfile string
+    CommunityDigest [32]byte
+    Mutators Mutators
+}
+type SimulationInputs struct { /* private frozen storage */ }
+func FreezeSimulationInputs(sources *SimulationSources, r SimulationInputRequest) (*SimulationInputs, error)
+func (i *SimulationInputs) Digest() [32]byte
+func (i *SimulationInputs) Manifest() []SimulationInput
+func (i *SimulationInputs) Catalog() *Catalog
+func (i *SimulationInputs) SimArt() *SimArt
+func (i *SimulationInputs) Model(key string) (*model.Model, bool)
+func (i *SimulationInputs) Filesystem() vfs.FSOps
+
+// internal/session
+type MatchConfigRequest struct { /* public positional fields of §8.6, no defaults */ }
+type EffectiveMatchConfig struct { /* private validated copy */ }
+func ResolveMatchConfig(r MatchConfigRequest) (EffectiveMatchConfig, error)
+func EncodeMatchConfig(c EffectiveMatchConfig) ([]byte, error)
+func DecodeMatchConfig(payload []byte) (EffectiveMatchConfig, error)
+func (c EffectiveMatchConfig) Digest() [32]byte
+func ValidateMatchInputs(c EffectiveMatchConfig, inputs *content.SimulationInputs) error
+func NewAdmittedSkirmish(inputs *content.SimulationInputs, c EffectiveMatchConfig, progress content.Progress) (*Session, error)
+
+// internal/version
+type BuildManifest struct { /* public positional fields of §8.7 */ }
+func CurrentBuildManifest() (BuildManifest, error)
+func EncodeBuildManifest(m BuildManifest) ([]byte, error)
+func DecodeBuildManifest(payload []byte) (BuildManifest, error)
+func (m BuildManifest) Digest() ([32]byte, error)
+```
+
+`SimulationInput` is the typed manifest record of §8.7: Family and Presence
+are `uint8`, Key and FallbackKey strings, Ordinal `uint32`, SemanticDigest
+`[32]byte`; diagnostic provenance has a separate accessor. Configuration
+fields/types mirror §8.6's explicit names and widths, with named `MatchSeat`,
+`MatchView`, `MatchPolicies`, `MatchMod`, `MatchContentProfile` records and
+`[]AIParam` per row. Codecs own validation and return no partially valid
+value. Resolve/decode establish **schema validity** (closed values, canonical
+form and known registered rules). `ValidateMatchInputs` then establishes
+**admission validity** against the same frozen content: map/schema, side
+ordinals, definition restrictions, content profile, effective rule/mutator
+inputs and supported consumer policies. `NewAdmittedSkirmish` must call it
+before allocating a world or consuming either RNG; a hash match alone is not
+admission. `Digest` for effective configuration/content is infallible because
+construction already validated them; the public build request remains
+fallible. Identity comparisons in U6 report protocol, build, content, map,
+rule, mod and configuration mismatches separately. M2's constructor refuses
+multi-seat execution until M5's entry/consumer gate is satisfied; do not
+silently compose it through today's single-human constructor.
 
 ## 9. State digest and desync
 
@@ -2152,11 +2634,44 @@ fairness or integrity of rated matches.
 
 ### 16.2 M2 preparation and work units
 
-**Status: design preparation, 2026-10-02.** M1's native matrix passed after
-the v3 reference-test correction (§16.1), opening M2's milestone gate. U0's
-exact schemas and API contracts still precede implementation dispatch.
-This section records the audit, contracts and sequencing; it does not claim
-a completed codec, identity or multi-seat session.
+**Status: U0 contracts published, 2026-10-02.** M1's native matrix passed
+after the v3 reference-test correction (§16.1), opening M2's milestone gate.
+§7.4.1–§7.4.4 publish the command schemas, size proof, stale-reference rules
+and allocation/command APIs; §8.6–§8.8 publish configuration, frozen-input
+and build contracts. U1 allocation references are implemented as described
+below. No M2 codec, battle-input identity implementation or multi-seat
+session is claimed here.
+
+**U1 allocation references, 2026-10-02.** Both successful creation paths
+assign a battle-wide serial after the fallible COB bind and before creation
+callbacks. Nanoframes, forced-slot reconstruction and ownership-transfer
+replacements participate in the same sequence; failure does not consume it.
+Slot reuse rejects the old command reference while internal raw-slot damage
+keeps its retail aliasing. Committed frames copy the serial independently
+of the publication-only `InstanceID`, including reuse between publications.
+
+Near counter exhaustion, in-flight creations reserve capacity before pool
+allocation, so a nested binder cannot consume an outer creation's final
+serial. Success commits and releases that reservation before subsequent
+callbacks; failure only releases it and retains any existing allocator RNG
+draws. The reservation count is transient call state, zero outside creation;
+M3 must inventory the successful counter and each unit's serial, not this
+temporary capacity accounting. M8 exact restore is still future work.
+
+The three public reference/counter accessors have lifecycle contract tests;
+U2 command admission and M3 serialization are their staged consumers.
+No deadcode-baseline exception is required. U1 does not yet migrate human commands to serial validation and does not
+expand the existing partial fingerprint to include the new metadata.
+
+U1's simulation-cost check compared `2691a6e0` with `0ed0e5e8` in two
+alternating pairs: Modern, three 250-unit armies, seed 7, two runtime workers,
+1,200 warm-up and 300 measured ticks, profiling disabled. Process-CPU medians
+were 2.298 ms/tick before and 2.197 after; no regression was observed, and
+the short samples do not establish a speedup. Scene metadata, initial/warm/
+final fingerprints, both RNG draw counts and every census sample matched.
+The final census had 725 live units and 6,218 features, with seven burning,
+eleven active builds and 53 deaths. All existing fingerprint locks remain
+required by the landing gates; no expected fingerprint was changed for U1.
 
 M2 makes the command boundary explicit and the battle inputs identifiable.
 It does not enable a network battle: perspectives, multiplayer sharing,
@@ -2178,8 +2693,8 @@ their own viewer state, and that substitution cannot implement §6.
 | M6/M7 service | Versioned payload and identity primitives | Live start/pacing/reconnect state machines, readiness transport and view-policy enforcement at the online UI boundaries |
 
 Q22–Q25 are approved, so no product decision among these four blocks M2.
-U0 still has to publish exact schemas and APIs; policy approval is not a
-completed encoding or implementation. Unsupported later-milestone commands
+U0's published schemas and APIs are contracts, not a completed encoding or
+implementation. Unsupported later-milestone commands
 remain explicitly unavailable rather than falling through to a local path.
 
 **Code ownership and sequence.** The table identifies implementation
@@ -2201,7 +2716,7 @@ already editing those files.
 | **U5 Build and configuration identities** | U0 | Explicit versioned effective configuration, build manifest and match view fields. Session owns match composition; `internal/version` and installer tooling own build provenance. Cover `SkirmishConfig`, every `SkirmishEntryOptions` field, match/mod selection and per-seat inputs. No relay or gameplay registry is introduced. |
 | **U6 Codecs and admission integration** | U2–U5, final schemas | Session owns command payload codec; `internal/netproto` holds only the agreed leaf wire primitives/identity values needed at this milestone. Join build/content/map/rule/mod/configuration comparisons, with distinct mismatch diagnostics and hostile-input tests. Live relay messages and transport remain M6/M7. |
 
-**Public API boundary to freeze in U0.** The shared reference is a value
+**Public API boundary (U0).** The shared reference is a value
 containing a `pool.Handle` and a nonzero `uint64` allocation serial, exposed
 by the unit world and copied into the committed frame. Session owns the
 typed seat-command value, its payload encoder/decoder and the adapter that
@@ -2210,10 +2725,10 @@ never accepts that metadata inside the payload. The local adapter supplies
 equivalent metadata without network dependencies. Content exposes an
 immutable admitted-input value and its digest/diagnostic manifest;
 composition consumes that same value. Configuration and build values have
-separate canonical encoders and digests. Exact exported names, signatures
-and field tables are U0's deliverable, reviewed before dependent dispatch;
-this boundary description is not permission for parallel agents to invent
-incompatible APIs.
+separate canonical encoders and digests. Exact names, signatures and fields
+are in §7.4.4 and §8.8, backed by their preceding wire tables. Dispatches
+cite those contracts and exclusive file ownership; do not invent alternate
+reference types, identity registries or codecs in parallel.
 
 **Contracts.**
 

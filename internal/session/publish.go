@@ -266,6 +266,7 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 			*vp = frame.UnitView{
 				InstanceID:        publication.unitIdentity(u),
 				Slot:              u.Handle,
+				AllocationSerial:  u.AllocationSerial,
 				Owner:             u.Owner,
 				X:                 u.X,
 				Y:                 u.Y,

@@ -7,12 +7,14 @@ Only player commands travel: a relay puts them in one order, tells every
 client which tick each one runs on, and decides how far the battle may
 advance. The model is **relayed deterministic lockstep**.
 
-**Status: adopted 2026-10-01; not yet implemented.** The maintainer accepted
+**Status: adopted 2026-10-01; M1 implemented with native-platform checks pending.** The maintainer accepted
 this design and decided its original questions on 2026-10-01, after two
 revisions of the 2026-09-30 proposal. Networking, replays and the multiplayer
 lobby are in scope (ARCHITECTURE §1), and implementation is authorized in the
-order of §16, each milestone behind the one before it. Nothing here is built
-yet. Measurements quoted here were taken on 2026-09-30 and 2026-10-01 against
+order of §16, each milestone behind the one before it. §16.1 records M1's
+implementation and verification; §16.2 prepares M2 without opening its
+implementation gate. The original audit measurements were taken on
+2026-09-30 and 2026-10-01 against
 main `193abfde`. Co-op is the first delivery, not the architecture's limit:
 an eventual competitive mode is required. The interoperability target is
 Nanolathe-to-Nanolathe; other engines are deferred without a commitment to
@@ -1051,6 +1053,41 @@ to the host that builds them:
   its nodes at enqueue. With sequences numbered from stream position (§7.2),
   the client names the stream position its receipt reported.
 
+**Implementation audit (2026-10-02, `fc032410`).** These are observations
+about Nanolathe's current code, not additional retail findings. They refine
+the schema and migration work in §16.2:
+
+| Input or state | Current consumer | Required M2 treatment |
+|---|---|---|
+| Order position | `orders.ResolvePos` contains three fixed coordinates, `InterfaceType`, `HasFeature`, `IsWreck` and `FeatureResurrectable`; area orders carry another such value per target. | The schema accounts for every member, including any presently unused member. Separate captured gesture intent from claims about the world. Audit the latter's producers and resolution branches before deciding which are transmitted or recomputed; do not introduce a current-visibility requirement under the guise of decoding (§7.2). |
+| Mobile construction | `commands.go` writes the supplied height into the new order and handles repeated-site cancellation before insertion. `AppendOnly`, `Queued` and `Facing` also change the result. | Carry each intent field. Validate the site/height through the owning placement contract before any unauthorized payload can purge or cancel orders. Preserve the researched repeated-click and rule-selected facing behavior. |
+| Community queue drag | The receipt includes unit, list index, descriptor, creation tick, target, old goal, build product and facing; the command adds a publication `InstanceID` and new destination. | Replace the unit's publication identity with an allocation serial; retain the queue receipt's complete identity checks. Audit its target reference as well. A stream position alone cannot identify an order produced by a script or planner. |
+| Group assignment | `applyHumanGroup` scans the owner's units and reads selected flags through `hud.AssignGroup`. | Capture the complete replacement membership before enqueue, including the empty set that clears the group. Preserve the operation's clearing of the same group on nonmembers. Recall/filter/Shift remain local. |
+| Resource commands | `SetResource` and `Give` carry binary32 amounts and explicit player fields. `Give` currently debits `ViewingOwner`; `SetResource` may name another player. | The online source is the stamped seat; a gift still names its recipient. Preserve binary32 values explicitly in the schema, with a documented finite-value and range policy. Keep the single-player source/target behavior. Integer-only encoding of amounts would lose existing inputs. |
+| Local command metadata | Enqueue supplies `Sequence` and `DueTick`, copies actor/area slices, and drains due commands in queue order, including the single-player paused prefix. | Keep a local enqueue adapter and a distinct stamped-entry adapter. Neither payload may author its seat, due tick or sequence. Both reach one phase-1 implementation; the online adapter cannot invoke the paused drain. |
+| Interface flags | Selection and BigBrother use selected/visited flags; build pages use their own status-word fields. `Unit.Group`, selectable/CTRL_F flags and readiness inputs have other consumers. | Inventory each bit before moving it. Remove only interface-owned fields; preserve group, eligibility and gameplay flags. Update the local selection from committed state, including transport readiness, death and reuse. |
+
+The schema must distinguish a malformed or unauthorized payload from a
+well-formed command whose actors have since died. It specifies rejection
+granularity for each kind before implementation: stale references never
+become references to replacement units, and a stale explicit target never
+silently becomes an intentional targetless order. Codec rejection and
+authorization rejection occur before order queues, resources or either RNG
+can change. Once an authorized command reaches an owning gameplay service,
+that service retains its researched ordering and failure behavior; for
+example Community order drag can interrupt movement before its placement
+test (DESIGN_COMMUNITY_PATCH §7; `[community patch engine behavior §5.11]`).
+
+**Single-player replay context.** The online classification is not a list
+of everything a single-player recorder may omit. `NoShake` changes the
+single-player CRT draw schedule, and `Gameplay` can change its rule set;
+both must be reproducible in M4. U0 publishes explicit single-player replay
+schemas for such inputs, including any retained target-player fields that
+online authorization forbids. Their decoding context comes from the agreed
+session/replay kind, never from a payload's request to elevate itself to a
+single-player command. Online admission refuses them. Pure selection,
+page browsing and camera changes need no authoritative stream entry.
+
 ## 8. Battle configuration and identity
 
 ### 8.1 What the seats agree
@@ -2014,6 +2051,209 @@ play is required eventually and has explicit additional mechanisms and gates.
 Co-op validates the shared simulation and transport; it does not certify the
 fairness or integrity of rated matches.
 
+### 16.2 M2 preparation and work units
+
+**Status: design preparation only, 2026-10-02.** M1's native Linux/amd64
+and Windows/amd64 vector checks remain pending (§16.1). M2 implementation
+starts after those checks pass. Cross-compilation and the Rosetta locks do
+not substitute for execution on those targets. This section records the
+code audit, contracts and sequencing that can be prepared before that gate;
+it does not claim a completed codec, identity or multi-seat session.
+
+M2 makes the command boundary explicit and the battle inputs identifiable.
+It does not enable a network battle: perspectives, multiplayer sharing,
+kind-3 lifecycle work and the multi-seat harness still belong to M5. A
+command kind whose application requires that work remains unavailable until
+its dependency lands. Tests must not make it appear implemented by temporarily
+changing `LocalOwner` or `ViewingOwner` around dispatch: services retain
+their own viewer state, and that substitution cannot implement §6.
+
+**Decisions and dependency gates.**
+
+| Dependency | M2 work that can be specified independently | Work that remains gated |
+|---|---|---|
+| M1 native-platform checks | Audit, schema design and work-unit contracts | All M2 implementation and its acceptance claim |
+| Q22 alliance representation | Declaration intent and receiver role/team checks from §7.1 | Applying declarations, initial matrix representation and shared-victory evaluation |
+| Q23 computer seats | Fixed host-seat attribution, existing Classic/Modern choice, enumeration of difficulty consumers | Final admitted computer-seat configuration, cap, Deathmatch eligibility and difficulty encoding; no implicit default chooses the answer |
+| Q24 history scope; Q25 share timing | Classify share requests and identify required permission checks | History storage/reset and application scheduling; no guessed delay or shared-history model |
+| M5 perspectives | Serial references, codecs, explicit actor lists and checks that need only the issuing seat | Correct online `View`, visibility refresh, known-site admission and all other perspective-dependent application |
+| M6/M7 service | Versioned payload and identity primitives | Live start/pacing/reconnect state machines, readiness transport and view-policy enforcement at the online UI boundaries |
+
+Q23 therefore affects M2 completion even though none of Q22–Q25 blocked M1.
+Configuration cannot be called complete while its computer difficulty and
+admission policy are placeholders. Schemas for undecided fields remain
+unpublished, or explicitly unsupported by the implementation; zero must not
+silently mean the recommended choice. The four questions remain in §15 for
+the maintainer. This preparation selects none of them.
+
+**Code ownership and sequence.** The table identifies implementation
+surfaces, not concurrent permission to edit every file in a directory.
+Each dispatch enumerates exact files, including tests and caller migrations,
+after its dependencies land. The landing owner alone edits this design,
+I5/I6, ARCHITECTURE and shared gate files. Shared `session` and client files
+make U2, U3 and U6 sequential. U4 and U5 may be independent after U0, with
+their composition/installer integrations landed separately from any unit
+already editing those files.
+
+| Unit | Depends on | Delivers and principal surfaces |
+|---|---|---|
+| **U0 Schema and consumer inventory** | M1 gate for implementation dispatch | Finish §7.4's field-by-field schemas and §8's effective-input inventory in this document before a codec is written. Enumerate all 35 existing command kinds plus proposed new kinds; distinguish local, lobby, single-player replay, supported seat and deferred seat kinds. Trace every field to its producer and consumer, set stable explicit numbers/bounds and publish the API contract for later units. |
+| **U1 Allocation references** | U0 | Creation serials at both successful creation paths in `internal/units/units.go`, committed references in `internal/frame/frame.go` and `internal/session/publish.go`, and focused lifecycle tests. Keep presentation identities for their existing cache purpose. Do not alter internal pool references. |
+| **U2 Explicit commands and authorization** | U1, U5 | Seat/stream metadata at the session input boundary, explicit actor and target references, role/cheat/rule checks from the agreed configuration, per-kind validation and local adapter. Own `internal/session/commands.go` and its command helpers/tests; migrate command producers while preserving single-player behavior. Perspective-dependent cases stay gated as above. |
+| **U3 Local interface state** | U2 | Selection, visited flags, build-page state, BigBrother/Shift and local logo overrides move to the client. Migrate `internal/hud` adapters, the unit readiness sweep, session publication and `cmd/nanolathe` input consumers together. Keep authoritative group assignment and online shake draws. Masked-fingerprint evidence and local interaction checks are part of this unit. |
+| **U4 Frozen simulation content** | U0 | Complete content identity and diagnostic inventory owned by `internal/content`, with composition integration in `internal/session/composition.go` and the script/model creation path. Freeze every later simulation resource read; keep `Catalog.Hash` unchanged. Test a resource changed after admission and a never-yet-created unit. |
+| **U5 Build and configuration identities** | U0; Q23 for final configuration | Explicit versioned effective configuration, build manifest and match view fields. Session owns match composition; `internal/version` and installer tooling own build provenance. Cover `SkirmishConfig`, every `SkirmishEntryOptions` field, match/mod selection and per-seat inputs. No relay or gameplay registry is introduced. |
+| **U6 Codecs and admission integration** | U2–U5, final schemas | Session owns command payload codec; `internal/netproto` holds only the agreed leaf wire primitives/identity values needed at this milestone. Join build/content/map/rule/mod/configuration comparisons, with distinct mismatch diagnostics and hostile-input tests. Live relay messages and transport remain M6/M7. |
+
+**Public API boundary to freeze in U0.** The shared reference is a value
+containing a `pool.Handle` and a nonzero `uint64` allocation serial, exposed
+by the unit world and copied into the committed frame. Session owns the
+typed seat-command value, its payload encoder/decoder and the adapter that
+accepts externally stamped seat/tick/stream-position metadata. Encoding
+never accepts that metadata inside the payload. The local adapter supplies
+equivalent metadata without network dependencies. Content exposes an
+immutable admitted-input value and its digest/diagnostic manifest;
+composition consumes that same value. Configuration and build values have
+separate canonical encoders and digests. Exact exported names, signatures
+and field tables are U0's deliverable, reviewed before dependent dispatch;
+this boundary description is not permission for parallel agents to invent
+incompatible APIs.
+
+**Contracts.**
+
+- **M2-C1 Serial lifetime.** One counter per battle, never per owner or
+  publication. Each successful ordinary, nanoframe, transfer or forced-slot
+  creation gets a distinct nonzero serial before the successful creation
+  notification can publish it. Failed creation consumes none. Audit both
+  allocator bodies and their bind-failure paths; this requirement does not
+  undo draws already taken by the existing failed allocator. Exhaustion
+  fails deterministically before a serial can wrap. Tests cover immediate
+  reuse between publications, a failed COB bind, forced-slot creation and
+  transfer. The counter and each live serial become M3 state inventory;
+  M8 preserves them exactly. A retail save has no serial: a new session
+  reconstructed from it obtains a new reference namespace and cannot
+  accept commands retained from the prior session.
+- **M2-C2 Attribution.** The stamped seat, not a payload owner or local
+  viewer, controls actor authorization and seat-owned mutations. Reject a
+  watcher, removed seat, foreign actor and forbidden kind at the receiver.
+  Cheats require the agreed online permission in every rule set, regardless
+  of developer state. Retain existing single-player cheat and `Give`/`View`
+  behavior through the local adapter. No command kind can fall through from
+  an unsupported online case to the legacy local path.
+- **M2-C3 References and order.** Never resolve a serial mismatch to the
+  slot's new occupant. For each actor list and target list, U0 specifies
+  duplicate, empty-list, stale-member and stale-target behavior and the
+  order retained for processing. Sorting a set for encoding is not harmless
+  when order changes formations, queue mutation or RNG calls. Stream
+  positions supply tracked-order sequences; pure local UI events do not
+  appear in the replay/online stream. Test cancellation after other seats'
+  entries and distinguish a local pending receipt from the accepted stream
+  receipt. Preserve deep copies at enqueue.
+- **M2-C4 Validation boundary.** Decode, validate schema and authorize
+  before gameplay mutation. Reject unknown kinds/versions, extra bytes,
+  invalid booleans/enums, overflowing integers, noncanonical encodings and
+  counts above the published bound before allocating from them. Publish
+  signedness, binary32 amount representation, string encoding, fixed-point
+  widths and per-kind argument bounds. Codec and authorization rejection
+  leave queues, resources, RNG and simulation state unchanged; consuming
+  a rejected entry still consumes its stream position. A gameplay service's
+  researched partial work is not rolled back (§7.4).
+- **M2-C5 Command-size proof.** U0 derives a worst-case payload size from
+  the admitted unit capacity and all variable-length fields, including area
+  targets and the maximum serial width. The configured maximum selection
+  must fit. A kind must not split implicitly into separately scheduled
+  commands: that can change group centres, repeated-click cancellation and
+  same-tick order. If limits or atomic fragmentation are necessary, specify
+  them and their tests before admitting that configuration. Byte limits are
+  Nanolathe protocol limits, not retail constants.
+- **M2-C6 Local interface.** A local state value is keyed by allocation
+  reference, so reused handles cannot inherit selection or a build page.
+  Selection readiness uses the existing predicate's complete inputs,
+  including carrier readiness. Group assignment still writes the owning
+  seat's authoritative group numbers; group recall changes only local
+  selection. BigBrother's timing follows simulated ticks, not renderer
+  frames. Preserve the phase-2 readiness clear and the subsequent
+  BigBrother sweep-tail observation, including a unit that becomes unready
+  and ready again before tick end. Deliver sufficient ordered facts to
+  advance local state across every intervening tick when a host presents
+  only the latest publication of a catch-up batch. Sampling that latest
+  frame alone is insufficient. Test transient readiness, skipped display
+  frames and handle reuse across the batch; the local result must equal
+  consuming every boundary. Online `NoShake` affects presentation only; single-player keeps
+  its existing draw behavior. Record how retained local UI state is handled
+  across a retail save/load, without putting it in the multiplayer digest.
+- **M2-C7 Fingerprint evidence.** Name the exact interface bits moved,
+  enumerate their readers/writers and compare baseline/candidate state with
+  only those bits masked. Keep group, selectable, ownership and other
+  gameplay bits unmasked. Do not update constants from unexplained output.
+  Allocation serials are new metadata for M3, not grounds to expand the old
+  partial fingerprint and obscure this comparison. Exercise explicit
+  commands with different local selections; no selection fallback may
+  affect an admitted seat command.
+- **M2-C8 Frozen content.** Digest the effective definitions in their
+  semantic order, all admitted scripts, model geometry/derived heights,
+  SimArt sequences and holds, relevant map/AI/extension inputs and applied
+  mutators. Record defined missing-input fallbacks. The value consumed at
+  later creation is the one admitted. A global model cache keyed only by
+  provider/path metadata (`loadAuthoredModel` today) is insufficient proof
+  of this: a loose file can change without a new key. Test both an edit
+  during a battle and a second admitted battle after that edit; the first
+  retains frozen content, the second sees the new identity. Separate local
+  provenance paths from identity so identical inputs on different installs
+  agree. Preserve existing catalog regression hashes.
+- **M2-C9 Effective configuration.** Canonicalize once, validate, freeze,
+  and hash the exact value composition consumes. Equivalent default
+  spellings normalize to the same value; each effective difference changes
+  identity. Version and domain-separate every identity encoding, frame
+  variable-length fields unambiguously, and encode ordered collections
+  explicitly. Reject unknown required fields instead of silently dropping
+  them. The field inventory below is a review checklist, not a license to
+  hash Go memory or `NormalizedBytes`.
+- **M2-C10 Build and admission.** The common release manifest identifies
+  source contents, dependency/toolchain inputs and simulation-relevant build
+  choices, and enumerates tested platform variants. GOOS/GOARCH-specific
+  binary hashes are variant evidence, not a reason to reject another
+  admitted variant of that same release. An unstamped or dirty build fails
+  normal admission; a development room needs an explicit common manifest.
+  A revision or `version.Profile` string alone is never a substitute.
+  Report protocol/build/content/map/rules/mod/configuration mismatches
+  separately. A later initial-state digest cannot replace these checks.
+- **M2-C11 Single-player replay inputs.** Account for every local command
+  that changes authoritative state, RNG or subsequent commands, even where
+  §7.1 makes it local or lobby-only online. In particular replaying
+  single-player `NoShake` and `Gameplay` must retain their effects. Context
+  validation rejects the same bytes in an online battle before dispatch;
+  no payload-supplied mode can bypass that check. M2 tests the boundary and
+  the single-player application equivalence; M4 records and replays it.
+
+**Effective-input inventory, starting from `fc032410`.** U0 adds every
+newly discovered composition or later-creation input to this table. Tests
+change one effective field at a time and also cover equivalent defaults.
+
+| Input family | Required inventory and treatment |
+|---|---|
+| `SkirmishConfig` | Gameplay selection, map, occupied seat rows in slot order, controller/side/colour/team/nickname/resources/Classic-or-Modern choice, difficulty (Q23), location mode, commander-death mode, mapping/LOS/type, unit limit, both seeds and every Survival option. Resolve private defaulting bookkeeping before encoding; it is not a wire field. State explicitly whether unused rows are rejected or canonicalized away. |
+| `SkirmishEntryOptions.BuilderOptions` | Initial six-value preference for each applicable seat; runtime changes remain seat commands. No receiver reads its own host preference at composition. |
+| `CommunitySources`, match/mod selection | Effective rule table and digest, base/name, content profile, mod identity/version/archive digest and mutators, with deterministic precedence. Provider paths and diagnostic provenance stay separate. |
+| `ContentLimits` | All effective table sizes and read caps. Admission must use the agreed limits even where a particular small fixture composes identically under two values. |
+| `AIOverrides` | Resolve All, difficulty and per-player layers into the effective canonical parameters each computer consumes. Check both Classic/Modern applicability and every difficulty consumer; source strings alone do not prove effective equality. |
+| `SimArt` | Digest the compiled content, including a defined missing lookup, not a pointer or whether a host passed a precompiled value. Precompiled and freshly compiled values must agree when their effective contents agree. |
+| `AutomatedPlayers`, `Progress` | Online automated-player override is fixed false; progress callbacks are excluded after confirming they observe only loading. Neither an arbitrary function identity nor a host default enters the hash. |
+| Additional online fields (§8.1) | Fixed computer host seats, initial team/shared-victory inputs, restrictions, cheat/watching permissions, scheduling/drop/pacing and audience policies. Q22–Q25 remain explicit dependencies wherever representation or application depends on them. |
+| Seat assignment | Encode the agreed human row assignment using protocol identities; keep reconnect secrets and ephemeral socket/local-host details out of the public configuration, digest and replay. |
+| View policy (§8.4) | Explicit tactical scale bounds and full-map permission, with declared player/spectator/replay applicability. The native-1× preset is common policy; ordinary minimap and local graphics preferences keep their existing contracts. M2 stores/compares the fields; M6 enforces all input routes and tests captures. No common world-viewport cap is chosen here. |
+
+**Acceptance.** Run the affected contracts during each unit, then the
+whole-tree gates before and after landing. M2 final acceptance requires U0's
+published schemas, all supported kinds' round-trip and bounded fuzz tests,
+receiver tests that bypass the UI, stale-reference lifecycle tests, the
+masked-state proof, and one-field identity/missing-input tests. Check every
+script/model/SimArt mismatch before composition is admitted, including an
+unbuilt unit. Simulation changes use the displayless benchmark; U3's
+presentation changes additionally require both renderer captures and local
+input checks, per ARCHITECTURE §6. Report unsupported/deferred commands and
+the Q23/native-platform gates separately from tests that actually passed.
+
 ## 17. Verification
 
 - **The multi-seat harness.** One test process composes the same battle N
@@ -2131,7 +2371,7 @@ invent a retail rule while implementing an independent transport feature.
 | O14 | Fair admission of delayed direct targets, radar contacts and area orders | Research the existing contracts, specify bounded authoritative observation evidence and validate against the scheduler; any gameplay departure follows DESIGN_GAMEPLAY_RULES. |
 | O15 | Ranked integrity level: full-state lockstep with verified results, or filtered state delivery | An explicit product decision before advertising ranked guarantees; prototype and budget the different presentation/state protocol if required. |
 | O16 | Whether competitive view policy also equalizes world viewport coverage | Decide whether resolution/aspect advantages are acceptable; otherwise define a common world-area bound and test all view/resize routes. No numeric viewport cap is assumed. |
-| O17 | Final wire field bounds, start/pacing/reconnect state tables and supported build manifests | M2 schemas and hostile/state-machine tests; implementation must not infer these from Go layouts or sender UI behavior. |
+| O17 | Final wire field bounds, start/pacing/reconnect state tables and supported build manifests | M2 publishes command/configuration schemas and build manifests (§16.2), with codec and hostile-input tests. M6 owns live start/pacing state tables; M7 owns reconnect tables and their state-machine tests. Implementation must not infer any of these from Go layouts or sender UI behavior. |
 | O18 | Retail's two-argument distance routine: the rounding sequence read on 2026-10-01 (L1), and the retail forms of the other library calls wherever a stored value could change `[01 R-DET-01 §3]` | **Settled 2026-10-01** for the distance routine: `[01 R-DET-01 §7]`, from two independent traces, its exits included. Still open: a manual retail observation that would confirm it (a reach test at an offset such as 20 by 99, where the routine's truncated distance is 100 and the exact one 101), and the retail forms of the other library calls. |
 | O19 | How often the effect pool fills in play under each rule set, and whether the 4,096-event window is ever reached | **Settled 2026-10-01** by the census in L9: only the Strict benchmark fight fills its pool, no existing lock moves, and the event window peaks at 48 of 4,096. The path benchmark's players are all allied, so nothing there fires. |
 | O20 | Machine scope of end state, respawn visibility and elimination draws | **Settled** by `[08 R-SKIR-01 §3]` `[08 R-ENTRY-01 §7]` `[08 R-CAMP-01 §9]` `[05 R-ECO-01 §1]`: per-machine countdown/latch, complete machine-grid rebuild, and one local CRT draw per elimination on each machine. Q24 leaves the history projection open; transport enumeration and remaining writer/caller scope questions stay in research. |

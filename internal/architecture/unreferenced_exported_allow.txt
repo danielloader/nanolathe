@@ -21,4 +21,3 @@ internal/cob.WeaponSecondary  # iota member; removal moves WeaponTertiary, which
 internal/frame.EventKindInvalid  # iota anchor of the event kind enum
 internal/render.FogKindNone  # iota anchor of FogKind
 internal/session.PostBattleControlNone  # iota anchor of PostBattleControl
-internal/sim/numeric.AngleUnitsTurn  # documents the 65,536-per-turn angle scale [04 §5.1]

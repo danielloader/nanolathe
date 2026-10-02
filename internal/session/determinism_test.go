@@ -187,6 +187,8 @@ func TestRS06_FloatAudit(t *testing.T) {
 		"internal/client/model.go":                         true, // model draw trig [I2][03 §2.4]
 		"internal/cob/ports.go":                            true, // cob distance hypot [I2][04 §4.4]
 		"internal/construction/community_kickout.go":       true, // sourced Community kickout circle/ray and sweep geometry [I2][community patch engine behavior §5.6]
+		"internal/sim/numeric/distance.go":                 true, // integer-root seed corrected exactly, and proven truncation shortcut [I2][01 R-DET-01 §7]
+		"internal/sim/numeric/radians.go":                  true, // correctly rounded root inside unfused arcsine reduction [I2]; approved Go adaptation (DESIGN_MULTIPLAYER §16.1 M1-C2)
 		"internal/sim/numeric/trig.go":                     true, // trig table [I2][04 §5.1]
 		"internal/session/strips.go":                       true, // nano particle travel distance sqrt, truncated to the tick count, never stored [I2][03 §5.5]
 		"internal/content/compile_unit.go":                 true, // compile-time

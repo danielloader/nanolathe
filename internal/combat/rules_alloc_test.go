@@ -44,6 +44,7 @@ func TestRulesDispatchDoesNotAllocate(t *testing.T) {
 				rulesDispatchSink = svc.rules().HoldsFire(&shooter, false)
 				rulesDispatchSink = svc.rules().AdmitTarget(target)
 				rulesDispatchSink = svc.rules().SlotMayFire(svc, &shooter, weapon, nil)
+				rulesDispatchSink = svc.rules().ReleaseSubmergedTarget(weapon, &shooter, nil)
 				rulesDispatchSink = svc.rules().DetonationBroadcast(svc, projectile, weapon)
 				rulesDispatchSink = svc.rules().GuidanceAdmitted(svc, projectile, weapon, 0, 0)
 				rulesDispatchSink = svc.rules().ShotTimeAdmitted(ShotTimeAdmission{Service: svc, Shooter: &shooter, Weapon: weapon})

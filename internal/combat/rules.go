@@ -10,7 +10,7 @@ import (
 
 // Rules is the gameplay policy seam of the combat service. Strict 3.1 answers
 // exactly as retail; Modern carries the approved Nanolathe policies of
-// docs/DESIGN_WEAPONS_PROJECTILES.md §2.3.1 and §2.6.1. Each method is asked at
+// docs/DESIGN_WEAPONS_PROJECTILES.md. Each method is asked at
 // the decision boundary owned by the affected request;
 // binding a rule set chooses the owning package's documented algorithms.
 //
@@ -78,6 +78,10 @@ type Rules interface {
 	AdmitTarget(q TargetAdmission) bool
 	// SlotMayFire is asked after reload decrement and before aim-time work.
 	SlotMayFire(s *Service, u *units.Unit, weapon *content.WeaponDef, terrain *world.Terrain) bool
+	// ReleaseSubmergedTarget asks whether a retained unit target must be
+	// released before aim or launch. Modern applies the acquisition height
+	// boundary to non-water weapons; Strict and Community preserve retention.
+	ReleaseSubmergedTarget(weapon *content.WeaponDef, target *units.Unit, terrain *world.Terrain) bool
 	// DetonationBroadcast answers whether central impact should run the
 	// area-damage-and-broadcast call. The same answer drives map markers.
 	DetonationBroadcast(s *Service, p *Projectile, weapon *content.WeaponDef) bool
@@ -312,6 +316,10 @@ func (StrictRules) AdmitTarget(q TargetAdmission) bool {
 
 func (StrictRules) SlotMayFire(*Service, *units.Unit, *content.WeaponDef, *world.Terrain) bool {
 	return true
+}
+
+func (StrictRules) ReleaseSubmergedTarget(*content.WeaponDef, *units.Unit, *world.Terrain) bool {
+	return false
 }
 
 func (StrictRules) DetonationBroadcast(*Service, *Projectile, *content.WeaponDef) bool {

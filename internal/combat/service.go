@@ -263,6 +263,16 @@ func (s *Service) StepWeaponsForUnit(u *units.Unit, tick uint32, w *units.World,
 				clearSlotTarget(slot, idx)
 				continue
 			}
+			if s.rules().ReleaseSubmergedTarget(slot.Weapon, tu, terrain) {
+				// Return even an ordered slot to normal acquisition, so it can
+				// select another contact on its next maintenance visit. Movement
+				// orders keep their own target and lifecycle.
+				// Nanolathe Modern policy: DESIGN_WEAPONS_PROJECTILES
+				// "Modern submerged target release".
+				clearSlotTarget(slot, idx)
+				slot.Flags |= units.SlotFlagAutonomous
+				continue
+			}
 		}
 		if slot.Target.Kind == units.TargetNone {
 			slot.Aim.IssueBit = false
@@ -1632,6 +1642,17 @@ func (s *Service) TickProjectiles(tick uint32, w *units.World, terrain *world.Te
 			if w != nil && s.holdsFire(w.Unit(p.Shooter), p.OrderedBurst) {
 				s.MarkDead(h)
 				continue
+			}
+			// Submersion cancels unlaunched pellets even before their deadline,
+			// using the anchor's original target rather than the slot's new one.
+			// Nanolathe Modern policy: DESIGN_WEAPONS_PROJECTILES
+			// "Modern submerged target release".
+			if w != nil && catalog != nil {
+				weapon, _ := catalog.WeaponByID(p.WeaponID)
+				if s.rules().ReleaseSubmergedTarget(weapon, w.Unit(p.TargetUnit), terrain) {
+					s.MarkDead(h)
+					continue
+				}
 			}
 			s.advanceBurstAt(i, tick, simRNG, s.weaponLookupFor(catalog), muzzleForBurst, w, terrain)
 			continue

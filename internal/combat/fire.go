@@ -212,6 +212,13 @@ func TryFire(svc *Service, slot *Slot, slotIdx int, tgt Target, tick uint32, por
 	if svc.holdsFire(ports.Shooter, ordered) {
 		return 0, false
 	}
+	if tgt.Kind == TargetUnit && ports.Shot != nil &&
+		svc.rules().ReleaseSubmergedTarget(slot.Weapon, ports.Shot.Target, ports.Shot.Terrain) {
+		// Direct fire attempts share the live slot's pre-query water check.
+		// Nanolathe Modern policy: DESIGN_WEAPONS_PROJECTILES
+		// "Modern submerged target release".
+		return 0, false
+	}
 	w := slot.Weapon
 	if !hasLiveWeaponExecutor(w) {
 		return 0, false

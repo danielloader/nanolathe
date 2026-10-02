@@ -1,13 +1,16 @@
 package combat
 
 import (
+	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
+	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
 
 // ModernRules is the approved Nanolathe Modern rule set of the combat service:
 // the terrain/obstruction preflight of docs/DESIGN_WEAPONS_PROJECTILES.md
-// §2.3.1/§2.3.2, Hold Fire suppression of §2.6.1, and threat/incoming fire.
+// §2.3.1/§2.3.2, submerged target release, Hold Fire suppression of §2.6.1,
+// and threat/incoming fire.
 // These are user-authorized departures from the
 // retail firing pipeline, not parity defects [I11].
 //
@@ -15,6 +18,14 @@ import (
 // pointer so a rule set may embed it and override a single answer without
 // copying the policy.
 type ModernRules struct{ CommunityRules }
+
+// ReleaseSubmergedTarget repeats only acquisition's target-height clause
+// [06 §3.1][06 R-WPN-05 §9]. Nanolathe Modern policy:
+// docs/DESIGN_WEAPONS_PROJECTILES.md "Modern submerged target release".
+func (*ModernRules) ReleaseSubmergedTarget(weapon *content.WeaponDef, target *units.Unit, terrain *world.Terrain) bool {
+	return weapon != nil && !weapon.WaterWeapon && target != nil && terrain != nil &&
+		wholeYWord(target.Y)+modelTop(target) <= int32(terrain.SeaLevel)
+}
 
 // AreaVictims carries CP-DMG-1 but applies the approved Nanolathe Modern
 // policy that lifts only the six-overflow-entry capacity. All eligibility,

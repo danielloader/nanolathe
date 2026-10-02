@@ -32,7 +32,7 @@ func beamFixture(t *testing.T) (*Service, *units.World, *world.Terrain, *units.U
 	terrain := beamTestTerrain()
 	weapon.BeamWeapon, weapon.Accuracy, weapon.DamageDefault = true, 0, 2500
 	weapon.WeaponVelocity, weapon.Range = 2184533, 2000
-	target.Def = &content.UnitDef{UnitName: "mobile", BMCode: 1, FootprintX: 2, FootprintZ: 2, ModelTopFixed: 16 << 16, DamageModifier: 65536}
+	target.Def = &content.UnitDef{UnitName: "mobile", BMCode: 1, FootprintX: 2, FootprintZ: 2, ModelTop: 16, ModelTopFixed: 16 << 16, DamageModifier: 65536}
 	target.Move.Mode = 1
 	shooter.X, shooter.Y, shooter.Z = numeric.FixedFromInt(128), numeric.FixedFromInt(4), numeric.FixedFromInt(256)
 	target.X, target.Y, target.Z = numeric.FixedFromInt(928), 0, shooter.Z

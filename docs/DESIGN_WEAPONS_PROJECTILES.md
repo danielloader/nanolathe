@@ -230,6 +230,51 @@ test, so no Modern behavior is built on them. Settling one would add its answer
 to the existing `combat.Rules` seam and a Modern policy block here, following
 [DESIGN_GAMEPLAY_RULES §9](DESIGN_GAMEPLAY_RULES.md#9-extending-the-existing-mechanism).
 
+### Modern submerged target release
+
+**Nanolathe Modern policy — user-authorized 2026-10-01, issue #59.** A
+non-water weapon stops firing at a retained unit target as soon as its whole-unit
+Y plus the definition's model-top height is at or below the map's sea level.
+This is the established acquisition boundary [06 §3.1][06 R-WPN-05 §9], applied
+again before aim-time work. An origin below the surface with a model extending
+above it remains targetable. The authored `waterweapon` flag alone exempts a
+weapon; projectile family and extension target keys do not determine capability.
+
+**Strict baseline.** Retail acquisition checks the target height, while the
+per-shot point gate carries no target-height clause. A previously acquired live
+target can therefore remain under fire after fully submerging
+[06 R-WPN-05 §9]. Strict 3.1, Community 3.9 and unbound services keep that answer.
+
+**State and ordering.** `combat.Rules.ReleaseSubmergedTarget` answers at the
+existing unit-target validation boundary after reload decrement and the earlier
+slot/stance gates, before target-point queries, Aim callbacks, shot RNG or costs.
+A refusal uses the ordinary target clear and `TargetCleared` callback, clears
+the Aim request latch and returns that slot to autonomy, including a slot held
+by an attack order. The next ordinary maintenance visit may acquire another
+eligible contact under its existing scan budget, visibility and Fire at Will
+gates. No replacement is guaranteed when no suitable contact exists or the
+stance forbids automatic acquisition. Movement orders retain their target and
+lifecycle; a later order binding is checked again at the next weapon visit.
+Other slots decide independently, including water-capable slots on the same unit.
+
+Parked burst templates test their original unit target before the next-pellet
+deadline. Submersion cancels only the unlaunched remainder, even for ordered
+bursts, before muzzle refresh, pellet allocation, spray RNG or sound callbacks.
+Already launched projectiles continue their ordinary motion and damage.
+Ground-point targets have no unit height to recheck. The policy adds no state,
+RNG or resource debit; reload recovery continues, ammunition is preserved and
+past shot costs are not refunded. Binding Strict restores its answer at the
+next decision boundary without reconstructing a released target or burst.
+
+**Verification.** `modern_submerged_target_test.go` locks the exact surface
+boundary and fractional height, water-weapon exemption, ordered/autonomous slot
+release, replacement acquisition, independent slots and ground points, burst
+cancellation, and Strict/Community/unbound RNG, ammunition and resource effects.
+It also repeats the issue's surface-to-submerged transition on the installed
+Brawler and Crocodile, and checks the direct spawner's pre-query refusal.
+The rules allocation guard covers the new question. Both repository gates and
+the displayless simulation-cost benchmark apply.
+
 ### 2.3.1 Modern terrain admission
 
 **Nanolathe policy, explicitly requested by the user; not retail evidence.**

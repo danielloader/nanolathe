@@ -85,6 +85,22 @@ func sidebarQuickKey(key byte) byte {
 	return key
 }
 
+// Use the dispatcher's command identities across native foreign pages and the
+// local side's GEN/DL windows [07 R-HUD-03 §6]. Unknown controls keep their full
+// names; source names and artwork are never rewritten (HUD design §3.3).
+func sidebarCommandIdentity(name string) string {
+	if command := commandButtonName(name); command != "" {
+		return command
+	}
+	upper := strings.ToUpper(name)
+	for _, arrow := range []string{"NEXT", "PREV"} {
+		if strings.HasSuffix(upper, arrow) {
+			return arrow
+		}
+	}
+	return name
+}
+
 // Flattening may combine products from several authored pages. Retained controls
 // must agree in behavior; shared controls use the canonical Orders shortcut.
 // Other differences still reject composition so no later-page control is lost.
@@ -101,12 +117,12 @@ func sidebarCommandsMatch(a, b, orders *sidebarCommandScaffold) bool {
 		// Shared controls are replaced by the Orders source in the combined
 		// panel, so its shortcut is authoritative on every local page (HUD §3.3).
 		for _, j := range orders.indices {
-			if strings.EqualFold(x.Name, orders.window.Gadgets[j].Name) {
+			if strings.EqualFold(sidebarCommandIdentity(x.Name), sidebarCommandIdentity(orders.window.Gadgets[j].Name)) {
 				sameShortcut = true
 				break
 			}
 		}
-		if !strings.EqualFold(x.Name, y.Name) || x.Attribs != y.Attribs || x.CommonAttribs != y.CommonAttribs || !sameShortcut || x.Stages != y.Stages || x.Status != y.Status || x.GrayedOut != y.GrayedOut || x.Text != y.Text || !slices.Equal(x.Labels, y.Labels) {
+		if !strings.EqualFold(sidebarCommandIdentity(x.Name), sidebarCommandIdentity(y.Name)) || x.Attribs != y.Attribs || x.CommonAttribs != y.CommonAttribs || !sameShortcut || x.Stages != y.Stages || x.Status != y.Status || x.GrayedOut != y.GrayedOut || x.Text != y.Text || !slices.Equal(x.Labels, y.Labels) {
 			return false
 		}
 		if mapped, ok := groups[x.Assoc]; ok && mapped != y.Assoc {
@@ -192,7 +208,7 @@ func (h *retailBattleHUD) sidebarCombinedCommands(c *sidebarProductCatalog) bool
 	collect := func(s *sidebarCommandScaffold, dst *[]sidebarProduct) {
 		for _, i := range s.indices {
 			g := s.window.Gadgets[i]
-			name := strings.ToUpper(g.Name)
+			name := strings.ToUpper(sidebarCommandIdentity(g.Name))
 			if seen[name] {
 				continue
 			}
@@ -206,7 +222,7 @@ func (h *retailBattleHUD) sidebarCombinedCommands(c *sidebarProductCatalog) bool
 	}
 	collect(c.orders, &orders)
 	for _, i := range c.orders.indices {
-		seen[strings.ToUpper(c.orders.window.Gadgets[i].Name)] = true
+		seen[strings.ToUpper(sidebarCommandIdentity(c.orders.window.Gadgets[i].Name))] = true
 	}
 	collect(build, &extra)
 	pack := func(items []sidebarProduct, offset int32, gaps *[]sidebarCommandGap) int32 {
@@ -284,7 +300,7 @@ func (h *retailBattleHUD) sidebarCombinedCommands(c *sidebarProductCatalog) bool
 			g := source.window.Gadgets[i]
 			for _, j := range c.orders.indices {
 				other := c.orders.window.Gadgets[j]
-				if !strings.EqualFold(g.Name, other.Name) {
+				if !strings.EqualFold(sidebarCommandIdentity(g.Name), sidebarCommandIdentity(other.Name)) {
 					continue
 				}
 				k := sidebarAssociation{source.window, g.Assoc}

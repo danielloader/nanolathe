@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
@@ -58,7 +57,9 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 			}
 			var names []string
 			for name, d := range cat.Units {
-				if d.Builder && d.BuildPageCount > 1 && strings.EqualFold(d.Side, cat.Sides[side].Name) {
+				// The local player can own either faction's builders through
+				// capture, production or spawning (issue #85).
+				if d.Builder && d.BuildPageCount > 1 {
 					names = append(names, name)
 				}
 			}
@@ -125,7 +126,14 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 						}
 						state, _ := h.expandedSidebarPaging(b, f)
 						controls := map[string]bool{}
+						commandCounts := map[string]int{}
 						for _, g := range w.Gadgets {
+							if command := commandButtonName(g.Name); command != "" {
+								commandCounts[command]++
+								if commandCounts[command] > 1 {
+									t.Fatalf("duplicated combined command %s", command)
+								}
+							}
 							if g.Active != 0 {
 								controls[commandButtonName(g.Name)] = true
 							}
@@ -154,7 +162,7 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 							cl.SetUIStage(battleHUDUIStage{hud: h, battle: b})
 							cl.SetSnapshot(sess.Snapshot)
 							cl.SetPalette(pal)
-							file, err := os.Create(filepath.Join(dir, fmt.Sprintf("ota-%s-%d.png", name, height)))
+							file, err := os.Create(filepath.Join(dir, fmt.Sprintf("ota-%d-%s-%d.png", side, name, height)))
 							if err != nil {
 								t.Fatal(err)
 							}

@@ -1704,7 +1704,12 @@ invented products. Unsafe custom scaffolds retain the authored/fitted path.
 The Orders source is the custom unit-zero GUI when present, otherwise the ordinary
 side Orders GUI. It owns common commands and supplementary controls; deduplicate
 matching named controls from the first numbered build page, retaining that page's
-unique controls. Move, Stop, Guard (`DEFEND`), Patrol, Attack and D-Gun (`BLAST`)
+unique controls. Recognized commands and NEXT/PREV arrows match by the existing
+dispatcher's action identity, so a foreign builder's native pages can combine
+with the local side's generated DL and Orders windows. Other controls retain
+their complete names. Use the same identities for numbered-page comparison,
+deduplication and shared association mapping; preserve source names and artwork.
+Move, Stop, Guard (`DEFEND`), Patrol, Attack and D-Gun (`BLAST`)
 remain on every build view, alongside tabs, page navigation and build-only controls.
 The preference governs the supplementary Orders-page controls above those common
 rows, not the common rows themselves. Both compositions preserve authored command
@@ -1774,8 +1779,10 @@ shared input/shortcuts, composite tiling ambiguity, indivisible child groups,
 fallback and capture retirement. Installed OTA, ProTA and
 Zero checks exercise all factions and visually inspect normalized products and
 controls. OTA coverage must also enter after the completed front-end transition
-and select every builder with authored product pages; testing only commanders or
-pre-transition windows masks retained shortcut differences. Classic and unsafe
+and select every builder with authored product pages, including foreign-faction
+builders owned by the local player; testing only commanders, the player's own
+faction or pre-transition windows misses command-prefix and shortcut differences.
+Reject duplicated combined commands. Classic and unsafe
 authored/fitted fallback use the existing layout tests. This is a
 host UI extension, not a promise to support arbitrary replacement command GUIs.
 

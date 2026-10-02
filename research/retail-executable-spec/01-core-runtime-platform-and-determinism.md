@@ -2799,6 +2799,11 @@ stated in the body, not here.
 
 ### Clock, network, and determinism
 
+- NaN payload and sign selection in the two-argument distance helper. Its
+  NaN result class and precedence over infinity are established, but the
+  processor chooses the propagated payload · [R-DET-01 §7] · processor
+  propagation documentation and an independently authored arithmetic probe.
+
 - Network future-frame overflow policy, retransmission wrap, and late-join
   resynchronization · §4.3 · static trace. Multiplayer-only; recorded so the
   spec stays exhaustive.

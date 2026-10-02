@@ -1939,7 +1939,9 @@ func (a *SimArt) EffectEntryHolds(bank, entry string) ([]int32, bool)
 
 - **M1-C1 Distance.** `Distance` performs the sequence of
   `[01 R-DET-01 §7]` in integer arithmetic, its special operands, its
-  overflow and its truncating underflow included. It equals a big-number
+  overflow and its truncating underflow included. NaN class and precedence
+  are established; payload/sign remain the explicit research Unknown and
+  code-site placeholder. For finite operands it equals a big-number
   model of that sequence, kept in the test, bit for bit: on every ordered
   integer pair to 3,000 in the retail tier and a sample in the fast tier, on
   raw 16.16 deltas, on fractional and wide-exponent operands, and on the

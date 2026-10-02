@@ -7,13 +7,13 @@ Only player commands travel: a relay puts them in one order, tells every
 client which tick each one runs on, and decides how far the battle may
 advance. The model is **relayed deterministic lockstep**.
 
-**Status: adopted 2026-10-01; M1 implemented with native-platform checks pending.** The maintainer accepted
+**Status: adopted 2026-10-01; M1 verified; M2 design preparation.** The maintainer accepted
 this design and decided its original questions on 2026-10-01, after two
 revisions of the 2026-09-30 proposal. Networking, replays and the multiplayer
 lobby are in scope (ARCHITECTURE §1), and implementation is authorized in the
 order of §16, each milestone behind the one before it. §16.1 records M1's
-implementation and verification; §16.2 prepares M2 without opening its
-implementation gate. The original audit measurements were taken on
+implementation and verification; its native-platform gate is complete.
+§16.2 prepares M2's schemas and work units. The original audit measurements were taken on
 2026-09-30 and 2026-10-01 against
 main `193abfde`. Co-op is the first delivery, not the architecture's limit:
 an eventual competitive mode is required. The interoperability target is
@@ -561,7 +561,7 @@ flipped distance is enough to separate two machines. How often that happens
 in play is not established: the locked battles agree across the two
 architectures as far as the partial fingerprint sees (§5.2), so this is a
 rare event to be closed, not one that has been observed to end a game. A
-`GOAMD64=v3` build could not run under Rosetta and is unmeasured; the
+`GOAMD64=v3` build could not run under Rosetta and was unmeasured in that audit; the
 installer builds with that setting cleared.
 
 **Which results are right is a retail question, not a portability one.**
@@ -2031,8 +2031,12 @@ The first [native CI run](https://github.com/nanolathe-gg/nanolathe/actions/runs
 at `55e95018` passed Darwin/arm64, Linux/amd64 v1 and Windows/amd64 v1.
 Linux/amd64 v3 passed the committed vectors and angle-table digest but failed
 two live-library comparisons: its standard library fuses arithmetic and is
-not the unfused v1 reference of M1-C2. The platform gate remains pending a
-corrected reference test and a green native rerun. This is not complete
+not the unfused v1 reference of M1-C2. The test-only correction in `184161da`
+limits live comparisons to v1 and checks an independently generated digest
+of the same 16,384 radian input pairs on every target; it changes no kernel
+code or existing vector/digest constant. The [native rerun at `f5c71c22`](https://github.com/nanolathe-gg/nanolathe/actions/runs/37034107271)
+passed all four numeric jobs: Darwin/arm64, Linux/amd64 v1 and v3, and
+Windows/amd64 v1. M1's platform gate is complete. This is not complete
 cross-platform world equivalence, which still awaits M3.
 
 | Unit | Delivers | Files it owns |
@@ -2148,12 +2152,11 @@ fairness or integrity of rated matches.
 
 ### 16.2 M2 preparation and work units
 
-**Status: design preparation only, 2026-10-02.** M1's native matrix ran;
-the v3 reference-test correction and green rerun remain pending (§16.1).
-M2 implementation starts after those checks pass. Cross-compilation and the Rosetta locks do
-not substitute for execution on those targets. This section records the
-code audit, contracts and sequencing that can be prepared before that gate;
-it does not claim a completed codec, identity or multi-seat session.
+**Status: design preparation, 2026-10-02.** M1's native matrix passed after
+the v3 reference-test correction (§16.1), opening M2's milestone gate. U0's
+exact schemas and API contracts still precede implementation dispatch.
+This section records the audit, contracts and sequencing; it does not claim
+a completed codec, identity or multi-seat session.
 
 M2 makes the command boundary explicit and the battle inputs identifiable.
 It does not enable a network battle: perspectives, multiplayer sharing,
@@ -2167,7 +2170,7 @@ their own viewer state, and that substitution cannot implement §6.
 
 | Dependency | M2 work that can be specified independently | Work that remains gated |
 |---|---|---|
-| M1 native-platform checks | Audit, schema design and work-unit contracts | All M2 implementation and its acceptance claim |
+| M1 native-platform checks — passed | Native matrix evidence in §16.1 | No remaining M1 platform gate on M2; U0 contracts still precede implementation |
 | Q22 alliance representation — decided | Shared directed matrix and declaration checks (§6.7) | M5 application and multi-seat victory tests |
 | Q23 computer seats — decided | Fixed host attribution, mode-selected cap, per-seat difficulty and initial Deathmatch exclusion (§6.6) | Exact field encoding in U0; admission in M2 and per-seat consumers in M5 |
 | Q24 history scope; Q25 share timing — decided | Canonical per-player history and request-tick sharing (§6.7) | M5 history storage/reset and sharing application |
@@ -2190,7 +2193,7 @@ already editing those files.
 
 | Unit | Depends on | Delivers and principal surfaces |
 |---|---|---|
-| **U0 Schema and consumer inventory** | M1 gate for implementation dispatch | Finish §7.4's field-by-field schemas and §8's effective-input inventory in this document before a codec is written. Enumerate all 35 existing command kinds plus proposed new kinds; distinguish local, lobby, single-player replay, supported seat and deferred seat kinds. Trace every field to its producer and consumer, set stable explicit numbers/bounds and publish the API contract for later units. |
+| **U0 Schema and consumer inventory** | M1 gate passed | Finish §7.4's field-by-field schemas and §8's effective-input inventory in this document before a codec is written. Enumerate all 35 existing command kinds plus proposed new kinds; distinguish local, lobby, single-player replay, supported seat and deferred seat kinds. Trace every field to its producer and consumer, set stable explicit numbers/bounds and publish the API contract for later units. |
 | **U1 Allocation references** | U0 | Creation serials at both successful creation paths in `internal/units/units.go`, committed references in `internal/frame/frame.go` and `internal/session/publish.go`, and focused lifecycle tests. Keep presentation identities for their existing cache purpose. Do not alter internal pool references. |
 | **U2 Explicit commands and authorization** | U1, U5 | Seat/stream metadata at the session input boundary, explicit actor and target references, role/cheat/rule checks from the agreed configuration, per-kind validation and local adapter. Own `internal/session/commands.go` and its command helpers/tests; migrate command producers while preserving single-player behavior. Perspective-dependent cases stay gated as above. |
 | **U3 Local interface state** | U2 | Selection, visited flags, build-page state, BigBrother/Shift and local logo overrides move to the client. Migrate `internal/hud` adapters, the unit readiness sweep, session publication and `cmd/nanolathe` input consumers together. Keep authoritative group assignment and online shake draws. Masked-fingerprint evidence and local interaction checks are part of this unit. |
@@ -2456,7 +2459,7 @@ invent a retail rule while implementing an independent transport feature.
 | O6 | Defeated player when watching is forbidden, including peer effects | **Settled** by `[08 R-SKIR-01 §3]` `[08 R-LEAVE-01 §10]`: ordinary lost ending unless a live hosted computer keeps the human watching; peers store the watch bit, and a later exit is ordinary departure. |
 | O7 | Four pairs of research statements that conflicted: which host option the overlay's `Watching:` row reads; whether the lobby's command-line words preset the host's options; whether the Tab strip exists outside multiplayer; and which step makes a defeated player a watcher | **Settled 2026-10-01.** Bit 15 is *game closed* and the `Watching:` row reads bit 7 `[08 R-SKIR-01 §12]`. No command-line word presets the lobby; an online service's configuration file does `[01 R-PLAT-01 §2]` `[08 R-SKIR-01 §7]`. The Tab strip and the `h` key are multiplayer-only `[07 R-CAM-01 §2]`. The elimination block makes the watcher, and neither answer to the question changes that `[07 R-FE-01 §9]`. |
 | O8 | `[04 R-COB-03 §6]` placed the effect gate outside the deterministic contract because a failed gate does nothing, while I4 counts the passing path's CRT draws as behaviour | **Settled 2026-10-01.** The section now says the failing branch is inert, the passing branch reaches the CRT stream and the strip pool, and the gate breaks no contract between retail's machines. |
-| O9 | Floating-point results under `GOAMD64=v3` and on native amd64 hardware; only Rosetta was measured | M1's cross-architecture job. |
+| O9 | Floating-point results under `GOAMD64=v3` and on native amd64 hardware; only Rosetta was measured in the initial audit | **M1 gate settled 2026-10-02:** native Linux/amd64 v1/v3, Windows/amd64 v1 and Darwin/arm64 pass the kernel's independent vectors and digests (§16.1). The v3 standard library differs because it permits fusion; the reference is explicitly unfused v1. Full-world equivalence remains M3. |
 | O10 | Checkpoint and tick-ring cost, and a complete state inventory | M3's measurements and owner review; M8's exact-restore and continuation evidence. |
 | O11 | Rejoin time on the largest/late battles and whether snapshot recovery must precede hosted release | Live-target catch-up measurements before promising M7 rejoin; advance M8 if the supported window cannot be met. |
 | O12 | Kind-3 branches beyond those §6.4 lists | Each implementation unit audits the code it touches against the research. |

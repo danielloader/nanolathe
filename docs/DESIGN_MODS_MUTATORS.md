@@ -116,18 +116,26 @@ $XDG_DATA_HOME/nanolathe/mods/      default ~/.local/share/nanolathe/mods
     nanolathe-mod.json              the mod's metadata and Nanolathe config (§4.2)
     install.json                    receipt: archive SHA-256, size, source URL, time
   manifest.json                     last fetched catalogue, for offline display (§5.2)
-  .downloads/                       <id>-<version>.zip.part: partial downloads, kept so a later attempt resumes
+  .downloads/                       <id>-<version>.zip.<sha256>.part: partial downloads
   .staging/                         extractions and removals in progress
+  .replaced/<id>/<version>/          previous complete install during replacement
 ```
 
 `.staging/` holds only work that ends with its process. The first opening of
 the library in each process clears it, never while an install is extracting
-into it; later openings leave it alone.
+into it; later openings leave it alone. Before this cleanup, opening the library
+recovers interrupted replacements from `.replaced/`: restore a previous copy
+when the target is missing, or remove it when the target is a complete install.
+An unreadable target keeps the backup and reports a recovery error. An opening
+during an install never performs this recovery underneath it.
 
 The directory is the index. An installed mod is a `<id>/<version>/` directory
 whose metadata parses and whose receipt exists; there is no separate index
 file to drift out of step. Installing a new version leaves older versions in
-place until the player removes them, because saves name a version (§7).
+place until the player removes them, because saves name a version (§7). A
+catalogue update to the same version replaces that directory only after the new
+package passes validation (§5.3); saves also record the archive hash, and the
+compatibility limits of replacement are described in §7.3.
 
 ### 4.2 Mod metadata and config
 
@@ -139,7 +147,7 @@ The engine carries none of it. Schema 2:
 ```json
 {
   "schema": 2,
-  "id": "prota", "name": "ProTA", "version": "4.8+nanolathe.1",
+  "id": "prota", "name": "ProTA", "version": "4.8",
   "summary": "One line for the mod lists.", "homepage": "https://…",
   "requires": ["<logical path the base install must supply>"],
   "content": {
@@ -163,9 +171,11 @@ Every object is closed: an unknown key anywhere is refused with the standard
 diagnostic, so a misspelling is reported rather than ignored.
 
 - **Identity.** `id` is lowercase `[a-z0-9-]`, stable across versions.
-  `version` is opaque and compared for equality only; the manifest's order is
-  the display order. `requires` lists logical paths that the **base**
-  install must resolve, for example a map from an expansion the mod overlays.
+  `version` is the original mod version, opaque and compared for equality only;
+  the manifest's order is the display order. Nanolathe packaging adds no suffix.
+  An archive SHA-256 distinguishes packaging updates within that version (§5.1).
+  `requires` lists logical paths that the **base** install must resolve, for
+  example a map from an expansion the mod overlays.
   A mod whose requirements fail is listed but cannot be selected, and the
   screen names the missing paths.
 - **`content`** is the load-time content description
@@ -248,8 +258,11 @@ TA Zero's `settings` and `keys` are exactly the `community` and `zero`
 columns of the controls preset (§4.3), which a test locks against
 `controlsPresetRows`; Escalation and Mayhem name no preset and carry
 neither. All four keep the Community 3.9 minimum and recommend it, and none
-locks a setting. Their versions carry a `+nanolathe.N` suffix because a
-rebuilt zip is a new file (§5.5).
+locks a setting. They retain the original versions: ProTA `4.8`, Escalation
+`10.2.0`, TA Zero `alpha5-20241224` and Total Mayhem `11.3.0`. Packaging changes
+update the archive hash, never those version strings (§5.1). Legacy installed
+versions with a `+nanolathe.N` suffix remain separate, selectable versions;
+nothing renames or deletes them.
 
 ### 4.3 Selection and precedence
 
@@ -523,10 +536,10 @@ One JSON file at `https://nanolathe.gg/mods/manifest.json`:
   "schema": 1,
   "mods": [
     {
-      "id": "prota", "name": "ProTA", "version": "4.8+nanolathe.1",
+      "id": "prota", "name": "ProTA", "version": "4.8",
       "summary": "…", "homepage": "…",
       "archive": {
-        "url": "https://github.com/nanolathe-gg/nanolathe-gg.github.io/releases/download/mods/prota-4.8+nanolathe.1.zip",
+        "url": "https://github.com/nanolathe-gg/nanolathe-gg.github.io/releases/download/mods/prota-4.8.zip",
         "size": 12443167,
         "sha256": "…"
       }
@@ -556,8 +569,17 @@ packaging and upload.
 engine to read schema 2 ZIP configs. Keep the same manifest URL and one current
 package per mod; no second catalogue, parallel archive fields or migration
 flags are needed. Already installed schema 1 packages remain readable. A
-packaging change gets a new version suffix and asset name; published archives
-are immutable, so old installations and partial downloads retain their identity.
+packaging update now follows the hash policy below.
+
+**Original-version packaging policy (user-authorized 2026-10-01).** This
+supersedes immutable archives and Nanolathe version suffixes. A packaging change
+keeps the original mod version and the `<id>-<version>.zip` asset name, and
+publishes the new byte size and SHA-256 in the manifest. An installed entry is
+current only when id, version and case-insensitive receipt SHA-256 all agree.
+A different hash, including an absent receipt hash on a manual folder install,
+offers the catalogue package again. Hashes identify bytes; they are not ordered,
+so a cached catalogue describes only its last fetched package. Partial downloads
+are keyed by the expected hash and never resumed into a different package.
 
 A minimum engine version is deliberately absent: the build carries no
 release version today (`internal/version` names a save profile, not a
@@ -584,9 +606,11 @@ release). Add `minimumEngine` once releases are stamped.
 
 ### 5.3 Download, verify, extract, commit
 
-1. Download to `.downloads/<id>-<version>.zip.part`, resuming with an HTTP
-   range request when the server supports it. The screen shows progress and
-   can cancel. A transfer that stops part-way, cancelled or stalled, keeps
+1. Download to `.downloads/<id>-<version>.zip.<sha256>.part`, using the
+   lowercase manifest hash, and resume with an HTTP range request when the
+   server supports it. Older unqualified part files and parts with another hash
+   are not reused. The screen shows progress and can cancel. A transfer that
+   stops part-way, cancelled or stalled, keeps
    the part file so a later attempt resumes it.
 2. Check size and SHA-256 against the manifest. Any mismatch deletes the file
    and reports it with the standard diagnostic.
@@ -607,9 +631,25 @@ release). Add `minimumEngine` once releases are stamped.
    without one), require every directory its `detect` list names, and
    require the products `openContent` requires. A mod that would not start,
    or whose config describes other content, is never installed.
-5. Write `install.json`, then rename the staged directory to
-   `<id>/<version>/`. The rename is on one filesystem, so an interrupted
-   install leaves nothing half-installed. Delete the zip.
+5. Write `install.json`, then publish the staged directory to `<id>/<version>/`.
+   Manual duplicates remain refused. Only an explicitly opted-in catalogue
+   install with verified id, version, hash and size may replace a complete
+   install: move the previous directory to `.replaced/<id>/<version>/`, then
+   rename staging to the target. Both renames stay on one filesystem. A failed
+   publication restores the previous copy; if restoring also fails, keep the
+   backup for recovery on the next open (§4.1). Once the target is complete,
+   remove the backup and downloaded zip. Validation failures never move the old
+   directory. Publication and recovery are serialized within the process.
+
+Both screens refuse an update to the mounted id/version, with a message to
+switch mods first. The download job captures that identity and the base roots
+on the render thread; the install worker checks the synchronized identity
+before installation and immediately before publication. Content reload refuses
+to mount an in-flight download's id/version until its install finishes, even
+if its dialog has closed. Workers never read a mutable shell pointer.
+The starter also compares the target directory with all mounted roots, including
+filesystem aliases, so a manual `--root` stack must restart on other content
+before replacing a directory it mounts.
 
 ### 5.4 Trust
 
@@ -643,8 +683,10 @@ For whoever builds the hosted zips:
   (§4.2): the zip carries everything Nanolathe needs to run the mod.
 - No executables, DLLs, installers, `ddraw` wrappers, launcher INIs or
   base-game archives.
-- A new version is a new file. Old versions stay hosted, because saves name
-  them.
+- A new upstream mod version is a new file. Repackaging retains that upstream
+  version and replaces its hosted file, publishing its new hash and size
+  (§5.1). A previous package of the same version is not guaranteed to remain
+  available for a save that recorded its hash (§7.3).
 - **Merging packages is not a file copy.** A mod published as several packages
   (TA Zero is Base plus Alpha 5) is merged into one root, but precedence
   differs between the two shapes. As separate roots, the later root wins. In
@@ -953,6 +995,17 @@ record naming a parameter this build does not know refuses the load.
    catalog's. A mismatch (a different base install, different mod bytes) loads
    with a warning on the battle message line rather than refusing.
 
+**After a package update.** The sidecar keeps the archive SHA-256 from the
+install receipt; it is provenance, not a separate installed-version selector.
+Loading selects by id/version and uses the package currently installed there.
+The catalogue offers its current package for that version and cannot promise
+the exact bytes a save recorded. The existing catalog-hash check above warns
+when compiled content differs; a changed archive hash alone neither proves
+incompatibility nor refuses the load. Packaging-only changes can leave the
+compiled catalog equal. Replacement does not promise compatibility with every
+older save. Legacy suffixed versions are still selected by their exact saved
+version when installed.
+
 A restored battle opens without the loading screen, so its warnings are
 posted to the battle message line (and standard error) rather than as
 loading-screen lines (§8.3).
@@ -1030,10 +1083,13 @@ selected mutator's description beneath; *Raise*, *Lower*, *Default* and
 
 **The Get more mods dialog.** A modal over the screen. Opening it fetches the
 manifest (§5.2); when that fails, it shows the cached manifest and its age.
-It lists every manifest entry whose id and version are not installed, with
-name, version, download size, summary, minimum gameplay and any unmet base
-requirement. *Download* on a row starts §5.3, with a progress bar; while the
-archive transfers the button reads *Cancel*. One download and install runs at
+It lists every manifest entry whose id, version and case-insensitive archive
+hash do not match an install, with name, version, download size and summary.
+The Nanolathe screen's catalogue instead keeps matching rows visible as
+*Installed*. A changed hash offers *Download* again under the original version;
+both screens disable the mounted version with *Switch mods before updating*.
+*Download* on a row starts §5.3, with a progress bar; while the archive transfers
+the button reads *Cancel*. One download and install runs at
 a time in the process: while one runs, the dialog shows its progress and
 offers no *Download*, and closing the dialog leaves it running. Once the
 archive is verified its install finishes even if the dialog or the screen
@@ -1098,6 +1154,8 @@ dependencies.
 |---|---|
 | Extraction refuses absolute paths, `..`, symlinks and case-folded duplicates; skips executables and `__MACOSX`; enforces the caps; an interrupted install leaves nothing installed | `modlibrary` tests on authored fixture zips |
 | Metadata disagreeing with the manifest refuses the install; unmet `requires` block selection | `modlibrary` |
+| Catalogue replacement preserves the original version, verifies the archive, keeps the old install on failure and recovers interrupted publication before staging cleanup; manual duplicates still refuse | `modlibrary.TestCatalogueReplacementKeepsOldInstallUntilValidated`, `modlibrary.TestReplacementRequiresVerifiedArchiveIdentity`, `modlibrary.TestOpenRecoversInterruptedReplacement` |
+| Both mod screens require id/version/hash agreement for current status and protect mounted versions before download and across asynchronous install/reload, including manual root aliases | `main.TestCatalogueCurrentRequiresVersionAndArchiveHash`, `main.TestBothModScreensRefuseUpdatingMountedVersion`, `main.TestModUpdateGuardAcrossAsynchronousInstall`, `main.TestModUpdateRefusesManuallyMountedDirectory` |
 | A negative build page lock is refused; a config carries it as `content.presentation.build_menu_page_size`, and the player's settings value wins | `modlibrary.TestBuildMenuPageSizeMetadata`, `main.TestContentBuildMenuPageSize`, `main.TestExpandedSidebarBuildPageLock` |
 | Precedence: `--mod` over setting, a manual stack disables both, a mod's own config beats a saved `contentProfile`, `--mod-config` beats both, a removed profile name is ignored with the notice, a command line below the minimum is rejected | `modlibrary`, `main.TestContentConfigPrecedenceWithoutAMod`, `main.TestManualStackWithoutAConfigShowsTheNotice` |
 | Every config section is closed and validated (content, reserved gameplay words, feature bounds, settings keys and types, reserved settings keys, keyboard actions and chords, lock paths); the settings layer applies only what it names | `modlibrary.TestParseConfigDocument`, `modlibrary.TestParseConfigDocumentRefusals`, `modlibrary.TestConfigSettingsLayer` |
@@ -1106,7 +1164,7 @@ dependencies.
 | Preset contents, and the retail preset keeping skirmish rows | `main.TestCommunityControlsPresetContents`, `main.TestRetailControlsPresetKeepsSkirmishRows`, `main.TestRetailPresetColumnIsTheDefaults` |
 | A ProTA package's recommendations are its settings layer after `--mod`; a change under ProTA stays ProTA's and the original game plays the base; the loading line names the effective unit limit | `main.TestProTARecommendedSettingsAreItsLayer` (retail tier) |
 | Layers, diffs and atomic subtrees; a change is kept per mod; locked paths play the mod's value until overridden and keep the player's; presets save and apply by part | `settings.TestLayers*`, `main.TestModSettingsKeepChangesPerMod`, `main.TestModConfigSettingsAndLocks`, `main.TestNLScreenPresetsSaveAndApplyPart` (retail tier) |
-| SHA-256 and size mismatch, truncated download, resume, off-origin redirect refused, offline cache shown | `modfetch` against `httptest` |
+| SHA-256 and size mismatch, truncated download, resume only for the same expected hash, off-origin redirect refused, offline cache shown | `modfetch` against `httptest` |
 | Zero mutators leave the clone deep-equal with an equal `Hash`; each mutator changes exactly its fields; rounding, minimum-one, saturation and `v ≤ 0` boundaries; the hash is independent of field order | `content` |
 | Mutators reach fresh skirmish, mission entry and restore; all six fingerprint locks unchanged | `session`, `headless` |
 | Under Strict 3.1 with Build speed ×2, a fixed construction finishes in half the ticks and bills the same total resources (a relationship, not a census) | `session` |

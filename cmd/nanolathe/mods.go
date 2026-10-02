@@ -319,14 +319,6 @@ func (h *shellHost) step(delta float64, cl *client.Client) {
 func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 	started := time.Now()
 	old := h.shell
-	// Loading a game leaves the battle it was loaded from, whatever mod
-	// the game needs; leave it before the switch so neither shell's battle
-	// holds the client while the other binds it.
-	if request.loadSave != "" && old.battle != nil {
-		old.teardownBattle(cl)
-		old.bindFrontendClient(cl)
-		old.openMenu(modeMenuMain)
-	}
 	fail := func(err error) {
 		fmt.Fprintf(os.Stderr, "nanolathe: mod switch failed: %v\n", err)
 		notice := "Mod switch failed: " + noticeReason(err)
@@ -339,6 +331,18 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 		if p := old.activePanel(); p != nil && old.frontend.Mode == modeMenuMain {
 			old.refreshMainMenuModStatus(p)
 		}
+	}
+	if modDownload.blocksMount(request.selector) {
+		fail(&missingProductError{what: "wait for the mod update to finish before switching to it", logical: request.selector, expected: "a completed mod install"})
+		return
+	}
+	// Loading a game leaves the battle it was loaded from, whatever mod
+	// the game needs; leave it before the switch so neither shell's battle
+	// holds the client while the other binds it.
+	if request.loadSave != "" && old.battle != nil {
+		old.teardownBattle(cl)
+		old.bindFrontendClient(cl)
+		old.openMenu(modeMenuMain)
 	}
 	opts := old.opts
 	opts.Roots, opts.Mod, opts.ModSet, opts.modBaseRoots = old.cs.baseRoots, request.selector, true, true
@@ -415,6 +419,7 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 	}
 	_ = old.cs.Close()
 	h.shell = shell
+	modDownload.rememberMounted(shell.cs.mod)
 	if request.loadSave != "" {
 		h.loadAfterReload(request.loadSave)
 	}
@@ -572,9 +577,46 @@ type modDownloadJob struct {
 	unseen      bool   // no Get more mods dialog has shown the outcome yet
 	installs    int    // completed installs, so an open screen re-reads the library
 	dirty       bool
+	mounted     settings.ModSelection // render-thread snapshots, read by the install worker
 }
 
 var modDownload modDownloadJob
+
+const modUpdateSwitchNotice = "Switch mods before updating"
+
+// rememberMounted is called on the render thread before starting a download
+// and after a successful reload. Workers never read a shell or its pointers.
+func (j *modDownloadJob) rememberMounted(mod *modlibrary.Mod) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.mounted = settings.ModSelection{}
+	if mod != nil {
+		j.mounted = settings.ModSelection{ID: mod.ID, Version: mod.Version}
+	}
+}
+
+func (j *modDownloadJob) allowInstall(entry modfetch.Entry) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if entry.ID == j.mounted.ID && entry.Version == j.mounted.Version {
+		return &missingProductError{what: modUpdateSwitchNotice, logical: modSelectorOf(entry.ID, entry.Version), expected: "an unmounted mod version"}
+	}
+	return nil
+}
+
+// blocksMount keeps the download's target unmounted from job start through
+// publication. Starting a download and requesting a reload are render-thread
+// operations; the worker rechecks the captured mounted identity before install
+// and again at commit (§5.3), without racing a shell replacement.
+func (j *modDownloadJob) blocksMount(selector string) bool {
+	id, version, err := modlibrary.ParseSelector(selector)
+	if err != nil || id == "" {
+		return false
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.running && j.entry.ID == id && (version == "" || version == j.entry.Version)
+}
 
 // modDownloadView is one consistent reading of the job for the dialog.
 type modDownloadView struct {
@@ -1159,7 +1201,7 @@ func (g *gameShell) openModsFetch() error {
 		}
 		state.entries = state.entries[:0]
 		for _, entry := range result.Manifest.Mods {
-			if !modInstalled(installed, entry.ID, entry.Version) {
+			if !modInstalled(installed, entry) {
 				state.entries = append(state.entries, entry)
 			}
 		}
@@ -1176,9 +1218,32 @@ func (g *gameShell) openModsFetch() error {
 	return nil
 }
 
-func modInstalled(installed []modlibrary.Mod, id, version string) bool {
+func modInstalled(installed []modlibrary.Mod, entry modfetch.Entry) bool {
 	for _, mod := range installed {
-		if mod.ID == id && mod.Version == version {
+		if mod.ID == entry.ID && mod.Version == entry.Version && entry.Archive.SHA256 != "" && strings.EqualFold(mod.Receipt.SHA256, entry.Archive.SHA256) {
+			return true
+		}
+	}
+	return false
+}
+
+func modUpdateMounted(entry modfetch.Entry, running *modlibrary.Mod) bool {
+	return running != nil && entry.ID == running.ID && entry.Version == running.Version
+}
+
+// A --root stack can mount the library directory without selecting a mod.
+// Compare normalized paths and filesystem identity so a symlink or another
+// spelling of that directory cannot bypass the mounted-content protection.
+func modDirectoryMounted(target string, roots []string) bool {
+	targetPath, _ := filepath.Abs(target)
+	targetInfo, _ := os.Stat(target)
+	for _, root := range roots {
+		rootPath, _ := filepath.Abs(root)
+		if targetPath != "" && targetPath == rootPath {
+			return true
+		}
+		rootInfo, err := os.Stat(root)
+		if err == nil && targetInfo != nil && os.SameFile(targetInfo, rootInfo) {
 			return true
 		}
 	}
@@ -1215,24 +1280,52 @@ func (g *gameShell) startModDownload() {
 	}
 	entry := state.entries[state.selected]
 	state.mu.Unlock()
-	lib, base := modsUI.lib, append([]string(nil), g.cs.baseRoots...)
+	if err := g.startCatalogueDownload(modsUI.lib, entry); err != nil {
+		state.mu.Lock()
+		state.status, state.dirty = noticeReason(err), true
+		state.mu.Unlock()
+	}
+}
+
+// startCatalogueDownload is shared by both mod screens. It snapshots the
+// mounted identity and base roots on the render thread; the job owns them
+// until installation finishes even if its screen closes or content changes.
+func (g *gameShell) startCatalogueDownload(lib *modlibrary.Library, entry modfetch.Entry) error {
+	modDownload.rememberMounted(g.cs.mod)
+	if err := modDownload.allowInstall(entry); err != nil {
+		return err
+	}
+	if modDirectoryMounted(filepath.Join(lib.Root, entry.ID, entry.Version), g.cs.roots) {
+		return &missingProductError{what: "restart with different --root content before updating this mod", logical: modSelectorOf(entry.ID, entry.Version), providers: g.cs.roots, expected: "an unmounted mod directory"}
+	}
+	base := append([]string(nil), g.cs.baseRoots...)
 	client := &modfetch.Client{CatalogURL: modfetch.CatalogURL(), CacheDir: lib.Root}
 	// Downloads live in .downloads, outside staging, and a transfer that
 	// stops part-way keeps its part file there so the next attempt resumes it
 	// (§5.3).
 	dst := filepath.Join(lib.Root, ".downloads", entry.ArchiveName())
-	modDownload.start(entry, func(ctx context.Context, progress func(done, total int64)) error {
+	started := modDownload.start(entry, func(ctx context.Context, progress func(done, total int64)) error {
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
 		}
 		return client.Download(ctx, entry, dst, progress)
 	}, func() error {
+		if err := modDownload.allowInstall(entry); err != nil {
+			return err
+		}
 		options := entry.InstallOptions()
 		options.Validate = modlibrary.ContentValidator(base)
+		options.BeforeCommit = func() error { return modDownload.allowInstall(entry) }
 		_, err := lib.InstallArchive(dst, options)
-		_ = os.Remove(dst)
+		if err == nil {
+			_ = os.Remove(dst)
+		}
 		return err
 	})
+	if !started {
+		return &missingProductError{what: "another mod install is running", logical: modSelectorOf(entry.ID, entry.Version), expected: "the current install to finish"}
+	}
+	return nil
 }
 
 // pollModsFetch runs once per update: a worker marks the dialog or the
@@ -1272,7 +1365,7 @@ func (g *gameShell) pollModsFetch() {
 	if dirty && modsUI != nil {
 		kept := state.entries[:0]
 		for _, entry := range state.entries {
-			if !modInstalled(modsUI.installed, entry.ID, entry.Version) {
+			if !modInstalled(modsUI.installed, entry) {
 				kept = append(kept, entry)
 			}
 		}
@@ -1303,10 +1396,15 @@ func (g *gameShell) refreshModsFetch() {
 		g.setListItems("MAPNAMES", items, state.selected)
 	}
 	description, detail := "", ""
+	mounted := false
 	if state.selected >= 0 && state.selected < len(state.entries) {
 		e := state.entries[state.selected]
 		description = e.Summary
 		detail = e.Homepage
+		mounted = modUpdateMounted(e, g.cs.mod)
+		if mounted {
+			detail = modUpdateSwitchNotice
+		}
 	}
 	p.SetText("DESCRIPTION", g.fitDetail(description, 230, 2))
 	p.SetText("SIZE", g.fitDetail(detail, 230, 1))
@@ -1336,7 +1434,7 @@ func (g *gameShell) refreshModsFetch() {
 	}
 	p.SetText("LOAD", action)
 	p.SetText("PREVMENU", "Close")
-	retailGreyGadget(p.Window, "LOAD", job.installing || (!job.running && len(state.entries) == 0))
+	retailGreyGadget(p.Window, "LOAD", job.installing || (!job.running && (len(state.entries) == 0 || mounted)))
 }
 
 // ---------------------------------------------------------------------------

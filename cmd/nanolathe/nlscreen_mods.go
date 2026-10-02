@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"image/color"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -75,21 +73,9 @@ func (s *nlScreen) downloadMod(entry modfetch.Entry) {
 	if err != nil || g == nil {
 		return
 	}
-	base := append([]string(nil), g.cs.baseRoots...)
-	client := &modfetch.Client{CatalogURL: modfetch.CatalogURL(), CacheDir: lib.Root}
-	dst := filepath.Join(lib.Root, ".downloads", entry.ArchiveName())
-	modDownload.start(entry, func(ctx context.Context, progress func(done, total int64)) error {
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		return client.Download(ctx, entry, dst, progress)
-	}, func() error {
-		options := entry.InstallOptions()
-		options.Validate = modlibrary.ContentValidator(base)
-		_, err := lib.InstallArchive(dst, options)
-		_ = os.Remove(dst)
-		return err
-	})
+	if err := g.startCatalogueDownload(lib, entry); err != nil {
+		s.toast, s.toastLeft = noticeReason(err), 3
+	}
 }
 
 // removeMod deletes an installed mod after the confirmation; the running
@@ -172,10 +158,12 @@ func (s *nlScreen) drawCatalog(screen *ebiten.Image) {
 		bf.Draw(screen, summary, rr.X+16*u, rr.Y+52*u, screenkit.Style{Size: 11 * u, Top: nlBody})
 		// Right side: installed, the running download, or a button.
 		bx := rr.X + rr.W - 170*u
-		installed := modInstalled(s.mods, e.ID, e.Version)
+		installed := modInstalled(s.mods, e)
 		switch {
 		case installed:
 			df.Draw(screen, "Installed", rr.X+rr.W-24*u, rr.Y+rr.H/2+5*u, screenkit.Style{Size: 12 * u, Tracking: 0.16, Top: nlGreenText, Upper: true, Align: 2})
+		case modUpdateMounted(e, s.shell().cs.mod):
+			bf.Draw(screen, modUpdateSwitchNotice, rr.X+rr.W-24*u, rr.Y+rr.H/2+5*u, screenkit.Style{Size: 10 * u, Top: nlAmber, Align: 2})
 		case job.running && job.entry.ID == e.ID && job.entry.Version == e.Version:
 			label := "Installing…"
 			frac := 1.0

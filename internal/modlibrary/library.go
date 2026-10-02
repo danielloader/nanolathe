@@ -54,7 +54,7 @@ const (
 
 // stagingName is the library's scratch directory for extractions and
 // removals in progress. Partial downloads are not kept here: a download is
-// written to <library>/.downloads/<id>-<version>.zip.part and kept after an
+// written to <library>/.downloads/<id>-<version>.zip.<sha256>.part and kept after an
 // interruption so a later attempt resumes it (DESIGN_MODS_MUTATORS §5.3).
 // Staging holds only work that dies with the process, so the first Open of a
 // library in each process clears it (see Open).
@@ -94,7 +94,8 @@ func beginInstall(root string) func() {
 }
 
 // ErrAlreadyInstalled reports an install whose <id>/<version>/ already
-// exists. Versions are immutable once installed; remove first to reinstall.
+// exists. Manual installs refuse duplicates; verified catalogue updates can
+// explicitly replace them.
 var ErrAlreadyInstalled = errors.New("mod version already installed")
 
 // ErrNotInstalled reports a Remove of a version that is not installed.
@@ -131,7 +132,8 @@ type Library struct {
 // Open prepares the library at root: it creates the directory and, the first
 // time this process opens that root, clears the staging area, which then can
 // only hold the leftovers of an extraction or removal that an earlier process
-// did not finish. Later Opens of the same root leave staging alone, and no
+// did not finish. Interrupted replacements are recovered from .replaced first.
+// Later Opens of the same root leave staging alone, and no
 // Open clears it while an install of this process is extracting into it, so
 // opening the library again never cuts an install off. Open may be called as
 // often as convenient.
@@ -147,6 +149,11 @@ func Open(root string) (*Library, error) {
 	key := stagingKey(root)
 	staging.Lock()
 	defer staging.Unlock()
+	if staging.installs[key] == 0 {
+		if err := lib.recoverReplacements(); err != nil {
+			return nil, err
+		}
+	}
 	if !staging.cleared[key] && staging.installs[key] == 0 {
 		if err := os.RemoveAll(dir); err != nil {
 			return nil, diagnostic("clearing mod staging failed: "+err.Error(), dir, nil, "a removable staging directory")
@@ -265,14 +272,19 @@ func (l *Library) Lookup(id, version string) (Mod, bool, error) {
 	return found, ok, nil
 }
 
-// Remove deletes one installed version (P9: nothing is removed implicitly).
+// Remove deletes one installed version at the player's request.
 // The version directory is first renamed into staging, so it disappears from
 // the library in one step even if the deletion that follows is interrupted;
 // the next process's first Open clears whatever is left. The <id>/ directory
 // goes when it empties.
 func (l *Library) Remove(id, version string) error {
+	staging.Lock()
+	defer staging.Unlock()
 	if !idPattern.MatchString(id) || !versionPattern.MatchString(version) {
 		return diagnostic(fmt.Sprintf("mod %s@%s cannot be removed", id, version), filepath.Join(l.Root, id, version), []string{l.Root}, "an installed mod id and an explicit version")
+	}
+	if err := l.recoverReplacement(id, version); err != nil {
+		return err
 	}
 	dir := l.modDir(id, version)
 	if info, err := os.Lstat(dir); err != nil || !info.IsDir() {

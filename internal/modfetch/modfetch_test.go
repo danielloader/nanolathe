@@ -379,7 +379,7 @@ func TestDownloadVerifies(t *testing.T) {
 		if got, _ := os.ReadFile(dst); !bytes.Equal(got, fixtureArchive) {
 			t.Fatal("downloaded bytes differ")
 		}
-		if _, err := os.Stat(dst + ".part"); err == nil {
+		if _, err := os.Stat(partialName(dst, server.entry("/mods/sample.zip", fixtureArchive))); err == nil {
 			t.Fatal("the part file outlived a finished download")
 		}
 		if lastTotal != int64(len(fixtureArchive)) || lastDone != lastTotal {
@@ -430,7 +430,11 @@ func TestDownloadVerifies(t *testing.T) {
 
 func assertNoFiles(t *testing.T, dst string) {
 	t.Helper()
-	for _, name := range []string{dst, dst + ".part"} {
+	parts, err := filepath.Glob(dst + ".*.part")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range append(parts, dst) {
 		if _, err := os.Stat(name); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("%s exists after a refused download (%v)", filepath.Base(name), err)
 		}
@@ -452,7 +456,7 @@ func TestInterruptedDownloadResumes(t *testing.T) {
 	if err := client.Download(context.Background(), entry, dst, nil); err == nil || !strings.Contains(err.Error(), "interrupted") {
 		t.Fatalf("Download = %v, want an interruption", err)
 	}
-	if info, err := os.Stat(dst + ".part"); err != nil || info.Size() != int64(half) {
+	if info, err := os.Stat(partialName(dst, server.entry("/mods/sample.zip", fixtureArchive))); err != nil || info.Size() != int64(half) {
 		t.Fatalf("part after the drop = %v, %v; want %d bytes kept", info, err, half)
 	}
 
@@ -477,6 +481,43 @@ func TestInterruptedDownloadResumes(t *testing.T) {
 	}
 }
 
+// Repackaging keeps id, version, URL and destination. Only the manifest hash
+// distinguishes a new archive from the interrupted one (§5.3).
+func TestChangedArchiveHashDoesNotResumePreviousPackage(t *testing.T) {
+	server := newCatalogServer(t)
+	client := server.client(t)
+	dst := filepath.Join(t.TempDir(), "sample.zip")
+	old := server.entry("/mods/sample.zip", fixtureArchive)
+	oldPart := partialName(dst, old)
+	if err := os.WriteFile(oldPart, fixtureArchive[:100], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Old releases used an unqualified part path; it must not be resumed.
+	if err := os.WriteFile(dst+".part", fixtureArchive[:100], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	updated := bytes.Repeat([]byte("n"), len(fixtureArchive))
+	entry := server.entry("/mods/sample.zip", updated)
+	server.route("/mods/sample.zip", serveBytes(updated))
+	if err := client.Download(context.Background(), entry, dst, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.seen()[0].Header.Get("Range"); got != "" {
+		t.Fatalf("new hash resumed old package with Range %q", got)
+	}
+	if got, _ := os.ReadFile(dst); !bytes.Equal(got, updated) {
+		t.Fatal("new package bytes differ")
+	}
+	if data, err := os.ReadFile(oldPart); err != nil || !bytes.Equal(data, fixtureArchive[:100]) {
+		t.Fatalf("previous archive's partial download changed: %v", err)
+	}
+	upper := old
+	upper.Archive.SHA256 = strings.ToUpper(old.Archive.SHA256)
+	if partialName(dst, upper) != oldPart {
+		t.Fatal("hash spelling changed the resume identity")
+	}
+}
+
 func TestResumeRestartsWhenTheServerIgnoresRange(t *testing.T) {
 	server := newCatalogServer(t)
 	server.route("/mods/sample.zip", func(w http.ResponseWriter, r *http.Request) {
@@ -484,7 +525,7 @@ func TestResumeRestartsWhenTheServerIgnoresRange(t *testing.T) {
 	})
 	client := server.client(t)
 	dst := filepath.Join(t.TempDir(), "sample.zip")
-	if err := os.WriteFile(dst+".part", []byte("stale prefix from another attempt"), 0o644); err != nil {
+	if err := os.WriteFile(partialName(dst, server.entry("/mods/sample.zip", fixtureArchive)), []byte("stale prefix from another attempt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.Download(context.Background(), server.entry("/mods/sample.zip", fixtureArchive), dst, nil); err != nil {
@@ -546,7 +587,7 @@ func TestStalledDownloadKeepsItsPart(t *testing.T) {
 	if err := client.Download(context.Background(), server.entry("/mods/sample.zip", fixtureArchive), dst, nil); err == nil || !strings.Contains(err.Error(), "stalled") {
 		t.Fatalf("Download = %v, want a stall", err)
 	}
-	if info, err := os.Stat(dst + ".part"); err != nil || info.Size() != 100 {
+	if info, err := os.Stat(partialName(dst, server.entry("/mods/sample.zip", fixtureArchive))); err != nil || info.Size() != 100 {
 		t.Fatalf("part after a stall = %v, %v; want 100 bytes kept", info, err)
 	}
 }
@@ -591,7 +632,7 @@ func TestDownloadThenInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts := entry.InstallOptions()
-	if opts.Expect != nil || opts.ExpectIdentity == nil || *opts.ExpectIdentity != (modlibrary.ExpectedIdentity{ID: "sample", Version: "1.0"}) || opts.SHA256 != entry.Archive.SHA256 || opts.Size != entry.Archive.Size || opts.Source != entry.Archive.URL {
+	if !opts.Replace || opts.Expect != nil || opts.ExpectIdentity == nil || *opts.ExpectIdentity != (modlibrary.ExpectedIdentity{ID: "sample", Version: "1.0"}) || opts.SHA256 != entry.Archive.SHA256 || opts.Size != entry.Archive.Size || opts.Source != entry.Archive.URL {
 		t.Fatalf("InstallOptions = %+v", opts)
 	}
 	validated := false
@@ -687,7 +728,7 @@ func TestReleaseAssetDownload(t *testing.T) {
 	}
 	entry := result.Manifest.Mods[0]
 	dst := filepath.Join(t.TempDir(), entry.ArchiveName())
-	if err := os.WriteFile(dst+".part", fixtureArchive[:100], 0o644); err != nil {
+	if err := os.WriteFile(partialName(dst, entry), fixtureArchive[:100], 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.Download(context.Background(), entry, dst, nil); err != nil {

@@ -2,7 +2,7 @@
   "schema": 2,
   "id": "escalation",
   "name": "TA: Escalation",
-  "version": "10.2.0+nanolathe.2",
+  "version": "10.2.0",
   "summary": "Experimental Gold 10.2.0 compatibility.",
   "homepage": "https://taesc.tauniverse.com/?p=downloads",
   "requires": [],

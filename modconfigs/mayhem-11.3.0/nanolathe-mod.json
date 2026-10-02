@@ -2,7 +2,7 @@
   "schema": 2,
   "id": "mayhem",
   "name": "Total Mayhem",
-  "version": "11.3.0+nanolathe.1",
+  "version": "11.3.0",
   "summary": "Experimental Total Mayhem 11.3.0 compatibility. Some patch-era gameplay and controls remain unverified.",
   "homepage": "https://mayhem.tauniverse.com/totalm.htm",
   "requires": [],

@@ -465,7 +465,7 @@ func (c *Client) readCache(base *url.URL, allowed origin) (Manifest, time.Time, 
 }
 
 // ArchiveName is the file name §5.3 downloads an entry to inside the
-// library's staging directory: <id>-<version>.zip.
+// library's .downloads directory: <id>-<version>.zip.
 func (e Entry) ArchiveName() string { return e.ID + "-" + e.Version + ".zip" }
 
 // InstallOptions are the library options a catalogue install needs: the id
@@ -474,11 +474,17 @@ func (e Entry) ArchiveName() string { return e.ID + "-" + e.Version + ".zip" }
 // Progress (§5.3).
 func (e Entry) InstallOptions() modlibrary.InstallOptions {
 	expect := modlibrary.ExpectedIdentity{ID: e.ID, Version: e.Version}
-	return modlibrary.InstallOptions{ExpectIdentity: &expect, SHA256: e.Archive.SHA256, Size: e.Archive.Size, Source: e.Archive.URL}
+	return modlibrary.InstallOptions{ExpectIdentity: &expect, SHA256: e.Archive.SHA256, Size: e.Archive.Size, Source: e.Archive.URL, Replace: true}
+}
+
+// partialName binds a resume to the expected archive bytes, including when a
+// packaging update keeps both the original mod version and the download URL.
+func partialName(dst string, e Entry) string {
+	return dst + "." + strings.ToLower(e.Archive.SHA256) + ".part"
 }
 
 // Download fetches an entry's archive to dst (§5.3 steps 1–2). Bytes go to
-// dst+".part"; an existing part is resumed with a range request, and kept if
+// dst+".<sha256>.part"; an existing part is resumed with a range request, and kept if
 // the server answers 206, or restarted if it answers 200. A transfer that
 // fails part-way (a dropped connection, a cancelled context, a stall) keeps
 // the part so a later call resumes it. A completed transfer is checked
@@ -508,7 +514,7 @@ func (c *Client) Download(ctx context.Context, e Entry, dst string, progress fun
 		return fail("mod catalogue entry has no archive identity", nil)
 	}
 
-	part := dst + ".part"
+	part := partialName(dst, e)
 	var offset int64
 	if info, err := os.Stat(part); err == nil && info.Mode().IsRegular() {
 		offset = info.Size()

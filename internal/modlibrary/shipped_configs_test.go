@@ -124,7 +124,7 @@ func TestShippedConfigsCarryTheRemovedProfiles(t *testing.T) {
 	for _, tc := range shippedConfigs {
 		t.Run(tc.id, func(t *testing.T) {
 			meta := readShippedConfig(t, tc.dir)
-			if meta.ID != tc.id || !strings.HasSuffix(tc.dir, strings.SplitN(meta.Version, "+", 2)[0]) {
+			if meta.ID != tc.id || meta.Version != strings.TrimPrefix(tc.dir, tc.id+"-") {
 				t.Fatalf("identity %s@%s does not match its release directory %s", meta.ID, meta.Version, tc.dir)
 			}
 			content := meta.Content()

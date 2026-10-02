@@ -35,9 +35,16 @@ type InstallOptions struct {
 	// Source is recorded in the receipt: the download URL, or empty for
 	// "local:<original file name>".
 	Source string
+	// Replace permits a catalogue package to replace the same id/version.
+	// It requires ExpectIdentity, SHA256 and Size; manual installs still
+	// refuse duplicates. The old install survives until validation succeeds.
+	Replace bool
 	// Validate runs on the staged content root before anything is committed
 	// (§5.3 step 4). ContentValidator is the standard one; nil skips.
 	Validate func(stagedRoot string, meta Metadata) error
+	// BeforeCommit rechecks host constraints after validation and immediately
+	// before publication; the desktop uses it to protect mounted content.
+	BeforeCommit func() error
 	// Progress reports extracted bytes against the package's total; may be nil.
 	Progress func(done, total int64)
 }
@@ -89,6 +96,9 @@ type plannedEntry struct {
 // caller removes it after a successful install.
 func (l *Library) InstallArchive(zipPath string, opts InstallOptions) (Mod, error) {
 	provider := filepath.Base(zipPath)
+	if opts.Replace && (opts.ExpectIdentity == nil || opts.SHA256 == "" || opts.Size <= 0) {
+		return Mod{}, diagnostic("replacing a mod requires a catalogue archive identity", provider, []string{provider}, "an expected id, version, SHA-256 and size")
+	}
 	info, err := os.Stat(zipPath)
 	if err != nil || !info.Mode().IsRegular() {
 		return Mod{}, diagnostic("mod archive is not readable", zipPath, []string{provider}, "a readable .zip file")
@@ -131,7 +141,7 @@ func (l *Library) InstallArchive(zipPath string, opts InstallOptions) (Mod, erro
 // here.
 func (l *Library) InstallDirectory(dir string, opts InstallOptions) (Mod, error) {
 	provider := filepath.Base(filepath.Clean(dir))
-	if opts.SHA256 != "" || opts.Size != 0 {
+	if opts.SHA256 != "" || opts.Size != 0 || opts.Replace {
 		return Mod{}, diagnostic("an archive identity cannot verify a folder", dir, []string{provider}, "a .zip file for a catalogue install")
 	}
 	// The chosen folder itself may be an alias; links inside it are refused.
@@ -221,7 +231,7 @@ func (l *Library) install(provider, baseName string, entries []sourceEntry, opts
 		}
 	}
 	target := l.modDir(meta.ID, meta.Version)
-	if err := l.refuseExisting(target, meta); err != nil {
+	if err := l.checkInstallTarget(target, meta, opts.Replace); err != nil {
 		return Mod{}, err
 	}
 
@@ -276,17 +286,8 @@ func (l *Library) install(provider, baseName string, entries []sourceEntry, opts
 		return Mod{}, diagnostic("writing the install receipt failed: "+err.Error(), ReceiptFile, []string{provider}, "a writable staging directory")
 	}
 
-	// Commit. The rename is within one filesystem, so an interrupted install
-	// leaves only staging litter and never a half-installed version.
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return Mod{}, diagnostic("creating the mod directory failed: "+err.Error(), filepath.Dir(target), []string{l.Root}, "a writable mod library")
-	}
-	if err := l.refuseExisting(target, meta); err != nil {
+	if err := l.commitInstall(staged, target, meta, opts); err != nil {
 		return Mod{}, err
-	}
-	if err := os.Rename(staged, target); err != nil {
-		_ = os.Remove(filepath.Dir(target)) // only succeeds if this install created it
-		return Mod{}, diagnostic("committing the mod failed: "+err.Error(), target, []string{l.Root}, "a writable mod library")
 	}
 	committed = true
 	mod := installedMod(meta, target, receipt)
@@ -294,8 +295,14 @@ func (l *Library) install(provider, baseName string, entries []sourceEntry, opts
 	return mod, nil
 }
 
-func (l *Library) refuseExisting(target string, meta Metadata) error {
-	if _, err := os.Lstat(target); err == nil {
+func (l *Library) checkInstallTarget(target string, meta Metadata, replace bool) error {
+	info, err := os.Lstat(target)
+	if err == nil {
+		if replace && info.IsDir() {
+			if _, ok := l.readMod(meta.ID, meta.Version); ok {
+				return nil
+			}
+		}
 		return &diagError{
 			what:      fmt.Sprintf("mod %s@%s is already installed", meta.ID, meta.Version),
 			logical:   target,
@@ -303,6 +310,9 @@ func (l *Library) refuseExisting(target string, meta Metadata) error {
 			expected:  "a version that is not installed yet (remove the installed one first)",
 			wrapped:   ErrAlreadyInstalled,
 		}
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return diagnostic("checking the installed mod failed: "+err.Error(), target, []string{l.Root}, "a readable mod library")
 	}
 	return nil
 }

@@ -182,6 +182,9 @@ type Renderer struct {
 	// model path: faces triangulated from the packet's projected corners onto a
 	// per-frame atlas page, then commits resolved onto the composite (§22).
 	modelDirect modelDirectLane
+	// preview is allocated only by the isolated unit viewer. Battle model
+	// commands never select its fractional-depth surface.
+	preview *modelPreviewSurface
 	// placePool is the lane's placement pool, started on the first frame
 	// placed in parallel and stopped when the renderer is collected
 	// (model_place_pool.go), and placeWorkers its participant count, zero for

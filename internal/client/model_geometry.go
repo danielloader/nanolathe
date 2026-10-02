@@ -721,11 +721,11 @@ func (c *Client) directModelGeometry(draw *presentationrender.UnitDraw, selector
 // The changing bounds only allocate storage; they never recenter the model.
 // Native and doubled corners have already been projected independently at
 // the requested display scale (DESIGN_DEVELOPER_TOOLS §7).
-func (c *Client) projectedPreviewGeometry(draw *presentationrender.UnitDraw, selector teamColor, projection ModelPreviewProjection, anchorX, anchorY int32) (*drawlist.ModelGeometry, error) {
+func (c *Client) projectedPreviewGeometry(draw *presentationrender.UnitDraw, selector teamColor, projection ModelPreviewProjection, anchorX, anchorY int32) (*drawlist.ModelGeometry, *drawlist.ModelPreviewGeometry, error) {
 	projector := modelPreviewProjector{projection: projection}
 	polys := c.collectDrawPolysProjection(draw, selector, 0, modelCursorUnit, presentationrender.PieceLaneAll, false, &projector)
 	if projector.err != nil || len(polys) == 0 {
-		return nil, projector.err
+		return nil, nil, projector.err
 	}
 	width, height, originX, originY := directModelExtent(polys)
 	supersample := c.modelSupersampleGeometry(polys, draw.KeyPlane, width, height, doubledPlacement{originX: originX, originY: originY, exact: true})
@@ -733,7 +733,7 @@ func (c *Client) projectedPreviewGeometry(draw *presentationrender.UnitDraw, sel
 	g := c.borrowModelPacket(polys, int32(width), int32(height), originX, originY, anchorX, anchorY, 1, draw.KeyPlane, drawlist.ModelFallbackNone)
 	g.Supersample = supersample
 	c.setModelLightingHeight(g, draw)
-	return g, nil
+	return g, projector.geometry(g.Faces, anchorX, anchorY), nil
 }
 
 // directModelExtent is modelExtent for direct-projected corners: seeded at the

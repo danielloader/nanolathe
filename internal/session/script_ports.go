@@ -4,6 +4,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/cob"
 	"github.com/nanolathe-gg/nanolathe/internal/combat"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
@@ -58,7 +59,7 @@ func (CommunityScriptPorts) ReadScriptPort(s *Session, reading *units.Unit, port
 		if target == nil || target.Remaining == 0 {
 			return 0
 		}
-		return 1 + int32(float32(99)*target.Remaining)
+		return 1 + numeric.TruncateFloat32ToLow32(float32(99)*target.Remaining)
 	case 74:
 		if reading.Owner >= 10 || uint16(args[0]) == 0 {
 			return 0

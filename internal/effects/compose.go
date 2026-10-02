@@ -1,4 +1,4 @@
-package render
+package effects
 
 import "github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 
@@ -6,10 +6,10 @@ import "github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 // per-tick sweep evaluates a removal verdict before the update work, compacts
 // left stably, and evicts the oldest object once the pre-insert count exceeds
 // 400 [03 "Strip storage and lifecycle"][R-STRIP-01 §1]. This file holds the
-// fixed effect pool the presentation side owns.
+// fixed effect pool the simulation owns.
 
 // FixedEffectCap is the fixed pool capacity [03 §1] C5 (I5).
-const FixedEffectCap = 300 // 0x54-byte records, 300 entries [03 §1] (I5)
+const FixedEffectCap = 300 // 300 entries [03 §1] (I5)
 
 // FixedEffectPool is the battle-sized fixed effect pool [03 §1] C5.
 // Its zero value holds up to 300 fixed-size records; appends at or above the

@@ -750,17 +750,7 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 	// way it installs damagebars [02 §3][07 R-HUD-03 §14.3][07 R-HUD-03 §14.4].
 	applyMessageLineSettings(cl, s)
 	cl.SetUIStage(battleHUDUIStage{hud: b.hud, battle: b})
-	// The presentation effect pool needs each admitted effect's authored
-	// per-frame holds, which live in the GAF entry the event names — an asset
-	// the client owns and the session does not [06 R-WFX-01 §1][03 §1]. This
-	// is the shell filling that seam with the same bank cache the draw pass
-	// resolves frames through, so the cursor the pool advances and the frame
-	// the composer blits can never come from two different readings of one
-	// entry.
-	b.sess.SetEffectTimingResolver(func(e render.Event) (render.FrameTiming, bool) {
-		return cl.EffectFrameTiming(e.AssetID, e.Graphic)
-	})
-	// The two AUTHORITATIVE readings of that same art — a smoke puff's last
+	// The authoritative art metadata — effect frame holds, a smoke puff's last
 	// frame against its bound entry's frame count [03 R-STRIP-01 §2], and a
 	// burning feature's frame geometry and its die/reclaim/burn lifetime in
 	// visits [05 R-FEAT-01 §10] — are deliberately NOT bound here. Content

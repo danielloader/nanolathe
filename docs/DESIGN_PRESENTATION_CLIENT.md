@@ -555,11 +555,20 @@ with a per-pixel **height key**, and that image is blitted. The split across
 ### 2.4 `internal/render` — the presentation pools and helpers
 
 Presentation-only, and it writes no pixels: `internal/client` does that. It
-owns `FixedEffectPool` (strip storage and the strip sweep itself are
-`internal/session`'s), the render-type constants and the `ProjectileDraw` dispatch, `TexturePlayer`
+owns effect draw lists and presentation debris-trail containers, the
+render-type constants and the `ProjectileDraw` dispatch, `TexturePlayer`
 and the GAF playback cursor, the cursor index table, `BuildFogOpsWindowWithArtInto`, the
 `RadarSurface`/`MinimapService` pair, the nanolathe emitter, the nanoframe
-reveal verdicts, the shade-row helpers, and the generated flash-table geometry.
+reveal verdicts and the shade-row helpers.
+
+`internal/effects` owns the authoritative `FixedEffectPool`, admission service,
+shatter geometry and whole-piece debris. Their lifetime and capacity can gate
+simulation draws, so they are covered by the determinism guards. Animation
+holds come from immutable `content.SimArt` at composition. Strip storage and
+its sweep remain in `internal/session`; detached views flow to presentation.
+Flash-table definitions and holds also belong to `internal/effects`, while
+`internal/client` generates the procedural disc geometry
+(DESIGN_MULTIPLAYER §16.1).
 
 ### 2.5 `internal/palette`
 
@@ -1072,7 +1081,8 @@ document carries them.
   401 `[03 §1]` `[03 R-FX-02 §4]` `[01 R-CORE-01 §4.4.1]`. Those are Strict's
   bounds; Community 3.9 and Modern size the simulation's strips from the
   special-effects limit at battle entry (DESIGN_COMMUNITY_PATCH §4.1, CP-LIM-2).
-* **C5 The fixed effect pool.** Up to 300 fixed-size records; an append at or
+* **C5 The fixed effect pool.** Owned by `internal/effects`. Up to 300
+  fixed-size records; an append at or
   above the cap allocates nothing. The integrator advances velocity against
   gravity, can restore a prior position and invert and halve vertical velocity
   on terrain or water contact, single-steps both embedded animation players,

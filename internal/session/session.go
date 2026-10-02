@@ -13,6 +13,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/construction"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
+	"github.com/nanolathe-gg/nanolathe/internal/effects"
 	"github.com/nanolathe-gg/nanolathe/internal/features"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
@@ -21,7 +22,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/path"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
-	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 	"github.com/nanolathe-gg/nanolathe/internal/triggers"
@@ -64,10 +64,10 @@ type MeteorState struct {
 type publicationState struct {
 	communityHUD     communityHUDPublication
 	events           *frame.EventBuffer
-	effects          *render.EffectService
+	effects          *effects.EffectService
 	unitIdentities   []publishedUnitIdentity
 	nextUnitIdentity uint64
-	fragments        []render.FragmentMetadata
+	fragments        []effects.FragmentMetadata
 	wrecks           wreckPresentation
 }
 
@@ -99,14 +99,14 @@ type Phase7Service interface {
 	StepPhase7()
 }
 
-func newPublicationState(events *frame.EventBuffer, explosionCapacity int) *publicationState {
+func newPublicationState(events *frame.EventBuffer, explosionCapacity int, art *content.SimArt) *publicationState {
 	if events == nil {
 		events = frame.NewEventBuffer(frame.Limits{})
 	}
-	pool := render.NewFixedEffectPool(explosionCapacity)
+	pool := effects.NewFixedEffectPool(explosionCapacity)
 	return &publicationState{
 		events:  events,
-		effects: render.NewEffectServiceWithPool(pool.Cap(), pool),
+		effects: effects.NewEffectServiceWithPool(pool.Cap(), pool, art),
 	}
 }
 
@@ -119,7 +119,7 @@ func (s *Session) ensurePublicationState() *publicationState {
 		return nil
 	}
 	if s.publication == nil {
-		s.publication = newPublicationState(nil, s.EntryCommunity.ExplosionCapacity)
+		s.publication = newPublicationState(nil, s.EntryCommunity.ExplosionCapacity, s.simArt)
 	}
 	return s.publication
 }
@@ -150,7 +150,7 @@ type Session struct {
 	communitySchema          communitySchemaState
 	publicationObserver      func(*frame.Frame)
 	developerDiagnostics     bool
-	fragmentMaterialResolver func(uint16, int, int, uint8) render.FrozenFragmentMaterial
+	fragmentMaterialResolver func(uint16, int, int, uint8) effects.FrozenFragmentMaterial
 
 	State         State
 	pendingBattle bool
@@ -198,7 +198,7 @@ type Session struct {
 	modernAI ai.Planner
 
 	publication *publicationState // staged events and admitted effects at the committed-frame boundary [01 §4.4][03 §1]
-	debris      *render.DebrisPool
+	debris      *effects.DebrisPool
 	// orderSnapshotScratch and routePointScratch are the publication
 	// boundary's reusable staging for one unit's order queue. Every value in
 	// them is overwritten or truncated before it is read, and the snapshot is

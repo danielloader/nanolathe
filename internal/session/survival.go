@@ -610,7 +610,7 @@ func (s *Session) stepSurvival(tick uint32) {
 		}
 		msg := fmt.Sprintf("Wave %d %s:", st.wave, word)
 		if r := st.tuning.WaveReward; r > 0 {
-			msg += fmt.Sprintf(" +%d metal and energy,", int(r))
+			msg += fmt.Sprintf(" +%d metal and energy,", numeric.TruncateFloat64ToInt64(float64(r)))
 		}
 		msg += fmt.Sprintf(" score +%d", ws.Total())
 		switch {

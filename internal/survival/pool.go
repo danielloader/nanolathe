@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
 
 // Domain is how a wave unit travels (DESIGN_SURVIVAL §5).
@@ -79,9 +80,9 @@ func (p *Pool) Cost(def *content.UnitDef) int64 {
 	if def == nil {
 		return 0
 	}
-	c := int64(def.BuildCostMetal)
+	c := numeric.TruncateFloat64ToInt64(float64(def.BuildCostMetal))
 	if p.RatioE > 0 {
-		c += int64(def.BuildCostEnergy) * p.RatioM / p.RatioE
+		c += numeric.TruncateFloat64ToInt64(float64(def.BuildCostEnergy)) * p.RatioM / p.RatioE
 	}
 	if c < 1 {
 		c = 1
@@ -215,7 +216,7 @@ func BuildPool(cat *content.Catalog, products Products) Pool {
 	type pair struct{ e, m int64 }
 	var ratios []pair
 	for _, u := range pool.Units {
-		e, m := int64(u.Def.BuildCostEnergy), int64(u.Def.BuildCostMetal)
+		e, m := numeric.TruncateFloat64ToInt64(float64(u.Def.BuildCostEnergy)), numeric.TruncateFloat64ToInt64(float64(u.Def.BuildCostMetal))
 		if e > 0 && m > 0 {
 			ratios = append(ratios, pair{e, m})
 		}

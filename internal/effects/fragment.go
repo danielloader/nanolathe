@@ -1,4 +1,4 @@
-package render
+package effects
 
 import (
 	"math"
@@ -339,12 +339,15 @@ func fragmentNormal(quad FragmentQuad) [3]float32 {
 		float32(float64(third[1]) - float64(second[1])),
 		float32(float64(third[2]) - float64(second[2])),
 	}
+	// Binary32 operands make each product exact in binary64 (at most 48
+	// significand bits). Explicit product stores prevent fusion without
+	// changing the existing results or the named binary32 boundaries [I2].
 	cross := [3]float32{
-		float32(float64(latter[1])*float64(former[2]) - float64(latter[2])*float64(former[1])),
-		float32(float64(latter[2])*float64(former[0]) - float64(latter[0])*float64(former[2])),
-		float32(float64(latter[0])*float64(former[1]) - float64(latter[1])*float64(former[0])),
+		float32(float64(float64(latter[1])*float64(former[2])) - float64(float64(latter[2])*float64(former[1]))),
+		float32(float64(float64(latter[2])*float64(former[0])) - float64(float64(latter[0])*float64(former[2]))),
+		float32(float64(float64(latter[0])*float64(former[1])) - float64(float64(latter[1])*float64(former[0]))),
 	}
-	length := math.Sqrt(float64(cross[0])*float64(cross[0]) + float64(cross[1])*float64(cross[1]) + float64(cross[2])*float64(cross[2]))
+	length := math.Sqrt(float64(float64(cross[0])*float64(cross[0])) + float64(float64(cross[1])*float64(cross[1])) + float64(float64(cross[2])*float64(cross[2])))
 	return [3]float32{
 		float32(float64(cross[0]) / length),
 		float32(float64(cross[1]) / length),

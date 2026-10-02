@@ -69,6 +69,9 @@ Allowed floating point, exhaustively:
 | AI candidate-score pressure terms (`energyRaw`, `metalRaw`) — the capacity difference and its product, at the 53-bit working precision retail runs with | `float64` transients, never stored; the inputs and the multipliers stay `float32`, and the capacity truncation and the single final truncation are the only narrowing steps | `[08 R-P0-05 §3]`, `[08 "Arithmetic and clamping"]` |
 | AI class-vector first-pass accumulator — the two cost products and their sums, at the 53-bit working precision retail runs with; the two coefficients that narrow keep their single-precision stores | `float64` transient, never stored; each sum truncates toward zero into the integer coefficient immediately, and the constants stay `float32` | `[08 "Arithmetic and clamping"]`, `[08 R-P0-05 §5]` |
 | AI metal-spot records and exhaustive-placement heap keys | authored feature-metal copy and helper-local negative squared-distance key, both `float32` | `[08 R-AI-03 §1]`, `[08 R-AI-03 §3]` |
+| Survival authored cost and reward conversions | `float64` only for exact widening of a stored `float32` into the defined signed-64 conversion; no floating arithmetic is added | DESIGN_SURVIVAL §5 and §6.9; DESIGN_MULTIPLAYER §16.1 M1-C4–C5 |
+| Portable numeric kernel: retail distance and its bounded truncation shortcut, unfused radian functions, immutable 65,536-angle table, and defined integer conversions | `float64` API values and working transients; integer significands implement distance rounding; radian coefficients and the angle table are immutable binary64 data; conversions narrow at their documented stores | `[01 R-DET-01 §1]`, `[01 R-DET-01 §2]`, `[01 R-DET-01 §7]`; DESIGN_MULTIPLAYER §16.1 M1-C1–C4 |
+| Leash, construction/work reach and air-order planar distances, including footprint pads | `float64` transient through the portable distance kernel; signed input words and raw differences, scaled pads and output narrowing follow each caller | `[01 R-DET-01 §7]`, `[04 R-STANCE-01 §4]`, `[04 R-AIR-01 §8]`, `[05 R-WORK-01 §2]` |
 | Simulation trig-table construction at initialization | `float64` transient; authoritative table entries are integers | `[04 §5.1]` |
 | Model piece rotation trig in the draw path and admission-time shatter pose | `float64`, round-to-nearest; geometry narrows back to fixed point | `[03 §2.4]`; approved current-simulation-pose departure in DESIGN_UNITS_ORDERS_COB §3.3 |
 | Queued-order range-ring adaptive chord count `trunc(radius × 2π × 1/8)` | `float64` presentation transient, narrowed immediately to the integer chord count | `[07 R-P0-11 §3]` |
@@ -104,8 +107,8 @@ an earlier statement — carries an explicit floating-point conversion, the
 specification's rounding barrier. It changes no operand width, no constant, no
 evaluation order and no narrowing point. Presentation packages are exempt.
 
-**Library functions and conversions** (adopted with DESIGN_MULTIPLAYER; in
-force from its milestone M1). The standard library's transcendental functions
+**Library functions and conversions — in force** (DESIGN_MULTIPLAYER M1).
+The standard library's transcendental functions
 do not return the same bits on every architecture: `math.Hypot` is assembly
 on amd64 and fused Go on arm64, and package `math` itself is compiled with
 fused multiply-adds on arm64, where the guard below cannot see it. An
@@ -117,16 +120,21 @@ arctangent, arccosine and tangent from the in-repository implementations in
 (DESIGN_MULTIPLAYER §5.3 L1). And a floating-point value becomes an integer
 only through a helper that defines the result for a value that does not fit
 or is not a number: Go leaves that conversion to the processor, and the
-processors disagree. Until M1 lands, the existing call sites and conversions
-are that milestone's work list, and a diff must not add to it.
+processors disagree. The numeric kernel alone may perform raw conversions,
+after enforcing the documented bounds. IEEE-754 classification and encoding
+operations (`IsNaN`, `IsInf`, `Signbit`, the `Float32`/`Float64` bit conversions,
+`Inf`, `NaN` and `Copysign`) inspect or construct bits rather than approximate
+arithmetic; they remain permitted. This does not settle propagated NaN
+payloads, which remain the explicit distance-kernel research Unknown.
 
 **Check.** `grep -rn "float64\|float32" internal/` — every hit maps to a row
 above or is presentation-only. `internal/architecture`'s
 `TestAuthoritativeArithmeticIsNotFused` compiles the authoritative packages for
 arm64 and for `GOAMD64=v3` and fails on a fused instruction outside its
 shrink-only allowlist, each entry of which argues that its product is exact.
-Two source guards for the library-function and conversion rule arrive with
-DESIGN_MULTIPLAYER's M1.
+`TestAuthoritativeNumericPortability` enforces both library-function identity
+and floating-to-integer conversion types, including aliases, named types and
+generic constraints; no caller outside `internal/sim/numeric` is exempt.
 
 ## I3 — Truncation toward zero
 
@@ -297,11 +305,11 @@ battle's one human seat is the perspective every such read resolves to. And
 nothing a host supplies after composition — a renderer, an art cache, an
 audio service, a preference — may change a lifetime, a pool's occupancy or a
 draw. The fixed effect pool is authoritative state although it is kept
-beside the publication boundary. Two parts of the engine do not yet meet
-this paragraph and are that design's work: the effect timing resolver only
-the windowed host installs (its milestone M1, §5.3 L9), and the reads of the
-local seat and viewing slot listed in its §6.3 (its milestone M5). A diff
-must not add a third.
+beside the publication boundary. Its authored holds come from the battle's
+immutable `content.SimArt`, bound before the first unit script; no host timing
+resolver exists (DESIGN_MULTIPLAYER §5.3 L9, M1). The reads of the local seat
+and viewing slot listed in that design's §6.3 do not yet meet this paragraph
+and remain its milestone M5 work. A diff must not add another exception.
 
 **Why.** Retail's draw path samples the accumulators exactly as committed at
 the current tick; no interpolation between updates exists `[03 §2.4]`.
@@ -433,7 +441,13 @@ that seat's own retail machine would have run it, because retail multiplayer
 has no single outcome to match. Its online policies (cheat permission for
 world-changing commands, no pause or speed change in the first releases,
 room-wide view restrictions) are Nanolathe's in every mode and are recorded
-as such, not as retail behavior. A single-seat battle is unchanged, and every
+as such, not as retail behavior. Q22–Q25, approved 2026-10-02, additionally
+define shared directed declarations, canonical per-player exploration with
+own/hosted reset scope, request-tick map sharing, explicit per-computer
+difficulty and initial computer exclusion from Deathmatch. Strict retains
+one computer per human; Modern/Community allow multiple within available
+seats through the existing RuleSet, as documented in DESIGN_MULTIPLAYER
+§6.6–§6.7. A single-seat battle is unchanged, and every
 fingerprint lock runs single-player. It is owned by
 [DESIGN_MULTIPLAYER](DESIGN_MULTIPLAYER.md) and is not yet implemented.
 

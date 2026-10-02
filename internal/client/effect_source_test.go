@@ -9,7 +9,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
-func TestEffectTimingLeavesPixelsUnmaterializedAndEvictionKeepsFrames(t *testing.T) {
+func TestEffectMetadataLeavesPixelsUnmaterializedAndEvictionKeepsFrames(t *testing.T) {
 	data, err := formats.EncodeGAF([]formats.GAFWriteEntry{{Name: "burst", Loop: true, Frames: []formats.GAFWriteFrame{
 		{Width: 1, Height: 1, Duration: 0, Pixels: []byte{7}},
 		{Width: 1, Height: 1, Duration: 3, Pixels: []byte{8}},
@@ -32,14 +32,13 @@ func TestEffectTimingLeavesPixelsUnmaterializedAndEvictionKeepsFrames(t *testing
 	c := &Client{modelFS: fs}
 	// Exercise the transient tier even with this small authored fixture.
 	c.effectCacheLocked().durableBytes = effectDurableBytes
-	timing, ok := c.EffectFrameTiming("EFFECT", "BURST")
-	if !ok || timing.Loop || len(timing.Durations) != 2 || timing.Durations[0] != 1 || timing.Durations[1] != 3 {
-		t.Fatalf("timing=%+v", timing)
+	entry, ok := c.effectEntry("EFFECT", "BURST")
+	if !ok || len(entry.Frames) != 2 {
+		t.Fatal("missing authored entry metadata")
 	}
 	if c.effectArt.frames.bytes != 0 {
-		t.Fatal("timing decoded pixels")
+		t.Fatal("metadata lookup decoded pixels")
 	}
-	entry, _ := c.effectEntry("effect", "burst")
 	if len(entry.Frames[0].Frame.Pixels) != 0 {
 		t.Fatal("durable metadata owns pixels")
 	}

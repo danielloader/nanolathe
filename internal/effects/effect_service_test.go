@@ -1,8 +1,13 @@
-package render
+package effects
 
 import (
-	"slices"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/nanolathe-gg/nanolathe/formats"
+	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
 // TestEffectServiceResolvesPrimaryTimingBesideACalculatedFlash locks the
@@ -18,16 +23,7 @@ import (
 // is now resolved on its own.
 func TestEffectServiceResolvesPrimaryTimingBesideACalculatedFlash(t *testing.T) {
 	pool := &FixedEffectPool{}
-	s := NewEffectServiceWithPool(EffectCapacity, pool)
-	resolved := 0
-	s.SetTimingResolver(func(e Event) (FrameTiming, bool) {
-		resolved++
-		if e.Graphic != "art" {
-			return FrameTiming{}, false
-		}
-		// The stock effect entries hold 2 or 3 ticks a frame [06 R-WFX-01 §1].
-		return FrameTiming{Durations: []int32{2, 2, 2, 2}}, true
-	})
+	s := NewEffectServiceWithPool(EffectCapacity, pool, effectTimingFixture(t))
 	// The production impact shape: named art, and the calculated table's holds
 	// already published as the secondary timing.
 	s.Advance(1, []Event{{
@@ -36,9 +32,6 @@ func TestEffectServiceResolvesPrimaryTimingBesideACalculatedFlash(t *testing.T) 
 		HasCalculatedFlash: true, CalculatedTable: 0,
 		DurationsB: FlashFrameDurations(0),
 	}})
-	if resolved != 1 {
-		t.Fatalf("the resolver ran %d times; a flash on the secondary must not suppress the primary lookup", resolved)
-	}
 	if pool.Len() != 1 {
 		t.Fatalf("admission produced %d records", pool.Len())
 	}
@@ -57,8 +50,7 @@ func TestEffectServiceResolvesPrimaryTimingBesideACalculatedFlash(t *testing.T) 
 	// An entry the resolver cannot find stays unresolved: no player, no
 	// invented lifetime, and the layer publishes dead [I9].
 	miss := &FixedEffectPool{}
-	m := NewEffectServiceWithPool(EffectCapacity, miss)
-	m.SetTimingResolver(func(Event) (FrameTiming, bool) { return FrameTiming{}, false })
+	m := NewEffectServiceWithPool(EffectCapacity, miss, effectTimingFixture(t))
 	m.Advance(1, []Event{{
 		Kind: KindExplosion, Tick: 1, Sequence: 1,
 		Graphic: "no-such-entry", AssetID: "fx",
@@ -70,52 +62,53 @@ func TestEffectServiceResolvesPrimaryTimingBesideACalculatedFlash(t *testing.T) 
 	}
 }
 
-// TestEffectServiceBindsAlreadyAdmittedPrimaryTiming locks the Create-before-
-// composition sequence. COB can append named art while the session has its
-// canonical pool but before the client installs the GAF timing resolver; that
-// binding must activate the existing primary player without re-admitting,
-// reordering, or changing its calculated secondary [03 §1][06 R-WFX-01 §2].
-func TestEffectServiceBindsAlreadyAdmittedPrimaryTiming(t *testing.T) {
+// Content timing controls retirement even with no client and never replaces
+// producer-owned timing [03 §1][06 R-WFX-01 §1].
+func TestEffectServiceContentTimingRetirement(t *testing.T) {
 	pool := &FixedEffectPool{}
-	s := NewEffectServiceWithPool(EffectCapacity, pool)
-	s.Advance(1, []Event{{
-		ID: 91, Kind: KindExplosion, Tick: 1, Sequence: 1,
-		Graphic: "art", AssetID: "fx",
-		HasCalculatedFlash: true, CalculatedTable: 2,
-		DurationsB: FlashFrameDurations(2),
-	}})
-	before := pool.Records()
-	if len(before) != 1 || before[0].AnimA.Active || !before[0].AnimB.Active {
-		t.Fatalf("pre-binding record = %+v, want unresolved primary and live calculated secondary", before)
-	}
-	id := before[0].ID
-	secondary := before[0].AnimB
-	secondaryDurations := append([]int32(nil), secondary.Durations...)
-	resolved := 0
-	s.SetTimingResolver(func(e Event) (FrameTiming, bool) {
-		resolved++
-		if e.Graphic != "art" || e.AssetID != "fx" {
-			return FrameTiming{}, false
+	s := NewEffectServiceWithPool(EffectCapacity, pool, effectTimingFixture(t))
+	s.Admit(1, Event{Kind: KindExplosion, Tick: 1, Graphic: "art"})
+	for tick := uint32(2); tick < 9; tick++ {
+		s.Advance(tick, nil)
+		if pool.Len() != 1 {
+			t.Fatalf("retired at tick %d before eight authored advances", tick)
 		}
-		return FrameTiming{Durations: []int32{2, 3}}, true
-	})
-	after := pool.Records()
-	if resolved != 1 || len(after) != 1 || after[0].ID != id {
-		t.Fatalf("binding changed record admission: calls=%d records=%+v", resolved, after)
 	}
-	if got := after[0].AnimA; !got.Active || got.Idx != 0 || got.Countdown != 2 || got.Frames != 2 || len(got.Durations) != 2 {
-		t.Fatalf("binding primary = %+v, want active authored player", got)
+	s.Advance(9, nil)
+	if pool.Len() != 0 {
+		t.Fatal("authored eight-advance non-looping art survived")
 	}
-	if got := after[0].AnimB; got.Idx != secondary.Idx || got.Countdown != secondary.Countdown ||
-		got.Loop != secondary.Loop || got.Active != secondary.Active || got.Frames != secondary.Frames ||
-		!slices.Equal(got.Durations, secondaryDurations) {
-		t.Fatalf("binding changed calculated secondary: got %+v, want %+v", got, secondary)
+	s.Admit(10, Event{Kind: KindExplosion, Tick: 10, Graphic: "art", DurationsA: []int32{1}, LoopA: true})
+	s.Advance(11, nil)
+	if rec := pool.Records()[0]; rec.AnimA.Frames != 1 || !rec.AnimA.Loop {
+		t.Fatalf("producer timing replaced: %+v", rec.AnimA)
 	}
-	// Rebinding does not restart an already resolved primary player.
-	s.SetTimingResolver(func(Event) (FrameTiming, bool) {
-		t.Fatal("rebind resolved an already active primary")
-		return FrameTiming{}, false
-	})
+}
+
+func effectTimingFixture(t *testing.T) *content.SimArt {
+	t.Helper()
+	data, err := formats.EncodeGAF([]formats.GAFWriteEntry{{Name: "art", Loop: true, Frames: []formats.GAFWriteFrame{
+		{Width: 1, Height: 1, Duration: 2, Pixels: []byte{1}},
+		{Width: 1, Height: 1, Duration: 2, Pixels: []byte{1}},
+		{Width: 1, Height: 1, Duration: 2, Pixels: []byte{1}},
+		{Width: 1, Height: 1, Duration: 2, Pixels: []byte{1}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "anims"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "anims/fx.gaf"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	fs := vfs.New()
+	if err := fs.MountDirectory(root, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+	return content.CompileSimArt(fs, nil)
 }
 
 // TestEffectServicePendingViewsCarryLiveness covers the fixture fallback that

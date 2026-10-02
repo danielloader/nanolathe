@@ -12,8 +12,6 @@
 package cob
 
 import (
-	"math"
-
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
 
@@ -554,7 +552,7 @@ func RelativeBearing(packedXZ int32, heading uint16) uint16 {
 // halves, truncated toward zero [01 §8] I3.
 func Distance(packedXZ int32) int32 {
 	x, z := unpackXZ(packedXZ)
-	h := math.Hypot(float64(x), float64(z))
+	h := numeric.Distance(float64(x), float64(z))
 	return numeric.TruncateFloat64ToLow32(h) // trunc toward zero [01 §8] I3 [04 §4.4]
 }
 
@@ -578,7 +576,7 @@ func AtanPort(first, second int32) uint16 {
 // It was deleted as unreachable by CL-3 and is restored here because WU-19-234
 // binds the port that reaches it.
 func HypotPort(first, second int32) int32 {
-	h := math.Hypot(float64(first), float64(second))
+	h := numeric.Distance(float64(first), float64(second))
 	return numeric.TruncateFloat64ToLow32(h) // trunc toward zero [01 §8] I3 [04 §4.4]
 }
 

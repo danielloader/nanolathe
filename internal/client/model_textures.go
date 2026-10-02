@@ -11,6 +11,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/effects"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	compiledmodel "github.com/nanolathe-gg/nanolathe/internal/model"
 	presentationrender "github.com/nanolathe-gg/nanolathe/internal/render"
@@ -564,8 +565,8 @@ func newModelTextureCursor(ref texRef) *modelTextureCursor {
 // FreezeFragmentMaterial copies only the selected material identity at COB
 // admission. Neither subsequent phase-7 advances nor player colour changes
 // can change the returned value [04 R-COB-04 §3]. No cursor is registered here.
-func (r *ModelTextureRegistry) FreezeFragmentMaterial(unitDefID uint16, pieceIndex, primitiveIndex int, ownerColor uint8) presentationrender.FrozenFragmentMaterial {
-	material := presentationrender.FrozenFragmentMaterial{
+func (r *ModelTextureRegistry) FreezeFragmentMaterial(unitDefID uint16, pieceIndex, primitiveIndex int, ownerColor uint8) effects.FrozenFragmentMaterial {
+	material := effects.FrozenFragmentMaterial{
 		UnitDefID: unitDefID, PieceIndex: pieceIndex, PrimitiveIndex: primitiveIndex,
 	}
 	if r == nil {

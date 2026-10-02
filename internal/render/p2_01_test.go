@@ -5,6 +5,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/combat"
+	"github.com/nanolathe-gg/nanolathe/internal/effects"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 )
@@ -177,7 +178,7 @@ func TestGAFMalformedTruncated(t *testing.T) {
 // TestFixedEffectDurationsPlaceholder locks A24: one tick per frame where authored not established.
 func TestFixedEffectDurationsPlaceholder(t *testing.T) {
 	// Non-looping 2 frames: countdown 1 each => terminates after 2 steps
-	p := EffectAnimPlayer{Idx: 0, Countdown: 1, Loop: false, Active: true, Frames: 2}
+	p := effects.EffectAnimPlayer{Idx: 0, Countdown: 1, Loop: false, Active: true, Frames: 2}
 	p.Step() // countdown<2 advances to idx1
 	if p.Idx != 1 || !p.Active {
 		t.Fatalf("step1 idx %d active %v want 1 true A24", p.Idx, p.Active)
@@ -187,13 +188,13 @@ func TestFixedEffectDurationsPlaceholder(t *testing.T) {
 		t.Fatalf("step2 should clear non-looping A24")
 	}
 	// Looping wraps
-	pl := EffectAnimPlayer{Idx: 1, Countdown: 1, Loop: true, Active: true, Frames: 2}
+	pl := effects.EffectAnimPlayer{Idx: 1, Countdown: 1, Loop: true, Active: true, Frames: 2}
 	pl.Step()
 	if pl.Idx != 0 || !pl.Active {
 		t.Fatalf("loop wrap idx %d active %v want 0 true A24", pl.Idx, pl.Active)
 	}
 	// Single-frame never advances
-	ps := EffectAnimPlayer{Idx: 0, Countdown: 5, Loop: true, Active: true, Frames: 1}
+	ps := effects.EffectAnimPlayer{Idx: 0, Countdown: 5, Loop: true, Active: true, Frames: 1}
 	ps.Step()
 	if ps.Idx != 0 {
 		t.Fatalf("single-frame should not advance")
@@ -202,12 +203,12 @@ func TestFixedEffectDurationsPlaceholder(t *testing.T) {
 
 // TestFixedEffectPerRecordGravity locks per-record gravity overrides pool default [03 §1][03 §2.2].
 func TestFixedEffectPerRecordGravityOverride(t *testing.T) {
-	var p FixedEffectPool
+	var p effects.FixedEffectPool
 	p.SetGravity(numeric.Fixed(1 * 65536))
-	rec := EffectRecord{
+	rec := effects.EffectRecord{
 		X: numeric.Fixed(0), Y: numeric.Fixed(100 * 65536), Z: numeric.Fixed(0),
 		VY: numeric.Fixed(0), Gravity: numeric.Fixed(5 * 65536),
-		AnimA: EffectAnimPlayer{Idx: 0, Countdown: 10, Loop: true, Active: true, Frames: 2},
+		AnimA: effects.EffectAnimPlayer{Idx: 0, Countdown: 10, Loop: true, Active: true, Frames: 2},
 	}
 	p.Append(rec)
 	p.Update(1)
@@ -220,12 +221,12 @@ func TestFixedEffectPerRecordGravityOverride(t *testing.T) {
 		t.Fatalf("per-record gravity VY %d want %d", got.VY, -5*65536)
 	}
 	// Zero per-record uses pool default
-	var p2 FixedEffectPool
+	var p2 effects.FixedEffectPool
 	p2.SetGravity(numeric.Fixed(2 * 65536))
-	rec2 := EffectRecord{
+	rec2 := effects.EffectRecord{
 		Y: numeric.Fixed(100 * 65536), VY: numeric.Fixed(0),
 		Gravity: 0,
-		AnimA:   EffectAnimPlayer{Idx: 0, Countdown: 10, Loop: true, Active: true, Frames: 2},
+		AnimA:   effects.EffectAnimPlayer{Idx: 0, Countdown: 10, Loop: true, Active: true, Frames: 2},
 	}
 	p2.Append(rec2)
 	p2.Update(1)

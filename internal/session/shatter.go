@@ -2,16 +2,16 @@ package session
 
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/cob"
+	"github.com/nanolathe-gg/nanolathe/internal/effects"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/model"
-	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
 
 // SetFragmentMaterialResolver binds the battle-owned texture registry's scalar
 // snapshot operation. It reads no drawn geometry or pixels and cannot veto
 // physical admission [04 R-COB-04 §3][I6].
-func (s *Session) SetFragmentMaterialResolver(resolver func(uint16, int, int, uint8) render.FrozenFragmentMaterial) {
+func (s *Session) SetFragmentMaterialResolver(resolver func(uint16, int, int, uint8) effects.FrozenFragmentMaterial) {
 	s.fragmentMaterialResolver = resolver
 }
 
@@ -52,7 +52,7 @@ func (sink *cobExplosionSink) AdmitShatter(request cob.ShatterExplosion) bool {
 	}
 	model.FoldRootAngles(states, binding.Model.Root, u.Move.Heading, u.Move.Pitch, u.Move.Bank)
 	transform := model.Compose(binding.Model, states, pieceIndex)
-	quads := make([]render.FragmentQuad, 0, len(piece.Primitives))
+	quads := make([]effects.FragmentQuad, 0, len(piece.Primitives))
 	for index, primitive := range piece.Primitives {
 		// The primitive's flag bit zero is authored IsColored bit zero. The
 		// designated ground plate remains at compiled slot zero [03 R-REN-03A §5]
@@ -60,7 +60,7 @@ func (sink *cobExplosionSink) AdmitShatter(request cob.ShatterExplosion) bool {
 		if len(primitive.VertexIndices) != 4 || primitive.IsColored&1 != 0 || piece.Selection && index == 0 {
 			continue
 		}
-		quad := render.FragmentQuad{PrimitiveIndex: index}
+		quad := effects.FragmentQuad{PrimitiveIndex: index}
 		valid := true
 		for corner, vertex := range primitive.VertexIndices {
 			if int(vertex) >= len(piece.Vertices) {
@@ -78,21 +78,21 @@ func (sink *cobExplosionSink) AdmitShatter(request cob.ShatterExplosion) bool {
 		velocity = [3]numeric.Fixed{u.Move.VelX, u.Move.VelY, u.Move.VelZ}
 	}
 	colour, _ := s.colourForOwner(int(u.Owner))
-	return s.publication.effects.AdmitShatter(render.FragmentRequest{
+	return s.publication.effects.AdmitShatter(effects.FragmentRequest{
 		UnitDefID: s.Units.DefIDForHandle(u.Handle), PieceIndex: pieceIndex,
 		Position: effectWorldPoint(u, transform.Position()), MoverVelocity: velocity,
 		Gravity: s.World.Gravity, ExplodeOnHit: request.Flags&cob.ExplosionShatterOnHit != 0, Quads: quads,
-		Freeze: func(def uint16, piece int, quad render.FragmentQuad) render.FrozenFragmentMaterial {
+		Freeze: func(def uint16, piece int, quad effects.FragmentQuad) effects.FrozenFragmentMaterial {
 			if s.fragmentMaterialResolver != nil {
 				return s.fragmentMaterialResolver(def, piece, quad.PrimitiveIndex, colour)
 			}
-			return render.FrozenFragmentMaterial{UnitDefID: def, PieceIndex: piece, PrimitiveIndex: quad.PrimitiveIndex}
+			return effects.FrozenFragmentMaterial{UnitDefID: def, PieceIndex: piece, PrimitiveIndex: quad.PrimitiveIndex}
 		},
 	}, s.SimRNG().Uint32n)
 }
 
 func (s *Session) bindFragmentStepContext(tick uint32) {
-	context := render.FragmentStepContext{WaterEffectsWordZero: s.waterEffectsEnabled(), Impact: fragmentImpactSink{debrisImpactSink{s, tick}}}
+	context := effects.FragmentStepContext{WaterEffectsWordZero: s.waterEffectsEnabled(), Impact: fragmentImpactSink{debrisImpactSink{s, tick}}}
 	if s.World != nil {
 		context.TerrainHeight, context.SeaLevel = s.World.HeightAt, s.World.SeaLevelWorld()
 		context.Gravity, context.Lava = s.World.Gravity, s.World.LavaWorld
@@ -102,11 +102,11 @@ func (s *Session) bindFragmentStepContext(tick uint32) {
 
 type fragmentImpactSink struct{ debrisImpactSink }
 
-func (sink fragmentImpactSink) GroundFragmentImpact(impact render.GroundFragmentImpact) {
-	sink.GroundDebrisImpact(render.GroundDebrisImpact(impact))
+func (sink fragmentImpactSink) GroundFragmentImpact(impact effects.GroundFragmentImpact) {
+	sink.GroundDebrisImpact(effects.GroundDebrisImpact(impact))
 }
-func (sink fragmentImpactSink) WaterFragmentImpact(impact render.WaterFragmentImpact) {
-	sink.WaterDebrisImpact(render.WaterDebrisImpact(impact))
+func (sink fragmentImpactSink) WaterFragmentImpact(impact effects.WaterFragmentImpact) {
+	sink.WaterDebrisImpact(effects.WaterDebrisImpact(impact))
 }
 
 func (s *Session) publishFragments(out []frame.FragmentView) []frame.FragmentView {

@@ -5,9 +5,9 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
+	"github.com/nanolathe-gg/nanolathe/internal/effects"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
-	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/testsupport"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
@@ -70,30 +70,6 @@ func TestEffectArtResolvesAgainstStockBanks(t *testing.T) {
 	// it clamps rather than vanishing mid-animation.
 	if _, ok := c.resolveEffectFrame(view, 1<<20); !ok {
 		t.Fatal("a cursor past the last frame must clamp into the entry")
-	}
-
-	// Authored timing: the frame reference's second word is the per-frame hold
-	// in whole ticks [fmt gaf], and explosion art does not loop, because the
-	// weapon parser clears the entry's loop byte at bind time.
-	timing, ok := c.EffectFrameTiming("fx", "Explosion")
-	if !ok {
-		t.Fatal("no authored timing for the stock Explosion entry")
-	}
-	if timing.Loop {
-		t.Fatal("explosion art must not loop; its loop byte is cleared when the weapon binds it")
-	}
-	if len(timing.Durations) == 0 {
-		t.Fatal("resolved an empty duration list")
-	}
-	for i, d := range timing.Durations {
-		if d < 1 {
-			t.Fatalf("frame %d hold %d; a frame with hold h is shown for max(h,1) advances", i, d)
-		}
-	}
-	// The census in [06 R-WFX-01 §1] records the stock `Explosion` entry at a
-	// hold of 2 ticks a frame.
-	if timing.Durations[0] != 2 {
-		t.Fatalf("stock Explosion frame 0 hold = %d, want 2", timing.Durations[0])
 	}
 }
 
@@ -315,8 +291,8 @@ func TestFinishedEffectPlayerStopsDrawing(t *testing.T) {
 	}
 	// Unequal timing: two ticks of art (two frames held one tick each) against
 	// six ticks of flash (three frames held two ticks each).
-	admit := func(durationsA, durationsB []int32) *render.FixedEffectPool {
-		p := &render.FixedEffectPool{}
+	admit := func(durationsA, durationsB []int32) *effects.FixedEffectPool {
+		p := &effects.FixedEffectPool{}
 		if !p.AppendView(frame.EffectView{
 			ID: 1, Kind: frame.KindExplosion.String(), Strip: -1,
 			Graphic: "Explosion", AssetID: "fx",
@@ -382,7 +358,7 @@ func TestFinishedEffectPlayerStopsDrawing(t *testing.T) {
 	// name nor the record's survival stands in for one [I9]. The production
 	// impact is NOT this case — its art is resolved as the primary player
 	// beside the flash's secondary timing [06 R-WFX-01 §2], which
-	// render.TestEffectServiceResolvesPrimaryTimingBesideACalculatedFlash
+	// effects.TestEffectServiceResolvesPrimaryTimingBesideACalculatedFlash
 	// covers.
 	r := admit(nil, []int32{2, 2, 2})
 	r.Update(1)

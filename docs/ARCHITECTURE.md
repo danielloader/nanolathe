@@ -148,6 +148,7 @@ package implements.
 | `internal/construction` | Build requests and queues, factory lifecycle, nanoframes and progress, capture, resurrection, reverse construction | DESIGN_ECONOMY_CONSTRUCTION |
 | `internal/features` | Feature runtime: placement, reclaim, burning, reproduction, sinking, geothermal | DESIGN_ECONOMY_CONSTRUCTION |
 | `internal/combat` | Weapon slots and targeting, aiming and the ballistic solver, the projectile pool, fire, motion families, impact, damage, death causes, stockpiles, meteors | DESIGN_WEAPONS_PROJECTILES |
+| `internal/effects` | Authoritative fixed effect pool and admission, paired shatter geometry and whole-piece debris; immutable content timing and detached frame publication | DESIGN_MULTIPLAYER §16.1, DESIGN_PRESENTATION_CLIENT |
 
 ### Sessions, campaign and computer player
 
@@ -171,7 +172,7 @@ package implements.
 | `internal/camera` | The orthographic camera, scroll caps, minimap conversions, presentation zoom | DESIGN_INTERFACE_HUD_INPUT |
 | `internal/ui` | Screen-level state of the authored front-end panels shared by the desktop binary and its tests | DESIGN_INTERFACE_HUD_INPUT |
 | `internal/client` | The window-side frame loop: samples the committed frame, draws terrain, units, effects, HUD and text into a software framebuffer, resolves art | DESIGN_PRESENTATION_CLIENT |
-| `internal/render` | Presentation pools and helpers: the strip composer, fixed effects, projectile render types, GAF cursors, fog presentation, shake, the model rasterizer, minimap | DESIGN_PRESENTATION_CLIENT |
+| `internal/render` | Presentation helpers: the strip composer, debris trail containers, projectile render types, GAF cursors, fog presentation, shake, the model rasterizer, minimap | DESIGN_PRESENTATION_CLIENT |
 | `internal/palette` | Palette, SHD, ALP and LHT tables and logical→physical lookups | DESIGN_PRESENTATION_CLIENT |
 | `internal/audio` | The eight-slot cue queue, sample decode and cache, positional attenuation, music, briefing speech | DESIGN_PRESENTATION_CLIENT |
 | `internal/audiobackend` | The desktop PCM device boundary behind `internal/audio` | DESIGN_PRESENTATION_CLIENT |
@@ -544,8 +545,8 @@ or encoding requires a new version.
 Community 3.9 and Modern separately against constants in
 `rules_lock_retail_test.go`. Each normal retail check runs the Ashap scene at
 6,000 ticks and the benchmark composition at its initial state, 600 and 1,500
-steps. M1 U3 adds a Strict pool-fill lock at step 4,500 to the short tier;
-the amd64 selector below includes it once added. The full tier additionally
+steps. The short tier also includes the Strict pool-fill lock at step 4,500;
+the amd64 selector below includes it. The full tier additionally
 runs the Ashap scene to its 54,000-tick bound or
 locked terminal tick. A separate assertion checks that the combat scenes
 distinguish all three rule sets. Limits are explicit so host profile preferences

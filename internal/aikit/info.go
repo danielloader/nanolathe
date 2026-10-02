@@ -3,6 +3,7 @@ package aikit
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/construction"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
 
 // Role is a bit set describing what a unit definition is for, derived from
@@ -262,8 +263,8 @@ func intercepts(def *content.UnitDef) bool {
 
 func summarize(key string, def *content.UnitDef) *UnitInfo {
 	u := &UnitInfo{Key: key, Def: def, Side: def.Side}
-	u.Metal = int32(def.BuildCostMetal)
-	u.Energy = int32(def.BuildCostEnergy)
+	u.Metal = numeric.TruncateFloat32ToLow32(def.BuildCostMetal)
+	u.Energy = numeric.TruncateFloat32ToLow32(def.BuildCostEnergy)
 	u.BuildTime = def.BuildTime
 	u.Value = u.Metal + u.Energy/EnergyPerMetal
 	u.HP = def.MaxDamage
@@ -272,24 +273,24 @@ func summarize(key string, def *content.UnitDef) *UnitInfo {
 	u.Radar = def.RadarDistance
 	u.BuildPower = def.WorkerTime
 	u.BuildRange = def.BuildDistance
-	u.MetalMake = int32(def.MetalMake * 100)
+	u.MetalMake = numeric.TruncateFloat64ToLow32(def.MetalMake * 100)
 	if def.ExtractsMetal > 0 {
-		u.MetalMake = int32(def.ExtractsMetal * 100000) // per footprint metal unit, ×1e5
+		u.MetalMake = numeric.TruncateFloat64ToLow32(def.ExtractsMetal * 100000) // per footprint metal unit, ×1e5
 	}
 	// Net energy: authored production minus upkeep. A negative energyuse is
 	// how solar collectors author their output.
-	u.EnergyMake = int32(def.EnergyMake - def.EnergyUse)
+	u.EnergyMake = numeric.TruncateFloat64ToLow32(def.EnergyMake - def.EnergyUse)
 	if u.EnergyMake < 0 {
 		u.EnergyMake = 0
 	}
-	u.WindGen = int32(def.WindGenerator)
-	u.TidalGen = int32(def.TidalGenerator)
-	u.EnergyUse = int32(def.EnergyUse)
+	u.WindGen = numeric.TruncateFloat64ToLow32(def.WindGenerator)
+	u.TidalGen = numeric.TruncateFloat64ToLow32(def.TidalGenerator)
+	u.EnergyUse = numeric.TruncateFloat64ToLow32(def.EnergyUse)
 	if u.EnergyUse < 0 {
 		u.EnergyUse = 0
 	}
-	u.MetalStore = int32(def.MetalStorage)
-	u.EnergyStore = int32(def.EnergyStorage)
+	u.MetalStore = numeric.TruncateFloat64ToLow32(def.MetalStorage)
+	u.EnergyStore = numeric.TruncateFloat64ToLow32(def.EnergyStorage)
 	u.FootX, u.FootZ = def.FootprintX, def.FootprintZ
 
 	mobile := def.BMCode != 0 && def.CanMove

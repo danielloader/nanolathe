@@ -5,6 +5,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
@@ -286,7 +287,7 @@ func buildProgress(u *units.Unit) (bool, int32) {
 	if u.Remaining == 0 {
 		return true, 100
 	}
-	return false, int32(100 - float32(u.Remaining*100))
+	return false, numeric.TruncateFloat32ToLow32(100 - float32(u.Remaining*100))
 }
 
 func fixedToWorld(v int64) int32 { return int32(v >> 16) }

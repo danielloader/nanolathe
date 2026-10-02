@@ -9,8 +9,6 @@
 package movement
 
 import (
-	"math"
-
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
@@ -79,7 +77,7 @@ func AirArrival(ax, az, bx, bz numeric.Fixed, explicitRadius int32, ay, by numer
 	dx := float64(int64(ax)-int64(bx)) / 65536.0
 	dz := float64(int64(az)-int64(bz)) / 65536.0
 	if explicitRadius != 0 {
-		if math.Hypot(dx, dz) >= float64(explicitRadius) {
+		if numeric.Distance(dx, dz) >= float64(explicitRadius) {
 			return false
 		}
 	} else {

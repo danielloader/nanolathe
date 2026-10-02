@@ -1,14 +1,14 @@
 package session
 
 import (
+	"github.com/nanolathe-gg/nanolathe/internal/effects"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
-	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
 
 func (s *Session) ensureDebris() {
 	if s != nil && s.debris == nil {
-		s.debris = render.NewDebrisPoolWithCapacity(s.EntryCommunity.DebrisCapacity)
+		s.debris = effects.NewDebrisPoolWithCapacity(s.EntryCommunity.DebrisCapacity)
 	}
 }
 
@@ -16,7 +16,7 @@ func (s *Session) stepDebris(tick uint32) {
 	if s == nil || s.debris == nil {
 		return
 	}
-	ctx := render.DebrisStepContext{}
+	ctx := effects.DebrisStepContext{}
 	if s.World != nil {
 		ctx.TerrainHeight = s.World.HeightAt
 		ctx.SeaLevel = s.World.SeaLevelWorld()
@@ -60,7 +60,7 @@ type debrisImpactSink struct {
 	tick    uint32
 }
 
-func (d debrisImpactSink) GroundDebrisImpact(impact render.GroundDebrisImpact) {
+func (d debrisImpactSink) GroundDebrisImpact(impact effects.GroundDebrisImpact) {
 	if d.admit(impact.Position, impact.Graphic, impact.CalculatedFrameTable, true) && impact.AboveSeaFlash &&
 		d.sessionAboveSea(impact.Position[1]) {
 		// The ground bitmap has claimed its fixed-pool slot before the class-7
@@ -69,7 +69,7 @@ func (d debrisImpactSink) GroundDebrisImpact(impact render.GroundDebrisImpact) {
 	}
 }
 
-func (d debrisImpactSink) WaterDebrisImpact(impact render.WaterDebrisImpact) {
+func (d debrisImpactSink) WaterDebrisImpact(impact effects.WaterDebrisImpact) {
 	d.admit(impact.Position, impact.Graphic, 0, false)
 }
 
@@ -81,7 +81,7 @@ func (d debrisImpactSink) admit(position [3]numeric.Fixed, graphic string, table
 	if calculated {
 		event.HasCalculatedFlash = true
 		event.CalculatedTable = table
-		event.DurationsB = render.FlashFrameDurations(int(table))
+		event.DurationsB = effects.FlashFrameDurations(int(table))
 	}
 	return d.session.publication.effects.Admit(d.tick, event)
 }

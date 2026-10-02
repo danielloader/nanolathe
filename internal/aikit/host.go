@@ -569,8 +569,8 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 	o.Tick, o.Me = tick, me
 	if int(me) < len(econ.Players) {
 		p := &econ.Players[me]
-		o.Metal = Res{Stock: int32(p.Stock[economy.Metal]), Cap: int32(p.Capacity[economy.Metal]), Income: int32(p.AIProduction[economy.Metal]), Expense: int32(p.AIConsumption[economy.Metal])}
-		o.Energy = Res{Stock: int32(p.Stock[economy.Energy]), Cap: int32(p.Capacity[economy.Energy]), Income: int32(p.AIProduction[economy.Energy]), Expense: int32(p.AIConsumption[economy.Energy])}
+		o.Metal = Res{Stock: numeric.TruncateFloat32ToLow32(p.Stock[economy.Metal]), Cap: numeric.TruncateFloat32ToLow32(p.Capacity[economy.Metal]), Income: numeric.TruncateFloat32ToLow32(p.AIProduction[economy.Metal]), Expense: numeric.TruncateFloat32ToLow32(p.AIConsumption[economy.Metal])}
+		o.Energy = Res{Stock: numeric.TruncateFloat32ToLow32(p.Stock[economy.Energy]), Cap: numeric.TruncateFloat32ToLow32(p.Capacity[economy.Energy]), Income: numeric.TruncateFloat32ToLow32(p.AIProduction[economy.Energy]), Expense: numeric.TruncateFloat32ToLow32(p.AIConsumption[economy.Energy])}
 	}
 	var hostile [10]bool
 	for i := 0; i < 10 && i < len(econ.Players); i++ {
@@ -583,7 +583,7 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 		o.Allied[i] = allied
 		hostile[i] = !allied
 	}
-	o.WindPermille = int32(econ.WindScalar() * 1000)
+	o.WindPermille = numeric.TruncateFloat32ToLow32(econ.WindScalar() * 1000)
 	if lim, ok := m.Strategic.UnitLimit(); ok {
 		o.UnitLimit = int32(lim)
 	}

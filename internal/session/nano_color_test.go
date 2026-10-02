@@ -70,7 +70,7 @@ func TestScriptNanoUsesSourceOwner(t *testing.T) {
 	s.Econ.Players[2].Exists = true
 	s.Econ.Players[2].Logo = 7
 	s.Units.Unit(sink.source).Owner = 2
-	s.publication = newPublicationState(frame.NewEventBuffer(frame.Limits{}), 0)
+	s.publication = newPublicationState(frame.NewEventBuffer(frame.Limits{}), 0, nil)
 	sink.publication = s.publication
 	sink.SetCOBPieceMap([]int{0})
 	emit := func() {

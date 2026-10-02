@@ -203,6 +203,37 @@ func TestStrictFingerprintIsLocked(t *testing.T) {
 	runFingerprintLock(t, gameplay.Strict31, lockAshapStrict6000, lockAshapStrict54000, lockAshapStrictEnd, lockBenchStrictInitial, lockBenchStrictWarm, lockBenchStrictFinal)
 }
 
+// The Strict pool fills after the short benchmark lock. Its occupancy gates
+// shatter draws [04 R-COB-04 §3], so this longer scene locks authored effect
+// timing even when no graphical host exists (DESIGN_MULTIPLAYER §16.1 M1-C9).
+// M1 matched the original window-like probe at partial-v1:8ea359e7670a471c.
+// The O22 retail correction changes only this lock: AirToAir tests the signed
+// high word of distance, so 160 plus a fraction no longer installs an
+// intercept [04 R-AIR-01 §8]. Restoring only that old comparison reproduces
+// the M1 constant exactly; the other fifteen locks are unchanged.
+func TestStrictEffectPoolFingerprintIsLocked(t *testing.T) {
+	catalog, fs := retailcat.Shared(t)
+	composed, _, err := ComposeSimBenchBattle(SimBenchOptions{
+		Gameplay: gameplay.Strict31, Map: SimBenchDefaultMap, Seed: lockBenchSeed,
+		Difficulty: lockDifficulty, UnitLimit: SimBenchDefaultUnitLimit,
+	}, fs, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for step := 0; step < 4500; step++ {
+		simBenchStep(composed.Session)
+	}
+	got, err := composed.Session.PartialStateFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "partial-v1:7ff5d4238edd1720"
+	if got != want {
+		t.Fatalf("Strict effect-pool scene at step 4500 = %s, want retail-corrected reference %s", got, want)
+	}
+	t.Logf("Strict effect-pool scene at step 4500: %s", got)
+}
+
 // TestCommunityFingerprintIsLocked holds the approved mainline feature table.
 func TestCommunityFingerprintIsLocked(t *testing.T) {
 	runFingerprintLock(t, gameplay.Community39, lockAshapCommunity6000, lockAshapCommunity54000, lockAshapCommunityEnd, lockBenchCommunityInitial, lockBenchCommunityWarm, lockBenchCommunityFinal)

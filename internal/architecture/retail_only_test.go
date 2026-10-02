@@ -45,6 +45,7 @@ var authoritativeDirs = []string{
 	"internal/combat",
 	"internal/construction",
 	"internal/economy",
+	"internal/effects",
 	"internal/features",
 	"internal/frame",
 	"internal/mission",
@@ -148,6 +149,7 @@ func forbiddenRuntimeImport(path string) bool {
 		"github.com/hajimehoshi/ebiten/v2",
 		"github.com/nanolathe-gg/nanolathe/cmd/nanolathe",
 		"github.com/nanolathe-gg/nanolathe/internal/client",
+		"github.com/nanolathe-gg/nanolathe/internal/render",
 		"github.com/nanolathe-gg/nanolathe/internal/cleanroom",
 		"github.com/nanolathe-gg/nanolathe/internal/testsupport",
 	} {

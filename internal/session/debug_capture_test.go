@@ -47,7 +47,7 @@ func TestDebugCaptureIdentityDoesNotFollowReusedSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Session{Units: w, publication: newPublicationState(nil, 0)}
+	s := &Session{Units: w, publication: newPublicationState(nil, 0, nil)}
 	oldID := s.publication.unitIdentity(w.Unit(h))
 	w.Destroy(h, 0)
 	w.FinalizeDeath(h, 1)

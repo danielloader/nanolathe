@@ -5,6 +5,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
@@ -88,7 +89,7 @@ func UnitReclaimPulse(builder, target *units.Unit) int32 {
 	n *= target.Def.MaxDamage
 	n *= reclaimPulseFactor
 	v := float64(uint32(n)) / float64(metalCost*300)
-	pulse := int32(v) // [01 §8] truncation toward zero
+	pulse := numeric.TruncateFloat64ToLow32(v) // [01 §8] truncation toward zero
 	if pulse <= 1 {
 		pulse = 1
 	}

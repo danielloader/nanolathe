@@ -746,6 +746,14 @@ reports do not move.
 
 ### 3.3 Construction — C15…C24
 
+**Approach reach arithmetic.** The mobile builder's fallback reach uses the
+portable retail distance kernel and the caller widths of `[05 R-WORK-01 §2]`,
+including signed raw subtraction wrap and footprint words. The former exact
+root and saturating radicand helpers are removed: saturation did not reproduce
+the retail inputs. `retail_distance_test.go` covers the integer boundary,
+footprint scale-before-truncation and large wrapped-coordinate case. This
+corrects the shared baseline without altering any Modern clearance policy.
+
 **C15 — one queue.** Factory and mobile products live as typed payloads on
 `orders.Node` in the **primary** segment, through the queue API the orders
 package publishes. This package introduces no second node and no second queue.

@@ -8,6 +8,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/ai"
 	"github.com/nanolathe-gg/nanolathe/internal/construction"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
 
@@ -433,7 +434,7 @@ func newMapBase(t *world.Terrain, void []bool) *mapBase {
 	b.cellW, b.cellH = w, h
 	b.seaLevel = int32(t.SeaLevel)
 	b.windMin, b.windMax = t.WindMin, t.WindMax
-	b.tidalPermille = int32(t.Tidal * 1000)
+	b.tidalPermille = numeric.TruncateFloat32ToLow32(t.Tidal * 1000)
 	sat := make([]int32, (w+1)*(h+1))
 	b.cellLo = make([]uint8, w*h)
 	b.cellHi = make([]uint8, w*h)

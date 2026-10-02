@@ -91,6 +91,7 @@ func loadAuthoritativeTypedPackages(t *testing.T, root string) []typedPackage {
 		}
 		info := &types.Info{
 			Defs:  map[*ast.Ident]types.Object{},
+			Uses:  map[*ast.Ident]types.Object{},
 			Types: map[ast.Expr]types.TypeAndValue{},
 		}
 		if _, err := (&types.Config{Importer: imp}).Check(item.ImportPath, fset, files, info); err != nil {
@@ -623,6 +624,18 @@ var float64FieldAllowances = map[string]string{
 // names the precise retail operation that needs binary64; all other float64
 // occurrences still use the shrink-only per-file baseline.
 var float64ScopeAllowances = map[string]float64Allowance{
+	"internal/orders/combat.go func leashBroken":                       {2, "I2 signed whole-unit leash distance through retail helper [04 R-STANCE-01 §4][01 R-DET-01 §7]"},
+	"internal/orders/work.go func footprintPad":                        {2, "I2 signed footprint words through retail distance before scaling and truncation [05 R-WORK-01 §2]"},
+	"internal/orders/work.go func inBuildRange":                        {2, "I2 wrapping raw coordinate differences through retail distance before signed high-word read [05 R-WORK-01 §2]"},
+	"internal/construction/factory.go func nanoFootprintPad":           {2, "I2 signed footprint words through retail distance before scaling and truncation [05 R-WORK-01 §2]"},
+	"internal/construction/factory.go func *Service.isWithinNanoRange": {2, "I2 wrapping raw coordinate differences through retail distance before signed high-word read [05 R-WORK-01 §2]"},
+	"internal/movement/airorders.go func airPlanarDistance":            {2, "I2 wrapping raw coordinate differences through retail distance before signed low-word truncation [04 R-AIR-01 §8]"},
+
+	"internal/effects/fragment.go func buildFragmentGeometry": {3, "I2 stored binary32 normal scaled for signed-low-word extrusion and velocity conversion [04 R-COB-04 §3]"},
+	"internal/effects/fragment.go func fragmentNormal":        {42, "I2 shatter normal differences, exact binary32-widened products, square root and division; named components narrow to binary32 [04 R-COB-04 §3]"},
+	"internal/effects/fragment.go const fragmentVertexScale":  {1, "I2 authored binary32 reciprocal-65535 coordinate conversion [04 R-COB-04 §3]"},
+	"internal/effects/fragment.go func fragmentVertexFloat":   {2, "I2 retained vertex coordinate multiplied by the stored binary32 reciprocal, then narrowed to binary32 [04 R-COB-04 §3]"},
+
 	"internal/construction/community_kickout.go const kickoutPi,kickoutQuarterPi":     {2, "I2 sourced Community kickout angle constants [CP-CON-1]"},
 	"internal/construction/community_kickout.go func CommunityRules.YieldObstruction": {2, "I2 sourced Community kickout random bearing [CP-CON-1]"},
 	"internal/construction/community_kickout.go func *Service.shouldKickout":          {4, "I2 sourced Community kickout invested-energy test [CP-CON-1]"},
@@ -630,7 +643,6 @@ var float64ScopeAllowances = map[string]float64Allowance{
 	"internal/construction/community_kickout.go func forwardCircleIntersection":       {39, "I2 sourced Community kickout tangent-branch circle/line geometry [CP-CON-1]"},
 	"internal/construction/community_kickout.go func kickoutQuadratic":                {10, "I2 sourced Community kickout quadratic root operation order [CP-CON-1]"},
 	"internal/construction/community_repair.go func communityRepairEnergy":            {4, "I2 Community repair energy helper working precision [CP-DMG-4]"},
-	"internal/model/model.go func *xformNode.evaluateRotation":                        {3, "I2 per-axis model rotation trigonometry [03 §2.4]"},
 	"internal/model/model.go func applyChain":                                         {18, "I2 model vertex working precision; round after each axis then narrow geometry [03 §2.4]"},
 
 	"internal/combat/meteor.go func MeteorDelay":               {2, "I2 meteor source float32, working quotient and signed64/low32 conversion [06 §6.5][01 R-DET-01 §1]"},
@@ -662,7 +674,7 @@ var float64ScopeAllowances = map[string]float64Allowance{
 
 	"internal/movement/airorders.go func airReleaseLead":  {5, "I2 AirStrike release lead [04 R-AIR-01 §8]"},
 	"internal/movement/flight.go func flightGoalDistance": {2, "I2 flight goal distance [04 R-AIR-01 §1]"},
-	"internal/movement/flight.go func rotateLeanPair":     {10, "I2 lean rotation [04 R-AIR-01 §2]"},
+	"internal/movement/flight.go func rotateLeanPair":     {8, "I2 lean rotation [04 R-AIR-01 §2]"},
 	"internal/movement/flight.go func IntegrateFlight":    {34, "I2 flight braking and integration temporaries [04 §10.1]"},
 	"internal/movement/integrate.go func groundHypotRaw":  {2, "I2 ground follower route distance [04 R-MOV-01 §3]"},
 
@@ -673,6 +685,35 @@ var float64ScopeAllowances = map[string]float64Allowance{
 	"internal/combat/damage.go func Falloff":                 {4, "I2 area-damage falloff [06 §9.3]"},
 	"internal/combat/damage.go func weaponNominal":           {2, "I2 area-damage amount product [06 §9.2]"},
 	"internal/construction/reclaim.go func UnitReclaimPulse": {2, "I2 unit-reclaim pulse divide [05 R-WORK-01 §4]"},
+
+	"internal/survival/pool.go func *Pool.Cost":               {2, "I2 exact float32 widening into defined signed-64 cost conversion (DESIGN_SURVIVAL §5)"},
+	"internal/survival/pool.go func BuildPool":                {2, "I2 exact float32 widening into defined signed-64 ratio conversion (DESIGN_SURVIVAL §5)"},
+	"internal/session/survival.go func *Session.stepSurvival": {1, "I2 exact float32 widening into defined signed-64 reward text conversion (DESIGN_SURVIVAL §6.9)"},
+
+	"internal/sim/numeric/angletable.go var angleSinCos":          {4, "I2 immutable binary64 angle table constructed with the existing angle expression (DESIGN_MULTIPLAYER §16.1 M1-C3)"},
+	"internal/sim/numeric/angletable.go func AngleSinCos":         {1, "I2 immutable binary64 angle table lookup (DESIGN_MULTIPLAYER §16.1 M1-C3)"},
+	"internal/sim/numeric/convert.go func TruncateFloat64ToInt64": {3, "I2/I3 signed-64 truncation and invalid-result bounds [01 R-DET-01 §1]"},
+	"internal/sim/numeric/convert.go func RoundFloat64ToInt32":    {3, "I2 nearest-even signed-32 conversion and invalid-result bounds [01 R-DET-01 §2]"},
+	"internal/sim/numeric/distance.go func decompose":             {1, "I2 exact binary64 operand decomposition for integer distance arithmetic [01 R-DET-01 §7]"},
+	"internal/sim/numeric/distance.go func store":                 {1, "I2 binary64 store boundary after integer significand rounding [01 R-DET-01 §7]"},
+	"internal/sim/numeric/distance.go func root":                  {1, "I2 stored sum input to the integer extended-precision root [01 R-DET-01 §7]"},
+	"internal/sim/numeric/distance.go func sqrt128":               {5, "I2 bounded binary64 root estimate corrected to an exact integer root [01 R-DET-01 §7]"},
+	"internal/sim/numeric/distance.go func Distance":              {2, "I2 binary64 operand/result slots around the integer retail rounding sequence [01 R-DET-01 §7]"},
+	"internal/sim/numeric/distance.go func TruncatedDistance":     {7, "I2 proven error-bound shortcut with retail-sequence fallback [01 R-DET-01 §7] (DESIGN_MULTIPLAYER §16.1 M1-C1)"},
+	"internal/sim/numeric/radians.go var _sin":                    {7, "I2 immutable sine approximation coefficients from the approved Go adaptation (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go var _cos":                    {7, "I2 immutable cosine approximation coefficients from the approved Go adaptation (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go func CosRadians":             {29, "I2 unfused cosine reduction and polynomial working precision (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go func SinRadians":             {29, "I2 unfused sine reduction and polynomial working precision (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go var _tanP":                   {4, "I2 immutable tangent numerator coefficients from the approved Go adaptation (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go var _tanQ":                   {6, "I2 immutable tangent denominator coefficients from the approved Go adaptation (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go func TanRadians":             {20, "I2 unfused tangent reduction and rational approximation working precision (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go func xatan":                  {23, "I2 unfused arctangent rational approximation working precision (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go func satan":                  {6, "I2 arctangent range reduction and reconstruction (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go func atan":                   {2, "I2 arctangent sign handling around the portable approximation (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go func Atan2Radians":           {2, "I2 quadrant selection around the portable arctangent (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go func asin":                   {4, "I2 unfused arcsine reduction through the correctly rounded library root and portable arctangent (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go func AcosRadians":            {2, "I2 arccosine reconstruction from portable arcsine (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
+	"internal/sim/numeric/radians.go func trigReduce":             {3, "I2 Payne-Hanek reduction returning binary64 radians after integer reduction (DESIGN_MULTIPLAYER §16.1 M1-C2)"},
 
 	"internal/sim/numeric/numeric.go func TruncateFloat32ToLow32": {1, "I2 exact widening of stored single precision into the shared I3 conversion [01 R-DET-01 §1]"},
 	"internal/sim/numeric/numeric.go func TruncateFloat64ToLow32": {3, "I2 authored conversion and I3 signed-low-word narrowing [01 R-DET-01 §1]"},
@@ -937,6 +978,7 @@ func typedFixture(t *testing.T, filename, source string) typedPackage {
 	}
 	info := &types.Info{
 		Defs:  map[*ast.Ident]types.Object{},
+		Uses:  map[*ast.Ident]types.Object{},
 		Types: map[ast.Expr]types.TypeAndValue{},
 	}
 	if _, err := (&types.Config{}).Check("fixture", fset, []*ast.File{file}, info); err != nil {

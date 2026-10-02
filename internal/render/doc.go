@@ -1,5 +1,5 @@
-// Package render owns the presentation pools and the helpers that fill them:
-// the ten effect strips and their composer, the fixed effect pool, projectile
+// Package render owns the presentation helpers:
+// the ten effect strips and their composer, debris trail containers, projectile
 // render types, GAF cursors, fog presentation, camera shake, the model
 // rasterizer's inputs and the minimap surfaces.
 //

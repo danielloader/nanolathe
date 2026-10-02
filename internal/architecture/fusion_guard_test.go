@@ -41,12 +41,6 @@ import (
 // internal/drawlist and cmd/nanolathe are all free to fuse, and most of the
 // repository's fused instructions live there. The guard scans authoritativeDirs
 // and nothing else, so adding a package to that list is what brings it in.
-//
-// internal/render/fragment.go's shatter normal is the one presentation site
-// worth naming here: it runs inside an RNG-consuming admission path, and it is
-// safe for the same reason the allowances below are — every operand is a
-// float32, so each product is at most 48 significand bits and exact in
-// binary64. Fusing an exact product changes nothing on any host.
 
 // fusionAllowance is one declaration whose fused instructions are provably
 // harmless. `sites` is the number of distinct source lines that fuse inside the

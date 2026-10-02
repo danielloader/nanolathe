@@ -170,10 +170,10 @@ func (s *Service) findKickoutDestination(u *units.Unit, clear world.FootprintRec
 		if q := orders.QueueOfUnit(u); q != nil && q.Head() != nil && q.Head().Target != 0 {
 			target := s.World.Unit(q.Head().Target)
 			if target != nil {
-				targetDirection := math.Atan2(float64(target.Z.Int()-unitZ), float64(target.X.Int()-unitX))
+				targetDirection := numeric.Atan2Radians(float64(target.Z.Int()-unitZ), float64(target.X.Int()-unitX))
 				dxKick, dzKick := float64(centerX-unitX), float64(centerZ-unitZ)
-				plus := float64(math.Cos(targetDirection+kickoutQuarterPi)*dxKick) + float64(math.Sin(targetDirection+kickoutQuarterPi)*dzKick)
-				minus := float64(math.Cos(targetDirection-kickoutQuarterPi)*dxKick) + float64(math.Sin(targetDirection-kickoutQuarterPi)*dzKick)
+				plus := float64(numeric.CosRadians(targetDirection+kickoutQuarterPi)*dxKick) + float64(numeric.SinRadians(targetDirection+kickoutQuarterPi)*dzKick)
+				minus := float64(numeric.CosRadians(targetDirection-kickoutQuarterPi)*dxKick) + float64(numeric.SinRadians(targetDirection-kickoutQuarterPi)*dzKick)
 				if plus < minus {
 					direction = targetDirection + kickoutQuarterPi
 				} else {
@@ -182,11 +182,11 @@ func (s *Service) findKickoutDestination(u *units.Unit, clear world.FootprintRec
 				nominal := float64(24 * clear.Width())
 				if ix, iz, ok := forwardCircleIntersection(float64(centerX), float64(centerZ), nominal, float64(unitX), float64(unitZ), direction); ok &&
 					ix > 16 && ix < float64(s.Terrain.CellW*16) && iz > 16 && iz < float64(s.Terrain.CellH*16) {
-					direction = math.Atan2(iz-float64(centerZ), ix-float64(centerX))
+					direction = numeric.Atan2Radians(iz-float64(centerZ), ix-float64(centerX))
 				}
 			}
 		} else if unitX != centerX || unitZ != centerZ {
-			direction = math.Atan2(float64(unitZ-centerZ), float64(unitX-centerX))
+			direction = numeric.Atan2Radians(float64(unitZ-centerZ), float64(unitX-centerX))
 		}
 	}
 
@@ -196,10 +196,10 @@ func (s *Service) findKickoutDestination(u *units.Unit, clear world.FootprintRec
 		for offset := 0.0; offset < kickoutPi; offset += 16.0 / r {
 			for sign := -1.0; sign <= 1.0; sign += 2.0 {
 				angle := direction + float64(sign*offset)
-				xStep := float64(r * math.Cos(angle))
-				zStep := float64(r * math.Sin(angle))
-				x := centerX + int64(xStep)
-				z := centerZ + int64(zStep)
+				xStep := float64(r * numeric.CosRadians(angle))
+				zStep := float64(r * numeric.SinRadians(angle))
+				x := centerX + numeric.TruncateFloat64ToInt64(xStep)
+				z := centerZ + numeric.TruncateFloat64ToInt64(zStep)
 				if s.kickoutCellClear(u, x, z) {
 					return numeric.FixedFromInt(x), numeric.FixedFromInt(z), true
 				}
@@ -210,7 +210,7 @@ func (s *Service) findKickoutDestination(u *units.Unit, clear world.FootprintRec
 }
 
 func forwardCircleIntersection(cx, cz, radius, x, z, direction float64) (float64, float64, bool) {
-	tangent := math.Tan(direction)
+	tangent := numeric.TanRadians(direction)
 	if math.Abs(tangent) <= 1.0 {
 		u := tangent
 		v := float64(z-cz) - float64(x*tangent)
@@ -222,7 +222,7 @@ func forwardCircleIntersection(cx, cz, radius, x, z, direction float64) (float64
 			candidateZ := z + float64(float64(candidateX-x)*tangent)
 			dx := candidateX - x
 			dz := candidateZ - z
-			forward := float64(dx*math.Cos(direction)) + float64(dz*math.Sin(direction))
+			forward := float64(dx*numeric.CosRadians(direction)) + float64(dz*numeric.SinRadians(direction))
 			if forward >= 0.0 {
 				return candidateX, candidateZ, true
 			}
@@ -240,7 +240,7 @@ func forwardCircleIntersection(cx, cz, radius, x, z, direction float64) (float64
 		candidateX := x + float64(float64(candidateZ-z)/tangent)
 		dx := candidateX - x
 		dz := candidateZ - z
-		forward := float64(dx*math.Cos(direction)) + float64(dz*math.Sin(direction))
+		forward := float64(dx*numeric.CosRadians(direction)) + float64(dz*numeric.SinRadians(direction))
 		if forward >= 0.0 {
 			return candidateX, candidateZ, true
 		}

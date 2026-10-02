@@ -2021,17 +2021,25 @@ non-zero:
 ```
 dx = (int16)unitX_wholeUnits - (int16)order.anchorX
 dz = (int16)unitZ_wholeUnits - (int16)order.anchorZ
-d  = trunc(hypot((double)dx, (double)dz))       // C hypot, __ftol truncation
+d  = trunc(distance(dx, dz))                 // [01 R-DET-01 §7]
 if (leash <= d) -> abandon the order (completion code 5)
 ```
 
-Both terms are whole world units, the subtraction is on sign-extended 16-bit
-values, the distance is a double `hypot` truncated toward zero by the standard
-float-to-long conversion, and the comparison is **inclusive** (`leash <= d`
-abandons; `d == leash - 1` continues). This refines the "strict `leash <=
-distance from the guard/fight anchor` removal" sentence of §3.5 with the exact
-widths and the truncation. Nothing rounds. When the record is abandoned, the
-return move queued behind it becomes the front order — that is the whole of the
+Both terms are whole world units: read each coordinate's high half and each
+anchor as a signed 16-bit value, then subtract in signed 32-bit arithmetic.
+The distance is the specific routine of [01 R-DET-01 §7], with the two
+differences converted exactly to binary64. Its result is truncated toward
+zero by [01 R-DET-01 §1], retaining the low 32 bits as a signed integer.
+The comparison with the record's signed 32-bit leash is **signed and
+inclusive** (`leash <= d` abandons; `d == leash - 1` continues). A negative
+nonzero leash therefore abandons immediately. The ground and VTOL repair
+handlers and all four air attack executors use the same widths and comparison.
+This refines the "strict `leash <= distance from the guard/fight anchor`
+removal" sentence of §3.5. The routine's rounding remains observable even
+with integer inputs: offsets `(20, 99)` truncate to 100, so a leash of 101
+continues. An exact integer root or squared-distance comparison would abandon
+and is not equivalent. When the record is abandoned, the return move queued
+behind it becomes the front order — that is the whole of the
 "return to post" behavior; there is no separate homing state.
 
 **Established — the repair patrol has its own three-armed issuer.** A second
@@ -3516,6 +3524,13 @@ adding, so a transcription that loses that sign inverts it.
 (for a mobile build, the product definition's) footprint sizes. `ReclaimUnit`
 uses a different test, given in its contract.
 
+**Established — distance identity and widths.** Each `hypot` in this reach
+expression is the routine of [01 R-DET-01 §7], not an exact integer root.
+The raw coordinate differences wrap to signed 32 bits before conversion;
+footprint inputs are sign-extended 16-bit cell counts. The helper result is
+scaled before truncation at each footprint end. [05 R-WORK-01 §2] gives the
+complete sequence, signed comparison and conversion boundaries.
+
 **Weapon-slot helpers.** *Inhibit slot k* sets the slot's control-byte bit 4
 and clears its target; *release slot k* clears that bit and clears the
 target; both fire `TargetCleared` under the guard of [R-ORDER-02 §2] and take
@@ -4420,6 +4435,9 @@ positive, so it is exact. That radius is the goal handle's `radiusParam` of
 therefore follow at an offset of 64 world units with a 32-unit radius (two
 cells), two two-cell units at 96 with 48 (three cells). The annulus installer
 and the rectangle installer are not called anywhere in either guard handler.
+This arrival test is genuinely squared cell arithmetic; it does not call the
+distance routine. A guard's spawned attack instead uses the whole-world-unit
+leash test of [R-STANCE-01 §4].
 
 **4. Cadence.** After the install the handler sets the deadline to `tick +
 30` through the shared setter (fixed — no draw; the setter ORs gate bit
@@ -13987,6 +14005,22 @@ The bomber's phase-5 point binding is also slot 0 only; its phase-6 stop clears
 that slot's target without reading or changing its control byte or Aim state
 ([06 §3.2]). These are distinct operations, confirmed at each caller.
 
+**Established — the attack legs' planar distance conversions.** The raw
+16.16 distances in `AirStrike` phases 1 and 2, the half-distance approach of
+`AirToGround` and `AirToGroundHover` phase 1, and the `AirToAir` intercept
+check all call [01 R-DET-01 §7]. Each X and Z difference is formed with
+wrapping signed 32-bit subtraction before exact conversion to binary64.
+Truncate the returned distance through [01 R-DET-01 §1] and retain its low
+32 bits. The bomber's 480-world-unit comparison reads that result as signed
+32-bit 16.16; each half-distance approach divides that signed result by two,
+truncating toward zero. A distance beyond the positive signed-32 range
+therefore becomes negative at this boundary; it is not kept as a wider
+positive distance. The dogfight intercept check instead reads the signed
+16-bit high half and compares that whole-world-unit value strictly above
+160. Thus 160 plus a fraction does not trigger the intercept. These are
+separate from the whole-coordinate maneuver leash above, and an exact root
+of the sum of squares cannot replace their distance routine.
+
 **Established — `AirStrike`: the bombing run, with a ballistic release lead.**
 
 | Phase | Work | Result |
@@ -14118,8 +14152,9 @@ target to slot 0 and then:
   reset the scratch counter; return 2.
 * When they are not set and the scratch counter is below `0x5A`, recompute the
   same dot product, add `0x2D` to the counter if it is not positive and zero it
-  otherwise; then, if the range to the target exceeds `0xA0` world units,
-  command a lead intercept: position `targetPos + targetVelocity · 45`,
+  otherwise; then, if the signed 16-bit high half of the truncated planar
+  distance exceeds `0xA0` whole world units, command a lead intercept: position
+  `targetPos + targetVelocity · 45`,
   velocity **`targetVelocity` plus** the direction of the target's heading at
   half the target's `MaxVelocity` — that is, X = `targetVelocityX − sin(h,
   MaxVelocity/2)` and Z = `targetVelocityZ − cos(h, MaxVelocity/2)` under the

@@ -6,7 +6,6 @@ package construction
 
 import (
 	"fmt"
-	"math"
 
 	"github.com/nanolathe-gg/nanolathe/internal/combat"
 	"github.com/nanolathe-gg/nanolathe/internal/community"
@@ -545,92 +544,12 @@ func isMobileBuilder(u *units.Unit) bool {
 	return u.Flags&units.BuildingClassStatus == 0
 }
 
-// nanoIsqrt is the floor of the square root of a non-negative value. Retail
-// forms the three magnitudes of [05 R-WORK-01 §2] on the double-precision stack
-// and truncates each toward zero; for an exact integer radicand the two agree,
-// and the integer form keeps authoritative state out of floating point (I2).
-//
-// This is the classic bitwise digit-by-digit method (review finding R04): it
-// starts from the highest power of four that fits in 63 bits and refines one
-// base-4 digit of the result per iteration using only addition, subtraction
-// and shifts, never a squaring multiply. That makes it exact and terminating
-// for every 0 <= v <= math.MaxInt64 — unlike the previous doubling search,
-// which grew a candidate `r` by repeated `r*r` until the square overflowed
-// signed 64-bit and wrapped to a value the loop's own condition could never
-// escape (reachable at v >= 2^62, i.e. a builder-to-site separation of about
-// 32768 world units per axis; see isWithinNanoRange below).
-func nanoIsqrt(v int64) int64 {
-	if v <= 0 {
-		return 0
-	}
-	// digit starts at the largest power of four not exceeding v; math.MaxInt64
-	// is just under 2^63, so 2^62 (the largest power of two below 2^63 that is
-	// also a power of four) is a safe, constant starting point.
-	digit := int64(1) << 62
-	for digit > v {
-		digit >>= 2
-	}
-	root := int64(0)
-	for digit != 0 {
-		if v >= root+digit {
-			v -= root + digit
-			root = (root >> 1) + digit
-		} else {
-			root >>= 1
-		}
-		digit >>= 2
-	}
-	return root
-}
-
-// nanoRadicand forms `dx*dx + dz*dz` for isWithinNanoRange without risking a
-// signed 64-bit wrap in the multiply or the add (review finding R04).
-//
-// Bound established for the caller: the largest map extent this research
-// corpus documents is research/formats/ota.md's `size` example, `36 x 16` in
-// 512-world-unit squares — 18432x8192 world units. A worst-case diagonal
-// separation at that scale gives a radicand near 2.9e18: under 2^62
-// (4.61e18) and an order of magnitude under math.MaxInt64 (9.22e18), so no
-// known or documented retail/community map reaches the danger zone. But
-// research/formats/tnt.md's Width/Height header fields are raw u32s, and
-// neither the format nor internal/content/compile_map.go's loader enforces a
-// maximum on them — so an unusually large or malformed map is not ruled out
-// by the code itself. The sum first overflows once |dx| and |dz| both
-// approach roughly 2^31 in 16.16 (about 32768 world units of separation on
-// each axis) — the same separation at which isWithinNanoRange's own signed
-// 16-bit high-word read already goes negative (see the comment below), so
-// saturating here changes nothing for any map where that read still means
-// anything, and only prevents a wrap for inputs already past it.
-func nanoRadicand(dx, dz int64) int64 {
-	sq := func(a int64) int64 {
-		if a == math.MinInt64 {
-			// -a would itself overflow (two's complement has no positive
-			// counterpart for MinInt64); its magnitude already saturates.
-			return math.MaxInt64
-		}
-		if a < 0 {
-			a = -a
-		}
-		if a != 0 && a > math.MaxInt64/a {
-			return math.MaxInt64
-		}
-		return a * a
-	}
-	dx2, dz2 := sq(dx), sq(dz)
-	if dx2 > math.MaxInt64-dz2 {
-		return math.MaxInt64
-	}
-	return dx2 + dz2
-}
-
-// nanoFootprintPad is one end's half-footprint diagonal in whole world units:
-// `trunc(8 · hypot(footX, footZ))` [05 R-WORK-01 §2]. Eight is half of the
-// sixteen world units a footprint cell spans, and `8·sqrt(n)` is `sqrt(64n)`.
-// Both ends' pads subtract, because retail forms the target's with a NEGATIVE
-// eight and then adds it.
+// nanoFootprintPad is one end's half-footprint diagonal [05 R-WORK-01 §2].
+// Signed footprint words enter the distance helper before multiplication by
+// eight and truncation; an exact integer root differs [01 R-DET-01 §7].
 func nanoFootprintPad(footX, footZ int32) int32 {
-	r := int64(footX)*int64(footX) + int64(footZ)*int64(footZ)
-	return int32(nanoIsqrt(64 * r))
+	distance := numeric.Distance(float64(int16(footX)), float64(int16(footZ)))
+	return numeric.TruncateFloat64ToLow32(8 * distance)
 }
 
 // isWithinNanoRange is the build-distance reach test of [05 R-WORK-01 §2],
@@ -682,9 +601,10 @@ func (s *Service) isWithinNanoRange(builder *units.Unit, siteX, siteZ numeric.Fi
 	if s == nil || s.Movement == nil {
 		return true // no walk driver bound in this context; skip range gate for unit tests
 	}
-	dx := int64(builder.X) - int64(siteX)
-	dz := int64(builder.Z) - int64(siteZ)
-	distFixed := nanoIsqrt(nanoRadicand(dx, dz))
+	// The raw coordinate differences wrap as signed 32-bit before widening.
+	dx := int32(builder.X) - int32(siteX)
+	dz := int32(builder.Z) - int32(siteZ)
+	distFixed := numeric.TruncatedDistance(float64(dx), float64(dz))
 	// The high word is read as a signed 16-bit quantity out of a 32-bit
 	// register, not as a shift of the whole value: a separation of 32768 world
 	// units or more reads negative [05 R-WORK-01 §2].

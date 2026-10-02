@@ -1579,16 +1579,13 @@ func airDeadline(n *orders.Node, tick uint32, delay uint32) {
 // airPlanarDistance is the `hypot(a − b)` the attack-run legs measure in 16.16
 // [04 R-AIR-01 §8].
 //
-// Retail forms it on the double-precision stack and truncates toward zero.
-// I2 has no row for a float temporary in this file, and none is needed: over an
-// exact integer radicand `floor(sqrt(x))` and `trunc(hypot)` are the same value,
-// so the integer square root of `dx² + dz²` reproduces it without leaving the
-// fixed-point world. The squared sum of two raw 16.16 map coordinates is at most
-// about 6e17 and cannot overflow int64.
+// The raw differences wrap as signed 32-bit before entering the distance
+// helper. Its truncated low word is signed; an exact root loses the helper's
+// rounding at integer boundaries [01 R-DET-01 §7][04 R-AIR-01 §8].
 func airPlanarDistance(ax, az, bx, bz numeric.Fixed) int64 {
-	dx := int64(ax) - int64(bx)
-	dz := int64(az) - int64(bz)
-	return int64(isqrt(uint64(dx*dx + dz*dz)))
+	dx := int32(ax) - int32(bx)
+	dz := int32(az) - int32(bz)
+	return int64(numeric.TruncatedDistance(float64(dx), float64(dz)))
 }
 
 // airBelowThreeQuarters is the health test the six base-seeking air legs share
@@ -2625,7 +2622,9 @@ func (s *System) legAirToAir(u *units.Unit, n *orders.Node, satisfied uint32, ti
 			} else {
 				n.Param1 += 0x2D
 			}
-			if airPlanarDistance(targetX, targetZ, u.X, u.Z) > int64(0xA0)<<16 {
+			// The dogfight gate reads the signed whole-unit high word,
+			// so a fractional excess above 160 does not pass [04 R-AIR-01 §8].
+			if int16(airPlanarDistance(targetX, targetZ, u.X, u.Z)>>16) > 0xA0 {
 				tvx, tvy, tvz := airUnitVelocity(t)
 				tHeading := uint16(0)
 				tMax := int64(0)

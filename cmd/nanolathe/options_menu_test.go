@@ -111,6 +111,7 @@ func TestMonitorDisplayOptions(t *testing.T) {
 // reopen and Cancel transaction. Optional captures use the production painter.
 func TestMonitorOptionsSelectionSurvivesReopen(t *testing.T) {
 	shell, _, cl := retailAssetShell(t)
+	shell.display.Width, shell.display.Height = 640, 480
 	window := shell.windowOptions()
 	shell.openMenu(modeMenuSingle)
 	shell.activateGadget("Options")
@@ -520,6 +521,7 @@ func TestBattleComposesAtTheChosenDisplayMode(t *testing.T) {
 // [07 R-WGT-01 §5 "Pointer"].
 func TestRetailOptionsSliderPointerCaptureAndDrag(t *testing.T) {
 	shell, _, cl := retailAssetShell(t)
+	shell.display.Width, shell.display.Height = 640, 480
 	shell.openMenu(modeMenuSingle)
 	shell.activateGadget("Options")
 	shell.activateGadget("VISUALS")

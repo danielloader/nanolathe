@@ -201,6 +201,9 @@ func nlShotSteps(s *nlScreen, only string) []nlShotStep {
 					card.set(d, min(len(card.steps)-1, card.get(d)+2))
 				}})
 			}
+			if card.key == "resolution" {
+				steps = append(steps, nlShotStep{name: base + "-custom", page: pi, card: ci, dialog: "resolution"})
+			}
 			if card.key == "profile" {
 				steps = append(steps, nlShotStep{name: base + "-community", page: pi, card: ci, draft: func(d *nlDraft) { d.controls = 2 }})
 			}
@@ -258,11 +261,11 @@ func (g *nlShotGame) Draw(screen *ebiten.Image) {
 	if !g.started {
 		g.started = true
 		g.frames, g.settle, g.demoArmed = 0, 0, false
-		s.draft = s.snapshot(s.shell())
 		s.shell().display.Width, s.shell().display.Height = g.displaySize.X, g.displaySize.Y
 		if step.gameSize.X > 0 && step.gameSize.Y > 0 {
 			s.shell().display.Width, s.shell().display.Height = step.gameSize.X, step.gameSize.Y
 		}
+		s.draft = s.snapshot(s.shell())
 		if step.draft != nil {
 			step.draft(&s.draft)
 		}
@@ -294,6 +297,9 @@ func (g *nlShotGame) Draw(screen *ebiten.Image) {
 		}
 	}
 	g.target.Clear()
+	if s.dialog == "resolution" && g.frames == 0 {
+		s.openResolutionDialog()
+	}
 	s.Draw(g.target)
 	g.frames++
 	p := s.preview

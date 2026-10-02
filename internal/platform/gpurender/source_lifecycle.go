@@ -22,6 +22,9 @@ func (r *Renderer) resetSources(release func(*ebiten.Image)) {
 		return
 	}
 	r.joinModelPages()
+	if r.preview != nil {
+		r.preview.resetSources(release)
+	}
 	seen := make(map[*ebiten.Image]struct{})
 	retire := func(img *ebiten.Image) {
 		if img == nil {

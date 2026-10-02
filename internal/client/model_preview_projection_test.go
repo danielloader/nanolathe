@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"math"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	compiledmodel "github.com/nanolathe-gg/nanolathe/internal/model"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	presentationrender "github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
@@ -51,12 +53,29 @@ func TestModelPreviewProjectionPreservesSourceAttributes(t *testing.T) {
 	for _, keyPlane := range []bool{false, true} {
 		draw.KeyPlane = keyPlane
 		ordinary := c.prepareModelGeometry(draw, 0, teamColor{}, 0, modelCursorUnit, nil, 0)
-		projected, err := c.projectedPreviewGeometry(draw, teamColor{}, ModelPreviewProjection{PixelsPerUnit: 7.25, Pivot: [3]numeric.Fixed{16384, 98304, -32768}}, 120, 90)
+		projected, precise, err := c.projectedPreviewGeometry(draw, teamColor{}, ModelPreviewProjection{PixelsPerUnit: 7.25, Pivot: [3]numeric.Fixed{16384, 98304, -32768}}, 120, 90)
 		if err != nil || ordinary == nil || projected == nil || projected.Supersample == nil {
 			t.Fatalf("missing model geometry: %v", err)
 		}
 		if projected.KeyPlane != keyPlane || projected.AnchorX != 120 || projected.AnchorY != 90 || projected.Cache.Reusable() {
 			t.Fatalf("projection changed depth class, pivot anchor or cache identity: %+v", projected)
+		}
+		if precise == nil || len(precise.Faces) != len(projected.Faces) {
+			t.Fatal("precise payload lost admitted faces")
+		}
+		for i, face := range precise.Faces {
+			if !reflect.DeepEqual(face.Face, projected.Faces[i]) {
+				t.Fatal("precise payload changed resolved face metadata or vertex order")
+			}
+		}
+		wantPositions := []drawlist.ModelPreviewPosition{
+			{X: 121.8125, Y: 93.625, Depth: .5},
+			{X: 139.9375, Y: 88.1875, Depth: 1},
+			{X: 139.9375, Y: 70.0625, Depth: 2},
+			{X: 118.1875, Y: 73.6875, Depth: 1},
+		}
+		if !reflect.DeepEqual(precise.Faces[0].Positions, wantPositions) {
+			t.Fatalf("precise positions = %+v, want %+v", precise.Faces[0].Positions, wantPositions)
 		}
 		for _, g := range []*drawlist.ModelGeometry{projected, projected.Supersample} {
 			if len(g.Faces) != len(ordinary.Faces) {
@@ -75,6 +94,90 @@ func TestModelPreviewProjectionPreservesSourceAttributes(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestModelPreviewPayloadFollowsAdmittedFaces(t *testing.T) {
+	c := testModelTextureClient()
+	c.pal, c.recordModelGeometry = &palette.Tables{}, true
+	quad := []uint16{0, 1, 2, 3}
+	draw := testPrimitiveDraw(presentationrender.PrimitiveDraw{}, nil)
+	draw.WorldPos = [3]numeric.Fixed{10*65536 + 5, 20*65536 + 7, -3*65536 - 9}
+	draw.Model.Pieces = []compiledmodel.Piece{{Name: "root", Selection: true}, {Name: "child"}}
+	draw.Pieces = []presentationrender.PieceDraw{
+		{SourceIndex: 0, Primitives: []presentationrender.PrimitiveDraw{
+			{IsColored: 1, ColorIndex: 9, VertexIndices: quad}, // Selection plate is skipped.
+			{IsColored: 1, ColorIndex: 77, VertexIndices: quad},
+		}},
+		{SourceIndex: 1, Primitives: []presentationrender.PrimitiveDraw{
+			{IsColored: 1, VertexIndices: []uint16{0, 1, 8}},       // Invalid reference rejects the whole face.
+			{VertexIndices: quad},                                  // No material.
+			{TextureName: "tex", VertexIndices: []uint16{0, 1, 2}}, // Textured non-quad.
+			{IsColored: 1, VertexIndices: []uint16{0, 1}},          // Too few corners.
+			{TextureName: "tex", VertexIndices: quad},
+		}},
+	}
+	for i := range draw.Pieces {
+		vertices := [][3]numeric.Fixed{{-16384, 32768, -32768}, {81920, 32768, -32768}, {81920, 32768, 98304}, {-16384, 32768, 98304}}
+		for j := range vertices {
+			if i == 0 {
+				vertices[j][1]++ // Close authored planes must keep their one-unit fixed-point gap.
+			}
+			for axis := range vertices[j] {
+				vertices[j][axis] += draw.WorldPos[axis]
+			}
+		}
+		draw.Pieces[i].WorldVertices = vertices
+	}
+	g, precise, err := c.projectedPreviewGeometry(draw, teamColor{}, ModelPreviewProjection{PixelsPerUnit: 3, Pivot: [3]numeric.Fixed{16384, 16384, 16384}}, 120, 90)
+	if err != nil || precise == nil || len(precise.Faces) != 2 {
+		t.Fatalf("admitted preview faces = %+v: %v", precise, err)
+	}
+	if precise.Faces[0].Face.Texture == nil || precise.Faces[1].Face.Color != 77 {
+		t.Fatal("preview lost the shared last-piece-first face order")
+	}
+	want := []drawlist.ModelPreviewPosition{
+		{X: 118.5, Y: 91.875, Depth: .5}, {X: 123, Y: 91.875, Depth: .5},
+		{X: 123, Y: 85.875, Depth: .5}, {X: 118.5, Y: 85.875, Depth: .5},
+	}
+	for i, face := range precise.Faces {
+		if !reflect.DeepEqual(face.Face, g.Faces[i]) || !reflect.DeepEqual(face.Positions, want) {
+			t.Fatalf("admitted face %d = %+v, want positions %+v", i, face, want)
+		}
+		for j := range want {
+			want[j].Y -= 3.0 / (2 * 65536)
+			want[j].Depth += 1.0 / 65536
+		}
+	}
+	if g.Faces[0].Vertices[0].Key != g.Faces[1].Vertices[0].Key {
+		t.Fatal("fixture must exercise surfaces whose legacy height keys are equal")
+	}
+}
+
+func TestModelPreviewPayloadOwnsRetainedCorners(t *testing.T) {
+	r := projectedTestRenderer(t)
+	r.client.modelScratch.active = true
+	opts := ModelPreviewOptions{Model: "precision", Width: 96, Height: 80}
+	record, err := r.RecordProjectedGeometry(opts, ModelPreviewProjection{PixelsPerUnit: 7.25})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &drawlist.ModelPreviewGeometry{Faces: slices.Clone(record.Projected.Faces)}
+	for i := range want.Faces {
+		want.Faces[i].Face.Vertices = slices.Clone(want.Faces[i].Face.Vertices)
+		want.Faces[i].Positions = slices.Clone(want.Faces[i].Positions)
+	}
+	// A retained preview owns both its material lanes and precise corners.
+	// Rewinding the shared recording scratch must not alter either slice.
+	r.client.modelScratch.reset()
+	opts.Heading = 16384
+	opts.PiecePoses = []frame.PieceView{{Name: "body", Ty: 32768}}
+	if _, err := r.RecordProjectedGeometry(opts, ModelPreviewProjection{PixelsPerUnit: 11.5}); err != nil {
+		t.Fatal(err)
+	}
+	record.List.ModelCommands()[0].Geometry.Faces[0].Vertices[0].U++
+	if !reflect.DeepEqual(record.Projected, want) {
+		t.Fatal("later recording or legacy packet mutation changed the retained precise payload")
 	}
 }
 
@@ -101,6 +204,9 @@ func TestModelPreviewProjectedCallsLeaveOrdinaryOutputUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if classic.Projected != nil || geometry.Projected != nil {
+		t.Fatal("ordinary recording created a precise viewer payload")
+	}
 	// A pre-existing ordinary orientation must neither quantize a tool angle
 	// within its small-change threshold nor be replaced by the tool call.
 	id := unitPresentationID(frame.UnitView{Slot: 1, InstanceID: 1})
@@ -110,7 +216,7 @@ func TestModelPreviewProjectedCallsLeaveOrdinaryOutputUnchanged(t *testing.T) {
 	toolOpts.Heading++
 	toolOpts.DisableAntiAlias = true
 	tool, err := r.RecordProjectedGeometry(toolOpts, ModelPreviewProjection{PixelsPerUnit: 100})
-	if err != nil || tool.Image != nil {
+	if err != nil || tool.Image != nil || tool.Projected == nil {
 		t.Fatalf("tool geometry: %v", err)
 	}
 	if *c.orientationCache(id) != cache {

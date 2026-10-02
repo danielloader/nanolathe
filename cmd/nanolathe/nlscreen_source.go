@@ -56,7 +56,8 @@ func (s *nlScreen) draftOf(st settings.Settings) nlDraft {
 		gameplay: st.Gameplay.Normalize(), pres: st.Presentation,
 		glow: st.Display.Glow, glowStrength: st.Display.GlowStrength,
 		unitLimit: st.UnitLimit, switchAlt: st.SwitchAltEnabled(), interfaceType: st.InterfaceType,
-		keys: keyMapFromSettings(st.KeyBindings),
+		keys:       keyMapFromSettings(st.KeyBindings),
+		resolution: retailDisplayMode{st.Display.Width, st.Display.Height},
 	}
 	if d.glowStrength < 0 {
 		d.glowStrength = settings.DefaultGlowStrength
@@ -171,7 +172,7 @@ func (s *nlScreen) guardLocked(c nlCard, change func()) {
 // cardSource is the card's marker: "set" when the mod's recommendation sets
 // it, "changed" when the player changed it for the mod, "" otherwise.
 func (s *nlScreen) cardSource(c nlCard) string {
-	if !s.sourceActive() || c.key == "content" {
+	if !s.sourceActive() || c.key == "content" || c.key == "resolution" {
 		return ""
 	}
 	switch {

@@ -4162,7 +4162,9 @@ the limitation. This is settings presentation policy, user-authorized 2026-09-30
 
 **Graphics and Effects pages.** Graphics holds the choices that shape the
 whole picture in either renderer: the renderer itself, the frame rate, the
-sidebar and fullscreen. Effects holds Enhanced's own looks, the player
+game resolution, sidebar and fullscreen. Resolution offers monitor-derived presets
+and editable dimensions through the host transaction in DESIGN_PRESENTATION_CLIENT
+§2.1. Effects holds Enhanced's own looks, the player
 switches of DESIGN_GPU_RENDERER §30, plus Commander arrival (§36) and Placement
 weapon rings (§20), both default on and independent of gameplay mode. Their
 previews use the existing opening recorder and prospective-building ghost/range

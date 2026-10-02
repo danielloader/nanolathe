@@ -5183,6 +5183,50 @@ Resources are replenished for those diagnostic scenes; retail art stays outside
 the repository. This renderer-only correction was visually reviewed with ARM
 and CORE factories; gameplay and the retail baseline are unchanged.
 
+### 22.5 Isolated unit viewer surface precision
+
+**Established (implementation); user-authorized viewer policy.** The hidden unit
+viewer calls `Renderer.DrawModelPreview` explicitly after composing its backdrop.
+No battle command selects this path. Its `ModelPreviewGeometry` retains floating
+screen positions and fractional oriented model-relative heights separately from
+ordinary `ModelGeometry`, so battle packets, per-vertex storage and the key lane
+above are unchanged. The shared collector still supplies texture admission,
+palette/team colour, shade rows, normals and material annotations.
+
+The device rasterizes the fractional coordinates at 2× output size. Depth is
+the triangle-interpolated model-relative height, normalized over the complete
+record's depth range before narrowing to the device float. It is never the
+rounded two-chain mapper's key. The quad mapper still supplies texture/shade
+lanes, and existing glint and material response apply. There is no name-based
+geometry change or bias.
+
+RGBA8 storage holds a non-wrapping 24-bit depth. Three MAX passes select bytes
+lexicographically: highest byte first, then the middle byte only from fragments
+matching that high byte, then the low byte only from fragments matching both.
+Two depth images alternate; maximizing all channels independently in one pass
+would produce depths belonging to no surface. One compiled shader and vertex
+batch serve all three passes and the colour pass, selected by a uniform, so
+their depth expressions cannot acquire different compiler arithmetic. Index-1
+texture holes discard in every pass.
+
+The colour pass admits only fragments within 1/1024 world unit plus two code
+points of the stored depth. Faces submit in reverse recorded order, so the
+first recorded face wins this tiny near-coincident band consistently. This
+compensates for independently rounded 16.16 transformed vertices; it does not
+claim exact ordering for sub-band separations or arbitrary grazing angles.
+The coverage resolve averages four premultiplied samples over the backdrop.
+There is no GPU readback, battle state or simulation interpolation.
+
+The preview lazily allocates two depth planes and one colour plane at twice
+the bounded canvas dimensions; no full battle atlas is allocated for it.
+It reuses the renderer's palette and texture cache, plus private quad parameters
+and CPU batches. `ResetSources` releases its planes/parameters and drops source
+references, retaining only compiled shaders. Closing the viewer owns this call.
+Its real-device fixture runs in the existing GPU gate and checks close sloped
+planes, stable near-coincident priority, shared-edge coverage, depth byte carries,
+negative/large heights and texture holes. The screen and record contracts are
+owned by DESIGN_DEVELOPER_TOOLS §7.
+
 ## 23. Battle lighting (Enhanced)
 
 ### 23.1 Scope and inputs

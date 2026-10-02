@@ -53,7 +53,7 @@ type Camera struct {
 	zoomViewX, zoomViewZ int32
 	zoomViewFactor       Zoom
 
-	// Fractional arrow-key motion at the live zoom (DESIGN_INTERFACE_HUD_INPUT §3.8).
+	// Fractional arrow-key and edge motion at the live zoom (DESIGN_INTERFACE_HUD_INPUT §3.8).
 	scrollX, scrollZ int64
 	scrollZoom       Zoom
 
@@ -631,7 +631,7 @@ func scrollMagnitude(setting byte, rawDelta int32) int32 {
 	return mag
 }
 
-// ScrollScreen gives arrow keys the native screen-pixel rate at every zoom.
+// ScrollScreen gives arrow keys and edges the native screen-pixel rate at every zoom.
 // Fractional map pixels carry between calls so slow settings still move when
 // magnified (DESIGN_INTERFACE_HUD_INPUT §3.8). Retail has no zoom counterpart.
 func (c *Camera) ScrollScreen(setting byte, rawDelta int32, dir Direction) {
@@ -641,6 +641,10 @@ func (c *Camera) ScrollScreen(setting byte, rawDelta int32, dir Direction) {
 	zoom := c.zoom()
 	if c.scrollZoom != zoom {
 		c.scrollX, c.scrollZ, c.scrollZoom = 0, 0, zoom
+	}
+	if zoom == ZoomUnit {
+		c.Scroll(setting, rawDelta, dir)
+		return
 	}
 	mag := int64(scrollMagnitude(setting, rawDelta)) * int64(ZoomUnit)
 	xAxis := dir == DirectionLeft || dir == DirectionRight

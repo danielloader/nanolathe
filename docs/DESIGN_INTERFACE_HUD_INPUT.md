@@ -1255,8 +1255,8 @@ consumers do not copy path-specific constants `[03 §2.5]`.
 raw time delta and capped at 128; a zero delta makes no movement. The cap is a
 signed comparison with no absolute value, so a negative delta keeps its sign.
 The delta is thirtieths of a second, so at the default setting byte 32 the
-sustained rate is 960 map pixels per second at any frame rate and the cap is a
-low-frame-rate limiter `[07 §10]` `[07 R-CAM-01 §10]`.
+sustained rate at native 1× is 960 map pixels per second at any frame rate
+(§3.8 defines the zoom conversion), and the cap is a low-frame-rate limiter `[07 §10]` `[07 R-CAM-01 §10]`.
 
 Magnitude is only half the contract; the pass is also a **shape**. It makes
 one exclusive test per axis, Left before Right and Up before Down, so a
@@ -2477,13 +2477,16 @@ by a simulation phase, and is not saved [I6].
   screen. `ScreenToRecord` bridges the two for the hover hull, which compares a
   pointer against corners projected at the step; the drag band needs no bridge,
   because it is projected from world points rather than from pointer pixels.
-* **Arrow-key scroll speed.** Arrow keys apply the existing setting, host-time
+* **Arrow-key and edge scroll speed.** Both apply the existing setting, host-time
   delta and signed cap in screen pixels, then divide by the live zoom before
   moving the camera. Fractional map pixels carry per axis while zoom is steady;
   a zoom change or a clamped move clears the corresponding carry. This keeps
   the standard 1× screen speed at every zoom, including slow settings at 2×.
-  This is a Nanolathe presentation choice; edge scrolling retains its retail
-  map-pixel rate.
+  Both use the current live factor, including intermediate continuous-zoom
+  factors, rather than the recording step or zoom target. This is a Nanolathe
+  presentation choice in every gameplay mode and renderer; at native 1× it
+  retains the retail rate. Production scroll-pass tests cover all four
+  directions, slow/default settings, free factors and a changing live zoom.
 * **The native fast path is exact.** At factor 1 both conversions take the
   original integer path unchanged, so nothing composed at native scale differs
   by a pixel from a build without the feature; the same holds at 2×

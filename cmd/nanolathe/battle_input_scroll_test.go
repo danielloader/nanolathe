@@ -301,10 +301,10 @@ func TestScrollSettingUsesAttachedShellWithoutDisk(t *testing.T) {
 	}
 }
 
-// Nanolathe's arrow-key zoom policy uses the native screen speed (§3.8),
+// Nanolathe's arrow-key and edge zoom policy uses the native screen speed (§3.8),
 // including settings whose per-frame map displacement is less than one pixel.
-func TestHeldArrowsKeepScreenSpeedAcrossZooms(t *testing.T) {
-	for _, zoom := range []camera.Zoom{camera.ZoomUnit / 4, camera.ZoomUnit / 2, camera.ZoomUnit * 3 / 4, camera.ZoomUnit, camera.ZoomUnit * 3 / 2, camera.ZoomMax} {
+func TestScrollKeepsScreenSpeedAcrossZooms(t *testing.T) {
+	for _, zoom := range []camera.Zoom{camera.ZoomUnit / 4, camera.ZoomUnit / 2, camera.ZoomUnit * 3 / 4, camera.ZoomUnit, camera.ZoomUnit * 3 / 2, 1229, camera.ZoomMax} {
 		for _, setting := range []byte{1, 32} {
 			for _, direction := range []struct {
 				name string
@@ -314,35 +314,83 @@ func TestHeldArrowsKeepScreenSpeedAcrossZooms(t *testing.T) {
 				{"left", input.KeyLeft, -1, 0}, {"right", input.KeyRight, 1, 0},
 				{"up", input.KeyUp, 0, -1}, {"down", input.KeyDown, 0, 1},
 			} {
-				t.Run(fmt.Sprintf("%s/setting%d/%s", zoom, setting, direction.name), func(t *testing.T) {
-					b := newTestBattle(testCatalogON05(), testWorldON05(300, 300))
-					b.scrollSpeedPrimed, b.scrollSpeedByte = true, setting
-					millis := &fakeMillisSource{}
-					b.millisSource = millis
-					cl, err := client.New(client.Options{Buffer: &frame.Buffer{}, Width: 640, Height: 480})
-					if err != nil {
-						t.Fatal(err)
-					}
-					cl.SetCamera(b.cam)
-					cl.Input().Mouse.SetPosition(320, 240)
-					cl.Input().Kbd.SetKey(direction.key, true)
-					b.viewerStep(0, cl)
-					b.cam.X, b.cam.Z = 8192, 8192
-					b.cam.MapW, b.cam.MapH = 32768, 32768
-					b.cam.Zoom = zoom
-					for i := 0; i < 50; i++ {
-						millis.ms += 20
-						b.viewerStep(0.02, cl)
-					}
-					// All chosen factors exactly divide a second's total travel.
-					x := zoom.Project(b.cam.X - 8192)
-					z := zoom.Project(b.cam.Z - 8192)
-					want := int32(setting) * 30
-					if x != direction.x*want || z != direction.z*want {
-						t.Fatalf("one second moved (%d,%d) screen pixels, want (%d,%d)", x, z, direction.x*want, direction.z*want)
-					}
-				})
+				for _, edge := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/setting%d/%s/edge%t", zoom, setting, direction.name, edge), func(t *testing.T) {
+						b := newTestBattle(testCatalogON05(), testWorldON05(300, 300))
+						b.scrollSpeedPrimed, b.scrollSpeedByte = true, setting
+						millis := &fakeMillisSource{}
+						b.millisSource = millis
+						cl, err := client.New(client.Options{Buffer: &frame.Buffer{}, Width: 640, Height: 480})
+						if err != nil {
+							t.Fatal(err)
+						}
+						cl.SetCamera(b.cam)
+						cl.Input().Mouse.SetPosition(320, 240)
+						if edge {
+							cl.SetFocused(true)
+							x, y := 320, 240
+							if direction.x < 0 {
+								x = 0
+							} else if direction.x > 0 {
+								x = 639
+							}
+							if direction.z < 0 {
+								y = 0
+							} else if direction.z > 0 {
+								y = 479
+							}
+							cl.Input().Mouse.SetPosition(float32(x), float32(y))
+						} else {
+							cl.Input().Kbd.SetKey(direction.key, true)
+						}
+						b.viewerStep(0, cl)
+						b.cam.X, b.cam.Z = 8192, 8192
+						b.cam.MapW, b.cam.MapH = 32768, 32768
+						b.cam.Zoom = zoom
+						for i := 0; i < 50; i++ {
+							millis.ms += 20
+							b.viewerStep(0.02, cl)
+						}
+						// Retained fractions keep total map travel within one map
+						// pixel of the native screen distance divided by live zoom.
+						x := b.cam.X - 8192
+						z := b.cam.Z - 8192
+						want := int32(setting) * 30 * int32(camera.ZoomUnit) / int32(zoom)
+						if x != direction.x*want || z != direction.z*want {
+							t.Fatalf("one second moved (%d,%d) map pixels, want (%d,%d)", x, z, direction.x*want, direction.z*want)
+						}
+					})
+				}
 			}
+		}
+	}
+}
+
+func TestEdgeScrollUsesChangingLiveZoom(t *testing.T) {
+	b := newTestBattle(testCatalogON05(), testWorldON05(300, 300))
+	b.scrollSpeedPrimed, b.scrollSpeedByte = true, 32
+	millis := &fakeMillisSource{}
+	b.millisSource = millis
+	cl, err := client.New(client.Options{Buffer: &frame.Buffer{}, Width: 640, Height: 480})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl.SetCamera(b.cam)
+	cl.SetFocused(true)
+	cl.Input().Mouse.SetPosition(639, 479)
+	b.viewerStep(0, cl)
+	b.cam.X, b.cam.Z = 8192, 8192
+	b.cam.MapW, b.cam.MapH = 32768, 32768
+	// Keep the recording step native while the live factor changes, as it
+	// does during continuous zoom. Each 100 ms frame spends three thirtieths.
+	for _, zoom := range []camera.Zoom{777, 911, 1229, 1777, 1511, 633} {
+		b.cam.Zoom = zoom
+		x, z := b.cam.X, b.cam.Z
+		millis.ms += 100
+		b.viewerStep(0.1, cl)
+		want := int32(96 * camera.ZoomUnit / zoom)
+		if dx, dz := b.cam.X-x, b.cam.Z-z; dx != want || dz != want {
+			t.Fatalf("live zoom %d: corner moved (%d,%d), want (%d,%d)", zoom, dx, dz, want, want)
 		}
 	}
 }

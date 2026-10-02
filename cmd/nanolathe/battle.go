@@ -1335,17 +1335,17 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 		modalActive := state.Modal() != ui.BattleModalClosed
 		// Every scroll-pass write is a jump by delta, and a jump by the scroll
 		// pass cancels the follow triple [07 R-CAM-01 §12].
-		scroll := func(dir camera.Direction, keyboard bool) {
-			if b.megamapShown() {
-				// Host choice: the camera the megamap hides holds still, so
-				// leaving returns to where the player left (§3.15).
+		scroll := func(dir camera.Direction) {
+			if b.preview || b.megamapShown() {
+				// Settings previews own their scripted camera (§3.17); their
+				// default pointer at (0,0) must not act as player edge input.
+				// The camera the megamap hides also holds still, so leaving
+				// returns to where the player left (§3.15).
 				return
 			}
-			if keyboard {
-				b.cam.ScrollScreen(scrollSetting, rawDelta, dir)
-			} else {
-				b.cam.Scroll(scrollSetting, rawDelta, dir)
-			}
+			// Host zoom policy: both input sources keep the native screen
+			// speed at the live factor (DESIGN_INTERFACE_HUD_INPUT §3.8).
+			b.cam.ScrollScreen(scrollSetting, rawDelta, dir)
 			b.cam.ClearFollow()
 			b.pendingFollowInput = nil
 		}
@@ -1360,8 +1360,7 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 		// twice or (as a summed vector would give) not at all.
 		//
 		// Each predicate is its arrow held with TALK.GUI absent, OR its edge
-		// band [07 §10]. The held arm wins the magnitude form when both arms of
-		// one predicate hold, as the keyboard arm is tested first. The edge arm
+		// band [07 §10]. Both arms use the same screen-pixel rate. The edge arm
 		// additionally requires focus and no modal; it deliberately does not
 		// test the minimap [07 R-CAM-01 §10]. A captured minimap camera drag
 		// that reaches the canvas edge cannot fight this pass: that latch jumps
@@ -1376,15 +1375,15 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 		edgeReady := focused && !modalActive
 		switch { // horizontal: Left predicate, then Right only if it failed
 		case heldLeft || (edgeReady && effX == 0 && effY < hi):
-			scroll(camera.DirLeft, heldLeft)
+			scroll(camera.DirLeft)
 		case heldRight || (edgeReady && effX == wi-1):
-			scroll(camera.DirRight, heldRight)
+			scroll(camera.DirRight)
 		}
 		switch { // vertical: Up predicate, then Down only if it failed
 		case heldUp || (edgeReady && effY == 0 && effX < wi):
-			scroll(camera.DirUp, heldUp)
+			scroll(camera.DirUp)
 		case heldDown || (edgeReady && effY == hi-1):
-			scroll(camera.DirDown, heldDown)
+			scroll(camera.DirDown)
 		}
 		// Middle-drag camera pan [F-P1-008]: presentation-only, uses mouse delta / scale.
 		if !talkActive && !b.megamapShown() && mouse.Held(input.MouseButtonMiddle) && mouse.Moved() {

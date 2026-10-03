@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 )
@@ -28,22 +29,18 @@ func (b *battleSession) spawnChatCommand(words []string) {
 	b.spawnAtPointer(words[1], "Point at the battlefield before submitting +spawn")
 }
 
-// unitNameChatCommand is the Modern shorthand `+<unit>`: a single word that
-// names a catalog unit and matched no registered command queues the same
-// request as `+spawn <unit>`. Retail reaches a unit-name default handler only
-// with developer access. It creates one fully built unit per definition whose
-// name matches the word as a wildcard pattern, owned by the slot the second
-// word names (slot 0 when absent), stepping 32 world units between footprints,
-// and validates no site [07 R-CAM-01 §6][07 R-CAM-01 §9]. This shorthand is
-// Nanolathe Modern policy with the `+spawn` contract instead — exact name, one
-// unit, local owner, no developer access — and shares only that placement
-// (DESIGN_INTERFACE_HUD_INPUT "Modern spawn command"). A word that names no
-// unit, carries arguments, or arrives under Strict 3.1 stays plain chat with
-// no feedback, as an unregistered retail command does. The retail handler
-// itself belongs with developer mode (DESIGN_DEVELOPER_TOOLS) and is not
-// implemented.
+// unitNameChatCommand keeps the Modern exact-name shorthand when developer
+// access is off (DESIGN_INTERFACE_HUD_INPUT "Modern spawn command"). With
+// access, the retail default handler owns patterns and optional player slots
+// in both gameplay modes [07 R-CAM-01 §6][07 R-CAM-01 §9].
 func (b *battleSession) unitNameChatCommand(words []string) bool {
-	if b == nil || b.sess == nil || b.sess.Catalog == nil || len(words) != 1 {
+	if b == nil || b.sess == nil || b.sess.Catalog == nil || len(words) == 0 {
+		return false
+	}
+	if b.developer.authorized {
+		return b.developerSpawnChatCommand(words)
+	}
+	if len(words) != 1 {
 		return false
 	}
 	if b.sess.Gameplay.Normalize() != gameplay.Modern {
@@ -73,4 +70,27 @@ func (b *battleSession) spawnAtPointer(unit, offWorld string) {
 		Kind:  session.HumanSpawn,
 		Spawn: session.HumanSpawnCommand{Unit: unit, X: wx, Y: wy, Z: wz},
 	})
+}
+
+// Capture access and the submission point before TALK closes. Only accepted
+// local submissions become commands; online has no developer-spawn payload
+// (DESIGN_DEVELOPER_TOOLS §8, DESIGN_MULTIPLAYER §7.4.2).
+func (b *battleSession) developerSpawnChatCommand(words []string) bool {
+	if b.sess.OnlineCommandContext() || b.cl == nil || b.cam == nil || b.cl.Input() == nil || b.cl.Input().Mouse == nil {
+		return true
+	}
+	mouse := b.cl.Input().Mouse
+	x, y := int32(mouse.X), int32(mouse.Y)
+	if !b.overWorld(x, y) {
+		return true
+	}
+	wx, wy, wz := b.cursorWorld(x, y)
+	_ = b.sess.EnqueueHumanCommand(session.HumanCommand{
+		Kind: session.HumanDeveloperSpawn,
+		DeveloperSpawn: session.HumanDeveloperSpawnCommand{
+			Pattern: content.CanonicalKey(words[0]), Owner: uint8(localCommandInt(words, 1)),
+			X: wx, Y: wy, Z: wz,
+		},
+	})
+	return true
 }

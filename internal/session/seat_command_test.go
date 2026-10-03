@@ -168,7 +168,7 @@ func TestSeatCommandKindNumbers(t *testing.T) {
 		{SeatHalfShot, HumanHalfShot}, {SeatMeteor, HumanMeteor}, {SeatBigBrother, HumanBigBrother},
 		{SeatShiftState, HumanShiftState}, {SeatCancelQueuedMove, HumanCancelQueuedMove}, {SeatSpawn, HumanSpawn},
 		{SeatBuilderOptions, HumanBuilderOptions}, {SeatCommunityOrderDrag, HumanCommunityOrderDrag},
-		{SeatCommunityKickout, HumanCommunityKickout}, {SeatGameplay, HumanGameplay},
+		{SeatCommunityKickout, HumanCommunityKickout}, {SeatDeveloperSpawn, HumanDeveloperSpawn}, {SeatGameplay, HumanGameplay},
 	}
 	for i, p := range pairs {
 		if uint8(p.seat) != uint8(p.human) {

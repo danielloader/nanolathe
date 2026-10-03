@@ -516,7 +516,8 @@ func (b *battleSession) dispatchLocalCommand(text string) {
 		}
 	default:
 		// Retail offers unmatched first words to a unit-name default handler
-		// [07 R-CAM-01 §6]; the Modern shorthand stands in for it here.
+		// [07 R-CAM-01 §6]; developer access selects it, otherwise the
+		// Modern exact-name shorthand keeps its own contract.
 		b.unitNameChatCommand(words)
 	}
 }

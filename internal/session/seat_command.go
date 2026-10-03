@@ -28,7 +28,7 @@ const (
 
 // SeatCommandKind is a command's kind byte. Every number is written out
 // rather than derived from iota or Go layout, because the numbers are a wire
-// schema (§7.4.2). Numbers 1..34 and 255 match HumanCommandKind for
+// schema (§7.4.2). Numbers 1..34, 46 and 255 match HumanCommandKind for
 // recognition; a test locks that, nothing derives one from the other.
 type SeatCommandKind uint8
 
@@ -79,6 +79,7 @@ const (
 	SeatDeclareAlliance    SeatCommandKind = 43 // D, reserved
 	SeatSharedVictory      SeatCommandKind = 44 // D, reserved
 	SeatShootAll           SeatCommandKind = 45 // D, cheat, reserved
+	SeatDeveloperSpawn     SeatCommandKind = 46 // R: authorized local developer submission
 	SeatGameplay           SeatCommandKind = 255
 )
 
@@ -269,6 +270,15 @@ type CommunityKickoutPayload struct {
 	Destination CommandPoint
 }
 
+// DeveloperSpawnPayload is kind 46, a single-player replay record. Pattern
+// is a canonical key with '*'/'?' interpreted by the retail default handler.
+// Owner is the typed integer's low byte, including values the allocator refuses.
+type DeveloperSpawnPayload struct {
+	Pattern  string
+	Owner    uint8
+	Position CommandPoint
+}
+
 // GameplayPayload is kind 255, a single-player replay record; online it is
 // lobby-only.
 type GameplayPayload struct {
@@ -299,6 +309,7 @@ type SeatCommand struct {
 	Meteor             MeteorPayload
 	CancelQueuedMove   CancelQueuedMovePayload
 	Spawn              SpawnPayload
+	DeveloperSpawn     DeveloperSpawnPayload
 	BuilderOptions     BuilderOptionsPayload
 	CommunityOrderDrag CommunityOrderDragPayload
 	CommunityKickout   CommunityKickoutPayload

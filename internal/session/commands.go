@@ -23,6 +23,10 @@ type HumanCommandKind uint8
 
 const HumanGameplay HumanCommandKind = 255
 
+// HumanDeveloperSpawn is the retail developer default handler, separate from
+// the Modern exact-name command and the reserved online kinds 35..45.
+const HumanDeveloperSpawn HumanCommandKind = 46
+
 const (
 	HumanSelectionReplace HumanCommandKind = iota + 1
 	HumanSelectionToggle
@@ -76,6 +80,15 @@ const (
 // See DESIGN_INTERFACE_HUD_INPUT "Modern spawn command".
 type HumanSpawnCommand struct {
 	Unit    string
+	X, Y, Z numeric.Fixed
+}
+
+// HumanDeveloperSpawnCommand captures an authorized developer submission.
+// Authorization belongs to the local producer; replay stores the accepted
+// request rather than depending on unrecorded host access [07 R-CAM-01 §6].
+type HumanDeveloperSpawnCommand struct {
+	Pattern string
+	Owner   uint8
 	X, Y, Z numeric.Fixed
 }
 
@@ -265,6 +278,7 @@ type HumanCommand struct {
 	BuilderOptions HumanBuilderOptionsCommand
 	Gameplay       gameplay.Mode
 	Spawn          HumanSpawnCommand
+	DeveloperSpawn HumanDeveloperSpawnCommand
 	// Sequence and DueTick are session-owned metadata. Callers leave both zero;
 	// EnqueueHumanCommand assigns them when the value enters the session queue.
 	Sequence           uint64
@@ -618,8 +632,8 @@ func pausedInputApplicable(c HumanCommand) bool {
 		return false
 	}
 	switch c.Kind {
-	case HumanSpawn:
-		// The Modern spawn command allocates a unit, which consumes creation
+	case HumanSpawn, HumanDeveloperSpawn:
+		// A spawn command allocates a unit, which consumes creation
 		// draws (see spawn_command.go).
 		return false
 	case HumanMeteor:
@@ -1406,6 +1420,10 @@ func (s *Session) applyBoundPlayerCommand(b *boundCommand, tick uint32) bool {
 		s.ToggleNoShake()
 	case HumanSpawn:
 		s.applySpawnCommand(c.Spawn, b.issuer, tick)
+	case HumanDeveloperSpawn:
+		if !b.online {
+			s.applyDeveloperSpawnCommand(c.DeveloperSpawn)
+		}
 	case HumanATM:
 		if s.Mission != nil && s.Mission.Type == mission.TypeCampaign {
 			return true

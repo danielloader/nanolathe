@@ -9066,6 +9066,10 @@ and the decider that would close it.
 
 ### Input and text
 
+- Case folding outside ASCII in the developer default handler’s unit-name
+  pattern comparison · [R-CAM-01 §6], [02 R-CAT-01 §3] · trace the active
+  retail code-page comparison table; the ASCII matching contract is settled.
+
 - A rooted invocation of the State/Builder probe painters and the cross-battle
   lifetime of their retained targets/shared panel cache · [R-CAM-01 §9] ·
   indirect-call and reset ownership trace, or manual observation identifying

@@ -119,3 +119,37 @@ func TestLOSChatCommandTogglesCurrentSightBit(t *testing.T) {
 		t.Fatalf("+LOS request = %+v", pending)
 	}
 }
+
+func TestDeveloperSpawnChatAccessOwnerAndPointerCapture(t *testing.T) {
+	for _, mode := range []gameplay.Mode{gameplay.Modern, gameplay.Strict31} {
+		b := newTestBattle(testCatalogON05(), testWorldON05(100, 100))
+		b.sess.Gameplay = mode
+		b.cl.Input().Mouse.SetPosition(300, 200)
+		x, y, z := b.cursorWorld(300, 200)
+		b.dispatchLocalCommand("+arm*")
+		if len(b.sess.PendingHumanCommands()) != 0 {
+			t.Fatal("wildcard bypassed developer access")
+		}
+		b.dispatchLocalCommand("+now Film Chris Include Reload Assert")
+		b.dispatchLocalCommand("+ArM* 258junk ignored # comment")
+		b.dispatchLocalCommand("+armfav")
+		pending := b.sess.PendingHumanCommands()
+		if len(pending) != 2 {
+			t.Fatalf("queued = %+v", pending)
+		}
+		want := session.HumanDeveloperSpawnCommand{Pattern: "arm*", Owner: 2, X: x, Y: y, Z: z}
+		if pending[0].Kind != session.HumanDeveloperSpawn || pending[0].DeveloperSpawn != want || pending[1].Kind != session.HumanDeveloperSpawn || pending[1].DeveloperSpawn.Owner != 0 {
+			t.Fatalf("developer requests = %+v", pending)
+		}
+		b.cl.Input().Mouse.SetPosition(500, 350)
+		b.cam.X += 50 << 16
+		b.dispatchLocalCommand("+now wrong")
+		if b.sess.PendingHumanCommands()[0].DeveloperSpawn != want {
+			t.Fatal("pointer or access changes retargeted an accepted submission")
+		}
+		b.dispatchLocalCommand("+arm*")
+		if len(b.sess.PendingHumanCommands()) != 2 {
+			t.Fatal("revoked developer access admitted a pattern")
+		}
+	}
+}

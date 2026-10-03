@@ -58,8 +58,8 @@ import (
 //     room's cheat permission is the receiver's question.
 //   - Deferred (D) kinds encode in both contexts, so M2 can test their codec;
 //     the receiver refuses their online application until M5. The
-//     single-player replay kinds NoShake, SetLogo and Gameplay are refused by
-//     the online codec, local interface kinds and the reserved numbers 35..45
+//     single-player replay kinds NoShake, SetLogo, DeveloperSpawn and Gameplay
+//     are refused by the online codec, local interface kinds and the reserved numbers 35..45
 //     by both.
 //   - A Gameplay record encodes its mode exactly as given and only when the
 //     mode is a rule set this build registered; a word the applier would
@@ -168,11 +168,11 @@ func seatCodecKind(context CommandContext, k SeatCommandKind) string {
 		SeatMakeSelectable, SeatVisibility, SeatDoubleShot, SeatHalfShot, SeatMeteor, SeatCancelQueuedMove, SeatSpawn,
 		SeatBuilderOptions, SeatCommunityOrderDrag, SeatCommunityKickout:
 		return ""
-	case SeatNoShake, SeatSetLogo, SeatGameplay:
+	case SeatNoShake, SeatSetLogo, SeatDeveloperSpawn, SeatGameplay:
 		if context == SinglePlayerReplay {
 			return ""
 		}
-		return "a kind with an online payload; NoShake, SetLogo and Gameplay are single-player replay records (online a local preference or the lobby's)"
+		return "a kind with an online payload; NoShake, SetLogo, DeveloperSpawn and Gameplay are single-player replay records (online a local preference or the lobby's)"
 	case SeatSelectionReplace, SeatSelectionToggle, SeatSelectionClear, SeatBuildPage, SeatGroupRecall, SeatBigBrother, SeatShiftState:
 		return "a kind with a payload; local interface kinds are reserved and never encoded"
 	case SeatShareMetal, SeatShareEnergy, SeatShareMapping, SeatShareRadar, SeatShareAll, SeatSetShareMetal,
@@ -328,6 +328,10 @@ func checkSeatWire(context CommandContext, c *SeatCommand) error {
 			return fail("cancelQueuedMove.sequence", "a tracked-move sequence of at least 1")
 		}
 		return checkWireActors(context, "cancelQueuedMove.actors", c.CancelQueuedMove.Actors, false)
+	case SeatDeveloperSpawn:
+		if why := validKey(c.DeveloperSpawn.Pattern, false); why != "" {
+			return fail("developerSpawn.pattern", why)
+		}
 	case SeatSpawn:
 		if why := validKey(c.Spawn.Unit, false); why != "" {
 			return fail("spawn.unit", why)
@@ -548,6 +552,10 @@ func writeSeatCommand(w *netproto.Writer, context CommandContext, c *SeatCommand
 	case SeatCancelQueuedMove:
 		w.U64(c.CancelQueuedMove.Sequence)
 		writeWireActors(w, c.CancelQueuedMove.Actors)
+	case SeatDeveloperSpawn:
+		w.Key(c.DeveloperSpawn.Pattern)
+		w.U8(c.DeveloperSpawn.Owner)
+		writeWirePoint(w, c.DeveloperSpawn.Position)
 	case SeatSpawn:
 		w.Key(c.Spawn.Unit)
 		writeWirePoint(w, c.Spawn.Position)
@@ -698,6 +706,10 @@ func readSeatCommand(r *netproto.Reader, context CommandContext) SeatCommand {
 	case SeatCancelQueuedMove:
 		c.CancelQueuedMove.Sequence = r.U64()
 		c.CancelQueuedMove.Actors = readWireActors(r)
+	case SeatDeveloperSpawn:
+		c.DeveloperSpawn.Pattern = r.Key()
+		c.DeveloperSpawn.Owner = r.U8()
+		c.DeveloperSpawn.Position = readWirePoint(r)
 	case SeatSpawn:
 		c.Spawn.Unit = r.Key()
 		c.Spawn.Position = readWirePoint(r)

@@ -123,6 +123,7 @@ func seatWireLayouts() []seatWireCase {
 		cat(33, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 8, "armsolar", 0, 0, 0, 0))
 	both("community kickout", SeatCommand{Kind: SeatCommunityKickout, CommunityKickout: CommunityKickoutPayload{Unit: ref(2, 3), Destination: CommandPoint{X: 10, Z: -10}}},
 		cat(34, 2, 3, 20, 0, 19))
+	replay("developer spawn", SeatCommand{Kind: SeatDeveloperSpawn, DeveloperSpawn: DeveloperSpawnPayload{Pattern: "arm*", Owner: 255, Position: CommandPoint{X: 1, Z: -1}}}, cat(46, 4, "arm*", 255, 2, 0, 1))
 	replay("gameplay", SeatCommand{Kind: SeatGameplay, Gameplay: GameplayPayload{Mode: gameplay.Strict31}}, cat(255, 10, "strict-3.1"))
 	return cases
 }
@@ -336,7 +337,7 @@ func FuzzDecodeSeatCommand(f *testing.F) {
 // unlisted numbers have no payload in either context (§7.4.1, §7.4.2,
 // M2-C11).
 func TestSeatCommandContextIsNotThePayloads(t *testing.T) {
-	replayOnly := map[string]bool{"no shake": true, "set logo": true, "gameplay": true, "set resource replay": true, "builder options replay": true}
+	replayOnly := map[string]bool{"no shake": true, "set logo": true, "developer spawn": true, "gameplay": true, "set resource replay": true, "builder options replay": true}
 	seen := 0
 	for _, c := range seatWireLayouts() {
 		if !replayOnly[c.name] {
@@ -362,7 +363,7 @@ func TestSeatCommandContextIsNotThePayloads(t *testing.T) {
 	}
 	for _, k := range []SeatCommandKind{0, SeatSelectionReplace, SeatSelectionToggle, SeatSelectionClear, SeatBuildPage, SeatGroupRecall,
 		SeatBigBrother, SeatShiftState, SeatShareMetal, SeatShareEnergy, SeatShareMapping, SeatShareRadar, SeatShareAll, SeatSetShareMetal,
-		SeatSetShareEnergy, SeatShareGift, SeatDeclareAlliance, SeatSharedVictory, SeatShootAll, 46, 128, 254} {
+		SeatSetShareEnergy, SeatShareGift, SeatDeclareAlliance, SeatSharedVictory, SeatShootAll, 47, 128, 254} {
 		for _, context := range []CommandContext{OnlineCommand, SinglePlayerReplay} {
 			if _, err := EncodeSeatCommand(context, SeatCommand{Kind: k}); err == nil {
 				t.Errorf("kind %d encoded in context %d", k, context)

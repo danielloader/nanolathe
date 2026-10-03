@@ -25,7 +25,7 @@ explanation, not an established fact.
 | Battle profiler and frame counter | [03 R-COMP-01 §5] | Useful host measurements, with their sampling scope identified |
 | Library memory/performance windows | [01 R-PLAT-01 §9] | Portable host diagnostics; do not require retail's disabled helper thread |
 | Screenshots and movie frame series | [01 R-PLAT-02 §6], [07 R-CAM-01 §8] | Planned capture tools using the existing host capture boundary |
-| Commands that change the battle | [07 R-CAM-01 §6], [01 R-PLAT-01 §9] | Separate later unit, gated on complete command-specific research |
+| Commands that change the battle | [07 R-CAM-01 §6], [01 R-PLAT-01 §9] | Default unit-spawn handler implemented in §8; other mutating tools remain deferred |
 
 This scope does not add multiplayer, restore competitive synchronization, or
 turn a diagnostic snapshot into a save. Existing [diagnostic capture](DEBUG_CAPTURE.md)
@@ -95,8 +95,8 @@ Do not silently turn retail stubs into claimed retail functionality. `Mem`,
 creates an empty file [01 R-PLAT-01 §9]. Useful replacements should be named and
 documented as Nanolathe tooling. Deliberate crash/allocation-exhaustion commands
 are recorded as retail evidence; they are not required for the inspection UI.
-The existing Modern `+spawn` remains subject to its Strict bypass until a
-separately designed retail developer-spawn command is implemented.
+The Modern `+spawn` keeps its Strict bypass. The separate retail developer
+default handler is available in both modes under §8.
 
 ## 3. Ownership and public boundary
 
@@ -529,3 +529,66 @@ through the native window or the Ebitengine VM host. Run the ordinary fast
 and short retail landing gates,
 plus matching classic and modern live-battle performance checks for changes to
 the shared geometry collector.
+
+## 8. Developer unit spawning
+
+**Implemented retail contract (Established):** after developer activation,
+an unmatched chat command `+<pattern> [player]` queues the default spawn
+handler `[07 R-CAM-01 §6]` in every gameplay mode. `+arm*` therefore creates
+one fully built unit for every loaded definition whose internal name begins
+with ARM. `?` consumes one byte and `*` consumes any run, including empty;
+ASCII literals compare case-insensitively and the whole name must match. All
+retained definitions are visited in catalog order, including duplicate names;
+the reserved sentinel is absent from `Catalog.UnitRecords`.
+
+Developer access is required at submission (`+Now Film Chris Include Reload
+Assert` in either mode; the Modern `+dev` convenience remains §2.1). Without
+access the Modern exact-name shorthand retains its existing contract, and
+Strict accepts no spawn shorthand. Registered commands retain priority.
+The second word uses the existing signed-decimal-prefix reader and narrows
+to an owner byte; absent means slot 0. Later words are ignored. Neither the
+viewing owner nor the controlling owner chooses ownership. The allocator
+silently refuses invalid owners and exhausted slices or definition limits;
+the command does not test whether the player exists.
+
+The host captures the submission-time battlefield point and enqueues a typed
+`HumanDeveloperSpawn` request. All expansion and creation run at phase 1;
+paused input holds the request and everything queued behind it. Access is
+checked before submission, so a later host access change does not change the
+accepted request. Single-player replay kind 46 stores that request (pattern,
+owner and point); replay requires no unrecorded host developer state.
+Online codecs and receivers refuse this replay-only kind even with cheats
+enabled, and the local adapter admits no online input. A future online
+developer-spawn contract must define its stream class, owner authorization and
+work bounds through DESIGN_MULTIPLAYER before enabling it.
+
+The first match starts at the captured point. Before each later match, X
+advances by that definition's half footprint width (`footprintX × 8`). Mission
+position fixup snaps buildings and computes their height; mobiles keep the
+point. The fixed-up point becomes the running point. Each attempted creation
+then advances X by 32 plus that definition's half width. X at or beyond the
+play-area right edge wraps to 160 and advances Z by 160. Failed allocations
+still advance the point and count as matches. These constants and operations
+are retail, not new Modern policy `[07 R-CAM-01 §6]` `[08 R-ENTRY-01 §6]`.
+
+There is no site validator, occupancy test or resource charge. Successful
+creations use the ordinary fully built allocator, COB initialization, RNG
+draws and movement registration; the normal visibility/publication passes
+expose them. The host requires the pointer over the battlefield, outside HUD
+and minimap, as for its existing spawn producer; this is a Nanolathe input
+boundary. There is no per-match off-map guard or spawn feedback.
+
+**Remaining implementation gap:** the no-match `debugdat` command-script
+fallback is traced `[01 R-PLAT-01 §9]` but remains deferred with `Include`'s
+typed command routing. Unknown patterns stay silent. This does not affect
+matching unit-spawn requests. Case folding for bytes outside ASCII shares
+the catalog’s existing Unknown code-page contract `[02 R-CAT-01 §3]`; those
+bytes stay literal until the active retail comparison table is traced.
+
+**Verification:** focused authored fixtures lock whole-name wildcard matching,
+case, owner-byte narrowing, submission pointer/access capture, both gameplay
+modes, paused queue order, duplicate definition order, a failed first match,
+building snapping, the inclusive right-edge wrap, occupied-site stacking,
+success-only allocator RNG, unchanged resources, replay dispatch and online
+refusal. The ordinary fast and short retail gates cover integration; the quick
+displayless simulation benchmark checks the unaffected ordinary tick path.

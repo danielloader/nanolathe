@@ -255,6 +255,8 @@ func onlineKindAdmission(k SeatCommandKind) string {
 		return m5Gate + ": a reserved kind with no version-1 payload until its owning service contract"
 	case SeatSelectionReplace, SeatSelectionToggle, SeatSelectionClear, SeatBuildPage, SeatGroupRecall, SeatBigBrother, SeatShiftState:
 		return "a seat command kind; selection, build pages, group recall, BigBrother and Shift are local interface state"
+	case SeatDeveloperSpawn:
+		return "a single-player replay kind; developer spawning has no online payload"
 	case SeatNoShake, SeatSetLogo:
 		return "a seat command kind; online it is a local presentation preference"
 	case SeatGameplay:
@@ -272,7 +274,7 @@ func replayKindAdmission(k SeatCommandKind) string {
 		SeatStockpile, SeatGroupAssign, SeatStance, SeatCloak, SeatSelfDestruct, SeatNoShake, SeatATM,
 		SeatSetResource, SeatSetLogo, SeatView, SeatGive, SeatMakeSelectable, SeatVisibility, SeatDoubleShot,
 		SeatHalfShot, SeatMeteor, SeatCancelQueuedMove, SeatSpawn, SeatBuilderOptions, SeatCommunityOrderDrag,
-		SeatCommunityKickout, SeatGameplay:
+		SeatCommunityKickout, SeatDeveloperSpawn, SeatGameplay:
 		return ""
 	case SeatSelectionReplace, SeatSelectionToggle, SeatSelectionClear, SeatBuildPage, SeatGroupRecall, SeatBigBrother, SeatShiftState:
 		return "a recorded kind; local interface state has no replay payload"
@@ -474,6 +476,8 @@ func (s *Session) seatSchema(context CommandContext, c *SeatCommand) string {
 			return "a tracked-move sequence of at least 1"
 		}
 		return validActors(c.CancelQueuedMove.Actors, limit, false)
+	case SeatDeveloperSpawn:
+		return validKey(c.DeveloperSpawn.Pattern, false)
 	case SeatSpawn:
 		if why := validKey(c.Spawn.Unit, false); why != "" {
 			return why
@@ -758,6 +762,8 @@ func (c *SeatCommand) unselectedZero() bool {
 		d.Meteor = MeteorPayload{}
 	case SeatCancelQueuedMove:
 		d.CancelQueuedMove = CancelQueuedMovePayload{}
+	case SeatDeveloperSpawn:
+		d.DeveloperSpawn = DeveloperSpawnPayload{}
 	case SeatSpawn:
 		d.Spawn = SpawnPayload{}
 	case SeatBuilderOptions:
@@ -790,6 +796,7 @@ func (c *SeatCommand) unselectedZero() bool {
 		d.Meteor == (MeteorPayload{}) &&
 		d.CancelQueuedMove.Sequence == 0 && len(d.CancelQueuedMove.Actors) == 0 &&
 		d.Spawn == (SpawnPayload{}) &&
+		d.DeveloperSpawn == (DeveloperSpawnPayload{}) &&
 		d.BuilderOptions == (BuilderOptionsPayload{}) &&
 		d.CommunityOrderDrag == (CommunityOrderDragPayload{}) &&
 		d.CommunityKickout == (CommunityKickoutPayload{}) &&
@@ -884,6 +891,10 @@ func (s *Session) bindSeatCommand(q *seatQueued, issuer uint8) boundCommand {
 	case SeatCancelQueuedMove:
 		h.Kind, b.actors = HumanCancelQueuedMove, c.CancelQueuedMove.Actors
 		h.CancelQueuedMove = HumanCancelQueuedMoveCommand{Sequence: c.CancelQueuedMove.Sequence}
+	case SeatDeveloperSpawn:
+		p := c.DeveloperSpawn
+		h.Kind = HumanDeveloperSpawn
+		h.DeveloperSpawn = HumanDeveloperSpawnCommand{Pattern: p.Pattern, Owner: p.Owner, X: p.Position.X, Y: p.Position.Y, Z: p.Position.Z}
 	case SeatSpawn:
 		h.Kind = HumanSpawn
 		h.Spawn = HumanSpawnCommand{Unit: c.Spawn.Unit, X: c.Spawn.Position.X, Y: c.Spawn.Position.Y, Z: c.Spawn.Position.Z}

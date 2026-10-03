@@ -1463,6 +1463,7 @@ above (`[]pool.UnitRef` for actors, `numeric.Fixed` for fixed values).
 | 35..43 | ShareMetal, ShareEnergy, ShareMapping, ShareRadar, ShareAll, SetShareMetal, SetShareEnergy, ShareGift, DeclareAlliance / D | Reserved in the listed order; no v1 payload, reject even when a receiver has local helpers |
 | 44 | SharedVictory / D | Reserved; no v1 payload |
 | 45 | ShootAll / D, cheat | Reserved; no v1 payload |
+| 46 | DeveloperSpawn / R | Pattern `key` (wildcards allowed), Owner `u8` (the typed integer’s low byte), Position `point`; accepted local developer submission, replay only (DESIGN_DEVELOPER_TOOLS §8). Online codecs and receivers reject it. |
 | 255 | Gameplay / R; lobby-only online | Mode name `key`; resolve through the existing registered rule sets, never a payload-defined registry |
 
 Every unlisted number is invalid. New sharing/alliance schemas require M5's

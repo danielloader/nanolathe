@@ -2874,10 +2874,11 @@ word as a name pattern, creates one fully built unit per matching definition
 for the slot named by a second word (slot 0 when absent), and steps 32 world
 units between footprints `[07 R-CAM-01 §6]` `[07 R-CAM-01 §9]`. The shorthand
 deliberately keeps the `+spawn` contract instead: no developer access, one
-unit, local ownership. A word naming no unit, a line with arguments, and every
-Strict 3.1 line remain plain chat with no feedback, exactly as an unregistered
-command would. The retail default handler itself is traced but not
-implemented; it belongs with developer mode (DESIGN_DEVELOPER_TOOLS).
+unit, local ownership. Without developer access, a word naming no unit, a
+line with arguments, and every Strict 3.1 line remain plain chat with no feedback, exactly as an unregistered
+command would. With developer access, the separate retail default handler
+owns unmatched words in both modes, including wildcard patterns and the
+optional owner; see DESIGN_DEVELOPER_TOOLS §8.
 
 **Repeating the last command.** Retail replays the retained last `+` command
 only with `\` and only with developer access; Insert has no battle action and
@@ -3383,7 +3384,7 @@ anchor and carry, and phases 2 through 12 are untouched.
 | Shift state, big brother, no-shake, gameplay mode | applied | session bookkeeping |
 | Set resource, set logo, give, view, ATM, visibility, double/half shot, meteor **with** an argument | applied | player-row, visibility-mode and toggle writes, no draw |
 | Meteor **without** an argument | **deferred** | enters the storm-arm body: four CRT scheduling draws and a live strike window `[06 §6.5]` |
-| Spawn (Modern) | **deferred** | allocates a unit, which consumes creation draws |
+| Spawn (Modern or developer default handler) | **deferred** | allocates a unit, which consumes creation draws |
 
 A deferred command is not skipped. The drain **stops** at it and leaves it and
 everything enqueued behind it in place, so enqueue order is exactly the order

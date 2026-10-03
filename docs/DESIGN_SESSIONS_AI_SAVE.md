@@ -1144,6 +1144,16 @@ records the authored result art without blending, traversing, or submitting
 the retired battle world. This also keeps a large final army out of the
 result screen's input and present path.
 
+The shell installs ENDMSN's selected authored mission before reopening the
+return panel and MSNBRIEF. Campaign-only presentation must retain that identity
+through panel population, just as a between-missions load retains its saved
+mission; only an explicit new-campaign action selects mission zero
+`[08 R-CAMP-01 §3]` `[08 R-CAMP-01 §8]` `[08 R-SAVE-02 §2]`.
+`TestCampaignWinAdvancesToTheNextBriefing` crosses two results transitions in
+each layout and checks the successor map and battle request.
+`TestCampaignFallbackContinuationKeepsSelectedMission` checks saved continuation
+identity and the separate new-campaign action using authored fixtures.
+
 The asynchronous host presents a terminal publication immediately after joining
 its batch. Its usual delay behind the latest released tick cannot apply once
 the latch stops further ticks: that would keep the renderer on a nonterminal

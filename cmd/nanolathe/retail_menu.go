@@ -304,21 +304,8 @@ func (g *gameShell) refreshMissionPanel() {
 	}
 	// The fixed campaign layout selects its literal side campaign directly;
 	// other layouts build the side-filtered list [07 R-FE-01 §4].
-	g.campaignOptions = g.retailCampaignOptions()
+	g.campaignOptions = g.missionCampaignOptions(g.missionSide)
 	layout := g.missionMenuLayout()
-	if layout == missionLayoutFixedCampaign {
-		name := "Arm Campaign"
-		if g.missionSide != 0 {
-			name = "Core Campaign"
-		}
-		g.campaignOptions = nil
-		for _, campaign := range g.campaigns {
-			if strings.EqualFold(campaign.Name, name) {
-				g.campaignOptions = []mission.Campaign{campaign}
-				break
-			}
-		}
-	}
 	if len(g.campaignOptions) != 0 {
 		if g.campaignIdx < 0 {
 			g.campaignIdx = 0
@@ -334,11 +321,9 @@ func (g *gameShell) refreshMissionPanel() {
 		campaignItems[i] = g.campaignOptions[i].Name
 	}
 	g.setListItems("Campaign", campaignItems, g.campaignIdx)
-	if layout != missionLayoutPlayAny {
-		// Campaign-only Start always enters the first mission; hidden lists
-		// cannot retain a later mission from another selection [07 R-FE-01 §4].
-		g.missionIdx = 0
-	}
+	// A repaint also runs after ENDMSN or continuation installs a selected
+	// mission. Preserve it here; only a new campaign action selects mission
+	// zero [08 R-CAMP-01 §3][08 R-CAMP-01 §8][08 R-SAVE-02 §2].
 	var missions []string
 	if len(g.campaignOptions) != 0 && g.campaignIdx < len(g.campaignOptions) {
 		for _, stub := range g.campaignOptions[g.campaignIdx].Missions {
@@ -360,6 +345,21 @@ func (g *gameShell) refreshMissionPanel() {
 	p.SetActive("CampaignKnob", layout != missionLayoutFixedCampaign)
 	p.SetActive("Missions", layout == missionLayoutPlayAny)
 	p.SetActive("MissionsKnob", layout == missionLayoutPlayAny)
+	if layout != missionLayoutPlayAny {
+		// The demo disables both Core controls [07 R-FE-01 §4]. Nanolathe's
+		// fallback follows available campaigns for either side instead of a
+		// hard-coded demo restriction (DESIGN_INTERFACE_HUD_INPUT §2.6).
+		for side, names := range [2][2]string{{"Side0", "Arm"}, {"Side1", "Core"}} {
+			available := false
+			for _, campaign := range g.missionCampaignOptions(side) {
+				available = available || len(campaign.Missions) != 0
+			}
+			for _, name := range names {
+				retailGreyGadget(p.Window, name, !available)
+			}
+		}
+		retailGreyGadget(p.Window, "Start", len(missions) == 0)
+	}
 	p.SetStageAt(p.Index("Difficulty"), clampMenuStage(g.missionDifficultyValue, 3))
 	if g.missionSide&1 == 0 {
 		p.SetStatus("Side0", 1)
@@ -370,6 +370,27 @@ func (g *gameShell) refreshMissionPanel() {
 		p.SetStatus("Side1", 1)
 		p.SetText("SIDENAME", "Core Campaign")
 	}
+}
+
+// missionCampaignOptions applies the authored fixed-name selection only to
+// the compact campaign layout; the other layouts filter by side
+// [07 R-FE-01 §4][08 R-CAMP-01 §3].
+func (g *gameShell) missionCampaignOptions(side int) []mission.Campaign {
+	if g.missionMenuLayout() == missionLayoutFixedCampaign {
+		name := "Arm Campaign"
+		if side != 0 {
+			name = "Core Campaign"
+		}
+		for _, campaign := range g.campaigns {
+			if strings.EqualFold(campaign.Name, name) {
+				return []mission.Campaign{campaign}
+			}
+		}
+		return nil
+	}
+	candidate := *g
+	candidate.missionSide = side
+	return candidate.retailCampaignOptions()
 }
 
 // retailCampaignSide returns the campaign record's authored HEADER

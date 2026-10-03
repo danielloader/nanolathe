@@ -471,6 +471,9 @@ choices for play-testing, recorded here so they change in one place.
   authored Skirmish button one authored pitch down, the pattern of the
   Nanolathe options categories
   ([DESIGN_INTERFACE_HUD_INPUT §3.4.1](DESIGN_INTERFACE_HUD_INPUT.md)).
+  When setup/chooser resources or all paired Network-schema maps are absent,
+  the entry is greyed under the host availability policy in that design
+  document §2.6; expanded content restores it on a fresh menu open.
 - **Setup.** It opens `skirmish.gui` in a Survival configuration
   (`cmd/nanolathe/survival_menu.go`). The screen keeps its own rows and
   switches and swaps them into the shared setup state while it is open, so

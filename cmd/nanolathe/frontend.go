@@ -664,10 +664,10 @@ func loadMenuAssets(cs *contentSet) *menuAssets {
 	}
 
 	// These windows and their bitmap backgrounds are the implemented
-	// single-player frontend. The bitmap path is fatal; the GUI opener has no
-	// recovery branch. Nanolathe reports a failed initial screen at startup and
-	// retains unavailable children for refusal at their open boundary [07 §5
-	// "Frontend asset failure boundaries"].
+	// single-player frontend. MAINMENU must be usable at startup. Missing child
+	// GUIs or backgrounds remain unavailable and their entry controls are greyed
+	// (host presentation policy, DESIGN_INTERFACE_HUD_INPUT §2.6). Malformed
+	// backgrounds retain their load error [07 §5].
 	panels := []struct {
 		mode     shellMode
 		guiName  string
@@ -769,7 +769,13 @@ func loadRetailPanelStrict(cs *contentSet, guiName, pcxName, gafName, expected s
 	}
 	if pcxName != "" {
 		if bg, err := formats.LoadPCXFile(cs.fs, pcxName); err != nil {
-			return nil, retailFrontendAssetError(cs, "retail frontend bitmap", pcxName, expected, err)
+			failure := retailFrontendAssetError(cs, "retail frontend bitmap", pcxName, expected, err)
+			if errors.Is(err, vfs.ErrNotFound) {
+				// A missing child backdrop must not advertise a partial screen.
+				p.window, p.unavailable = nil, failure
+				return p, failure
+			}
+			return nil, failure
 		} else {
 			p.background = bg
 		}
@@ -880,6 +886,7 @@ func (g *gameShell) openMenuWithTokenFlush(mode shellMode, flushTokens bool) {
 					window.Gadgets[i].GrayedOut |= 1
 				}
 			}
+			g.disableUnavailableFrontendEntries(window, mode)
 			panel = ui.NewPanel(window)
 			if mode == modeMenuMain {
 				// Retail supplies its literal, reveals the authored label, and

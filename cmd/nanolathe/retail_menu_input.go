@@ -340,6 +340,12 @@ func (g *gameShell) activateGadget(name string) {
 	case modeMenuMission:
 		switch name {
 		case "Start":
+			if g.missionMenuLayout() != missionLayoutPlayAny {
+				// New Campaign starts at zero. ENDMSN and continuation enter
+				// briefing directly with their own selected mission, bypassing
+				// this action [08 R-CAMP-01 §3][08 R-CAMP-01 §8].
+				g.missionIdx = 0
+			}
 			// Campaign Start first opens MSNBRIEF. Its Start action later
 			// emits the same shared battle request used by every entry path
 			// [08 R-CAMP-01 §2].
@@ -350,6 +356,7 @@ func (g *gameShell) activateGadget(name string) {
 			}
 		case "Campaign":
 			if g.missionMenuLayout() == missionLayoutCampaign {
+				g.missionIdx = 0
 				g.openCampaignBriefing()
 			}
 		case "Difficulty":

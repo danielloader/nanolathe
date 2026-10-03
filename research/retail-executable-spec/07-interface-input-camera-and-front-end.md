@@ -3217,6 +3217,14 @@ controller and background-selection paths establishes this difference;
 the asset inventory corroborates it. This finding is scoped to that demo
 package, not to the retail 3.1 entry routes above or to other demo releases.
 
+**Established — supplied demo side controls.** That demo's NEWGAME opener
+unconditionally greys both `Side1` (the Core portrait) and `Core` (its caption
+button), using the named-gadget grey setter of [R-WGT-01 §13]. There is no
+campaign-file availability condition around those two writes. The compact
+layout hides the campaign list and mission list; Arm's fixed campaign is
+selected directly, rather than displayed as a selectable campaign row. This
+describes the supplied demo executable, not retail 3.1 or an expanded install.
+
 The campaign list is rebuilt for the current side (the campaign-side filter
 of [08 R-CAMP-01 §2]); selecting a `Side0`/`Arm` or `Side1`/`Core` button
 rewrites the side word, both side records, and both lists. `Difficulty` is

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image/color"
 	"testing"
 	"time"
@@ -168,102 +169,119 @@ func TestPostBattleStartKeepsTheShellAfterTeardown(t *testing.T) {
 }
 
 // TestCampaignWinAdvancesToTheNextBriefing walks the reported path end to end:
-// the first Arm mission entered from its briefing at an 800x600 display mode,
-// won, through the whole results sequence and out of ENDMSN's Start. It pins
+// the first two Arm missions entered from their briefings at an 800x600 display
+// mode, won, through the whole results sequence and out of ENDMSN's Start,
+// across Play Any and both campaign-only layouts. It pins
 // the three things the play-test found broken — the loading screen and the
 // results screens are 640x480 while the battle is at the chosen mode, the
 // glamour screen fades up into the image's own palette, and Start lands on the
 // next mission's briefing rather than on nothing
 // [07 "The loading screen"][07 R-FE-02 §2][08 R-CAMP-01 §6][07 R-FE-01 §10].
 func TestCampaignWinAdvancesToTheNextBriefing(t *testing.T) {
-	root := probeRetail(t)
-	opts := Options{Root: root}
-	cs, err := openContent(opts)
-	if err != nil {
-		t.Skipf("retail assets unavailable: %v", err)
-	}
-	defer cs.Close()
-	shell, err := newGameShell(opts, cs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cl, err := client.New(client.Options{Buffer: &frame.Buffer{}, Width: 800, Height: 600})
-	if err != nil {
-		t.Fatal(err)
-	}
-	previous := clPtr
-	clPtr = cl
-	defer func() { clPtr = previous }()
-	cl.SetPalette(shell.assets.pal)
-	cl.SetFNT(shell.font)
-	cl.SetUIStage(gameShellUIStage{shell: shell})
-	shell.display.Width, shell.display.Height = 800, 600
-	shell.missionSide = 0
-	shell.openMenu(modeMenuMission)
-	found := false
-	for i := range shell.campaignOptions {
-		if shell.campaignOptions[i].Path == "camps/arm campaign.tdf" {
-			shell.campaignIdx, found = i, true
-		}
-	}
-	if !found {
-		t.Skip("the Arm campaign is not in this install")
-	}
-	shell.missionIdx = 0
-	shell.openCampaignBriefing()
-	if shell.briefing == nil {
-		t.Fatal("the briefing did not open")
-	}
-	shell.dispatchBriefing(BriefingActionStart)
-	if w, h := cl.Size(); w != retailScreenW || h != retailScreenH {
-		t.Fatalf("loading screen surface = %dx%d, want 640x480", w, h)
-	}
-	for i := 0; i < 2000 && shell.frontend.Mode == modeLoading; i++ {
-		shell.stepLoading(0.05)
-		time.Sleep(5 * time.Millisecond)
-	}
-	if shell.battle == nil {
-		t.Fatalf("the mission never loaded; mode=%v", shell.frontend.Mode)
-	}
-	if w, h := cl.Size(); w != 800 || h != 600 {
-		t.Fatalf("battle surface = %dx%d, want the chosen 800x600 display mode", w, h)
-	}
-	b := shell.battle
-	sess := b.sess
-	// ARM1's victory is a trigger, so an already-satisfied victory queue stands
-	// in for playing it [08 R-TRIG-01 §6].
-	sess.Mission.Victory = []*triggers.Trigger{{Kind: triggers.KindBuildUnitType, Completed: true}}
-	for i := 0; i < 30*20 && !b.isResultVisible(); i++ {
-		sess.Step(sess.Clock.ScaledAnchor + 1)
-	}
-	if !b.isResultVisible() {
-		t.Fatalf("the mission never ended; latch=%+v", sess.Latch)
-	}
-	b.ensurePostBattleController()
-	for i := 0; i < 900 && b.postBattle.State() != session.PostBattleEndMission; i++ {
-		b.stepPostBattle(1.0/30.0, cl.Input(), cl)
-		if b.postBattle.State() == session.PostBattleGlamour && i > 200 {
-			// The glamour screen waits for a key once its deadline passes.
-			cl.Input().Kbd.SetKey(input.KeySpace, true)
-		}
-	}
-	if got := b.postBattle.State(); got != session.PostBattleEndMission {
-		t.Fatalf("the results sequence stalled in state %d", got)
-	}
-	if w, h := cl.Size(); w != retailScreenW || h != retailScreenH {
-		t.Fatalf("ENDMSN surface = %dx%d, want the 640x480 the results controller forces", w, h)
-	}
-	if shell.resultBackground == nil {
-		t.Fatal("ENDMSN opened without its outcome background bitmap")
-	}
-	b.doResultAction(ui.ResultActionContinue, cl)
-	if shell.battle != nil {
-		t.Fatal("Start left the finished battle installed")
-	}
-	if shell.briefing == nil || shell.frontend.Mode != modeMenuMission {
-		t.Fatalf("Start left the shell on mode %v with briefing=%v; want the next mission's briefing", shell.frontend.Mode, shell.briefing != nil)
-	}
-	if shell.missionIdx != 1 {
-		t.Fatalf("Start selected mission index %d, want the successor 1", shell.missionIdx)
+	for _, layout := range []missionMenuLayout{missionLayoutPlayAny, missionLayoutCampaign, missionLayoutFixedCampaign} {
+		t.Run(fmt.Sprintf("layout%d", layout), func(t *testing.T) {
+			root := probeRetail(t)
+			opts := Options{Root: root}
+			cs, err := openContent(opts)
+			if err != nil {
+				t.Skipf("retail assets unavailable: %v", err)
+			}
+			defer cs.Close()
+			shell, err := newGameShell(opts, cs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cl, err := client.New(client.Options{Buffer: &frame.Buffer{}, Width: 800, Height: 600})
+			if err != nil {
+				t.Fatal(err)
+			}
+			previous := clPtr
+			clPtr = cl
+			defer func() { clPtr = previous }()
+			cl.SetPalette(shell.assets.pal)
+			cl.SetFNT(shell.font)
+			cl.SetUIStage(gameShellUIStage{shell: shell})
+			shell.display.Width, shell.display.Height = 800, 600
+			shell.missionSide = 0
+			shell.assets.missionLayout = layout
+			shell.openMenu(modeMenuMission)
+			found := false
+			for i := range shell.campaignOptions {
+				if shell.campaignOptions[i].Path == "camps/arm campaign.tdf" {
+					shell.campaignIdx, found = i, true
+				}
+			}
+			if !found {
+				t.Skip("the Arm campaign is not in this install")
+			}
+			shell.missionIdx = 0
+			shell.openCampaignBriefing()
+			if shell.briefing == nil {
+				t.Fatal("the briefing did not open")
+			}
+			for missionIndex := 0; missionIndex < 2; missionIndex++ {
+				previousMap := shell.briefing.mission.TerrainKey
+				shell.dispatchBriefing(BriefingActionStart)
+				if w, h := cl.Size(); w != retailScreenW || h != retailScreenH {
+					t.Fatalf("loading screen surface = %dx%d, want 640x480", w, h)
+				}
+				for i := 0; i < 2000 && shell.frontend.Mode == modeLoading; i++ {
+					shell.stepLoading(0.05)
+					time.Sleep(5 * time.Millisecond)
+				}
+				if shell.battle == nil {
+					t.Fatalf("the mission never loaded; mode=%v", shell.frontend.Mode)
+				}
+				if w, h := cl.Size(); w != 800 || h != 600 {
+					t.Fatalf("battle surface = %dx%d, want the chosen 800x600 display mode", w, h)
+				}
+				b := shell.battle
+				sess := b.sess
+				// An already-satisfied victory queue stands in for playing each
+				// campaign mission [08 R-TRIG-01 §6].
+				sess.Mission.Victory = []*triggers.Trigger{{Kind: triggers.KindBuildUnitType, Completed: true}}
+				for i := 0; i < 30*20 && !b.isResultVisible(); i++ {
+					sess.Step(sess.Clock.ScaledAnchor + 1)
+				}
+				if !b.isResultVisible() {
+					t.Fatalf("the mission never ended; latch=%+v", sess.Latch)
+				}
+				b.ensurePostBattleController()
+				for i := 0; i < 900 && b.postBattle.State() != session.PostBattleEndMission; i++ {
+					b.stepPostBattle(1.0/30.0, cl.Input(), cl)
+					if b.postBattle.State() == session.PostBattleGlamour && i > 200 {
+						// The glamour screen waits for a key once its deadline passes.
+						cl.Input().Kbd.SetKey(input.KeySpace, true)
+					}
+				}
+				if got := b.postBattle.State(); got != session.PostBattleEndMission {
+					t.Fatalf("the results sequence stalled in state %d", got)
+				}
+				if w, h := cl.Size(); w != retailScreenW || h != retailScreenH {
+					t.Fatalf("ENDMSN surface = %dx%d, want the 640x480 the results controller forces", w, h)
+				}
+				if shell.resultBackground == nil {
+					t.Fatal("ENDMSN opened without its outcome background bitmap")
+				}
+				b.doResultAction(ui.ResultActionContinue, cl)
+				if shell.battle != nil {
+					t.Fatal("Start left the finished battle installed")
+				}
+				if shell.briefing == nil || shell.frontend.Mode != modeMenuMission {
+					t.Fatalf("Start left the shell on mode %v with briefing=%v; want the next mission's briefing", shell.frontend.Mode, shell.briefing != nil)
+				}
+				if shell.missionIdx != missionIndex+1 {
+					t.Fatalf("Start selected mission index %d, want the successor %d", shell.missionIdx, missionIndex+1)
+				}
+				if shell.briefing.mission.TerrainKey == previousMap {
+					t.Fatalf("successor briefing reloaded the preceding map %q", previousMap)
+				}
+				t.Logf("mission %d -> %d: map %s -> %s", missionIndex+1, missionIndex+2, previousMap, shell.briefing.mission.TerrainKey)
+				request, err := shell.briefing.request()
+				if err != nil || request.value.Mission != fmt.Sprintf("camps/arm campaign.tdf:MISSION%d", missionIndex+1) {
+					t.Fatalf("successor battle request = %q, error %v", request.value.Mission, err)
+				}
+			}
+		})
 	}
 }

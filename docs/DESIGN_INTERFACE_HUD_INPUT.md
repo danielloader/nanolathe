@@ -832,8 +832,8 @@ root-level `camps/*.tdf` before filtering by side: two or fewer selects
 `newcampaign4x`, hides both lists, and selects the literal `Arm Campaign` or
 `Core Campaign`; more than two selects `newcampaign4`, shows the side-filtered
 campaign list, and hides the mission list. Both keep the authored NEWGAME
-rectangles and enter mission zero. Selecting a visible campaign row starts
-its briefing; otherwise Start does. Initial focus is Difficulty for the fixed
+rectangles; a new campaign action enters mission zero. Selecting a visible
+campaign row starts its briefing; otherwise Start does. Initial focus is Difficulty for the fixed
 campaign and Campaign for the visible list.
 
 This is Nanolathe content presentation compatibility in every gameplay mode,
@@ -844,8 +844,65 @@ fallback, and the chosen campaign background remains required. Unused campaign
 backgrounds are not preloaded. `TestMissionBackgroundFallback` locks the
 selection, the strict two-file boundary and decode failures;
 `TestCampaignFallbackUsesAuthoredLayout` locks visibility, literal side
-selection, first-mission entry and authored rectangles. Visual acceptance uses
-the extracted demo alone to open MAINMENU, New Campaign, briefing and battle.
+selection, retained mission identity and authored rectangles. Panel refreshes
+preserve the mission selected by ENDMSN or a continuation load: the first-mission
+reset belongs to New Campaign's Start/row action, not to population. Otherwise
+opening the return panel before MSNBRIEF would replay mission zero after victory.
+
+The supplied demo unconditionally greys the Core portrait (`Side1`) and caption
+(`Core`) [07 R-FE-01 §4]. As user-authorized content presentation policy
+(2026-10-03), Nanolathe's fallback instead greys each side's portrait and caption
+when its layout offers no campaign with a mission, and greys Start when the
+selected side has no mission. Added playable content re-enables that side; the
+Play Any layout retains its existing controls.
+`TestCampaignFallbackDisablesUnavailableSides` locks pointer and keyboard refusal, empty descriptors and re-enabling.
+Visual acceptance uses the extracted demo alone to open MAINMENU, New Campaign, briefing and battle.
+
+**Unavailable menu actions (user-authorized host presentation policy,
+2026-10-03).** On each fresh MAINMENU or SINGLE window, grey entry controls
+whose required content is absent. Use the existing gadget grey bit
+`[07 R-WGT-01 §13]`; preserve authored restrictions, visibility, rectangles,
+and the rest of the grey word. These checks apply in every gameplay mode and
+add no gameplay selection or capability registry. Reopening or rebuilding the
+shell from expanded mounted content recomputes availability.
+
+- SINGLE requires its cached child window. Intro and Credits require their
+  respective movie files; their existing load boundaries still diagnose a
+  present but malformed movie.
+- Skirmish and Survival require both setup/chooser windows and at least one
+  map from the existing Network-schema census with a paired TNT file. Do not
+  decode every terrain or build a catalog to decide a menu entry.
+- New Campaign requires NEWGAME, MSNBRIEF and a campaign offering a mission
+  under the selected layout. Play Any additionally requires the Play Any
+  layout; the demo's authored hidden control remains hidden.
+- Options requires its GUI and background. Load Game requires the currently
+  selected retail or missing-only fallback dialog and its required background.
+  An empty save list retains its established message; the save/load feature
+  remains available when its presentation resources are present.
+
+A missing child backdrop, like a missing child GUI, is retained as an
+unavailable screen rather than preventing its usable parent from opening.
+MAINMENU remains required at startup. Malformed backgrounds retain their
+existing failure, and file-presence checks never substitute for decoding at
+an action's load boundary. Missing optional gadget art, narration, result art
+or CD tracks does not disable an otherwise usable screen.
+
+Options categories are greyed when their required page GUI/backdrop is absent,
+using the existing page table and its distinct frontend and in-battle sources.
+The Music page remains usable without tracks, but CD previous/stop/play/next,
+track mode and per-track category require music enabled and a nonzero track
+count. Its volume and enable controls keep their existing meaning. This extra
+availability gate is Nanolathe host policy; retail's music-enabled tests remain
+`[03 R-AUD-01 §4]`.
+
+`TestFrontendAvailabilityFollowsMountedContent` locks input refusal, paired
+terrain, reopening, authored grey bits and supported neighboring actions.
+`TestFrontendLoadAvailabilityUsesMissingOnlyFallback` locks dialog selection.
+`TestFrontendMissingBackdropIsAnUnavailableChild` locks the missing/malformed
+boundary. `TestOptionsAvailabilityUsesRequiredPageAssets` and
+`TestMusicTransportNeedsAvailableTracks` lock options dependencies and the
+zero-track transport gate. Visual acceptance uses the extracted demo to
+inspect MAINMENU, SINGLE and Music, then enters Arm's briefing.
 
 The supplied demo's cursor bank also predates `cursorrevive` while supplying
 every other required named shape `[07 §8]`. As host presentation compatibility,

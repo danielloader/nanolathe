@@ -508,6 +508,7 @@ func (g *gameShell) openRetailOptionsScreen(inBattle bool) error {
 	if inBattle {
 		hideRetailBattleOptionsGadgets(window)
 	}
+	g.disableUnavailableOptionsPages(window, inBattle)
 	g.installRetailWindowButtonArt(window, nil)
 	optionsPanel = ui.NewPanel(window)
 	if optionsPanel == nil {
@@ -1025,10 +1026,14 @@ func (g *gameShell) syncRetailMusicPage() {
 	on := g.audioPrefs.MusicMode != 0
 	p.SetStageAt(p.Index("NOTRAK"), boolInt(on))
 	p.SetStageAt(p.Index("TRACKMODE"), g.audioPrefs.CDMode-1)
-	for _, name := range []string{"MUSICVOL", "CDPREV", "CDSTOP", "CDPLAY", "CDNEXT", "TRACKMODE"} {
-		retailGreyGadget(optionsAssets.window, name, !on)
+	retailGreyGadget(optionsAssets.window, "MUSICVOL", !on)
+	// Track transport cannot act without a track. The page and volume remain
+	// usable (host presentation policy, DESIGN_INTERFACE_HUD_INPUT §2.6).
+	tracks := on && optionsState.tracks > 0
+	for _, name := range []string{"CDPREV", "CDSTOP", "CDPLAY", "CDNEXT", "TRACKMODE"} {
+		retailGreyGadget(optionsAssets.window, name, !tracks)
 	}
-	retailGreyGadget(optionsAssets.window, "TRACKTYPE", !(on && g.audioPrefs.CDMode == settings.MaxCDMode))
+	retailGreyGadget(optionsAssets.window, "TRACKTYPE", !(tracks && g.audioPrefs.CDMode == settings.MaxCDMode))
 	p.SetStageAt(p.Index("TRACKTYPE"), retailTrackCategory(optionsState.track))
 	g.syncRetailTrackLabel()
 }

@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
+	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/mission"
+	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
@@ -98,12 +100,15 @@ func TestCampaignFallbackUsesAuthoredLayout(t *testing.T) {
 			g := &gameShell{frontend: ui.NewFrontend(modeMenuMission), campaigns: campaigns, missionSide: side, missionIdx: 1,
 				assets: &menuAssets{missionLayout: layout, missionBackground: background,
 					panel: map[shellMode]*retailPanelAssets{modeMenuMission: {window: window}}}}
+			if layout == missionLayoutCampaign && side == 0 {
+				g.campaignIdx = 1 // Retain the selected Arm campaign, after the alternative.
+			}
 			g.applyRetailMissionLayout(window)
 			g.frontend.Panels.Replace(ui.NewPanel(window))
 			g.refreshMissionPanel()
 			p := g.activePanel()
-			if p.ActiveOf("Missions") || p.ActiveOf("MissionsKnob") || g.missionIdx != 0 {
-				t.Fatal("campaign fallback exposed or retained a later mission")
+			if p.ActiveOf("Missions") || p.ActiveOf("MissionsKnob") || g.missionIdx != 1 {
+				t.Fatal("campaign fallback exposed the mission list or lost the carried mission")
 			}
 			if p.ActiveOf("Campaign") != (layout == missionLayoutCampaign) || p.ActiveOf("CampaignKnob") != (layout == missionLayoutCampaign) {
 				t.Fatal("campaign visibility does not match the selected art")
@@ -119,6 +124,87 @@ func TestCampaignFallbackUsesAuthoredLayout(t *testing.T) {
 			} else if window.Header.DefaultFocus != "Campaign" {
 				t.Fatal("visible campaign list lost initial focus")
 			}
+		}
+	}
+}
+
+// The supplied demo greys Core unconditionally [07 R-FE-01 §4]; Nanolathe's
+// user-authorized fallback instead admits each side with playable content.
+func TestCampaignFallbackDisablesUnavailableSides(t *testing.T) {
+	for _, layout := range []missionMenuLayout{missionLayoutFixedCampaign, missionLayoutCampaign} {
+		window := newgameTestWindow()
+		for i, name := range []string{"Side0", "Arm", "Side1", "Core", "Start"} {
+			window.Gadgets = append(window.Gadgets, gui.Gadget{Kind: gui.KindButton, Name: name, Active: 1,
+				Rect: gui.Rect{X: int32(210 + i*30), Y: 20, W: 20, H: 20}})
+		}
+		g := &gameShell{frontend: ui.NewFrontend(modeMenuMission),
+			campaigns: []mission.Campaign{{Name: "Arm Campaign", Document: mustParseCampaignHeader(t, "ARM"), Missions: []mission.Stub{{Index: 0}}}},
+			assets:    &menuAssets{missionLayout: layout}}
+		g.frontend.Panels.Replace(ui.NewPanel(window))
+		g.refreshMissionPanel()
+		p := g.activePanel()
+		for _, name := range []string{"Side1", "Core"} {
+			i := p.Index(name)
+			r := p.Window.PlacedRect(i)
+			if p.Window.Gadgets[i].GrayedOut&1 == 0 || p.Fires(i) || p.PressTest(r.X+1, r.Y+1) != -1 {
+				t.Fatalf("layout %d: unavailable %s still accepts activation", layout, name)
+			}
+			p.SetFocus(i)
+			if p.DefaultKeyAction(false).Kind != ui.ActionNone {
+				t.Fatalf("layout %d: unavailable %s accepts keyboard activation", layout, name)
+			}
+		}
+		for _, name := range []string{"Side0", "Arm", "Start"} {
+			if !p.Fires(p.Index(name)) {
+				t.Fatalf("layout %d: available %s disabled", layout, name)
+			}
+		}
+		// An empty Core descriptor still provides no mission. A playable one
+		// enables both the portrait and caption, without changing the layout.
+		g.campaigns = append(g.campaigns, mission.Campaign{Name: "Core Campaign", Document: mustParseCampaignHeader(t, "CORE")})
+		g.refreshMissionPanel()
+		if p.Fires(p.Index("Core")) {
+			t.Fatal("empty campaign enabled Core")
+		}
+		g.campaigns[1].Missions = []mission.Stub{{Index: 0}}
+		g.refreshMissionPanel()
+		if !p.Fires(p.Index("Side1")) || !p.Fires(p.Index("Core")) {
+			t.Fatal("playable Core campaign did not re-enable its controls")
+		}
+	}
+}
+
+// A between-missions save carries an authored successor, not a request to
+// start a new campaign [08 R-SAVE-02 §2][08 R-CAMP-01 §8]. Check the loaded
+// briefing's map, not only the shell's row, across both fallback layouts.
+func TestCampaignFallbackContinuationKeepsSelectedMission(t *testing.T) {
+	for _, layout := range []missionMenuLayout{missionLayoutCampaign, missionLayoutFixedCampaign} {
+		cs, campaigns := campaignWorkflowFixture(t)
+		defer cs.Close()
+		for i := range campaigns {
+			if campaigns[i].Path == "camps/arm.tdf" {
+				campaigns[i].Name = "Arm Campaign"
+			}
+		}
+		g := &gameShell{cs: cs, campaigns: campaigns, frontend: ui.NewFrontend(modeMenuSingle),
+			assets: &menuAssets{missionLayout: layout,
+				panel:    map[shellMode]*retailPanelAssets{modeMenuMission: {window: newgameTestWindow()}},
+				briefing: &retailPanelAssets{window: &gui.Window{Gadgets: []gui.Gadget{{Kind: gui.KindPanel, Active: 1}}}}}}
+		if err := g.applyRetailContinuation(&session.RetailCampaignContinuation{
+			CampaignPath: "camps/arm.tdf", MissionIndex: 1, Side: 0,
+			Thumbs: [25]byte{'W', 'U'},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if g.audioOwner != nil {
+			defer g.audioOwner.Close()
+		}
+		if g.briefing == nil || g.briefing.mission.TerrainKey != "second" || g.missionIdx != 1 || g.campaignProgress.Thumbs[0] != 'W' {
+			t.Fatalf("layout %d: continuation lost the successor briefing or progress", layout)
+		}
+		g.activateGadget("Start")
+		if g.briefing == nil || g.briefing.mission.TerrainKey != "first" || g.missionIdx != 0 {
+			t.Fatalf("layout %d: explicit New Campaign Start did not select mission zero", layout)
 		}
 	}
 }

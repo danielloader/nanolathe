@@ -69,7 +69,10 @@ type app struct {
 	scrollPointScale float64
 	// windowW/windowH are the last selected host size. Logical menu/battle
 	// transitions do not change them (DESIGN_PRESENTATION_CLIENT §2.1).
-	windowW, windowH       int
+	windowW, windowH int
+	// layoutW/layoutH are the canvas last returned to Ebitengine. The active
+	// host screen fills the window, while the client's menu is still 640x480.
+	layoutW, layoutH       int
 	options                RunOptions
 	fullscreen             bool
 	fullscreenEnterHeld    bool
@@ -498,8 +501,18 @@ func (a *app) syncPointerCapture() {
 // just ended (and cleared the host clip) is re-confined in the same update.
 // Windowed play leaves the pointer free (DESIGN_PRESENTATION_CLIENT §2.1).
 func (a *app) syncCursorClip() {
-	width, height := a.c.Size()
+	width, height := a.cursorClipSize()
 	a.cursorClip.update(a.fullscreen, a.c.IsFocused(), a.c.PointerCaptured(), width, height)
+}
+
+// cursorClipSize follows the canvas Ebitengine is presenting, including a
+// host-owned screen (DESIGN_PRESENTATION_CLIENT §2.1). The client's size is
+// only a fallback before the first Layout.
+func (a *app) cursorClipSize() (int, int) {
+	if a.layoutW > 0 && a.layoutH > 0 {
+		return a.layoutW, a.layoutH
+	}
+	return a.c.Size()
 }
 
 func (a *app) scaledInputNow() uint32 {
@@ -1087,13 +1100,15 @@ func (a *app) Layout(outsideWidth, outsideHeight int) (int, int) {
 	a.paceHeld = a.beganAt.Sub(arrived)
 	a.c.SetOutsideSize(outsideWidth, outsideHeight)
 	if a.screenActive() {
-		return a.screenLayout(outsideWidth, outsideHeight)
+		a.layoutW, a.layoutH = a.screenLayout(outsideWidth, outsideHeight)
+		return a.layoutW, a.layoutH
 	}
 	w, h := a.c.Size()
 	if outsideWidth > 0 && outsideHeight > 0 {
 		a.scrollPointScale = max(float64(w)/float64(outsideWidth), float64(h)/float64(outsideHeight))
 	}
-	return w, h
+	a.layoutW, a.layoutH = w, h
+	return a.layoutW, a.layoutH
 }
 
 // windowOwned records that this process has entered the window layer: Run sets

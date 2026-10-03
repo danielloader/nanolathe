@@ -368,6 +368,12 @@ On Windows the adapter confines the pointer to exactly the device pixels that
 report a logical canvas coordinate (`presentedCursorRect`) while the window is
 fullscreen, focused and not in drag-scroll capture, reconciling the clip every
 host step and releasing it on focus loss, in windowed mode and at shutdown.
+The confinement uses the canvas last returned by `Layout`. The Nanolathe
+screen fills the host window at device-pixel resolution, so its clip admits
+the whole window even though the underlying client menu remains 640×480.
+Returning to the menu or battle restores confinement to that canvas on the
+next layout. `TestCursorClipFollowsPresentedScreenLayout` locks these
+transitions on wide displays and scaled desktops.
 Windowed play is never confined. Other hosts are unconfined
 (`cursor_clip_other.go`): macOS live traces show the pointer reaching the bars,
 and leaving the window above the content (below), and X11 is unchecked. Keypad Enter is folded into

@@ -1,6 +1,71 @@
 package ebitenapp
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/nanolathe-gg/nanolathe/internal/client"
+)
+
+type cursorClipScreen struct{ active bool }
+
+func (s *cursorClipScreen) Active() bool     { return s.active }
+func (*cursorClipScreen) Update()            {}
+func (*cursorClipScreen) Draw(*ebiten.Image) {}
+
+// The host screen fills the display, so the menu's 4:3 confinement must not
+// keep the pointer away from its controls (DESIGN_PRESENTATION_CLIENT §2.1).
+func TestCursorClipFollowsPresentedScreenLayout(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		outsideW, outsideH int
+		scale              float64
+	}{
+		{"wide", 1920, 1080, 1},
+		{"ultrawide", 3440, 1440, 1},
+		{"scaled", 1536, 864, 1.25},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := client.New(client.Options{Width: 640, Height: 480})
+			if err != nil {
+				t.Fatal(err)
+			}
+			screen := &cursorClipScreen{}
+			a := app{c: c, options: RunOptions{Screen: screen}, screenScale: screenScale{
+				monitorScaleF: func() float64 { return tc.scale },
+			}}
+			cw, ch := int(float64(tc.outsideW)*tc.scale), int(float64(tc.outsideH)*tc.scale)
+			check := func(fullWindow bool) {
+				t.Helper()
+				w, h := a.Layout(tc.outsideW, tc.outsideH)
+				clipW, clipH := a.cursorClipSize()
+				if clipW != w || clipH != h {
+					t.Fatalf("clip uses %dx%d, presented canvas is %dx%d", clipW, clipH, w, h)
+				}
+				left, top, right, bottom, ok := presentedCursorRect(cw, ch, clipW, clipH)
+				if !ok {
+					t.Fatal("no confinement rectangle")
+				}
+				if fullWindow {
+					if left != 0 || top != 0 || right != int32(cw) || bottom != int32(ch) {
+						t.Fatalf("host screen clipped to [%d,%d)x[%d,%d)", left, right, top, bottom)
+					}
+				} else if left <= 0 || right >= int32(cw) {
+					t.Fatal("4:3 client canvas did not restore its pillarbox confinement")
+				}
+			}
+			check(false)
+			screen.active = true
+			check(true)
+			screen.active = false
+			check(false)
+			c.Resize(800, 600)
+			check(false)
+			screen.active = true
+			check(true)
+		})
+	}
+}
 
 // The confinement rectangle must admit exactly the device pixels Ebitengine
 // reports as logical 0..w-1 (truncating toward zero), so both exact camera

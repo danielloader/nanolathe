@@ -819,6 +819,42 @@ half `[07 R-FE-01 §11]`. `step` is the per-host-frame pump: battle, loading, or
 the menu pass, each installing its cursor shape — the hourglass across the
 blocking load transition and the idle shape everywhere else `[07 §8]`.
 
+The demo save/load fallback uses its authored `SAVELIST.GUI` / `LOADLIST.GUI`
+rectangles and the existing panel/common-art fill when `LOADGAME.GUI` is
+absent. Those resources originally serve restriction lists; their reuse for
+game saves is Nanolathe presentation policy, owned by
+[DESIGN_SESSIONS_AI_SAVE §5](DESIGN_SESSIONS_AI_SAVE.md#5-divergences).
+
+**Demo campaign fallback (user-authorized 2026-10-03).** When
+`bitmaps/playanygame4.pcx` is absent, the shell selects the observed demo
+campaign layout `[07 R-FE-01 §4]` / `[08 R-CAMP-01 §3]`. Count every
+root-level `camps/*.tdf` before filtering by side: two or fewer selects
+`newcampaign4x`, hides both lists, and selects the literal `Arm Campaign` or
+`Core Campaign`; more than two selects `newcampaign4`, shows the side-filtered
+campaign list, and hides the mission list. Both keep the authored NEWGAME
+rectangles and enter mission zero. Selecting a visible campaign row starts
+its briefing; otherwise Start does. Initial focus is Difficulty for the fixed
+campaign and Campaign for the visible list.
+
+This is Nanolathe content presentation compatibility in every gameplay mode,
+not a change to retail 3.1's reachable layout or to battle rules. A present
+Play Any background retains both lists and the existing compressed layout.
+Malformed backgrounds still fail; only a missing Play Any file selects the
+fallback, and the chosen campaign background remains required. Unused campaign
+backgrounds are not preloaded. `TestMissionBackgroundFallback` locks the
+selection, the strict two-file boundary and decode failures;
+`TestCampaignFallbackUsesAuthoredLayout` locks visibility, literal side
+selection, first-mission entry and authored rectangles. Visual acceptance uses
+the extracted demo alone to open MAINMENU, New Campaign, briefing and battle.
+
+The supplied demo's cursor bank also predates `cursorrevive` while supplying
+every other required named shape `[07 §8]`. As host presentation compatibility,
+an absent revive entry uses that bank's normal pointer; the logical cursor
+index and command chooser remain unchanged. A present revive entry retains
+its authored art. Empty entries, missing normal art and other missing required
+shapes remain errors. `TestOlderCursorBankUsesNormalForMissingRevive` locks
+these boundaries. This policy enables no resurrection capability or rule.
+
 `retail_menu_input.go` adapts the host sample to `Panel.ServiceFrame`, which
 owns pointer capture, held repeats, selection and keyboard dispatch. A
 user-requested host extension routes wheel and two-finger scrolling over a

@@ -3188,8 +3188,8 @@ is set. On a Spanish install the `Skirmish` button's quickkey byte is set
 to `s` (`0x73`) through *set quickkey by name* ([R-FE-02 §5]), so the
 Spanish label keeps the English hotkey.
 
-**Established fact — `NEWGAME.GUI` has two layouts, and the shell reaches
-only one.** The opener takes a flag: 0 selects the *campaign* layout
+**Established fact — `NEWGAME.GUI` has two layouts, and the retail 3.1 shell
+reaches only one.** The opener takes a flag: 0 selects the *campaign* layout
 (background `newcampaign4` when more than two `camps\*.tdf` exist, else
 `newcampaign4x` with the campaign list hidden and the side's `Arm Campaign`
 / `Core Campaign` document selected directly), 1 selects the *play-any*
@@ -3202,6 +3202,20 @@ flag-0 layout; the campaign layout is therefore unreachable in this
 executable and `newcampaign4`/`newcampaign4x` are never loaded. What differs
 between `NewCamp` and `AnyMsn` is only the sound cue and the substate
 number; the screen, background and lists are identical.
+
+**Established — supplied 1997 demo variant.** The locally supplied
+`TADemo.exe` (SHA-256
+`216e4f39617cb979cd2bc1fba92e9e5136b33a98790d9fc6d3d1cb901ecfbb57`),
+extracted from the demo installer with its `TADemo.hpi`, routes `NewCamp` to
+the campaign layout instead. Its opener counts root-level `camps/*.tdf`
+documents before applying a side filter: more than two selects
+`newcampaign4`; two or fewer selects `newcampaign4x` and the fixed side
+campaign. The supplied archive contains one such descriptor, `Arm Campaign`,
+both campaign backgrounds and no `playanygame4`. Its ordinary New Campaign
+route therefore uses `newcampaign4x`. Static inspection of the demo's button,
+controller and background-selection paths establishes this difference;
+the asset inventory corroborates it. This finding is scoped to that demo
+package, not to the retail 3.1 entry routes above or to other demo releases.
 
 The campaign list is rebuilt for the current side (the campaign-side filter
 of [08 R-CAMP-01 §2]); selecting a `Side0`/`Arm` or `Side1`/`Core` button
@@ -5935,6 +5949,13 @@ and missing-key fallback are not fully established.
 Cursor artwork is loaded from a cursor GAF root. Named cursor entries include
 normal, red/green validity, attack, move, airstrike, too-far, hourglass,
 path, and revive-style indicators. Cursor frames use the shared palette/LUT.
+
+**Established — supplied 1997 demo asset boundary.** The `TADemo.hpi`
+paired with the demo executable identified in [R-FE-01 §4] contains all
+the required named cursor shapes below except `cursorrevive`; it also
+contains the unused `cursorprotect` artwork. Every present required shape
+has frames. This is an inventory of the supplied demo bank, not evidence
+for a retail fallback when a required cursor entry is absent.
 
 **The cursor index table is closed.** A hardware-style cursor index byte
 selects the active shape from a handle array of twenty-two slots resolved at

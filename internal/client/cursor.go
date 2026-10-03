@@ -29,9 +29,9 @@ const CursorGAFPath = "anims/cursors.gaf"
 // Cursors is the resolved cursor handle array plus the playback state of the
 // shape currently shown [07 §8][03 §4.4].
 //
-// Slot 0 of the handle array is unused; entries 1..21 are resolved by name at
-// load and stay resolved for the session, exactly as retail resolves them once
-// at init [07 §8].
+// Slot 0 of the handle array is unused; entries 1..21 are resolved at load
+// and stay resolved for the session [07 §8]. An older bank may supply its
+// normal art for an absent revive name (DESIGN_INTERFACE_HUD_INPUT §2.6).
 type Cursors struct {
 	gaf     *formats.GAF
 	entries [render.CursorCount]*formats.GAFEntry
@@ -72,9 +72,20 @@ func LoadCursors(fs vfs.FSOps) (*Cursors, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nanolathe: load retail cursor GAF: logical path %s, providers searched [%s], expected retail cursor GAF: %w", CursorGAFPath, cursorProviders(fs), err)
 	}
+	return resolveCursors(fs, gaf)
+}
+
+func resolveCursors(fs vfs.FSOps, gaf *formats.GAF) (*Cursors, error) {
 	cs := &Cursors{gaf: gaf}
 	for idx := 1; idx < render.CursorCount; idx++ {
 		e, ok := render.ResolveCursorEntry(gaf, idx)
+		// The demo bank predates revive art. Use its normal pointer for that
+		// absent entry, retaining the index and command behavior. Empty authored
+		// entries and every other missing shape still fail (host presentation
+		// compatibility: DESIGN_INTERFACE_HUD_INPUT §2.6; [07 §8]).
+		if !ok && idx == render.CursorRevive {
+			e, ok = render.ResolveCursorEntry(gaf, render.CursorNormal)
+		}
 		if !ok || e == nil || len(e.Frames) == 0 {
 			name := render.CursorName(idx)
 			// Retail has no behaviour here to clone. A name the bank lookup
@@ -104,7 +115,7 @@ func (cs *Cursors) Index() int {
 
 // SetIndex installs a cursor shape, diffing against the shape already shown so
 // an unchanged index does not restart the sequence [07 §8]. LoadCursors
-// validates every named entry before a Cursors value can be installed, so an
+// validates every resolved entry before a Cursors value can be installed, so an
 // invalid index is ignored rather than selecting a different shape.
 func (cs *Cursors) SetIndex(idx int) {
 	if cs == nil || idx == cs.idx {

@@ -339,11 +339,19 @@ func (g *gameShell) activateGadget(name string) {
 		}
 	case modeMenuMission:
 		switch name {
-		case "Start", "Missions":
+		case "Start":
 			// Campaign Start first opens MSNBRIEF. Its Start action later
 			// emits the same shared battle request used by every entry path
 			// [08 R-CAMP-01 §2].
 			g.openCampaignBriefing()
+		case "Missions":
+			if g.missionMenuLayout() == missionLayoutPlayAny {
+				g.openCampaignBriefing()
+			}
+		case "Campaign":
+			if g.missionMenuLayout() == missionLayoutCampaign {
+				g.openCampaignBriefing()
+			}
 		case "Difficulty":
 			g.missionDifficultyValue = cycleInt(g.missionDifficultyValue, 0, 2, 1)
 			if p := g.activePanel(); p != nil {

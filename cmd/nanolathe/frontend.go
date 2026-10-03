@@ -65,26 +65,33 @@ type retailPanelAssets struct {
 	unavailable error
 }
 
-// menuAssets is the mounted retail frontend resource set. All menu pixels,
-// widgets and text font come from the same files TotalA.exe selects.
+type missionMenuLayout uint8
+
+const (
+	missionLayoutPlayAny missionMenuLayout = iota
+	missionLayoutCampaign
+	missionLayoutFixedCampaign
+)
+
+// menuAssets is the mounted frontend resource set. Menu pixels, widgets
+// and text fonts come from the selected authored files.
 type menuAssets struct {
 	// err is retained on the compatibility-shaped loader below so existing
 	// asset-inspection tests can still inspect a partially built value. The
 	// frontend constructor always checks it before installing a panel [07 §5
 	// "Frontend asset failure boundaries"].
-	err             error
-	common          *formats.GAF
-	logos           *formats.GAF
-	font            *formats.FNT
-	gafFont         *formats.GAF
-	gafFontSmall    *formats.GAF
-	pal             *palette.Tables
-	panel           map[shellMode]*retailPanelAssets
-	message         *retailPanelAssets
-	loading         *formats.PCX
-	missionCampaign *formats.PCX
-	missionSmall    *formats.PCX
-	missionAny      *formats.PCX
+	err               error
+	common            *formats.GAF
+	logos             *formats.GAF
+	font              *formats.FNT
+	gafFont           *formats.GAF
+	gafFontSmall      *formats.GAF
+	pal               *palette.Tables
+	panel             map[shellMode]*retailPanelAssets
+	message           *retailPanelAssets
+	loading           *formats.PCX
+	missionBackground *formats.PCX
+	missionLayout     missionMenuLayout
 	// briefing is loaded lazily after a campaign mission resolves its planet;
 	// MSNBRIEF is not needed by the shell's skirmish path.
 	briefing *retailPanelAssets
@@ -593,6 +600,43 @@ func presentationResource(authored, retail string) string {
 	return authored
 }
 
+// Missing Play Any art selects the demo's authored campaign layout. This is
+// content presentation compatibility, independent of gameplay mode
+// (DESIGN_INTERFACE_HUD_INPUT §2.6; [07 R-FE-01 §4]).
+func loadMissionBackground(cs *contentSet) (*formats.PCX, missionMenuLayout, error) {
+	logical := "bitmaps/playanygame4.pcx"
+	background, err := formats.LoadPCXFile(cs.fs, logical)
+	if err == nil {
+		return background, missionLayoutPlayAny, nil
+	}
+	if !errors.Is(err, vfs.ErrNotFound) {
+		return nil, missionLayoutPlayAny, retailFrontendAssetError(cs, "retail frontend bitmap", logical, "the authored Play Any background", err)
+	}
+	entries, err := cs.fs.ReadDir("camps")
+	if err != nil && !errors.Is(err, vfs.ErrNotFound) {
+		return nil, missionLayoutPlayAny, retailFrontendAssetError(cs, "frontend campaigns", "camps", "the authored campaign directory", err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir && strings.HasSuffix(strings.ToLower(entry.Name), ".tdf") {
+			count++
+		}
+	}
+	// The campaign opener counts all root-level descriptors before filtering
+	// by side. Two or fewer use the fixed campaign [07 R-FE-01 §4].
+	layout := missionLayoutFixedCampaign
+	logical = "bitmaps/newcampaign4x.pcx"
+	if count > 2 {
+		layout = missionLayoutCampaign
+		logical = "bitmaps/newcampaign4.pcx"
+	}
+	background, err = formats.LoadPCXFile(cs.fs, logical)
+	if err != nil {
+		return nil, layout, retailFrontendAssetError(cs, "frontend campaign bitmap", logical, "the authored campaign background", err)
+	}
+	return background, layout, nil
+}
+
 func loadMenuAssets(cs *contentSet) *menuAssets {
 	a := &menuAssets{panel: make(map[shellMode]*retailPanelAssets)}
 	if cs == nil || cs.fs == nil {
@@ -614,6 +658,10 @@ func loadMenuAssets(cs *contentSet) *menuAssets {
 		return a
 	}
 	a.font = f
+	a.missionBackground, a.missionLayout, a.err = loadMissionBackground(cs)
+	if a.err != nil {
+		return a
+	}
 
 	// These windows and their bitmap backgrounds are the implemented
 	// single-player frontend. The bitmap path is fatal; the GUI opener has no
@@ -629,7 +677,7 @@ func loadMenuAssets(cs *contentSet) *menuAssets {
 	}{
 		{modeMenuMain, "guis/mainmenu.gui", presentationResource(cs.presentation.MainMenuBackground, "bitmaps/frontendx.pcx"), "anims/mainmenu.gaf", "MAINMENU authored GUI and background"},
 		{modeMenuSingle, "guis/single.gui", presentationResource(cs.presentation.SinglePlayerBackground, "bitmaps/singlebg.pcx"), "anims/single.gaf", "SINGLE authored GUI and background"},
-		{modeMenuMission, "guis/newgame.gui", "bitmaps/newcampaign4x.pcx", "anims/newgame.gaf", "NEWGAME authored GUI and background"},
+		{modeMenuMission, "guis/newgame.gui", "", "anims/newgame.gaf", "NEWGAME authored GUI and background"},
 		{modeMenuMap, "guis/selmap.gui", "bitmaps/dselectmap2.pcx", "", "SELMAP authored GUI and background"},
 		{modeMenuSkirmish, "guis/skirmish.gui", "bitmaps/skirmsetup4x.pcx", "anims/skirmish.gaf", "SKIRMISH authored GUI and background"},
 	}
@@ -648,6 +696,9 @@ func loadMenuAssets(cs *contentSet) *menuAssets {
 		}
 		a.panel[spec.mode] = panel
 	}
+	if panel := a.panel[modeMenuMission]; panel != nil {
+		panel.background = a.missionBackground
+	}
 	message, err := loadRetailPanelStrict(cs, "guis/msgbox.gui", "", "", "MSGBOX authored GUI")
 	if err != nil {
 		if message != nil && message.unavailable != nil {
@@ -659,25 +710,11 @@ func loadMenuAssets(cs *contentSet) *menuAssets {
 	}
 	a.message = message
 
-	// Loading and both NEWGAME background variants are selected by later
-	// callbacks, but they all enter through the same fatal bitmap loader when
-	// selected. Preload them so no reachable callback can land on a nil PCX.
-	for _, spec := range []struct {
-		logical string
-		dst     **formats.PCX
-		expect  string
-	}{
-		{presentationResource(cs.presentation.LoadingBackground, "bitmaps/loadgame2bg.pcx"), &a.loading, "the authored loading background"},
-		{"bitmaps/newcampaign4.pcx", &a.missionCampaign, "the authored campaign background"},
-		{"bitmaps/newcampaign4x.pcx", &a.missionSmall, "the authored compressed campaign background"},
-		{"bitmaps/playanygame4.pcx", &a.missionAny, "the authored Play Any background"},
-	} {
-		pcx, loadErr := formats.LoadPCXFile(cs.fs, spec.logical)
-		if loadErr != nil {
-			a.err = retailFrontendAssetError(cs, "retail frontend bitmap", spec.logical, spec.expect, loadErr)
-			return a
-		}
-		*spec.dst = pcx
+	logical := presentationResource(cs.presentation.LoadingBackground, "bitmaps/loadgame2bg.pcx")
+	a.loading, err = formats.LoadPCXFile(cs.fs, logical)
+	if err != nil {
+		a.err = retailFrontendAssetError(cs, "retail frontend bitmap", logical, "the authored loading background", err)
+		return a
 	}
 
 	// GUI-attached roots and HATTFONT slots are separately optional in retail:

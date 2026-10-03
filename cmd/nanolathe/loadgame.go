@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/save"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
+	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
 // The save and load dialogs live on the frontend panel stack as one authored
@@ -120,26 +122,51 @@ func (g *gameShell) openSaveLoadScreenReporting(mode saveLoadMode, source saveLo
 	}
 }
 
-// loadSaveLoadPanel parses `LOADGAME.GUI` once and re-reads only the backdrop
-// when the direction changes [08 R-SAVE-02 §1].
+// loadSaveLoadPanel prefers LOADGAME.GUI [08 R-SAVE-02 §1]. The demo's
+// restriction-list windows are reused only when that file is absent: this is
+// Nanolathe presentation policy, not their retail purpose [08 R-SAVE-02 §5]
+// (DESIGN_SESSIONS_AI_SAVE §5).
 func (g *gameShell) loadSaveLoadPanel(mode saveLoadMode) (*ui.Panel, error) {
-	window, err := g.cs.loadGUI(retailSaveLoadGUI)
-	if err != nil {
-		return nil, retailFrontendAssetError(g.cs, "retail save dialog GUI unavailable", retailSaveLoadGUI, "the authored save/load window", err)
+	guiPath := retailSaveLoadGUI
+	window, err := g.cs.loadGUI(guiPath)
+	if errors.Is(err, vfs.ErrNotFound) {
+		guiPath = "guis/loadlist.gui"
+		if mode == saveScreenMode {
+			guiPath = "guis/savelist.gui"
+		}
+		window, err = g.cs.loadGUI(guiPath)
 	}
-	background, err := formats.LoadPCXFile(g.cs.fs, mode.backdrop())
 	if err != nil {
-		return nil, retailFrontendAssetError(g.cs, "retail save dialog bitmap", mode.backdrop(), "the authored save/load backdrop", err)
+		return nil, retailFrontendAssetError(g.cs, "save dialog GUI unavailable", guiPath, "the authored save/load window", err)
 	}
-	saveLoadAssets = &retailPanelAssets{window: window, background: background}
+	var background *formats.PCX
+	if guiPath == retailSaveLoadGUI {
+		background, err = formats.LoadPCXFile(g.cs.fs, mode.backdrop())
+		if err != nil {
+			return nil, retailFrontendAssetError(g.cs, "retail save dialog bitmap", mode.backdrop(), "the authored save/load backdrop", err)
+		}
+	}
+	// The demo also lacks the game-save backdrops. With its smaller windows,
+	// use the existing authored panel/common-art fill and gadget renderer.
+	if guiPath != retailSaveLoadGUI {
+		if i := window.GadgetIndex("DELETE"); i >= 0 {
+			caption := "Delete Game"
+			if g.cs.translations != nil {
+				caption = g.cs.translations.Translate(caption)
+			}
+			window.Gadgets[i].Text = caption
+			window.Gadgets[i].Labels = []string{caption}
+		}
+	}
 	installSaveSidecarLine(window)
 	// LOADGAME is a fresh authored open. Build before the panel captures its
 	// runtime state [07 R-WGT-01 §3].
 	g.installRetailWindowButtonArt(window, nil)
 	panel := ui.NewPanel(window)
 	if panel == nil {
-		return nil, retailFrontendAssetError(g.cs, "retail save dialog GUI unavailable", retailSaveLoadGUI, "the authored save/load window", nil)
+		return nil, retailFrontendAssetError(g.cs, "save dialog GUI unavailable", guiPath, "the authored save/load window", nil)
 	}
+	saveLoadAssets = &retailPanelAssets{window: window, background: background}
 	return panel, nil
 }
 
@@ -388,24 +415,33 @@ func (g *gameShell) activateSaveLoadGadget(name string) bool {
 		g.playMenuCue(cuePreviousScreen)
 		g.closeSaveLoadScreen()
 	case saveLoadToSave:
-		saveLoadUI.SetMode(saveScreenMode)
-		g.reopenSaveLoadPanel()
+		g.reopenSaveLoadPanel(saveScreenMode)
 	case saveLoadToLoad:
-		saveLoadUI.SetMode(loadScreenMode)
-		g.reopenSaveLoadPanel()
+		g.reopenSaveLoadPanel(loadScreenMode)
 	}
 	return true
 }
 
 // reopenSaveLoadPanel re-reads the backdrop for the other direction and
-// re-applies the control set to the same window [08 R-SAVE-02 §1].
-func (g *gameShell) reopenSaveLoadPanel() {
+// re-applies the control set to the same retail window [08 R-SAVE-02 §1].
+// The fallback has a separately authored window for each direction.
+func (g *gameShell) reopenSaveLoadPanel(mode saveLoadMode) {
 	if saveLoadUI == nil || saveLoadAssets == nil {
 		return
 	}
-	if background, err := formats.LoadPCXFile(g.cs.fs, saveLoadUI.Mode().backdrop()); err == nil {
+	if saveLoadAssets.window.Name != retailSaveLoadGUI {
+		panel, err := g.loadSaveLoadPanel(mode)
+		if err != nil {
+			reportRetailMessageError(g.showRetailMessage(err.Error()))
+			return
+		}
+		g.frontend.Panels.Pop()
+		saveLoadPanel = panel
+		g.frontend.Panels.Push(panel)
+	} else if background, err := formats.LoadPCXFile(g.cs.fs, mode.backdrop()); err == nil {
 		saveLoadAssets.background = background
 	}
+	saveLoadUI.SetMode(mode)
 	g.refreshSaveLoadPanel()
 	g.focusSaveLoadNameEditor()
 }

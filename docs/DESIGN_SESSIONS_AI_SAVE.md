@@ -1587,6 +1587,23 @@ random-draw count `[08 R-AI-01 §3]`.
 
 ## 5. Divergences
 
+* **Demo save/load presentation (user-authorized 2026-10-03).** If
+  `guis/loadgame.gui` is absent, saving uses `guis/savelist.gui` and loading
+  uses `guis/loadlist.gui`. These are authored restriction-list layouts in
+  retail [08 R-SAVE-02 §5]; reusing them for games is Nanolathe host
+  compatibility policy in every gameplay mode. Keep their rectangles and
+  existing game-save controller: name editing, SAV enumeration, overwrite,
+  deletion, bank serialization and restore all retain their contracts. Change
+  the deletion caption to `Delete Game`. The demo lacks both game-save PCX
+  backdrops, so these smaller windows use the existing panel/common-art fill
+  and gadget renderer. Summary gadgets absent from a layout remain absent.
+  A present retail GUI still requires its direction's retail backdrop; decode
+  errors never select the fallback, and the selected fallback GUI is required.
+  Direction changes select the corresponding fallback layout. Authored
+  fixtures in `demo_save_test.go` lock selection, failure boundaries, focus,
+  geometry and SAV-only listing/deletion. Visual acceptance saves a demo
+  mission and restores it through the load dialog with the demo as sole root.
+
 * **Installer-selected save directory.** The user-authorized `--save-dir`
   override lets a source installer place both save/load dialogs in a writable
   per-user directory even when retail content is elsewhere. With this override,

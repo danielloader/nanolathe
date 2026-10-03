@@ -4,10 +4,51 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/testsupport"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
+
+func TestOlderCursorBankUsesNormalForMissingRevive(t *testing.T) {
+	for _, missing := range []int{render.CursorRevive, render.CursorAttack, render.CursorNormal, 0} {
+		gaf := &formats.GAF{}
+		for idx := 1; idx < render.CursorCount; idx++ {
+			if idx == missing {
+				continue
+			}
+			gaf.Entries = append(gaf.Entries, formats.GAFEntry{Name: render.CursorName(idx), FrameCount: 1, Frames: []formats.GAFFrameRef{{Frame: &formats.GAFFrame{Width: 1, Height: 1}}}})
+		}
+		cs, err := resolveCursors(vfs.New(), gaf)
+		if missing != 0 && missing != render.CursorRevive {
+			if err == nil {
+				t.Fatalf("missing %q was accepted", render.CursorName(missing))
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		cs.SetIndex(render.CursorRevive)
+		if cs.Index() != render.CursorRevive || cs.Frame() == nil {
+			t.Fatal("fallback changed the logical cursor or lost its frame")
+		}
+		usesNormal := cs.entries[render.CursorRevive] == cs.entries[render.CursorNormal]
+		if usesNormal != (missing == render.CursorRevive) {
+			t.Fatal("a present revive shape was replaced or the absent shape was not filled")
+		}
+	}
+	// An authored but empty revive sequence is malformed, not an old bank.
+	gaf := &formats.GAF{Entries: []formats.GAFEntry{{Name: render.CursorName(render.CursorRevive)}}}
+	for idx := 1; idx < render.CursorCount; idx++ {
+		if idx != render.CursorRevive {
+			gaf.Entries = append(gaf.Entries, formats.GAFEntry{Name: render.CursorName(idx), FrameCount: 1, Frames: []formats.GAFFrameRef{{Frame: &formats.GAFFrame{Width: 1, Height: 1}}}})
+		}
+	}
+	if _, err := resolveCursors(vfs.New(), gaf); err == nil {
+		t.Fatal("an empty authored revive entry was accepted")
+	}
+}
 
 func TestMissingCursorRootIsExplicitError(t *testing.T) {
 	fs := vfs.New()

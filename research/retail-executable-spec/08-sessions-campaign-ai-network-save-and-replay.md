@@ -8222,6 +8222,14 @@ for each definition index from `1` upward that has a restriction record,
 one `u32` definition id word and one `u32` restriction value. The empty-list message is `There are no saved lists
 to choose from`. Nothing in this family touches a save bank. [Established]
 
+**Established — supplied demo asset inventory.** The demo identified in
+[07 R-FE-01 §4] includes `guis/savelist.gui` and `guis/loadlist.gui`, with
+`GAMES`, `LOAD`, `CANCEL`, `SLIDER`, `GAMENAME` and `DELETE` controls. It lacks
+`guis/loadgame.gui`, `bitmaps/dsavegame2.pcx` and `bitmaps/dloadgame2.pcx`.
+Resource presence alone does not establish that the demo uses restriction-list
+windows for saved games. Nanolathe's reuse is a separately authorized host
+presentation policy, documented in DESIGN_SESSIONS_AI_SAVE §5.
+
 ### The `Units` account, word by word [R-SAVE-02 §6]
 
 **Established — writer traversal and account items.** The writer walks the

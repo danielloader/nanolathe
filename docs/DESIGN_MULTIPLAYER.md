@@ -21,9 +21,12 @@ Nanolathe-to-Nanolathe; other engines are deferred without a commitment to
 support them (§8.5). The four follow-up policies Q22–Q25 were approved on 2026-10-02 (§15).
 Later that day the maintainer decided what final removal does to hosted
 computers and that it goes through a vote (Q26, Q27, revised Q4 and Q6),
-and the online `Give` policy was recorded under Q8; §15 Q28 lists the
-details this document proposes without an approval, and Q29 a question
-that still needs a decision.
+and the online `Give` policy was recorded under Q8. Q28 collects the protocol
+and design details this document had proposed on its own; the maintainer
+approved them the same day, decided Q29 (a finally removed seat is absent
+from the end-condition sweeps, and the perspective its computers borrow keeps
+updating) and settled O23 (a Strict resignation deletes the leaver's units
+silently, as retail's menu quit does on the other machines).
 
 The first revision added the protocol, identity and snapshot requirements of
 an earlier review, the competitive path (§4.7, §12.6) and shared match
@@ -221,7 +224,7 @@ open product decisions authorize no departure. Established unless marked:
 | Ending | Each machine judges its own human every 30 ticks; authored triggers are not checked online. Defeat requires no live units. Each surviving opponent must have shared victory enabled on both sides, mutual alliance, and its own row covering every seated non-eliminated seat, including itself and watchers; an opponent that has created nothing prevents victory. Won and lost paths share a countdown that false checks do not reset `[08 R-SKIR-01 §3]` `[08 R-TRIG-01 §6]`. Outside Deathmatch, the no-live-human site `[08 R-SESS-01 §1]` runs each tick and ends the battle on its sixth consecutive true tick from an unarmed countdown `[08 R-TRIG-01 §6]`. | Per human seat (§6). Shared victory reads the common directed matrix under Q22; the other victory requirements remain (§6.7). |
 | Defeated players | Where the host allows watching, a defeated player becomes a watcher at its defeat latch and is then asked "You're out!  Continue Watching?": *Yes* changes nothing further and *No* leaves `[07 R-FE-01 §9]`. Where it does not, the player takes the ordinary lost ending, as in skirmish. One hosting live computer players is put in watch mode without the question, whatever the option says, because departure removes their machine group and destroys its units `[08 R-SKIR-01 §3]` `[08 R-LEAVE-01 §9]`. | Per seat (§6.6, §11.1). |
 | Watchers | A watcher holds a seat with no commander — its placement draws are still taken — sees everything, and is left out of scores and elimination `[08 R-ENTRY-01 §5]`. Joining as one needs the host's *watching allowed* option; the host can switch it off in battle, which removes the remote watchers `[08 R-SKIR-01 §12]` `[07 R-HUD-04 §1]`. | Observer rows in the configuration (§11.4). |
-| Resign, host loss, timeout | Resign tears down only the leaving machine. In a launched battle host loss migrates the host flag and does not end play `[08 R-LEAVE-01 §7]` `[08 R-LEAVE-01 §8]`. Timeout opens a dialog; REJECT or timeout plus 120 seconds removes one silent machine, and when the silent slots span two or more machines the dialog closes, so the automatic path never removes them `[08 R-LEAVE-01 §6]`. The host can also reject a player through its control window `[08 R-LEAVE-01 §1]`. Removal destroys units and empties the seat without transferring stocks, scores or its unit-limit slice `[08 R-LEAVE-01 §3]` `[08 R-LEAVE-01 §4]` `[08 R-LEAVE-01 §5]`; removing a human removes every slot of its machine, its hosted computers included, in ascending slot order `[08 R-LEAVE-01 §9]`. | Rejoin and final removal are distinct. A seat out of play stays idle until a removal vote passes; no timer removes it (§11.1, Q27). Strict destroys a voted-out seat's units and removes its hosted computers with it, and applies the same contract to a resignation by a proposed choice (Q28); Modern/Community retain the units idle and keep the computers running (§11.1, Q6, Q26). |
+| Resign, host loss, timeout | Resign tears down only the leaving machine. In a launched battle host loss migrates the host flag and does not end play `[08 R-LEAVE-01 §7]` `[08 R-LEAVE-01 §8]`. Timeout opens a dialog; REJECT or timeout plus 120 seconds removes one silent machine, and when the silent slots span two or more machines the dialog closes, so the automatic path never removes them `[08 R-LEAVE-01 §6]`. The host can also reject a player through its control window `[08 R-LEAVE-01 §1]`. Removal destroys units and empties the seat without transferring stocks, scores or its unit-limit slice `[08 R-LEAVE-01 §3]` `[08 R-LEAVE-01 §4]` `[08 R-LEAVE-01 §5]`; removing a human removes every slot of its machine, its hosted computers included, in ascending slot order `[08 R-LEAVE-01 §9]`. | Rejoin and final removal are distinct. A seat out of play stays idle until a removal vote passes; no timer removes it (§11.1, Q27). Strict destroys a voted-out seat's units as retail's peer removal does and removes its hosted computers with it; a Strict resignation deletes the leaver's units silently, as the other machines do for retail's menu quit (§19 O23); Modern/Community retain the units idle and keep the computers running (§11.1, Q6, Q26). |
 | Computer players | Each not-ready human may add one computer on its machine, when the game is open and not Deathmatch; the host's first click on an open row blocks it, and the next reopens it and enters the add path. The creator controls side/team and readiness; teams provide computer alliances. Difficulty is unsynchronized hosting-machine state `[08 R-SKIR-01 §13]` `[08 R-AI-01 §21]`. | Every replica runs each computer, with its creator's fixed perspective (§6.6). Strict permits one computer per human and removes it with its human's final removal; Modern/Community permit multiple within available seats and keep them running (Q26). Difficulty is explicit per computer; computers are excluded from Deathmatch initially (Q23, §6.6). |
 | Saving | Disabled in multiplayer `[08 R-SAVE-02 §4]` `[08 "Multiplayer saves"]`. | Not offered (§11.5). |
 | Replays | Retail has none `[08 "Replay"]` `[08 "Bounded absence"]`; the community recorder's files are `[fmt tad]`. | A Nanolathe feature, not a rule (§10). |
@@ -280,7 +283,7 @@ client sequence and assigned stream position; reconnects retain this identity
 so a retransmitted command cannot execute twice (§11.2). A competitive
 scheduler may assign a later tick under the room's declared policy (§4.7).
 
-**Client sequence (proposed, §15 Q28).** These are Nanolathe protocol rules.
+**Client sequence (§15 Q28, approved 2026-10-02).** These are Nanolathe protocol rules.
 They replace the earlier retransmission contract, under which a repeated
 sequence returned its original receipt and a conflicting payload under an
 accepted sequence was refused. Each human seat numbers its commands with an
@@ -389,7 +392,7 @@ and once it has been out of play for the agreed cumulative grace the other
 seats may vote on its final removal (§11.1); no vote removes an active seat. M6's pacing state
 table (§19 O17) must set a bound after which a connected seat that has made
 no progress is moved into the drop state, so that it becomes votable after
-the grace without any vote-kick (proposed, §15 Q28; the bound's value
+the grace without any vote-kick (§15 Q28; the bound's value
 belongs to that table). Pacing is host policy: it decides *when* ticks run,
 never *what* they compute. A battle therefore runs no faster than its slowest
 participant can simulate, and the seat and unit limits a lobby offers are
@@ -966,12 +969,14 @@ battle goes on while any human seat is still playing. It ends for every
 client once every human seat has latched a result or been finally removed,
 or through the no-human countdown `[08 R-SESS-01 §1]` `[08 R-TRIG-01 §6]`. A
 seat out of play has not left, and its units count as live until a vote
-removes it, in every mode, by design. Whether a finally removed seat still
-counts in the end-condition sweeps — under Modern and Community its retained
-idle units are still live — is an open maintainer decision (§15 Q29). If
+removes it, in every mode, by design. A finally removed seat is absent from
+the end-condition sweeps in every mode, as retail's cleared record is
+`[08 R-LEAVE-01 §3]` `[08 R-LEAVE-01 §5]`: under Modern and Community its
+retained idle units are still live — they can be attacked and destroyed —
+but no survivor has to destroy them to win (§15 Q29, decided 2026-10-02). If
 every human still playing is out of play and none has returned within
 `RejoinGraceMilliseconds`, the relay ends the battle without a result
-(proposed, §15 Q28; §11.1).
+(§15 Q28; §11.1).
 
 ### 6.6 Computer seats
 
@@ -994,14 +999,15 @@ final removal the modes differ (§11.1, §15 Q26):
   together, in ascending slot order, the human's own slot taking its place
   in that order, each through the destruction contract of §11.1. For a
   voted removal this follows retail's peer removal of the machine group
-  `[08 R-LEAVE-01 §2]` `[08 R-LEAVE-01 §9]`; for a resignation it is a
-  proposed Nanolathe choice (§15 Q28), since retail's leaving machine takes
-  a different path `[08 R-LEAVE-01 §7]`.
-- **Modern and Community** keep its computers running with the host's last
-  perspective, whose operational meaning is open (§15 Q29). This is a
-  Nanolathe Modern policy, selected with the retention of the removed
-  human's units through the existing `session.RuleSet` — by one answer, as
-  proposed in §11.1.
+  `[08 R-LEAVE-01 §2]` `[08 R-LEAVE-01 §9]`; for a resignation it is the
+  silent deletion the other machines perform for retail's menu quit
+  `[08 R-LEAVE-01 §7]` (§19 O23, decided 2026-10-02).
+- **Modern and Community** keep its computers running with the host's
+  perspective, which goes on updating: the removed human's own per-seat
+  block and sensor pass keep running for it (§15 Q29, decided 2026-10-02).
+  This is a Nanolathe Modern policy, selected with the retention of the
+  removed human's units through the existing `session.RuleSet` — by one
+  answer (§11.1, §15 Q28).
 
 Retail difficulty belongs to the hosting machine, is not synchronized and
 is consulted only for its computers: the room creator sets hard at START;
@@ -1032,8 +1038,8 @@ the computer's own agreed value:
 
 A human seat consults no difficulty, and the Survival attacker has no
 economy and runs no planner tasks (DESIGN_SURVIVAL §4.1), so no reader
-reaches it. **Rule (proposed, §15 Q28): an online configuration carries no
-battle-wide difficulty word.** Each added computer's row carries its value
+reaches it. **Rule (§15 Q28, approved 2026-10-02): an online configuration
+carries no battle-wide difficulty word.** Each added computer's row carries its value
 (§8.6), and every reader above takes the seat it concerns. Validating a
 global word against the per-seat values was rejected: retail has no
 battle-wide difficulty to preserve, two computers at different levels admit
@@ -1055,7 +1061,7 @@ M2 admission tests cover a second computer refused under Strict and admitted
 under Modern/Community when seats permit, exhaustion of available seats,
 Deathmatch refusal in every mode, and fixed host attribution. Change only
 one seat's difficulty and require a configuration mismatch; under the
-proposed rule above (Q28), a configuration carrying a battle-wide difficulty
+rule above (Q28), a configuration carrying a battle-wide difficulty
 word is malformed. M5 verifies that every
 reader in the table above uses the configured value of the seat it
 concerns — Classic plan gates, Modern parameters and persona selection,
@@ -1160,7 +1166,7 @@ Every `HumanCommandKind` falls into one of four classes:
 | `Order`, `Stop`, `SelfDestruct`, `Stance`, `Cloak` | Read the selection when no units are given; `Stance` and `Cloak` always do. | **Seat commands**, always with explicit units. |
 | `Activation`, `MobileBuild`, `FactoryBuild`, `CancelProduction`, `Stockpile`, `CancelQueuedMove`, `CommunityKickout`, `CommunityOrderDrag` | Explicit units owned by the local owner; the two Community commands also match a publication identity, and the order drag runs the viewer's known-site gate. | **Seat commands**; references by handle and allocation serial (§7.2), the known-site gate on the seat's perspective. |
 | `BuilderOptions` | Player state, live mid-battle. The payload names its owner, which is checked against the local owner. | **Seat command**; the owner field leaves the payload (§7.2). |
-| `Give` | `+Give p n metal`, open in every session kind and with no alliance test: a transfer from the issuing machine's own/controlling slot (the slot `Control` changes, not the viewing slot) to seat `p` through the sharing transfer, the typed integer converted to single precision `[07 R-CAM-01 §6]`. A negative amount passes every gate of that transfer, raising the source's stock and lowering the recipient's production slot `[05 R-SHARE-01 §2]`. The single-player source is resolved at drain time. | **Seat command** whose source is the issuing seat. **Nanolathe online policy (§15 Q8, every mode):** a positive whole amount within that producer's range is ordinary resource sharing, as in retail. Any other amount — zero, negative, non-finite, not a whole number, or outside the signed 32-bit range of the only producer (§7.4.1) — is rejected at the validation boundary unless the room's cheat permission is on, in which case the signed retail transfer applies to any amount that producer can generate (that range under the permission is proposed, §15 Q28). Without this rule any seat could take another seat's resources with every replica agreeing. Single-player keeps the retail behavior, negative amounts included. |
+| `Give` | `+Give p n metal`, open in every session kind and with no alliance test: a transfer from the issuing machine's own/controlling slot (the slot `Control` changes, not the viewing slot) to seat `p` through the sharing transfer, the typed integer converted to single precision `[07 R-CAM-01 §6]`. A negative amount passes every gate of that transfer, raising the source's stock and lowering the recipient's production slot `[05 R-SHARE-01 §2]`. The single-player source is resolved at drain time. | **Seat command** whose source is the issuing seat. **Nanolathe online policy (§15 Q8, every mode):** a positive whole amount within that producer's range is ordinary resource sharing, as in retail. Any other amount — zero, negative, non-finite, not a whole number, or outside the signed 32-bit range of the only producer (§7.4.1) — is rejected at the validation boundary unless the room's cheat permission is on, in which case the signed retail transfer applies to any amount that producer can generate (that range under the permission is §15 Q28, approved 2026-10-02). Without this rule any seat could take another seat's resources with every replica agreeing. Single-player keeps the retail behavior, negative amounts included. |
 | `SetResource` | `+NoMetal p n` and `+NoEnergy p n`, also open in every session kind, write any player's stock `[07 R-CAM-01 §6]`. In retail multiplayer a write to another player's stock lasted only until that player's next economy snapshot overwrote it `[08 "Economy and integrity checks"]`. | **Seat command limited to the issuing seat's own stock and gated by the online cheat permission.** This authorization policy applies in every online gameplay mode, including Strict 3.1 (§15 Q8); it is Nanolathe's and not a claim about retail. |
 | `SetLogo` | `+Logo n p` sets any seat's insignia `[07 R-CAM-01 §6]` by writing the player record's logo, which saves and result rows carry. | **Local**: a presentation override on the issuing client. The record keeps its configured logo. |
 | *(new)* share toggles and thresholds, the share screen's gifts | `+ShareMetal`, `+ShareEnergy`, `+ShareMapping`, `+ShareRadar`, `+ShareAll`, `+SetShareMetal`, `+SetShareEnergy` are network-only; each toggle flips the issuing player's own option, clear at the start `[07 R-CAM-01 §6]` `[05 R-SHARE-01 §3]`. The share screen is `[05 R-SHARE-01 §5]`; declarations have their own row below. Retail's receiver does not check that a share names the player that sent it `[05 R-SHARE-01 §4]`. | **New seat commands** acting on the issuing seat; the relay's seat stamp is the source (§7.2). The share options are per-seat battle state inside the digest (§9.1), not agreed configuration. |
@@ -1315,7 +1321,7 @@ session or replay header, never by that byte or another payload field.
 | `ref` | Handle `u16`, then allocation serial `u64`. Both zero is null; exactly one zero is invalid. Non-null references have handle 1..65535 and serial 1..MaxUint64. |
 | `actors` | Count `u16`, then that many non-null `ref` values in captured order. At most the agreed per-player unit limit; duplicate references or repeated handles are invalid. Empty means no actors, never implicit selection. |
 | `key` | Byte length `u16`, then 1..255 bytes of the canonical content key returned by `content.CanonicalKey`, with no NUL. Preserve bytes above ASCII literally, as that function does; keys need not be UTF-8. Encode canonical keys; refuse noncanonical input on decode. An explicitly optional key permits zero length. This length ceiling is protocol admission policy: reject content whose command-addressable keys exceed it before ready. |
-| `amount` | Four little-endian bytes of IEEE binary32. Online: finite, signed, and positive zero only (the encoder canonicalizes negative zero). Per kind, online `Give` narrows this further: without the room's cheat permission the amount must be a whole number from 1 to 2^31 (2,147,483,648), the positive values its only producer can generate — the typed signed 32-bit integer converted to single precision `[07 R-CAM-01 §6]`, whose largest value rounds to 2^31. With the cheat permission it may be any whole number from −2^31 to 2^31, zero included, and the signed transfer applies `[05 R-SHARE-01 §2]` (§7.1, §15 Q8); a value no producer can generate — not finite or not whole — is rejected in every online room (both proposed, §15 Q28). Single-player replay: preserve all 32 bits, including the existing local input's exceptional values. Never round through decimal or integer amounts. |
+| `amount` | Four little-endian bytes of IEEE binary32. Online: finite, signed, and positive zero only (the encoder canonicalizes negative zero). Per kind, online `Give` narrows this further: without the room's cheat permission the amount must be a whole number from 1 to 2^31 (2,147,483,648), the positive values its only producer can generate — the typed signed 32-bit integer converted to single precision `[07 R-CAM-01 §6]`, whose largest value rounds to 2^31. With the cheat permission it may be any whole number from −2^31 to 2^31, zero included, and the signed transfer applies `[05 R-SHARE-01 §2]` (§7.1, §15 Q8); a value no producer can generate — not finite or not whole — is rejected in every online room (both §15 Q28, approved 2026-10-02). Single-player replay: preserve all 32 bits, including the existing local input's exceptional values. Never round through decimal or integer amounts. |
 | `position` | `point`, InterfaceType `u8` (0 left, 1 right), HasFeature `bool`. The latter records the captured contextual feature intent. |
 
 `ResolvePos.IsWreck` and `FeatureResurrectable` have producers but no
@@ -1344,7 +1350,7 @@ The context-only codec checks the absolute 3276-actor ceiling; receiver
 admission checks the smaller agreed unit limit and, online, the work limits
 below before dispatch.
 
-**Per-command work (proposed, §15 Q28).** The representation ceilings do
+**Per-command work (§15 Q28, approved 2026-10-02).** The representation ceilings do
 not bound the work one command asks of a tick. The area applier
 (`applyHumanOrderBatch`, `internal/session/commands.go`) visits every actor
 for every entry, and each visit can push one order node, while one unit's
@@ -1433,7 +1439,7 @@ above (`[]pool.UnitRef` for actors, `numeric.Fixed` for fixed values).
 | 19 | SetResource / S, cheat | Resource `u8` (0 metal, 1 energy), Amount `amount`; replay adds Player `u8` 0..9 **before** Resource |
 | 20 | SetLogo / R | Player `u8` 0..9, Logo `u8` 0..255; online is a local override only |
 | 21 | View / D, cheat | Player `u8` 0..9 |
-| 22 | Give / S; cheat for any amount but a positive whole one | Player `u8` 0..9 (recipient), Resource `u8` (0 metal, 1 energy), Amount `amount` with `Give`'s per-kind bound (§7.4.1; the range under the cheat permission is proposed, §15 Q28) |
+| 22 | Give / S; cheat for any amount but a positive whole one | Player `u8` 0..9 (recipient), Resource `u8` (0 metal, 1 energy), Amount `amount` with `Give`'s per-kind bound (§7.4.1; the range under the cheat permission is §15 Q28) |
 | 23 | MakeSelectable / S, cheat | No fields |
 | 24 | Visibility / D, cheat | ToggleMask `u8` 0..7, ClearMask `u8` 0..7; overlapping bits retain toggle-then-clear semantics |
 | 25 | DoubleShot / D, cheat | No fields; toggles the issuing seat's own gate (§6.3 "Machine option bits") |
@@ -1629,8 +1635,8 @@ policies that constrain its participating clients:
 1. **The skirmish configuration**, `session.SkirmishConfig`
    (`internal/session/skirmish.go`): map; the seat rows (nickname,
    controller, side, colour, ally group, starting metal and energy, Classic or
-   Modern); difficulty, which online is each computer row's own and, as
-   proposed, never a battle-wide word (§6.6, §8.6, §15 Q28); start-location
+   Modern); difficulty, which online is each computer row's own and never
+   a battle-wide word (§6.6, §8.6, §15 Q28); start-location
    mode; commander-death mode; mapping, line of sight and its type; unit
    limit; Survival options. The relay fills the two seed fields (§8.3).
 2. **The match selection** of DESIGN_MODS_MUTATORS §3 — the mod's id,
@@ -1832,7 +1838,7 @@ new version, even if its Go zero value would appear harmless.
 | 2. RuleName, RuleBase | `key`, then `u8` (1 Strict 3.1, 2 Modern, 3 Community 3.9). Custom named sets use their registered base; resolve through the existing registry, reject unknown names or disagreement rather than normalizing an unknown name to Modern. |
 | 3. MapName, MapSchema | Canonical logical map `text(1024)`, selected schema `u32`. Selection is resolved by the existing map-entry code, not a client-local rescan at composition. |
 | 4. NumPlayers, Players | `u8` 2..10, then exactly that many rows in slot order (row format below). Clear rows beyond this count. At least one human; watcher admission requires WatchingAllowed. Survival keeps its attacker-last and survivor-alliance invariants and permits multiple human survivors; do not import the single-player convenience constructor's human/computer menu layout into online admission. |
-| 5. Location, CommanderDeath, Mapping, LineOfSight, LOSType | Five `u8`: location 0 randomized/1 identity; commander-death 0..2; the last three 0..1. There is no battle-wide difficulty word (proposed, §15 Q28): each added computer's row carries its own difficulty (row field 2), and every reader of today's global word takes the computer seat it concerns (§6.6). The single-player `SkirmishConfig.Difficulty` is not encoded, and composition must not read it for an admitted online battle. |
+| 5. Location, CommanderDeath, Mapping, LineOfSight, LOSType | Five `u8`: location 0 randomized/1 identity; commander-death 0..2; the last three 0..1. There is no battle-wide difficulty word (§15 Q28): each added computer's row carries its own difficulty (row field 2), and every reader of today's global word takes the computer seat it concerns (§6.6). The single-player `SkirmishConfig.Difficulty` is not encoded, and composition must not read it for an admitted online battle. |
 | 6. UnitLimit, SimulationSeed, CRTSeed | `u16` 20..3276, then two `u32`. The effective Community unit-limit override has already been applied. Seeds are explicit, including zero if supplied; composition uses the existing seed constructors. |
 | 7. Survival | Pace `u8` (0 normal, 1 relaxed, 2 relentless), NoAir `bool`, NoNaval `bool`. All zero for SessionKind=1; no redundant Enabled bit. |
 | 8. Mod | ID `text(255)`, Version `text(255)`, Archive `digest`. All empty/zero for base content; a selected mod requires all three. These are public mod identities, not local archive paths. |
@@ -1842,7 +1848,7 @@ new version, even if its Go zero value would appear harmless.
 | 12. Unit restrictions | At most 65535 records `{DefinitionID u16, Unit key, Limit u8}` in ascending nonzero definition-ID order; limit 0..100. Resolve wacky/norestrict/default behavior through the researched restriction contract before freezing. Omitted means unrestricted, not zero. Verify each key against that immutable record, preserving duplicate-name identities; reject duplicate IDs and ineligible definitions. Enforcement remains after the first networked release (Q16); until then only the implemented baseline restriction selection is admissible, never silently ignore an encoded choice. |
 | 13. Permissions | CheatsAllowed `bool`, WatchingAllowed `bool`. Neither local developer state nor interface preferences add permissions. GameClosed is room admission and excluded from battle identity. |
 | 14. View | Player, Spectator, Replay view records, each `{MinimumScale u16, MaximumScale u16, FullMap bool}`; 64 ≤ minimum ≤ maximum ≤ 2048 in existing 1/1024 zoom units. Native-no-zoom-out uses minimum 1024 and FullMap=false. Enforce camera's map-dependent feasibility separately in M6; ordinary minimap is unaffected. |
-| 15. Online policies | Policy revision `u16` =1, Scheduling `u8` =1 (casual earliest-unsealed tick), Pacing `u8` =1 (normal speed/no pause), Drop `u8` =1, Audience `u8` =1 (§11.4). Drop policy 1 is: retain a seat out of play idle, allow a removal vote once it has been out of play for a cumulative RejoinGraceMilliseconds, and on a passed vote apply the mode's final-removal rule (§11.1); its vote window, cooldown and other proposed details are fixed protocol values of policy 1, not configuration fields (§15 Q28). Explicit RejoinGraceMilliseconds `u32`, never a removal timer, has three uses (§11.1): the cumulative time a seat must have been out of play — dropped or rejoining — since it was last active before a removal vote may be called against it; the time an admitted rejoin has to complete before the seat returns to the drop state (proposed); and the wait before a battle with no active playing human ends without a result (proposed). Then SpectatorDelayMilliseconds `u32`, ReplayReleaseDelayMilliseconds `u32`. No implicit timeout is invented here: the room must supply these values before ready; M6 validates service bounds and enforces them. Competitive or alternative policies are unsupported. |
+| 15. Online policies | Policy revision `u16` =1, Scheduling `u8` =1 (casual earliest-unsealed tick), Pacing `u8` =1 (normal speed/no pause), Drop `u8` =1, Audience `u8` =1 (§11.4). Drop policy 1 is: retain a seat out of play idle, allow a removal vote once it has been out of play for a cumulative RejoinGraceMilliseconds, and on a passed vote apply the mode's final-removal rule (§11.1); its vote window, cooldown and other details are fixed protocol values of policy 1, not configuration fields (§15 Q28). Explicit RejoinGraceMilliseconds `u32`, never a removal timer, has three uses (§11.1): the cumulative time a seat must have been out of play — dropped or rejoining — since it was last active before a removal vote may be called against it; the time an admitted rejoin has to complete before the seat returns to the drop state; and the wait before a battle with no active playing human ends without a result (the last two §15 Q28). Then SpectatorDelayMilliseconds `u32`, ReplayReleaseDelayMilliseconds `u32`. No implicit timeout is invented here: the room must supply these values before ready; M6 validates service bounds and enforces them. Competitive or alternative policies are unsupported. |
 
 Each player row is positional:
 
@@ -1857,7 +1863,7 @@ Each player row is positional:
    not credentials. Others use zero. Added computers have HostSeat 0..9
    naming an initially human row, ComputerKind 0 Classic/1 Modern, and
    difficulty 0..2, the only difficulty an online battle has under the
-   proposed rule of §6.6 (§15 Q28). Other
+   rule of §6.6 (§15 Q28). Other
    roles use HostSeat=255, ComputerKind=0, Difficulty=0, a required zero
    that no reader consults; the scenario attacker is not an added computer
    counted by Q23. Validate Strict's one-computer cap through the owning RuleSet;
@@ -2248,10 +2254,23 @@ check `[08 R-LEAVE-01 §1]` `[08 R-LEAVE-01 §2]`.
   session closes, from the transport. Supported inference only: closing the
   session destroys the leaver's players and peers then empty its slots,
   hosted computers included, in an order not traced. **A Strict resignation
-  applies the same destruction contract as a voted removal, hosted
-  computers included** (proposed Nanolathe choice, §15 Q28; which retail
-  variant a resignation corresponds to is §19 O23). Modern and Community
-  follow the final-removal policy below.
+  is retail's menu variant as the other machines see it** (§19 O23, decided
+  2026-10-02): the relay-authored resignation event deletes every unit of
+  the resigning seat and, under Strict, of the computer seats it hosts,
+  silently — no `Killed` script, no explosion, no wreck, no kill or loss
+  credit — exactly as a receiver treats a positive-health unit's cause-8
+  death record `[08 R-LEAVE-01 §7]`; a unit whose health is already
+  non-positive at that tick keeps the researched receiver path for it (the
+  `Killed` query, an effect-only explosion and the wreck). The 30000
+  self-damage of the exit variant is not applied. Each seat's record is then
+  cleared as a voted removal clears it (below), with the same freezing of
+  stocks and nothing transferred. Replicas take the seats in the order a
+  voted removal takes them — ascending slot order, the human's own slot in
+  its place — and each seat's units in ascending pool order, the order of
+  the voted removal's sweep `[08 R-LEAVE-01 §4]`; retail's order for the
+  menu variant is only the Supported inference above, so this is the
+  protocol's order, not a researched one. Modern and Community follow the
+  final-removal policy below.
 - **A reconnectable drop** is the state of a seat that has no connection in
   play: its connection was lost or closed, the desync policy took it out of
   play (§9.3), or it made no progress past M6's lag bound (§4.4). A seat
@@ -2259,7 +2278,7 @@ check `[08 R-LEAVE-01 §1]` `[08 R-LEAVE-01 §2]`.
   admitted but whose rejoin (§11.2) has not completed is **rejoining**, and
   is still out of play; a rejoin that has not completed within
   `RejoinGraceMilliseconds` of its admitted resume returns the seat to the
-  drop state (proposed, §15 Q28). An out-of-play seat and its units are
+  drop state (§15 Q28). An out-of-play seat and its units are
   retained idle in every mode and issue no new commands, and the computer
   seats it hosts keep running in every mode, because every client runs every
   computer and the reconnectable window, with its rejoin, is itself the
@@ -2278,8 +2297,8 @@ check `[08 R-LEAVE-01 §1]` `[08 R-LEAVE-01 §2]`.
   script-selected wreck. Stocks freeze when the record is removed;
   resources, scores, identities and the unit-limit slice are not gifted or
   redistributed `[08 R-LEAVE-01 §3]` `[08 R-LEAVE-01 §4]` `[08 R-LEAVE-01 §5]`.
-  A Strict resignation applies the same contract by the proposed choice
-  above.
+  A Strict resignation clears the record the same way but deletes the units
+  silently, with no self-destruct effect (Resign bullet, §19 O23).
 - **Computer seats** follow their human host's final removal by mode
   (§6.6, Q26). When a remaining machine removes a departed human, retail
   removes every slot carrying that human's machine number — its hosted
@@ -2289,16 +2308,17 @@ check `[08 R-LEAVE-01 §1]` `[08 R-LEAVE-01 §2]`.
   its hosted computer seats with it, the human's own slot taking its place
   in ascending slot order, each by the destruction contract above: for a
   voted removal this is retail's peer removal of the machine group; for a
-  resignation it is the proposed choice of the Resign bullet. Modern and
-  Community keep them running with the host's last perspective, under the
-  policy below. Defeat alone removes no computer in any mode.
+  resignation it is the silent deletion of the Resign bullet (§19 O23).
+  Modern and Community keep them running with the host's perspective, which
+  keeps updating, under the policy below. Defeat alone removes no computer
+  in any mode.
 - **The hosting client** of an embedded relay is the relay: losing it ends
   the battle for everyone without a result. This is an infrastructure limit;
   retail migrates its host flag and continues a launched battle
   `[08 R-LEAVE-01 §8]`. A hosted relay has no such player seat.
 
 **Nanolathe online policy — the removal vote (approved 2026-10-02, §15
-Q27; the details marked proposed are §15 Q28).** Retail removes a silent
+Q27; its details §15 Q28, approved the same day).** Retail removes a silent
 machine through its time-out dialog: any machine's `REJECT` removes it at
 once, and the dialog removes it by itself at the time-out plus 120 seconds;
 when the silent slots span two or more machines the dialog closes instead,
@@ -2320,11 +2340,11 @@ the dialog and the host's reject with a vote in every gameplay mode:
 - **Caller.** Any active human seat that is still playing — not a watcher,
   not a spectator, not the subject.
 - **Electorate and threshold.** The active human seats still playing,
-  excluding the subject, fixed when the vote opens (proposed). The vote
+  excluding the subject, fixed when the vote opens. The vote
   passes on a strict majority of that electorate: a tie fails, and a sole
   remaining eligible seat decides alone. A ballot not cast counts as no.
   The call casts the caller's yes ballot, and each other voter casts at most
-  one ballot, which it cannot change (proposed). "Active" is the relay's own
+  one ballot, which it cannot change. "Active" is the relay's own
   fact; "still playing" is the agreed summary of §12.2, which may lag by one
   digest interval.
 - **Timing.** A vote may be called only once the subject has been out of
@@ -2332,13 +2352,13 @@ the dialog and the host's reject with a vote in every gameplay mode:
   since it was last active in the battle (§8.6 field 15). Cumulative, so a
   seat that keeps reconnecting without completing a rejoin cannot reset it,
   and a seat the desync policy keeps out of play (§9.3) is covered by the
-  same clock (proposed). Only a completed rejoin (§11.2) cancels an open
-  vote and resets the grace; an admitted resume does neither (proposed). A
+  same clock. Only a completed rejoin (§11.2) cancels an open
+  vote and resets the grace; an admitted resume does neither. A
   vote stays open for **30 seconds** and closes earlier once its outcome can
   no longer change; after a failed or tied vote, another vote against the
   same subject may not be called for **60 seconds**; at most one vote per
-  subject is open at a time (all proposed: Nanolathe protocol values, not
-  retail constants). A refused call is answered with its reason (§12.2
+  subject is open at a time (Nanolathe protocol values, not retail
+  constants; all §15 Q28). A refused call is answered with its reason (§12.2
   "Refused").
 - **Mechanism.** Calls, ballots and results are relay and lobby messages
   (§12.2). They are never simulation commands and never enter the replay's
@@ -2348,7 +2368,7 @@ the dialog and the host's reject with a vote in every gameplay mode:
   applies it identically (§4.2 "Relay-authored entries"). An embedded relay
   runs the same tally code as a hosted one; its hosting client is trusted
   with the tally as §13 states.
-- **A battle with nobody left to vote** (proposed, §15 Q28). When no human
+- **A battle with nobody left to vote** (§15 Q28). When no human
   seat that is still playing is active, the relay holds its grants. If none
   has become active again once `RejoinGraceMilliseconds` has passed since
   the last one left play, the relay ends the battle without a result, as it
@@ -2361,9 +2381,15 @@ hosted computers Q26, approved 2026-10-02).** The approved departure is
 bounded to a finally removed human seat in a multiplayer battle. Strict 3.1
 keeps the machine-group removal above. Modern and Community retain the
 removed seat's units under that owner, idle, with no new commands, and keep
-the computer seats it hosts running with its last perspective. What "last
-perspective" means operationally, and whether a removed seat still counts in
-the end-condition sweeps, are open (§15 Q29). Retention transfers neither
+the computer seats it hosts running with its perspective. That perspective
+is live, not a snapshot (§15 Q29, decided 2026-10-02): the removed human's
+own per-seat block — its sensor pass, temporary sight and the other per-seat
+work of §6.3 — keeps running for its seat exactly as while it was only out
+of play, so the picture its computers borrow goes on updating; only its
+end-condition evaluation stops, because a finally removed seat is absent
+from the end-condition sweeps in every mode (§6.5). Its retained units are
+live and can be destroyed, but destroying them is not required for any
+survivor's victory. Retention transfers neither
 units nor stocks to another player and adds no RNG draw of its own. Ordinary
 unit simulation and economy remain under their existing rules.
 Single-player, commander defeat and reconnectable absence do not select this
@@ -2372,7 +2398,7 @@ happens, in every mode.
 
 Select the answer through the existing central `gameplay.Mode` and
 `session.RuleSet` composition, following DESIGN_GAMEPLAY_RULES §9. **One
-answer covers both halves (proposed implementation choice, §15 Q28).**
+answer covers both halves (§15 Q28, approved 2026-10-02).**
 Retail's machine-group removal is a single rule `[08 R-LEAVE-01 §2]`, so the
 decision can be one choice between the Strict removal — destroy the human's
 units and remove its hosted computer seats with theirs — and the Modern
@@ -2398,11 +2424,16 @@ and preserve single-player fingerprints. For hosted computers:
   computers in ascending slot order, each with the researched destruction,
   loss-stat, elimination-line and RNG effects, and a later removal of an
   already removed seat changes nothing;
-- under Strict, a resignation applies that same contract to the human and
-  its hosted computers; this tests the proposed Nanolathe choice of Q28,
-  not a researched retail resignation;
+- under Strict, a resignation clears the human and its hosted computers in
+  that same order but deletes their units silently: no `Killed` script,
+  explosion, wreck, credit or self-destruct draw for a positive-health unit,
+  the researched receiver path for a unit already at non-positive health,
+  and no self-damage (§19 O23);
 - under Modern and Community, either removal leaves its computers running
-  and issuing commands with the host's last perspective, as Q29 defines it.
+  and issuing commands with the host's perspective, which keeps updating
+  because the removed seat's per-seat block still runs; the removed seat is
+  absent from the end-condition sweeps, so a survivor wins without
+  destroying its retained units (Q29).
 
 For the vote: one that passes, one that fails, a tie (which fails), one
 cancelled by the subject's completed rejoin, one that survives an admitted
@@ -2459,7 +2490,7 @@ admitted only after that transition; one sent earlier is refused with the
 expected next sequence (§12.2 "Refused"). The transition is the completed
 rejoin of §11.1: only it cancels an open removal vote and resets the seat's
 grace, and a rejoin that has not completed within `RejoinGraceMilliseconds`
-of its admitted resume returns the seat to the drop state (proposed, §15
+of its admitted resume returns the seat to the drop state (§15
 Q28). Authentication, takeover, deduplication and checkpoint handoff are
 part of reconnect, not later account features.
 
@@ -2578,7 +2609,7 @@ Relay to client:
 | Prepare start | frozen configuration, its version/hash, seed pair, seat assignment and required readiness participants |
 | Start | confirmation of the acknowledged configuration and agreed initial checkpoint; permits the first grant |
 | Accepted | client sequence and immutable stream position; a duplicate gets no second receipt (§4.2) |
-| Refused | proposed (§15 Q28): the refused message's kind and reason. For a command — a gap in its sequence, or a command sent before the rejoin membership transition — the expected next sequence (§4.2, §11.2). For a removal call — the cumulative grace not yet reached, the subject's cooldown still running, a subject that is active, or a caller that is not an active human seat still playing (§11.1) |
+| Refused | §15 Q28: the refused message's kind and reason. For a command — a gap in its sequence, or a command sent before the rejoin membership transition — the expected next sequence (§4.2, §11.2). For a removal call — the cumulative grace not yet reached, the subject's cooldown still running, a subject that is active, or a caller that is not an active human seat still playing (§11.1) |
 | Resumed | the seat's last accepted client sequence and its stream position, the new connection epoch, and the stream position from which delivery continues (§11.2) |
 | Frame | ordered stream entries, optionally with a grant sealing a complete prefix; notes and receipts can be delivered without granting ticks |
 | Desync | checkpoint tick, sub-digest and tick-ring request, last sealed grant, and the room policy's outcome for each seat (§9.3) |
@@ -2739,7 +2770,7 @@ name other players in removal and player-record payloads
 | Seeing through fog or bypassing match view restrictions | Every lockstep client holds the whole state, whether its source is open or closed. Honest clients enforce §8.4; hashes cannot prove camera compliance. Moderation/reports are limited measures; withholding hidden state needs §12.6's different delivery architecture. |
 | Ordering attacks on units one cannot see | Casual behavior and the required competitive admission contract are distinct (§7.2, §15 Q9). |
 | Automation, macros | Not preventable; community moderation. |
-| Stalling, lag switching | Pacing and the waiting-for-player state while a seat is active; a connected seat that makes no progress past M6's bound is moved into the drop state (proposed), and once a seat is out of play the grants go on without it and the others may vote on its final removal after the grace (§4.4, §11.1). |
+| Stalling, lag switching | Pacing and the waiting-for-player state while a seat is active; a connected seat that makes no progress past M6's bound is moved into the drop state (§15 Q28), and once a seat is out of play the grants go on without it and the others may vote on its final removal after the grace (§4.4, §11.1). |
 | Attacking an opponent's connection | Hosted relays avoid publishing player addresses. An embedded/direct host necessarily exposes its listening address; hosting remains a service attack surface. |
 | Flooding the relay | Per-connection rate and size limits; tokens on hosted relays. |
 | Forged results or replays | Casual streams are diagnostic records, not independently certified results. Ranked reporting requires the authenticated replayer/result service and a declared archive authentication policy (§12.6). |
@@ -2810,11 +2841,11 @@ admit a relay connection (§15 Q1).
 The maintainer decided the original questions on 2026-10-01 and approved
 the follow-up policies Q22–Q25 on 2026-10-02 after the second research round.
 Later on 2026-10-02 the maintainer decided Q26 and Q27, which revise Q4 and
-Q6, and the online `Give` correction was recorded under Q8. Q28 is not a
-decision: it lists the details this document proposes, each marked
-"proposed" where it is used, until the maintainer approves or changes them.
-Q29 is open and needs a maintainer decision.
-A later decision or revision is recorded here first.
+Q6, and the online `Give` correction was recorded under Q8. Q28 collects
+the protocol and design details this document had proposed on its own; the
+maintainer approved them as written later that day ("looks reasonable for
+now"), decided Q29, and settled §19 O23, which replaces Q28's resignation
+item. A later decision or revision is recorded here first.
 Adoption authorizes §16 in order and no gameplay departure beyond those named
 here. M1 implementation is expressly approved, with Go's BSD-licensed
 pure-Go trigonometric routines adapted unfused and credited in `NOTICE.md`.
@@ -2825,11 +2856,11 @@ The integer-root fidelity audit O22 is authorized separately after M1.
 | Q1 | Adopt relayed deterministic lockstep, move networking, replay and the lobby out of ARCHITECTURE §1 "Deliberately out of scope", and widen DESIGN_MODS_MUTATORS D5 so the client may also connect to a relay? | Yes (§2, §4, §14). |
 | Q2 | Is multiplayer a mode-independent session kind, available under every gameplay mode, Strict 3.1 included, like Survival and the Modern AI? | Yes, with owner-machine equivalence and the online command-authorization exception of Q8; the agent instructions and the invariants were amended with this decision. Session and view policy cannot introduce a second gameplay registry: mechanical departures still use `session.RuleSet`. Single-player behavior is preserved except the declared M1/M2 changes. |
 | Q3 | Is "Strict 3.1 online" defined by owner-machine equivalence (§6)? | Yes. Retail has no single multiplayer outcome to match (§3.2), and this is the reading that keeps every single-seat battle bit-identical. |
-| Q4 | Which seat lends each computer seat its perspective? | The human that added it, recorded and fixed in configuration, matching the established retail host association (§6.6). Test that human becoming a watcher. **Revised 2026-10-02 by Q26:** while that human is out of play its computers keep running with its perspective in every mode; at its final removal Strict removes them with it and Modern/Community keep them running with its last perspective, whose operational meaning is open (Q29, §11.1). A Modern policy using the computer's own sensor perspective requires a separate researched gameplay contract. |
+| Q4 | Which seat lends each computer seat its perspective? | The human that added it, recorded and fixed in configuration, matching the established retail host association (§6.6). Test that human becoming a watcher. **Revised 2026-10-02 by Q26:** while that human is out of play its computers keep running with its perspective in every mode; at its final removal Strict removes them with it and Modern/Community keep them running with its perspective, which keeps updating because the removed seat's per-seat block still runs (Q29, §11.1). A Modern policy using the computer's own sensor perspective requires a separate researched gameplay contract. |
 | Q5 | Who may pause and change speed? | Nobody in the first releases: normal speed 10, thirty ticks a second, no pause or speed change. Relay grants still slow or hold for lag or disconnect. Retail authority is established: watchers may pause, only non-watchers may change speed, and receivers trust either from an admitted peer. Any later policy is decided before enabling §4.4. |
-| Q6 | What happens to a dropped seat's units? | **Revised 2026-10-01:** retain the seat idle while rejoin is possible. On final removal Strict 3.1 destroys that seat's units; Modern and Community keep them idle. This is the Nanolathe Modern policy of §11.1, selected through `gameplay.Mode` and `session.RuleSet`. **Revised 2026-10-02 (Q26, Q27):** drop policy 1 is: retain the seat out of play idle, allow a removal vote once it has been out of play for the agreed grace (measured cumulatively, as proposed in Q28), then apply the mode's final-removal rule. No timer removes a seat. Strict's final removal of a human also removes its hosted computers in ascending slot order — retail's peer removal for a voted removal, a proposed choice for a resignation (Q28); Modern/Community keep them running. Selecting both halves by one rule answer is a proposed implementation choice (Q28, §11.1). |
+| Q6 | What happens to a dropped seat's units? | **Revised 2026-10-01:** retain the seat idle while rejoin is possible. On final removal Strict 3.1 destroys that seat's units; Modern and Community keep them idle. This is the Nanolathe Modern policy of §11.1, selected through `gameplay.Mode` and `session.RuleSet`. **Revised 2026-10-02 (Q26, Q27):** drop policy 1 is: retain the seat out of play idle, allow a removal vote once it has been out of play for the agreed grace (measured cumulatively, Q28), then apply the mode's final-removal rule. No timer removes a seat. Strict's final removal of a human also removes its hosted computers in ascending slot order — retail's peer removal for a voted removal, the silent deletion of retail's menu quit for a resignation (§19 O23); Modern/Community keep them running. One rule answer selects both halves (Q28, §11.1). |
 | Q7 | Order of delivery: one simulation on every host, commands and identity, the digest, replays, one world per player, LAN co-op with a room-code relay, the public service, snapshots, then ranked? | Yes (§16). The canonical writer precedes digest-verified replay; exact restore has its own milestone and may move earlier if fast-forward rejoin misses its budget. |
-| Q8 | Are cheat and debug commands available online? | Only with the agreed cheat permission, enforced on every receiving simulation in every online gameplay mode; competitive rooms always disable it. This includes the commands retail leaves ungated in every session kind that change the world — own-stock `+NoMetal`/`+NoEnergy`, `+Selectable` and `+LOSType` (§7.1) — and is an explicit Nanolathe online authorization exception, not historical Strict behavior. `+ShootAll`, when it is implemented, is classified under the same decision. The developer phrase and developer-only commands cannot bypass this permission or expand the allowed stream classes. Single-player permissions remain unchanged. **Recorded 2026-10-02 — online `Give`, Nanolathe online policy in every mode:** retail `+Give` is open in every session kind with no alliance test, and a negative amount reverses the transfer `[07 R-CAM-01 §6]` `[05 R-SHARE-01 §2]`, so an ungated online gift would let any seat take another's resources with every replica agreeing. A positive whole amount within the only producer's range is ordinary resource sharing for every seat — the play the share screen also offers `[05 R-SHARE-01 §5]` — so the cheat gate for world-changing commands does not apply to it. Any other amount is rejected at the validation boundary unless the room's cheat permission is on, in which case the signed retail transfer applies to every amount that producer can generate — whole numbers from −2^31 to 2^31, zero included; an amount no producer generates (non-finite, not whole, or beyond that range) stays rejected (proposed, Q28). Single-player keeps the retail behavior, negative amounts included; its source is the own/controlling slot at drain time (§7.1, §7.4.1). `SetResource` stays cheat-gated. |
+| Q8 | Are cheat and debug commands available online? | Only with the agreed cheat permission, enforced on every receiving simulation in every online gameplay mode; competitive rooms always disable it. This includes the commands retail leaves ungated in every session kind that change the world — own-stock `+NoMetal`/`+NoEnergy`, `+Selectable` and `+LOSType` (§7.1) — and is an explicit Nanolathe online authorization exception, not historical Strict behavior. `+ShootAll`, when it is implemented, is classified under the same decision. The developer phrase and developer-only commands cannot bypass this permission or expand the allowed stream classes. Single-player permissions remain unchanged. **Recorded 2026-10-02 — online `Give`, Nanolathe online policy in every mode:** retail `+Give` is open in every session kind with no alliance test, and a negative amount reverses the transfer `[07 R-CAM-01 §6]` `[05 R-SHARE-01 §2]`, so an ungated online gift would let any seat take another's resources with every replica agreeing. A positive whole amount within the only producer's range is ordinary resource sharing for every seat — the play the share screen also offers `[05 R-SHARE-01 §5]` — so the cheat gate for world-changing commands does not apply to it. Any other amount is rejected at the validation boundary unless the room's cheat permission is on, in which case the signed retail transfer applies to every amount that producer can generate — whole numbers from −2^31 to 2^31, zero included; an amount no producer generates (non-finite, not whole, or beyond that range) stays rejected (Q28, approved 2026-10-02). Single-player keeps the retail behavior, negative amounts included; its source is the own/controlling slot at drain time (§7.1, §7.4.1). `SetResource` stays cheat-gated. |
 | Q9 | Validate attack-target visibility? | Casual retains the researched admission. Ranked admission requires an approved delayed-observation/radar/direct-target contract with tests (§7.2); neither arbitrary client claims nor a current-sight-only check is accepted as the solution. Any new gameplay decision uses its existing owning rule seam. |
 | Q10 | Who runs public relays? | The project runs one, reached by room code; the protocol is open and anyone may run more (§12). |
 | Q11 | Identity: display names only, or accounts? | Display names until ranked play needs accounts. |
@@ -2844,13 +2875,13 @@ The integer-root fidelity audit O22 is authorized separately after M1.
 | Q20 | How are releases, rooms and replays kept compatible? | One simulation build per room, shown in the lobby; a replay or a desync bundle names the release it needs (§8.2, §10). The installer keeps earlier releases on request so that old recordings still play, and no release is published before the cross-architecture and host-kind suites pass on it. |
 | Q21 | May a snapshot rejoin restart the Modern AI's controllers on every client? | Yes (§9.1), subject to the play-test of §19 O21 before M8. The computer players lose their plans at that tick, as they already do across a save and load, in exchange for not requiring exact serialization of every brain. A room that forbids snapshot rejoin never restarts them. |
 | Q22 | One shared alliance matrix or retail's per-machine stale copies? | **Approved 2026-10-02:** one shared directed matrix in every online mode, with row B its transpose. Declarations remain one-way; mutuality and all other victory requirements remain. Shared victory uses consistent third-seat knowledge instead of retail's stale copies (§6.7). |
-| Q23 | Computer-seat cap, difficulty and Deathmatch admission? | **Approved 2026-10-02:** Strict retains one computer per human; Modern/Community allow multiple within available lobby seats. Every computer has explicit agreed difficulty and its fixed human host. Computers remain excluded from Deathmatch in every mode initially. Preserve Classic/Modern difficulty and income semantics; single-player is unchanged (§6.6). An online configuration carries no battle-wide difficulty word; every reader takes the computer seat it concerns (§6.6, §8.6; proposed, Q28). |
+| Q23 | Computer-seat cap, difficulty and Deathmatch admission? | **Approved 2026-10-02:** Strict retains one computer per human; Modern/Community allow multiple within available lobby seats. Every computer has explicit agreed difficulty and its fixed human host. Computers remain excluded from Deathmatch in every mode initially. Preserve Classic/Modern difficulty and income semantics; single-player is unchanged (§6.6). An online configuration carries no battle-wide difficulty word; every reader takes the computer seat it concerns (§6.6, §8.6; Q28, approved 2026-10-02). |
 | Q24 | Respawn/watcher visibility rebuild: preserve retail's erased copies of remote explored history? | **Approved 2026-10-02:** one canonical explored history per player, shared by replicas. Respawn/watcher rebuild affects the entering human's own/hosted-computer perspective and histories, preserving unrelated players' exploration. This applies in every online mode, including Strict; current sight is not merged (§6.7). |
 | Q25 | Apply explored-map sharing on its request tick or reproduce transport-delay timing? | **Approved 2026-10-02:** periodic map shares apply on the request tick in canonical human-seat order; explicit gifts apply on their assigned tick in command-stream order. No transport-delay emulation. Eligibility and the copied data retain their researched contracts (§6.7). |
-| Q26 | When a human seat is finally removed, what happens to the computer seats it hosts? | **Approved 2026-10-02.** When a remaining retail machine removes a departed human, it removes every slot carrying that human's machine number — its hosted computers too — in ascending slot order, each through the peer-removal path that destroys its units `[08 R-LEAVE-01 §2]` `[08 R-LEAVE-01 §3]`–`[08 R-LEAVE-01 §5]` `[08 R-LEAVE-01 §9]`. Strict 3.1 online: at a human's final removal its hosted computer seats are removed with it, in ascending slot order, each by the §11.1 destruction contract — retail's peer removal for a voted removal; for a resignation the contract is a proposed choice (Q28), because retail's leaving machine takes a different path `[08 R-LEAVE-01 §7]` (§19 O23). Modern and Community keep them running with the host's last perspective (its operational meaning is open, Q29), as a Nanolathe Modern policy selected with Q6's unit retention through the existing `gameplay.Mode`/`session.RuleSet` composition; one answer for both is a proposed implementation choice (Q28). In every mode, while the human is only out of play, its computers keep running: every client runs every computer, and the reconnectable window is itself the approved Nanolathe addition (§6.6, §11.1). |
-| Q27 | How is a seat finally removed? | **Approved 2026-10-02.** The maintainer: "triggering final removal was supposed to go through a vote, anybody can trigger unless you think that's unwise." A Nanolathe online policy in every mode, with these rules from the landing owner's recommendation: only a seat in the reconnectable-drop state (disconnected) can be a vote's subject; there is no vote-kick of a connected seat, because a Strict removal destroys units. Any connected human seat still playing may call; the electorate is the connected human seats still playing, excluding the subject; a strict majority passes, a tie fails, a sole eligible seat decides alone, and an uncast ballot counts as no. A vote may be called only after the subject has been absent for at least `RejoinGraceMilliseconds`, and the subject's rejoin cancels it. No timer removes a seat. Votes are relay/lobby messages, never stream entries; the relay tallies and authors the one final-removal event. Resignation is the seat's own immediate final removal with no vote. Q28 lists the proposed refinements: a rejoining seat counts as still absent, absence is measured cumulatively, only a completed rejoin cancels, and the bounds and timings of §11.1. |
-| Q28 | Details this document proposes without an approval | **Proposed 2026-10-02, not approved.** All are Nanolathe protocol or design values, not retail constants. *Removal vote and absence (§11.1, §11.2):* a seat that is rejoining counts as out of play; the grace is the cumulative time out of play — dropped or rejoining — since the seat was last active, so repeated reconnects or a desync-held seat (§9.3) cannot reset it; only a completed rejoin cancels an open vote and resets the grace; a rejoin not completed within `RejoinGraceMilliseconds` of its admitted resume returns the seat to the drop state; a 30-second vote window that closes early once its outcome cannot change; a 60-second cooldown after a failed or tied vote against the same subject; one open vote per subject; the electorate fixed when the vote opens; the call casts the caller's yes ballot and no ballot can be changed; a battle with no active playing human ends without a result once `RejoinGraceMilliseconds` passes with none returned. *Lag (§4.4, O17):* M6's pacing state table sets a bound after which a connected seat that makes no progress enters the drop state. *Protocol (§4.2, §12.2):* the client-sequence rules, which replace the earlier retransmission contract (a repeated sequence returned its original receipt, a conflicting payload was refused), and the Refused message. *Resignation (§11.1, O23):* a Strict resignation applies the same destruction contract as a voted removal, hosted computers included. *Rule seam (§11.1, Q6, Q26):* one `session.RuleSet` answer selects both unit retention and the hosted computers' fate. *Per-command work (§7.4.1):* at most 10,000 area entries and an actor-times-entry product of at most 1,048,576 online. *Online `Give` (§7.1, §7.4.1):* with the cheat permission, admit any whole amount from −2^31 to 2^31 and still reject non-finite or non-whole amounts. *Difficulty (§6.6, §8.1, §8.6):* no battle-wide difficulty word in the online configuration. |
-| Q29 | How does a finally removed seat take part in ending the battle, and what is "the host's last perspective"? | **Open — needs a maintainer decision.** (1) Under Modern and Community a finally removed seat's units are retained idle and remain live, so as written a survivor of a two-seat battle must destroy every one of them to win. Options: (a) a finally removed seat is absent from the end-condition sweeps in every mode, as retail's cleared record is `[08 R-LEAVE-01 §3]` `[08 R-LEAVE-01 §5]`; (b) its units must be destroyed. Under Strict the removal destroys them, so the choice matters chiefly for Modern and Community. (2) By design, a seat that is out of play but not removed blocks victory in every mode until a vote removes it, because its units are live (§6.5). (3) The design cannot derive what "the host's last perspective" means for computers kept running after their human's removal under Modern and Community: whether the removed human's own per-seat block and sensor pass keep running, so the perspective goes on updating, or the perspective is frozen at removal (§6.2, §6.3, §6.6, §11.1). |
+| Q26 | When a human seat is finally removed, what happens to the computer seats it hosts? | **Approved 2026-10-02.** When a remaining retail machine removes a departed human, it removes every slot carrying that human's machine number — its hosted computers too — in ascending slot order, each through the peer-removal path that destroys its units `[08 R-LEAVE-01 §2]` `[08 R-LEAVE-01 §3]`–`[08 R-LEAVE-01 §5]` `[08 R-LEAVE-01 §9]`. Strict 3.1 online: at a human's final removal its hosted computer seats are removed with it, in ascending slot order, each by the §11.1 destruction contract — retail's peer removal for a voted removal; for a resignation it is the silent deletion the other machines perform for retail's menu quit, because the leaving machine itself takes a different path `[08 R-LEAVE-01 §7]` (§19 O23, decided 2026-10-02). Modern and Community keep them running with the host's perspective, which keeps updating (Q29), as a Nanolathe Modern policy selected with Q6's unit retention through the existing `gameplay.Mode`/`session.RuleSet` composition; one answer for both (Q28). In every mode, while the human is only out of play, its computers keep running: every client runs every computer, and the reconnectable window is itself the approved Nanolathe addition (§6.6, §11.1). |
+| Q27 | How is a seat finally removed? | **Approved 2026-10-02.** The maintainer: "triggering final removal was supposed to go through a vote, anybody can trigger unless you think that's unwise." A Nanolathe online policy in every mode, with these rules from the landing owner's recommendation: only a seat in the reconnectable-drop state (disconnected) can be a vote's subject; there is no vote-kick of a connected seat, because a Strict removal destroys units. Any connected human seat still playing may call; the electorate is the connected human seats still playing, excluding the subject; a strict majority passes, a tie fails, a sole eligible seat decides alone, and an uncast ballot counts as no. A vote may be called only after the subject has been absent for at least `RejoinGraceMilliseconds`, and the subject's rejoin cancels it. No timer removes a seat. Votes are relay/lobby messages, never stream entries; the relay tallies and authors the one final-removal event. Resignation is the seat's own immediate final removal with no vote. Q28 records the approved refinements: a rejoining seat counts as still absent, absence is measured cumulatively, only a completed rejoin cancels, and the bounds and timings of §11.1. |
+| Q28 | Details this document proposed on its own | **Approved 2026-10-02** as written, the maintainer: "q28 looks reasonable for now." All are Nanolathe protocol or design values, not retail constants, and may be revised here later. One item is superseded: the *Resignation* entry below was replaced the same day by §19 O23 (a Strict resignation deletes the leaver's units silently, as retail's menu quit does on the other machines, rather than applying the voted-removal contract). *Removal vote and absence (§11.1, §11.2):* a seat that is rejoining counts as out of play; the grace is the cumulative time out of play — dropped or rejoining — since the seat was last active, so repeated reconnects or a desync-held seat (§9.3) cannot reset it; only a completed rejoin cancels an open vote and resets the grace; a rejoin not completed within `RejoinGraceMilliseconds` of its admitted resume returns the seat to the drop state; a 30-second vote window that closes early once its outcome cannot change; a 60-second cooldown after a failed or tied vote against the same subject; one open vote per subject; the electorate fixed when the vote opens; the call casts the caller's yes ballot and no ballot can be changed; a battle with no active playing human ends without a result once `RejoinGraceMilliseconds` passes with none returned. *Lag (§4.4, O17):* M6's pacing state table sets a bound after which a connected seat that makes no progress enters the drop state. *Protocol (§4.2, §12.2):* the client-sequence rules, which replace the earlier retransmission contract (a repeated sequence returned its original receipt, a conflicting payload was refused), and the Refused message. *Resignation (§11.1, O23) — superseded:* the proposal that a Strict resignation apply the voted-removal contract gave way to O23's silent deletion. *Rule seam (§11.1, Q6, Q26):* one `session.RuleSet` answer selects both unit retention and the hosted computers' fate. *Per-command work (§7.4.1):* at most 10,000 area entries and an actor-times-entry product of at most 1,048,576 online. *Online `Give` (§7.1, §7.4.1):* with the cheat permission, admit any whole amount from −2^31 to 2^31 and still reject non-finite or non-whole amounts. *Difficulty (§6.6, §8.1, §8.6):* no battle-wide difficulty word in the online configuration. |
+| Q29 | How does a finally removed seat take part in ending the battle, and what is "the host's last perspective"? | **Decided 2026-10-02**, the maintainer taking the landing owner's recommendation. (1) A finally removed seat is absent from the end-condition sweeps in every mode, as retail's cleared record is `[08 R-LEAVE-01 §3]` `[08 R-LEAVE-01 §5]`. Under Modern and Community its retained idle units stay live and can be destroyed, but no survivor has to destroy them to win (§6.5, §11.1). Under Strict the removal destroys them, so nothing changes there. (2) Unchanged by design: a seat that is out of play but not removed blocks victory in every mode until a vote removes it, because its units are live (§6.5). (3) The perspective its hosted computers borrow under Modern and Community is live, not frozen: the removed human's own per-seat block — sensor pass, temporary sight and the other per-seat work of §6.3 — keeps running for its seat as it did while the seat was only out of play; only its end-condition evaluation stops (§6.6, §11.1). A frozen snapshot was rejected as a second perspective representation nothing else needs. |
 
 ## 16. Delivery plan
 
@@ -3066,6 +3097,44 @@ The final census had 725 live units and 6,218 features, with seven burning,
 eleven active builds and 53 deaths. All existing fingerprint locks remain
 required by the landing gates; no expected fingerprint was changed for U1.
 
+**U4 frozen simulation content, 2026-10-02.** Skirmish and Survival entry
+capture their sources before the catalog compiles
+(`content.CaptureSimulationSources`), compile, resolve the map and prepare
+rules and mutators through the capture, then freeze
+(`content.FreezeSimulationInputs`): every admitted unit's program and model
+— units never built included — the animation table, the map's OTA and TNT,
+the AI profile and the extension inputs. The sealed view answers a lookup it
+never captured as a defined miss and records it (`UncapturedLookups`), so a
+file edited during a battle cannot reach it; the next battle sees the edit.
+The §8.8 content API exists as written, plus the family and presence
+constants, `ErrSimulationInputNotCaptured`, a separate `Provenance()`
+accessor and the audit list. Composition binds each unit's model and program
+from the frozen inputs; a battle composed without them (campaign, restore,
+hand-built fixtures) reads each model once per battle through a cache keyed
+by provider entry **and** content digest, and every battle gets its own COB
+loader, because the old process-wide caches were keyed by name or path alone
+(M2-C8). `Catalog.Hash` and `Catalog.Manifest` are unchanged through a
+capture, and all sixteen fingerprint locks hold with their constants. Battle
+entry on "ashap plateau" costs about 33 ms more on the game's normal path
+(602 → 636 ms) and about 53 ms more with a supplied catalog (267 → 320 ms),
+chiefly parsing every admitted unit model once; a live battle holds 8–21 MiB
+of captured bytes, animation-bank bytes excluded. Readings the unit made,
+recorded in its code comments: a manifest entry carries its fallback key only
+in presence state 2 (§8.7's "empty for states 0/1"); the catalog family
+digests only what the simulation reads (sounds, aliases, other maps, the
+profile table, the model-name index and `Catalog.Hash`, which mixes in
+provider paths, are left out); unit models are digested as the parsed
+hierarchy plus derived height, feature and weapon models as authored bytes,
+because they are only checked for loadability; the selected map's header,
+OTA and TNT bytes and schema index are the map family, a translated-name OTA
+retry is presence 2; a supplied `SimArt` is validated file by file against
+the capture and, under the single-player adapter, a stale one is recompiled
+rather than refused; audio keeps the live mount. Not done: campaign missions
+and restores are not frozen (their entry files were outside the unit), the
+session holds no field for the inputs (recovered from the unit world's COB
+source), and `Catalog.Clone()` drops `Limits`, an existing defect for the
+catalog's owner.
+
 M2 makes the command boundary explicit and the battle inputs identifiable.
 It does not enable a network battle: perspectives, multiplayer sharing,
 kind-3 lifecycle work and the multi-seat harness still belong to M5. A
@@ -3082,16 +3151,14 @@ their own viewer state, and that substitution cannot implement §6.
 | Q22 alliance representation — decided | Shared directed matrix and declaration checks (§6.7) | M5 application and multi-seat victory tests |
 | Q23 computer seats — decided | Fixed host attribution, mode-selected cap, per-seat difficulty and initial Deathmatch exclusion (§6.6) | Exact field encoding in U0; admission in M2 and per-seat consumers in M5 |
 | Q24 history scope; Q25 share timing — decided | Canonical per-player history and request-tick sharing (§6.7) | M5 history storage/reset and sharing application |
-| Q26 hosted computers; Q27 removal vote — decided; Q29 — open | Drop policy 1 and `RejoinGraceMilliseconds` fields (§8.6), relay vote message schemas (§12.2) | M6 lifecycle, the final-removal rule answer (one answer proposed, Q28), the relay tally and their tests (§11.1); end-condition treatment of a removed seat and the meaning of the host's last perspective wait for Q29 |
+| Q26 hosted computers; Q27 removal vote; Q28 details; Q29 end condition and perspective; O23 resignation — all decided | Drop policy 1 and `RejoinGraceMilliseconds` fields (§8.6), relay vote message schemas (§12.2), the Refused message and client-sequence rules (§4.2, §12.2) | M6 lifecycle, the one-answer final-removal rule, the silent resignation, the removed seat's absence from the end sweeps, the relay tally and their tests (§11.1); M5 keeps a removed seat's per-seat block running (Q29) |
 | M5 perspectives | Serial references, codecs, explicit actor lists and checks that need only the issuing seat | Correct online `View`, visibility refresh, known-site admission and all other perspective-dependent application |
 | M6/M7 service | Versioned payload and identity primitives | Live start/pacing/reconnect state machines, readiness transport and view-policy enforcement at the online UI boundaries |
 
-Q22–Q27 are approved, so no product decision among them blocks M2, and the
-open Q29 blocks only M5/M6 work. Q28's
-proposals are not approved: the M2 units that encode one — the online
-`Give` bound and the per-command work limits (U2, U6), and a
-configuration without a battle-wide difficulty word (U5) — land only
-after the maintainer approves or revises it.
+Q22–Q29 and O23 are decided, so no product decision blocks M2 (the units
+that encode a Q28 value — the online `Give` bound and the per-command work
+limits in U2 and U6, and a configuration without a battle-wide difficulty
+word in U5 — may land) or the M5/M6 lifecycle work.
 U0's published schemas and APIs are contracts, not a completed encoding or
 implementation. Unsupported later-milestone commands
 remain explicitly unavailable rather than falling through to a local path.
@@ -3255,7 +3322,7 @@ change one effective field at a time and also cover equivalent defaults.
 
 | Input family | Required inventory and treatment |
 |---|---|
-| `SkirmishConfig` | Gameplay selection, map, occupied seat rows in slot order, controller/side/colour/team/nickname/resources/Classic-or-Modern choice, per-computer difficulty (Q23), which as proposed replaces the single-player global word online (§8.6 field 5, §15 Q28), location mode, commander-death mode, mapping/LOS/type, unit limit, both seeds and every Survival option. Resolve private defaulting bookkeeping before encoding; it is not a wire field. State explicitly whether unused rows are rejected or canonicalized away. |
+| `SkirmishConfig` | Gameplay selection, map, occupied seat rows in slot order, controller/side/colour/team/nickname/resources/Classic-or-Modern choice, per-computer difficulty (Q23), which replaces the single-player global word online (§8.6 field 5, §15 Q28), location mode, commander-death mode, mapping/LOS/type, unit limit, both seeds and every Survival option. Resolve private defaulting bookkeeping before encoding; it is not a wire field. State explicitly whether unused rows are rejected or canonicalized away. |
 | `SkirmishEntryOptions.BuilderOptions` | Initial six-value preference for each applicable seat; runtime changes remain seat commands. No receiver reads its own host preference at composition. |
 | `CommunitySources`, match/mod selection | Effective rule table and digest, base/name, content profile, mod identity/version/archive digest and mutators, with deterministic precedence. Provider paths and diagnostic provenance stay separate. |
 | `ContentLimits` | All effective table sizes and read caps. Admission must use the agreed limits even where a particular small fixture composes identically under two values. |
@@ -3405,10 +3472,10 @@ invent a retail rule while implementing an independent transport feature.
 | O14 | Fair admission of delayed direct targets, radar contacts and area orders | Research the existing contracts, specify bounded authoritative observation evidence and validate against the scheduler; any gameplay departure follows DESIGN_GAMEPLAY_RULES. |
 | O15 | Ranked integrity level: full-state lockstep with verified results, or filtered state delivery | An explicit product decision before advertising ranked guarantees; prototype and budget the different presentation/state protocol if required. |
 | O16 | Whether competitive view policy also equalizes world viewport coverage | Decide whether resolution/aspect advantages are acceptable; otherwise define a common world-area bound and test all view/resize routes. No numeric viewport cap is assumed. |
-| O17 | Final wire field bounds, start/pacing/reconnect state tables and supported build manifests | M2 publishes command/configuration schemas and build manifests (§16.2), with codec and hostile-input tests. M6 owns live start/pacing state tables, including the bound after which a connected seat that makes no progress enters the drop state (proposed requirement, §15 Q28; the value is the table's); M7 owns reconnect tables and their state-machine tests. Implementation must not infer any of these from Go layouts or sender UI behavior. |
+| O17 | Final wire field bounds, start/pacing/reconnect state tables and supported build manifests | M2 publishes command/configuration schemas and build manifests (§16.2), with codec and hostile-input tests. M6 owns live start/pacing state tables, including the bound after which a connected seat that makes no progress enters the drop state (a §15 Q28 requirement; the value is the table's); M7 owns reconnect tables and their state-machine tests. Implementation must not infer any of these from Go layouts or sender UI behavior. |
 | O18 | Retail's two-argument distance routine: the rounding sequence read on 2026-10-01 (L1), and the retail forms of the other library calls wherever a stored value could change `[01 R-DET-01 §3]` | **Settled 2026-10-01** for the distance routine: `[01 R-DET-01 §7]`, from two independent traces, its exits included. Still open: a manual retail observation that would confirm it (a reach test at an offset such as 20 by 99, where the routine's truncated distance is 100 and the exact one 101), and the retail forms of the other library calls. |
 | O19 | How often the effect pool fills in play under each rule set, and whether the 4,096-event window is ever reached | **Settled 2026-10-01** by the census in L9: only the Strict benchmark fight (seed 7, before O22) fills its pool, no existing lock moves, and the event window peaks at 48 of 4,096. After O22 that scene peaks at 296 records, and the pool lock uses seed 5, which fills (M1-C9). The path benchmark's players are all allied, so nothing there fires. |
 | O20 | Machine scope of end state, respawn visibility and elimination draws | **Settled** by `[08 R-SKIR-01 §3]` `[08 R-ENTRY-01 §7]` `[08 R-CAMP-01 §9]` `[05 R-ECO-01 §1]`: per-machine countdown/latch, complete machine-grid rebuild, and one local CRT draw per elimination on each machine. Q24 adopts canonical per-player histories (§6.7); transport enumeration and remaining writer/caller scope questions stay in research. |
 | O21 | Whether restarting Modern controllers from observation at a snapshot tick is acceptable play (§9.1, §15 Q21) | Play-test computer seats across forced restarts and compare with a save and load, which already restarts them. |
 | O22 | Strict fidelity where the engine takes an exact integer root or compares squares and retail calls its distance routine on whole numbers — candidates seen while reading for M1 are the leash test, the guard and nano ranges and the air order distance. The routine truncates to one below the exact root on 722 ordered whole-number pairs up to 3,000, such as 20 by 99 `[01 R-DET-01 §7]`. This is not a lockstep hazard: integer code computes the same everywhere | **Settled.** `[04 R-STANCE-01 §4]`, `[04 R-AIR-01 §8]` and `[05 R-WORK-01 §2]` establish the caller widths and routine identity. Leash, work/construction reach and air-order distances now use the portable kernel. Ordinary guard arrival and unit reclaim remain genuinely squared tests. The dogfight reads a signed high word before comparing with 160; correcting it left the seed-7 Strict pool at a peak of 296 records through 15,000 steps, so the step-4,500 pool lock moved to seed 5 (M1-C9, DESIGN_MOVEMENT_PATH §3.4). The original fifteen locks are unchanged. M1-C6's CPU budget (§16.1) was measured before this change and re-measured on 2026-10-02 on a shared host (Go 1.27.1, Darwin/arm64, two runtime workers; 216 sequential runs of the M1-C6 setting, each build's fingerprints identical across its runs). On the windows where the build before O22 and the build with it still play the same battle, process CPU per tick differs by about 0 ± 2%; in the profiles the kernel takes about 2% of Strict and 1.6% of Modern CPU, all of it at call sites that predate O22, and the leash, reach and air-order sites O22 changed do not appear. Against M1-C6's baseline the quietest Modern session measured +1.2% (range −1.5% to +2.4%), consistent with the recorded +2.15%; the host's noise is as large as the three-percent budget, so this supports the budget and does not certify it, and Strict was never measured against it on a quiet host. Two things the first O22 record did not say: the correction is a shared retail mechanic, so it also changes Modern battles that reach its boundaries — the Modern benchmark scene's fingerprint already differs by tick 2,199, with no Modern lock moved, and giving the Modern repair-pad queue its own distance does not change that — and after O22 a full-window fingerprint match with the M1-C6 baseline is no longer possible, so a later cost comparison must use a window before the battles diverge. |
-| O23 | Which retail leaving path a Nanolathe resignation corresponds to, and whether Strict should reproduce it. Retail's surrender question has a menu variant (teardown only; peers delete positive-health units with no script, explosion or wreck) and an exit variant (30000 self-damage first, so a unit it leaves at non-positive health goes with the kill script, an effect-only explosion and the wreck); the order in which peers then empty the leaver's slots is only a Supported inference `[08 R-LEAVE-01 §7]`. §11.1 instead proposes that a Strict resignation apply the voted-removal contract (§15 Q28) | A maintainer decision on the variant and on whether Strict reproduces it; for the peer ordering, a trace of the transport's player-destroyed notices when the leaver's session closes, on which the Supported inference of `[08 R-LEAVE-01 §7]` rests |
+| O23 | Which retail leaving path a Nanolathe resignation corresponds to, and whether Strict should reproduce it. Retail's surrender question has a menu variant (teardown only; peers delete positive-health units with no script, explosion or wreck) and an exit variant (30000 self-damage first, so a unit it leaves at non-positive health goes with the kill script, an effect-only explosion and the wreck); the order in which peers then empty the leaver's slots is only a Supported inference `[08 R-LEAVE-01 §7]` | **Decided 2026-10-02**, the maintainer: "units can be deleted silently" — the menu variant, as the other machines see it. A Strict resignation deletes the resigning seat's units, and its hosted computers' units with them, with no `Killed` script, explosion, wreck or credit, keeping the researched receiver path for a unit already at non-positive health and applying no self-damage; the records are then cleared as a voted removal clears them (§11.1). This supersedes the §15 Q28 proposal that a resignation apply the voted-removal contract. Still open, as research rather than a decision: the slot order in which peers empty the leaver's records, which a trace of the transport's player-destroyed notices when the leaver's session closes would settle; until then the protocol uses the voted removal's order (§11.1). |

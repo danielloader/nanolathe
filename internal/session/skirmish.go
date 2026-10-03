@@ -587,7 +587,10 @@ type SkirmishEntryOptions struct {
 	// banks the weapon definitions name, none of which rules or mutators
 	// change, and is never written after compilation, so battles over one
 	// content set may share it. Nil compiles it at
-	// composition, as every battle entry otherwise does.
+	// composition, as every battle entry otherwise does. A supplied table is
+	// validated against the battle's captured sources; one whose banks have
+	// changed since it was compiled is not used, and entry compiles its own
+	// (DESIGN_MULTIPLAYER §8.7).
 	SimArt *content.SimArt
 }
 
@@ -631,8 +634,18 @@ func NewSkirmishWithEntryOptions(fs vfs.FSOps, cat *content.Catalog, cfg Skirmis
 	if fs == nil {
 		return nil, fmt.Errorf("session: nil filesystem for skirmish battle [02 §5]")
 	}
+	// Capture the battle's sources before anything compiles from them. The
+	// catalog compile, map and schema resolution and rule and mutator
+	// preparation below read this capture, and the inputs frozen from it
+	// are all any later simulation read sees (DESIGN_MULTIPLAYER §8.7). Audio
+	// is presentation and keeps the live mount.
+	sources, err := content.CaptureSimulationSources(fs, cfg.MapName)
+	if err != nil {
+		return nil, err
+	}
+	captured := sources.Filesystem()
 	// 1. mount/receive VFS and compile one immutable catalog [02 §5]
-	cat, err = strictCatalogWithProgress(fs, cat, options.ContentLimits, report)
+	cat, err = strictCatalogWithProgress(captured, cat, options.ContentLimits, report)
 	if err != nil {
 		return nil, err
 	}
@@ -642,12 +655,21 @@ func NewSkirmishWithEntryOptions(fs vfs.FSOps, cat *content.Catalog, cfg Skirmis
 		return nil, err
 	}
 	// 2. select mission/schema [08 "Mission type dispatch"]
-	m, err := mission.LoadWithType(fs, mission.TypeSkirmish, cfg.MapName, 0, cfg.NumPlayers, nil)
+	m, err := mission.LoadWithType(captured, mission.TypeSkirmish, cfg.MapName, 0, cfg.NumPlayers, nil)
 	if err != nil {
 		return nil, fmt.Errorf("session: skirmish map %q: %w", cfg.MapName, err)
 	}
+	// Freeze every input later composition and unit creation read: each
+	// admitted unit's program and model (units not yet built included), the
+	// animation table, the map, the AI profile and the extension inputs.
+	inputs, err := freezeSkirmishInputs(sources, skirmishSimulationRequest(cat, m, entryFeatures, options))
+	if err != nil {
+		return nil, fmt.Errorf("session: skirmish content: %w", err)
+	}
+	frozen := inputs.Filesystem()
+	cat = inputs.Catalog()
 	// 3. load terrain and apply selected schema including surface metal [03 §2.2][05]
-	terrain, err := loadTerrainStrict(fs, cat, m, entryFeatures)
+	terrain, err := loadTerrainStrict(frozen, cat, m, entryFeatures)
 	if err != nil {
 		return nil, err
 	}
@@ -667,7 +689,7 @@ func NewSkirmishWithEntryOptions(fs vfs.FSOps, cat *content.Catalog, cfg Skirmis
 	// `[Preferences] UnitLimit`, which battle entry copies over the session
 	// word — a skirmish never uses the map's `maxunits` [08 R-SKIR-01 §6].
 	// Normalize above applied only the missing-value default.
-	unitsWorld, err := newBattleSlicedWorldWithCOBSized(cat, fs, sessionKindSkirmish, [pool.PlayerCount]uint32{}, cfg.UnitLimit)
+	unitsWorld, err := newBattleSlicedWorldWithCOBSized(cat, frozen, sessionKindSkirmish, [pool.PlayerCount]uint32{}, cfg.UnitLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -702,7 +724,7 @@ func NewSkirmishWithEntryOptions(fs vfs.FSOps, cat *content.Catalog, cfg Skirmis
 		World:            terrain,
 		Mission:          m,
 		Skirmish:         cfg,
-		simArt:           options.SimArt,
+		simArt:           inputs.SimArt(),
 		Clock:            &clock.State{Requested: 10, Active: 10},
 		Snapshot:         frame.NewBuffer(),
 		Units:            unitsWorld,
@@ -834,7 +856,7 @@ func NewSkirmishWithEntryOptions(fs vfs.FSOps, cat *content.Catalog, cfg Skirmis
 		// [GlobalHeader]: a map's Network schemas name the profile that suits
 		// its terrain — SeaBattle, Hover, AirBattle — and no stock .ota
 		// authors a global key [02 R-MAP-01 §5 row 7][08 R-AI-01 §12].
-		prof, perr := loadSkirmishAIProfile(fs, battleAIProfileName(m))
+		prof, perr := loadSkirmishAIProfile(frozen, battleAIProfileName(m))
 		if perr != nil {
 			return nil, perr
 		}
@@ -876,7 +898,7 @@ func NewSkirmishWithEntryOptions(fs vfs.FSOps, cat *content.Catalog, cfg Skirmis
 	}
 	report.Report(FamilyPlacement, 100)
 	// Ensure COB VMs for all units (load via VFS, statics zero-init, piece count from program, Create run) [04 §4.1][P1-I01]
-	if err := ensureCOBForAll(s, fs); err != nil {
+	if err := ensureCOBForAll(s, frozen); err != nil {
 		return nil, err
 	}
 	report.Report(FamilyScripts, 100)

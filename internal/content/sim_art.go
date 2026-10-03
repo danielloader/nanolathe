@@ -40,7 +40,10 @@ package content
 // presentation edge [I6].
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -131,6 +134,150 @@ type SimArt struct {
 	// bank order compilation visits them. Load-time host diagnostics only: no
 	// phase reads them.
 	diagnostics []EffectBankDiagnostic
+
+	// compiled, requests and sources are the validation hook a precompiled
+	// table carries into battle entry (DESIGN_MULTIPLAYER §8.7): which banks
+	// and feature sequences the compile was asked for, and the identity of
+	// every file it read. A battle's frozen inputs accept a supplied table only
+	// when the same requests follow from the battle's catalog and every file
+	// still has that identity in the battle's capture. No phase reads them.
+	compiled bool
+	requests [32]byte
+	sources  []simArtSource
+}
+
+// simArtSource is the identity of one file a SimArt compile read. A file in
+// an archive is identified by its provider entry and the archive's host stamp:
+// a mounted archive's members do not change under it. Any other provider —
+// a loose directory above all — is identified by a digest of its bytes,
+// because a loose file can be edited without changing its name or provider.
+type simArtSource struct {
+	path     string
+	found    bool
+	provider vfs.Provenance
+	size     int64
+	stamp    string
+	bytes    bool
+	digest   [32]byte
+}
+
+// simArtSourceLimit bounds the identity read of a non-archive bank. It is the
+// larger of the two loader caps used below (the effect-bank policy and the
+// formats package's whole-file read), so any file either loader read is read
+// whole here.
+const simArtSourceLimit = 1 << 30
+
+// simArtFeatureRequest is one feature event sequence a compile asks for.
+type simArtFeatureRequest struct {
+	filename, sequence string
+}
+
+// simArtRequests lists what CompileSimArt compiles for a catalog: the default
+// and weapon-named effect banks in sorted order, then each feature
+// definition's three event sequences and their shadow twins in sorted
+// definition-key order. Sorting fixes the order files are opened in (I4).
+func simArtRequests(cat *Catalog) ([]string, []simArtFeatureRequest) {
+	banks := map[string]struct{}{DefaultEffectBank: {}}
+	if cat != nil {
+		for _, def := range cat.Weapons {
+			if def == nil {
+				continue
+			}
+			for _, name := range [...]string{def.ExplosionGaf, def.WaterExplosionGaf, def.LavaExplosionGaf} {
+				if bank := CanonicalKey(name); bank != "" {
+					banks[bank] = struct{}{}
+				}
+			}
+		}
+	}
+	bankNames := make([]string, 0, len(banks))
+	for bank := range banks {
+		bankNames = append(bankNames, bank)
+	}
+	sort.Strings(bankNames)
+	if cat == nil || len(cat.Features) == 0 {
+		return bankNames, nil
+	}
+	keys := make([]string, 0, len(cat.Features))
+	for key := range cat.Features {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var features []simArtFeatureRequest
+	for _, key := range keys {
+		def := cat.Features[key]
+		if def == nil || trimTDFSemantic(def.Filename) == "" {
+			continue
+		}
+		for _, seq := range [...]string{
+			def.SeqNameBurn, def.SeqNameDie, def.SeqNameReclamate,
+			def.SeqNameBurnShad, def.SeqNameDieShad, def.SeqNameReclamateShad,
+		} {
+			if trimTDFSemantic(seq) == "" {
+				continue
+			}
+			features = append(features, simArtFeatureRequest{filename: def.Filename, sequence: seq})
+		}
+	}
+	return bankNames, features
+}
+
+// simArtRequestDigest is the identity of a request list, in its order.
+func simArtRequestDigest(banks []string, features []simArtFeatureRequest) [32]byte {
+	h := sha256.New()
+	writePart := func(s string) {
+		var n [binary.MaxVarintLen64]byte
+		h.Write(n[:binary.PutUvarint(n[:], uint64(len(s)))])
+		h.Write([]byte(s))
+	}
+	writePart("nanolathe/simart-requests/1")
+	for _, bank := range banks {
+		writePart("bank")
+		writePart(bank)
+	}
+	for _, req := range features {
+		writePart("feature")
+		writePart(req.filename)
+		writePart(req.sequence)
+	}
+	var out [32]byte
+	h.Sum(out[:0])
+	return out
+}
+
+// recordSource notes the identity of a file the compile is about to read.
+func (a *SimArt) recordSource(fs vfs.FSOps, path string) {
+	src := simArtSource{path: path}
+	info, err := fs.Stat(path)
+	if err == nil && !info.IsDir {
+		src.found, src.provider, src.size = true, info.Source, info.Size
+		if stamp, stampErr := fs.CacheStamp(path); stampErr == nil {
+			src.stamp = stamp
+		}
+		if !isArchiveProvider(info.Source) {
+			src.bytes = true
+			src.digest, _ = simArtStreamDigest(fs, path)
+		}
+	}
+	a.sources = append(a.sources, src)
+}
+
+// simArtStreamDigest hashes a file through Open, the uncapped streaming read,
+// so the identity read neither takes a loader's cap nor appears among the
+// bounded whole-file reads the loaders themselves make.
+func simArtStreamDigest(fs vfs.FSOps, path string) ([32]byte, error) {
+	file, err := fs.Open(path)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	defer file.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, io.LimitReader(file, simArtSourceLimit)); err != nil {
+		return [32]byte{}, err
+	}
+	var out [32]byte
+	h.Sum(out[:0])
+	return out, nil
 }
 
 // CompileSimArt builds the table from the battle's VFS and compiled catalog.
@@ -158,54 +305,16 @@ func CompileSimArt(fs vfs.FSOps, cat *Catalog) *SimArt {
 		return art
 	}
 	// Gather bank names first and load each once, in sorted order (I4).
-	banks := map[string]struct{}{DefaultEffectBank: {}}
-	if cat != nil {
-		for _, def := range cat.Weapons {
-			if def == nil {
-				continue
-			}
-			for _, name := range [...]string{def.ExplosionGaf, def.WaterExplosionGaf, def.LavaExplosionGaf} {
-				if bank := CanonicalKey(name); bank != "" {
-					banks[bank] = struct{}{}
-				}
-			}
-		}
-	}
-	bankNames := make([]string, 0, len(banks))
-	for bank := range banks {
-		bankNames = append(bankNames, bank)
-	}
-	sort.Strings(bankNames)
+	bankNames, features := simArtRequests(cat)
+	art.compiled, art.requests = true, simArtRequestDigest(bankNames, features)
 	for _, bank := range bankNames {
 		art.compileEffectBank(fs, bank)
 	}
-	if cat == nil || len(cat.Features) == 0 {
-		return art
-	}
-	keys := make([]string, 0, len(cat.Features))
-	for key := range cat.Features {
-		keys = append(keys, key)
-	}
-	// Sorted, so the order files are opened in — and therefore anything that
-	// could observe that order — is the same in every run (I4).
-	sort.Strings(keys)
 	// featureBanks memoises one validated metadata index per feature filename,
 	// including the failures: a nil value means "tried, absent".
 	featureBanks := make(map[string]*formats.GAFMetadata)
-	for _, key := range keys {
-		def := cat.Features[key]
-		if def == nil || trimTDFSemantic(def.Filename) == "" {
-			continue
-		}
-		for _, seq := range [...]string{
-			def.SeqNameBurn, def.SeqNameDie, def.SeqNameReclamate,
-			def.SeqNameBurnShad, def.SeqNameDieShad, def.SeqNameReclamateShad,
-		} {
-			if trimTDFSemantic(seq) == "" {
-				continue
-			}
-			art.compileFeatureSequence(fs, featureBanks, def.Filename, seq)
-		}
+	for _, req := range features {
+		art.compileFeatureSequence(fs, featureBanks, req.filename, req.sequence)
 	}
 	return art
 }
@@ -221,6 +330,7 @@ func (a *SimArt) compileEffectBank(fs vfs.FSOps, name string) {
 		bank = DefaultEffectBank
 	}
 	path := EffectBankPath(bank)
+	a.recordSource(fs, path)
 	gaf, err := formats.LoadGAFMetadataFileWithLimits(fs, path, EffectBankMaxBytes, EffectBankGAFLimits())
 	if err != nil {
 		a.diagnostics = append(a.diagnostics, EffectBankDiagnostic{
@@ -259,6 +369,7 @@ func (a *SimArt) compileFeatureSequence(fs vfs.FSOps, banks map[string]*formats.
 		// The feature sprite source is the TDF `filename` stem without an
 		// extension [02 "Feature record"]; the path is lower-cased per the VFS
 		// canonical rules (I1).
+		a.recordSource(fs, "anims/"+file+".gaf")
 		g, err := formats.LoadGAFMetadataFile(fs, "anims/"+file+".gaf")
 		if err != nil {
 			g = nil

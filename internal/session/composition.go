@@ -1,6 +1,7 @@
 package session
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"sync"
@@ -29,18 +30,27 @@ import (
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
-// cobLoader is the per-process cache for COB programs [04 §4.1][P1-I01].
-// It is shared across sessions but never mutated during a tick (I1).
+// globalCobLoader is a process-wide COB program cache keyed by unit name
+// alone. Production worlds no longer use it: a name is not a file's contents,
+// so each battle's unit world gets its own loader over that battle's sources
+// (newBattleSlicedWorldWithCOBSized). Test fixtures that compose a world by
+// hand still install it.
 var globalCobLoader = cob.NewCachedLoader()
 
 // parsedModelEntry retains one immutable model and the winning VFS
-// provenance for an authored ObjectName/provider identity. Models are safe to
-// share between sessions; VM piece state remains per-unit in cob.Binding.
+// provenance for an authored ObjectName/provider identity and the bytes it
+// was parsed from (authoredModelKey). Models are safe to share between
+// sessions; VM piece state remains per-unit in cob.Binding.
 type parsedModelEntry struct {
 	model *model.Model
 	prov  vfs.Provenance
 }
 
+// authoredModelKey identifies a parsed model by the winning provider entry
+// AND the bytes it was parsed from. Provider and path metadata alone cannot
+// validate a cached parse: a loose file can be edited without changing any of
+// it, so the bytes are reread and their digest is part of the key
+// (DESIGN_MULTIPLAYER §8.7, M2-C8).
 type authoredModelKey struct {
 	Identity     string
 	LogicalPath  string
@@ -50,12 +60,17 @@ type authoredModelKey struct {
 	MountRoot    string
 	Priority     int
 	MountOrder   int
+	Content      [32]byte
 }
 
 var parsedModels = struct {
 	sync.Mutex
 	byProvider map[authoredModelKey]parsedModelEntry
 }{byProvider: make(map[authoredModelKey]parsedModelEntry)}
+
+// authoredModelReadLimit is the formats package's whole-file 3DO read cap, so
+// the revalidating read accepts exactly what the model loader accepts.
+const authoredModelReadLimit = 1 << 30
 
 func loadAuthoredModel(fs vfs.FSOps, objectName string) (*model.Model, vfs.Provenance, error) {
 	identity := content.CanonicalKey(strings.TrimSpace(objectName))
@@ -70,11 +85,21 @@ func loadAuthoredModel(fs vfs.FSOps, objectName string) (*model.Model, vfs.Prove
 	if info.IsDir {
 		return nil, info.Source, fmt.Errorf("session: model %q is a directory (provider %s)", path, info.Source.ProviderID())
 	}
+	data, err := fs.ReadFileLimit(path, authoredModelReadLimit)
+	if err != nil {
+		// The loader's own read reports the failure in its own words.
+		_, loadErr := model.Load(fs, path)
+		if loadErr == nil {
+			loadErr = err
+		}
+		return nil, info.Source, fmt.Errorf("session: model %q from %s: %w", path, info.Source.ProviderID(), loadErr)
+	}
 	key := authoredModelKey{
 		Identity: identity, LogicalPath: info.Source.LogicalPath,
 		OriginalPath: info.Source.OriginalPath, ProviderType: info.Source.ProviderType,
 		SourcePath: info.Source.SourcePath, MountRoot: info.Source.MountRoot,
 		Priority: info.Source.Priority, MountOrder: info.Source.MountOrder,
+		Content: sha256.Sum256(data),
 	}
 	parsedModels.Lock()
 	if entry, ok := parsedModels.byProvider[key]; ok {
@@ -82,7 +107,9 @@ func loadAuthoredModel(fs vfs.FSOps, objectName string) (*model.Model, vfs.Prove
 		return entry.model, entry.prov, nil
 	}
 	parsedModels.Unlock()
-	loaded, err := model.Load(fs, path)
+	// Parse exactly the bytes the key names, so a concurrent edit cannot
+	// attach one file's geometry to another's digest.
+	loaded, err := model.Load(capturedModelFile{FSOps: fs, path: path, data: data}, path)
 	if err != nil {
 		return nil, info.Source, fmt.Errorf("session: model %q from %s: %w", path, info.Source.ProviderID(), err)
 	}
@@ -98,6 +125,67 @@ func loadAuthoredModel(fs vfs.FSOps, objectName string) (*model.Model, vfs.Prove
 	entry := parsedModels.byProvider[key]
 	parsedModels.Unlock()
 	return entry.model, entry.prov, nil
+}
+
+// capturedModelFile serves one already-read model file to the model loader,
+// so the parse consumes the bytes that were digested. Every other lookup,
+// including the loader's diagnostic provider lookup, reaches the wrapped view.
+type capturedModelFile struct {
+	vfs.FSOps
+	path string
+	data []byte
+}
+
+func (f capturedModelFile) ReadFileLimit(name string, max int64) ([]byte, error) {
+	if name != f.path {
+		return f.FSOps.ReadFileLimit(name, max)
+	}
+	if int64(len(f.data)) > max {
+		return nil, fmt.Errorf("%w: %s exceeds %d bytes", vfs.ErrTooLarge, name, max)
+	}
+	return append([]byte(nil), f.data...), nil
+}
+
+// unitModelResolver resolves the authoritative model unit creation binds. A
+// battle composed from frozen inputs resolves from them; any other world reads
+// each model once per battle and keeps that parse for the rest of the battle.
+type unitModelResolver func(objectName string) (*model.Model, vfs.Provenance, error)
+
+// battleModelResolver returns the resolver for a unit world's COB source.
+func battleModelResolver(fs vfs.FSOps) unitModelResolver {
+	if inputs := frozenInputsOf(fs); inputs != nil {
+		return func(objectName string) (*model.Model, vfs.Provenance, error) {
+			if mdl, ok := inputs.Model(objectName); ok {
+				return mdl, vfs.Provenance{}, nil
+			}
+			// The capture could not supply this model; the loader's own
+			// answer over the sealed view carries the diagnostic.
+			return loadAuthoredModel(fs, objectName)
+		}
+	}
+	var mu sync.Mutex
+	type loaded struct {
+		model *model.Model
+		prov  vfs.Provenance
+	}
+	byIdentity := make(map[string]loaded)
+	return func(objectName string) (*model.Model, vfs.Provenance, error) {
+		identity := content.CanonicalKey(strings.TrimSpace(objectName))
+		mu.Lock()
+		hit, ok := byIdentity[identity]
+		mu.Unlock()
+		if ok {
+			return hit.model, hit.prov, nil
+		}
+		mdl, prov, err := loadAuthoredModel(fs, objectName)
+		if err != nil {
+			return nil, prov, err
+		}
+		mu.Lock()
+		byIdentity[identity] = loaded{model: mdl, prov: prov}
+		mu.Unlock()
+		return mdl, prov, nil
+	}
 }
 
 // cobPresentationSink admits only already-resolved COB events. It supplies
@@ -506,11 +594,14 @@ func (s *Session) bindBuildPresentation() {
 	s.Build.Presentation = &buildPresentationSink{session: s}
 }
 
-func (s *Session) bindUnitCOB(fs vfs.FSOps, u *units.Unit) error {
+// bindUnitCOBWith is the strict binding with the battle's model resolver. A
+// battle composed from frozen inputs binds the model and program those inputs
+// admitted, including for a unit first created long after battle entry.
+func (s *Session) bindUnitCOBWith(fs vfs.FSOps, models unitModelResolver, u *units.Unit) error {
 	if s == nil || u == nil || u.Def == nil {
 		return fmt.Errorf("session: cannot bind nil unit")
 	}
-	mdl, prov, err := loadAuthoredModel(fs, u.Def.ObjectName)
+	mdl, prov, err := models(u.Def.ObjectName)
 	if err != nil {
 		return fmt.Errorf("unit %q model %s: %w", u.Def.UnitName, prov.ProviderID(), err)
 	}
@@ -771,7 +862,11 @@ func newBattleSlicedWorldWithCOBSized(cat *content.Catalog, fs vfs.FSOps, mode i
 	if err != nil {
 		return nil, err
 	}
-	w.SetCOBSource(fs, globalCobLoader)
+	// One loader per battle: its cache is keyed by unit name, which says
+	// nothing about the file behind it, so it must not outlive the battle's
+	// sources (DESIGN_MULTIPLAYER §8.7). A frozen battle's fs is its sealed
+	// capture, so every program the loader can return was admitted.
+	w.SetCOBSource(fs, cob.NewCachedLoader())
 	return w, nil
 }
 
@@ -1668,9 +1763,15 @@ func createAndBindServices(s *Session) error {
 	//
 	// A composition without a VFS (unit-test fixtures) leaves the table nil and
 	// every consumer keeps its documented "unknown" behaviour. A resolver a
-	// caller installed explicitly is never overwritten.
+	// caller installed explicitly is never overwritten. A battle composed from
+	// frozen inputs takes the table those inputs admitted; nothing is compiled
+	// from its sealed view (DESIGN_MULTIPLAYER §8.7).
 	if s.simArt == nil && cobFS != nil {
-		s.simArt = content.CompileSimArt(cobFS, s.Catalog)
+		if inputs := frozenInputsOf(cobFS); inputs != nil {
+			s.simArt = inputs.SimArt()
+		} else {
+			s.simArt = content.CompileSimArt(cobFS, s.Catalog)
+		}
 	}
 	if s.simArt != nil {
 		if s.effectFrameCount == nil {
@@ -1706,12 +1807,15 @@ func createAndBindServices(s *Session) error {
 	// script, callbacks, or publication can observe it [04 R-CB-01 §4][05
 	// "Unit instance economy state"].
 	if cobFS != nil {
+		// One model resolver per battle: the frozen inputs' parsed models, or
+		// for a battle without them, each model read once and kept.
+		models := battleModelResolver(cobFS)
 		s.Units.SetCOBBinder(func(u *units.Unit) error {
 			s.initializeSensorStatus(u) // constructor seed precedes COB Create [03 R-VIS-01 §4 Gate]
 			if u == nil || !s.Econ.InitializeUnitEconomy(u.Handle) {
 				return fmt.Errorf("session: initialize unit economy account")
 			}
-			return s.bindUnitCOB(cobFS, u)
+			return s.bindUnitCOBWith(cobFS, models, u)
 		})
 		if !s.Units.HasCOBBinder() {
 			return fmt.Errorf("session: missing COB binder for service wiring [04 §4.1]")

@@ -116,9 +116,15 @@ the connected, still-playing humans pass a removal vote — no connected seat
 can be voted out, resignation needs no vote, and no timer removes a seat —
 and at a human's final removal Strict removes its hosted computers with it as
 retail does, while Modern/Community keep them running through the existing
-`RuleSet`.
+`RuleSet`. The same day the maintainer approved the protocol details the
+design had proposed (vote window and cooldown, cumulative grace, client
+sequence numbers, per-command work limits, the online `Give` range, no
+battle-wide difficulty word), decided that a finally removed seat is absent
+from the end-condition sweeps while the perspective its computers borrow
+keeps updating, and that a Strict resignation deletes the leaver's units
+silently as retail's menu quit does on the other machines.
 These policies and their tests are owned by DESIGN_MULTIPLAYER §6.6–§6.7,
-§11.1 and Q22–Q27; they do not change single-player. Nothing a relay, a lobby or a
+§11.1, Q22–Q29 and §19 O23; they do not change single-player. Nothing a relay, a lobby or a
 host supplies may change what a tick
 computes, and a single-seat battle is untouched: every fingerprint lock runs
 single-player. It is owned by

@@ -42,13 +42,11 @@ func frozenInputsOf(fs vfs.FSOps) *content.SimulationInputs {
 // mutators preparation applied.
 func skirmishSimulationRequest(cat *content.Catalog, m *mission.Mission, entry community.Features, options SkirmishEntryOptions) content.SimulationInputRequest {
 	request := content.SimulationInputRequest{
-		Catalog:   cat,
-		SimArt:    options.SimArt,
-		AIProfile: battleAIProfileName(m),
-		Mutators:  options.Mutators,
-	}
-	if digest, err := hex.DecodeString(entry.Digest()); err == nil && len(digest) == len(request.CommunityDigest) {
-		copy(request.CommunityDigest[:], digest)
+		Catalog:         cat,
+		SimArt:          options.SimArt,
+		AIProfile:       battleAIProfileName(m),
+		CommunityDigest: communityDigest(entry),
+		Mutators:        options.Mutators,
 	}
 	if m == nil || strings.TrimSpace(m.TerrainKey) == "" {
 		return request
@@ -56,15 +54,7 @@ func skirmishSimulationRequest(cat *content.Catalog, m *mission.Mission, entry c
 	if cat != nil {
 		if header := cat.Maps[content.CanonicalKey(m.TerrainKey)]; header != nil {
 			request.MapOTA, request.MapTNT = header.LogicalOTA, header.LogicalTNT
-			// The index applySchemaStrict selects; an unmatched name records
-			// the schema as a defined absence, and entry then fails there.
-			request.MapSchema = uint32(len(header.Schemas))
-			for i, schema := range header.Schemas {
-				if schema.Name == m.Schema.Name {
-					request.MapSchema = uint32(i)
-					break
-				}
-			}
+			request.MapSchema = mapSchemaIndex(header, m.Schema.Name)
 			return request
 		}
 	}
@@ -73,6 +63,31 @@ func skirmishSimulationRequest(cat *content.Catalog, m *mission.Mission, entry c
 	request.MapOTA = "maps/" + m.TerrainKey + ".ota"
 	request.MapTNT = "maps/" + strings.ToLower(strings.TrimSpace(m.TerrainKey)) + ".tnt"
 	return request
+}
+
+// communityDigest is the effective Community table's identity as the frozen
+// inputs record it: the SHA-256 that community.Features.Digest spells in hex.
+// A spelling that does not decode leaves the zero digest, which no table
+// has.
+func communityDigest(f community.Features) [32]byte {
+	var out [32]byte
+	if digest, err := hex.DecodeString(f.Digest()); err == nil && len(digest) == len(out) {
+		copy(out[:], digest)
+	}
+	return out
+}
+
+// mapSchemaIndex is the selected schema's index in the map header, the index
+// applySchemaStrict selects by name. An unmatched name is the header's schema
+// count, which the freeze records as a defined absence; entry then fails
+// there.
+func mapSchemaIndex(header *content.MapHeader, name string) uint32 {
+	for i, schema := range header.Schemas {
+		if schema.Name == name {
+			return uint32(i)
+		}
+	}
+	return uint32(len(header.Schemas))
 }
 
 // freezeSkirmishInputs freezes a skirmish's inputs from its capture.

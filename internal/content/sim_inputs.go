@@ -59,6 +59,11 @@ type SimulationInputs struct {
 	manifest   []SimulationInput
 	provenance []SimulationInputProvenance
 	digest     [32]byte
+	// selection is the request's map, extension and mutator selection as the
+	// freeze recorded it, its catalog and animation-table pointers cleared and
+	// its mutators in their canonical spelling. Admission compares a match
+	// configuration with it (DESIGN_MULTIPLAYER §8.8).
+	selection SimulationInputRequest
 }
 
 // Digest is the content identity: SHA-256 over the domain
@@ -144,6 +149,72 @@ func (i *SimulationInputs) UncapturedLookups() []string {
 	return i.sources.snap.uncapturedLookups()
 }
 
+// The selection accessors below report what the inputs were frozen for, as
+// the freeze request named it. They let match admission compare an agreed
+// configuration with the content the battle will run on (DESIGN_MULTIPLAYER
+// §8.8) without re-deriving the selection from the manifest's digests.
+
+// MapName returns the map name the capture was taken for, trimmed: the name
+// the lobby or the command line selected (CaptureSimulationSources).
+func (i *SimulationInputs) MapName() string {
+	if i == nil || i.sources == nil {
+		return ""
+	}
+	return i.sources.mapName
+}
+
+// MapFiles returns the logical OTA and TNT paths map resolution selected, as
+// the freeze request named them.
+func (i *SimulationInputs) MapFiles() (ota, tnt string) {
+	if i == nil {
+		return "", ""
+	}
+	return i.selection.MapOTA, i.selection.MapTNT
+}
+
+// MapSchema returns the selected schema's index in the catalog's map header,
+// as the freeze request named it. An index at or past the header's schema
+// count was recorded as a defined absence.
+func (i *SimulationInputs) MapSchema() uint32 {
+	if i == nil {
+		return 0
+	}
+	return i.selection.MapSchema
+}
+
+// CommunityDigest returns the effective Community table's digest the freeze
+// recorded.
+func (i *SimulationInputs) CommunityDigest() [32]byte {
+	if i == nil {
+		return [32]byte{}
+	}
+	return i.selection.CommunityDigest
+}
+
+// Mutators returns the mutators the catalog had already been prepared with
+// when it was frozen, each identity factor spelled as the zero value: the
+// vector the manifest records, which is never applied again.
+func (i *SimulationInputs) Mutators() Mutators {
+	if i == nil {
+		return Mutators{}
+	}
+	return i.selection.Mutators
+}
+
+// canonicalMutators spells every identity factor as the zero value, the one
+// spelling the manifest's step vector gives it.
+func canonicalMutators(m Mutators) Mutators {
+	for _, f := range []*Factor{
+		&m.BuildSpeed, &m.BuildCost, &m.Health, &m.Damage, &m.AreaOfEffect, &m.Sight,
+		&m.Radar, &m.Income, &m.Salvage, &m.FireRate, &m.UnitSpeed,
+	} {
+		if f.IsIdentity() {
+			*f = Factor{}
+		}
+	}
+	return m
+}
+
 // frozenUnitModelPath is the model path unit creation uses for an authored
 // object name.
 func frozenUnitModelPath(objectName string) string {
@@ -221,6 +292,9 @@ func FreezeSimulationInputs(sources *SimulationSources, r SimulationInputRequest
 	f.inputs.manifest = f.entries
 	f.inputs.provenance = f.provenance
 	f.inputs.digest = simulationManifestDigest(f.entries)
+	f.inputs.selection = r
+	f.inputs.selection.Catalog, f.inputs.selection.SimArt = nil, nil
+	f.inputs.selection.Mutators = canonicalMutators(r.Mutators)
 	f.inputs.view = sources.snap.newView(f.inputs, false)
 	sources.snap.seal()
 	sources.frozen = true

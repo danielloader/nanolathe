@@ -3068,10 +3068,9 @@ after the v3 reference-test correction (§16.1), opening M2's milestone gate.
 and allocation/command APIs; §8.6–§8.8 publish configuration, frozen-input
 and build contracts. U1 allocation references, U4 frozen simulation content
 and U5's configuration and build identities are implemented as described
-below. No command codec, no `ValidateMatchInputs`/`NewAdmittedSkirmish` and
-no multi-seat session is claimed here: U5's admission half follows U4 as a
-short follow-up unit, then U2, U3 and U6 in the sequence of "Code ownership
-and sequence".
+below, as is U5b, the admission half (`ValidateMatchInputs`,
+`NewAdmittedSkirmish`). No command codec and no multi-seat session is claimed
+here: U2, U3 and U6 follow in the sequence of "Code ownership and sequence".
 
 **U1 allocation references, 2026-10-02.** Both successful creation paths
 assign a battle-wide serial after the fallible COB bind and before creation
@@ -3206,6 +3205,51 @@ records them for; the Windows build now also passes `-ldflags=-s -w` so both
 installers share one argument list. A headless `match_config_digest` was not
 added: the report builder cannot reach the entry options, and a digest
 rebuilt from the normalized session would misreport the battle.
+
+**U5b match admission, 2026-10-02.** `ValidateMatchInputs` and
+`NewAdmittedSkirmish` exist with their §8.8 signatures. Skirmish battle entry
+is now two steps, `prepareSkirmishEntry` (capture, compile, prepare, select
+the map, freeze) and `composeSkirmish` (compose from exactly those frozen
+inputs, with the presentation audio mount as a parameter); the single-player
+constructors call both and are unchanged in signature and behaviour, and all
+sixteen locks hold. The frozen inputs now record the selection the freeze
+made — map name and files, schema index, Community digest, mutators in
+canonical spelling — behind read accessors; manifest and digest are
+unchanged. Admission compares the configuration against those records and
+reports every failed comparison at once (`errors.Join`), each wrapped in its
+category — `ErrMatchConfigurationRejected`, `ErrMatchMapMismatch`,
+`ErrMatchRulesMismatch`, `ErrMatchContentMismatch` — in that order; the
+map-entry selection is re-run on the frozen map file for the configuration's
+seat count and must equal both the recorded and the configured schema; side
+ordinals are checked for every seat, attacker and watchers included; a
+nonempty unit-restriction list is refused naming Q16; permissions, views,
+policies and participant identities are not composition inputs and are not
+compared. `NewAdmittedSkirmish` admits first, then composes only the
+single-seat shape — exactly one human, no watcher, one difficulty shared by
+every computer (with none, the default word, which §6.6 says nothing reads) —
+from the given inputs through the back half, never through a second capture
+or freeze, passing the setup through no `Normalize` (an explicit zero
+resource stays zero), the agreed Community table as one final command-line
+base layer the constructor checks resolves back to itself under the bound
+set, each computer's parameters as its own seat layer, and a nil audio mount
+(the host binds its own at adoption); any other shape returns
+`ErrMatchNeedsMultiSeat`, naming M5. A retail test composes four setups —
+Strict, Modern with options and mutators, Survival with a buddy, Survival
+alone — both ways and requires the same content digest and the same partial
+state fingerprint at entry and every 600 ticks through 1,800. Three things
+the inputs cannot yet attest are `TODO(question)` markers in
+`match_admission.go`: the rule set that prepared the catalog (the combat seam
+answers weapon reloads during preparation, and only the Community digest is
+recorded — settle by recording the preparing set in the freeze request or by
+U6's cross-seat content-digest comparison); the content limits after
+`Catalog.Clone`, which drops `Limits` (U4's finding; settle in `Clone`); and
+the content profile's name and directory table and the mod identity, which
+the mount applies before capture (settle by recording them with the capture
+or comparing the mod identity from the mod library in U6). U6 needs a public
+form of the unexported `freezeMatchInputs`, the front half run from a decoded
+configuration; and the session keeps no copy of the admitted configuration,
+which U2's permission checks and M6's view enforcement will want, or the
+host keeps the value. Seven staged rows join the deadcode baseline.
 
 M2 makes the command boundary explicit and the battle inputs identifiable.
 It does not enable a network battle: perspectives, multiplayer sharing,

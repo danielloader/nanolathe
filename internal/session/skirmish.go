@@ -6,6 +6,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/ai"
 	"github.com/nanolathe-gg/nanolathe/internal/clock"
+	"github.com/nanolathe-gg/nanolathe/internal/community"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
@@ -608,23 +609,55 @@ func NewSkirmishWithProgress(fs vfs.FSOps, cat *content.Catalog, cfg SkirmishCon
 // The load observer sees the catalog's families first and then this
 // constructor's own, so a caller painting the retail loading screen can drive
 // it from one stream. A nil observer reports nothing and changes nothing else.
+//
+// Battle entry is two steps: prepareSkirmishEntry captures, compiles, resolves
+// the map and freezes the battle's inputs, and composeSkirmish composes the
+// battle from exactly those frozen inputs. An admitted match composes through
+// the second step alone, from inputs it was handed (NewAdmittedSkirmish).
 func NewSkirmishWithEntryOptions(fs vfs.FSOps, cat *content.Catalog, cfg SkirmishConfig, options SkirmishEntryOptions) (*Session, error) {
-	entryFeatures, err := ResolveCommunity(cfg.Gameplay, options.CommunitySources)
+	entry, err := prepareSkirmishEntry(fs, cat, cfg, options)
 	if err != nil {
 		return nil, err
+	}
+	// Audio is presentation and keeps the live mount (DESIGN_MULTIPLAYER
+	// §16.2, U4).
+	return composeSkirmish(entry, options, fs)
+}
+
+// skirmishEntry is the front half of skirmish battle entry: the setup as
+// battle entry normalized it, the battle's resolved Community table, the
+// selected map and the inputs frozen for them. composeSkirmish composes the
+// battle from these values and reads no live source for the simulation.
+type skirmishEntry struct {
+	cfg      SkirmishConfig
+	features community.Features
+	mission  *mission.Mission
+	inputs   *content.SimulationInputs
+}
+
+// prepareSkirmishEntry is battle entry's front half: it resolves the
+// Community table, normalizes and checks the setup, captures the sources,
+// compiles or validates the catalog through the capture, prepares it under the
+// rules and mutators, selects the map and freezes the battle's inputs
+// (DESIGN_MULTIPLAYER §8.7). It allocates no world and draws from neither
+// stream.
+func prepareSkirmishEntry(fs vfs.FSOps, cat *content.Catalog, cfg SkirmishConfig, options SkirmishEntryOptions) (skirmishEntry, error) {
+	entryFeatures, err := ResolveCommunity(cfg.Gameplay, options.CommunitySources)
+	if err != nil {
+		return skirmishEntry{}, err
 	}
 	if entryFeatures.UnitLimit != 0 {
 		cfg.UnitLimit = entryFeatures.UnitLimit
 	}
 	report := options.Progress
 	if err := cfg.Normalize(); err != nil {
-		return nil, err
+		return skirmishEntry{}, err
 	}
 	if err := cfg.Validate(); err != nil {
-		return nil, err
+		return skirmishEntry{}, err
 	}
 	if err := validateSkirmishLobby(cfg); err != nil && !options.AutomatedPlayers {
-		return nil, err
+		return skirmishEntry{}, err
 	}
 	// DET-01 [R-CORE-02]: battle bootstrap seeds both streams fresh BEFORE any
 	// battle setup draw (skirmish slot shuffle, commander placement), wiping
@@ -632,7 +665,7 @@ func NewSkirmishWithEntryOptions(fs vfs.FSOps, cat *content.Catalog, cfg Skirmis
 	// RNG authority from here on; production composition supplies this explicit
 	// pair, and no package-global stream or implicit seed source is consulted.
 	if fs == nil {
-		return nil, fmt.Errorf("session: nil filesystem for skirmish battle [02 §5]")
+		return skirmishEntry{}, fmt.Errorf("session: nil filesystem for skirmish battle [02 §5]")
 	}
 	// Capture the battle's sources before anything compiles from them. The
 	// catalog compile, map and schema resolution and rule and mutator
@@ -641,33 +674,50 @@ func NewSkirmishWithEntryOptions(fs vfs.FSOps, cat *content.Catalog, cfg Skirmis
 	// is presentation and keeps the live mount.
 	sources, err := content.CaptureSimulationSources(fs, cfg.MapName)
 	if err != nil {
-		return nil, err
+		return skirmishEntry{}, err
 	}
 	captured := sources.Filesystem()
 	// 1. mount/receive VFS and compile one immutable catalog [02 §5]
 	cat, err = strictCatalogWithProgress(captured, cat, options.ContentLimits, report)
 	if err != nil {
-		return nil, err
+		return skirmishEntry{}, err
 	}
 	cat = prepareCommunityWeapons(cat, cfg.Gameplay, entryFeatures)
 	cat, err = applyEntryMutators(cat, options.Mutators)
 	if err != nil {
-		return nil, err
+		return skirmishEntry{}, err
 	}
 	// 2. select mission/schema [08 "Mission type dispatch"]
 	m, err := mission.LoadWithType(captured, mission.TypeSkirmish, cfg.MapName, 0, cfg.NumPlayers, nil)
 	if err != nil {
-		return nil, fmt.Errorf("session: skirmish map %q: %w", cfg.MapName, err)
+		return skirmishEntry{}, fmt.Errorf("session: skirmish map %q: %w", cfg.MapName, err)
 	}
 	// Freeze every input later composition and unit creation read: each
 	// admitted unit's program and model (units not yet built included), the
 	// animation table, the map, the AI profile and the extension inputs.
 	inputs, err := freezeSkirmishInputs(sources, skirmishSimulationRequest(cat, m, entryFeatures, options))
 	if err != nil {
-		return nil, fmt.Errorf("session: skirmish content: %w", err)
+		return skirmishEntry{}, fmt.Errorf("session: skirmish content: %w", err)
+	}
+	return skirmishEntry{cfg: cfg, features: entryFeatures, mission: m, inputs: inputs}, nil
+}
+
+// composeSkirmish is battle entry's back half: it composes the battle from a
+// front half's frozen inputs, reading every simulation input through their
+// sealed view and running on the catalog they hold, so nothing is captured,
+// compiled, prepared or frozen a second time. Of the options it reads only the
+// Community sources the session keeps, the mutators it records, the builder
+// options, the AI overrides and the load observer; the front half consumed the
+// rest. audio is the mount the presentation audio service resolves samples
+// from; it never reaches the simulation, and nil gives a silent service.
+func composeSkirmish(entry skirmishEntry, options SkirmishEntryOptions, audio vfs.FSOps) (*Session, error) {
+	cfg, m, entryFeatures, inputs := entry.cfg, entry.mission, entry.features, entry.inputs
+	report := options.Progress
+	if inputs == nil {
+		return nil, fmt.Errorf("session: skirmish content: no frozen inputs [02 §5]")
 	}
 	frozen := inputs.Filesystem()
-	cat = inputs.Catalog()
+	cat := inputs.Catalog()
 	// 3. load terrain and apply selected schema including surface metal [03 §2.2][05]
 	terrain, err := loadTerrainStrict(frozen, cat, m, entryFeatures)
 	if err != nil {
@@ -832,7 +882,7 @@ func NewSkirmishWithEntryOptions(fs vfs.FSOps, cat *content.Catalog, cfg Skirmis
 		return nil, err
 	}
 	// Audio presentation queue/cache/music owned by session so unit/weapon/feature/UI events can queue without client import cycle [03 §8.3][03 §8.4] I6.
-	s.InitAudio(fs)
+	s.InitAudio(audio)
 	// 5. create every required service non-nil and bind ports [08][04 §7.2]
 	if err := createAndBindServices(s); err != nil {
 		return nil, err

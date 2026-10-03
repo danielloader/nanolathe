@@ -386,11 +386,28 @@ Downloads verified source and a private Go compiler. Original game assets are re
         $name = $manifest.version + '-' + $manifest.source_revision + '-' + [guid]::NewGuid().ToString('N')
         $stage = Join-Path $base ('stage-' + [guid]::NewGuid().ToString('N'))
         [void][IO.Directory]::CreateDirectory($stage)
+        # The common build manifest (docs/DESIGN_MULTIPLAYER.md section 8.7) is stamped
+        # into the verified source before the build, from the verified archive,
+        # so every platform's install of this release names one build. These
+        # build arguments are the Unix installer's: one common manifest needs
+        # one argument list. Each is passed to the stamp as an -arg value,
+        # since Windows PowerShell can drop a bare "--" before a native command.
+        $buildArgs = @('-mod=readonly', '-trimpath', '-buildvcs=false', '-ldflags=-s -w', './cmd/nanolathe')
+        $stampArgs = @($buildArgs | ForEach-Object { '-arg=' + $_ }) + @(
+            '-source', (Join-Path $work 'source.zip'), '-prefix', ('nanolathe-' + $manifest.source_revision + '/'), '-write', $source, '-cgo', '0',
+            '-variant', ('darwin/amd64/v1=' + $manifest.go_darwin_amd64_sha256), '-variant', ('darwin/arm64/v8.0=' + $manifest.go_darwin_arm64_sha256),
+            '-variant', ('linux/amd64/v1=' + $manifest.go_linux_amd64_sha256), '-variant', ('linux/arm64/v8.0=' + $manifest.go_linux_arm64_sha256),
+            '-variant', ('windows/amd64/v1=' + $manifest.go_windows_amd64_sha256), '-variant', ('windows/arm64/v8.0=' + $manifest.go_windows_arm64_sha256))
         Push-Location -LiteralPath $source
         try {
             Write-Host 'Building Nanolathe (the first build can take several minutes)...'
             $ErrorActionPreference = 'Continue'
-            & $go build -mod=readonly -trimpath -buildvcs=false -o (Join-Path $stage 'nanolathe.exe') ./cmd/nanolathe
+            & $go run -mod=readonly -trimpath -buildvcs=false ./internal/version/stampgen @stampArgs
+            $stampExit = $LASTEXITCODE
+            $ErrorActionPreference = 'Stop'
+            if ($stampExit -ne 0) { throw "Build stamp failed with code $stampExit." }
+            $ErrorActionPreference = 'Continue'
+            & $go build -o (Join-Path $stage 'nanolathe.exe') @buildArgs
             $buildExit = $LASTEXITCODE
             $ErrorActionPreference = 'Stop'
             if ($buildExit -ne 0) { throw "Go build failed with code $buildExit." }

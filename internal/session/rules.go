@@ -82,7 +82,43 @@ type RuleSet struct {
 	// is paid in full whatever this answers (DESIGN_ECONOMY_CONSTRUCTION
 	// "Modern AI full income").
 	ComputerIncome ComputerIncomeRules
+	// Seats is the online seat policy: how many computer seats one human may
+	// add to a multiplayer battle (docs/DESIGN_MULTIPLAYER.md §6.6). No
+	// simulation package owns the question; match admission asks it.
+	Seats SeatRules
 }
+
+// SeatRules is the seam for the online seat decisions of a multiplayer
+// battle (docs/DESIGN_MULTIPLAYER.md §6.6, §11.1). Like UnitLimitRules it is
+// session-owned, because no simulation package owns the question: match
+// admission asks it before a world exists, and no tick reads it. Strict 3.1
+// keeps retail's answer; Modern and Community 3.9 answer with the approved
+// Nanolathe online policy (§15 Q23).
+//
+// The final-removal decision of §11.1 — whether a finally removed human's
+// units and hosted computers are destroyed or kept, which §15 Q6, Q26 and Q28
+// select with one answer for both halves — belongs to this interface too,
+// and is added here when M6 implements removal.
+type SeatRules interface {
+	// ComputerSeatsPerHuman is the most computer seats one human seat may
+	// add, within the lobby's available seats.
+	ComputerSeatsPerHuman() int
+}
+
+// StrictSeats is retail's answer: one computer per human machine, hosted by
+// the human that added it [08 R-SKIR-01 §13]. It is zero size.
+type StrictSeats struct{}
+
+// ComputerSeatsPerHuman is retail's one computer per machine.
+func (StrictSeats) ComputerSeatsPerHuman() int { return 1 }
+
+// ModernSeats is the approved Nanolathe online policy for Modern and
+// Community 3.9 (docs/DESIGN_MULTIPLAYER.md §6.6, §15 Q23): a human may add
+// computers up to the available lobby seats. It is zero size.
+type ModernSeats struct{}
+
+// ComputerSeatsPerHuman is bounded only by the lobby's seats.
+func (ModernSeats) ComputerSeatsPerHuman() int { return SkirmishMaxPlayers }
 
 // UnitLimitRules is the save/restore unit-limit policy seam
 // (DESIGN_SESSIONS_AI_SAVE "Modern save unit limits"). It is the one gameplay
@@ -154,6 +190,7 @@ func StrictRuleSet() RuleSet {
 		Path:           path.RetailKernel{},
 		Planner:        ai.RetailPlanner{},
 		ComputerIncome: StrictComputerIncome{},
+		Seats:          StrictSeats{},
 	}
 }
 
@@ -176,6 +213,10 @@ func CommunityRuleSet() RuleSet {
 		Path:           path.RetailKernel{},
 		Planner:        ai.RetailPlanner{},
 		ComputerIncome: CommunityComputerIncome{},
+		// Community 3.9 takes Modern's online seat answer, the approved
+		// policy for every set but Strict 3.1 (docs/DESIGN_MULTIPLAYER.md
+		// §6.6).
+		Seats: ModernSeats{},
 	}
 }
 
@@ -204,6 +245,7 @@ func ModernRuleSet() RuleSet {
 		// cadence and simulation-stream draws stay the retail step's.
 		Planner:        ai.ModernPlanner{},
 		ComputerIncome: ModernComputerIncome{},
+		Seats:          ModernSeats{},
 	}
 }
 
@@ -356,6 +398,9 @@ func completeRuleSet(name string, set RuleSet) RuleSet {
 	}
 	if set.ComputerIncome == nil {
 		set.ComputerIncome = base.ComputerIncome
+	}
+	if set.Seats == nil {
+		set.Seats = base.Seats
 	}
 	return set
 }

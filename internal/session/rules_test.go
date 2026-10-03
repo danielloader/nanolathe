@@ -360,6 +360,7 @@ func TestCompleteRuleSetFillsFromCommunityBase(t *testing.T) {
 		{name: "Path", got: set.Path, want: want.Path},
 		{name: "Planner", got: set.Planner, want: want.Planner},
 		{name: "ComputerIncome", got: set.ComputerIncome, want: want.ComputerIncome},
+		{name: "Seats", got: set.Seats, want: want.Seats},
 	} {
 		if reflect.TypeOf(seam.got) != reflect.TypeOf(seam.want) {
 			t.Fatalf("%s is %T, want Community base %T", seam.name, seam.got, seam.want)
@@ -408,6 +409,7 @@ func TestLookupRuleSetBuildsOnceAndCompletesFromItsBase(t *testing.T) {
 		{name: "Path", got: first.Path, want: modern.Path},
 		{name: "Planner", got: first.Planner, want: modern.Planner},
 		{name: "ComputerIncome", got: first.ComputerIncome, want: modern.ComputerIncome},
+		{name: "Seats", got: first.Seats, want: modern.Seats},
 		{name: "Orders", got: first.Orders, want: modern.Orders, overridden: true},
 	} {
 		same := reflect.TypeOf(seam.got) == reflect.TypeOf(seam.want)
@@ -571,5 +573,31 @@ func TestBaseModeOfReducesASelectionToAReservedWord(t *testing.T) {
 		if got := BaseModeOf(tc.mode); got != tc.want {
 			t.Fatalf("BaseModeOf(%q) = %q, want %q", tc.mode, got, tc.want)
 		}
+	}
+}
+
+// The online seat seam answers retail's one computer per human under Strict
+// 3.1 [08 R-SKIR-01 §13] and the approved Nanolathe policy — every available
+// seat — under Modern and Community 3.9, which composes Modern's answer
+// (docs/DESIGN_MULTIPLAYER.md §6.6, §15 Q23).
+func TestReservedRuleSetsAnswerTheOnlineSeatPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		set  RuleSet
+		want int
+	}{
+		{StrictRuleSet(), 1},
+		{CommunityRuleSet(), SkirmishMaxPlayers},
+		{ModernRuleSet(), SkirmishMaxPlayers},
+	} {
+		if got := tc.set.Seats.ComputerSeatsPerHuman(); got != tc.want {
+			t.Fatalf("%s allows %d computer seats per human, want %d", tc.set.Name, got, tc.want)
+		}
+	}
+	if _, community := CommunityRuleSet().Seats.(ModernSeats); !community {
+		t.Fatal("Community 3.9 does not compose Modern's seat answer")
+	}
+	// A registered set that leaves the seam unstated takes its base's answer.
+	if got := completeRuleSet("strict-seats-test", RuleSet{Base: gameplay.Strict31}).Seats.ComputerSeatsPerHuman(); got != 1 {
+		t.Fatalf("a Strict-based set completed to %d computer seats per human", got)
 	}
 }

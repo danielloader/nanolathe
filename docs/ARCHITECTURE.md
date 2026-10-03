@@ -124,7 +124,7 @@ package implements.
 | `internal/frame` | The committed frame: what the simulation publishes at the end of each sub-tick and what presentation samples | DESIGN_RUNTIME_DETERMINISM (publication), DESIGN_PRESENTATION_CLIENT (consumption) |
 | `internal/session` | The authoritative session: state machine, battle entry for skirmish and mission, the twelve-phase tick, publication, results, save staging and restore, effect strips, eyeballs, status cues | DESIGN_RUNTIME_DETERMINISM (tick, publication), DESIGN_SESSIONS_AI_SAVE (states, entry, results, saves) |
 | `internal/gameplay` | Central gameplay policy vocabulary shared by settings and session: the two reserved words and, through a registry view the session installs, the name of any rule set the build links; no simulation or presentation dependencies | DESIGN_GAMEPLAY_RULES |
-| `internal/version` | Build identity | DESIGN_RUNTIME_DETERMINISM |
+| `internal/version` | Build identity: the profile name, the common build manifest of DESIGN_MULTIPLAYER §8.7 (`BuildManifest`, its codec and digest, `CurrentBuildManifest`) and the stamp the installer's generator `internal/version/stampgen` writes into a verified source tree before the release build | DESIGN_RUNTIME_DETERMINISM, DESIGN_MULTIPLAYER §8.7 |
 
 ### World
 
@@ -158,7 +158,7 @@ package implements.
 | `internal/triggers` | Mission trigger records, parsing, evaluation, save form | DESIGN_SESSIONS_AI_SAVE |
 | `internal/ai` | The skirmish planner: profiles, manager and tasks, strategic refresh, candidate selection, placement, groups | DESIGN_SESSIONS_AI_SAVE |
 | `internal/aikit` | The Modern AI computer player's host: the controller kept in `ai.Manager.Ext`, its fair observation, command executor, unit table, map analysis, persona and private generator | DESIGN_SESSIONS_AI_SAVE "Modern AI computer player", DESIGN_GAMEPLAY_RULES "The Modern AI controller" |
-| `internal/aikit/core`, `internal/aikit/brains/...` | The brain chassis (blackboard and four replaceable policy layers) and the brains: `utility` and `tactics` (the shipped util+tac) and `survival` (a Survival battle's computer buddies) | MODERN_AI_RESEARCH |
+| `internal/aikit/core`, `internal/aikit/brains/...` | The brain chassis (blackboard and four replaceable policy layers) and the brains: `utility` and `tactics` (the shipped util+tac) and `survival` (a Survival battle's computer buddies); `brains/utiltac` is the leaf that owns the three brains' parameter vocabulary check, shared by the `mods/aikit` layers and by match admission (DESIGN_MULTIPLAYER §8.6) | MODERN_AI_RESEARCH |
 | `internal/save` | The retail HAPIBANK bank container and its boxes | DESIGN_SESSIONS_AI_SAVE |
 | `internal/headless` | Composes and advances an authoritative session with no window or device and emits the report; also hosts the simulation-cost benchmark's fixture, timing and census, and the AI arena's match loop | DESIGN_SESSIONS_AI_SAVE, SIM_BENCHMARK, MODERN_AI_RESEARCH |
 
@@ -225,7 +225,7 @@ presentation  client ─► render, hud, audio, camera, palette, input, model, f
               ui ─► gui, input           render ─► camera, combat, visibility, world, model, palette, frame, content
               hud ─► render, camera, input, frame, units, world, content
 
-composition   session ─► every simulation package below, plus frame, hud, render, audio, save
+composition   session ─► every simulation package below, plus frame, hud, render, audio, save, aikit/brains/utiltac (parameter vocabulary for match admission)
               headless ─► session, ai, aikit, orders, units, content, pool, vfs
               airdiag ─► session, movement, orders, units, content, pool, vfs
 

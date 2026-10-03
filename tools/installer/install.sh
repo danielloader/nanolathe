@@ -97,8 +97,20 @@ install_release() {
     export CGO_ENABLED=0 GOTOOLCHAIN=local GOPATH="$base/cache/gopath" GOMODCACHE="$base/cache/gopath/pkg/mod" GOCACHE="$base/cache/go-build" GOENV=off
     export GOROOT="$toolchain" GOWORK=off GOFLAGS= GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org GOPRIVATE= GONOSUMDB= GONOPROXY=
     unset GOOS GOARCH GOAMD64 GOARM64 GOEXPERIMENT
+    # The common build manifest (docs/DESIGN_MULTIPLAYER.md §8.7) is stamped
+    # into the verified source before the build. It is read from the verified
+    # archive, so every platform's install of this release names one build,
+    # and it records exactly the build arguments below, the cleared
+    # environment's cgo setting and the six admitted toolchain archives.
+    local build_args=(-mod=readonly -trimpath -buildvcs=false '-ldflags=-s -w' ./cmd/nanolathe) stamp_args=() arg
+    for arg in "${build_args[@]}"; do stamp_args+=("-arg=$arg"); done
+    stamp_args+=(-source "$stage/source.tar.gz" -prefix "nanolathe-$revision/" -write "$source" -cgo 0
+        -variant "darwin/amd64/v1=$go_dx" -variant "darwin/arm64/v8.0=$go_da"
+        -variant "linux/amd64/v1=$go_lx" -variant "linux/arm64/v8.0=$go_la"
+        -variant "windows/amd64/v1=$go_wx" -variant "windows/arm64/v8.0=$go_wa")
     printf 'Building Nanolathe %s (the first build can take several minutes)…\n' "$version" >&3
-    (cd "$source" && "$toolchain/bin/go" build -mod=readonly -trimpath -buildvcs=false -ldflags='-s -w' -o "$stage/release/nanolathe" ./cmd/nanolathe)
+    (cd "$source" && "$toolchain/bin/go" run -mod=readonly -trimpath -buildvcs=false ./internal/version/stampgen "${stamp_args[@]}")
+    (cd "$source" && "$toolchain/bin/go" build -o "$stage/release/nanolathe" "${build_args[@]}")
     "$stage/release/nanolathe" --help
     if [ -n "$root_arg" ]; then
         root_arg=$(cd -- "$root_arg" && pwd -P)

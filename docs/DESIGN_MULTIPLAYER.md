@@ -1050,9 +1050,13 @@ partly migrated reader could silently read.
 Strict 3.1 retains one computer per human. Modern and Community allow a
 human to add multiple computers within the session's available lobby seats,
 including the existing Survival layout constraints. Each has the fixed host
-association above. Select the cap through `gameplay.Mode` and the existing
-`session.RuleSet` composition, extending an owning interface under
-DESIGN_GAMEPLAY_RULES §9; do not add a room flag or registry. All online modes
+association above. The cap is selected through the existing
+`session.RuleSet` composition by the session-owned `SeatRules` seam
+(`ComputerSeatsPerHuman`: `StrictSeats` answers one, `ModernSeats` the
+available seats; Community composes Modern's answer), added by U5 under
+DESIGN_GAMEPLAY_RULES §9 because no simulation package asks the question; the
+final-removal answer of §11.1 joins that seam in M6. There is no room flag
+or second registry. All online modes
 exclude computers from Deathmatch in the first releases. That admission
 restriction does not define computer respawn behavior. Single-player
 admission and difficulty remain unchanged.
@@ -3062,9 +3066,12 @@ fairness or integrity of rated matches.
 after the v3 reference-test correction (§16.1), opening M2's milestone gate.
 §7.4.1–§7.4.4 publish the command schemas, size proof, stale-reference rules
 and allocation/command APIs; §8.6–§8.8 publish configuration, frozen-input
-and build contracts. U1 allocation references are implemented as described
-below. No M2 codec, battle-input identity implementation or multi-seat
-session is claimed here.
+and build contracts. U1 allocation references, U4 frozen simulation content
+and U5's configuration and build identities are implemented as described
+below. No command codec, no `ValidateMatchInputs`/`NewAdmittedSkirmish` and
+no multi-seat session is claimed here: U5's admission half follows U4 as a
+short follow-up unit, then U2, U3 and U6 in the sequence of "Code ownership
+and sequence".
 
 **U1 allocation references, 2026-10-02.** Both successful creation paths
 assign a battle-wide serial after the fallible COB bind and before creation
@@ -3134,6 +3141,71 @@ and restores are not frozen (their entry files were outside the unit), the
 session holds no field for the inputs (recovered from the unit world's COB
 source), and `Catalog.Clone()` drops `Limits`, an existing defect for the
 catalog's owner.
+
+**U5 build and configuration identities, 2026-10-02 (configuration and
+build-manifest half).** The `internal/session` and `internal/version` blocks
+of §8.8 exist as written except `ValidateMatchInputs` and
+`NewAdmittedSkirmish`, which need U4's `SimulationInputs` and follow as a
+short unit. `MatchConfigRequest` carries the fifteen fields of §8.6 and the
+positional seat row; `ResolveMatchConfig` validates and freezes a deep copy
+with its canonical encoding, `DecodeMatchConfig` refuses an oversize payload,
+an overlong or overflowing varint, a boolean other than 0 or 1, a count or
+length over its bound before allocating from it, every value resolution
+refuses, trailing bytes and any payload that is not the canonical encoding of
+what it decodes to; `Digest()` is SHA-256 over `nanolathe/match-config/1`
+and that encoding. `NewMatchConfigRequest` is the local adapter from
+`SkirmishConfig` and `SkirmishEntryOptions`, which it leaves unchanged.
+`version.BuildManifest` encodes §8.7's fields in order under
+`nanolathe/sim-build/1`; `internal/version/stampgen` is the generator both
+installers run with `go run` on the verified archive before the release
+build, writing `internal/version/stamp_generated.go` (ignored by git); an
+unstamped development build reports itself so. The Modern AI parameter
+vocabulary check lives in the new leaf `internal/aikit/brains/utiltac`, and
+the online computer-seat cap is asked of the new session-owned `SeatRules`
+seam (§6.6). Tests change one effective field at a time across the §16.2
+inventory, resolve equivalent default spellings to one identity, refuse a
+spliced battle-wide difficulty byte, and mutate every byte of a valid
+encoding (truncations, flips under six masks, 20,000 deterministic random
+edits, count and length attacks) requiring a refusal or an identical
+re-encoding. The startup report now names the build manifest digest or
+"unstamped"; the staged API no shipped binary reaches yet (the configuration
+codec and adapter, the vocabulary check) is listed in the deadcode baseline
+with that reason, for U6 and the `mods/aikit` switch to drop. Readings the
+unit made, recorded in its code comments: neither payload carries an in-band
+version (the domain and envelope name it); `Seats` holds exactly NumPlayers
+rows, so unused rows cannot be represented; fields a role does not read must
+hold their canonical value (non-computers HostSeat 255, ComputerKind 0,
+Difficulty 0 and no parameters; computers and the attacker a zero
+participant; the attacker zero resources; every non-human seat the patch
+default builder options) or the request is rejected; Classic computers keep
+their merged parameters; `SharedVictory` must equal the team rule
+`[05 R-SHARE-01 §1]`; the all-in-one-team refusal counts watchers; a
+Survival attacker is last with group 5 and every other row shares one team;
+a nonzero Community unit limit must equal the field; `MapName` is nonempty
+and trimmed with case kept; content-profile `From` is a canonical key,
+`To` lower-case, identity rows rejected, `From` strictly ascending; unit
+restrictions get schema checks only, and `ValidateMatchInputs` must refuse a
+nonempty list until Q16 enforcement exists; the three policy durations
+accept any `u32`; the mod triple is all empty or all set; AI parameters are
+canonical tokens in strictly ascending key order with the 8,192-byte bound
+measured on the encoding; the adapter supports one local human hosting every
+computer, drops only a truncated trailing character of a name, maps a
+nonzero location to 1, takes the visibility words' low bit, requires
+difficulty 0..2 and refuses `AutomatedPlayers`; a zero `SourceTree` marks an
+unstamped manifest; the source inventory is SHA-256 of
+`nanolathe/source-tree/1`, the entry count and each entry (path, kind 1
+regular / 2 executable / 3 symlink, length, bytes) in path byte order, with
+empty directories not inventoried, special files, hard links, any `.git` and
+`replace` directives refused; the module list is `go.sum`'s non-`/go.mod`
+lines; build arguments exclude `-o` and `-tags`; the six variants are the
+cleared environment's levels (amd64 v1, arm64 v8.0) with the release's
+toolchain hashes; the runtime stamp check compares toolchain, platform,
+level, cgo, tags, GOEXPERIMENT, trimpath and the linked modules, and
+`-ldflags` only for untrimmed builds, which are the only ones the toolchain
+records them for; the Windows build now also passes `-ldflags=-s -w` so both
+installers share one argument list. A headless `match_config_digest` was not
+added: the report builder cannot reach the entry options, and a digest
+rebuilt from the normalized session would misreport the battle.
 
 M2 makes the command boundary explicit and the battle inputs identifiable.
 It does not enable a network battle: perspectives, multiplayer sharing,

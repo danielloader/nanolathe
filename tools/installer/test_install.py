@@ -73,6 +73,7 @@ exit "${RUN_FAIL:-0}"
         (self.path / "engine").write_text(engine)
         go = '''#!/bin/bash
 [ "$CGO_ENABLED" = 0 ] && [ "$GOTOOLCHAIN" = local ] && [ "$GOENV" = off ] || exit 20
+if [ "$1" = run ]; then printf '%s\\n' "$*" >> "$FIXTURE_DIR/stamps"; exit "${STAMP_FAIL:-0}"; fi
 printf built >> "$FIXTURE_DIR/builds"
 [ "${BUILD_FAIL:-0}" = 0 ] || exit 21
 while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then output=$2; break; fi; shift; done
@@ -127,6 +128,18 @@ chmod +x "$output"
             self.assertEqual((self.base / "current").resolve(), before)
         downloads = (self.path / "downloads").read_text()
         self.assertEqual(downloads.count("https://go.dev/"), 1)
+
+    def test_build_is_stamped_from_the_verified_archive_and_stamp_failure_keeps_release(self):
+        self.install("--no-run")
+        stamp = (self.path / "stamps").read_text()
+        for want in ("./internal/version/stampgen", "-source", "source.tar.gz", f"nanolathe-{REVISION}/", "-cgo 0",
+                     "-arg=-mod=readonly", "-arg=-trimpath", "-arg=-buildvcs=false", "-arg=-ldflags=-s -w", "-arg=./cmd/nanolathe",
+                     f"-variant windows/arm64/v8.0={self.go_hash}", f"-variant darwin/amd64/v1={self.go_hash}"):
+            self.assertIn(want, stamp)
+        before = (self.base / "current").resolve()
+        self.manifest(version="alpha.2")
+        self.install("--no-run", success=False, STAMP_FAIL="1")
+        self.assertEqual((self.base / "current").resolve(), before)
 
     def test_manifest_is_data_and_rejects_duplicates(self):
         self.manifest(version="$(touch injected)")

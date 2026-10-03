@@ -45,6 +45,7 @@ type RuleSet struct {
     Path           path.Kernel
     Planner        ai.Planner
     ComputerIncome ComputerIncomeRules
+    Seats          SeatRules
 }
 ```
 
@@ -97,9 +98,10 @@ as a second way to select a policy: a composed session always binds.
 | `path.Kernel` | `internal/path` | the search a route request is opened with ("The path search kernel" below); Strict 3.1 and Community bind `path.RetailKernel`, Modern binds `path.SmoothKernel` ([route straightening](DESIGN_MOVEMENT_PATH.md#modern-route-straightening) and [route smoothing](DESIGN_MOVEMENT_PATH.md#modern-route-smoothing)) |
 | `ai.Planner` | `internal/ai` | the computer player's per-tick think step ("The computer player's think step" below); Strict 3.1 and Community bind `ai.RetailPlanner`, Modern binds `ai.ModernPlanner` ([wave air targets](DESIGN_SESSIONS_AI_SAVE.md#modern-wave-air-targets)); a computer player marked Modern takes the step `mods/aikit` installs, the [Modern AI computer player](DESIGN_SESSIONS_AI_SAVE.md#modern-ai-computer-player), under any bound set, and no set binds it ("The Modern AI controller" below) |
 | `session.ComputerIncomeRules` | `internal/session` | the word the Classic computer players' difficulty discount selects on; every reserved set answers retail's difficulty word, and the AI arena's research set composes `FullComputerIncome`; a player marked Modern is paid in full whatever the set answers ([Modern AI full income](DESIGN_ECONOMY_CONSTRUCTION.md#modern-ai-full-income)) |
+| `session.SeatRules` | `internal/session` | the online seat decisions of a multiplayer battle (DESIGN_MULTIPLAYER §6.6, §15 Q23): how many computer seats one human may add — Strict 3.1 answers retail's one per machine (`StrictSeats`), Modern and Community answer the available lobby seats (`ModernSeats`); match admission asks it before a world exists. The final-removal answer of DESIGN_MULTIPLAYER §11.1 (Q6, Q26, Q28: one answer for the removed human's units and its hosted computers) joins this interface when M6 implements removal |
 
-`session.ComputerIncomeRules` is a session seam for the same reason
-`UnitLimitRules` is: no simulation package asks the question. The ledger and
+`session.ComputerIncomeRules` and `session.SeatRules` are session seams for
+the same reason `UnitLimitRules` is: no simulation package asks the question. The ledger and
 the construction refund sites only read a selector word the session installs,
 so the session asks the bound set on every bind, outside any tick, and
 projects its one answer onto both. Beside it the same projection marks each
@@ -339,8 +341,8 @@ they are checked by tests rather than trusted:
    what makes an identity fingerprint the correct gate for a seam unit.
 4. **Strict policy answers add no randomness or state writes.** The policy
    methods in `combat.Rules`, `orders.Rules`, `construction.Rules`,
-   `movement.Rules`, `UnitLimitRules` and `ComputerIncomeRules` preserve the
-   retail path without extra work. The whole
+   `movement.Rules`, `UnitLimitRules`, `ComputerIncomeRules` and `SeatRules`
+   preserve the retail path without extra work. The whole
    subsystem seams still execute retail search and planner behavior, including
    their established state writes and RNG consumption; they are not no-ops.
    An approved Modern change documents its RNG and resource effects and uses
@@ -629,8 +631,8 @@ to ask for the same approval again.
 2. **Use the existing interface.** Compose a shipped implementation when it
    already answers the question. Add a method to the owning `combat.Rules`,
    `orders.Rules`, `construction.Rules`, `movement.Rules`,
-   `session.UnitLimitRules` or `session.ComputerIncomeRules` when the
-   package needs a new decision. Implement Strict, Community and Modern
+   `session.UnitLimitRules`, `session.ComputerIncomeRules` or
+   `session.SeatRules` when the package needs a new decision. Implement Strict, Community and Modern
    defaults in their derivation chain, with each layer promoting the lower
    answer where no departure is approved.
    Keep unbound fixtures' retail behavior. For a replacement search or think

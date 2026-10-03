@@ -1,0 +1,158 @@
+// Package utiltac owns the util+tac brain's parameter vocabulary: the one
+// strict check every configured Modern AI parameter passes before a battle
+// (docs/DESIGN_SESSIONS_AI_SAVE.md "Modern AI computer player",
+// "Configuration"). The brain is utility strategy, economy and production
+// with a tactics army; each of its layers owns its own keys:
+//
+//   - the utility parameters, utility.Specs (name, default and range);
+//   - the variety switches that utility.VarietyFrom reads: the style and its
+//     jitter, the attack-value switches, the front rules, the opening
+//     switches, and the personality and its traits;
+//   - the tactics army's switches and knobs that tactics.ParamsFrom reads
+//     (internal/aikit/brains/tactics/README.md);
+//   - the survival brain's keys, survival.Specs, which only a Survival
+//     battle's computer survivors read.
+//
+// The check lives here, below both of its users, so that the mod that builds
+// the brain (mods/aikit) and the session's online match admission
+// (docs/DESIGN_MULTIPLAYER.md §8.6) read one vocabulary. The session cannot
+// import mods/aikit, which imports the session.
+package utiltac
+
+import (
+	"fmt"
+	"maps"
+	"slices"
+	"strconv"
+
+	"github.com/nanolathe-gg/nanolathe/internal/aikit/brains/survival"
+	"github.com/nanolathe-gg/nanolathe/internal/aikit/brains/utility"
+)
+
+// varietyKeys are the keys utility.VarietyFrom reads, which validates their
+// values itself: the switches, then the personality's trait keys
+// (utility.TraitKeys).
+var varietyKeys = append([]string{"style", "jitter", "att_curve", "att_share", "att_floor", "att_lag", "att_build", "tower_time", "wide_base", "open_reclaim", "open_reclaim_hi", "open_reclaim_end", "open_army", "open_fam", "open_follow",
+	"personality"}, utility.TraitKeys[:]...)
+
+// wordKeys take a word rather than an integer: a style, a personality, or
+// pv's "main".
+var wordKeys = [...]string{"style", "personality", "pv"}
+
+// tacticsKey is one key tactics.ParamsFrom reads and the values that it
+// acts on. ParamsFrom ignores a value it cannot use, so the strict check
+// names what it accepts: a switch is 0 or 1; a knob is a 32-bit integer of
+// at least min; pv takes "main".
+type tacticsKey struct {
+	name string
+	knob bool
+	min  int64
+}
+
+// tacticsKeys lists them in tactics.Params field order. air and naval are
+// also utility switches (utility.Specs), which check them first.
+var tacticsKeys = [...]tacticsKey{
+	{name: "route"}, {name: "micro"}, {name: "raid"}, {name: "defend"}, {name: "escort"}, {name: "budget"},
+	{name: "air"}, {name: "naval"},
+	{name: "em", knob: true, min: minKnob}, {name: "rm", knob: true, min: minKnob}, {name: "nm", knob: true, min: minKnob},
+	{name: "posture"}, {name: "pv"}, {name: "pagg", knob: true, min: minKnob},
+	{name: "passage"}, {name: "unseen"}, {name: "harass"},
+	{name: "hn", knob: true, min: 1}, {name: "hv", knob: true, min: 0},
+	{name: "probe"}, {name: "tour"},
+	{name: "sm", knob: true, min: 1}, {name: "raidv", knob: true, min: 1},
+}
+
+// minKnob is the least signed 32-bit value: the margin and aggression knobs
+// take either sign.
+const minKnob = -1 << 31
+
+// ValidateParams checks a parameter set strictly, for a configuration: every
+// key must be one a util+tac layer reads, and every value one that layer
+// uses as written — a utility parameter an integer inside its documented
+// range (the utility reader would clamp it), a switch 0 or 1. The arena's
+// lenient reading is the brain builder's. Keys are checked in sorted order,
+// so the first error is always the same one.
+func ValidateParams(params map[string]string) error {
+	for _, k := range slices.Sorted(maps.Keys(params)) {
+		if err := ValidateParam(k, params[k]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateParam checks one key and its value the way ValidateParams checks
+// each pair of a set. A key's validity never depends on another key, so a set
+// is valid exactly when each of its pairs is.
+func ValidateParam(key, value string) error {
+	// Every value but a style, a personality or pv's word is an integer,
+	// spelled plainly: "+1" or "01" would read as 1 in one layer and not in
+	// another (a tactics switch is off only for exactly "0").
+	n, err := strconv.ParseInt(value, 10, 32)
+	plain := err == nil && strconv.FormatInt(n, 10) == value
+	if !plain && !slices.Contains(wordKeys[:], key) && knownParam(key) {
+		return fmt.Errorf("aikit: %s=%q: want an integer", key, value)
+	}
+	for i := range utility.Specs {
+		sp := &utility.Specs[i]
+		if sp.Name != key {
+			continue
+		}
+		if n < int64(sp.Min) || n > int64(sp.Max) {
+			return fmt.Errorf("aikit: %s=%q: want an integer in %d..%d (%s)", key, value, sp.Min, sp.Max, sp.Doc)
+		}
+		return nil
+	}
+	if slices.Contains(varietyKeys, key) {
+		_, err := utility.VarietyFrom(map[string]string{key: value})
+		return err
+	}
+	for i := range survival.Specs {
+		if survival.Specs[i].Name == key {
+			_, err := survival.ParamsFrom(map[string]string{key: value})
+			return err
+		}
+	}
+	for i := range tacticsKeys {
+		tk := &tacticsKeys[i]
+		if tk.name != key {
+			continue
+		}
+		switch {
+		case key == "pv":
+			if value != "main" {
+				return fmt.Errorf("aikit: pv=%q: want main (measure the main squad alone)", value)
+			}
+		case tk.knob:
+			if n < tk.min {
+				return fmt.Errorf("aikit: %s=%q: want an integer of at least %d", key, value, tk.min)
+			}
+		default:
+			if n != 0 && n != 1 {
+				return fmt.Errorf("aikit: %s=%q: want 0 or 1", key, value)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("aikit: unknown parameter %q (the keys are utility.Specs, the variety switches, the tactics switches and survival.Specs; docs/DESIGN_SESSIONS_AI_SAVE.md \"Modern AI computer player\")", key)
+}
+
+// knownParam reports a key some util+tac layer reads.
+func knownParam(key string) bool {
+	for i := range utility.Specs {
+		if utility.Specs[i].Name == key {
+			return true
+		}
+	}
+	for i := range tacticsKeys {
+		if tacticsKeys[i].name == key {
+			return true
+		}
+	}
+	for i := range survival.Specs {
+		if survival.Specs[i].Name == key {
+			return true
+		}
+	}
+	return slices.Contains(varietyKeys, key)
+}

@@ -38,6 +38,25 @@ func writeStartupSystemReport(w io.Writer) {
 	}
 	fmt.Fprintf(w, "nanolathe: build: profile=%s revision=%s modified=%s ebitengine=%s\n",
 		version.ProfileID(), revision, modified, engine)
+	fmt.Fprintf(w, "nanolathe: build manifest: %s\n", startupBuildManifest(version.CurrentBuildManifest()))
+}
+
+// startupBuildManifest names the common build manifest the binary carries
+// (docs/DESIGN_MULTIPLAYER.md §8.7): its digest, which is the build players
+// must share to play together, or why there is none. An installer build is
+// stamped; a development build is not.
+func startupBuildManifest(m version.BuildManifest, err error) string {
+	if err != nil {
+		return "refused (" + err.Error() + ")"
+	}
+	if !m.Stamped() {
+		return "unstamped (development build)"
+	}
+	digest, err := m.Digest()
+	if err != nil {
+		return "refused (" + err.Error() + ")"
+	}
+	return hex.EncodeToString(digest[:])
 }
 
 func startupBuildIdentity(info *debug.BuildInfo) (revision, modified, engine string) {

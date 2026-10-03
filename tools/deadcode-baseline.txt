@@ -63,6 +63,7 @@ github.com/nanolathe-gg/nanolathe/internal/session NewAdmittedSkirmish
 github.com/nanolathe-gg/nanolathe/internal/session NewMatchConfigRequest
 github.com/nanolathe-gg/nanolathe/internal/session NewSkirmishWithProgress
 github.com/nanolathe-gg/nanolathe/internal/session ResolveMatchConfig
+github.com/nanolathe-gg/nanolathe/internal/session Session.markSeatRemovedForCommands
 github.com/nanolathe-gg/nanolathe/internal/session ValidateMatchInputs
 github.com/nanolathe-gg/nanolathe/internal/session admitMatch
 github.com/nanolathe-gg/nanolathe/internal/session asciiLower
@@ -104,6 +105,7 @@ github.com/nanolathe-gg/nanolathe/internal/session matchWriter.seat
 github.com/nanolathe-gg/nanolathe/internal/session matchWriter.text
 github.com/nanolathe-gg/nanolathe/internal/session matchWriter.u8
 github.com/nanolathe-gg/nanolathe/internal/session matchWriter.uvarint
+github.com/nanolathe-gg/nanolathe/internal/session setOnlineSeatCommands
 github.com/nanolathe-gg/nanolathe/internal/session validateMatchAIParams
 github.com/nanolathe-gg/nanolathe/internal/session validateMatchKey
 github.com/nanolathe-gg/nanolathe/internal/session validateMatchSeat

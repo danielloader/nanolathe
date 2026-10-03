@@ -15,8 +15,10 @@ import (
 // DESIGN_INTERFACE_HUD_INPUT "Modern spawn command". Its placement is the
 // retail developer spawn handler's (spawnCommandPlacement); its gate, owner
 // and single exact name are the policy's. Rejections precede the ordinary
-// allocator so they cannot consume creation RNG draws.
-func (s *Session) applySpawnCommand(c HumanSpawnCommand, tick uint32) {
+// allocator so they cannot consume creation RNG draws. owner is the issuing
+// seat: the stamped seat online, the own/controlling slot in single-player
+// (DESIGN_MULTIPLAYER §7.1).
+func (s *Session) applySpawnCommand(c HumanSpawnCommand, owner uint8, tick uint32) {
 	if s.Gameplay.Normalize() != gameplay.Modern {
 		return
 	}
@@ -25,7 +27,7 @@ func (s *Session) applySpawnCommand(c HumanSpawnCommand, tick uint32) {
 			s.publication.events.EmitAnnounce(frame.Event{Tick: tick, StatusText: text, StatusClass: 4, AnnounceSlot: 10})
 		}
 	}
-	if s.Catalog == nil || s.World == nil || s.Units == nil || s.Econ == nil || int(s.LocalOwner) >= len(s.Econ.Players) || !s.Econ.Players[s.LocalOwner].Exists {
+	if s.Catalog == nil || s.World == nil || s.Units == nil || s.Econ == nil || int(owner) >= len(s.Econ.Players) || !s.Econ.Players[owner].Exists {
 		say("Cannot spawn without an active local player")
 		return
 	}
@@ -39,7 +41,7 @@ func (s *Session) applySpawnCommand(c HumanSpawnCommand, tick uint32) {
 		say(reason)
 		return
 	}
-	h, err := s.Units.Create(def, s.LocalOwner, x, y, z)
+	h, err := s.Units.Create(def, owner, x, y, z)
 	if err != nil {
 		say("Cannot spawn: unit limit reached or unit assets unavailable")
 		return

@@ -282,6 +282,28 @@ type HumanCommand struct {
 	Visibility         HumanVisibilityCommand
 	Meteor             HumanMeteorCommand
 	ShiftHeld          bool
+
+	// seat is a stamped stream entry riding this queue (EnqueueSeatCommand);
+	// nil for every local command. One queue keeps stamped and local entries
+	// in one order through one drain (DESIGN_MULTIPLAYER §7.4.4).
+	seat *seatQueued
+	// refs is the local adapter's capture of the command's explicit unit
+	// handles as allocation references (DESIGN_MULTIPLAYER §7.4.4).
+	refs localRefs
+}
+
+// localRefs holds the explicit handles of a local command as allocation
+// references, captured when the command is submitted. Selection-derived
+// actors are not here: the selection is session state until the local
+// interface unit moves it to the client, and a selection command queued
+// earlier in the same batch must still reach an implicit order behind it, so
+// the adapter reads it at the input boundary (bindLocalCommand).
+type localRefs struct {
+	captured bool
+	actors   []pool.UnitRef // Order, Stop, SelfDestruct, CancelQueuedMove handles
+	target   pool.UnitRef   // Order.Target
+	targets  []pool.UnitRef // Order.Targets[i].Target, parallel
+	unit     pool.UnitRef   // the singular actor of the unit-addressed kinds
 }
 
 func cloneHumanHandles(in []pool.Handle) []pool.Handle {
@@ -300,7 +322,91 @@ func cloneHumanCommand(c HumanCommand) HumanCommand {
 	c.Stop.Handles = cloneHumanHandles(c.Stop.Handles)
 	c.CancelQueuedMove.Handles = cloneHumanHandles(c.CancelQueuedMove.Handles)
 	c.SelfDestruct.Handles = cloneHumanHandles(c.SelfDestruct.Handles)
+	c.refs.actors = cloneRefs(c.refs.actors)
+	c.refs.targets = cloneRefs(c.refs.targets)
 	return c
+}
+
+// captureRef names the allocation now occupying a handle's slot. The handle
+// is kept even when its unit has already died: the slot's raw record
+// (World.RawUnitRecord) still shows a dying unit's serial, and a freed or
+// never-allocated slot shows zero, which no lookup accepts. Either way the
+// reference is stale rather than null, so an ordinary order to a dead target
+// keeps the single-player result §7.4.3 says the local adapter preserves —
+// a ground order built with the dead handle. A local reference with a zero
+// serial never leaves the session; it has no wire form.
+func (s *Session) captureRef(h pool.Handle) pool.UnitRef {
+	if h == 0 {
+		return pool.UnitRef{}
+	}
+	var serial uint64
+	if s != nil && s.Units != nil {
+		if u := s.Units.RawUnitRecord(h); u != nil {
+			serial = u.AllocationSerial
+		}
+	}
+	return pool.UnitRef{Handle: h, Serial: serial}
+}
+
+func (s *Session) captureRefs(hs []pool.Handle) []pool.UnitRef {
+	if len(hs) == 0 {
+		return nil
+	}
+	out := make([]pool.UnitRef, len(hs))
+	for i, h := range hs {
+		out[i] = s.captureRef(h)
+	}
+	return out
+}
+
+// captureLocalRefs records the command's explicit handles as references. It
+// runs at submission; a command handed to phase 1 without passing through
+// EnqueueHumanCommand (replay staging, tests) is captured when applied, which
+// is the same instant for the queue's purposes because nothing runs between.
+func (s *Session) captureLocalRefs(c *HumanCommand) {
+	if c.refs.captured {
+		return
+	}
+	c.refs = localRefs{captured: true}
+	switch c.Kind {
+	case HumanOrder:
+		c.refs.actors = s.captureRefs(c.Order.Handles)
+		c.refs.target = s.captureRef(c.Order.Target)
+		if len(c.Order.Targets) != 0 {
+			c.refs.targets = make([]pool.UnitRef, len(c.Order.Targets))
+			for i := range c.Order.Targets {
+				c.refs.targets[i] = s.captureRef(c.Order.Targets[i].Target)
+			}
+		}
+	case HumanStop:
+		c.refs.actors = s.captureRefs(c.Stop.Handles)
+	case HumanSelfDestruct:
+		c.refs.actors = s.captureRefs(c.SelfDestruct.Handles)
+	case HumanCancelQueuedMove:
+		c.refs.actors = s.captureRefs(c.CancelQueuedMove.Handles)
+	case HumanActivation:
+		c.refs.unit = s.captureRef(c.Activation.Unit)
+	case HumanMobileBuild:
+		c.refs.unit = s.captureRef(c.MobileBuild.Builder)
+	case HumanFactoryBuild:
+		c.refs.unit = s.captureRef(c.FactoryBuild.Builder)
+	case HumanCancelProduction:
+		c.refs.unit = s.captureRef(c.CancelProduction.Unit)
+	case HumanStockpile:
+		c.refs.unit = s.captureRef(c.Stockpile.Unit)
+	}
+}
+
+// localInterfaceKind reports the local-only (L) kinds of DESIGN_MULTIPLAYER
+// §7.1: selection, build pages, group recall, BigBrother and Shift. They are
+// interface state, not seat commands, and still live in the session until the
+// local interface unit moves them to the client.
+func localInterfaceKind(k HumanCommandKind) bool {
+	switch k {
+	case HumanSelectionReplace, HumanSelectionToggle, HumanSelectionClear, HumanBuildPage, HumanGroupRecall, HumanBigBrother, HumanShiftState:
+		return true
+	}
+	return false
 }
 
 // EnqueueHumanCommand appends one command for the next authoritative input
@@ -313,10 +419,28 @@ func (s *Session) EnqueueHumanCommand(c HumanCommand) error {
 // EnqueueHumanCommandWithSequence also returns the session-owned command receipt.
 // Enhanced input uses it to replace only its first click's queued move with a
 // build at a later input boundary (DESIGN_INTERFACE_HUD_INPUT §3.10).
+//
+// It is the single-player compatibility adapter of DESIGN_MULTIPLAYER
+// §7.4.4: it captures the command's explicit handles as allocation
+// references here, at submission, and phase 1 hands the command to the same
+// payload implementation a stamped seat command reaches (applyBound). In an
+// online session it admits only the local interface kinds; every command that
+// changes the world must arrive stamped through EnqueueSeatCommand, so no kind
+// can fall through to this path unauthorized (§16.2 M2-C2).
 func (s *Session) EnqueueHumanCommandWithSequence(c HumanCommand) (uint64, error) {
 	if s == nil {
 		return 0, fmt.Errorf("session: nil human-command owner")
 	}
+	s.humanMu.Lock()
+	online := s.seatCommands.online != nil
+	s.humanMu.Unlock()
+	if online && !localInterfaceKind(c.Kind) {
+		return 0, fmt.Errorf("nanolathe: local command refused: logical path human command kind %d, providers searched [session], expected a stamped seat command in an online session", c.Kind)
+	}
+	// A caller cannot supply the capture or a stamped entry.
+	c.seat = nil
+	c.refs = localRefs{}
+	s.captureLocalRefs(&c)
 	if c.Kind == HumanBuilderOptions {
 		if err := s.validateBuilderOptions(c.BuilderOptions); err != nil {
 			return 0, err
@@ -369,7 +493,16 @@ func (s *Session) HasPendingHumanCommand(kind HumanCommandKind) bool {
 	s.humanMu.Lock()
 	defer s.humanMu.Unlock()
 	for i := range s.pendingHuman {
-		if s.pendingHuman[i].Kind == kind {
+		c := &s.pendingHuman[i]
+		if c.seat != nil {
+			// A stamped rule-set switch (single-player replay) reassigns the
+			// same HUD-read rule state as a local one, so the host must see it.
+			if kind == HumanGameplay && c.seat.command.Kind == SeatGameplay {
+				return true
+			}
+			continue
+		}
+		if c.Kind == kind {
 			return true
 		}
 	}
@@ -378,15 +511,19 @@ func (s *Session) HasPendingHumanCommand(kind HumanCommandKind) bool {
 
 // PendingHumanCommands returns immutable command copies for diagnostics/tests
 // and presentation of input intent awaiting the next authoritative tick.
+// Stamped seat entries are not human commands and are not listed.
 func (s *Session) PendingHumanCommands() []HumanCommand {
 	if s == nil {
 		return nil
 	}
 	s.humanMu.Lock()
 	defer s.humanMu.Unlock()
-	out := make([]HumanCommand, len(s.pendingHuman))
+	out := make([]HumanCommand, 0, len(s.pendingHuman))
 	for i := range s.pendingHuman {
-		out[i] = cloneHumanCommand(s.pendingHuman[i])
+		if s.pendingHuman[i].seat != nil {
+			continue
+		}
+		out = append(out, cloneHumanCommand(s.pendingHuman[i]))
 	}
 	return out
 }
@@ -434,6 +571,12 @@ func (s *Session) applyHumanCommands(tick uint32) {
 // leaves it and everything behind it queued, so enqueue order is preserved
 // exactly and the next real tick applies the remainder in sequence.
 func pausedInputApplicable(c HumanCommand) bool {
+	if c.seat != nil {
+		// The paused boundary is the single-player local adapter's alone: a
+		// stamped entry waits for phase 1 of its own tick (DESIGN_MULTIPLAYER
+		// §4.2, §7.4.4), and it holds everything queued behind it.
+		return false
+	}
 	switch c.Kind {
 	case HumanSpawn:
 		// The Modern spawn command allocates a unit, which consumes creation
@@ -489,12 +632,50 @@ func (s *Session) applyPausedHumanCommands(tick uint32, before func()) int {
 	return n
 }
 
+// humanUnit admits a live unit of the seat the command being applied acts for:
+// the entry's seat while phase 1 applies a stamped seat command, otherwise the
+// local own/controlling slot (DESIGN_MULTIPLAYER §7.2). The issuer is command
+// attribution, not a perspective; nothing here reads or moves a viewing slot.
 func (s *Session) humanUnit(h pool.Handle) *units.Unit {
 	if s == nil || s.Units == nil || h == 0 {
 		return nil
 	}
 	u := s.Units.Unit(h)
-	if u == nil || !u.Alive || u.Owner != s.LocalOwner {
+	if u == nil || !u.Alive || u.Owner != s.commandIssuer() {
+		return nil
+	}
+	return u
+}
+
+// commandIssuer is the seat humanUnit admits units of.
+func (s *Session) commandIssuer() uint8 {
+	if s.seatCommands.issuing {
+		return s.seatCommands.issuer
+	}
+	return s.LocalOwner
+}
+
+// commandActor resolves an actor reference: a live unit with that allocation
+// serial, owned by the issuer. A serial mismatch is a stale actor, never the
+// slot's new occupant (§16.2 M2-C3).
+func (s *Session) commandActor(issuer uint8, r pool.UnitRef) *units.Unit {
+	if s == nil || s.Units == nil {
+		return nil
+	}
+	u := s.Units.LookupReference(r)
+	if u == nil || !u.Alive || u.Owner != issuer {
+		return nil
+	}
+	return u
+}
+
+// commandTarget resolves a target reference, which may name any player's unit.
+func (s *Session) commandTarget(r pool.UnitRef) *units.Unit {
+	if s == nil || s.Units == nil {
+		return nil
+	}
+	u := s.Units.LookupReference(r)
+	if u == nil || !u.Alive {
 		return nil
 	}
 	return u
@@ -580,39 +761,78 @@ func (s *Session) applyHumanBuildPage(c HumanBuildPageCommand) {
 	u.Flags = view.Flags
 }
 
-func (s *Session) applyHumanGroup(c HumanGroupCommand, assign bool) {
-	if s == nil || s.Units == nil || s.Catalog == nil || c.Group < 1 || c.Group > 9 {
-		return
-	}
+// groupViews lists an owner's live units that carry a nonzero catalog
+// definition id, in ascending pool order, as the group scanner sees them
+// [07 §9]. selected, when non-nil, replaces each unit's selection bit: the
+// explicit membership of a seat command stands in for the selection flag.
+func (s *Session) groupViews(owner uint8, selected func(pool.Handle) bool) ([]*hud.SelectUnit, []*units.Unit) {
 	views := make([]*hud.SelectUnit, 0)
 	unitsByView := make([]*units.Unit, 0)
 	for _, u := range s.Units.Iter() {
-		if u == nil || !u.Alive || u.Owner != s.LocalOwner || u.Def == nil {
+		if u == nil || !u.Alive || u.Owner != owner || u.Def == nil {
 			continue
 		}
 		defID, ok := s.Catalog.UnitDefIndex(u.Def.CanonicalKey)
 		if !ok || defID == 0 || defID > 0xffff {
 			continue
 		}
-		views = append(views, &hud.SelectUnit{Flags: u.Flags, Group: u.Group, DefID: uint16(defID)})
-		unitsByView = append(unitsByView, u)
-	}
-	if assign {
-		hud.AssignGroup(views, c.Group, nil)
-	} else {
-		mask := c.Mask
-		if mask == ([hud.CategoryMaskBytes]byte{}) {
-			// No CTRL_F mask producer is part of the current immutable frame.
-			// Treat absent filter state as no filter; the authored mask producer
-			// remains an explicit TODO rather than a guessed category mask [07 §9].
-			for i := range mask {
-				mask[i] = 0xff
+		flags := u.Flags
+		if selected != nil {
+			flags &^= hud.SelectionFlag
+			if selected(u.Handle) {
+				flags |= hud.SelectionFlag
 			}
 		}
-		hud.RecallGroup(views, c.Group, c.Preserve, mask, nil)
+		views = append(views, &hud.SelectUnit{Flags: flags, Group: u.Group, DefID: uint16(defID)})
+		unitsByView = append(unitsByView, u)
 	}
+	return views, unitsByView
+}
+
+// applyHumanGroupRecall is digit recall, local interface state [07 §9].
+func (s *Session) applyHumanGroupRecall(c HumanGroupCommand) {
+	if s == nil || s.Units == nil || s.Catalog == nil || c.Group < 1 || c.Group > 9 {
+		return
+	}
+	views, unitsByView := s.groupViews(s.LocalOwner, nil)
+	mask := c.Mask
+	if mask == ([hud.CategoryMaskBytes]byte{}) {
+		// No CTRL_F mask producer is part of the current immutable frame.
+		// Treat absent filter state as no filter; the authored mask producer
+		// remains an explicit TODO rather than a guessed category mask [07 §9].
+		for i := range mask {
+			mask[i] = 0xff
+		}
+	}
+	hud.RecallGroup(views, c.Group, c.Preserve, mask, nil)
 	for i, view := range views {
 		unitsByView[i].Flags = view.Flags
+		unitsByView[i].Group = view.Group
+	}
+}
+
+// applyBoundGroupAssign is Ctrl+digit assignment over explicit membership:
+// every live member of the issuer takes the group, and every other unit of
+// the issuer carrying it loses it, through the same scanner rule as before
+// [07 §9]. Only the group number is written; the selection bit stays the
+// interface's (DESIGN_MULTIPLAYER §7.1, §7.4.3).
+func (s *Session) applyBoundGroupAssign(b *boundCommand) {
+	if s.Catalog == nil || b.c.Group.Group < 1 || b.c.Group.Group > 9 {
+		return
+	}
+	members := s.boundActors(b)
+	var mark []bool
+	for _, h := range members {
+		if int(h) >= len(mark) {
+			mark = append(mark, make([]bool, int(h)+1-len(mark))...)
+		}
+		mark[h] = true
+	}
+	views, unitsByView := s.groupViews(b.issuer, func(h pool.Handle) bool {
+		return int(h) < len(mark) && mark[h]
+	})
+	hud.AssignGroup(views, b.c.Group.Group, nil)
+	for i, view := range views {
 		unitsByView[i].Group = view.Group
 	}
 }
@@ -793,19 +1013,21 @@ func removeQueuedWorldOrder(actor *units.Unit, kind orders.ID, target pool.Handl
 	})
 }
 
+// applyHumanCommand is phase 1's one entry for a queued element, in queue
+// order. A stamped seat entry is authorized and yields a receipt
+// (applyQueuedSeatCommand). A local command applies its interface-state kinds
+// here and hands every other kind, bound to references and to the own/
+// controlling slot at drain time, to the shared payload implementation
+// (applyBound) that stamped commands reach too (DESIGN_MULTIPLAYER §7.4.4).
 func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 	if s == nil {
 		return
 	}
+	if c.seat != nil {
+		s.applyQueuedSeatCommand(c.seat, tick)
+		return
+	}
 	switch c.Kind {
-	case HumanBuilderOptions:
-		if s.validateBuilderOptions(c.BuilderOptions) == nil {
-			s.playerBuilderOptions[c.BuilderOptions.Owner] = c.BuilderOptions.Options
-		}
-		return
-	case HumanGameplay:
-		s.SetGameplay(c.Gameplay)
-		return
 	case HumanBigBrother:
 		s.bigBrother.enabled = !s.bigBrother.enabled
 		if s.bigBrother.enabled {
@@ -817,143 +1039,169 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 	case HumanShiftState:
 		s.bigBrother.shiftHeld = c.ShiftHeld
 		return
-	case HumanNoShake:
-		s.ToggleNoShake()
-		return
-	case HumanSpawn:
-		s.applySpawnCommand(c.Spawn, tick)
-		return
-	case HumanATM:
-		if s.Mission != nil && s.Mission.Type == mission.TypeCampaign {
+	}
+	if localInterfaceKind(c.Kind) {
+		if s.Units == nil {
 			return
 		}
-		if s.Econ == nil || int(s.LocalOwner) >= len(s.Econ.Players) {
-			return
-		}
-		p := &s.Econ.Players[s.LocalOwner]
-		if !p.Exists {
-			return
-		}
-		economy.CreditSpawn(p, economy.Metal, 1000)
-		economy.CreditSpawn(p, economy.Energy, 1000)
-		return
-	case HumanSetResource:
-		if s.Econ == nil || c.SetResource.Player < 0 || c.SetResource.Player >= len(s.Econ.Players) {
-			return
-		}
-		if c.SetResource.Resource != economy.Metal && c.SetResource.Resource != economy.Energy {
-			return
-		}
-		p := &s.Econ.Players[c.SetResource.Player]
-		if !p.Exists || p.ControllerState < 1 || p.ControllerState > 3 || p.Side == 10 {
-			return
-		}
-		p.Stock[c.SetResource.Resource] = c.SetResource.Amount
-		return
-	case HumanSetLogo:
-		if s.Econ == nil || c.SetLogo.Player < 0 || c.SetLogo.Player >= len(s.Econ.Players) {
-			return
-		}
-		p := &s.Econ.Players[c.SetLogo.Player]
-		if !p.Exists || p.ControllerState < 1 || p.ControllerState > 3 || p.Side == 10 {
-			return
-		}
-		p.Logo = c.SetLogo.Logo
-		return
-	case HumanView:
-		if s.Mission == nil || s.Mission.Type != mission.TypeCampaign {
-			s.SetViewingOwner(c.View.Player)
-		}
-		return
-	case HumanGive:
-		p := s.playerRecord(c.Give.Player)
-		if p == nil || !p.Exists || p.ControllerState < 1 || p.ControllerState > 3 || p.Side == 10 {
-			return
-		}
-		// The source is the own/controlling slot, LocalOwner here — the slot
-		// retail's developer `Control` command moves — never the viewing slot.
-		// `View` writes only the viewing slot, so a View earlier in the same
-		// input batch changes presentation but not whose stock Give debits
-		// [07 R-CAM-01 §6][05 R-SHARE-01 §2]. The source is still read at
-		// drain time.
-		s.Econ.Transfer(s.LocalOwner, uint8(c.Give.Player), c.Give.Resource, c.Give.Amount)
-		return
-	case HumanVisibility:
-		if s.Vis == nil {
-			return
-		}
-		const mask2 = visibility.ModeHistoryEnabled | visibility.ModeCurrentEnabled
-		if c.Visibility.ToggleMask&mask2 != 0 || c.Visibility.ClearMask&mask2 != 0 {
-			if s.Mission != nil && s.Mission.Type == mission.TypeCampaign {
-				return
+		switch c.Kind {
+		case HumanSelectionReplace:
+			for _, u := range s.Units.Iter() {
+				if u != nil && u.Alive && u.Owner == s.LocalOwner {
+					u.Flags &^= 0x10
+				}
 			}
-		}
-		const semantic = mask2 | visibility.ModeTerrainRay
-		mode := s.Vis.Mode()
-		mode ^= c.Visibility.ToggleMask & semantic
-		mode &^= c.Visibility.ClearMask & semantic
-		// Mapping and NowISee carry the bulk refresh's history-reset argument.
-		// The latter still resets history when bits are already clear; the command
-		// itself, rather than a detected mode transition, selects that argument.
-		resetHistory := c.Visibility.ToggleMask&visibility.ModeHistoryEnabled != 0 ||
-			c.Visibility.ClearMask&visibility.ModeHistoryEnabled != 0
-		eligible, observers := visibilityModeRefreshInputs(s, mode)
-		s.Vis.RefreshMode(mode, resetHistory, eligible, observers)
-		return
-	case HumanDoubleShot, HumanHalfShot:
-		if s.Mission != nil && s.Mission.Type == mission.TypeCampaign {
-			return
-		}
-		if s.Combat == nil {
-			return
-		}
-		if c.Kind == HumanDoubleShot {
-			s.Combat.ToggleDoubleShot()
-		} else {
-			s.Combat.ToggleHalfShot()
+			for _, h := range c.Selection.Handles {
+				if u := s.humanUnit(h); u != nil {
+					u.Flags |= 0x10
+				}
+			}
+		case HumanSelectionToggle:
+			for _, h := range c.Selection.Handles {
+				if u := s.humanUnit(h); u != nil {
+					u.Flags ^= 0x10
+				}
+			}
+		case HumanSelectionClear:
+			for _, u := range s.Units.Iter() {
+				if u != nil && u.Alive && u.Owner == s.LocalOwner {
+					u.Flags &^= 0x10
+				}
+			}
+		case HumanBuildPage:
+			s.applyHumanBuildPage(c.BuildPage)
+		case HumanGroupRecall:
+			s.applyHumanGroupRecall(c.Group)
 		}
 		return
-	case HumanMeteor:
-		if s.Mission != nil && s.Mission.Type == mission.TypeCampaign {
-			return
+	}
+	b := s.bindLocalCommand(c)
+	s.applyBound(&b, tick)
+}
+
+// boundCommand is one command as the shared payload implementation takes it:
+// the payload at the local record's width, the issuing seat, and every actor
+// and target as an allocation reference in processing order. Both adapters
+// produce it — the local one from a HumanCommand (bindLocalCommand), the
+// stamped one from a SeatCommand (bindSeatCommand) — so one body applies
+// both (DESIGN_MULTIPLAYER §7.4.4).
+type boundCommand struct {
+	c HumanCommand
+	// issuer owns the actors and is the source of every seat-owned mutation:
+	// the stamped seat online, the own/controlling slot at drain time in
+	// single-player [07 R-CAM-01 §6].
+	issuer uint8
+	// online applies the online stale-target contract of §7.4.3; the local
+	// adapter and the single-player replay context keep the single-player
+	// result.
+	online bool
+	// stamped commands name Community actors by allocation reference; the
+	// local adapter keeps its publication-identity check.
+	stamped bool
+	// sequence is the tracked-move receipt: the stream position of a stamped
+	// entry, the local sequence of a local one.
+	sequence uint64
+	actors   []pool.UnitRef
+	target   pool.UnitRef
+	targets  []pool.UnitRef // parallel to c.Order.Targets
+	unit     pool.UnitRef
+}
+
+// selectedHumanRefs is the local selection as references, ascending.
+func (s *Session) selectedHumanRefs() []pool.UnitRef {
+	return s.captureRefs(s.selectedHumanHandles())
+}
+
+// sortedUniqueRefs is the ordinary order's captured selection as a set,
+// visited in pool order [I1]. One handle captured twice carries one serial.
+func sortedUniqueRefs(in []pool.UnitRef) []pool.UnitRef {
+	out := slices.Clone(in)
+	slices.SortFunc(out, func(a, b pool.UnitRef) int { return int(a.Handle) - int(b.Handle) })
+	return slices.CompactFunc(out, func(a, b pool.UnitRef) bool { return a.Handle == b.Handle })
+}
+
+// bindLocalCommand is the local adapter's half of phase 1. Explicit handles
+// were captured at submission; a command that names none falls back to the
+// current selection here, where the selection commands queued ahead of it
+// have already applied, exactly as before.
+func (s *Session) bindLocalCommand(c HumanCommand) boundCommand {
+	s.captureLocalRefs(&c)
+	b := boundCommand{c: c, issuer: s.LocalOwner, sequence: c.Sequence, target: c.refs.target, targets: c.refs.targets, unit: c.refs.unit}
+	switch c.Kind {
+	case HumanOrder:
+		switch {
+		case len(c.Order.Handles) == 0:
+			b.actors = s.selectedHumanRefs()
+		case len(c.Order.Targets) == 0:
+			b.actors = sortedUniqueRefs(c.refs.actors)
+		default:
+			b.actors = c.refs.actors
 		}
-		if c.Meteor.ArgumentPresent {
-			s.Meteor.Enabled = c.Meteor.Enabled
-			return
+	case HumanStop:
+		b.actors = c.refs.actors
+		if len(c.Stop.Handles) == 0 {
+			b.actors = s.selectedHumanRefs()
 		}
-		// The command-only form enters the same storm-arm body as a due
-		// schedule, but deliberately bypasses the enabled-bit test [07
-		// R-CAM-01 §6][06 §6.5].
-		s.armMeteor(tick)
-		return
+	case HumanSelfDestruct:
+		b.actors = c.refs.actors
+		if len(c.SelfDestruct.Handles) == 0 {
+			b.actors = s.selectedHumanRefs()
+		}
+	case HumanCancelQueuedMove:
+		b.actors = c.refs.actors
+	case HumanStance, HumanCloak, HumanGroupAssign:
+		// The stance and cloak arms broadcast to the selection in ascending
+		// pool order [04 R-STANCE-01 §5]; assignment takes the selection as
+		// the group's membership [07 §9].
+		b.actors = s.selectedHumanRefs()
+	}
+	return b
+}
+
+// boundActors resolves the actor list to the issuer's live units, keeping the
+// list's order and any repeat the local adapter carried. Stale and foreign
+// references drop out; an online foreign actor was already refused whole.
+func (s *Session) boundActors(b *boundCommand) []pool.Handle {
+	out := make([]pool.Handle, 0, len(b.actors))
+	for _, r := range b.actors {
+		if s.commandActor(b.issuer, r) != nil {
+			out = append(out, r.Handle)
+		}
+	}
+	return out
+}
+
+// boundActorList is boundActors with §7.4.3's outcome: an empty or entirely
+// stale list does nothing.
+func (s *Session) boundActorList(b *boundCommand) ([]pool.Handle, CommandOutcome) {
+	handles := s.boundActors(b)
+	if len(handles) == 0 {
+		return nil, CommandNoOp
+	}
+	return handles, CommandApplied
+}
+
+// applyBound is the one phase-1 payload implementation. Its bodies are the
+// local applier's, with actors and targets resolved through allocation
+// references and seat-owned mutations taken from the bound issuer. The
+// outcome is for a stamped entry's receipt; the local adapter ignores it.
+func (s *Session) applyBound(b *boundCommand, tick uint32) CommandOutcome {
+	if s == nil {
+		return CommandNoOp
+	}
+	if b.issuer != s.LocalOwner {
+		prevIssuer, prevIssuing := s.seatCommands.issuer, s.seatCommands.issuing
+		s.seatCommands.issuer, s.seatCommands.issuing = b.issuer, true
+		defer func() { s.seatCommands.issuer, s.seatCommands.issuing = prevIssuer, prevIssuing }()
+	}
+	if s.applyBoundPlayerCommand(b, tick) {
+		return CommandApplied
 	}
 	if s.Units == nil {
-		return
+		return CommandNoOp
 	}
+	c := &b.c
 	switch c.Kind {
-	case HumanSelectionReplace:
-		for _, u := range s.Units.Iter() {
-			if u != nil && u.Alive && u.Owner == s.LocalOwner {
-				u.Flags &^= 0x10
-			}
-		}
-		for _, h := range c.Selection.Handles {
-			if u := s.humanUnit(h); u != nil {
-				u.Flags |= 0x10
-			}
-		}
-	case HumanSelectionToggle:
-		for _, h := range c.Selection.Handles {
-			if u := s.humanUnit(h); u != nil {
-				u.Flags ^= 0x10
-			}
-		}
-	case HumanSelectionClear:
-		for _, u := range s.Units.Iter() {
-			if u != nil && u.Alive && u.Owner == s.LocalOwner {
-				u.Flags &^= 0x10
-			}
-		}
 	case HumanMakeSelectable:
 		for _, u := range s.Units.Iter() {
 			if u != nil && u.Alive {
@@ -963,12 +1211,9 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 	case HumanStop:
 		id := orders.Lookup("Stop")
 		if id == 0 {
-			return
+			return CommandApplied
 		}
-		handles := c.Stop.Handles
-		if len(handles) == 0 {
-			handles = s.selectedHumanHandles()
-		}
+		handles, outcome := s.boundActorList(b)
 		for _, h := range handles {
 			if u := s.humanUnit(h); u != nil {
 				s.bindOrderQueue(u)
@@ -979,10 +1224,14 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 				}
 			}
 		}
+		return outcome
 	case HumanActivation:
-		u := s.humanUnit(c.Activation.Unit)
-		if u == nil || u.Def == nil || !u.Def.OnOffable {
-			return
+		u := s.commandActor(b.issuer, b.unit)
+		if u == nil {
+			return CommandNoOp
+		}
+		if u.Def == nil || !u.Def.OnOffable {
+			return CommandApplied
 		}
 		name := "Deactivate"
 		if c.Activation.Activate {
@@ -990,7 +1239,7 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 		}
 		id := orders.Lookup(name)
 		if id == 0 {
-			return
+			return CommandApplied
 		}
 		s.bindOrderQueue(u)
 		if q := orders.QueueForUnit(u); q != nil {
@@ -1001,22 +1250,24 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 			q.Push(id, orders.NewNodeForOrder(id, 0, 0, 0, 0, tick, u.Handle, c.Activation.Queued))
 		}
 	case HumanStance:
-		// The selection broadcast of [04 R-STANCE-01 §5]: walk the local
-		// player's units in ascending pool order, submit to every one carrying
-		// the selection bit, and skip a unit whose definition lacks the
-		// matching accept flag. Neither the leader exclusion nor the centroid
-		// arm is active for a standing order — both standing descriptors carry
-		// static mask 0x10060, which has no target-required bit, and a standing
-		// order carries no ground position.
+		// The selection broadcast of [04 R-STANCE-01 §5]: walk the issuer's
+		// units in ascending pool order, submit to every one carrying the
+		// selection bit, and skip a unit whose definition lacks the matching
+		// accept flag. Neither the leader exclusion nor the centroid arm is
+		// active for a standing order — both standing descriptors carry
+		// static mask 0x10060, which has no target-required bit, and a
+		// standing order carries no ground position. A stamped command names
+		// the units it was captured from, in that same order (§7.4.3).
 		name := "Standing_MoveOrder"
 		if c.Stance.Fire {
 			name = "Standing_FireOrder"
 		}
 		id := orders.Lookup(name)
 		if id == 0 {
-			return
+			return CommandApplied
 		}
-		for _, h := range s.selectedHumanHandles() {
+		handles, outcome := s.boundActorList(b)
+		for _, h := range handles {
 			u := s.humanUnit(h)
 			if u == nil || u.Def == nil {
 				continue
@@ -1048,6 +1299,7 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 				q.Push(id, node)
 			}
 		}
+		return outcome
 	case HumanCloak:
 		// The cloak arm of the same battle-panel handler as the two stance
 		// gadgets [04 R-STANCE-01 §2]: it resolves one of the two named
@@ -1070,9 +1322,10 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 		}
 		id := orders.Lookup(name)
 		if id == 0 {
-			return
+			return CommandApplied
 		}
-		for _, h := range s.selectedHumanHandles() {
+		handles, outcome := s.boundActorList(b)
+		for _, h := range handles {
 			u := s.humanUnit(h)
 			if u == nil || u.Def == nil {
 				continue
@@ -1087,14 +1340,18 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 			// them at the head after the leading-auto drop [04 R-ORD-01 §13].
 			q.Push(id, orders.NewNodeForOrder(id, 0, 0, 0, 0, tick, u.Handle, false))
 		}
+		return outcome
 	case HumanMobileBuild:
-		u := s.humanUnit(c.MobileBuild.Builder)
-		if u == nil || s.Catalog == nil {
-			return
+		u := s.commandActor(b.issuer, b.unit)
+		if u == nil {
+			return CommandNoOp
+		}
+		if s.Catalog == nil {
+			return CommandApplied
 		}
 		def, ok := s.Catalog.Unit(c.MobileBuild.Product)
 		if !ok {
-			return
+			return CommandApplied
 		}
 		facing := s.Build.ResolveStructureFacing(def, c.MobileBuild.Facing)
 		s.bindOrderQueue(u)
@@ -1104,7 +1361,7 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 			// The test runs only in queued mode; a non-queued click purges and
 			// re-issues as before.
 			if !c.MobileBuild.AppendOnly && removeQueuedWorldOrder(u, mobileBuildKind(u), 0, c.MobileBuild.WX, c.MobileBuild.WZ) {
-				return
+				return CommandApplied
 			}
 		} else {
 			if q := orders.QueueForUnit(u); q != nil {
@@ -1127,15 +1384,18 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 				tail := q.Primary()[q.LenPrimary()-1]
 				if tail.ID == id && tail.BuildDefKey == n.BuildDefKey && tail.GoalX == n.GoalX && tail.GoalZ == n.GoalZ && tail.BuildFacing == n.BuildFacing {
 					tail.CreationTick, tail.GoalY = tick, n.GoalY
-					return
+					return CommandApplied
 				}
 			}
 			q.Push(id, n)
 		}
 	case HumanFactoryBuild:
-		u := s.humanUnit(c.FactoryBuild.Builder)
-		if u == nil || s.Catalog == nil {
-			return
+		u := s.commandActor(b.issuer, b.unit)
+		if u == nil {
+			return CommandNoOp
+		}
+		if s.Catalog == nil {
+			return CommandApplied
 		}
 		// Factory products come from the installed GUI name, independently of
 		// CANBUILD membership [07 §9][07 R-P0-11 §1].
@@ -1160,19 +1420,19 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 			stampHumanBuild(u, beforeFactory, c.FactoryBuild.Product, tick, false, 0)
 		}
 	case HumanCancelProduction:
-		u := s.humanUnit(c.CancelProduction.Unit)
+		u := s.commandActor(b.issuer, b.unit)
 		if u == nil {
-			return
+			return CommandNoOp
 		}
 		s.bindOrderQueue(u)
 		q := orders.QueueForUnit(u)
 		if q == nil || q.LenPrimary() == 0 {
-			return
+			return CommandApplied
 		}
 		prim := q.Primary()
 		tail := prim[len(prim)-1]
 		if tail == nil || tail.BuildDefKey == "" {
-			return
+			return CommandApplied
 		}
 		if orders.IsMobileBuild(tail.ID) {
 			_ = construction.CancelMobileTailMost(u, tail.BuildDefKey, tail.GoalX, tail.GoalZ)
@@ -1180,73 +1440,13 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 			_ = construction.CancelTailMost(u, tail.BuildDefKey)
 		}
 	case HumanStockpile:
-		u := s.humanUnit(c.Stockpile.Unit)
+		u := s.commandActor(b.issuer, b.unit)
 		if u == nil {
-			return
+			return CommandNoOp
 		}
-		id := orders.Lookup("BuildWeapon")
-		if id == 0 {
-			return
-		}
-		// The UI alias path always supplies zero, which is where shipped
-		// stockpile weapons live [06 §11.1]; the node constructor then stores
-		// that build-type argument verbatim, and the handler selects the slot
-		// with it and no search [06 R-WPN-05 §2]. The slot hunt that used to
-		// stand here — "find the first slot carrying a `stockpile` weapon" —
-		// named a slot the alias never names.
-		//
-		// The refusal is the enqueue guard's: a node whose named slot holds
-		// weapon record 0 or a weapon without `stockpile` would complete every
-		// queued round free in one visit and, if it outlived the visit, fault
-		// the build page's percentage on a divide by zero [06 R-WPN-05 §2]. No
-		// shipped click reaches it — a MAKENUKE/MAKEANTI button is authored
-		// only where slot 0 holds a stockpile weapon — so refusing is both safe
-		// and indistinguishable from retail here.
-		const stockpileAliasSlot = 0 // [06 §11.1] the alias's build-type argument
-		// The stockpile toy is a counted producer like every other build-page
-		// toy: the click's signed count adds or subtracts rounds against the
-		// BUILDWEAPON record, and the producer never purges [07 R-P0-11 §1].
-		// A caller that named no count asks for one round.
-		count := c.Stockpile.Count
-		if count == 0 {
-			count = 1
-		}
-		if count < 0 {
-			// Negative count: the scan does not stop at the first match, so
-			// the TAIL-most matching record is consumed first; a record
-			// holding more than the remaining magnitude is subtracted in
-			// place, otherwise it is unlinked and the scan repeats with the
-			// reduced remainder [07 R-P0-11 §1]. CancelTailMost is that step
-			// for a magnitude of one — it decrements a record holding more
-			// than one and unlinks it otherwise — so the loop below reaches
-			// the same state the single scan does. BUILDWEAPON lives on the
-			// REAR segment [04 §3.1], which CancelTailMost searches after the
-			// primary one; the match is the descriptor plus the record's
-			// build-type operand, the only id a BUILDWEAPON record carries.
-			// Nothing matching means nothing changes: the click is already
-			// audible, because the cue precedes the routing.
-			s.bindOrderQueue(u)
-			q := orders.QueueForUnit(u)
-			if q == nil {
-				return
-			}
-			matchRound := func(n orders.Node) bool {
-				return n.ID == id && n.Param1 == uint32(stockpileAliasSlot)
-			}
-			for i := 0; i < -count; i++ {
-				if !q.CancelTailMost(matchRound) {
-					break
-				}
-			}
-			return
-		}
-		s.queueStockpileRounds(u, count, tick)
-	case HumanBuildPage:
-		s.applyHumanBuildPage(c.BuildPage)
+		s.applyBoundStockpile(u, c.Stockpile.Count, tick)
 	case HumanGroupAssign:
-		s.applyHumanGroup(c.Group, true)
-	case HumanGroupRecall:
-		s.applyHumanGroup(c.Group, false)
+		s.applyBoundGroupAssign(b)
 	case HumanSelfDestruct:
 		// Ctrl+D is a toggle [07 R-CAM-01 §2]. Its name lookup is
 		// case-insensitive and exact, so it resolves the rear-segment
@@ -1258,12 +1458,9 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 		// announcements and the 30000 self-damage [04 R-SPEC-01 §13].
 		id := orders.Lookup("SelfDestruct")
 		if id == 0 {
-			return
+			return CommandApplied
 		}
-		handles := c.SelfDestruct.Handles
-		if len(handles) == 0 {
-			handles = s.selectedHumanHandles()
-		}
+		handles, outcome := s.boundActorList(b)
 		cancelled := false
 		for _, h := range handles {
 			u := s.humanUnit(h)
@@ -1276,7 +1473,7 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 			}
 		}
 		if cancelled {
-			return
+			return outcome
 		}
 		for _, h := range handles {
 			u := s.humanUnit(h)
@@ -1290,100 +1487,416 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 			// No target and no goal; Shift makes it a queued issue.
 			q.Push(id, orders.Node{Owner: u.Handle, CreationTick: tick, QueuedIssue: c.SelfDestruct.Queued})
 		}
+		return outcome
 	case HumanCancelQueuedMove:
-		s.applyHumanCancelQueuedMove(c.CancelQueuedMove)
+		return s.applyBoundCancelQueuedMove(b)
 	case HumanCommunityOrderDrag:
-		s.applyCommunityOrderDrag(c.CommunityOrderDrag)
+		if !b.stamped {
+			s.applyCommunityOrderDrag(c.CommunityOrderDrag)
+			return CommandApplied
+		}
+		return s.applyStampedCommunityOrderDrag(b)
 	case HumanCommunityKickout:
-		s.applyCommunityKickout(c.CommunityKickout, tick)
+		if !b.stamped {
+			s.applyCommunityKickout(c.CommunityKickout, tick)
+			return CommandApplied
+		}
+		u := s.commandActor(b.issuer, b.unit)
+		if u == nil {
+			return CommandNoOp
+		}
+		if s.Build == nil {
+			return CommandApplied
+		}
+		s.bindOrderQueue(u)
+		s.Build.KickoutMove(u, c.CommunityKickout.X, c.CommunityKickout.Y, c.CommunityKickout.Z, tick)
 	case HumanOrder:
-		if len(c.Order.Targets) != 0 {
-			s.applyHumanOrderBatch(c.Order, tick)
+		return s.applyBoundOrder(b, tick)
+	}
+	return CommandApplied
+}
+
+// applyBoundPlayerCommand applies the kinds that act on player records and
+// battle-wide state rather than units, and reports whether c was one.
+func (s *Session) applyBoundPlayerCommand(b *boundCommand, tick uint32) bool {
+	c := &b.c
+	switch c.Kind {
+	case HumanBuilderOptions:
+		if s.validateBuilderOptionsFor(c.BuilderOptions, b.issuer) == nil {
+			s.playerBuilderOptions[c.BuilderOptions.Owner] = c.BuilderOptions.Options
+		}
+	case HumanGameplay:
+		s.SetGameplay(c.Gameplay)
+	case HumanNoShake:
+		s.ToggleNoShake()
+	case HumanSpawn:
+		s.applySpawnCommand(c.Spawn, b.issuer, tick)
+	case HumanATM:
+		if s.Mission != nil && s.Mission.Type == mission.TypeCampaign {
+			return true
+		}
+		if s.Econ == nil || int(b.issuer) >= len(s.Econ.Players) {
+			return true
+		}
+		p := &s.Econ.Players[b.issuer]
+		if !p.Exists {
+			return true
+		}
+		economy.CreditSpawn(p, economy.Metal, 1000)
+		economy.CreditSpawn(p, economy.Energy, 1000)
+	case HumanSetResource:
+		if s.Econ == nil || c.SetResource.Player < 0 || c.SetResource.Player >= len(s.Econ.Players) {
+			return true
+		}
+		if c.SetResource.Resource != economy.Metal && c.SetResource.Resource != economy.Energy {
+			return true
+		}
+		p := &s.Econ.Players[c.SetResource.Player]
+		if !p.Exists || p.ControllerState < 1 || p.ControllerState > 3 || p.Side == 10 {
+			return true
+		}
+		p.Stock[c.SetResource.Resource] = c.SetResource.Amount
+	case HumanSetLogo:
+		if s.Econ == nil || c.SetLogo.Player < 0 || c.SetLogo.Player >= len(s.Econ.Players) {
+			return true
+		}
+		p := &s.Econ.Players[c.SetLogo.Player]
+		if !p.Exists || p.ControllerState < 1 || p.ControllerState > 3 || p.Side == 10 {
+			return true
+		}
+		p.Logo = c.SetLogo.Logo
+	case HumanView:
+		if s.Mission == nil || s.Mission.Type != mission.TypeCampaign {
+			s.SetViewingOwner(c.View.Player)
+		}
+	case HumanGive:
+		p := s.playerRecord(c.Give.Player)
+		if p == nil || !p.Exists || p.ControllerState < 1 || p.ControllerState > 3 || p.Side == 10 {
+			return true
+		}
+		// The source is the issuer: the stamped seat online, and in
+		// single-player the own/controlling slot — LocalOwner at drain time,
+		// the slot retail's developer `Control` command moves — never the
+		// viewing slot. `View` writes only the viewing slot, so a View earlier
+		// in the same input batch changes presentation but not whose stock
+		// Give debits [07 R-CAM-01 §6][05 R-SHARE-01 §2].
+		s.Econ.Transfer(b.issuer, uint8(c.Give.Player), c.Give.Resource, c.Give.Amount)
+	case HumanVisibility:
+		if s.Vis == nil {
+			return true
+		}
+		const mask2 = visibility.ModeHistoryEnabled | visibility.ModeCurrentEnabled
+		if c.Visibility.ToggleMask&mask2 != 0 || c.Visibility.ClearMask&mask2 != 0 {
+			if s.Mission != nil && s.Mission.Type == mission.TypeCampaign {
+				return true
+			}
+		}
+		const semantic = mask2 | visibility.ModeTerrainRay
+		mode := s.Vis.Mode()
+		mode ^= c.Visibility.ToggleMask & semantic
+		mode &^= c.Visibility.ClearMask & semantic
+		// Mapping and NowISee carry the bulk refresh's history-reset argument.
+		// The latter still resets history when bits are already clear; the command
+		// itself, rather than a detected mode transition, selects that argument.
+		resetHistory := c.Visibility.ToggleMask&visibility.ModeHistoryEnabled != 0 ||
+			c.Visibility.ClearMask&visibility.ModeHistoryEnabled != 0
+		eligible, observers := visibilityModeRefreshInputs(s, mode)
+		s.Vis.RefreshMode(mode, resetHistory, eligible, observers)
+	case HumanDoubleShot, HumanHalfShot:
+		if s.Mission != nil && s.Mission.Type == mission.TypeCampaign {
+			return true
+		}
+		if s.Combat == nil {
+			return true
+		}
+		if c.Kind == HumanDoubleShot {
+			s.Combat.ToggleDoubleShot()
+		} else {
+			s.Combat.ToggleHalfShot()
+		}
+	case HumanMeteor:
+		if s.Mission != nil && s.Mission.Type == mission.TypeCampaign {
+			return true
+		}
+		if c.Meteor.ArgumentPresent {
+			s.Meteor.Enabled = c.Meteor.Enabled
+			return true
+		}
+		// The command-only form enters the same storm-arm body as a due
+		// schedule, but deliberately bypasses the enabled-bit test [07
+		// R-CAM-01 §6][06 §6.5].
+		s.armMeteor(tick)
+	default:
+		return false
+	}
+	return true
+}
+
+// applyBoundStockpile is one MAKENUKE/MAKEANTI click on a resolved launcher.
+func (s *Session) applyBoundStockpile(u *units.Unit, count int, tick uint32) {
+	id := orders.Lookup("BuildWeapon")
+	if id == 0 {
+		return
+	}
+	// The UI alias path always supplies zero, which is where shipped
+	// stockpile weapons live [06 §11.1]; the node constructor then stores
+	// that build-type argument verbatim, and the handler selects the slot
+	// with it and no search [06 R-WPN-05 §2]. The slot hunt that used to
+	// stand here — "find the first slot carrying a `stockpile` weapon" —
+	// named a slot the alias never names.
+	//
+	// The refusal is the enqueue guard's: a node whose named slot holds
+	// weapon record 0 or a weapon without `stockpile` would complete every
+	// queued round free in one visit and, if it outlived the visit, fault
+	// the build page's percentage on a divide by zero [06 R-WPN-05 §2]. No
+	// shipped click reaches it — a MAKENUKE/MAKEANTI button is authored
+	// only where slot 0 holds a stockpile weapon — so refusing is both safe
+	// and indistinguishable from retail here.
+	const stockpileAliasSlot = 0 // [06 §11.1] the alias's build-type argument
+	// The stockpile toy is a counted producer like every other build-page
+	// toy: the click's signed count adds or subtracts rounds against the
+	// BUILDWEAPON record, and the producer never purges [07 R-P0-11 §1].
+	// A caller that named no count asks for one round.
+	if count == 0 {
+		count = 1
+	}
+	if count < 0 {
+		// Negative count: the scan does not stop at the first match, so
+		// the TAIL-most matching record is consumed first; a record
+		// holding more than the remaining magnitude is subtracted in
+		// place, otherwise it is unlinked and the scan repeats with the
+		// reduced remainder [07 R-P0-11 §1]. CancelTailMost is that step
+		// for a magnitude of one — it decrements a record holding more
+		// than one and unlinks it otherwise — so the loop below reaches
+		// the same state the single scan does. BUILDWEAPON lives on the
+		// REAR segment [04 §3.1], which CancelTailMost searches after the
+		// primary one; the match is the descriptor plus the record's
+		// build-type operand, the only id a BUILDWEAPON record carries.
+		// Nothing matching means nothing changes: the click is already
+		// audible, because the cue precedes the routing.
+		s.bindOrderQueue(u)
+		q := orders.QueueForUnit(u)
+		if q == nil {
 			return
 		}
-		var target *units.Unit
-		if c.Order.Target != 0 {
-			target = s.humanTarget(c.Order.Target)
+		matchRound := func(n orders.Node) bool {
+			return n.ID == id && n.Param1 == uint32(stockpileAliasSlot)
 		}
-		handles := c.Order.Handles
-		if len(handles) == 0 {
-			handles = s.selectedHumanHandles()
-		} else {
-			// A captured selection remains a set visited in pool order [I1].
-			handles = slices.Clone(handles)
-			slices.Sort(handles)
-			handles = slices.Compact(handles)
-		}
-		var excluded pool.Handle
-		if !c.Order.AssignedPosition && c.Order.Code != 5 && c.Order.Code != 10 && c.Order.Code != 14 && target != nil {
-			excluded = target.Handle // numeric broadcast target exclusion [04 R-STANCE-01 §5]
-		}
-		var center orders.ResolvePos
-		var count int32
-		if !c.Order.AssignedPosition {
-			center, count = s.humanOrderCentroid(handles, excluded)
-			if c.Order.StagedCount > count && count != 0 {
-				count = c.Order.StagedCount
+		for i := 0; i < -count; i++ {
+			if !q.CancelTailMost(matchRound) {
+				break
 			}
 		}
-		slots := s.groupDestinationSlots(c.Order, handles, excluded, target, center, count)
-		// The units this command gives a ground move, for the traffic
-		// policy's arrival places (movement.Pilot); nothing reads it under
-		// Strict 3.1 or Community 3.9.
-		var moved []pool.Handle
-		var movedOwner uint8
-		for _, h := range handles {
-			u := s.humanUnit(h)
-			if u == nil || h == excluded {
+		return
+	}
+	s.queueStockpileRounds(u, count, tick)
+}
+
+// applyBoundOrder is the world order. An explicit target that has died keeps
+// the single-player result for the local adapter and the replay context: the
+// order resolves as a ground order at the captured position and its node
+// still carries the dead handle. Online, a stale ordinary target makes the
+// whole order a no-op and never a ground click (§7.4.3).
+func (s *Session) applyBoundOrder(b *boundCommand, tick uint32) CommandOutcome {
+	c := &b.c
+	if len(c.Order.Targets) != 0 {
+		return s.applyBoundOrderBatch(b, tick)
+	}
+	targetHandle := b.target.Handle
+	var target *units.Unit
+	if targetHandle != 0 {
+		target = s.commandTarget(b.target)
+		if target == nil && b.online {
+			return CommandNoOp
+		}
+	}
+	handles, outcome := s.boundActorList(b)
+	if outcome != CommandApplied {
+		return outcome
+	}
+	var excluded pool.Handle
+	if !c.Order.AssignedPosition && c.Order.Code != 5 && c.Order.Code != 10 && c.Order.Code != 14 && target != nil {
+		excluded = target.Handle // numeric broadcast target exclusion [04 R-STANCE-01 §5]
+	}
+	var center orders.ResolvePos
+	var count int32
+	if !c.Order.AssignedPosition {
+		center, count = s.humanOrderCentroid(handles, excluded)
+		if c.Order.StagedCount > count && count != 0 {
+			count = c.Order.StagedCount
+		}
+	}
+	slots := s.groupDestinationSlots(c.Order, handles, excluded, target, center, count)
+	// The units this command gives a ground move, for the traffic
+	// policy's arrival places (movement.Pilot); nothing reads it under
+	// Strict 3.1 or Community 3.9.
+	var moved []pool.Handle
+	var movedOwner uint8
+	for _, h := range handles {
+		u := s.humanUnit(h)
+		if u == nil || h == excluded {
+			continue
+		}
+		s.bindOrderQueue(u)
+		id := orders.Resolve(c.Order.Code, u, target, &c.Order.Position)
+		if id == 0 {
+			continue
+		}
+		gx, gy, gz := c.Order.Position.X, c.Order.Position.Y, c.Order.Position.Z
+		if target != nil {
+			gx, gy, gz = target.X, target.Y, target.Z
+		}
+		if !c.Order.AssignedPosition && orders.DescriptorFor(id).StaticGate&2 != 0 && count != 0 {
+			goal := humanFormationGoal(c.Order.Position, u, center, count)
+			gx, gy, gz = goal.X, goal.Y, goal.Z
+			if d, ok := slots.lookup(h); ok {
+				gx, gz = d.X, d.Z
+			}
+		}
+		q := orders.QueueForUnit(u)
+		if q == nil {
+			continue
+		}
+		trackedMove := c.Order.TrackQueuedMove && c.Order.Queued && targetHandle == 0 && isHumanMoveOrder(id)
+		if c.Order.Queued {
+			// The producer's first act, once per acting unit: a queued
+			// click that repeats an already-queued order of this kind at
+			// (or within one cell of) the same point removes it and issues
+			// nothing [07 R-P0-11 §6]. It runs ONLY in queued mode; a plain
+			// click falls through to the Replace below without testing.
+			if !trackedMove && removeQueuedWorldOrder(u, id, targetHandle, gx, gz) {
 				continue
 			}
-			s.bindOrderQueue(u)
-			id := orders.Resolve(c.Order.Code, u, target, &c.Order.Position)
+		} else {
+			q.PurgeUnprotected()
+			q.DropLeadingAutoOps()
+		}
+		n := orders.NewNodeForOrder(id, targetHandle, gx, gy, gz, tick, u.Handle, c.Order.Queued)
+		if trackedMove {
+			// The tracked-move receipt: a stamped entry's stream position,
+			// so every client stamps the same sequence (§7.2).
+			n.HumanMoveSequence = b.sequence
+		}
+		q.Push(id, n)
+		if target == nil && !c.Order.Queued && id == orders.Lookup("Move_Ground") {
+			moved, movedOwner = append(moved, h), u.Owner
+		}
+	}
+	if len(moved) > 1 && s.Movement != nil {
+		s.Movement.NoteGroupOrder(movedOwner, moved, c.Order.Position.X, c.Order.Position.Z, tick)
+	}
+	return CommandApplied
+}
+
+// applyBoundOrderBatch preserves the captured actor and target order.
+// The area gesture is an explicit extension (DESIGN_INTERFACE_HUD_INPUT §3.11):
+// the first admitted target replaces once unless queued, then all others append
+// without the ordinary repeat-click toggle [07 R-P0-11 §6]. A stale explicit
+// target drops only its own entry and never becomes a ground order; targetless
+// feature entries keep their place (§7.4.3).
+func (s *Session) applyBoundOrderBatch(b *boundCommand, tick uint32) CommandOutcome {
+	c := &b.c
+	handles, outcome := s.boundActorList(b)
+	for _, h := range handles {
+		u := s.humanUnit(h)
+		if u == nil {
+			continue
+		}
+		s.bindOrderQueue(u)
+		q := orders.QueueForUnit(u)
+		if q == nil {
+			continue
+		}
+		queued := c.Order.Queued
+		for i, goal := range c.Order.Targets {
+			var target *units.Unit
+			if goal.Target != 0 {
+				target = s.commandTarget(b.targets[i])
+				if target == nil {
+					// A vanished captured unit must not turn into a ground
+					// order. Existing targets use [04 R-ORD-02 §1]'s gates.
+					continue
+				}
+			}
+			id := orders.Resolve(c.Order.Code, u, target, &goal.Position)
 			if id == 0 {
 				continue
 			}
-			gx, gy, gz := c.Order.Position.X, c.Order.Position.Y, c.Order.Position.Z
+			gx, gy, gz := goal.Position.X, goal.Position.Y, goal.Position.Z
 			if target != nil {
 				gx, gy, gz = target.X, target.Y, target.Z
 			}
-			if !c.Order.AssignedPosition && orders.DescriptorFor(id).StaticGate&2 != 0 && count != 0 {
-				goal := humanFormationGoal(c.Order.Position, u, center, count)
-				gx, gy, gz = goal.X, goal.Y, goal.Z
-				if d, ok := slots.lookup(h); ok {
-					gx, gz = d.X, d.Z
-				}
-			}
-			q := orders.QueueForUnit(u)
-			if q == nil {
-				continue
-			}
-			trackedMove := c.Order.TrackQueuedMove && c.Order.Queued && c.Order.Target == 0 && isHumanMoveOrder(id)
-			if c.Order.Queued {
-				// The producer's first act, once per acting unit: a queued
-				// click that repeats an already-queued order of this kind at
-				// (or within one cell of) the same point removes it and issues
-				// nothing [07 R-P0-11 §6]. It runs ONLY in queued mode; a plain
-				// click falls through to the Replace below without testing.
-				if !trackedMove && removeQueuedWorldOrder(u, id, c.Order.Target, gx, gz) {
-					continue
-				}
-			} else {
+			if !queued {
 				q.PurgeUnprotected()
 				q.DropLeadingAutoOps()
 			}
-			n := orders.NewNodeForOrder(id, c.Order.Target, gx, gy, gz, tick, u.Handle, c.Order.Queued)
-			if trackedMove {
-				n.HumanMoveSequence = c.Sequence
-			}
-			q.Push(id, n)
-			if target == nil && !c.Order.Queued && id == orders.Lookup("Move_Ground") {
-				moved, movedOwner = append(moved, h), u.Owner
-			}
-		}
-		if len(moved) > 1 && s.Movement != nil {
-			s.Movement.NoteGroupOrder(movedOwner, moved, c.Order.Position.X, c.Order.Position.Z, tick)
+			q.Push(id, orders.NewNodeForOrder(id, goal.Target, gx, gy, gz, tick, u.Handle, queued))
+			queued = true
 		}
 	}
+	return outcome
+}
+
+// applyBoundCancelQueuedMove removes the tracked queued moves the named
+// receipt stamped into the actors' queues (DESIGN_INTERFACE_HUD_INPUT §3.10).
+func (s *Session) applyBoundCancelQueuedMove(b *boundCommand) CommandOutcome {
+	sequence := b.c.CancelQueuedMove.Sequence
+	if sequence == 0 {
+		return CommandApplied
+	}
+	handles, outcome := s.boundActorList(b)
+	for _, h := range handles {
+		u := s.humanUnit(h)
+		if u == nil {
+			continue
+		}
+		q := orders.QueueForUnit(u)
+		if q == nil {
+			continue
+		}
+		for {
+			var found *orders.Node
+			for _, n := range q.Primary() {
+				if n != nil && n.HumanMoveSequence == sequence && isHumanMoveOrder(n.ID) {
+					found = n
+					break
+				}
+			}
+			if found == nil {
+				break
+			}
+			// Use a currently linked pointer: the removal helper's fallback
+			// for stale pointers could otherwise remove unrelated work. Reload
+			// after cleanup, which can itself mutate the queue [04 §3.3].
+			q.RemovePrimaryNode(found, false)
+		}
+	}
+	return outcome
+}
+
+// applyStampedCommunityOrderDrag is the stamped form of the Community queue
+// drag: the unit is named by allocation reference, and the receipt's every
+// field must still match the queued record (§7.4.3). A changed receipt does
+// nothing.
+func (s *Session) applyStampedCommunityOrderDrag(b *boundCommand) CommandOutcome {
+	u := s.commandActor(b.issuer, b.unit)
+	if u == nil {
+		return CommandNoOp
+	}
+	q := orders.QueueOfUnit(u)
+	if q == nil {
+		return CommandNoOp
+	}
+	ok := orders.DragCommunityOrder(q, b.c.CommunityOrderDrag.Receipt, b.c.CommunityOrderDrag.Position, func(n *orders.Node, raw orders.CommunityOrderDragDestination) (orders.CommunityOrderDragDestination, bool) {
+		if !orders.IsMobileBuild(n.ID) {
+			return raw, true
+		}
+		return s.communityDraggedBuildPosition(u, n, raw)
+	})
+	if !ok {
+		return CommandNoOp
+	}
+	return CommandApplied
 }
 
 // humanOrderCentroid counts the selection before per-actor command admission.
@@ -1419,95 +1932,4 @@ func humanFormationGoal(goal orders.ResolvePos, u *units.Unit, center orders.Res
 
 func isHumanMoveOrder(id orders.ID) bool {
 	return id != 0 && (id == orders.Lookup("Move_Ground") || id == orders.Lookup("VTOL_Move"))
-}
-
-func (s *Session) applyHumanCancelQueuedMove(c HumanCancelQueuedMoveCommand) {
-	if c.Sequence == 0 {
-		return
-	}
-	for _, h := range c.Handles {
-		u := s.humanUnit(h)
-		if u == nil {
-			continue
-		}
-		q := orders.QueueForUnit(u)
-		if q == nil {
-			continue
-		}
-		for {
-			var found *orders.Node
-			for _, n := range q.Primary() {
-				if n != nil && n.HumanMoveSequence == c.Sequence && isHumanMoveOrder(n.ID) {
-					found = n
-					break
-				}
-			}
-			if found == nil {
-				break
-			}
-			// Use a currently linked pointer: the removal helper's fallback
-			// for stale pointers could otherwise remove unrelated work. Reload
-			// after cleanup, which can itself mutate the queue [04 §3.3].
-			q.RemovePrimaryNode(found, false)
-		}
-	}
-}
-
-// applyHumanOrderBatch preserves the captured target order for each actor.
-// The area gesture is an explicit extension (DESIGN_INTERFACE_HUD_INPUT §3.11):
-// the first admitted target replaces once unless queued, then all others append
-// without the ordinary repeat-click toggle [07 R-P0-11 §6].
-func (s *Session) applyHumanOrderBatch(c HumanOrderCommand, tick uint32) {
-	handles := c.Handles
-	if len(handles) == 0 {
-		handles = s.selectedHumanHandles()
-	}
-	for _, h := range handles {
-		u := s.humanUnit(h)
-		if u == nil {
-			continue
-		}
-		s.bindOrderQueue(u)
-		q := orders.QueueForUnit(u)
-		if q == nil {
-			continue
-		}
-		queued := c.Queued
-		for _, goal := range c.Targets {
-			var target *units.Unit
-			if goal.Target != 0 {
-				target = s.humanTarget(goal.Target)
-				if target == nil {
-					// A vanished captured unit must not turn into a ground
-					// order. Existing targets use [04 R-ORD-02 §1]'s gates.
-					continue
-				}
-			}
-			id := orders.Resolve(c.Code, u, target, &goal.Position)
-			if id == 0 {
-				continue
-			}
-			gx, gy, gz := goal.Position.X, goal.Position.Y, goal.Position.Z
-			if target != nil {
-				gx, gy, gz = target.X, target.Y, target.Z
-			}
-			if !queued {
-				q.PurgeUnprotected()
-				q.DropLeadingAutoOps()
-			}
-			q.Push(id, orders.NewNodeForOrder(id, goal.Target, gx, gy, gz, tick, u.Handle, queued))
-			queued = true
-		}
-	}
-}
-
-func (s *Session) humanTarget(h pool.Handle) *units.Unit {
-	if s == nil || s.Units == nil || h == 0 {
-		return nil
-	}
-	u := s.Units.Unit(h)
-	if u == nil || !u.Alive {
-		return nil
-	}
-	return u
 }

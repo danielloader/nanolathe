@@ -427,6 +427,7 @@ type Session struct {
 	// input boundary a total order independent of producer timing; commands
 	// with one due tick are applied in this order [01 §4.4].
 	nextHumanSequence uint64
+	seatCommands      seatCommandState // DESIGN_MULTIPLAYER §7.4.4; type in seat_command.go
 }
 
 // resetRadarBlink initializes the transient radar cadence at battle entry.

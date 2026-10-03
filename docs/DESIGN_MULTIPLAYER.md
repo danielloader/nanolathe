@@ -1584,7 +1584,7 @@ type CommandContext uint8 // explicit constants: OnlineCommand=1, SinglePlayerRe
 type SeatCommandKind uint8 // explicit numbers from the table
 type SeatCommand struct { /* Kind plus one named typed payload from the table */ }
 type CommandStamp struct { Seat uint8; Tick uint32; Position uint64 }
-type CommandReceipt struct { Stamp CommandStamp; Outcome CommandOutcome }
+type CommandReceipt struct { Stamp CommandStamp; Outcome CommandOutcome; Diagnostic string } // Diagnostic: the rejection's text, empty otherwise (added by U2)
 type CommandOutcome uint8 // explicit constants: CommandApplied=1, CommandNoOp=2, CommandRejected=3
 func EncodeSeatCommand(context CommandContext, c SeatCommand) ([]byte, error)
 func DecodeSeatCommand(context CommandContext, payload []byte) (SeatCommand, error)
@@ -3068,9 +3068,10 @@ after the v3 reference-test correction (§16.1), opening M2's milestone gate.
 and allocation/command APIs; §8.6–§8.8 publish configuration, frozen-input
 and build contracts. U1 allocation references, U4 frozen simulation content
 and U5's configuration and build identities are implemented as described
-below, as is U5b, the admission half (`ValidateMatchInputs`,
-`NewAdmittedSkirmish`). No command codec and no multi-seat session is claimed
-here: U2, U3 and U6 follow in the sequence of "Code ownership and sequence".
+below, as are U5b, the admission half (`ValidateMatchInputs`,
+`NewAdmittedSkirmish`), and U2, the explicit seat commands. No command codec
+and no multi-seat session is claimed here: U3 and U6 follow in the sequence
+of "Code ownership and sequence".
 
 **U1 allocation references, 2026-10-02.** Both successful creation paths
 assign a battle-wide serial after the fallible COB bind and before creation
@@ -3250,6 +3251,68 @@ form of the unexported `freezeMatchInputs`, the front half run from a decoded
 configuration; and the session keeps no copy of the admitted configuration,
 which U2's permission checks and M6's view enforcement will want, or the
 host keeps the value. Seven staged rows join the deadcode baseline.
+
+**U2 explicit commands and authorization, 2026-10-02.** The §7.4.4
+`internal/session` block exists — `SeatCommand` with the §7.4.2 kind numbers
+and one `<Kind>Payload` record per kind, `CommandStamp`, `CommandOutcome`,
+`CommandReceipt` (with one field beyond the published struct, `Diagnostic`,
+the rejection text, recorded in §7.4.4), `EnqueueSeatCommand` and
+`DrainCommandReceipts`; `EncodeSeatCommand`/`DecodeSeatCommand` are U6's.
+Stamped entries ride the existing phase-1 queue through an unexported field
+of `HumanCommand`, so the drain, the paused boundary (which stops at a stamped
+entry) and `step.go` are unchanged; the session gained one field,
+`seatCommands`. The former per-kind appliers are one shared implementation
+(`applyBound`) that both the local adapter and the stamped path reach, and
+the local adapter now captures explicit references and membership at
+submission, keeping its legacy semantics otherwise: foreign handles skipped,
+duplicate actors processed, the ordinary order's explicit handles visited as
+a set in pool order as before. Online, every seat kind of §7.4.2 is applied
+(Order, Stop, Activation, FactoryBuild, CancelProduction, Stockpile,
+GroupAssign, Stance, Cloak, SelfDestruct, CancelQueuedMove, BuilderOptions;
+ATM, SetResource on the issuing seat's own stock, MakeSelectable and Meteor
+behind the cheat permission; Spawn behind the permission and the Modern set;
+`Give` under Q8/Q28; CommunityKickout when the feature is on) or refused
+with the gate it waits for: MobileBuild and CommunityOrderDrag (known-site
+admission), View and Visibility (perspective and history), DoubleShot and
+HalfShot (per-seat damage gates) and the reserved kinds 35–45 name M5; the
+local kinds, the replay-only NoShake and SetLogo, lobby-only Gameplay and
+any unlisted number are never admitted online. In the single-player replay
+context every S, D and replay-only kind applies with single-player
+semantics. Readings, each marked in the code: a stream position must exceed
+every position accepted so far from any seat (the stream is one append-only
+sequence, §4.2, so queue order equals stream order without a sort);
+"unsealed" means after `Clock.GlobalTick`, the granted-tick rule being M6's
+driver's; an online stamp must name a human row of the configuration that is
+not finally removed and whose economy record is neither Watcher nor
+observer; in the replay context the stamped seat must equal `LocalOwner`;
+`EnqueueHumanCommand` in an online session accepts only local interface
+kinds; online coordinates must fit the signed 32-bit raw 16.16 range (a
+`TODO(question)` at `validPoint`: a formation offset can still push a point
+near the edge past it); online Spawn and Kickout are refused when their rule
+or feature is off, where replay keeps the silent no-op; `CommandNoOp` is a
+stale or empty actor list, a stale singular actor, a stale online ordinary
+target or a changed drag receipt, and `CommandApplied` means dispatched even
+if the gameplay service then refused; online `SetResource` amounts must be
+finite and not negative zero; selection-derived actors (implicit Order, Stop,
+SelfDestruct, Stance, Cloak, GroupAssign membership) are still read at the
+input boundary, not at submission, because capturing at submission would
+break selecting then ordering within one batch — U3 moves it; missing content
+keys are refused in both contexts; `humanUnit` admits units of the command's
+issuer through a separate attribution field, set only when the issuer differs
+from `LocalOwner`, so `group_destinations.go` serves remote seats without
+edits. **M2-C7 declaration:** the one single-player behaviour change is the
+M2-C3 correction itself — a handle captured when a command is submitted is
+no longer redirected to a unit created in the same slot before phase 1; no
+current producer reaches that case, and all sixteen locks hold with their
+constants. Open for later units: `group_destinations.go` should take the
+issuer explicitly; the admitted multi-seat constructor (M5) calls
+`setOnlineSeatCommands`, M6's final-removal event calls
+`markSeatRemovedForCommands`, and its stream driver enqueues in stream
+order; a dead or freed handle captured by the local adapter becomes a
+reference with serial 0 because the freed-slot record drops
+`AllocationSerial`, and local duplicate actor lists exist — neither has a
+wire form, so M4's recorder and U6 decide their treatment. Two staged rows
+join the deadcode baseline.
 
 M2 makes the command boundary explicit and the battle inputs identifiable.
 It does not enable a network battle: perspectives, multiplayer sharing,

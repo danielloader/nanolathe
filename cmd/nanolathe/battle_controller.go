@@ -170,16 +170,24 @@ func (c *BattleController) Step(frame BattleInputFrame, cl *client.Client) {
 				cl.ObserveCommittedTick()
 			})
 		}
+		// Facts of ticks no observer saw (a host that stepped the session
+		// itself) reach the local state before input reads it.
+		c.battle.syncLocalInterface()
 		shift := state.Kbd.HasShift()
 		if cl != nil && cl.Input() != nil {
 			shift = cl.Input().Kbd.HasShift()
 		}
 		if shift != c.shiftHeld {
-			if c.battle.sess.EnqueueHumanCommand(session.HumanCommand{Kind: session.HumanShiftState, ShiftHeld: shift}) == nil {
+			// Held Shift pauses BigBrother, local interface state
+			// (DESIGN_MULTIPLAYER §7.1).
+			if c.battle.enqueueHumanCommand(session.HumanCommand{Kind: session.HumanShiftState, ShiftHeld: shift}) == nil {
 				c.shiftHeld = shift
 			}
 		}
 	}
+	// Whichever joined tick the next presentation pins carries the local
+	// state this step left, composed while the simulation is quiescent.
+	defer c.battle.finishLocalInterfaceStep()
 	// Retail handles follow hotkeys after the sub-tick batch. Keep these
 	// presentation-only requests pending while automatic cycles consume it.
 	c.battle.deferFollowInput = true

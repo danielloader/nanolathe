@@ -9,7 +9,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
-	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
 )
@@ -172,16 +171,9 @@ func TestMegamapBoxSelectsOwnUnitsAndHidesTheClick(t *testing.T) {
 	in.PublishPointer()
 	b.serviceMegamapPointer(in, b.pointerSample(in, 0), cl)
 	pointer(input.LeftUp, lens.X+lens.W-1, lens.Y+lens.H-1)
-	var selected bool
-	for _, c := range s.PendingHumanCommands() {
-		if c.Kind == session.HumanSelectionReplace {
-			for _, h := range c.Selection.Handles {
-				selected = selected || h == builder
-			}
-		}
-	}
-	if !selected {
-		t.Fatalf("box selection did not select the own unit: %+v", s.PendingHumanCommands())
+	// Selection is the host's local state (DESIGN_MULTIPLAYER §7.3).
+	if !hostSelected(b, s.Units.Unit(builder)) {
+		t.Fatalf("box selection did not select the own unit: %v", b.localState().SelectedRefs())
 	}
 }
 

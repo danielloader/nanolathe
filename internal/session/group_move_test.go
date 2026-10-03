@@ -63,12 +63,10 @@ func TestHumanGroupMoveRetailDestinations(t *testing.T) {
 				sim, crt := s.rngSim, s.rngCrt
 				stock := s.Econ.Players[0].Stock
 				click := orders.ResolvePos{X: 1000<<16 + 123, Y: 85<<16 + 456, Z: 1000<<16 + 789}
-				// Selection and order share one input drain. No selection snapshot
-				// or centroid from the preceding publication may be substituted.
-				if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: handles}}); err != nil {
-					t.Fatal(err)
-				}
-				if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanOrder, Order: HumanOrderCommand{Code: 2, Position: click, AssignedPosition: tc.assigned}}); err != nil {
+				// The client resolves the order's units from its own selection
+				// when it sends the order (DESIGN_MULTIPLAYER §7.3); the centroid
+				// is the input boundary's, from the units as they stand there.
+				if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanOrder, Order: HumanOrderCommand{Handles: handles, Code: 2, Position: click, AssignedPosition: tc.assigned}}); err != nil {
 					t.Fatal(err)
 				}
 				s.applyHumanCommands(1)

@@ -6,7 +6,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
-	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
@@ -336,7 +335,7 @@ func TestNextUnitCycleGlidesWithoutSelecting(t *testing.T) {
 	if got := len(selectedHandles(t, b)); got != before {
 		t.Fatalf("`n` changed the selection from %d to %d", before, got)
 	}
-	if !b.visitedUnits[far.Handle] {
+	if !b.localState().Visited(unitViewRef(frame.UnitView{Slot: far.Handle, AllocationSerial: far.AllocationSerial})) {
 		t.Fatalf("`n` did not mark its pick visited")
 	}
 	// With every unit visited the cycle clears and restarts on the same unit.
@@ -508,11 +507,11 @@ func TestEscapeDeselectsAndCancels(t *testing.T) {
 	if b.battleState().Input.Latch != input.LatchNormal {
 		t.Fatalf("Escape did not return the armed latch to idle")
 	}
-	if u.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, u) {
 		t.Fatalf("Escape over an armed latch also deselected")
 	}
 	pressKeys(b, input.KeyEscape)
-	if u.Flags&hud.SelectionFlag != 0 {
+	if hostSelected(b, u) {
 		t.Fatalf("Escape with an idle latch did not deselect")
 	}
 }

@@ -709,21 +709,23 @@ func TestTrackedMovesUseTheStreamPosition(t *testing.T) {
 	}
 }
 
-// In an online session the local adapter carries only local interface
-// state; every world command must arrive stamped (M2-C2).
+// In an online session the local adapter admits nothing: every world command
+// must arrive stamped (M2-C2), and the local interface kinds are the client's
+// own state, which never reaches the session (§7.3).
 func TestLocalAdapterRefusesWorldCommandsOnline(t *testing.T) {
 	f := newSeatFixture(t, true, true)
 	for _, c := range []HumanCommand{
 		{Kind: HumanATM}, {Kind: HumanNoShake}, {Kind: HumanGameplay, Gameplay: gameplay.Strict31},
 		{Kind: HumanStop, Stop: HumanStopCommand{Handles: []pool.Handle{f.own0}}},
 		{Kind: HumanGive, Give: HumanGiveCommand{Player: 1, Amount: 5}},
+		{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{f.own0}}},
 	} {
 		if err := f.s.EnqueueHumanCommand(c); err == nil {
 			t.Fatalf("kind %d admitted through the local adapter online", c.Kind)
 		}
 	}
-	if err := f.s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{f.own0}}}); err != nil {
-		t.Fatal(err)
+	if !f.s.OnlineCommandContext() {
+		t.Fatal("the online fixture does not report the online command context")
 	}
 }
 
@@ -817,21 +819,21 @@ func TestLocalAndStampedCommandsShareOneImplementation(t *testing.T) {
 func TestPausedBoundaryLeavesStampedEntries(t *testing.T) {
 	f := newSeatFixture(t, false, false)
 	tick := f.s.Clock.GlobalTick + 1
-	_ = f.s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{f.own0}}})
+	_ = f.s.EnqueueHumanCommand(HumanCommand{Kind: HumanView, View: HumanViewCommand{Player: 1}})
 	if err := f.s.EnqueueSeatCommand(f.stamp(0), SeatCommand{Kind: SeatStop, Stop: StopPayload{Actors: []pool.UnitRef{f.ref(f.own0)}}}); err != nil {
 		t.Fatal(err)
 	}
-	_ = f.s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionClear})
+	_ = f.s.EnqueueHumanCommand(HumanCommand{Kind: HumanView, View: HumanViewCommand{Player: 0}})
 	if n := f.s.applyPausedHumanCommands(tick, nil); n != 1 {
 		t.Fatalf("paused boundary applied %d entries, want the local prefix of 1", n)
 	}
-	if f.queueLen(f.own0) != 0 || f.s.Units.Unit(f.own0).Flags&0x10 == 0 || len(f.s.DrainCommandReceipts()) != 0 {
+	if f.queueLen(f.own0) != 0 || f.s.ViewingOwner != 1 || len(f.s.DrainCommandReceipts()) != 0 {
 		t.Fatal("the paused boundary applied a stamped entry")
 	}
 	if rs := f.tick(); len(rs) != 1 || rs[0].Outcome != CommandApplied {
 		t.Fatalf("phase 1 receipts %+v", rs)
 	}
-	if f.s.Units.Unit(f.own0).Flags&0x10 != 0 {
+	if f.s.ViewingOwner != 0 {
 		t.Fatal("the entry behind the stamped one did not apply in order")
 	}
 }

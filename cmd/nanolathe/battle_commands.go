@@ -358,8 +358,11 @@ func (b *battleSession) selfDestructSelection(queued bool) {
 	})
 }
 
+// effectiveBuildPage is the command page's page. The page is local interface
+// state applied at once (battle_local_interface.go), and the frame's command
+// page is composed from it, so no pending page command waits to be projected.
 func (b *battleSession) effectiveBuildPage(f *frame.Frame) int {
-	return b.sess.PendingBuildPage(f.CommandPage.Builder, int(f.CommandPage.Page))
+	return int(f.CommandPage.Page)
 }
 
 // Modern row pages have a presentation-local index. Keep every navigation

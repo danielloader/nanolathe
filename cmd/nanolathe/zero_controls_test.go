@@ -61,13 +61,26 @@ func zeroSelectionFixture(t *testing.T, scheme int) (*battleSession, *frame.Fram
 	return b, b.sess.Snapshot.Current()
 }
 
-func lastZeroSelection(t *testing.T, b *battleSession) session.HumanCommand {
+// zeroSelection is the host's local selection, in ascending slot order.
+// Selection is client-side local state (DESIGN_MULTIPLAYER §7.3): a gesture
+// changes it at once and sends nothing to the session.
+func zeroSelection(t *testing.T, b *battleSession) []pool.Handle {
 	t.Helper()
-	pending := b.sess.PendingHumanCommands()
-	if len(pending) == 0 {
-		t.Fatal("selection did not enqueue a command")
+	if len(b.sess.PendingHumanCommands()) != 0 {
+		t.Fatal("a selection gesture reached the session queue")
 	}
-	return pending[len(pending)-1]
+	refs := b.localState().SelectedRefs()
+	out := make([]pool.Handle, len(refs))
+	for i, r := range refs {
+		out[i] = r.Handle
+	}
+	return out
+}
+
+// seedZeroSelection selects slot h first, so a later toggle and a replace
+// leave different selections.
+func seedZeroSelection(b *battleSession, h pool.Handle) {
+	b.localState().ReplaceSelection([]pool.UnitRef{{Handle: h}})
 }
 
 func TestZeroSelectionKeepsRetailAndCommunityMeaning(t *testing.T) {
@@ -86,7 +99,7 @@ func TestZeroSelectionKeepsRetailAndCommunityMeaning(t *testing.T) {
 		kbd.SetKey(input.KeyS, true)
 		kbd.SetKey(input.KeyShift, tc.shift)
 		b.dispatchCtrlLetters(kbd)
-		if got := lastZeroSelection(t, b).Selection.Handles; !slices.Equal(got, tc.want) {
+		if got := zeroSelection(t, b); !slices.Equal(got, tc.want) {
 			t.Fatalf("scheme %d shift %v selected %v, want %v", tc.scheme, tc.shift, got, tc.want)
 		}
 	}
@@ -99,7 +112,7 @@ func TestZeroSelectionKeepsRetailAndCommunityMeaning(t *testing.T) {
 		if key == input.KeyF {
 			want = 6
 		}
-		if got := lastZeroSelection(t, b).Selection.Handles; !slices.Equal(got, []pool.Handle{want}) {
+		if got := zeroSelection(t, b); !slices.Equal(got, []pool.Handle{want}) {
 			t.Fatalf("Zero idle key %v selected %v", key, got)
 		}
 	}
@@ -143,6 +156,7 @@ func TestZeroMegamapFilterSamplesReleaseAndKeepsShiftToggle(t *testing.T) {
 	if !lens.Valid() {
 		t.Fatal("invalid fixture megamap lens")
 	}
+	seedZeroSelection(b, 1)
 	in := input.NewState()
 	for _, event := range []input.PointerEvent{
 		{Kind: input.LeftDown, X: lens.X, Y: lens.Y, Buttons: input.MouseButtons{Left: true}},
@@ -155,9 +169,9 @@ func TestZeroMegamapFilterSamplesReleaseAndKeepsShiftToggle(t *testing.T) {
 		in.PublishPointer()
 		b.serviceMegamapPointer(in, b.pointerSample(in, 0), nil)
 	}
-	c := lastZeroSelection(t, b)
-	if c.Kind != session.HumanSelectionToggle || !slices.Equal(c.Selection.Handles, []pool.Handle{5}) {
-		t.Fatalf("release filter/toggle = %+v", c)
+	// Shift toggles the filtered band into the seeded selection.
+	if got := zeroSelection(t, b); !slices.Equal(got, []pool.Handle{1, 5}) {
+		t.Fatalf("release filter/toggle selected %v, want the seed and 5", got)
 	}
 }
 
@@ -166,6 +180,7 @@ func TestZeroWorldRectangleFiltersOnRelease(t *testing.T) {
 		b, _ := zeroSelectionFixture(t, 2)
 		b.sess.World = testWorldON05(100, 100)
 		b.millisSource = &fakeMillisSource{}
+		seedZeroSelection(b, 1)
 		in := input.NewState()
 		in.Mouse.SetPosition(180, 80)
 		in.Mouse.SetButton(input.MouseButtonLeft, true)
@@ -182,9 +197,8 @@ func TestZeroWorldRectangleFiltersOnRelease(t *testing.T) {
 		if key == input.KeyY {
 			want = 6
 		}
-		c := lastZeroSelection(t, b)
-		if c.Kind != session.HumanSelectionToggle || !slices.Equal(c.Selection.Handles, []pool.Handle{want}) {
-			t.Fatalf("world release %v selected %+v", key, c)
+		if got := zeroSelection(t, b); !slices.Equal(got, []pool.Handle{1, want}) {
+			t.Fatalf("world release %v selected %v, want the seed toggled with %d", key, got, want)
 		}
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -86,6 +87,14 @@ func paletteCallbackFactory(t *testing.T, gadgets []gui.Gadget, products []strin
 	// The established viewer fixture supplies ARM FAV and its window. The
 	// callback only needs a builder identity, so this keeps the fixture small.
 	factory.Def.Builder = true
+	// The host composes the command page from the definition's page-count
+	// byte and the local page (hud.ComposeCommandPage); the fixture frame
+	// below agrees with it.
+	factory.Def.BuildPageCount = int32(count)
+	// A page move shows at once, so every page has its authored window.
+	for page := 2; page < int(count); page++ {
+		b.hud.windows[fmt.Sprintf("armfav%d", page)] = b.hud.windows["armfav1"]
+	}
 	paletteCallbackFrame(t, b, func(f *frame.Frame) {
 		f.Selection.Handles = []pool.Handle{factory.Handle}
 		f.Selection.Primary = factory.Handle
@@ -137,36 +146,42 @@ func TestPaletteCallbackBuildOrdersAndPager(t *testing.T) {
 	b, cl, factory := paletteCallbackFactory(t, buttons, nil, 0, 4)
 	spy := paletteCallbackCues(t, b, ordersButtonCue, buildButtonCue, cueNextBuildMenu)
 
-	paletteCallbackToken(t, b, cl, 'o')
-	paletteCallbackToken(t, b, cl, 'b')
-	paletteCallbackToken(t, b, cl, 'n')
-	pending := b.sess.PendingHumanCommands()
-	if len(pending) != 3 {
-		t.Fatalf("callback commands=%v, want orders, build, next", pending)
+	// The page is local interface state (DESIGN_MULTIPLAYER §7.3): each
+	// callback moves it at once, with no session command.
+	page := func() (pool.Handle, uint16) {
+		f, _ := b.currentSnapshot()
+		return f.CommandPage.Builder, f.CommandPage.Page
 	}
-	for i, want := range []int{0, 1, 2} {
-		if got := pending[i]; got.Kind != session.HumanBuildPage || got.BuildPage.Builder != factory || got.BuildPage.Page != want {
-			t.Fatalf("callback %d=%+v, want page %d for factory %v", i, got, want, factory)
+	for _, step := range []struct {
+		token rune
+		want  uint16
+	}{{'o', 0}, {'b', 1}, {'n', 2}} {
+		paletteCallbackToken(t, b, cl, step.token)
+		if builder, got := page(); builder != factory || got != step.want {
+			t.Fatalf("callback %q: page %d for builder %d, want %d for factory %v", step.token, got, builder, step.want, factory)
 		}
+	}
+	if pending := b.sess.PendingHumanCommands(); len(pending) != 0 {
+		t.Fatalf("page callbacks reached the session: %+v", pending)
 	}
 	if got, want := spy.aliases, []string{ordersButtonCue, buildButtonCue, cueNextBuildMenu}; !slices.Equal(got, want) {
 		t.Fatalf("BUILD/ORDERS/NEXT cues=%v, want %v", got, want)
 	}
 
-	// PREV follows the pending NEXT page before any publication [07 R-HUD-03 §6].
+	// PREV follows the NEXT page before any publication [07 R-HUD-03 §6].
 	paletteCallbackToken(t, b, cl, 'p')
-	pending = b.sess.PendingHumanCommands()
-	if got := pending[len(pending)-1]; got.Kind != session.HumanBuildPage || got.BuildPage.Page != 1 {
-		t.Fatalf("PREV callback=%+v, want pending previous page 1", got)
+	if _, got := page(); got != 1 {
+		t.Fatalf("PREV callback page %d, want the previous page 1", got)
 	}
 
 	// A one-page count hides the gadget and cannot dispatch or play a
 	// page cue [07 R-HUD-03 §6].
 	paletteCallbackFrame(t, b, func(f *frame.Frame) { f.CommandPage.PageCount = 1 })
-	beforeCommands, beforeCues := len(b.sess.PendingHumanCommands()), len(spy.aliases)
+	_, beforePage := page()
+	beforeCues := len(spy.aliases)
 	paletteCallbackToken(t, b, cl, 'n')
-	if got := len(b.sess.PendingHumanCommands()); got != beforeCommands {
-		t.Fatalf("one-page NEXT added commands: %v", b.sess.PendingHumanCommands())
+	if _, got := page(); got != beforePage || len(b.sess.PendingHumanCommands()) != 0 {
+		t.Fatalf("one-page NEXT moved the page to %d", got)
 	}
 	if got := len(spy.aliases); got != beforeCues {
 		t.Fatalf("one-page NEXT added cue %v", spy.aliases[beforeCues:])

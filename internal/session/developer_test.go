@@ -31,7 +31,7 @@ func developerFixture(t *testing.T) (*Session, pool.Handle) {
 		t.Fatal(err)
 	}
 	u := s.Units.Unit(h)
-	u.Flags |= 0x10
+	s.SetDeveloperMovementSubject(h) // the host's selection
 	s.Movement = movement.NewSystem(terrain, movement.Template(), movement.NewOccupancyGrid())
 	s.Movement.BindWorld(s.Units)
 	s.Movement.EnsureUnit(u)

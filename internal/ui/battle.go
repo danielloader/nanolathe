@@ -94,8 +94,10 @@ type BattleScheduleIntent struct {
 
 // BattleInputState is the single owner of mutable battle presentation/input
 // state. It contains no simulation handles or services: the command adapter
-// reads this value, turns gestures into semantic session commands, and leaves
-// application to Session.EnqueueHumanCommand [01 §4.4][07 §3][07 §9].
+// reads this value, turns gestures into semantic commands, applies the local
+// interface ones (selection, build pages, group recall, BigBrother, Shift) to
+// the host's local interface state (DESIGN_MULTIPLAYER §7.3), and leaves the
+// rest to Session.EnqueueHumanCommand [01 §4.4][07 §3][07 §9].
 //
 // Keeping the gesture latches together is important. A HUD press, placement
 // press, or world drag owns the complete button gesture; separate owners can
@@ -149,7 +151,8 @@ type BattleInputState struct {
 // BattleState owns all mutable authored battle-interface state that is not
 // simulation state: modal windows, latches, gestures, placement, status, and
 // result dismissal. The command composition layer only adapts this state to
-// Session.EnqueueHumanCommand [07 §3][07 §9].
+// the host's local interface state and Session.EnqueueHumanCommand
+// [07 §3][07 §9].
 type BattleState struct {
 	modal        BattleModal
 	pressed      int

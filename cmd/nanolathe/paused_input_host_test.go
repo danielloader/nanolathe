@@ -27,25 +27,26 @@ func pausedHostBuildNodes(u *units.Unit, product string) int {
 	return n
 }
 
-// The whole point of the paused-input boundary is that the host's own dispatch
-// path sees the new selection: every dispatcher resolves its actor from the
-// committed command page, so a build clicked after a paused selection must be
-// addressed to the unit the player just selected and to nothing else
-// (DESIGN_INTERFACE_HUD_INPUT §3.12) [07 §9].
+// Every dispatcher resolves its actor from the committed command page, which
+// the host composes from its local selection (DESIGN_MULTIPLAYER §7.3), so a
+// build clicked after a paused selection must be addressed to the unit the
+// player just selected and to nothing else (DESIGN_INTERFACE_HUD_INPUT §3.12)
+// [07 §9]. Selection applies at once, paused or not; only the build waits for
+// the paused-input boundary.
 func TestPausedMobileBuildDispatchesToTheUnitSelectedWhilePaused(t *testing.T) {
 	b := newTestBattle(testCatalogON05(), testWorldON05(20, 20))
 	b.sess.State = session.StateBattle
 	first := placeUnit(b, "armcons", pausedHostCell(3), pausedHostCell(3))
 	second := placeUnit(b, "armcons", pausedHostCell(9), pausedHostCell(9))
+	b.sess.Step(1)
 
 	if err := b.enqueueHumanCommand(session.HumanCommand{Kind: session.HumanSelectionReplace,
 		Selection: session.HumanSelectionCommand{Handles: []pool.Handle{first.Handle}}}); err != nil {
 		t.Fatal(err)
 	}
-	b.sess.Step(1)
 	f, ok := b.currentSnapshot()
 	if !ok || f.CommandPage.Builder != first.Handle {
-		t.Fatalf("first tick did not publish the first builder: %+v", f.CommandPage.Builder)
+		t.Fatalf("the selection did not compose the first builder's page: %+v", f.CommandPage.Builder)
 	}
 
 	b.sess.SetPaused(true)
@@ -72,7 +73,7 @@ func TestPausedMobileBuildDispatchesToTheUnitSelectedWhilePaused(t *testing.T) {
 		t.Fatalf("paused build addressed builder %d, want the newly selected %d", got, second.Handle)
 	}
 	if len(pending) != 1 {
-		t.Fatalf("the paused boundary left %d commands queued, want only the new build", len(pending))
+		t.Fatalf("%d commands queued, want only the new build", len(pending))
 	}
 
 	b.sess.SetPaused(false)
@@ -100,16 +101,16 @@ func TestBattleOptionsWindowSuppressesThePausedInputBoundary(t *testing.T) {
 		t.Fatalf("opening the options window did not pause a modal battle: modal=%d paused=%t",
 			b.battleState().Modal(), b.sess.Clock.Paused)
 	}
-	if err := b.enqueueHumanCommand(session.HumanCommand{Kind: session.HumanSelectionReplace,
-		Selection: session.HumanSelectionCommand{Handles: []pool.Handle{subject.Handle}}}); err != nil {
+	if err := b.enqueueHumanCommand(session.HumanCommand{Kind: session.HumanMobileBuild, MobileBuild: session.HumanMobileBuildCommand{
+		Builder: subject.Handle, Product: "armsolar", WX: pausedHostCell(12), WZ: pausedHostCell(12)}}); err != nil {
 		t.Fatal(err)
 	}
 	b.viewerStep(0, b.cl)
 	if len(b.sess.PendingHumanCommands()) != 1 {
 		t.Fatal("the modal options window drained the input queue")
 	}
-	if f, ok := b.currentSnapshot(); !ok || f.CommandPage.Builder != 0 {
-		t.Fatal("the modal options window published a selection")
+	if got := pausedHostBuildNodes(subject, "armsolar"); got != 0 {
+		t.Fatal("the modal options window applied a command")
 	}
 
 	b.closeBattleMenu()
@@ -119,11 +120,11 @@ func TestBattleOptionsWindowSuppressesThePausedInputBoundary(t *testing.T) {
 	if len(b.sess.PendingHumanCommands()) != 0 {
 		t.Fatal("a paused battle with the options window closed did not drain its input")
 	}
-	f, ok := b.currentSnapshot()
-	if !ok || f.CommandPage.Builder != subject.Handle {
-		t.Fatalf("the host frame published builder %d, want %d", f.CommandPage.Builder, subject.Handle)
+	if got := pausedHostBuildNodes(subject, "armsolar"); got != 1 {
+		t.Fatalf("the paused boundary left %d build orders, want 1", got)
 	}
-	if f.Tick != b.sess.Clock.GlobalTick {
+	f, ok := b.currentSnapshot()
+	if !ok || f.Tick != b.sess.Clock.GlobalTick {
 		t.Fatalf("the paused host frame published tick %d, want the committed %d", f.Tick, b.sess.Clock.GlobalTick)
 	}
 }

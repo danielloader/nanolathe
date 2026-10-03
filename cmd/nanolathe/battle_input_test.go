@@ -8,7 +8,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/features"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
-	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
@@ -84,6 +83,11 @@ func applyPendingBattleCommands(b *battleSession) {
 	b.sess.Step(now)
 }
 
+// replaceSelectionForTest selects us as the client does: from a committed
+// frame that shows them. Selection is the host's local interface state
+// (DESIGN_MULTIPLAYER §7.3), so the units are published first, the selection
+// applies at once, and one more tick publishes the frame readers compose it
+// onto.
 func replaceSelectionForTest(t *testing.T, b *battleSession, us ...*units.Unit) {
 	t.Helper()
 	handles := make([]pool.Handle, 0, len(us))
@@ -92,6 +96,9 @@ func replaceSelectionForTest(t *testing.T, b *battleSession, us ...*units.Unit) 
 			handles = append(handles, u.Handle)
 		}
 	}
+	// One tick, whatever the scheduler anchor: the frame must show the units.
+	b.sess.State = session.StateBattle
+	b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
 	if err := b.enqueueHumanCommand(session.HumanCommand{Kind: session.HumanSelectionReplace, Selection: session.HumanSelectionCommand{Handles: handles}}); err != nil {
 		t.Fatalf("replace selection: %v", err)
 	}
@@ -115,7 +122,7 @@ func TestClickCommanderSelectsExactlyOne(t *testing.T) {
 	count := 0
 	var selected *units.Unit
 	for _, u := range b.sess.Units.Iter() {
-		if u != nil && u.Flags&hud.SelectionFlag != 0 {
+		if u != nil && hostSelected(b, u) {
 			count++
 			selected = u
 		}
@@ -140,7 +147,7 @@ func TestClickAtRenderedCommanderPosition(t *testing.T) {
 	sx, sy := beamX-camera.OriginX, beamY-camera.OriginY
 	clickAt(b, sx, sy, false)
 
-	if commander.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, commander) {
 		t.Fatalf("rendered commander at (%d,%d) was not selected", sx, sy)
 	}
 }
@@ -170,7 +177,7 @@ func TestClickAtRenderedCommanderPositionUsesSnapshotPicker(t *testing.T) {
 	sx, sy := beamX-camera.OriginX, beamY-camera.OriginY
 	clickAt(b, sx, sy, false)
 
-	if commander.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, commander) {
 		t.Fatalf("snapshot-rendered commander at (%d,%d) was not selected", sx, sy)
 	}
 }
@@ -187,35 +194,35 @@ func TestEmptyClickClearsShiftToggles(t *testing.T) {
 	// Click A selects A
 	sxA, syA := screenPos(b.cam, a)
 	clickAt(b, sxA, syA, false)
-	if a.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, a) {
 		t.Fatalf("A should be selected after click")
 	}
 	// Click B without shift replaces: A cleared, B selected
 	sxC, syC := screenPos(b.cam, c)
 	clickAt(b, sxC, syC, false)
-	if a.Flags&hud.SelectionFlag != 0 {
+	if hostSelected(b, a) {
 		t.Fatalf("A should be cleared after replace click on C")
 	}
-	if c.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, c) {
 		t.Fatalf("C should be selected after replace")
 	}
 	// Shift-click A adds A (now both selected) [07 §9] additive toggle inside
 	clickAt(b, sxA, syA, true)
-	if a.Flags&hud.SelectionFlag == 0 || c.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, a) || !hostSelected(b, c) {
 		t.Fatalf("shift-click should add A, want both selected")
 	}
 	// Shift-click A again toggles A off, leaving only C
 	clickAt(b, sxA, syA, true)
-	if a.Flags&hud.SelectionFlag != 0 {
+	if hostSelected(b, a) {
 		t.Fatalf("shift toggle should deselect A")
 	}
-	if c.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, c) {
 		t.Fatalf("C should remain selected after toggling A off")
 	}
 	// Left empty with selection issues a contextual move order and does NOT clear [07 §9][04 §3.4] — right-click is deselect/cancel only.
 	// Use the mobile builder A (armcons, CanMove) for move tests; C is a building (armsolar) that cannot move.
 	clickAt(b, sxA, syA, false) // select mobile A
-	if a.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, a) {
 		t.Fatalf("A should be selected for move test")
 	}
 	qBefore := 0
@@ -225,11 +232,11 @@ func TestEmptyClickClearsShiftToggles(t *testing.T) {
 	// Use a far empty ground location that is not within 16px of any unit.
 	// Use a far empty point so it is not intercepted as minimap input [C-6][07 §10].
 	clickAt(b, 500, 300, false) // far empty ground
-	if a.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, a) {
 		t.Fatalf("left empty with selection should preserve selection (issues move instead of clear)")
 	}
-	if c.Flags&hud.SelectionFlag != 0 {
-		t.Fatalf("left empty should not affect C, got %v", c.Flags&hud.SelectionFlag != 0)
+	if hostSelected(b, c) {
+		t.Fatalf("left empty should not affect C, got %v", hostSelected(b, c))
 	}
 	if q := orders.QueueForUnit(a); q == nil || q.LenPrimary() != qBefore+1 {
 		t.Fatalf("left empty with selection should queue a contextual move, before %d after %d", qBefore, func() int {
@@ -247,8 +254,8 @@ func TestEmptyClickClearsShiftToggles(t *testing.T) {
 	// Right empty clears when not additive [07 §9] — deselect branch.
 	// Right click must be outside minimap as well.
 	rightClickAt(b, 500, 300, false)
-	if a.Flags&hud.SelectionFlag != 0 || c.Flags&hud.SelectionFlag != 0 {
-		t.Fatalf("right empty should clear all, A %v C %v", a.Flags&hud.SelectionFlag != 0, c.Flags&hud.SelectionFlag != 0)
+	if hostSelected(b, a) || hostSelected(b, c) {
+		t.Fatalf("right empty should clear all, A %v C %v", hostSelected(b, a), hostSelected(b, c))
 	}
 	// Shift+right empty still clears in current retail path (right does not queue).
 	// Select A again and verify shift+left empty preserves via queued move.
@@ -258,7 +265,7 @@ func TestEmptyClickClearsShiftToggles(t *testing.T) {
 		qBefore2 = q.LenPrimary()
 	}
 	clickAt(b, 500, 300, true) // shift left empty → queued move, preserves
-	if a.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, a) {
 		t.Fatalf("shift left empty should preserve selection via queued move")
 	}
 	if q := orders.QueueForUnit(a); q == nil || q.LenPrimary() != qBefore2+1 {
@@ -286,7 +293,7 @@ func TestFoggedEnemyCannotBeSelectedOrTargeted(t *testing.T) {
 	b.battleState().Input.Latch = input.LatchNormal
 	sx, sy := screenPos(b.cam, enemy)
 	clickAt(b, sx, sy, false)
-	if enemy.Flags&hud.SelectionFlag != 0 {
+	if hostSelected(b, enemy) {
 		t.Fatalf("fogged enemy should not be selectable")
 	}
 	// Targeting: armed attack latch should not acquire fogged unit handle
@@ -310,7 +317,7 @@ func TestFoggedEnemyCannotBeSelectedOrTargeted(t *testing.T) {
 	sxOwn, syOwn := screenPos(b.cam, own)
 	b.battleState().Input.Latch = input.LatchNormal
 	clickAt(b, sxOwn, syOwn, false)
-	if own.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, own) {
 		t.Fatalf("own unit should be selectable even with empty vis (owner bypass)")
 	}
 }
@@ -332,16 +339,16 @@ func TestLocalOwnerNonzeroReceivesCommands(t *testing.T) {
 	// Try to select otherUnit via click – should not select because filter to LocalOwner [07 §9]
 	sxOther, syOther := screenPos(b.cam, otherUnit)
 	clickAt(b, sxOther, syOther, false)
-	if otherUnit.Flags&hud.SelectionFlag != 0 {
+	if hostSelected(b, otherUnit) {
 		t.Fatalf("foreign unit (owner 0) should not be selectable when LocalOwner=1")
 	}
-	if localUnit.Flags&hud.SelectionFlag != 0 {
+	if hostSelected(b, localUnit) {
 		t.Fatalf("local unit should not be selected after foreign click (empty clear)")
 	}
 	// Click local unit – should select
 	sxLocal, syLocal := screenPos(b.cam, localUnit)
 	clickAt(b, sxLocal, syLocal, false)
-	if localUnit.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, localUnit) {
 		t.Fatalf("local unit (owner 1) should be selectable when LocalOwner=1")
 	}
 	// Left-click contextual move should dispatch only to local selection via same canonical producer [P0-I03].
@@ -582,4 +589,11 @@ func TestPlacementReachesTheWholeSurfaceAtALargerDisplayMode(t *testing.T) {
 	if head.GoalX != wantX || head.GoalZ != wantZ {
 		t.Fatalf("queued build at (%d,%d), want the site the pointer named (%d,%d)", head.GoalX, head.GoalZ, wantX, wantZ)
 	}
+}
+
+// hostSelected reports whether the battle host's local interface state has u
+// selected. Selection is client-side local state keyed by allocation
+// reference (DESIGN_MULTIPLAYER §7.3); no unit status word carries it.
+func hostSelected(b *battleSession, u *units.Unit) bool {
+	return u != nil && b.localState().Selected(pool.UnitRef{Handle: u.Handle, Serial: u.AllocationSerial})
 }

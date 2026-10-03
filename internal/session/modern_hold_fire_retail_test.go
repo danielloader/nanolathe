@@ -107,13 +107,9 @@ func TestModernHoldFireStopsAutomaticFire(t *testing.T) {
 	if q := orders.QueueForUnit(shooter); q == nil || q.Head() == nil || orders.DescriptorFor(q.Head().ID).Name != "Guard_NoMove" || shooter.SlotAt(0).IsAutonomous() {
 		t.Fatal("the tower's engagement is not held by its stationary guard; the case proves nothing")
 	}
-	for _, u := range s.Units.IterSliced() {
-		if u != nil && u.Alive && u.Owner == 0 {
-			u.Flags &^= 0x10
-		}
-	}
-	shooter.Flags |= 0x10 // the selection bit the stance broadcast walks [04 R-STANCE-01 §5]
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanStance, Stance: HumanStanceCommand{Fire: true, Value: 0}}); err != nil {
+	// The stance broadcast walks the selection, which the client sends with
+	// the press [04 R-STANCE-01 §5] (DESIGN_MULTIPLAYER §7.3).
+	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanStance, Stance: HumanStanceCommand{Fire: true, Value: 0, Handles: []pool.Handle{shooter.Handle}}}); err != nil {
 		t.Fatal(err)
 	}
 	lastLaunch(2, false) // the command is applied and the standing record runs

@@ -7,7 +7,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/combat"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
-	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/mission"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
@@ -175,16 +174,23 @@ func TestHumanCommandSequenceAndDueTickAreSessionOwned(t *testing.T) {
 	first, _ := w.Create(def, 0, 0, 0, 0)
 	second, _ := w.Create(def, 0, 0, 0, 0)
 	s := &Session{Units: w, LocalOwner: 0, Clock: &clock.State{GlobalTick: 7}}
+	stop := func(h pool.Handle) HumanCommand {
+		return HumanCommand{Kind: HumanStop, Stop: HumanStopCommand{Handles: []pool.Handle{h}}}
+	}
 	// Caller metadata is ignored: the session is the sole owner of ordering
 	// and scheduling at the local input boundary [01 §4.4].
-	if err := s.EnqueueHumanCommand(HumanCommand{Sequence: 900, DueTick: 1, Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{first}}}); err != nil {
+	c := stop(first)
+	c.Sequence, c.DueTick = 900, 1
+	if err := s.EnqueueHumanCommand(c); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.EnqueueHumanCommand(HumanCommand{Sequence: 1, DueTick: 1, Kind: HumanSelectionToggle, Selection: HumanSelectionCommand{Handles: []pool.Handle{first}}}); err != nil {
+	c = stop(second)
+	c.Sequence, c.DueTick = 1, 1
+	if err := s.EnqueueHumanCommand(c); err != nil {
 		t.Fatal(err)
 	}
 	s.Clock.GlobalTick = 8
-	if err := s.EnqueueHumanCommand(HumanCommand{Sequence: 1, DueTick: 1, Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{second}}}); err != nil {
+	if err := s.EnqueueHumanCommand(stop(first)); err != nil {
 		t.Fatal(err)
 	}
 	pending := s.PendingHumanCommands()
@@ -192,40 +198,12 @@ func TestHumanCommandSequenceAndDueTickAreSessionOwned(t *testing.T) {
 		t.Fatalf("session metadata = %+v, want sequence 1,2,3 and due ticks 8,8,9", pending)
 	}
 	s.applyHumanCommands(8)
-	if w.Unit(first).Flags&0x10 != 0 || w.Unit(second).Flags&0x10 != 0 {
-		t.Fatalf("same-tick commands did not apply in sequence order or future command applied early: first=%x second=%x", w.Unit(first).Flags, w.Unit(second).Flags)
-	}
 	if got := s.PendingHumanCommands(); len(got) != 1 || got[0].Sequence != 3 {
 		t.Fatalf("future queue = %+v, want sequence 3", got)
 	}
 	s.applyHumanCommands(9)
-	if w.Unit(first).Flags&0x10 != 0 || w.Unit(second).Flags&0x10 == 0 {
-		t.Fatalf("due commands did not apply in sequence order: first=%x second=%x", w.Unit(first).Flags, w.Unit(second).Flags)
-	}
-}
-
-func TestHumanSelectionCommandDrainsAtInputBoundary(t *testing.T) {
-	cat := &content.Catalog{Units: map[string]*content.UnitDef{}}
-	w := newSessionFixtureWorld(8, cat)
-	def := &content.UnitDef{UnitName: "armcom", MaxDamage: 100}
-	def.CanonicalKey = "armcom"
-	h, err := w.Create(def, 0, 0, 0, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := &Session{Units: w, LocalOwner: 0}
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{h}}}); err != nil {
-		t.Fatal(err)
-	}
-	if w.Unit(h).Flags&0x10 != 0 {
-		t.Fatal("enqueue mutated authoritative flags")
-	}
-	s.applyHumanCommands(1)
-	if w.Unit(h).Flags&0x10 == 0 {
-		t.Fatal("input boundary did not apply selection")
-	}
 	if len(s.PendingHumanCommands()) != 0 {
-		t.Fatal("input queue not drained")
+		t.Fatal("the due command stayed queued")
 	}
 }
 
@@ -245,9 +223,6 @@ func TestHumanCommandKindsQueueAndApplyAtBoundary(t *testing.T) {
 	hFactory, _ := builderWorld.Create(factoryDef, 0, 4<<16, 0, 0)
 	s := &Session{Units: builderWorld, Catalog: cat, LocalOwner: 0}
 	cmds := []HumanCommand{
-		{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{hBuilder}}},
-		{Kind: HumanSelectionToggle, Selection: HumanSelectionCommand{Handles: []pool.Handle{hBuilder}}},
-		{Kind: HumanSelectionClear},
 		{Kind: HumanOrder, Order: HumanOrderCommand{Handles: []pool.Handle{hBuilder}, Code: 2, Position: orders.ResolvePos{X: 10 << 16, Z: 10 << 16}}},
 		{Kind: HumanStop, Stop: HumanStopCommand{Handles: []pool.Handle{hBuilder}}},
 		{Kind: HumanActivation, Activation: HumanActivationCommand{Unit: hBuilder, Activate: true}},
@@ -261,8 +236,8 @@ func TestHumanCommandKindsQueueAndApplyAtBoundary(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if builderWorld.Unit(hBuilder).Flags&0x10 != 0 {
-		t.Fatal("enqueue mutated selection immediately")
+	if q := orders.QueueOfUnit(builderWorld.Unit(hBuilder)); q != nil && q.LenPrimary() != 0 {
+		t.Fatal("enqueue mutated an order queue immediately")
 	}
 	s.applyHumanCommands(1)
 	if len(s.PendingHumanCommands()) != 0 {
@@ -273,28 +248,40 @@ func TestHumanCommandKindsQueueAndApplyAtBoundary(t *testing.T) {
 	}
 }
 
-func TestSelectionThenImplicitOrderAndStopUsesCurrentSelection(t *testing.T) {
+// An order, Stop or broadcast that names no units does nothing: the session
+// holds no selection to fall back to. The client resolves every order's units
+// from its own selection when it sends the order (DESIGN_MULTIPLAYER §7.3).
+func TestCommandsWithoutActorsHaveNoSelectionFallback(t *testing.T) {
 	cat := &content.Catalog{Units: map[string]*content.UnitDef{}}
 	// A mobile unit authors bmcode 1; the resolver's live-mover test reads the
 	// building-class status bit that creation derives from it [04 R-ORD-02 §1].
-	def := &content.UnitDef{UnitName: "scout", BMCode: 1, CanMove: true, MaxDamage: 100}
+	def := &content.UnitDef{UnitName: "scout", BMCode: 1, CanMove: true, MaxDamage: 100, MobileStandOrders: true}
 	def.CanonicalKey = "scout"
 	cat.Units[def.CanonicalKey] = def
 	w := newSessionFixtureWorld(8, cat)
 	h, _ := w.Create(def, 0, 0, 0, 0)
+	w.Unit(h).Flags |= units.SelectedStatus // a stray bit is not a selection
 	s := &Session{Units: w, Catalog: cat, LocalOwner: 0}
-	_ = s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{h}}})
-	_ = s.EnqueueHumanCommand(HumanCommand{Kind: HumanOrder, Order: HumanOrderCommand{Code: 2, Position: orders.ResolvePos{X: 8 << 16, Z: 8 << 16}}})
+	for _, c := range []HumanCommand{
+		{Kind: HumanOrder, Order: HumanOrderCommand{Code: 2, Position: orders.ResolvePos{X: 8 << 16, Z: 8 << 16}}},
+		{Kind: HumanStop}, {Kind: HumanSelfDestruct},
+		{Kind: HumanStance, Stance: HumanStanceCommand{Value: 1}}, {Kind: HumanCloak, Cloak: HumanCloakCommand{Cloak: true}},
+	} {
+		if err := s.EnqueueHumanCommand(c); err != nil {
+			t.Fatal(err)
+		}
+	}
 	s.applyHumanCommands(7)
+	if q := orders.QueueOfUnit(w.Unit(h)); q != nil && q.LenPrimary() != 0 {
+		t.Fatalf("a command without actors reached unit %d: %s", h, orders.DescriptorFor(q.Head().ID).Name)
+	}
+	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanOrder, Order: HumanOrderCommand{Handles: []pool.Handle{h}, Code: 2, Position: orders.ResolvePos{X: 8 << 16, Z: 8 << 16}}}); err != nil {
+		t.Fatal(err)
+	}
+	s.applyHumanCommands(8)
 	q := orders.QueueForUnit(w.Unit(h))
 	if q == nil || q.LenPrimary() == 0 || orders.DescriptorFor(q.Head().ID).Name != "Move_Ground" {
-		t.Fatal("implicit order did not use selection applied earlier in boundary")
-	}
-	_ = s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{h}}})
-	_ = s.EnqueueHumanCommand(HumanCommand{Kind: HumanStop})
-	s.applyHumanCommands(8)
-	if q.Head() == nil || orders.DescriptorFor(q.Head().ID).Name != "Stop" {
-		t.Fatal("implicit stop did not use current selection")
+		t.Fatal("an order naming its unit did not apply")
 	}
 }
 
@@ -365,153 +352,10 @@ func TestHumanCancelWithoutQueueBindsLazyQueue(t *testing.T) {
 	}
 }
 
-func TestHumanBuildPageUsesAuthoritativeBuilderAndAuthoredPageGuard(t *testing.T) {
-	cat := &content.Catalog{Units: map[string]*content.UnitDef{}, BuildMenus: map[string]*content.BuildMenuPage{}}
-	// BuildPageCount is the compiled page-count byte of [02 R-CAT-01 §5 step 5]:
-	// two authored page windows plus the orders page.
-	bdef := &content.UnitDef{UnitName: "armcom", Builder: true, MaxDamage: 100, BuildPageCount: 3}
-	bdef.CanonicalKey = "armcom"
-	other := &content.UnitDef{UnitName: "other", Builder: true, MaxDamage: 100}
-	other.CanonicalKey = "other"
-	cat.Units[bdef.CanonicalKey], cat.Units[other.CanonicalKey] = bdef, other
-	buttons := []string{"armsolar", "armmex", "armlab", "armllt", "armstump", "armham", "armflash"}
-	cat.BuildMenus[bdef.CanonicalKey] = &content.BuildMenuPage{Buttons: buttons}
-	w := newSessionFixtureWorld(8, cat)
-	h, _ := w.Create(bdef, 0, 0, 0, 0)
-	ho, _ := w.Create(other, 0, 0, 0, 0)
-	w.Unit(h).Flags |= 0x10
-	s := &Session{Units: w, Catalog: cat, LocalOwner: 0}
-	// Seven authored products make two authored build pages, so the page-count
-	// byte is three: page 0 the orders state, pages 1 and 2 the build pages
-	// [07 R-HUD-03 §6].
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanBuildPage, BuildPage: HumanBuildPageCommand{Builder: h, Page: 1}}); err != nil {
-		t.Fatal(err)
-	}
-	s.applyHumanCommands(1)
-	if got := hud.DecodePage(w.Unit(h).Flags); got != 1 {
-		t.Fatalf("valid page command got page %d, want 1", got)
-	}
-	// An invalid builder identity is rejected at the authoritative boundary.
-	_ = s.EnqueueHumanCommand(HumanCommand{Kind: HumanBuildPage, BuildPage: HumanBuildPageCommand{Builder: ho, Page: 1}})
-	s.applyHumanCommands(2)
-	if got := hud.DecodePage(w.Unit(h).Flags); got != 1 {
-		t.Fatalf("invalid page command changed page to %d", got)
-	}
-	// A valid builder with an out-of-range request follows the established
-	// page-count clamp before encoding, rather than writing an invalid page.
-	_ = s.EnqueueHumanCommand(HumanCommand{Kind: HumanBuildPage, BuildPage: HumanBuildPageCommand{Builder: h, Page: 0}})
-	s.applyHumanCommands(3)
-	if got := hud.DecodePage(w.Unit(h).Flags); got != 0 {
-		t.Fatalf("page reset got %d, want 0", got)
-	}
-	_ = s.EnqueueHumanCommand(HumanCommand{Kind: HumanBuildPage, BuildPage: HumanBuildPageCommand{Builder: h, Page: 9}})
-	s.applyHumanCommands(4)
-	if got := hud.DecodePage(w.Unit(h).Flags); got != 2 {
-		t.Fatalf("page-count clamp got %d, want 2", got)
-	}
-}
-
-func TestHumanBuildPageSelectionThenPageSameBoundary(t *testing.T) {
-	cat := &content.Catalog{Units: map[string]*content.UnitDef{}, BuildMenus: map[string]*content.BuildMenuPage{}}
-	bdef := &content.UnitDef{UnitName: "builder", Builder: true, MaxDamage: 100, BuildPageCount: 3}
-	bdef.CanonicalKey = "builder"
-	cat.Units[bdef.CanonicalKey] = bdef
-	cat.BuildMenus[bdef.CanonicalKey] = &content.BuildMenuPage{Buttons: []string{"a", "b", "c", "d", "e", "f", "g"}}
-	w := newSessionFixtureWorld(8, cat)
-	h, _ := w.Create(bdef, 0, 0, 0, 0)
-	s := &Session{Units: w, Catalog: cat, LocalOwner: 0}
-	_ = s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{h}}})
-	_ = s.EnqueueHumanCommand(HumanCommand{Kind: HumanBuildPage, BuildPage: HumanBuildPageCommand{Builder: h, Page: 1}})
-	s.applyHumanCommands(3)
-	if w.Unit(h).Flags&0x10 == 0 || hud.DecodePage(w.Unit(h).Flags) != 1 {
-		t.Fatalf("selection then page did not apply in one input boundary: flags=%08x", w.Unit(h).Flags)
-	}
-}
-
-func TestCommandPagePublicationIsImmutableAndUsesSelectedPage(t *testing.T) {
-	cat := &content.Catalog{Units: map[string]*content.UnitDef{}, BuildMenus: map[string]*content.BuildMenuPage{}}
-	bdef := &content.UnitDef{UnitName: "builder", Builder: true, MaxDamage: 100, BuildPageCount: 3}
-	bdef.CanonicalKey = "builder"
-	cat.Units[bdef.CanonicalKey] = bdef
-	menu := &content.BuildMenuPage{Buttons: []string{"a", "b", "c", "d", "e", "f", "g"}}
-	cat.BuildMenus[bdef.CanonicalKey] = menu
-	w := newSessionFixtureWorld(8, cat)
-	h, _ := w.Create(bdef, 0, 0, 0, 0)
-	// Page 2 is the second authored build page and holds the seventh entry
-	// alone: page N carries entries (N-1)*6..N*6-1 and page 0 carries none
-	// [07 R-HUD-03 §6].
-	w.Unit(h).Flags = 0x10 | hud.EncodePageBits(0, 2)
-	s := &Session{Units: w, Catalog: cat, LocalOwner: 0, Snapshot: &frame.Buffer{}}
-	s.publishSnapshot(4)
-	frame := s.Snapshot.Current()
-	if frame == nil || frame.CommandPage.Page != 2 || len(frame.CommandPage.ProductKeys) != 1 || frame.CommandPage.ProductKeys[0] != "g" {
-		t.Fatalf("published page=%d products=%v", frame.CommandPage.Page, frame.CommandPage.ProductKeys)
-	}
-	menu.Buttons[6] = "mutated-after-publish"
-	if frame.CommandPage.ProductKeys[0] != "g" {
-		t.Fatalf("published product keys alias mutable catalog: %v", frame.CommandPage.ProductKeys)
-	}
-}
-
-func TestHumanBuildPageRejectsMixedAndMultiBuilderSelection(t *testing.T) {
-	cat := &content.Catalog{Units: map[string]*content.UnitDef{}, BuildMenus: map[string]*content.BuildMenuPage{}}
-	bdef := &content.UnitDef{UnitName: "builder", Builder: true, MaxDamage: 100}
-	bdef.CanonicalKey = "builder"
-	workerDef := &content.UnitDef{UnitName: "worker", MaxDamage: 100}
-	workerDef.CanonicalKey = "worker"
-	otherBuilder := &content.UnitDef{UnitName: "otherbuilder", Builder: true, MaxDamage: 100}
-	otherBuilder.CanonicalKey = "otherbuilder"
-	cat.Units[bdef.CanonicalKey] = bdef
-	cat.Units[workerDef.CanonicalKey] = workerDef
-	cat.Units[otherBuilder.CanonicalKey] = otherBuilder
-	cat.BuildMenus[bdef.CanonicalKey] = &content.BuildMenuPage{Buttons: []string{"a", "b", "c", "d", "e", "f", "g"}}
-	cat.BuildMenus[otherBuilder.CanonicalKey] = &content.BuildMenuPage{Buttons: []string{"a", "b", "c", "d", "e", "f", "g"}}
-	w := newSessionFixtureWorld(8, cat)
-	h, _ := w.Create(bdef, 0, 0, 0, 0)
-	n, _ := w.Create(workerDef, 0, 0, 0, 0)
-	o, _ := w.Create(otherBuilder, 0, 0, 0, 0)
-	s := &Session{Units: w, Catalog: cat, LocalOwner: 0, Snapshot: &frame.Buffer{}}
-
-	// A builder mixed with an ordinary unit has aggregate command state and
-	// cannot mutate a single-builder page [07 §9].
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{h, n}}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanBuildPage, BuildPage: HumanBuildPageCommand{Builder: h, Page: 1}}); err != nil {
-		t.Fatal(err)
-	}
-	s.applyHumanCommands(1)
-	if got := hud.DecodePage(w.Unit(h).Flags); got != 0 {
-		t.Fatalf("mixed builder/non-builder selection changed page to %d", got)
-	}
-	s.publishSnapshot(1)
-	frame := s.Snapshot.Current()
-	if frame == nil || frame.CommandPage.Builder != 0 {
-		t.Fatalf("mixed selection published builder page: %+v", frame.CommandPage)
-	}
-
-	// Two selected builders are likewise not a single page identity.
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{h, o}}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanBuildPage, BuildPage: HumanBuildPageCommand{Builder: h, Page: 1}}); err != nil {
-		t.Fatal(err)
-	}
-	s.applyHumanCommands(2)
-	if got := hud.DecodePage(w.Unit(h).Flags); got != 0 {
-		t.Fatalf("multi-builder selection changed page to %d", got)
-	}
-	s.publishSnapshot(2)
-	frame = s.Snapshot.Current()
-	if frame == nil || frame.CommandPage.Builder != 0 {
-		t.Fatalf("multi-builder selection published builder page: %+v", frame.CommandPage)
-	}
-}
-
 // TestHumanGroupDoesNotWriteAIUnits locks the ownership boundary between the
 // local input path and AI tactical groups. A skirmish's LocalOwner is selected
 // from a human lobby row; the command path then filters that owner before
-// copying HUD group state back to live units [07 §9][08 "Skirmish configuration"].
+// writing group numbers to live units [07 §9][08 "Skirmish configuration"].
 func TestHumanGroupDoesNotWriteAIUnits(t *testing.T) {
 	cat := &content.Catalog{Units: map[string]*content.UnitDef{}}
 	def := &content.UnitDef{UnitName: "scout", MaxDamage: 10}
@@ -526,11 +370,11 @@ func TestHumanGroupDoesNotWriteAIUnits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.Unit(human).Flags |= 0x10
-	w.Unit(aiUnit).Flags |= 0x10
 	w.Unit(aiUnit).Group = 4
 	s := &Session{Units: w, Catalog: cat, LocalOwner: 0}
-	s.applyHumanCommand(HumanCommand{Kind: HumanGroupAssign, Group: HumanGroupCommand{Group: 2}}, 1)
+	// The membership names a foreign unit too; only the issuer's units are
+	// written.
+	s.applyHumanCommand(HumanCommand{Kind: HumanGroupAssign, Group: HumanGroupCommand{Group: 2, Handles: []pool.Handle{human, aiUnit}}}, 1)
 	if got := w.Unit(human).Group; got != 2 {
 		t.Fatalf("human group=%d, want 2", got)
 	}

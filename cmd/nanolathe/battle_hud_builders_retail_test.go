@@ -70,9 +70,6 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 			step := int32(1)
 			for _, name := range names {
 				t.Run(name, func(t *testing.T) {
-					for _, u := range sess.Units.Iter() {
-						u.Flags &^= hud.SelectionFlag
-					}
 					d, _ := cat.Unit(name)
 					// The settings demonstration must resolve the same cells as
 					// the live HUD, rather than inventing six/twelve-item pages
@@ -109,12 +106,13 @@ func TestRetailBuilderMenusAfterTransition(t *testing.T) {
 						t.Fatal(err)
 					}
 					u := sess.Units.Unit(handle)
-					u.Flags = hud.EncodePageBits(u.Flags|hud.SelectionFlag, 1)
+					u.Flags = hud.EncodePageBits(u.Flags, 1)
+					b.local = testSelection(u)
 					for n := 0; n < 5; n++ {
 						sess.Step(step)
 						step++
 					}
-					f := sess.Snapshot.Current()
+					f, _ := b.currentSnapshot()
 					for _, height := range []int{480, 768, 1080} {
 						cl.Resize(1280, height)
 						w, _, err := h.windowForRequired(b, f)

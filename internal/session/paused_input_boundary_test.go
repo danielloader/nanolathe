@@ -91,29 +91,47 @@ func pausedFrame(t *testing.T, s *Session) *frame.Frame {
 	return f
 }
 
-func selectionOf(f *frame.Frame) []pool.Handle { return f.Selection.Handles }
-
-// A paused battle must still accept selection, page and command-panel input:
-// the host frame keeps running with the options window closed
-// [01 R-PLAT-01 §1 steps 2, 4, 5], so the queued command has to reach
-// authoritative state and the committed frame without a tick
-// (DESIGN_INTERFACE_HUD_INPUT §3.12).
-func TestPausedInputSelectsAndPagesWithoutAdvancingTheTick(t *testing.T) {
-	s, a, b := pausedInputFixture(t)
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace,
-		Selection: HumanSelectionCommand{Handles: []pool.Handle{a.Handle}}}); err != nil {
-		t.Fatal(err)
+// queuedBuilds is the number of committed primary order records of unit h.
+func queuedBuilds(f *frame.Frame, h pool.Handle) int {
+	for _, q := range f.OrderQueues {
+		if q.Unit == h {
+			return len(q.Primary)
+		}
 	}
+	return 0
+}
+
+// viewable registers computer player records the View command may move the
+// viewing slot to.
+func viewable(s *Session, players ...int) {
+	for _, p := range players {
+		s.Econ.Players[p].Exists = true
+		s.Econ.Players[p].ControllerState = 2
+	}
+}
+
+func pausedBuild(b *units.Unit, cells int32) HumanCommand {
+	return HumanCommand{Kind: HumanMobileBuild, MobileBuild: HumanMobileBuildCommand{
+		Builder: b.Handle, Product: "fixsolar", WX: numeric16(cells), WZ: numeric16(cells), Queued: true}}
+}
+
+// A paused battle must still accept command-panel input: the host frame
+// keeps running with the options window closed [01 R-PLAT-01 §1 steps 2, 4,
+// 5], so the queued command has to reach authoritative state and the
+// committed frame without a tick (DESIGN_INTERFACE_HUD_INPUT §3.12).
+// Selection and the build page are the client's local state now
+// (DESIGN_MULTIPLAYER §7.3), applied at input without this boundary.
+func TestPausedInputAppliesWithoutAdvancingTheTick(t *testing.T) {
+	s, _, b := pausedInputFixture(t)
+	viewable(s, 1)
 	s.Step(1)
-	if got := pausedFrame(t, s).CommandPage.Builder; got != a.Handle {
-		t.Fatalf("first tick published builder %d, want A=%d", got, a.Handle)
-	}
-
 	s.SetPaused(true)
 	tickBefore := s.Clock.GlobalTick
 	simBefore, crtBefore := *s.SimRNG(), *s.CrtRNG()
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace,
-		Selection: HumanSelectionCommand{Handles: []pool.Handle{b.Handle}}}); err != nil {
+	if err := s.EnqueueHumanCommand(pausedBuild(b, 30)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanView, View: HumanViewCommand{Player: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	for now := int32(2); now <= 6; now++ {
@@ -129,12 +147,8 @@ func TestPausedInputSelectsAndPagesWithoutAdvancingTheTick(t *testing.T) {
 	if f.Tick != tickBefore {
 		t.Fatalf("paused publication carries tick %d, want the committed %d", f.Tick, tickBefore)
 	}
-	handles := selectionOf(f)
-	if len(handles) != 1 || handles[0] != b.Handle {
-		t.Fatalf("paused selection published %v, want only B=%d", handles, b.Handle)
-	}
-	if f.CommandPage.Builder != b.Handle {
-		t.Fatalf("paused command page names builder %d, want B=%d", f.CommandPage.Builder, b.Handle)
+	if queuedBuilds(f, b.Handle) != 1 || f.ViewingPlayer != 1 {
+		t.Fatalf("paused publication: %d build records, viewer %d; want 1 and 1", queuedBuilds(f, b.Handle), f.ViewingPlayer)
 	}
 	if !f.Paused {
 		t.Fatal("paused publication does not report the pause bit")
@@ -143,43 +157,21 @@ func TestPausedInputSelectsAndPagesWithoutAdvancingTheTick(t *testing.T) {
 		t.Fatal("a drained command stayed queued")
 	}
 
-	// A build-page change is visible while paused, on the newly selected unit.
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanBuildPage,
-		BuildPage: HumanBuildPageCommand{Builder: b.Handle, Page: 2}}); err != nil {
-		t.Fatal(err)
-	}
-	s.Step(7)
-	f = pausedFrame(t, s)
-	if f.CommandPage.Page != 2 || f.CommandPage.Builder != b.Handle {
-		t.Fatalf("paused page published %d for builder %d, want page 2 for B", f.CommandPage.Page, f.CommandPage.Builder)
-	}
-	if s.Clock.GlobalTick != tickBefore {
-		t.Fatal("the page change advanced the global tick")
-	}
-
 	// Exactly once: resuming must not apply either command a second time.
 	s.SetPaused(false)
 	s.Step(8)
 	if s.Clock.GlobalTick == tickBefore {
 		t.Fatal("resume did not run a tick")
 	}
-	f = pausedFrame(t, s)
-	if handles := selectionOf(f); len(handles) != 1 || handles[0] != b.Handle {
-		t.Fatalf("resumed selection %v, want only B", handles)
-	}
-	if f.CommandPage.Page != 2 {
-		t.Fatalf("resumed page %d, want 2", f.CommandPage.Page)
+	if f = pausedFrame(t, s); queuedBuilds(f, b.Handle) != 1 {
+		t.Fatalf("resumed queue holds %d build records, want 1", queuedBuilds(f, b.Handle))
 	}
 }
 
 // Idle-paused pumps must not republish: a host frame with nothing queued is
 // not an input boundary (DESIGN_INTERFACE_HUD_INPUT §3.12).
 func TestPausedInputDoesNothingWithAnEmptyQueue(t *testing.T) {
-	s, a, _ := pausedInputFixture(t)
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace,
-		Selection: HumanSelectionCommand{Handles: []pool.Handle{a.Handle}}}); err != nil {
-		t.Fatal(err)
-	}
+	s, _, _ := pausedInputFixture(t)
 	s.Step(1)
 	s.SetPaused(true)
 	before := s.Snapshot.Current()
@@ -195,15 +187,14 @@ func TestPausedInputDoesNothingWithAnEmptyQueue(t *testing.T) {
 // blend must not be handed two copies of one tick as a previous/current pair
 // (DESIGN_GPU_RENDERER §13.5).
 func TestPausedRepublicationLeavesNoPreviousPair(t *testing.T) {
-	s, a, b := pausedInputFixture(t)
+	s, _, b := pausedInputFixture(t)
 	s.Step(1)
 	s.Step(2)
 	if s.Snapshot.Previous() == nil {
 		t.Fatal("two ticks did not produce a previous frame")
 	}
 	s.SetPaused(true)
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace,
-		Selection: HumanSelectionCommand{Handles: []pool.Handle{a.Handle, b.Handle}}}); err != nil {
+	if err := s.EnqueueHumanCommand(pausedBuild(b, 30)); err != nil {
 		t.Fatal(err)
 	}
 	s.Step(3)
@@ -222,16 +213,15 @@ func TestPausedRepublicationLeavesNoPreviousPair(t *testing.T) {
 // Applying a command at the paused boundary must leave exactly the state the
 // unpaused run would have produced on the next tick: the same order queues,
 // the same creation stamps, the same resources and the same position in both
-// random streams (DESIGN_INTERFACE_HUD_INPUT §3.12).
+// random streams (DESIGN_INTERFACE_HUD_INPUT §3.12). The selection-derived
+// actors are explicit, as the client sends them (DESIGN_MULTIPLAYER §7.3).
 func TestPausedInputEquivalentToApplyingTheCommandsOnTheNextTick(t *testing.T) {
 	script := func(s *Session, a, b *units.Unit) []HumanCommand {
 		return []HumanCommand{
-			{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{b.Handle}}},
-			{Kind: HumanBuildPage, BuildPage: HumanBuildPageCommand{Builder: b.Handle, Page: 1}},
 			{Kind: HumanMobileBuild, MobileBuild: HumanMobileBuildCommand{
 				Builder: b.Handle, Product: "fixsolar", WX: numeric16(30), WZ: numeric16(30)}},
-			{Kind: HumanGroupAssign, Group: HumanGroupCommand{Group: 4}},
-			{Kind: HumanStop},
+			{Kind: HumanGroupAssign, Group: HumanGroupCommand{Group: 4, Handles: []pool.Handle{b.Handle}}},
+			{Kind: HumanStop, Stop: HumanStopCommand{Handles: []pool.Handle{b.Handle}}},
 		}
 	}
 
@@ -280,6 +270,9 @@ func TestPausedInputEquivalentToApplyingTheCommandsOnTheNextTick(t *testing.T) {
 	if paused.Econ.Players[0].Stock != running.Econ.Players[0].Stock {
 		t.Fatal("the two runs ended with different resources")
 	}
+	if pb.Group != 4 || rb.Group != 4 {
+		t.Fatal("the explicit group membership did not apply")
+	}
 	pq, rq := orders.QueueOfUnit(pb), orders.QueueOfUnit(rb)
 	if (pq == nil) != (rq == nil) {
 		t.Fatal("only one run built an order queue")
@@ -302,20 +295,19 @@ func TestPausedInputEquivalentToApplyingTheCommandsOnTheNextTick(t *testing.T) {
 // queued, and it holds everything enqueued behind it, so enqueue order is the
 // same order the next tick applies (DESIGN_INTERFACE_HUD_INPUT §3.12).
 func TestPausedInputDefersSimulationWorkAndKeepsEnqueueOrder(t *testing.T) {
-	s, a, b := pausedInputFixture(t)
+	s, _, _ := pausedInputFixture(t)
+	viewable(s, 1, 2)
 	s.Step(1)
 	s.SetPaused(true)
 	crtBefore := *s.CrtRNG()
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace,
-		Selection: HumanSelectionCommand{Handles: []pool.Handle{a.Handle}}}); err != nil {
+	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanView, View: HumanViewCommand{Player: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	// The argument-free meteor command arms a storm and spends CRT draws.
 	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanMeteor}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace,
-		Selection: HumanSelectionCommand{Handles: []pool.Handle{b.Handle}}}); err != nil {
+	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanView, View: HumanViewCommand{Player: 2}}); err != nil {
 		t.Fatal(err)
 	}
 	s.Step(2)
@@ -323,79 +315,56 @@ func TestPausedInputDefersSimulationWorkAndKeepsEnqueueOrder(t *testing.T) {
 		t.Fatal("a deferred command spent the CRT stream at the paused boundary")
 	}
 	pending := s.PendingHumanCommands()
-	if len(pending) != 2 || pending[0].Kind != HumanMeteor || pending[1].Kind != HumanSelectionReplace {
+	if len(pending) != 2 || pending[0].Kind != HumanMeteor || pending[1].Kind != HumanView {
 		t.Fatalf("the drain did not stop at the deferred command: %v", pending)
 	}
-	if handles := selectionOf(pausedFrame(t, s)); len(handles) != 1 || handles[0] != a.Handle {
-		t.Fatalf("paused selection %v, want the prefix's A=%d", handles, a.Handle)
+	if v := pausedFrame(t, s).ViewingPlayer; v != 1 {
+		t.Fatalf("paused viewer %d, want the prefix's 1", v)
 	}
 }
 
 // A republication must not deliver the previous tick's one-shots a second
-// time: the staged presentation events and the per-tick big-brother notices
+// time: the staged presentation events and the per-tick local-interface facts
 // are both reset by their own producer before the boundary runs
 // (DESIGN_INTERFACE_HUD_INPUT §3.12) [03 R-AUD-01 §7][07 R-CAM-01 §12].
 func TestPausedRepublicationDoesNotRepeatOneShots(t *testing.T) {
-	s, a, _ := pausedInputFixture(t)
+	s, _, b := pausedInputFixture(t)
+	s.SetLocalInterfaceFacts(true)
 	s.Step(1)
 	pub := s.ensurePublicationState()
 	pub.events.EmitAnnounce(frame.Event{Tick: s.Clock.GlobalTick, StatusText: "one shot", StatusClass: 4, AnnounceSlot: 10})
-	s.bigBrother.cycle = true
-	s.bigBrother.resetVisited = true
-	s.bigBrother.cancelFollow = true
-	s.publishSnapshot(s.Clock.GlobalTick + 1)
-	s.Clock.GlobalTick++
+	s.Step(2)
 	first := pausedFrame(t, s)
-	if len(first.Events) != 1 || !first.BigBrotherCycle {
-		t.Fatalf("the fixture did not publish its one-shots: events=%d cycle=%t", len(first.Events), first.BigBrotherCycle)
+	if len(first.Events) != 1 || !first.Interface.Valid {
+		t.Fatalf("the fixture did not publish its one-shots: events=%d facts=%t", len(first.Events), first.Interface.Valid)
 	}
-	drained := s.Snapshot.DrainCommittedEvents(nil)
-	if len(drained) != 1 {
+	if drained := s.Snapshot.DrainCommittedEvents(nil); len(drained) != 1 {
 		t.Fatalf("presentation drained %d retained events, want 1", len(drained))
+	}
+	if facts := s.Snapshot.DrainInterfaceFacts(nil); len(facts) != 2 {
+		t.Fatalf("presentation drained %d ticks of facts, want 2", len(facts))
 	}
 
 	s.SetPaused(true)
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace,
-		Selection: HumanSelectionCommand{Handles: []pool.Handle{a.Handle}}}); err != nil {
+	if err := s.EnqueueHumanCommand(pausedBuild(b, 30)); err != nil {
 		t.Fatal(err)
 	}
 	s.Step(9)
 	again := pausedFrame(t, s)
+	if again == first || again.Tick != first.Tick {
+		t.Fatal("fixture: the paused boundary did not republish the committed tick")
+	}
 	if len(again.Events) != 0 {
 		t.Fatalf("the republication repeated %d presentation events", len(again.Events))
 	}
-	if again.BigBrotherCycle || again.BigBrotherResetVisited || again.BigBrotherCancelFollow {
-		t.Fatal("the republication repeated a per-tick big-brother notice")
+	if again.Interface.Valid {
+		t.Fatal("the republication repeated the tick's local-interface facts")
 	}
 	if s.Snapshot.PendingCommittedEvents() != 0 {
 		t.Fatalf("the republication retained %d events for presentation", s.Snapshot.PendingCommittedEvents())
 	}
-}
-
-// A factory selected from an empty selection while paused publishes its
-// construction panel facts, which is what makes the side panel usable
-// (DESIGN_INTERFACE_HUD_INPUT §3.12) [07 §9].
-func TestPausedSelectionOfAFactoryPublishesItsPanelFacts(t *testing.T) {
-	s, a, _ := pausedInputFixture(t)
-	s.Step(1)
-	if got := pausedFrame(t, s).CommandPage.Builder; got != 0 {
-		t.Fatalf("the fixture started with builder %d selected, want none", got)
-	}
-	s.SetPaused(true)
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace,
-		Selection: HumanSelectionCommand{Handles: []pool.Handle{a.Handle}}}); err != nil {
-		t.Fatal(err)
-	}
-	s.Step(2)
-	f := pausedFrame(t, s)
-	if f.CommandPage.Builder != a.Handle {
-		t.Fatalf("paused selection published builder %d, want %d", f.CommandPage.Builder, a.Handle)
-	}
-	if f.CommandPage.PageCount != 3 {
-		t.Fatalf("paused selection published page count %d, want the authored 3", f.CommandPage.PageCount)
-	}
-	if len(f.CommandPage.AllowedProducts) == 0 {
-		t.Fatal("paused selection published no build membership")
+	if facts := s.Snapshot.DrainInterfaceFacts(nil); len(facts) != 0 {
+		t.Fatalf("the republication retained %d ticks of facts", len(facts))
 	}
 }
 
@@ -403,12 +372,11 @@ func TestPausedSelectionOfAFactoryPublishesItsPanelFacts(t *testing.T) {
 // single-player step reaches the sub-ticks only in the battle state
 // [01 R-PLAT-01 §1 step 2].
 func TestPausedInputRequiresTheBattleState(t *testing.T) {
-	s, a, _ := pausedInputFixture(t)
+	s, _, b := pausedInputFixture(t)
 	s.Step(1)
 	s.SetPaused(true)
 	s.State = StatePostBattle
-	if err := s.EnqueueHumanCommand(HumanCommand{Kind: HumanSelectionReplace,
-		Selection: HumanSelectionCommand{Handles: []pool.Handle{a.Handle}}}); err != nil {
+	if err := s.EnqueueHumanCommand(pausedBuild(b, 30)); err != nil {
 		t.Fatal(err)
 	}
 	s.Step(2)

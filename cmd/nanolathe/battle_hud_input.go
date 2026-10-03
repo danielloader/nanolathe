@@ -162,10 +162,9 @@ func (h *retailBattleHUD) hitTestFor(b *battleSession, x, y int32) bool {
 	if unitInfoCovers(x, y) {
 		return true
 	}
-	var f *frame.Frame
-	if b.sess != nil && b.sess.Snapshot != nil {
-		f = b.sess.Snapshot.Current()
-	}
+	// The composed committed frame: its command page is the host's local
+	// selection's (battle_local_interface.go).
+	f, _ := b.currentSnapshot()
 	window, _, err := h.windowForRequired(b, f)
 	if err != nil {
 		h.assetErr = err
@@ -199,10 +198,9 @@ func (h *retailBattleHUD) buttonAt(b *battleSession, x, y int32) int {
 	if h == nil || b == nil {
 		return -1
 	}
-	var f *frame.Frame
-	if b.sess != nil && b.sess.Snapshot != nil {
-		f = b.sess.Snapshot.Current()
-	}
+	// The composed committed frame: its command page is the host's local
+	// selection's (battle_local_interface.go).
+	f, _ := b.currentSnapshot()
 	window, _, err := h.windowForRequired(b, f)
 	if err != nil {
 		h.assetErr = err

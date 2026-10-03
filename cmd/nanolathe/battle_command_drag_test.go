@@ -191,6 +191,8 @@ func TestCommandDragFormationUsesCurveAndIndividualActors(t *testing.T) {
 				}
 				handles = append(handles, h)
 			}
+			// The selection is made from a frame that shows the new units.
+			b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
 			if err := b.enqueueSelectionCommand(session.HumanCommand{Kind: session.HumanSelectionReplace, Selection: session.HumanSelectionCommand{Handles: handles}}); err != nil {
 				t.Fatal(err)
 			}
@@ -269,6 +271,7 @@ func TestCommandDragAreaReleaseProducesOneBatch(t *testing.T) {
 
 func TestCommandDragKeyboardCancelsWithoutSwallowingShortcut(t *testing.T) {
 	b, cl, _, _ := resourceFixture(t, false)
+	b.localState().ClearSelection()
 	b.battleState().SetLatch(input.LatchMove)
 	dragInput(b, cl, 300, 250, input.MouseButtonLeft, "press", input.Modifiers{})
 	in := input.NewState()
@@ -281,12 +284,13 @@ func TestCommandDragKeyboardCancelsWithoutSwallowingShortcut(t *testing.T) {
 	if b.modernDrag != nil {
 		t.Fatal("shortcut retained command capture")
 	}
-	cmds := b.sess.PendingHumanCommands()
-	if len(cmds) != 1 || cmds[0].Kind != session.HumanSelectionReplace {
-		t.Fatalf("Ctrl+A was swallowed: %+v", cmds)
+	// Ctrl+A selects through the local interface state
+	// (DESIGN_MULTIPLAYER §7.3); clear it first to see the shortcut land.
+	if b.localState().SelectionCount() == 0 || len(b.sess.PendingHumanCommands()) != 0 {
+		t.Fatalf("Ctrl+A was swallowed: selection %v, queued %+v", b.localState().SelectedRefs(), b.sess.PendingHumanCommands())
 	}
 	dragInput(b, cl, 400, 300, input.MouseButtonLeft, "release", input.Modifiers{})
-	if len(b.sess.PendingHumanCommands()) != 1 {
+	if len(b.sess.PendingHumanCommands()) != 0 {
 		t.Fatal("old release issued an order")
 	}
 }

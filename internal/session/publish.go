@@ -11,7 +11,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/features"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
-	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
@@ -280,6 +279,7 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 				Pitch:             u.Move.Pitch,
 				Bank:              u.Move.Bank,
 				Activated:         u.Activated,
+				CloakRequested:    u.IsCloaked,
 				Kills:             u.Kills,
 				// The unit painter's pass selector is the committed low two
 				// bits of the mover mode word, never a screen coordinate
@@ -372,6 +372,14 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 			for slot := range vp.EnabledWeaponSlots {
 				vp.EnabledWeaponSlots[slot] = u.SlotAt(slot).IsEnabled()
 			}
+			// The held-round byte a MAKENUKE/MAKEANTI toy prints: the order
+			// alias's build type is always zero and every shipped stockpile
+			// weapon sits in slot 0, so slot 0's completed-round remainder is
+			// the byte [07 R-P0-11 §2][06 §11.1][06 R-WPN-05 §2]. The host's
+			// command page reads it for its page unit (CommandPageView).
+			if slot := u.SlotAt(0); slot != nil {
+				vp.StockpileRounds = slot.Ammo
+			}
 			// Copy the linkage owner's traversal order; it can change without
 			// allocation when a child is detached and reattached [04 R-UNIT-06 §3].
 			vp.Cargo = append(vp.Cargo, u.Attachment.Cargo...)
@@ -430,110 +438,15 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 		}
 		published.Units = views
 		published.OrderQueues = orderQueues
-		// Selection is authoritative unit state (bit 0x10), not a renderer-side
-		// cache [07 §9]. Preserve pool order so a frame is deterministic [I1].
-		for _, u := range views {
-			if u.Owner != s.LocalOwner || u.Flags&0x10 == 0 {
-				continue
-			}
-			published.Selection.Handles = append(published.Selection.Handles, u.Slot)
-			if published.Selection.Primary == 0 {
-				published.Selection.Primary = u.Slot
-			}
-		}
+		// The local seat. The selection, the build page and the command page are
+		// the client's local interface state (DESIGN_MULTIPLAYER §7.3): the host
+		// composes them onto the frames it presents (frame.SelectionView,
+		// hud.ComposeCommandPage), so this publication leaves them at their zero
+		// value and copies each status word as the simulation holds it. Only a
+		// retail save's restore writes a selected bit there; the host seeds its
+		// selection from those words once (hud.LocalInterface.AdoptStatusWords)
+		// and composes its own bit over them.
 		published.Selection.LocalPlayer = s.LocalOwner
-		published.Selection.Count = uint16(len(published.Selection.Handles))
-		publishSelectionAggregate(s, published.Selection.Handles, &published.CommandPage)
-		// Command-page state belongs to the single selected unit whose
-		// definition authors page windows. Shift/input latches are
-		// presentation-owned and therefore remain at their zero value until a
-		// typed input state is introduced [07 §9].
-		if published.Selection.Count == 1 && published.Selection.Primary != 0 && s.Catalog != nil {
-			// A command page is a single-selection surface. Do not promote one
-			// unit from a mixed or multi-unit selection to the page owner;
-			// aggregate command state is distinct [07 §9].
-			if u := s.Units.Unit(published.Selection.Primary); u != nil && u.Alive && u.Owner == s.LocalOwner && u.Flags&0x10 != 0 && u.Def != nil {
-				// The single selected unit owns the command page whatever it is.
-				// The window the switch then opens is chosen by that unit's own
-				// page-shown bit and page field, and which windows exist is the
-				// definition's page-count byte — the catalog compiler's probe of
-				// guis/<internal name>N.GUI [07 R-HUD-03 §6]
-				// [02 R-CAT-01 §5 step 5]. A count of 0 is a valid state, not an
-				// absent page: the switch opens the side's "%sGEN.GUI" and the
-				// stage/grey table greys BUILD and ORDERS on its own count-0 arm.
-				//
-				// Neither the FBI `Builder` word nor CANBUILD membership is part
-				// of that test, and gating on both here was what hid the
-				// stockpile launchers' pages. Exactly eight reference-install
-				// definitions author a page window without the builder word —
-				// ARMSILO/CORSILO, ARMAMD/CORFMD, ARMSCAB/CORMABM and
-				// ARMEMP/CORTRON, the eight that carry a `stockpile` weapon —
-				// and each one's page holds a single MAKENUKE/MAKEANTI toy
-				// [06 §11.1]. With the page suppressed a Retaliator could never
-				// be told to build a round.
-				pageCount := hud.BuilderPageCount(u.Def)
-				published.CommandPage.Builder = u.Handle
-				// A nonnil empty slice is an authoritative empty list. Nil is
-				// reserved for older hand-built presentation fixtures.
-				if published.CommandPage.AllowedProducts == nil {
-					published.CommandPage.AllowedProducts = make([]string, 0)
-				}
-				published.CommandPage.AllowedProducts = append(published.CommandPage.AllowedProducts, s.buildProducts(u.Def.CanonicalKey)...)
-				const buttonsPerPage = hud.RetailBuildButtonsPerPage // authored build rail page [07 §9]
-				// Page 0 is the orders state, not a build page: the count is
-				// the definition's page-count byte, compiled from the
-				// authored page windows [02 R-CAT-01 §5 step 5], page N
-				// carries the authored entries (N-1)*6..N*6-1, and page 0
-				// carries none [07 R-HUD-03 §6]. The page number itself is
-				// the unit's own state — the page-shown bit and the page
-				// field of [07 §9] — copied out here, never derived from the
-				// renderer.
-				published.CommandPage.PageCount = uint16(pageCount)
-				pageNumber := hud.ClampPage(hud.DecodePage(u.Flags), pageCount)
-				published.CommandPage.Page = uint16(pageNumber)
-				// The held-round byte the MAKENUKE/MAKEANTI toy prints
-				// [07 R-P0-11 §2]. The order alias's build type is always zero
-				// and every shipped stockpile weapon sits in slot 0, so slot 0's
-				// completed-round remainder is the byte [06 §11.1]
-				// [06 R-WPN-05 §2]. The pending half of the label comes from the
-				// committed order queues, which already carry the secondary
-				// BUILDWEAPON nodes.
-				if slot := u.SlotAt(0); slot != nil {
-					published.CommandPage.Stockpile = slot.Ammo
-				}
-				published.CommandPage.ProductKeys = published.CommandPage.ProductKeys[:0]
-				// A page window with no CANBUILD list behind it publishes no
-				// products; its authored toys are its own. Only a unit that
-				// authors a build menu has product membership to place.
-				if page := s.Catalog.BuildMenus[content.CanonicalKey(u.Def.CanonicalKey)]; page != nil {
-					// Base CANBUILD membership keeps its canonical page order. The
-					// download-menu tail on BuildMenuPage.Buttons is an extension of
-					// authoritative membership, not a flat continuation whose slice
-					// position determines a page: download records carry PAGE and
-					// BUTTON explicitly [02 R-CAT-01 §8][07 §9].
-					baseButtons := page.BaseButtons()
-					// Hand-built catalogs predating BaseButtonCount have no
-					// download records and therefore consist wholly of CANBUILD
-					// membership. Compiled catalogs always set the count, including
-					// the legitimate zero-base/download-only case.
-					if page.BaseButtonCount == 0 && len(s.Catalog.DownloadPlacements) == 0 {
-						baseButtons = page.Buttons
-					}
-					baseProducts := hud.ProductsForPage(baseButtons, pageNumber, buttonsPerPage)
-					published.CommandPage.ProductKeys = append(published.CommandPage.ProductKeys, baseProducts...)
-					for _, placement := range s.Catalog.DownloadPlacementsForPage(u.Def.CanonicalKey, pageNumber) {
-						published.CommandPage.GeneratedProducts = append(published.CommandPage.GeneratedProducts, frame.GeneratedProductPlacement{
-							ProductKey: placement.Product,
-							Button:     placement.Button,
-						})
-						if containsCanonicalProduct(published.CommandPage.ProductKeys, placement.Product) {
-							continue
-						}
-						published.CommandPage.ProductKeys = append(published.CommandPage.ProductKeys, placement.Product)
-					}
-				}
-			}
-		}
 	}
 	// Visibility masks are copied for the viewing player; their
 	// mode-dependent/raw representation remains owned by visibility [03 §3.1–§3.2].
@@ -744,23 +657,19 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 			// cloak and definition inputs are current unit state at publication
 			// [03 R-VIS-01 §4][03 §3.9]. A detached sensor snapshot may still
 			// describe a prior occupant of this pool slot.
-			selected := u.Owner == s.LocalOwner && u.Flags&0x10 != 0
 			ownerKnown := u.Owner < 10
 			palette, paletteKnown := radarOwnerPalette(s, u.Owner, ownerKnown)
-			// The contact status word carries the selected/range-status bit used by
-			// the later circle branch. Keep it distinct from visibility bits, which
-			// are supplied by the sensor pass [03 §3.9].
-			status &^= 0x10
-			if selected {
-				status |= 0x10
-			}
+			// The contact status word's selected/range-status bit, which the
+			// later circle branch reads, is the local selection: the host
+			// composes it (frame.RadarContactView). The status word the
+			// simulation holds carries no selected bit at a tick boundary.
+			status &^= units.SelectedStatus
 			contactIdx := len(published.Radar.Contacts)
 			contact := frame.RadarContactView{
 				Kind: frame.RadarContactUnit, Handle: u.Handle, Owner: u.Owner, OwnerKnown: ownerKnown,
 				X: u.X, Y: u.Y, Z: u.Z, Status: status,
 				Hidden: hidden, Stealth: stealth, Active: active,
 				OnOffable: onOffable,
-				Selected:  selected,
 				// The damage-flash byte of [06 R-WPN-04 §2], the blink gate's
 				// per-unit term [03 §3.9]. The sim record holds it signed (the
 				// sweep decrements -16 up to zero); the frame carries retail's
@@ -787,10 +696,13 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 				// instance is active OR the definition's on/off bit is clear. An
 				// inactive on/off-capable unit therefore publishes no range
 				// distances, while a unit without that capability stays eligible.
+				// The selected half is the host's local selection, so this
+				// publishes the activation half and the distances it admits, and
+				// the host composes RangeStatus from the two.
 				// This is the ONLY producer of minimap circles — the sensor phase
 				// rasterizes nothing [03 §3.10] correction of 2026-08-29.
-				contact.RangeStatus = status&0x10 != 0 && (active || !onOffable)
-				if contact.RangeStatus {
+				contact.RangeEligible = active || !onOffable
+				if contact.RangeEligible {
 					contact.RadarDistance = u.Def.RadarDistance
 					contact.SonarDistance = u.Def.SonarDistance
 					contact.RadarJam = u.Def.RadarDistanceJam
@@ -893,10 +805,10 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 		published.Economy = published.Economy[:0]
 	}
 	publishPlayerRows(s, published)
+	// The tick's local-interface facts; none at the paused-input boundary,
+	// which runs no sweep (interface_facts.go).
+	s.publishInterfaceFacts(published)
 	// Shake offset produced at phase 10 [03 §5.6][01 §4.4] DET-04.
-	published.BigBrotherCycle = s.bigBrother.cycle
-	published.BigBrotherResetVisited = s.bigBrother.resetVisited
-	published.BigBrotherCancelFollow = s.bigBrother.cancelFollow
 	published.ShakeOffsetX = s.shakeOffsetX
 	published.ShakeOffsetY = s.shakeOffsetY
 	published.ShakeActive = s.shakeActive
@@ -1023,16 +935,6 @@ func (s *Session) commitFrame(tick uint32, paused bool) error {
 	return s.Snapshot.Publish(tick)
 }
 
-func containsCanonicalProduct(products []string, candidate string) bool {
-	want := content.CanonicalKey(candidate)
-	for _, product := range products {
-		if content.CanonicalKey(product) == want {
-			return true
-		}
-	}
-	return false
-}
-
 // publishPlayerRows publishes the ten player slots' live rows once per tick,
 // inside the same publication boundary every other committed field is written
 // in. It is the only writer of frame.Frame.Players.
@@ -1125,98 +1027,18 @@ func publishPlayerRows(s *Session, published *frame.Frame) {
 	}
 }
 
-// publishSelectionAggregate folds the local player's selection into the
-// selection-aggregate command state the side panel stages and greys its
-// command buttons from [07 §9][07 R-HUD-03 §6].  handles carries the selection
-// in ascending pool order, the order every selection walk uses [07 §9].
-//
-// The fold is a copy out of authoritative state at the publication boundary and
-// mutates nothing [I6].  Values and folds are documented on
-// frame.CommandPageView; the two open spec conflicts are marked there.
-func publishSelectionAggregate(s *Session, handles []pool.Handle, page *frame.CommandPageView) {
-	// Each field starts at its not-applicable sentinel: 4 for the three-bit
-	// stance fields [04 R-STANCE-01 §1], 3 for the two-bit pairs, which is
-	// also the value that greys CLOAK and ONOFF [07 R-HUD-03 §6].
-	page.MoveStance = 4
-	page.FireStance = 4
-	page.CloakState = 3
-	page.OnOffState = 3
-	if s == nil || s.Units == nil {
-		return
+// CommandPageProducts is the bound construction rule's complete product
+// membership for a builder definition: the CommandPageView.AllowedProducts
+// the host composes for its page unit, independent of the visible page. It is
+// a read-only query of the immutable catalog and the bound rule, on the
+// host's goroutine; presentation never reselects gameplay rules [I6]. A
+// nonnil empty slice is an authoritative empty list.
+func (s *Session) CommandPageProducts(builder string) []string {
+	out := make([]string, 0)
+	if s == nil {
+		return out
 	}
-	for _, h := range handles {
-		u := s.Units.Unit(h)
-		if u == nil || !u.Alive || u.Def == nil {
-			continue
-		}
-		// A unit joins a stance fold only when its definition authors the
-		// matching accept key [04 R-STANCE-01 §5]; the unit's own two-bit
-		// fields are bits 18-19 (move) and 20-21 (fire) of its status word
-		// [04 R-STANCE-01 §2].
-		if u.Def.MobileStandOrders {
-			v := uint8((u.Flags >> 18) & 3)
-			if page.MoveStance == 4 {
-				page.MoveStance = v
-			} else if page.MoveStance != v {
-				page.MoveStance = 3
-			}
-		}
-		if u.Def.FireStandOrders {
-			v := uint8((u.Flags >> 20) & 3)
-			if page.FireStance == 4 {
-				page.FireStance = v
-			} else if page.FireStance != v {
-				page.FireStance = 3
-			}
-		}
-		// onoffable gates the on/off pair; the folded state is the unit's
-		// committed activation [04 R-SPEC-01 §11][02 "Unit record"].
-		if u.Def.OnOffable {
-			v := uint8(0)
-			if u.Activated {
-				v = 1
-			}
-			if page.OnOffState == 3 {
-				page.OnOffState = v
-			} else if page.OnOffState != v {
-				page.OnOffState = 2
-			}
-		}
-		// The can-cloak capability is derived at definition load as
-		// cloakcost > 0 [05 "which units can request cloak at all"]; the folded
-		// state is the unit's cloak-requested bit.  Unlike the on/off fold this
-		// one takes the disagreement value for any second cloak-capable unit,
-		// agreeing or not.
-		//
-		// This is the one cloak reader that stays on the REQUEST after the two
-		// bits were split (WU-19-92): the gadget shows what the player asked
-		// for and is what `Cloak_On` / `Cloak_Off` toggle, not whether the unit
-		// happens to be paid up and hidden this pass [04 R-ORD-01 §2].
-		if u.Def.CloakCost > 0 {
-			if page.CloakState == 3 {
-				v := uint8(0)
-				if u.IsCloaked {
-					v = 1
-				}
-				page.CloakState = v
-			} else {
-				page.CloakState = 2
-			}
-		}
-		// The capability aggregates of the stage/grey table [07 R-HUD-03 §6],
-		// each from its authored key [02 "Unit record"].  REPAIR reads the
-		// parser's derived copy of canreclamate [02 R-KEYS-01 §1].
-		page.CanMove = page.CanMove || u.Def.CanMove
-		page.CanStop = page.CanStop || u.Def.CanStop
-		page.CanAttack = page.CanAttack || u.Def.CanAttack
-		page.CanDefend = page.CanDefend || u.Def.CanGuard
-		page.CanPatrol = page.CanPatrol || u.Def.CanPatrol
-		page.CanReclaim = page.CanReclaim || u.Def.CanReclamate
-		page.CanCapture = page.CanCapture || u.Def.CanCapture
-		page.CanRepair = page.CanRepair || u.Def.CanReclamate
-		page.IsTransport = page.IsTransport || u.Def.CanLoad
-		page.CanBlast = page.CanBlast || u.Def.CanDGun
-	}
+	return append(out, s.buildProducts(builder)...)
 }
 
 // radarOwnerPalette resolves the player-record color used as the authored

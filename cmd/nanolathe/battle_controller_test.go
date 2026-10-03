@@ -7,7 +7,6 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/clock"
-	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
@@ -76,7 +75,7 @@ func TestStrictSkirmish_ProductionInputReplayG10A(t *testing.T) {
 		t.Fatal("select release did not render a frame")
 	}
 	applyPendingBattleCommands(b)
-	if commander.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, commander) {
 		t.Fatalf("production replay did not select commander at screen=%d,%d", sx, sy)
 	}
 

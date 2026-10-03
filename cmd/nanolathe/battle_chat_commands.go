@@ -173,12 +173,15 @@ func (b *battleSession) dispatchLocalCommand(text string) {
 			b.cl.InvalidateModelImages()
 		}
 	case "bigbrother":
+		// BigBrother is local interface state (DESIGN_MULTIPLAYER §7.1, §7.3).
 		if b.sess != nil {
-			_ = b.sess.EnqueueHumanCommand(session.HumanCommand{Kind: session.HumanBigBrother})
+			_ = b.enqueueHumanCommand(session.HumanCommand{Kind: session.HumanBigBrother})
 		}
 	case "noshake":
+		// Single-player toggles the authoritative driver; online it is a local
+		// presentation preference (submitHumanCommand).
 		if b.sess != nil {
-			_ = b.sess.EnqueueHumanCommand(session.HumanCommand{Kind: session.HumanNoShake})
+			_ = b.enqueueHumanCommand(session.HumanCommand{Kind: session.HumanNoShake})
 		}
 	case "spawn":
 		b.spawnChatCommand(words)
@@ -282,7 +285,9 @@ func (b *battleSession) dispatchLocalCommand(text string) {
 			}
 			return
 		}
-		_ = b.sess.EnqueueHumanCommand(session.HumanCommand{
+		// Single-player writes the player record; online it is a local
+		// presentation override (submitHumanCommand).
+		_ = b.enqueueHumanCommand(session.HumanCommand{
 			Kind: session.HumanSetLogo,
 			SetLogo: session.HumanSetLogoCommand{
 				Player: player,

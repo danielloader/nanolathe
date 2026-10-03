@@ -180,6 +180,15 @@ type UnitView struct {
 	// Activated is the committed on/off state used by UI command dispatch.
 	// Presentation must not rehydrate a selected unit from the live pool [I6].
 	Activated bool
+	// CloakRequested is the unit's cloak-REQUESTED bit, the one cloak input
+	// the CLOAK gadget's aggregate folds [04 R-ORD-01 §2] (Cloaked below is the
+	// instance bit). StockpileRounds is runtime weapon slot 0's completed-round
+	// remainder, the held-round byte a MAKENUKE/MAKEANTI toy prints
+	// [07 R-P0-11 §2][06 §11.1]. Both are published for every unit because the
+	// command page is composed by the host from its local selection
+	// (CommandPageView).
+	CloakRequested  bool
+	StockpileRounds int32
 	// Cloaked supplies step 2 of the visibility gate [03 §3.2],
 	// published so presentation can evaluate it without reconstructing cloak
 	// state from the instance flag word.  Cloaked is the INSTANCE cloak bit
@@ -559,12 +568,58 @@ type OrderQueueView struct {
 	SecondaryTruncated bool
 }
 
-// SelectionView is committed local selection state [07 §9].
+// SelectionView names the local seat and carries the local selection [07 §9].
+//
+// Only LocalPlayer is published by the simulation. Selection is client-side
+// local interface state keyed by allocation reference (DESIGN_MULTIPLAYER
+// §7.3), so Handles, Primary and Count are a presentation-only section: the
+// publisher leaves them at their zero value, and the host composes them from
+// its local state onto the frames it presents, together with the selected bit
+// of each UnitView.Flags and RadarContactView, the selected builder's page
+// field and CommandPage. Handles is in ascending slot order, the frame's own
+// unit order. Composed is the local-state epoch the section was composed
+// from; zero means no host has composed it (a hand-built fixture, or a frame
+// no host consumes).
 type SelectionView struct {
 	LocalPlayer uint8
 	Handles     []pool.Handle
 	Primary     pool.Handle
 	Count       uint16
+	Composed    uint64
+}
+
+// Contains reports whether slot is in the composed selection. Handles is
+// kept in ascending slot order, so the test is a binary search.
+func (v SelectionView) Contains(slot pool.Handle) bool {
+	_, found := slices.BinarySearch(v.Handles, slot)
+	return found
+}
+
+// InterfaceFacts is what one completed tick tells the host's local interface
+// state (DESIGN_MULTIPLAYER §7.3, §16.2 M2-C6). Selection, the build page and
+// BigBrother live in the client, keyed by allocation reference, and advance
+// from two simulation observations that only the unit sweep can make. They
+// are delivered here tick by tick, and the buffer retains every tick's facts
+// until the host drains them, so a host that presents only the newest
+// publication of a catch-up batch still advances its local state across
+// every intervening tick (Buffer.DrainInterfaceFacts). They are facts about
+// the tick, not interface state, and no simulation phase reads them.
+type InterfaceFacts struct {
+	// Valid reports that the session produced this tick's facts: a local
+	// interface consumer asked for them and the tick's unit sweep ran.
+	Valid bool
+	Tick  uint32
+	// Owner is the local seat whose player slice Ready walks.
+	Owner uint8
+	// Unready lists, in visit order (ascending pool order), every unit the
+	// phase-2 sweep found not ready at its own visit, whoever owns it: the
+	// units whose selected bit the sweep's selection-maintenance step clears
+	// [04 R-MOV-03 §1 step 7].
+	Unready []pool.UnitRef
+	// Ready lists the live units of the Owner's player slice that are ready at
+	// the sweep tail, in slice order: the walk BigBrother's cycle makes there
+	// [07 R-CAM-01 §12].
+	Ready []pool.UnitRef
 }
 
 // CommandPageView describes the selected builder's authored command page and
@@ -573,10 +628,14 @@ type SelectionView struct {
 //
 // Every aggregate field below is folded over the local player's selected units
 // in ascending pool order — the order [07 §9] fixes for every selection walk —
-// so the value is a pure function of committed state and is recomputed each
-// tick.  The interface's own latch, the local write a stance or on/off click
-// makes to stage the button before the next refresh, stays presentation-owned
+// so the value is a pure function of committed state and the local selection.
+// The interface's own latch, the local write a stance or on/off click makes to
+// stage the button before the next refresh, stays presentation-owned
 // [04 R-STANCE-01 §2].
+//
+// The whole view is presentation-only, like the selection it is derived from
+// (SelectionView): the publisher leaves it zero and the host composes it from
+// its local interface state and the frame (hud.ComposeCommandPage).
 type CommandPageView struct {
 	Builder     pool.Handle
 	Page        uint16
@@ -796,13 +855,21 @@ type RadarContactView struct {
 	// RadarArt carries the projectile pass's art selector for a
 	// RadarContactProjectile; it is meaningless for the other kinds
 	// [03 §3.9] layer 6.
-	RadarArt      RadarProjectileArt
-	Hidden        bool
-	Stealth       bool
-	Active        bool
-	OnOffable     bool
+	RadarArt  RadarProjectileArt
+	Hidden    bool
+	Stealth   bool
+	Active    bool
+	OnOffable bool
+	// Selected, Status bit 0x10 and RangeStatus are presentation-only: the
+	// host composes them from its local selection (SelectionView). The
+	// publisher supplies RangeEligible, the circle gate's activation term —
+	// the instance is active or its definition is not on/off-capable — and
+	// the four distances whenever it holds; the selected-unit circle gate is
+	// RangeStatus = selected && RangeEligible [03 §3.9] "Selected-unit circle
+	// gate correction".
 	Selected      bool
 	RangeStatus   bool
+	RangeEligible bool
 	BlinkSuppress uint8
 	Seen          bool
 	Friendly      bool
@@ -1134,8 +1201,11 @@ type WindView struct {
 // after Publish succeeds the writer must treat the frame as immutable until
 // the next permitted BeginWrite reuse.
 type Frame struct {
-	// BigBrother events belong only to this publication [04 R-MOV-03 §1].
-	BigBrotherCycle, BigBrotherResetVisited, BigBrotherCancelFollow bool
+	// Interface is this tick's local-interface facts (InterfaceFacts). The
+	// buffer retains a copy of every valid one at Publish, independently of
+	// the slot rotation. BigBrother's notices are no longer published: the
+	// host's local state raises them while consuming these facts.
+	Interface InterfaceFacts
 
 	Tick uint32
 	Wind WindView
@@ -1331,7 +1401,7 @@ func (f *Frame) Reset() {
 	f.Developer = nil
 	f.Wind = WindView{}
 	f.Paused = false
-	f.BigBrotherCycle, f.BigBrotherResetVisited, f.BigBrotherCancelFollow = false, false, false
+	f.Interface = InterfaceFacts{Unready: f.Interface.Unready[:0], Ready: f.Interface.Ready[:0]}
 	f.ShakeOffsetX = 0
 	f.ShakeOffsetY = 0
 	f.ShakeActive = false
@@ -1449,6 +1519,14 @@ type Buffer struct {
 	pendingEvents   []EventView
 	pendingDropped  uint64
 	pendingOverflow bool
+	// Retained local-interface facts, drained by the host's local interface
+	// state (DrainInterfaceFacts). Like events they are one per tick and must
+	// survive the slot rotation until applied, in tick order. factsDropped
+	// counts the ticks whose facts the full queue refused, and
+	// factsDroppedTick is the newest of them.
+	pendingFacts     []InterfaceFacts
+	factsDropped     uint64
+	factsDroppedTick uint32
 }
 
 // concurrentBufferSlots is the widened rotation. A reader beside the writer
@@ -1572,6 +1650,11 @@ func (b *Buffer) Publish(tick uint32) error {
 	// faster than the presentation drain therefore supersedes state but never
 	// discards an occurrence [03 R-AUD-01 §7][I6].
 	b.retainCommittedEvents(f.Events)
+	// Each tick's local-interface facts likewise join their own queue, so the
+	// host's local state advances across every tick of a catch-up batch
+	// whichever publication it presents (DESIGN_MULTIPLAYER §16.2 M2-C6). A
+	// republication carries none: the paused-input boundary runs no sweep.
+	b.retainInterfaceFacts(&f.Interface)
 	// The slot being superseded becomes the previous tick. Before the second
 	// publication there is none (docs/DESIGN_GPU_RENDERER.md §13.5).
 	if b.committed != 0 {
@@ -1795,4 +1878,74 @@ func (b *Buffer) PublishedTick() (uint32, bool) {
 		return 0, false
 	}
 	return b.lastTick, true
+}
+
+// retainedInterfaceFactsCapacity bounds the retained fact queue. It is a
+// Nanolathe safety bound with no retail counterpart, like the event queue's:
+// a host that consumes local-interface facts drains them at every host step,
+// so the queue holds one catch-up batch (at most five ticks [01 §4.3]), and
+// only a consumer that stopped draining for 256 ticks fills it.
+//
+// A full queue keeps the oldest ticks and refuses every newer tick's facts
+// until the next drain, counting each refusal and remembering the newest
+// refused tick (InterfaceFactsDropped); it never rewrites a retained tick. So
+// one drain returns a contiguous run of ticks and the gap, if any, lies
+// entirely after it. What the gap's ticks would have told the local state is
+// then unknown — which selected units were unready at a visit, and whether
+// BigBrother cycled — and the host resynchronises from the newest committed
+// frame at or after the gap (hud.LocalInterface.ResyncAfterGap, called from
+// the battle host's advanceLocalInterface).
+const retainedInterfaceFactsCapacity = 256
+
+// retainInterfaceFacts appends a deep copy of one tick's valid facts. The
+// slices are copied because the frame slot is reset and reused by a later
+// BeginWrite. The caller holds b.mu.
+func (b *Buffer) retainInterfaceFacts(f *InterfaceFacts) {
+	if b == nil || f == nil || !f.Valid {
+		return
+	}
+	if len(b.pendingFacts) >= retainedInterfaceFactsCapacity {
+		b.factsDropped++
+		b.factsDroppedTick = f.Tick
+		return
+	}
+	kept := *f
+	kept.Unready = slices.Clone(f.Unready)
+	kept.Ready = slices.Clone(f.Ready)
+	b.pendingFacts = append(b.pendingFacts, kept)
+}
+
+// DrainInterfaceFacts moves every retained tick's facts into dst, oldest tick
+// first, and empties the queue. The caller owns the returned slice until its
+// next drain; passing the previous result back reuses its capacity. Draining
+// twice with no publication in between returns nothing, so each tick is
+// applied exactly once.
+func (b *Buffer) DrainInterfaceFacts(dst []InterfaceFacts) []InterfaceFacts {
+	dst = dst[:0]
+	if b == nil {
+		return dst
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.pendingFacts) == 0 {
+		return dst
+	}
+	dst = append(dst, b.pendingFacts...)
+	clear(b.pendingFacts)
+	b.pendingFacts = b.pendingFacts[:0]
+	return dst
+}
+
+// InterfaceFactsDropped reports how many ticks' facts the full queue has
+// refused since the buffer was made, and the newest refused tick. A host
+// compares the count with the one it last saw: a change means its local state
+// missed the ticks up to newest and must resynchronise rather than advance
+// silently from incomplete facts.
+func (b *Buffer) InterfaceFactsDropped() (count uint64, newest uint32) {
+	if b == nil {
+		return 0, 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.factsDropped, b.factsDroppedTick
 }

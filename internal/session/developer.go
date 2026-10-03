@@ -3,6 +3,7 @@ package session
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/visibility"
 )
@@ -13,6 +14,16 @@ import (
 func (s *Session) SetDeveloperDiagnostics(enabled bool) {
 	if s != nil {
 		s.developerDiagnostics = enabled
+	}
+}
+
+// SetDeveloperMovementSubject names the unit whose movement tiers the next
+// developer publication carries: the first unit of the host's local
+// selection, or zero for none. Like the opt-in itself it is a diagnostic
+// request and changes no simulation state (DESIGN_DEVELOPER_TOOLS §3.1) [I6].
+func (s *Session) SetDeveloperMovementSubject(h pool.Handle) {
+	if s != nil {
+		s.bigBrother.developerSubject = h
 	}
 }
 
@@ -46,8 +57,11 @@ func (s *Session) publishDeveloper(f *frame.Frame) {
 		// observer and independent of the ordinary fog policy [03 §3.12].
 		d.Coverage = append(d.Coverage, s.Vis.ByteGrid(visibility.PlayerID(s.LocalOwner))...)
 	}
-	if len(f.Selection.Handles) > 0 {
-		d.MovementSubject = f.Selection.Handles[0]
+	// The movement subject is the first unit of the client's selection, which
+	// the host names (SetDeveloperMovementSubject): selection is client-side
+	// local state (DESIGN_MULTIPLAYER §7.3).
+	if subject := s.bigBrother.developerSubject; subject != 0 {
+		d.MovementSubject = subject
 		d.MovementTiers = s.Movement.DeveloperTiers(d.MovementSubject, d.MovementTiers)
 	}
 	// Follow the already-published pool order and reuse its publication

@@ -43,14 +43,8 @@ func TestRetailAdvancedKbotAmbusherClick(t *testing.T) {
 		t.Fatal(err)
 	}
 	builder := sess.Units.Unit(handle)
-	for _, u := range sess.Units.Iter() {
-		if u != nil {
-			u.Flags &^= hud.SelectionFlag
-		}
-	}
-	builder.Flags |= hud.SelectionFlag
 	cam := &camera.Camera{ViewW: 640, ViewH: 480, MapW: int32(sess.World.CellW * 16), MapH: int32(sess.World.CellH * 16)}
-	b := &battleSession{sess: sess, cat: cat, cam: cam}
+	b := &battleSession{sess: sess, cat: cat, cam: cam, local: testSelection(builder)}
 	b.hud, err = loadRetailBattleHUD(cs.fs, sess, cat, retailPaletteForTest(t, cs), nil, newBattleWindowContext(cs, nil))
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +52,7 @@ func TestRetailAdvancedKbotAmbusherClick(t *testing.T) {
 	for page := 1; page < int(def.BuildPageCount); page++ {
 		builder.Flags = hud.EncodePageBits(builder.Flags, page)
 		sess.Step(sess.Clock.ScaledAnchor + 1)
-		cur := sess.Snapshot.Current()
+		cur, _ := b.currentSnapshot()
 		w, _, err := b.hud.windowForRequired(b, cur)
 		if err != nil {
 			t.Fatal(err)

@@ -27,6 +27,7 @@ func TestMegamapGuardSendKeepsGuardPrepared(t *testing.T) {
 	b.hostPresentation = &p
 	b.interfaceType = settings.InterfaceTypeRightClick
 	b.setSurfaceSize(640, 480)
+	s.Step(s.Clock.ScaledAnchor + 1) // the selection is made from a published frame
 	b.commitSelection([]pool.Handle{builder}, true)
 	s.Step(s.Clock.ScaledAnchor + 1)
 	f, ok := b.currentSnapshot()

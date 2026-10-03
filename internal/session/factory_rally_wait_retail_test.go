@@ -36,10 +36,9 @@ func TestFactoryRallyWaitSurvivesProductionCancellationRetail(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				selectFactory := func() {
-					issue(HumanCommand{Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{factory.Handle}}})
-				}
-				selectFactory()
+				// Selection is the client's local state (DESIGN_MULTIPLAYER
+				// §7.3); the issue's deselect/reselect repro touches nothing the
+				// session holds, so the loop below only keeps its timing.
 				for i := 0; i < 3; i++ {
 					issue(HumanCommand{Kind: HumanOrder, Order: HumanOrderCommand{
 						Handles: []pool.Handle{factory.Handle}, Code: command.code, Queued: true,
@@ -93,11 +92,6 @@ func TestFactoryRallyWaitSurvivesProductionCancellationRetail(t *testing.T) {
 				// Several complete deadline cycles must leave the published geometry
 				// stable, including deselection/reselection from the issue's repro.
 				for i := 0; i < 180; i++ {
-					if i == 30 {
-						issue(HumanCommand{Kind: HumanSelectionClear})
-					} else if i == 31 {
-						selectFactory()
-					}
 					step()
 					if got := connectors(); !slices.Equal(got, before) {
 						t.Fatalf("tick %d: rally connectors changed from %v to %v", s.Clock.GlobalTick, before, got)

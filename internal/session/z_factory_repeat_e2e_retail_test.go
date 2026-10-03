@@ -189,30 +189,34 @@ func TestFactoryRepeatThroughDispatchRetail(t *testing.T) {
 	}
 	t.Logf("plant complete: handle=%d", plant.Handle)
 
-	// Select it the way a click does: the authoritative selection command, then
-	// a step so the frame publishes the command page [07 §9][I6].
-	if err := sess.EnqueueHumanCommand(HumanCommand{
-		Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{plant.Handle}},
-	}); err != nil {
-		t.Fatalf("select: %v", err)
+	// Select it the way a click does: the client's local selection, which the
+	// host composes onto each committed frame with the command page
+	// (DESIGN_MULTIPLAYER §7.3) [07 §9][I6].
+	client := selectLocal(plant)
+	current := func() *frame.Frame {
+		f := sess.Snapshot.Current()
+		if f != nil {
+			composeLocal(sess, client, f)
+		}
+		return f
 	}
 	for i := 0; i < 4; i++ {
 		rich()
 	}
-	// A freshly selected builder shows the orders page, which carries no
-	// products: page 0 is the orders state and page 1 is the first authored
-	// build page [07 R-HUD-03 §6]. Clicking BUILD is what a player does here,
-	// and the page it selects is dispatched as this same absolute page command.
-	if err := sess.EnqueueHumanCommand(HumanCommand{
-		Kind: HumanBuildPage, BuildPage: HumanBuildPageCommand{Builder: plant.Handle, Page: 1},
-	}); err != nil {
-		t.Fatalf("build page: %v", err)
+	// Clicking BUILD selects the first authored build page, page 1 (page 0
+	// is the orders state) [07 R-HUD-03 §6], on the local page state.
+	if f := current(); f != nil {
+		if v, ok := fr4SnapshotUnit(f, plant.Handle); ok {
+			def, _ := cat.Unit(v.DefName)
+			defID, _ := cat.UnitDefIndex(v.DefName)
+			client.SetBuildPage(unitRef(plant), v.Flags, uint16(defID), 1, int(def.BuildPageCount))
+		}
 	}
 	for i := 0; i < 4; i++ {
 		rich()
 	}
 
-	f := sess.Snapshot.Current()
+	f := current()
 	if f == nil {
 		t.Fatal("no committed frame after selection")
 	}
@@ -243,7 +247,7 @@ func TestFactoryRepeatThroughDispatchRetail(t *testing.T) {
 	watch := func() {
 		rich()
 		stepNo++
-		if cur := sess.Snapshot.Current(); cur != nil && cur.CommandPage.Builder != plant.Handle {
+		if cur := current(); cur != nil && cur.CommandPage.Builder != plant.Handle {
 			flips++
 			if firstFlip < 0 {
 				firstFlip = stepNo
@@ -255,9 +259,10 @@ func TestFactoryRepeatThroughDispatchRetail(t *testing.T) {
 	// has had time to clear the pad, round 3 is clicked the instant the product
 	// completes, with the pad still occupied.
 	for round := 1; round <= 3; round++ {
+		current()
 		builder, why := fr4DispatchFactoryBuild(sess, cat, productKey, 1)
 		if why != "" {
-			cur := sess.Snapshot.Current()
+			cur := current()
 			t.Fatalf("round %d: dispatch rejected: %s (page builder=%d selection=%d alive=%v owner=%d)",
 				round, why, cur.CommandPage.Builder, cur.Selection.Count, plant.Alive, plant.Owner)
 		}

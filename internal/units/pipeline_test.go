@@ -255,3 +255,71 @@ func TestSelectionMaintenanceClearsUnreadyUnits(t *testing.T) {
 		}
 	})
 }
+
+// The step-7 observation sink hears every visited unit's readiness verdict in
+// pool order and changes nothing: a sweep with an observer leaves the same
+// status words, the selected-bit clear included, as one without
+// [04 R-MOV-03 §1 step 7] (DESIGN_MULTIPLAYER §16.2 M2-C6).
+func TestReadinessObserverHearsStep7WithoutWriting(t *testing.T) {
+	def := &content.UnitDef{UnitName: "observe-unit", MaxDamage: 100, Limit: -1}
+	build := func(t *testing.T) (*World, []*Unit) {
+		t.Helper()
+		w := newFixtureWorld(8, nil)
+		var us []*Unit
+		for i := 0; i < 3; i++ {
+			h, err := w.Create(def, 0, 0, 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			u := w.Unit(h)
+			u.Health = 100
+			us = append(us, u)
+		}
+		us[0].Flags |= SelectedStatus // ready: keeps the bit
+		us[1].Flags |= SelectedStatus // unready: step 7 clears it
+		us[1].Remaining = 0.5
+		us[2].Remaining = 0.5 // unready, never selected
+		return w, us
+	}
+	observed, ous := build(t)
+	plain, pus := build(t)
+	type verdict struct {
+		ref   pool.UnitRef
+		ready bool
+	}
+	var heard []verdict
+	observed.SetReadinessObserver(func(ref pool.UnitRef, ready bool) {
+		heard = append(heard, verdict{ref, ready})
+	})
+	runPhase2Sweep(observed, 1)
+	runPhase2Sweep(plain, 1)
+
+	want := []verdict{
+		{pool.UnitRef{Handle: ous[0].Handle, Serial: ous[0].AllocationSerial}, true},
+		{pool.UnitRef{Handle: ous[1].Handle, Serial: ous[1].AllocationSerial}, false},
+		{pool.UnitRef{Handle: ous[2].Handle, Serial: ous[2].AllocationSerial}, false},
+	}
+	if len(heard) != len(want) {
+		t.Fatalf("heard %v, want %v", heard, want)
+	}
+	for i := range want {
+		if heard[i] != want[i] {
+			t.Fatalf("verdict %d = %v, want %v (pool order)", i, heard[i], want[i])
+		}
+	}
+	for i := range ous {
+		if ous[i].Flags != pus[i].Flags {
+			t.Fatalf("unit %d status %#x with an observer, %#x without", i, ous[i].Flags, pus[i].Flags)
+		}
+	}
+	if ous[0].Flags&SelectedStatus == 0 || ous[1].Flags&SelectedStatus != 0 {
+		t.Fatal("the observed sweep did not keep step 7's own clear")
+	}
+
+	observed.SetReadinessObserver(nil)
+	heard = heard[:0]
+	runPhase2Sweep(observed, 2)
+	if len(heard) != 0 {
+		t.Fatal("a removed observer was still called")
+	}
+}

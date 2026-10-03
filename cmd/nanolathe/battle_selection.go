@@ -18,11 +18,15 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
 
+// currentSnapshot is the newest committed frame, its presentation-only
+// sections composed from the local interface state (battle_local_interface.go).
+// Host-step readers use it, while the simulation is quiescent.
 func (b *battleSession) currentSnapshot() (*frame.Frame, bool) {
 	if b == nil || b.sess == nil || b.sess.Snapshot == nil {
 		return nil, false
 	}
 	cur := b.sess.Snapshot.Current()
+	b.composeLocalInterface(cur)
 	return cur, cur != nil
 }
 
@@ -30,12 +34,15 @@ func (b *battleSession) currentSnapshot() (*frame.Frame, bool) {
 // pinned publication under the asynchronous simulation, the newest otherwise
 // (battle_sim.go). Draw-path readers — the HUD's world overlays, which run on
 // the pre-record goroutine while a batch publishes — use it; host-step readers
-// keep currentSnapshot.
+// keep currentSnapshot. A pinned frame is one no writer can reach, so its
+// presentation-only sections are composed here too; the pre-record pipeline
+// never runs beside input handling, the only writer of the local state.
 func (b *battleSession) presentedSnapshot(cl *client.Client) (*frame.Frame, bool) {
 	if cl == nil {
 		return b.currentSnapshot()
 	}
 	cur := cl.PresentedFrame()
+	b.composeLocalInterface(cur)
 	return cur, cur != nil
 }
 
@@ -284,6 +291,15 @@ func (b *battleSession) ownSelectableUnit(f *frame.Frame, v frame.UnitView) bool
 	if v.Owner != b.sess.LocalOwner {
 		return false
 	}
+	return b.selectionReadyView(f, v)
+}
+
+// selectionReadyView is the readiness half of ownSelectableUnit, whoever owns
+// the unit: the published form of the sweep's step-7 predicate.
+func (b *battleSession) selectionReadyView(f *frame.Frame, v frame.UnitView) bool {
+	if b == nil || v.Slot == 0 {
+		return false
+	}
 	if v.Flags&units.ClassifierEligibleStatus == 0 {
 		return false
 	}
@@ -393,21 +409,6 @@ func (b *battleSession) ownSelectableHandles(keep func(frame.UnitView) bool) []p
 			continue
 		}
 		out = append(out, v.Slot)
-	}
-	return out
-}
-
-// selectedHandlesInSlotOrder returns the committed selection in slot order.
-func (b *battleSession) selectedHandlesInSlotOrder() []pool.Handle {
-	f, ok := b.currentSnapshot()
-	if !ok {
-		return nil
-	}
-	out := make([]pool.Handle, 0, len(f.Selection.Handles))
-	for i := range f.Units {
-		if containsHandle(f.Selection.Handles, f.Units[i].Slot) {
-			out = append(out, f.Units[i].Slot)
-		}
 	}
 	return out
 }

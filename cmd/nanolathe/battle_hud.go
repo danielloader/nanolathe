@@ -793,6 +793,11 @@ func (h *retailBattleHUD) draw(c *client.Client, b *battleSession, presented cli
 	// presentation gate and releasing it returns without constructing or
 	// mutating any authoritative data [I6][07 §9][R-P0-11 §4].
 	cur := presented.Committed
+	// The host composed every retained publication at the end of its step;
+	// a pass that stepped the session some other way (a capture, a test)
+	// composes here. The frame is pinned or the writer is quiescent, and no
+	// input runs beside a draw (battle_local_interface.go).
+	b.composeLocalInterface(cur)
 	if b != nil && b.resultScreenActive(cur) {
 		h.drawResultOverlay(c, b, cur.Result, localSlotWatching(cur))
 		h.drawFrontendDialog(c, b)

@@ -155,24 +155,26 @@ func TestInputPagingWrapAndPendingCueIdentity(t *testing.T) {
 	b, cl, _ := paletteCallbackFactory(t, []gui.Gadget{{Kind: gui.KindButton, Name: "ARMNEXT", Active: 1, QuickKey: 'n'}}, nil, 0, 3)
 	spy := paletteCallbackCues(t, b, cueNextBuildMenu)
 	_ = cl
-	b.nextBuildPage()
-	b.nextBuildPage()
-	b.nextBuildPage()
-	b.prevBuildPage()
-	pending := b.sess.PendingHumanCommands()
-	if len(pending) != 4 {
-		t.Fatalf("pending pages=%+v", pending)
+	// The page is local interface state applied at once (DESIGN_MULTIPLAYER
+	// §7.3), so each move starts from the page the previous one produced.
+	page := func() int {
+		f, _ := b.currentSnapshot()
+		return int(f.CommandPage.Page)
 	}
-	for i, want := range []int{1, 2, 0, 2} {
-		if pending[i].BuildPage.Page != want {
-			t.Fatalf("page %d=%d want %d", i, pending[i].BuildPage.Page, want)
+	for i, step := range []func(){b.nextBuildPage, b.nextBuildPage, b.nextBuildPage, b.prevBuildPage} {
+		step()
+		if want := []int{1, 2, 0, 2}[i]; page() != want {
+			t.Fatalf("page %d=%d want %d", i, page(), want)
 		}
+	}
+	if len(spy.aliases) != 4 || len(b.sess.PendingHumanCommands()) != 0 {
+		t.Fatalf("four page moves played %d cues and queued %+v", len(spy.aliases), b.sess.PendingHumanCommands())
 	}
 	before := len(spy.aliases)
 	b.switchBuildPage(9)
 	b.switchBuildPage(3)
-	if len(b.sess.PendingHumanCommands()) != 4 || len(spy.aliases) != before {
-		t.Fatal("invalid or unchanged pending page emitted command/cue")
+	if page() != 2 || len(spy.aliases) != before {
+		t.Fatal("invalid or unchanged page emitted a change or cue")
 	}
 }
 
@@ -226,6 +228,14 @@ func TestInputRecordTimestampsCannotExtendIdleClickDeadline(t *testing.T) {
 			in.PublishPointer()
 			b.handleInput(in, nil)
 			pending := b.sess.PendingHumanCommands()
+			if tc.kind == session.HumanSelectionReplace {
+				// A selection is local interface state (DESIGN_MULTIPLAYER
+				// §7.3): the gesture replaced the selection and sent nothing.
+				if len(pending) != 0 || hostSelected(b, u) {
+					t.Fatalf("processing clock classified %+v, selection %v", pending, b.localState().SelectedRefs())
+				}
+				return
+			}
 			if len(pending) != 1 || pending[0].Kind != tc.kind {
 				t.Fatalf("processing clock classified %+v", pending)
 			}

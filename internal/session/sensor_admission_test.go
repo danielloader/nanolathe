@@ -5,6 +5,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/visibility"
@@ -246,14 +247,17 @@ func TestRadarEmissionRequiresTheActivationBit(t *testing.T) {
 // observable outcomes at the frame boundary, where the sole circle producer now
 // lives [03 §3.10] correction of 2026-08-29:
 //
-//  1. an enemy radar tower the viewer CAN see publishes no circle distances;
-//  2. the viewer's own UNSELECTED tower publishes none;
-//  3. the viewer's own SELECTED tower publishes exactly its authored ones.
+//  1. an enemy radar tower the viewer CAN see never passes the circle gate;
+//  2. the viewer's own UNSELECTED tower does not either;
+//  3. the viewer's own SELECTED tower does, with exactly its authored
+//     distances.
 //
 // The gate is [03 §3.9] "Selected-unit circle gate correction" (Established):
 // the selected/range-status bit must be set. Only the local player's own units
 // can carry that bit, so outcome 1 holds however well the enemy is detected —
-// which is what the older sensor-phase producer got wrong.
+// which is what the older sensor-phase producer got wrong. The selected half
+// is the client's local selection, composed onto the frame
+// (DESIGN_MULTIPLAYER §7.3); the publisher supplies the activation half.
 func TestMinimapCirclesOnlyForTheViewersSelectedUnits(t *testing.T) {
 	cell := func(n int32) numeric.Fixed { return numeric.Fixed(int64(n) << 16) }
 
@@ -279,6 +283,11 @@ func TestMinimapCirclesOnlyForTheViewersSelectedUnits(t *testing.T) {
 	s.stepAuthoritativePhases(1)
 	s.publishSnapshot(1)
 	cur := s.Snapshot.Current()
+	local := hud.NewLocalInterface()
+	// A client that selected the enemy's handle as well still gates it out:
+	// only the local player's units are ever selected.
+	local.ReplaceSelection([]pool.UnitRef{unitRef(s.Units.Unit(enemyH))})
+	local.ComposeSelection(cur)
 
 	enemy, ok := radarContactFor(cur, enemyH)
 	if !ok {
@@ -287,22 +296,23 @@ func TestMinimapCirclesOnlyForTheViewersSelectedUnits(t *testing.T) {
 	if !enemy.Seen {
 		t.Fatalf("precondition: this case needs a DETECTED enemy, status %#x", enemy.Status)
 	}
-	if enemy.RangeStatus || enemy.RadarDistance != 0 {
-		t.Fatalf("a detected enemy published circle distances: %+v [03 §3.9]", enemy)
+	if enemy.RangeStatus || enemy.Selected {
+		t.Fatalf("a detected enemy passed the circle gate: %+v [03 §3.9]", enemy)
 	}
 
 	mine, ok := radarContactFor(cur, mineH)
 	if !ok {
 		t.Fatal("the viewer's own tower published no contact")
 	}
-	if mine.RangeStatus || mine.RadarDistance != 0 {
-		t.Fatalf("the viewer's own UNSELECTED tower published circle distances: %+v [03 §3.9]", mine)
+	if mine.RangeStatus {
+		t.Fatalf("the viewer's own UNSELECTED tower passed the circle gate: %+v [03 §3.9]", mine)
 	}
 
 	// Selecting it is the whole difference.
-	s.Units.Unit(mineH).Flags |= 0x10 // the authoritative selected bit [07 §9]
+	local.ReplaceSelection([]pool.UnitRef{unitRef(s.Units.Unit(mineH))})
 	s.stepAuthoritativePhases(30)
 	s.publishSnapshot(2)
+	local.ComposeSelection(s.Snapshot.Current())
 	mine, ok = radarContactFor(s.Snapshot.Current(), mineH)
 	if !ok {
 		t.Fatal("the viewer's own tower published no contact after selection")

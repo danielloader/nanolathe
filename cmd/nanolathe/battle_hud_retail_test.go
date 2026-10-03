@@ -11,12 +11,14 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 	"github.com/nanolathe-gg/nanolathe/internal/testsupport"
+	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
 func TestRetailCommanderPageDrawsAndArmsAuthoredProduct(t *testing.T) {
@@ -33,14 +35,15 @@ func TestRetailCommanderPageDrawsAndArmsAuthoredProduct(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The commander is the client's selection (DESIGN_MULTIPLAYER §7.3).
 	var commanderName string
+	var commander *units.Unit
 	for _, u := range sess.Units.Iter() {
 		if u == nil || u.Owner != sess.LocalOwner {
 			continue
 		}
-		u.Flags &^= hud.SelectionFlag
 		if commanderName == "" && u.Def != nil && u.Def.Builder && u.Def.CanMove {
-			u.Flags |= hud.SelectionFlag
+			commander = u
 			commanderName = u.Def.UnitName
 		}
 	}
@@ -65,7 +68,11 @@ func TestRetailCommanderPageDrawsAndArmsAuthoredProduct(t *testing.T) {
 		MapW: int32(sess.World.CellW * 16), MapH: int32(sess.World.CellH * 16),
 	}
 	centerBattleStartCamera(sess, cam)
-	b := &battleSession{sess: sess, cat: cat, cam: cam}
+	b := &battleSession{sess: sess, cat: cat, cam: cam, local: testSelection(commander)}
+	current := func() *frame.Frame {
+		f, _ := b.currentSnapshot()
+		return f
+	}
 	pal := retailPaletteForTest(t, cs)
 	b.hud, err = loadRetailBattleHUD(cs.fs, sess, cat, pal, nil, newBattleWindowContext(cs, nil))
 	if err != nil {
@@ -85,7 +92,7 @@ func TestRetailCommanderPageDrawsAndArmsAuthoredProduct(t *testing.T) {
 	// rebuild path used by the draw loop. Radar callbacks and contacts are
 	// consumed from the committed payload, never rebound to visibility state
 	// or rebuilt from frame units [03 §3.4][03 §3.9].
-	cur := sess.Snapshot.Current()
+	cur := current()
 	if cur == nil {
 		t.Fatal("production HUD has no committed frame")
 	}
@@ -133,7 +140,7 @@ func TestRetailCommanderPageDrawsAndArmsAuthoredProduct(t *testing.T) {
 	if got := b.hud.modalGadgetRect(b.hud.confirmWin, choice1, nil); got.W != 96 || got.H != 20 {
 		t.Fatalf("YESORNO CHOICE1 runtime size = %dx%d, want stock frame 96x20", got.W, got.H)
 	}
-	cur = sess.Snapshot.Current()
+	cur = current()
 	if cur == nil {
 		t.Fatal("selected commander snapshot disappeared")
 	}
@@ -172,7 +179,7 @@ func TestRetailCommanderPageDrawsAndArmsAuthoredProduct(t *testing.T) {
 	step := int32(31)
 	clickCommandButton := func(suffix string) {
 		t.Helper()
-		window, _, err := b.hud.windowForRequired(b, sess.Snapshot.Current())
+		window, _, err := b.hud.windowForRequired(b, current())
 		if err != nil {
 			t.Fatalf("command window: %v", err)
 		}
@@ -201,7 +208,7 @@ func TestRetailCommanderPageDrawsAndArmsAuthoredProduct(t *testing.T) {
 	// the same page back, because page 0 leaves the page field alone and so the
 	// builder remembers where it was [07 R-HUD-03 §6][07 R-HUD-04 §4].
 	clickCommandButton("ORDERS")
-	cur = sess.Snapshot.Current()
+	cur = current()
 	if cur == nil {
 		t.Fatal("orders-state commander snapshot disappeared")
 	}
@@ -219,7 +226,7 @@ func TestRetailCommanderPageDrawsAndArmsAuthoredProduct(t *testing.T) {
 		t.Fatalf("commander orders window = %q; want suffix %q", w.Name, ordersWindow)
 	}
 	clickCommandButton("BUILD")
-	cur = sess.Snapshot.Current()
+	cur = current()
 	if cur.CommandPage.Page != 1 || !commandPageIsPaged(cur) {
 		t.Fatalf("BUILD returned to page %d (paged=%v), want the remembered page 1", cur.CommandPage.Page, commandPageIsPaged(cur))
 	}
@@ -330,11 +337,8 @@ func TestRetailNoSelectionClosesCommandWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, u := range sess.Units.Iter() {
-		if u != nil {
-			u.Flags &^= hud.SelectionFlag
-		}
-	}
+	// No local selection: the host's local state starts empty
+	// (DESIGN_MULTIPLAYER §7.3).
 	for step := int32(1); step <= 30; step++ {
 		sess.Step(step)
 		if cur := sess.Snapshot.Current(); cur != nil {

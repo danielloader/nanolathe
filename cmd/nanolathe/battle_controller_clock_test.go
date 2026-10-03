@@ -30,7 +30,6 @@ package main
 import (
 	"testing"
 
-	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
@@ -88,7 +87,7 @@ func TestBattleReplayIgnoresHostProcessUptime(t *testing.T) {
 	// With the host clock pinned, the fixture's own clock driver is what makes
 	// the queued selection due, and the replay resolves identically every run.
 	applyPendingBattleCommands(b)
-	if commander.Flags&hud.SelectionFlag == 0 {
+	if !hostSelected(b, commander) {
 		t.Fatalf("pinned replay did not select commander at screen=%d,%d", sx, sy)
 	}
 }

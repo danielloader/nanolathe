@@ -28,8 +28,9 @@ func TestViewingOwnerPreservesCommandsAndVisibilityCaches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Units.Unit(local).Flags |= 0x10
-	s.Units.Unit(viewed).Flags |= 0x10
+	// The client's selection names both; only the local player's unit is
+	// ever composed as selected (DESIGN_MULTIPLAYER §7.3).
+	client := selectLocal(s.Units.Unit(local), s.Units.Unit(viewed))
 	// Distinct masks let the reused frame slot expose a stale-observer copy.
 	s.Vis.ByteGrid(0)[0] = 1
 	s.Vis.ByteGrid(1)[0] = 2
@@ -48,6 +49,7 @@ func TestViewingOwnerPreservesCommandsAndVisibilityCaches(t *testing.T) {
 	}
 	s.publishSnapshot(3)
 	cur := s.Snapshot.Current()
+	composeLocal(s, client, cur)
 	if cur.ViewingPlayer != 1 || cur.Selection.LocalPlayer != 0 || len(cur.Selection.Handles) != 1 || cur.Selection.Handles[0] != local {
 		t.Fatal("committed observer and selected command owner were conflated")
 	}

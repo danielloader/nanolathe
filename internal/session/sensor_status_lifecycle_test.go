@@ -5,6 +5,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
+	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/save"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
@@ -141,18 +142,21 @@ func TestSensorCircleActivationBetweenPasses(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := s.Units.Unit(h)
-	u.Flags |= 0x10
+	local := hud.NewLocalInterface() // the client's selection
+	local.ReplaceSelection([]pool.UnitRef{unitRef(u)})
 	u.SetActivationEdge(true)
 	s.stepSensorPhase(1)
 	u.SetActivationEdge(false)
 	s.publishSnapshot(2)
+	local.ComposeSelection(s.Snapshot.Current())
 	c, ok := radarContactFor(s.Snapshot.Current(), h)
-	if !ok || c.Active || c.RangeStatus || c.RadarDistance != 0 {
+	if !ok || c.Active || c.RangeStatus || c.RangeEligible || c.RadarDistance != 0 {
 		t.Fatalf("deactivated unit retains circles: %+v", c)
 	}
 	s.stepSensorPhase(3)
 	u.SetActivationEdge(true)
 	s.publishSnapshot(4)
+	local.ComposeSelection(s.Snapshot.Current())
 	c, ok = radarContactFor(s.Snapshot.Current(), h)
 	if !ok || !c.Active || !c.RangeStatus || c.RadarDistance != def.RadarDistance {
 		t.Fatalf("activated unit lacks circles: %+v", c)

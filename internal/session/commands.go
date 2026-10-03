@@ -175,6 +175,10 @@ type HumanFactoryBuildCommand struct {
 // 3→0; 4 matches no arm and presses nothing) and transmits it here; this
 // boundary owns the broadcast and the definition gate.
 type HumanStanceCommand struct {
+	// Handles is the selection the press broadcasts to, in the ascending
+	// order of the former selection scan; the client resolves it from its own
+	// selection when the press is sent (DESIGN_MULTIPLAYER §7.3, §7.4.3).
+	Handles []pool.Handle
 	// Fire selects `Standing_FireOrder`; otherwise `Standing_MoveOrder`.
 	Fire bool
 	// Value is the new stance, 0..2 as the panel sends it.
@@ -187,6 +191,8 @@ type HumanStanceCommand struct {
 // broadcast. There is no queue flag: the arm takes no Shift argument, exactly
 // as the stance arm beside it does not.
 type HumanCloakCommand struct {
+	// Handles is the selection the press broadcasts to, as for a stance.
+	Handles []pool.Handle
 	// Cloak selects `Cloak_On`; otherwise `Cloak_Off`.
 	Cloak bool
 }
@@ -229,20 +235,25 @@ type HumanStockpileCommand struct {
 
 // HumanBuildPageCommand selects one authored build page for a selected builder.
 // Page is an absolute zero-based page; presentation resolves digit/next/prev
-// into this value from the immutable frame, while the authoritative boundary
-// validates the builder and clamps against the compiled CANBUILD page count
-// [07 §9].
+// into this value from the frame [07 §9]. The build page is local interface
+// state (DESIGN_MULTIPLAYER §7.3): the host applies this value to its own
+// local state and the session refuses it.
 type HumanBuildPageCommand struct {
 	Builder pool.Handle
 	Page    int
 }
 
 // HumanGroupCommand carries the established Ctrl+digit assignment or digit
-// recall operation. Preserve is the Shift-held toggle/preserve argument on
-// recall [07 §9]. Mask is the authored CTRL_F filter when that state is
-// available; an all-zero value means that the presentation boundary has not
-// published a CTRL_F mask yet (the no-filter path).
+// recall operation [07 §9]. Assignment is a seat command: Handles is its
+// complete new membership, the client's selection when the keys are pressed,
+// because the group number is also computer-player state
+// (DESIGN_MULTIPLAYER §7.1). Recall changes only the local selection, so the
+// host applies it to its own local state and the session refuses it; Preserve
+// is recall's Shift-held toggle/preserve argument, and Mask the authored
+// CTRL_F filter when that state is available (an all-zero value is the
+// no-filter path).
 type HumanGroupCommand struct {
+	Handles  []pool.Handle
 	Group    int
 	Preserve bool
 	Mask     [hud.CategoryMaskBytes]byte
@@ -293,14 +304,14 @@ type HumanCommand struct {
 }
 
 // localRefs holds the explicit handles of a local command as allocation
-// references, captured when the command is submitted. Selection-derived
-// actors are not here: the selection is session state until the local
-// interface unit moves it to the client, and a selection command queued
-// earlier in the same batch must still reach an implicit order behind it, so
-// the adapter reads it at the input boundary (bindLocalCommand).
+// references, captured when the command is submitted. There are no other
+// actors: selection is client-side local state (DESIGN_MULTIPLAYER §7.3), and
+// the client resolves every order's units from its own selection when it
+// sends the order, so a selection made earlier in the same input batch is
+// already in the handles a later command carries.
 type localRefs struct {
 	captured bool
-	actors   []pool.UnitRef // Order, Stop, SelfDestruct, CancelQueuedMove handles
+	actors   []pool.UnitRef // Order, Stop, SelfDestruct, CancelQueuedMove, Stance, Cloak, GroupAssign handles
 	target   pool.UnitRef   // Order.Target
 	targets  []pool.UnitRef // Order.Targets[i].Target, parallel
 	unit     pool.UnitRef   // the singular actor of the unit-addressed kinds
@@ -322,6 +333,9 @@ func cloneHumanCommand(c HumanCommand) HumanCommand {
 	c.Stop.Handles = cloneHumanHandles(c.Stop.Handles)
 	c.CancelQueuedMove.Handles = cloneHumanHandles(c.CancelQueuedMove.Handles)
 	c.SelfDestruct.Handles = cloneHumanHandles(c.SelfDestruct.Handles)
+	c.Stance.Handles = cloneHumanHandles(c.Stance.Handles)
+	c.Cloak.Handles = cloneHumanHandles(c.Cloak.Handles)
+	c.Group.Handles = cloneHumanHandles(c.Group.Handles)
 	c.refs.actors = cloneRefs(c.refs.actors)
 	c.refs.targets = cloneRefs(c.refs.targets)
 	return c
@@ -384,6 +398,12 @@ func (s *Session) captureLocalRefs(c *HumanCommand) {
 		c.refs.actors = s.captureRefs(c.SelfDestruct.Handles)
 	case HumanCancelQueuedMove:
 		c.refs.actors = s.captureRefs(c.CancelQueuedMove.Handles)
+	case HumanStance:
+		c.refs.actors = s.captureRefs(c.Stance.Handles)
+	case HumanCloak:
+		c.refs.actors = s.captureRefs(c.Cloak.Handles)
+	case HumanGroupAssign:
+		c.refs.actors = s.captureRefs(c.Group.Handles)
 	case HumanActivation:
 		c.refs.unit = s.captureRef(c.Activation.Unit)
 	case HumanMobileBuild:
@@ -397,16 +417,30 @@ func (s *Session) captureLocalRefs(c *HumanCommand) {
 	}
 }
 
-// localInterfaceKind reports the local-only (L) kinds of DESIGN_MULTIPLAYER
+// LocalInterfaceKind reports the local-only (L) kinds of DESIGN_MULTIPLAYER
 // §7.1: selection, build pages, group recall, BigBrother and Shift. They are
-// interface state, not seat commands, and still live in the session until the
-// local interface unit moves them to the client.
-func localInterfaceKind(k HumanCommandKind) bool {
+// client-side local interface state (§7.3), applied by the host to its own
+// local state; the session holds none of it and refuses them. Their numbers
+// stay reserved so the kind numbering of §7.4.2 does not move.
+func LocalInterfaceKind(k HumanCommandKind) bool {
 	switch k {
 	case HumanSelectionReplace, HumanSelectionToggle, HumanSelectionClear, HumanBuildPage, HumanGroupRecall, HumanBigBrother, HumanShiftState:
 		return true
 	}
 	return false
+}
+
+// OnlineCommandContext reports whether the session runs the online command
+// context, where every command that changes the world must arrive stamped and
+// the replay-only kinds (NoShake, SetLogo) are local presentation preferences
+// of the issuing client (DESIGN_MULTIPLAYER §7.1).
+func (s *Session) OnlineCommandContext() bool {
+	if s == nil {
+		return false
+	}
+	s.humanMu.Lock()
+	defer s.humanMu.Unlock()
+	return s.seatCommands.online != nil
 }
 
 // EnqueueHumanCommand appends one command for the next authoritative input
@@ -423,18 +457,24 @@ func (s *Session) EnqueueHumanCommand(c HumanCommand) error {
 // It is the single-player compatibility adapter of DESIGN_MULTIPLAYER
 // §7.4.4: it captures the command's explicit handles as allocation
 // references here, at submission, and phase 1 hands the command to the same
-// payload implementation a stamped seat command reaches (applyBound). In an
-// online session it admits only the local interface kinds; every command that
-// changes the world must arrive stamped through EnqueueSeatCommand, so no kind
-// can fall through to this path unauthorized (§16.2 M2-C2).
+// payload implementation a stamped seat command reaches (applyBound). Every
+// actor list is explicit: the client resolves selection-derived actors from
+// its own selection before it submits (§7.3). The local interface kinds never
+// reach the session (LocalInterfaceKind). In an online session it admits
+// nothing at all: every command that changes the world must arrive stamped
+// through EnqueueSeatCommand, so no kind can fall through to this path
+// unauthorized (§16.2 M2-C2).
 func (s *Session) EnqueueHumanCommandWithSequence(c HumanCommand) (uint64, error) {
 	if s == nil {
 		return 0, fmt.Errorf("session: nil human-command owner")
 	}
+	if LocalInterfaceKind(c.Kind) {
+		return 0, fmt.Errorf("nanolathe: local command refused: logical path human command kind %d, providers searched [session], expected the client's local interface state (DESIGN_MULTIPLAYER §7.3)", c.Kind)
+	}
 	s.humanMu.Lock()
 	online := s.seatCommands.online != nil
 	s.humanMu.Unlock()
-	if online && !localInterfaceKind(c.Kind) {
+	if online {
 		return 0, fmt.Errorf("nanolathe: local command refused: logical path human command kind %d, providers searched [session], expected a stamped seat command in an online session", c.Kind)
 	}
 	// A caller cannot supply the capture or a stamped entry.
@@ -681,90 +721,11 @@ func (s *Session) commandTarget(r pool.UnitRef) *units.Unit {
 	return u
 }
 
-func (s *Session) selectedHumanHandles() []pool.Handle {
-	if s == nil || s.Units == nil {
-		return nil
-	}
-	out := make([]pool.Handle, 0)
-	for _, u := range s.Units.Iter() {
-		if u != nil && u.Alive && u.Owner == s.LocalOwner && u.Flags&0x10 != 0 {
-			out = append(out, u.Handle)
-		}
-	}
-	return out
-}
-
-func (s *Session) selectedHumanBuilder(h pool.Handle) *units.Unit {
-	if s == nil || s.Units == nil || h == 0 {
-		return nil
-	}
-	var selected *units.Unit
-	for _, u := range s.Units.Iter() {
-		if u == nil || !u.Alive || u.Owner != s.LocalOwner || u.Flags&0x10 == 0 {
-			continue
-		}
-		// The retail page state is keyed by the single selected unit's
-		// identity. A unit mixed with another selected one has aggregate
-		// command state, not a page [07 §9].
-		if selected != nil {
-			return nil
-		}
-		selected = u
-	}
-	if selected == nil || selected.Handle != h || selected.Def == nil {
-		return nil
-	}
-	return selected
-}
-
-// PendingBuildPage projects accepted page commands over the committed page for
-// the same builder, so repeated host input before a tick preserves enqueue
-// order without copying the command queue [07 R-HUD-03 §6][I6].
-func (s *Session) PendingBuildPage(builder pool.Handle, page int) int {
-	if s == nil {
-		return page
-	}
-	s.humanMu.Lock()
-	defer s.humanMu.Unlock()
-	for i := range s.pendingHuman {
-		c := &s.pendingHuman[i]
-		if c.Kind == HumanBuildPage && c.BuildPage.Builder == builder {
-			page = c.BuildPage.Page
-		}
-	}
-	return page
-}
-
-func (s *Session) applyHumanBuildPage(c HumanBuildPageCommand) {
-	u := s.selectedHumanBuilder(c.Builder)
-	if u == nil || s.Catalog == nil {
-		return
-	}
-	// Which pages exist is the definition's page-count byte and nothing else
-	// [07 R-HUD-03 §6][02 R-CAT-01 §5 step 5]. The CANBUILD membership test
-	// that used to stand here, beside selectedHumanBuilder's FBI `Builder`
-	// word, refused the ORDERS/BUILD toggle and the page keys on the eight
-	// stockpile launchers — the units that author a page window and build
-	// nothing [06 §11.1]. SetBuildPage below carries the count guard.
-	pageCount := hud.BuilderPageCount(u.Def)
-	if pageCount == 0 {
-		return
-	}
-	defID, ok := s.Catalog.UnitDefIndex(u.Def.CanonicalKey)
-	if !ok || defID == 0 || defID > 0xffff {
-		return
-	}
-	view := hud.SelectUnit{Flags: u.Flags, DefID: uint16(defID)}
-	// SetBuildPage performs the retail identity/page-count guard and clamps
-	// to the authored page byte. It mutates only at the input boundary [07 §9].
-	hud.SetBuildPage(&view, c.Page, pageCount, nil)
-	u.Flags = view.Flags
-}
-
 // groupViews lists an owner's live units that carry a nonzero catalog
 // definition id, in ascending pool order, as the group scanner sees them
-// [07 §9]. selected, when non-nil, replaces each unit's selection bit: the
-// explicit membership of a seat command stands in for the selection flag.
+// [07 §9]. The explicit membership of the assignment stands in for the
+// selection bit, which is the client's (DESIGN_MULTIPLAYER §7.3): selected
+// sets it on exactly the members.
 func (s *Session) groupViews(owner uint8, selected func(pool.Handle) bool) ([]*hud.SelectUnit, []*units.Unit) {
 	views := make([]*hud.SelectUnit, 0)
 	unitsByView := make([]*units.Unit, 0)
@@ -776,12 +737,9 @@ func (s *Session) groupViews(owner uint8, selected func(pool.Handle) bool) ([]*h
 		if !ok || defID == 0 || defID > 0xffff {
 			continue
 		}
-		flags := u.Flags
-		if selected != nil {
-			flags &^= hud.SelectionFlag
-			if selected(u.Handle) {
-				flags |= hud.SelectionFlag
-			}
+		flags := u.Flags &^ hud.SelectionFlag
+		if selected(u.Handle) {
+			flags |= hud.SelectionFlag
 		}
 		views = append(views, &hud.SelectUnit{Flags: flags, Group: u.Group, DefID: uint16(defID)})
 		unitsByView = append(unitsByView, u)
@@ -789,33 +747,11 @@ func (s *Session) groupViews(owner uint8, selected func(pool.Handle) bool) ([]*h
 	return views, unitsByView
 }
 
-// applyHumanGroupRecall is digit recall, local interface state [07 §9].
-func (s *Session) applyHumanGroupRecall(c HumanGroupCommand) {
-	if s == nil || s.Units == nil || s.Catalog == nil || c.Group < 1 || c.Group > 9 {
-		return
-	}
-	views, unitsByView := s.groupViews(s.LocalOwner, nil)
-	mask := c.Mask
-	if mask == ([hud.CategoryMaskBytes]byte{}) {
-		// No CTRL_F mask producer is part of the current immutable frame.
-		// Treat absent filter state as no filter; the authored mask producer
-		// remains an explicit TODO rather than a guessed category mask [07 §9].
-		for i := range mask {
-			mask[i] = 0xff
-		}
-	}
-	hud.RecallGroup(views, c.Group, c.Preserve, mask, nil)
-	for i, view := range views {
-		unitsByView[i].Flags = view.Flags
-		unitsByView[i].Group = view.Group
-	}
-}
-
 // applyBoundGroupAssign is Ctrl+digit assignment over explicit membership:
 // every live member of the issuer takes the group, and every other unit of
 // the issuer carrying it loses it, through the same scanner rule as before
-// [07 §9]. Only the group number is written; the selection bit stays the
-// interface's (DESIGN_MULTIPLAYER §7.1, §7.4.3).
+// [07 §9]. Only the group number is written; selection is the client's
+// (DESIGN_MULTIPLAYER §7.1, §7.4.3).
 func (s *Session) applyBoundGroupAssign(b *boundCommand) {
 	if s.Catalog == nil || b.c.Group.Group < 1 || b.c.Group.Group > 9 {
 		return
@@ -1015,10 +951,11 @@ func removeQueuedWorldOrder(actor *units.Unit, kind orders.ID, target pool.Handl
 
 // applyHumanCommand is phase 1's one entry for a queued element, in queue
 // order. A stamped seat entry is authorized and yields a receipt
-// (applyQueuedSeatCommand). A local command applies its interface-state kinds
-// here and hands every other kind, bound to references and to the own/
-// controlling slot at drain time, to the shared payload implementation
-// (applyBound) that stamped commands reach too (DESIGN_MULTIPLAYER §7.4.4).
+// (applyQueuedSeatCommand). A local command, bound to references and to the
+// own/controlling slot at drain time, goes to the shared payload
+// implementation (applyBound) that stamped commands reach too
+// (DESIGN_MULTIPLAYER §7.4.4). A local interface kind applies nothing: that
+// state is the client's (§7.3), and the queue never admits one.
 func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 	if s == nil {
 		return
@@ -1027,52 +964,7 @@ func (s *Session) applyHumanCommand(c HumanCommand, tick uint32) {
 		s.applyQueuedSeatCommand(c.seat, tick)
 		return
 	}
-	switch c.Kind {
-	case HumanBigBrother:
-		s.bigBrother.enabled = !s.bigBrother.enabled
-		if s.bigBrother.enabled {
-			s.bigBrother.countdown = 1
-		} else {
-			s.bigBrother.cancelFollow = true
-		}
-		return
-	case HumanShiftState:
-		s.bigBrother.shiftHeld = c.ShiftHeld
-		return
-	}
-	if localInterfaceKind(c.Kind) {
-		if s.Units == nil {
-			return
-		}
-		switch c.Kind {
-		case HumanSelectionReplace:
-			for _, u := range s.Units.Iter() {
-				if u != nil && u.Alive && u.Owner == s.LocalOwner {
-					u.Flags &^= 0x10
-				}
-			}
-			for _, h := range c.Selection.Handles {
-				if u := s.humanUnit(h); u != nil {
-					u.Flags |= 0x10
-				}
-			}
-		case HumanSelectionToggle:
-			for _, h := range c.Selection.Handles {
-				if u := s.humanUnit(h); u != nil {
-					u.Flags ^= 0x10
-				}
-			}
-		case HumanSelectionClear:
-			for _, u := range s.Units.Iter() {
-				if u != nil && u.Alive && u.Owner == s.LocalOwner {
-					u.Flags &^= 0x10
-				}
-			}
-		case HumanBuildPage:
-			s.applyHumanBuildPage(c.BuildPage)
-		case HumanGroupRecall:
-			s.applyHumanGroupRecall(c.Group)
-		}
+	if LocalInterfaceKind(c.Kind) {
 		return
 	}
 	b := s.bindLocalCommand(c)
@@ -1107,11 +999,6 @@ type boundCommand struct {
 	unit     pool.UnitRef
 }
 
-// selectedHumanRefs is the local selection as references, ascending.
-func (s *Session) selectedHumanRefs() []pool.UnitRef {
-	return s.captureRefs(s.selectedHumanHandles())
-}
-
 // sortedUniqueRefs is the ordinary order's captured selection as a set,
 // visited in pool order [I1]. One handle captured twice carries one serial.
 func sortedUniqueRefs(in []pool.UnitRef) []pool.UnitRef {
@@ -1120,40 +1007,28 @@ func sortedUniqueRefs(in []pool.UnitRef) []pool.UnitRef {
 	return slices.CompactFunc(out, func(a, b pool.UnitRef) bool { return a.Handle == b.Handle })
 }
 
-// bindLocalCommand is the local adapter's half of phase 1. Explicit handles
-// were captured at submission; a command that names none falls back to the
-// current selection here, where the selection commands queued ahead of it
-// have already applied, exactly as before.
+// bindLocalCommand is the local adapter's half of phase 1. Every actor was
+// captured at submission from the command's explicit handles. There is no
+// selection fallback: the client resolved the order's units from its own
+// selection when it sent the order (DESIGN_MULTIPLAYER §7.3), so a command
+// that names no units has none and does nothing, as an empty stamped actor
+// list does (§7.4.3).
 func (s *Session) bindLocalCommand(c HumanCommand) boundCommand {
 	s.captureLocalRefs(&c)
 	b := boundCommand{c: c, issuer: s.LocalOwner, sequence: c.Sequence, target: c.refs.target, targets: c.refs.targets, unit: c.refs.unit}
 	switch c.Kind {
 	case HumanOrder:
-		switch {
-		case len(c.Order.Handles) == 0:
-			b.actors = s.selectedHumanRefs()
-		case len(c.Order.Targets) == 0:
+		if len(c.Order.Targets) == 0 {
 			b.actors = sortedUniqueRefs(c.refs.actors)
-		default:
+		} else {
 			b.actors = c.refs.actors
 		}
-	case HumanStop:
+	case HumanStop, HumanSelfDestruct, HumanCancelQueuedMove, HumanStance, HumanCloak, HumanGroupAssign:
+		// The stance and cloak arms broadcast to the captured selection in
+		// the ascending order of the former selection scan
+		// [04 R-STANCE-01 §5]; assignment takes it as the group's complete
+		// membership [07 §9].
 		b.actors = c.refs.actors
-		if len(c.Stop.Handles) == 0 {
-			b.actors = s.selectedHumanRefs()
-		}
-	case HumanSelfDestruct:
-		b.actors = c.refs.actors
-		if len(c.SelfDestruct.Handles) == 0 {
-			b.actors = s.selectedHumanRefs()
-		}
-	case HumanCancelQueuedMove:
-		b.actors = c.refs.actors
-	case HumanStance, HumanCloak, HumanGroupAssign:
-		// The stance and cloak arms broadcast to the selection in ascending
-		// pool order [04 R-STANCE-01 §5]; assignment takes the selection as
-		// the group's membership [07 §9].
-		b.actors = s.selectedHumanRefs()
 	}
 	return b
 }

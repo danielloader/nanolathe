@@ -108,11 +108,12 @@ func TestRetailConstructionShipYardAndLLTAreBuildable(t *testing.T) {
 				t.Fatal(err)
 			}
 			ship := sess.Units.Unit(handle)
-			ship.Flags = hud.EncodePageBits(ship.Flags|hud.SelectionFlag, 1)
+			ship.Flags = hud.EncodePageBits(ship.Flags, 1)
+			b.local = testSelection(ship)
 			for step := int32(1); step <= 5; step++ {
 				sess.Step(step)
 			}
-			f := sess.Snapshot.Current()
+			f, _ := b.currentSnapshot()
 			if f == nil || f.CommandPage.Builder != handle {
 				t.Fatalf("%s does not own the command page", tc.ship)
 			}

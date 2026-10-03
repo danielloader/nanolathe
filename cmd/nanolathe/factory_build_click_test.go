@@ -78,23 +78,16 @@ func TestRetailFactoryProductClickQueuesAndBuilds(t *testing.T) {
 	if lab == nil {
 		t.Fatal("lab not in pool")
 	}
-	for _, u := range sess.Units.Iter() {
-		if u == nil {
-			continue
-		}
-		u.Flags &^= hud.SelectionFlag
-		if u.Handle == labHandle {
-			// Selected and showing its first build page. Page 0 is the orders
-			// state and carries no products, so the product rail this test
-			// clicks only exists from page 1 up [07 R-HUD-03 §6].
-			u.Flags |= hud.SelectionFlag
-			u.Flags = hud.EncodePageBits(u.Flags, 1)
-		}
-	}
+	// Selected and showing its first build page. Page 0 is the orders state
+	// and carries no products, so the product rail this test clicks only
+	// exists from page 1 up [07 R-HUD-03 §6]. The selection is the client's
+	// (DESIGN_MULTIPLAYER §7.3).
+	lab.Flags = hud.EncodePageBits(lab.Flags, 1)
+	local := testSelection(lab)
 	for step := int32(31); step <= 60; step++ {
 		sess.Step(step)
 	}
-	cur := sess.Snapshot.Current()
+	cur := composedFrame(sess, cat, local)
 	if cur == nil {
 		t.Fatal("no published frame")
 	}
@@ -107,7 +100,7 @@ func TestRetailFactoryProductClickQueuesAndBuilds(t *testing.T) {
 		ViewW: winW, ViewH: winH,
 		MapW: int32(sess.World.CellW * 16), MapH: int32(sess.World.CellH * 16),
 	}
-	b := &battleSession{sess: sess, cat: cat, cam: cam}
+	b := &battleSession{sess: sess, cat: cat, cam: cam, local: local}
 	pal := retailPaletteForTest(t, cs)
 	b.hud, err = loadRetailBattleHUD(cs.fs, sess, cat, pal, nil, newBattleWindowContext(cs, nil))
 	if err != nil {

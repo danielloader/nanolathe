@@ -168,7 +168,7 @@ package implements.
 | Package | Responsibility | Design document |
 |---|---|---|
 | `internal/gui` | GUI file loading into the control kinds, hit tests, dispatch | DESIGN_INTERFACE_HUD_INPUT |
-| `internal/hud` | The battle HUD: side anchors and bars, selection and build pages, the command latch, panel slide, cursor, footer, queue overlay, score panel | DESIGN_INTERFACE_HUD_INPUT |
+| `internal/hud` | The battle HUD: side anchors and bars, selection and build pages, the command latch, panel slide, cursor, footer, queue overlay, score panel; `LocalInterface`, the client's local interface state (selection, visited set, pages, BigBrother, held Shift, online logo and shake overrides) keyed by allocation reference, composed into the presentation-only frame sections by the host (DESIGN_MULTIPLAYER §7.3) | DESIGN_INTERFACE_HUD_INPUT, DESIGN_MULTIPLAYER §7.3 |
 | `internal/input` | Platform-neutral key and mouse vocabulary and input rings | DESIGN_INTERFACE_HUD_INPUT |
 | `internal/camera` | The orthographic camera, scroll caps, minimap conversions, presentation zoom | DESIGN_INTERFACE_HUD_INPUT |
 | `internal/ui` | Screen-level state of the authored front-end panels shared by the desktop binary and its tests | DESIGN_INTERFACE_HUD_INPUT |

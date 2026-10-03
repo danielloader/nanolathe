@@ -12,8 +12,8 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
-	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/testsupport"
+	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
 func TestRetailExpandedSidebarFlatCommanderProducts(t *testing.T) {
@@ -26,9 +26,10 @@ func TestRetailExpandedSidebarFlatCommanderProducts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var commander *units.Unit
 	for _, u := range sess.Units.Iter() {
 		if u != nil && u.Owner == sess.LocalOwner && u.Def != nil && u.Def.Builder {
-			u.Flags |= hud.SelectionFlag
+			commander = u
 			break
 		}
 	}
@@ -42,12 +43,12 @@ func TestRetailExpandedSidebarFlatCommanderProducts(t *testing.T) {
 		t.Fatal(err)
 	}
 	cl.SetEnhanced(true)
-	b := &battleSession{sess: sess, cat: cat, cl: cl}
+	b := &battleSession{sess: sess, cat: cat, cl: cl, local: testSelection(commander)}
 	b.hud, err = loadRetailBattleHUD(cs.fs, sess, cat, retailPaletteForTest(t, cs), nil, newBattleWindowContext(cs, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := sess.Snapshot.Current()
+	f, _ := b.currentSnapshot()
 	w, _, err := b.hud.windowForRequired(b, f)
 	if err != nil || w == nil {
 		t.Fatalf("commander window: %v", err)

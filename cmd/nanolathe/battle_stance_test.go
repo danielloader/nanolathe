@@ -51,8 +51,10 @@ func TestStanceCyclePressTransmitsTheNextValue(t *testing.T) {
 		b := newTestBattle(testCatalogON05(), testWorldON05(20, 20))
 		u := placeUnit(b, "armcons", numeric.Fixed(8*65536), numeric.Fixed(8*65536))
 		replaceSelectionForTest(t, b, u)
-		f := b.sess.Snapshot.Current()
-		if f == nil {
+		// The host composes the command page from its local selection; the
+		// published aggregate is then set to the case under test.
+		f, ok := b.currentSnapshot()
+		if !ok {
 			t.Fatal("no committed frame after selection")
 		}
 		f.CommandPage.FireStance = row.from
@@ -67,7 +69,7 @@ func TestStanceCyclePressTransmitsTheNextValue(t *testing.T) {
 		if len(pending) != 1 || pending[0].Kind != session.HumanStance {
 			t.Fatalf("stance %d: dispatched %+v, want one HumanStance", row.from, pending)
 		}
-		if !pending[0].Stance.Fire || pending[0].Stance.Value != row.want {
+		if !pending[0].Stance.Fire || pending[0].Stance.Value != row.want || len(pending[0].Stance.Handles) != 1 || pending[0].Stance.Handles[0] != u.Handle {
 			t.Fatalf("stance %d: transmitted %+v, want fire with value %d", row.from, pending[0].Stance, row.want)
 		}
 	}

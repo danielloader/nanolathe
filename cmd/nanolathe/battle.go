@@ -14,6 +14,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/headless"
+	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/benchlock"
@@ -270,12 +271,24 @@ type battleSession struct {
 	// [07 R-HUD-04 §1][07 R-CAM-01 §14]. Presentation-only [I6].
 	panelHoldFlag bool
 
-	// visitedUnits and currentUnit are the `n` unit cycle's state
-	// [07 R-CAM-01 §2]. Retail keeps the visited bits in each unit's status
-	// word; presentation may not write simulation state, so the cycle keeps its
-	// own set here [I6]. The set is only looked up, never ranged, so it takes
-	// part in no order-producing iteration [I1].
-	visitedUnits       map[pool.Handle]bool
+	// local is the client's local interface state — selection, the `n`
+	// cycle's visited set, build pages, BigBrother and the held Shift — keyed
+	// by allocation reference (DESIGN_MULTIPLAYER §7.3,
+	// battle_local_interface.go). Retail keeps these in each unit's status
+	// word; here no simulation state holds them [I6]. localFacts holds the
+	// drained tick facts of publications not yet observed, localDrain is the
+	// drain's scratch, and localEvents stashes notices raised outside an
+	// observation. localDropped is the frame buffer's dropped-facts count as
+	// last seen, and localGap/localGapTick a pending resynchronisation after
+	// facts were lost (advanceLocalInterface). currentUnit is the `n` cycle's
+	// current unit [07 R-CAM-01 §2].
+	local              *hud.LocalInterface
+	localFacts         []frame.InterfaceFacts
+	localDrain         []frame.InterfaceFacts
+	localEvents        hud.InterfaceEvents
+	localDropped       uint64
+	localGap           bool
+	localGapTick       uint32
 	deferFollowInput   bool
 	pendingFollowInput func()
 	currentUnit        pool.Handle
@@ -628,6 +641,10 @@ func composeBattleEntryDetachedWithModels(sess *session.Session, cat *content.Ca
 		showRanges: cs.presentation.ShowRanges, modBuildPageSize: cs.buildMenuPageSize(),
 		millisSource: newMonotonicMillisSource(), battleUI: ui.NewProductionBattleState(),
 	}
+	// A fresh battle — a load included — starts with fresh local interface
+	// state: the loaded session's references are a new namespace
+	// (battle_local_interface.go).
+	b.attachLocalInterface()
 	if savedCamera != nil {
 		saved := *savedCamera
 		b.entrySavedCamera = &saved

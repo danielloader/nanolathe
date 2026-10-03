@@ -66,22 +66,14 @@ func TestSeaplanePlatformBuildClicksUseInstalledNames(t *testing.T) {
 	if plat == nil {
 		t.Fatal("platform not in pool")
 	}
-	for _, u := range sess.Units.Iter() {
-		if u == nil {
-			continue
-		}
-		u.Flags &^= hud.SelectionFlag
-		if u.Handle == platHandle {
-			// Page 0 is the orders state and carries no products
-			// [07 R-HUD-03 §6].
-			u.Flags |= hud.SelectionFlag
-			u.Flags = hud.EncodePageBits(u.Flags, 1)
-		}
-	}
+	// Page 0 is the orders state and carries no products [07 R-HUD-03 §6].
+	// The selection is the client's (DESIGN_MULTIPLAYER §7.3).
+	plat.Flags = hud.EncodePageBits(plat.Flags, 1)
+	local := testSelection(plat)
 	for step := int32(31); step <= 60; step++ {
 		sess.Step(step)
 	}
-	cur := sess.Snapshot.Current()
+	cur := composedFrame(sess, cat, local)
 	if cur == nil {
 		t.Fatal("no published frame")
 	}
@@ -94,7 +86,7 @@ func TestSeaplanePlatformBuildClicksUseInstalledNames(t *testing.T) {
 		ViewW: winW, ViewH: winH,
 		MapW: int32(sess.World.CellW * 16), MapH: int32(sess.World.CellH * 16),
 	}
-	b := &battleSession{sess: sess, cat: cat, cam: cam}
+	b := &battleSession{sess: sess, cat: cat, cam: cam, local: local}
 	pal := retailPaletteForTest(t, cs)
 	b.hud, err = loadRetailBattleHUD(cs.fs, sess, cat, pal, nil, newBattleWindowContext(cs, nil))
 	if err != nil {

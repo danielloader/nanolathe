@@ -9,7 +9,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
-	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
 // publishFollowedUnit commits a new frame carrying one unit at the tracked
@@ -136,7 +135,8 @@ func TestBigBrotherFollowsEveryControllerTick(t *testing.T) {
 	b.sess.State = session.StateBattle
 	first := placeUnit(b, "armcons", numeric.Fixed(400<<16), numeric.Fixed(500<<16))
 	second := placeUnit(b, "armfav", numeric.Fixed(900<<16), numeric.Fixed(800<<16))
-	first.Flags |= units.SelectedStatus
+	// The client's local selection (DESIGN_MULTIPLAYER §7.3).
+	b.localState().ReplaceSelection([]pool.UnitRef{{Handle: first.Handle, Serial: first.AllocationSerial}})
 	b.cam.SetTracked(first.Handle)
 	b.cam.MapW, b.cam.MapH = 1<<20, 1<<20
 	c := NewBattleController(b, &scriptedMillisSource{samples: []uint32{0, 67, 67}})

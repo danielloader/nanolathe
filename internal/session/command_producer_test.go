@@ -6,8 +6,20 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
+
+// withActors gives a stance or cloak press the units it broadcasts to.
+func withActors(c HumanCommand, handles ...pool.Handle) HumanCommand {
+	switch c.Kind {
+	case HumanStance:
+		c.Stance.Handles = handles
+	case HumanCloak:
+		c.Cloak.Handles = handles
+	}
+	return c
+}
 
 // Preserve-queue descriptors still enter the producer boundary: leading auto
 // removal and caption admission apply in both modes [04 R-ORD-01 §13]. Modern
@@ -24,7 +36,9 @@ func TestHumanMovementStanceAndCloakUseProducerBoundary(t *testing.T) {
 		} {
 			t.Run(string(mode)+"/"+tc.name, func(t *testing.T) {
 				s, u, enemy := modernDangerSession(t, mode)
-				u.Flags |= 0x10 // selection [04 R-STANCE-01 §5]
+				// The client sends its selection with the press [04 R-STANCE-01 §5]
+				// (DESIGN_MULTIPLAYER §7.3).
+				command := withActors(tc.command, u.Handle)
 				u.Def.MobileStandOrders = true
 				u.Def.CloakCost = 1
 				u.SetCloaked(tc.name == "Cloak_Off")
@@ -38,7 +52,7 @@ func TestHumanMovementStanceAndCloakUseProducerBoundary(t *testing.T) {
 					t.Fatal("fixture did not establish mode-specific danger memory")
 				}
 				sim, crt, stock := *s.SimRNG(), *s.CrtRNG(), s.Econ.Players[u.Owner].Stock
-				s.applyHumanCommand(tc.command, 11)
+				s.applyHumanCommand(command, 11)
 				primary := q.Primary()
 				if len(primary) != 2 || primary[1] != mission || !reflect.DeepEqual(*mission, before) {
 					t.Fatal("command did not remove leading auto alone while preserving the mission")
@@ -82,7 +96,7 @@ func TestHumanCommandDangerWithdrawalBoundary(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, u, _ := modernDangerSession(t, gameplay.Modern)
-			u.Flags |= 0x10
+			command := withActors(tc.command, u.Handle)
 			u.Def.MobileStandOrders, u.Def.FireStandOrders = true, true
 			u.Def.CloakCost = 1
 			q := orders.QueueOfUnit(u)
@@ -95,7 +109,7 @@ func TestHumanCommandDangerWithdrawalBoundary(t *testing.T) {
 				t.Fatal("fixture did not stage a withdrawal")
 			}
 			sim, crt, stock := *s.SimRNG(), *s.CrtRNG(), s.Econ.Players[u.Owner].Stock
-			s.applyHumanCommand(tc.command, 11)
+			s.applyHumanCommand(command, 11)
 			primary := q.Primary()
 			if tc.preserve {
 				if len(primary) != 3 || primary[1] != response || primary[2] != mission {

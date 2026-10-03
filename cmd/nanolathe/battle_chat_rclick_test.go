@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
-	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
@@ -54,18 +53,18 @@ func TestTalkRightPressCancelsAndIsConsumed(t *testing.T) {
 		if got := len(cl.MessageRing().Visible()); got != 0 {
 			t.Fatalf("latch %v: right press committed the line (%d visible)", latch, got)
 		}
-		if b.battleState().Input.Latch != latch || u.Flags&hud.SelectionFlag == 0 {
+		if b.battleState().Input.Latch != latch || !hostSelected(b, u) {
 			t.Fatalf("latch %v: the cancelling press reached the battle", latch)
 		}
 	}
 
 	b.battleState().Input.Latch = input.LatchAttack
 	rightPress()
-	if b.battleState().Input.Latch != input.LatchNormal || u.Flags&hud.SelectionFlag == 0 {
+	if b.battleState().Input.Latch != input.LatchNormal || !hostSelected(b, u) {
 		t.Fatal("with chat closed, right press did not cancel the armed latch alone")
 	}
 	rightPress()
-	if u.Flags&hud.SelectionFlag != 0 {
+	if hostSelected(b, u) {
 		t.Fatal("with chat closed, idle right press did not deselect")
 	}
 }

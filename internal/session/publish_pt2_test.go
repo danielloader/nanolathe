@@ -145,14 +145,19 @@ func TestPublishSnapshotFoldsDisagreeingOnOffSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second unit: %v", err)
 	}
-	// Selection membership is bit 0x10 of the unit status word [07 §9].
-	w.Unit(first).Flags |= 0x10
-	w.Unit(second).Flags |= 0x10
+	// Selection is the client's local state; the host composes it and the
+	// command page onto the frame (DESIGN_MULTIPLAYER §7.3).
+	local := selectLocal(w.Unit(first), w.Unit(second))
 	w.Unit(first).Activated = true
+	cat := &content.Catalog{Units: map[string]*content.UnitDef{"switchable": def}}
 
-	s := &Session{Snapshot: frame.NewBuffer(), Units: w, LocalOwner: 0}
-	s.publishSnapshot(1)
-	cur := s.Snapshot.Current()
+	s := &Session{Snapshot: frame.NewBuffer(), Units: w, LocalOwner: 0, Catalog: cat}
+	publish := func(tick uint32) *frame.Frame {
+		s.publishSnapshot(tick)
+		composeLocal(s, local, s.Snapshot.Current())
+		return s.Snapshot.Current()
+	}
+	cur := publish(1)
 	if cur == nil || cur.Selection.Count != 2 {
 		t.Fatalf("published selection = %#v, want two selected units", cur)
 	}
@@ -162,15 +167,13 @@ func TestPublishSnapshotFoldsDisagreeingOnOffSelection(t *testing.T) {
 
 	// Agreement folds to the shared state, not to the disagreement value.
 	w.Unit(second).Activated = true
-	s.publishSnapshot(2)
-	if got := s.Snapshot.Current().CommandPage.OnOffState; got != 1 {
+	if got := publish(2).CommandPage.OnOffState; got != 1 {
 		t.Fatalf("agreeing on/off aggregate = %d, want 1", got)
 	}
 
 	// No selected unit is onoffable: the sentinel that greys ONOFF survives.
 	def.OnOffable = false
-	s.publishSnapshot(3)
-	if got := s.Snapshot.Current().CommandPage.OnOffState; got != 3 {
+	if got := publish(3).CommandPage.OnOffState; got != 3 {
 		t.Fatalf("not-applicable on/off aggregate = %d, want 3", got)
 	}
 }
@@ -204,13 +207,14 @@ func TestPublishedCommandPageCountsTheOrdersPage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create %s: %v", key, err)
 		}
-		w.Unit(h).Flags = 0x10 | hud.EncodePageBits(0, page)
+		w.Unit(h).Flags = hud.EncodePageBits(w.Unit(h).Flags&^hud.PageFieldMask, page)
 		s := &Session{Units: w, Catalog: cat, LocalOwner: 0, Snapshot: frame.NewBuffer()}
 		s.publishSnapshot(1)
 		cur := s.Snapshot.Current()
 		if cur == nil {
 			t.Fatalf("%s published no frame", key)
 		}
+		composeLocal(s, selectLocal(w.Unit(h)), cur)
 		return &cur.CommandPage
 	}
 	sameKeys := func(t *testing.T, got, want []string) {
@@ -276,9 +280,10 @@ func TestPublishedCommandPageUnionsBasePageWithExplicitDownloads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.Unit(h).Flags = 0x10 | hud.EncodePageBits(0, 2)
+	w.Unit(h).Flags = hud.EncodePageBits(w.Unit(h).Flags, 2)
 	s := &Session{Units: w, Catalog: cat, LocalOwner: 0, Snapshot: frame.NewBuffer()}
 	s.publishSnapshot(1)
+	composeLocal(s, selectLocal(w.Unit(h)), s.Snapshot.Current())
 	page := s.Snapshot.Current().CommandPage
 	wantKeys := []string{"p7", "download-a", "download-b"}
 	if fmt.Sprint(page.ProductKeys) != fmt.Sprint(wantKeys) {

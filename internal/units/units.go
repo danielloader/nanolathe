@@ -1051,6 +1051,9 @@ type World struct {
 	// OnCapture is the capture-transfer hook [08 "Evaluation"] slot 2; nil means
 	// no consumer. It fires exactly once per ownership transfer.
 	OnCapture CaptureHook
+	// readinessObserver is the sweep's step-7 observation sink
+	// (SetReadinessObserver, pipeline.go); nil means no observer.
+	readinessObserver ReadinessObserver
 
 	defMap    map[*content.UnitDef]uint16 // def -> occupancy identity for per-def scan [P0-16][CNT-05]
 	nextDefID uint16

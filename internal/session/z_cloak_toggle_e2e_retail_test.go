@@ -109,17 +109,13 @@ func TestCloakToggleEndToEndRetail(t *testing.T) {
 	// control only exists when the two start in sight of each other.
 	seenBefore := sess.IsUnitVisible(enemy, com)
 
-	// Select the commander through the ordinary command boundary, then press
-	// CLOAK: the presentation arm resolves the direction from the published
-	// pair (0 → on) and transmits one descriptor to the whole selection.
-	if err := sess.EnqueueHumanCommand(HumanCommand{
-		Kind: HumanSelectionReplace, Selection: HumanSelectionCommand{Handles: []pool.Handle{com.Handle}},
-	}); err != nil {
-		t.Fatalf("select: %v", err)
-	}
+	// Press CLOAK with the commander selected: the presentation arm resolves
+	// the direction from the published pair (0 → on) and transmits one
+	// descriptor to the whole selection, which the client sends with the
+	// press (DESIGN_MULTIPLAYER §7.3).
 	stepOne()
 	if err := sess.EnqueueHumanCommand(HumanCommand{
-		Kind: HumanCloak, Cloak: HumanCloakCommand{Cloak: true},
+		Kind: HumanCloak, Cloak: HumanCloakCommand{Cloak: true, Handles: []pool.Handle{com.Handle}},
 	}); err != nil {
 		t.Fatalf("cloak on: %v", err)
 	}
@@ -176,7 +172,7 @@ func TestCloakToggleEndToEndRetail(t *testing.T) {
 		t.Fatal("restoring the stock did not re-hide the cloaked unit [05 R-ECO-01 §9]")
 	}
 	if err := sess.EnqueueHumanCommand(HumanCommand{
-		Kind: HumanCloak, Cloak: HumanCloakCommand{Cloak: false},
+		Kind: HumanCloak, Cloak: HumanCloakCommand{Cloak: false, Handles: []pool.Handle{com.Handle}},
 	}); err != nil {
 		t.Fatalf("cloak off: %v", err)
 	}

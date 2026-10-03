@@ -572,6 +572,10 @@ func (g *gameShell) writeBattleSave(path, description string) error {
 		return err
 	}
 	in.DisplayTimers = g.battle.cl.ResourceDisplayTimers()
+	// The selection and the pages local input moved are this client's; the
+	// save writes them into the status words, as retail saved them
+	// (hud.LocalInterface).
+	in.LocalInterface = g.battle.retailLocalInterface()
 	return sess.WriteRetailSave(path, in)
 }
 

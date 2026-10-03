@@ -72,7 +72,7 @@ func TestRetailSpawnChatCreatesUsableUnits(t *testing.T) {
 		if len(b.sess.Units.Iter()) != before+1 {
 			t.Fatal("repeat spawn at an occupied site was refused")
 		}
-		if err := b.sess.EnqueueHumanCommand(session.HumanCommand{Kind: session.HumanSelectionReplace, Selection: session.HumanSelectionCommand{Handles: []pool.Handle{created.Handle}}}); err != nil {
+		if err := b.enqueueHumanCommand(session.HumanCommand{Kind: session.HumanSelectionReplace, Selection: session.HumanSelectionCommand{Handles: []pool.Handle{created.Handle}}}); err != nil {
 			t.Fatal(err)
 		}
 		applyPendingBattleCommands(b)

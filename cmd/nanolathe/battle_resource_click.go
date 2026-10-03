@@ -194,7 +194,7 @@ func (b *battleSession) beginResourceClick(cl *client.Client, mx, my int32, modi
 		command := session.HumanCommand{Kind: session.HumanOrder, Order: session.HumanOrderCommand{
 			Handles: pending.selection, Code: 2, Position: *pos, Queued: true, TrackQueuedMove: true,
 		}}
-		sequence, err := b.sess.EnqueueHumanCommandWithSequence(command)
+		sequence, err := b.submitHumanCommand(command)
 		if err != nil {
 			return false
 		}

@@ -41,7 +41,6 @@ func TestRetailARMLabGeneratedSecondPageQueuesWarriorAndFlea(t *testing.T) {
 		if u == nil || u.Owner != sess.LocalOwner {
 			continue
 		}
-		u.Flags &^= hud.SelectionFlag
 		x, y, z = u.X, u.Y, u.Z
 	}
 	labHandle, err := sess.Units.Create(labDef, sess.LocalOwner, x, y, z)
@@ -49,7 +48,8 @@ func TestRetailARMLabGeneratedSecondPageQueuesWarriorAndFlea(t *testing.T) {
 		t.Fatalf("create ARMLAB: %v", err)
 	}
 	lab := sess.Units.Unit(labHandle)
-	lab.Flags |= hud.SelectionFlag | hud.EncodePageBits(0, 1)
+	lab.Flags = hud.EncodePageBits(lab.Flags, 1)
+	local := testSelection(lab) // the client's selection (DESIGN_MULTIPLAYER §7.3)
 
 	step := int32(1)
 	stepOnce := func() {
@@ -60,7 +60,7 @@ func TestRetailARMLabGeneratedSecondPageQueuesWarriorAndFlea(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		stepOnce()
 	}
-	cur := sess.Snapshot.Current()
+	cur := composedFrame(sess, cat, local)
 	if cur == nil || cur.CommandPage.Builder != labHandle || cur.CommandPage.Page != 1 {
 		t.Fatalf("ARMLAB first page snapshot = %#v", cur)
 	}
@@ -70,7 +70,7 @@ func TestRetailARMLabGeneratedSecondPageQueuesWarriorAndFlea(t *testing.T) {
 		MapW: int32(sess.World.CellW * 16), MapH: int32(sess.World.CellH * 16),
 	}
 	centerBattleStartCamera(sess, cam)
-	b := &battleSession{sess: sess, cat: cat, cam: cam}
+	b := &battleSession{sess: sess, cat: cat, cam: cam, local: local}
 	pal := retailPaletteForTest(t, cs)
 	b.hud, err = loadRetailBattleHUD(cs.fs, sess, cat, pal, nil, newBattleWindowContext(cs, nil))
 	if err != nil {
@@ -97,7 +97,7 @@ func TestRetailARMLabGeneratedSecondPageQueuesWarriorAndFlea(t *testing.T) {
 		t.Fatalf("ARMLAB page 1: window=%v err=%v", first, err)
 	}
 	clickNamed(first, "NEXT") // actual page-cycle button behavior [07 R-HUD-03 §6]
-	cur = sess.Snapshot.Current()
+	cur, _ = b.currentSnapshot()
 	if cur == nil || cur.CommandPage.Page != 2 {
 		t.Fatalf("NEXT selected page %v, want ARMLAB page 2", cur)
 	}

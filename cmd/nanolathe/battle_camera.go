@@ -173,34 +173,29 @@ func localCommanderUnit(sess *session.Session) (*units.Unit, bool) {
 }
 
 // applyPublishedCamera consumes each completed sub-tick once, before another
-// sub-tick can replace it. BigBrother repicks before follow, then Camera.Shake
-// finishes the pass: an idle camera's return toward where its shake started,
-// the cumulative phase-10 shake delta, and the final clamp
+// sub-tick can replace it. The local interface state first advances through
+// the tick — BigBrother's notices are its own now, raised from the tick's
+// facts — then BigBrother repicks before follow, and Camera.Shake finishes
+// the pass: an idle camera's return toward where its shake started, the
+// cumulative phase-10 shake delta, and the final clamp
 // [04 R-MOV-03 §1][07 R-CAM-01 §10][07 R-CAM-01 §12][I6].
 func (b *battleSession) applyPublishedCamera(cur *frame.Frame) {
-	if b == nil || b.cam == nil || cur == nil {
+	if b == nil || cur == nil {
 		return
 	}
-	if cur.BigBrotherCancelFollow {
-		b.cam.ClearFollow()
-		b.cam.LatchTracked()
+	ev := b.observeLocalInterface(cur)
+	if b.cam == nil {
+		return
 	}
-	if cur.BigBrotherResetVisited {
-		b.visitedUnits = nil
-		// TODO(question): map the force-zero page-close deferral bits and current
-		// page owner to this shell before replacing its existing unit-info-only
-		// close [07 R-HUD-04 §3].
-		if closeUnitInfo() {
-			b.developer.quickkeysDisabled = false
-		}
-	}
-	if cur.BigBrotherCycle {
-		b.cycleFollowTargetFrom(false, b.cam.LatchedTracked())
-		b.cam.LatchTracked()
-	}
+	b.applyLocalInterfaceEvents(ev)
 	b.applyFollowCamera(cur)
 	dx := cur.ShakeOffsetX - b.appliedShakeX
 	dy := cur.ShakeOffsetY - b.appliedShakeY
+	if b.local.NoShake() {
+		// Online NoShake is presentation only: the driver ran, with its two
+		// CRT draws, and this client declines the offset (§7.1).
+		dx, dy = 0, 0
+	}
 	b.cam.Shake(dx, dy)
 	b.appliedShakeX, b.appliedShakeY = cur.ShakeOffsetX, cur.ShakeOffsetY
 }
@@ -433,9 +428,10 @@ func (b *battleSession) cycleNextUnvisitedUnit() {
 	if !ok || b.cam == nil || b.sess == nil {
 		return
 	}
+	local := b.localState()
 	pick, found := b.firstUnvisitedOwnUnit(f)
 	if !found {
-		b.visitedUnits = nil
+		local.ClearVisited()
 		pick, found = b.firstUnvisitedOwnUnit(f)
 	}
 	if !found {
@@ -443,34 +439,37 @@ func (b *battleSession) cycleNextUnvisitedUnit() {
 	}
 	b.glideToUnit(pick)
 	b.currentUnit = pick.Slot
-	b.markVisited(pick.Slot)
+	local.MarkVisited(unitViewRef(pick))
 	for i := range f.Units {
 		v := f.Units[i]
 		if v.Slot != 0 && v.Owner == b.sess.LocalOwner && b.onScreenUnit(v) {
-			b.markVisited(v.Slot)
+			local.MarkVisited(unitViewRef(v))
 		}
 	}
 }
 
+// unitViewRef is a committed unit's allocation reference, the key of every
+// local interface entry (hud.LocalInterface).
+func unitViewRef(v frame.UnitView) pool.UnitRef {
+	return pool.UnitRef{Handle: v.Slot, Serial: v.AllocationSerial}
+}
+
+// firstUnvisitedOwnUnit is the cycle's walk. Retail keeps the visited bits in
+// each unit's status word [07 R-CAM-01 §2]; here they are local interface
+// state keyed by allocation reference, so a unit created in a visited unit's
+// slot is unvisited.
 func (b *battleSession) firstUnvisitedOwnUnit(f *frame.Frame) (frame.UnitView, bool) {
 	for i := range f.Units {
 		v := f.Units[i]
 		if v.Slot == 0 || b.sess == nil || v.Owner != b.sess.LocalOwner {
 			continue
 		}
-		if b.visitedUnits[v.Slot] {
+		if b.local.Visited(unitViewRef(v)) {
 			continue
 		}
 		return v, true
 	}
 	return frame.UnitView{}, false
-}
-
-func (b *battleSession) markVisited(h pool.Handle) {
-	if b.visitedUnits == nil {
-		b.visitedUnits = make(map[pool.Handle]bool)
-	}
-	b.visitedUnits[h] = true
 }
 
 // glideToUnit writes the desired origin from a unit position through the one

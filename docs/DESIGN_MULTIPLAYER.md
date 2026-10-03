@@ -3074,8 +3074,11 @@ and build contracts. U1 allocation references, U4 frozen simulation content
 and U5's configuration and build identities are implemented as described
 below, as are U5b, the admission half (`ValidateMatchInputs`,
 `NewAdmittedSkirmish`), U2, the explicit seat commands, and U6, the command
-codec, the wire primitives and the join comparison. No multi-seat session is
-claimed here; U3, the local interface state, is the last M2 unit.
+codec, the wire primitives and the join comparison, and U3, the local
+interface state. **Every M2 unit is implemented as of 2026-10-02.** No
+multi-seat session is claimed: M2's constructor refuses it until M5, and the
+open items each unit's paragraph lists below (the replay-widening proposal,
+the three admission attestations, the visited-bit question) carry into M3–M6.
 
 **U1 allocation references, 2026-10-02.** Both successful creation paths
 assign a battle-wide serial after the fallible COB bind and before creation
@@ -3375,6 +3378,63 @@ rows left the deadcode baseline and the staged codec, join and front-half
 rows joined it, because nothing shipped can call them before M4's recorder
 and M6's relay. Open: M6's stream driver needs an accessor for the session's
 command context; U2's `onlineAmount` duplicates `netproto.OnlineAmount`.
+
+**U3 local interface state, 2026-10-02.** Selection, the visited set, build
+pages, BigBrother and held Shift, and the online logo and shake overrides
+live in `hud.LocalInterface`, keyed by `pool.UnitRef` (sorted slices, no
+ranged map), so a reused handle inherits neither a selection nor a page. The
+session refuses the local kinds in both contexts, reads no selection — Stance,
+Cloak and GroupAssign carry `Handles`, and a command with no units does
+nothing — and no longer publishes the selection, the selected bit or the
+command page; it publishes `CloakRequested`, `StockpileRounds`,
+`RangeEligible` and, each tick, `frame.InterfaceFacts`. Those facts are step
+7's readiness verdicts, heard through a session-installed observation sink on
+the units sweep (`units.SetReadinessObserver`, nil by default) that reports
+each visited unit's reference and verdict in visit order before the step's
+own clear and writes nothing, so a sweep with an observer leaves every record
+as one without — proven by status words and partial fingerprints compared
+tick by tick with and without a consumer. The host applies local kinds at
+once, fills selection-derived actors when it sends a command (Order, Stop,
+SelfDestruct, Stance, Cloak, GroupAssign), consumes facts per publication and
+composes the presentation-only frame sections at the end of each step;
+control-group assignment stays a seat command, recall is local with the
+not-yet-published assignment overlaid so assign-then-recall in one batch
+works. The frame buffer keeps a per-tick fact queue of 256 ticks: when full it
+keeps the oldest, refuses newer ones and counts them; the host then applies
+the facts before the gap and resyncs from the first frame at or after it
+(selected units not ready there leave the selection; a unit unready only
+inside the gap stays selected, BigBrother cycles in the gap are skipped,
+visited units and pages are kept) — unreachable in normal play, since the
+host drains every step. **M2-C7 evidence:** the bits moved are the selected
+bit, both visited bits and the page field (bits 22–25); with those masked on
+every unit record, baseline `4bedbf0f` and the candidate agree at all 58
+samples (ashap every 6,000 ticks and the end in three modes, the benchmark
+scene every 300 steps, the Strict pool scene every 900 steps), with and
+without a facts consumer, and so do the unmasked fingerprints — the lock
+scenes take no human input and never set those bits, and the page field
+keeps its creation seed in `units.initialStatusFlags` — so no lock constant
+moved; moving one would have been updating from unexplained output. Six
+renderer captures (plain, `--shot-select`, select with a build page and
+Shift, through classic and modern) are byte-identical to the baseline.
+Retail's save carries the selected bit, both visited bits and the page field
+`[08 R-SAVE-02 §6]`: the host hands its local selection and moved pages to
+the save path, which writes them into detached copies of the status words,
+and a load seeds the new local state once from the restored words
+(`AdoptStatusWords`); the visited bits are a `TODO(question)` — research
+names 0x40 and 0x80 without saying which a visit sets and which the `n`
+cycle tests — so they are neither written nor seeded and a restored word
+keeps the file's. Readings: the host consumes every completed tick's facts
+before the next input batch, so local state takes the same values tick for
+tick, and a selection becomes visible one tick sooner, at input; online
+`NoShake` and `SetLogo` are local only while single-player keeps the
+authoritative toggle and record write; the commanded page is local and the
+seeded page field is the default; BigBrother's cancel-follow notice goes out
+with the next tick, or at once when paused; a dying unit is reported unready
+at its last visit and leaves the selection there. Open: `step.go` and
+`composition.go` still use the names `resetBigBrotherEvents`/`stepBigBrother`;
+`units.initialStatusFlags` still seeds bits 22–25 (removing the seed would
+move the locks); `debug_capture.go`'s `DebugUnit.Selected` is always false;
+the visited-bit question needs an Unknown entry in research 07.
 
 M2 makes the command boundary explicit and the battle inputs identifiable.
 It does not enable a network battle: perspectives, multiplayer sharing,

@@ -10,7 +10,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
-	"github.com/nanolathe-gg/nanolathe/internal/session"
 )
 
 func sidebarNavigationFixture(t *testing.T) (*battleSession, *client.Client) {
@@ -31,6 +30,9 @@ func sidebarNavigationFixture(t *testing.T) (*battleSession, *client.Client) {
 		n++
 	}
 	b.hud.windows["armfav3"] = third
+	// The page count is the definition's page-count byte; the host composes
+	// the command page from it (hud.ComposeCommandPage).
+	b.cat.Units["armfav"].BuildPageCount = 4
 	paletteCallbackFrame(t, b, func(f *frame.Frame) { f.CommandPage.PageCount = 4 })
 	cl.Resize(1280, 704)
 	expandedWindow(t, b)
@@ -138,14 +140,18 @@ func TestAdaptiveSidebarNavigationUsesVisiblePages(t *testing.T) {
 		t.Fatal("presentation paging changed committed authored page state")
 	}
 
-	// SwitchAlt still routes the other digit arm to squad recall.
+	// SwitchAlt still routes the other digit arm to squad recall, which is
+	// local selection (DESIGN_MULTIPLAYER §7.3): recalling the empty group 2
+	// without Shift deselects the builder.
 	b.switchAlt = true
 	b.routeDigit(2, true, false, cl)
 	assertPage(1)
+	if b.localState().SelectionCount() != 1 {
+		t.Fatal("fixture: the builder is not the selection")
+	}
 	b.routeDigit(2, false, false, cl)
-	pending := b.sess.PendingHumanCommands()
-	if len(pending) != 1 || pending[0].Kind != session.HumanGroupRecall {
-		t.Fatalf("SwitchAlt group arm dispatched %+v", pending)
+	if b.localState().SelectionCount() != 0 || len(b.sess.PendingHumanCommands()) != 0 {
+		t.Fatalf("SwitchAlt group arm did not recall: selection %v, queued %+v", b.localState().SelectedRefs(), b.sess.PendingHumanCommands())
 	}
 }
 
@@ -153,9 +159,10 @@ func TestAdaptiveSidebarNavigationFallsBackToAuthoredPages(t *testing.T) {
 	b, cl := sidebarNavigationFixture(t)
 	cl.SetEnhanced(false)
 	b.nextBuildPage()
-	pending := b.sess.PendingHumanCommands()
-	if len(pending) != 1 || pending[0].Kind != session.HumanBuildPage || pending[0].BuildPage.Page != 2 {
-		t.Fatalf("Classic navigation lost its authored page command: %+v", pending)
+	// The authored page is local interface state, applied at once.
+	f, _ := b.currentSnapshot()
+	if f.CommandPage.Page != 2 || len(b.sess.PendingHumanCommands()) != 0 {
+		t.Fatalf("Classic navigation lost its authored page: page %d, queued %+v", f.CommandPage.Page, b.sess.PendingHumanCommands())
 	}
 }
 

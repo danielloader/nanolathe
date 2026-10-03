@@ -86,11 +86,12 @@ func (b *battleSession) DispatchStockpileGadget(count int) error {
 // constructs the session-owned value directly; EnqueueHumanCommand assigns
 // sequence and due-tick metadata and performs no simulation mutation
 // [01 §4.4][07 §9].
+// Local interface kinds apply to the client's own local state instead, and
+// every other command's selection-derived units are resolved from that state
+// here, at submission (submitHumanCommand, DESIGN_MULTIPLAYER §7.3).
 func (b *battleSession) enqueueHumanCommand(c session.HumanCommand) error {
-	if b == nil || b.sess == nil {
-		return fmt.Errorf("nanolathe: battle command not enqueued: no session")
-	}
-	return b.sess.EnqueueHumanCommand(c)
+	_, err := b.submitHumanCommand(c)
+	return err
 }
 
 func (b *battleSession) DispatchMobileBuild(product string, wx, wy, wz numeric.Fixed, queued bool) error {
@@ -181,8 +182,9 @@ func (b *battleSession) DispatchStockpile(unit pool.Handle, count int) error {
 }
 
 // DispatchBuildPage submits an absolute authored page selected by the
-// presentation controls. Production resolves the builder from the immutable
-// CommandPage and the session validates it again at the input boundary [07 §9].
+// presentation controls. Production resolves the builder from the committed
+// CommandPage; the page is local interface state, and the local state applies
+// the retail identity and page-count guard [07 §9].
 func (b *battleSession) DispatchBuildPage(page int) error {
 	f, ok := b.currentSnapshot()
 	if !ok {

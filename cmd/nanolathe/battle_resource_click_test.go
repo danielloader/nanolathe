@@ -238,12 +238,16 @@ func TestResourceSingleClickExpiryAndClassic(t *testing.T) {
 						resourceInput(b, cl, 320, 320, false, shift)
 					}
 					cmds := b.sess.PendingHumanCommands()
-					want := session.HumanOrder
 					if kind == 1 {
-						want = session.HumanSelectionClear
+						// Type 1's clear is local interface state
+						// (DESIGN_MULTIPLAYER §7.3): nothing reaches the session.
+						if len(cmds) != 0 || b.localState().SelectionCount() != 0 || b.resourceClick != nil {
+							t.Fatalf("single click %+v, selection %v, want an immediate local clear with no pending gesture", cmds, b.localState().SelectedRefs())
+						}
+						return
 					}
-					if len(cmds) != 1 || cmds[0].Kind != want || b.resourceClick != nil {
-						t.Fatalf("single click %+v, want immediate %v with no pending gesture", cmds, want)
+					if len(cmds) != 1 || cmds[0].Kind != session.HumanOrder || b.resourceClick != nil {
+						t.Fatalf("single click %+v, want immediate order with no pending gesture", cmds)
 					}
 					if kind == 0 && cmds[0].Order.Queued != shift {
 						t.Fatalf("queued=%v, want captured Shift=%v", cmds[0].Order.Queued, shift)
@@ -543,6 +547,7 @@ func TestResourceFeedbackCancelsWhenSelectionExpands(t *testing.T) {
 	resourceClickAt(b, cl, 320, 320, true)
 	ms.ms += 100
 	resourceClickAt(b, cl, 320, 320, true)
+	b.sess.Step(b.sess.Clock.ScaledAnchor + 1) // the selection is made from a frame that shows other
 	b.enqueueSelectionCommand(session.HumanCommand{Kind: session.HumanSelectionReplace, Selection: session.HumanSelectionCommand{Handles: []pool.Handle{builder, other.Handle}}})
 	b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
 	b.updateResourceQueueFeedback(cl)

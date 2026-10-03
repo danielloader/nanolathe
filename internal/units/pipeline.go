@@ -9,6 +9,7 @@ package units
 
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/cob"
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
 )
 
 // unitPostCOBStatus is the per-unit post-normal-COB status work [04 §2.4][04 §5.1].
@@ -57,11 +58,18 @@ func (w *World) unitPostCOBStatus(u *Unit, tick uint32) {
 	// share [07 R-WGT-01 §9][08 R-TRIG-01 §3]: the selectable bit 5 is set, the
 	// remaining-build fraction is exactly 0.0, the post-capture grace counter is
 	// zero, and either the unit has no carrier or its carrier's status word
-	// carries bit 30. This is the sweep's own clear, not presentation's: the bit
-	// lives on the unit record (internal/session's selection commands write it,
-	// publication reads it), so a unit that starts a repair, is picked up by a
-	// transport that is not an airbase, or has its selectable bit cleared drops
-	// out of the selection on its next visit without the HUD being asked.
+	// carries bit 30. This is the sweep's own clear, not presentation's: a unit
+	// that starts a repair, is picked up by a transport that is not an airbase,
+	// or has its selectable bit cleared drops out of the selection on its next
+	// visit without the HUD being asked.
+	//
+	// The selection itself is a client's local state keyed by allocation
+	// reference (DESIGN_MULTIPLAYER §7.3), so the session hears this step's
+	// verdict through the observation sink and tells its host; the bit below
+	// is the retail word's own, which only a retail save's restore sets now.
+	if obs := w.readinessObserver; obs != nil {
+		obs(pool.UnitRef{Handle: u.Handle, Serial: u.AllocationSerial}, w.selectionReady(u))
+	}
 	if u.Flags&SelectedStatus != 0 && !w.selectionReady(u) {
 		u.Flags &^= SelectedStatus
 	}
@@ -106,3 +114,21 @@ func (w *World) selectionReady(u *Unit) bool {
 // SelectionReady exposes the shared sweep and next-ready selector predicate
 // [04 R-MOV-03 §1].
 func (w *World) SelectionReady(u *Unit) bool { return w.selectionReady(u) }
+
+// ReadinessObserver hears step 7's readiness verdict for one unit at its own
+// visit: the unit's allocation reference and whether it is ready
+// [04 R-MOV-03 §1 step 7]. It is called for every live unit the sweep visits,
+// in visit order — ascending pool order within the sweep's player gate — and
+// before the step's own clear, which it cannot affect. An observer must not
+// write to the world, draw from either RNG stream or allocate units: the
+// verdict is reported, never acted on, so a sweep with an observer leaves
+// every record exactly as one without.
+type ReadinessObserver func(ref pool.UnitRef, ready bool)
+
+// SetReadinessObserver installs (or, with nil, removes) the step-7 observation
+// sink. Nil is the default; a world rebuild starts without one.
+func (w *World) SetReadinessObserver(fn ReadinessObserver) {
+	if w != nil {
+		w.readinessObserver = fn
+	}
+}

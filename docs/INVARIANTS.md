@@ -314,7 +314,14 @@ audio service, a preference — may change a lifetime, a pool's occupancy or a
 draw. The fixed effect pool is authoritative state although it is kept
 beside the publication boundary. Its authored holds come from the battle's
 immutable `content.SimArt`, bound before the first unit script; no host timing
-resolver exists (DESIGN_MULTIPLAYER §5.3 L9, M1). The reads of the local seat
+resolver exists (DESIGN_MULTIPLAYER §5.3 L9, M1). The committed frame's
+selection and command-page sections, and the selected bit and page field of
+its unit and contact copies, are presentation-only: the host composes them
+from its local interface state keyed by allocation reference
+(DESIGN_MULTIPLAYER §7.3, M2 U3), the session writes neither bit, and the
+frame buffer retains each tick's local-interface facts — step 7's readiness
+verdicts, reported through an observation sink that writes nothing — until
+the host drains them. The reads of the local seat
 and viewing slot listed in that design's §6.3 do not yet meet this paragraph
 and remain its milestone M5 work. A diff must not add another exception.
 

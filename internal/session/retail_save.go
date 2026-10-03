@@ -45,6 +45,10 @@ type RetailSaveInputs struct {
 	// entry writes the unit's own retained words [08 R-SAVE-02 §6].
 	// RetailBattleSaveInputs fills this from the live services.
 	UnitMirrors map[pool.Handle]RetailUnitMirrors
+	// LocalInterface is the saving client's local interface state, written
+	// into the status words where the session-held selection used to be.
+	// Nil — a battle with no host — writes each word as the session holds it.
+	LocalInterface *RetailLocalInterface
 
 	// Mapping is required for a live save and copied as supplied [08
 	// R-SAVE-02 §12]. RetailMappingImage below is the runtime source; a caller
@@ -175,6 +179,7 @@ func ProjectRetailSession(s *Session, in RetailSaveInputs) (save.RetailProjectio
 // build every group vector backwards [08 R-SAVE-02 §6].
 func projectUnitImage(w *units.World, econ *economy.Service, movement *movement.System, in RetailSaveInputs) (save.UnitImage, error) {
 	image := save.UnitImage{Version: save.UnitsVersionRetail}
+	localInterface := in.LocalInterface.index()
 	resolve := func(h pool.Handle) (uint16, bool) {
 		id, ok := in.StableIDs[h]
 		return id, ok && id != 0 && w.Unit(h) != nil
@@ -195,6 +200,15 @@ func projectUnitImage(w *units.World, econ *economy.Service, movement *movement.
 			mirrored := *u
 			mirrors.applyTo(&mirrored)
 			record = &mirrored
+		}
+		// The client's selection and page fields go into the same detached
+		// copy, never the live word (RetailLocalInterface).
+		if flags := localInterface.statusWord(u); flags != record.Flags {
+			if record == u {
+				detached := *u
+				record = &detached
+			}
+			record.Flags = flags
 		}
 		scratch, ok := in.UnitWriterScratch[h]
 		if !ok {
@@ -520,6 +534,75 @@ func (m RetailUnitMirrors) applyTo(u *units.Unit) {
 	}
 	u.CachedOccupancyX, u.CachedOccupancyZ = m.OccupancyX, m.OccupancyZ
 	u.FootprintSizeX, u.FootprintSizeZ = m.FootprintX, m.FootprintZ
+}
+
+// RetailLocalInterface is a client's local interface state as a retail save
+// writes it (DESIGN_MULTIPLAYER §7.3). Retail keeps the selection and each
+// builder's build page in the unit's status word — the selected bit 4 and the
+// page field, bit 22 and bits 23..25 [07 §9] — and the packed save word
+// carries both [08 R-SAVE-02 §6]. Here the selection and any page local input
+// moved are the client's, keyed by allocation reference, so the host hands
+// them to the save, which writes them into each saved word where the session
+// used to carry them: the selected bit set exactly on the listed units, and
+// a listed page field in place of the word's own. A reference whose slot no
+// longer holds that allocation is ignored. The visited bits are not written
+// (hud.LocalInterface's TODO(question)); the word keeps its own.
+type RetailLocalInterface struct {
+	Selected []pool.UnitRef
+	Pages    []RetailPageField
+}
+
+// RetailPageField is one builder's page field, in the status word's layout.
+type RetailPageField struct {
+	Ref   pool.UnitRef
+	Flags uint32
+}
+
+// retailBuildPageField is the status word's build-page field: the page-shown
+// bit 22 and the page-number bits 23..25 [07 §9]. internal/units and
+// internal/hud own the same masks and neither is importable here for it.
+const retailBuildPageField uint32 = 1<<22 | 7<<23
+
+// retailLocalInterfaceIndex is a RetailLocalInterface looked up by reference
+// during one projection. Its maps are read by key only, never ranged [I1].
+type retailLocalInterfaceIndex struct {
+	selected map[pool.UnitRef]bool
+	pages    map[pool.UnitRef]uint32
+}
+
+func (l *RetailLocalInterface) index() *retailLocalInterfaceIndex {
+	if l == nil {
+		return nil
+	}
+	x := &retailLocalInterfaceIndex{
+		selected: make(map[pool.UnitRef]bool, len(l.Selected)),
+		pages:    make(map[pool.UnitRef]uint32, len(l.Pages)),
+	}
+	for _, r := range l.Selected {
+		x.selected[r] = true
+	}
+	for _, p := range l.Pages {
+		x.pages[p.Ref] = p.Flags & retailBuildPageField
+	}
+	return x
+}
+
+// statusWord is u's status word as the save writes it: the session's word
+// with the client's selected bit and page field in place, or the word itself
+// when no client supplied its state.
+func (x *retailLocalInterfaceIndex) statusWord(u *units.Unit) uint32 {
+	if x == nil {
+		return u.Flags
+	}
+	ref := pool.UnitRef{Handle: u.Handle, Serial: u.AllocationSerial}
+	flags := u.Flags &^ units.SelectedStatus
+	if x.selected[ref] {
+		flags |= units.SelectedStatus
+	}
+	if page, ok := x.pages[ref]; ok {
+		flags = flags&^retailBuildPageField | page
+	}
+	return flags
 }
 
 // retailUnitMirrors projects the service-owned base-record words for every

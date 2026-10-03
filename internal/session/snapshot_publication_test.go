@@ -10,6 +10,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/features"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
@@ -274,29 +275,37 @@ func TestRadarSelectedRangeStatusGatePreservesSlotOrder(t *testing.T) {
 		{DefinitionHeader: content.DefinitionHeader{CanonicalKey: "unselected"}, MaxDamage: 1, RadarDistance: 300, OnOffable: false},
 	}
 	w := newSessionFixtureWorld(4, nil)
+	local := hud.NewLocalInterface() // the client's selection (DESIGN_MULTIPLAYER §7.3)
+	var selected []pool.UnitRef
 	for i, def := range defs {
 		h, err := w.Create(def, 0, numeric.Fixed(int64(i+1)<<16), 0, 0)
 		if err != nil {
 			t.Fatalf("create unit %d: %v", i, err)
 		}
 		if i < 2 {
-			w.Unit(h).Flags |= 0x10 // authoritative selected bit [07 §9]
+			selected = append(selected, unitRef(w.Unit(h)))
 		}
 	}
-	w.Unit(3).Flags &^= 0x10
+	local.ReplaceSelection(selected)
 	s := &Session{Snapshot: frame.NewBuffer(), Units: w, LocalOwner: 0}
 	s.publishSnapshot(1)
 	contacts := s.Snapshot.Current().Radar.Contacts
+	for _, c := range contacts {
+		if c.Selected || c.Status&0x10 != 0 || c.RangeStatus {
+			t.Fatalf("the publisher composed a selection: %+v", c)
+		}
+	}
+	local.ComposeSelection(s.Snapshot.Current())
 	if len(contacts) != 3 || contacts[0].Handle >= contacts[1].Handle || contacts[1].Handle >= contacts[2].Handle {
 		t.Fatalf("contact order = %+v, want ascending handles", contacts)
 	}
 	if !contacts[0].Selected || contacts[0].Status&0x10 == 0 || !contacts[0].RangeStatus || contacts[0].RadarDistance != 100 {
 		t.Fatalf("selected active range = %+v", contacts[0])
 	}
-	if !contacts[1].Selected || contacts[1].Status&0x10 == 0 || contacts[1].RangeStatus || contacts[1].RadarDistance != 0 {
+	if !contacts[1].Selected || contacts[1].Status&0x10 == 0 || contacts[1].RangeStatus || contacts[1].RangeEligible || contacts[1].RadarDistance != 0 {
 		t.Fatalf("inactive onoffable range = %+v", contacts[1])
 	}
-	if contacts[2].Selected || contacts[2].Status&0x10 != 0 || contacts[2].RangeStatus || contacts[2].RadarDistance != 0 {
+	if contacts[2].Selected || contacts[2].Status&0x10 != 0 || contacts[2].RangeStatus || !contacts[2].RangeEligible {
 		t.Fatalf("unselected range = %+v", contacts[2])
 	}
 }

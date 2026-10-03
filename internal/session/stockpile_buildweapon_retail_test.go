@@ -59,15 +59,13 @@ func TestRetailRetaliatorStockpilesAndFiresANuke(t *testing.T) {
 	// MAKENUKE toy lives on it [07 R-HUD-03 §6]. The FBI `Builder` gate that
 	// used to stand at the publication boundary published no page at all for a
 	// silo, so the toy was unreachable however well the sim below worked.
-	// A command page is a single-selection surface, so the battle's own opening
-	// selection has to come off first [07 §9].
-	for _, u := range s.Units.IterSliced() {
-		if u != nil && u.Alive && u.Owner == 0 {
-			u.Flags &^= 0x10
-		}
-	}
-	silo.Flags |= 0x10 // the selection bit [07 §9]
+	// A command page is a single-selection surface; the host composes it from
+	// the client's selection (DESIGN_MULTIPLAYER §7.3).
+	local := selectLocal(silo)
 	s.Step(3)
+	if committed := s.Snapshot.Current(); committed != nil {
+		composeLocal(s, local, committed)
+	}
 	if committed := s.Snapshot.Current(); committed == nil {
 		t.Fatal("no committed frame after the selection step")
 	} else if committed.CommandPage.Builder != silo.Handle || committed.CommandPage.PageCount < 2 {
@@ -125,6 +123,9 @@ func TestRetailRetaliatorStockpilesAndFiresANuke(t *testing.T) {
 	// The held byte the MAKENUKE toy prints is published on the command page
 	// [07 R-P0-11 §2]; without it the button can never show that a round is
 	// ready.
+	if committed := s.Snapshot.Current(); committed != nil {
+		composeLocal(s, local, committed)
+	}
 	if committed := s.Snapshot.Current(); committed == nil || committed.CommandPage.Stockpile != 1 {
 		t.Fatalf("committed command page publishes stockpile %v, want the one held round [07 R-P0-11 §2]", committed.CommandPage.Stockpile)
 	}

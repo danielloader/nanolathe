@@ -150,12 +150,10 @@ func TestPatrollingSquadDoesNotFreezeWhileWalking(t *testing.T) {
 		t.Skipf("only %d squad members could be staged on legal ground", len(squad))
 	}
 
-	if err := sess.EnqueueHumanCommand(session.HumanCommand{
-		Kind:      session.HumanSelectionReplace,
-		Selection: session.HumanSelectionCommand{Handles: squad},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	// The orders below name their actors explicitly; selection is the
+	// client's local state and no longer a session command
+	// (DESIGN_MULTIPLAYER §7.3).
+	//
 	// Code 9 is the patrol resolver [04 R-ORD-02 §1]; the four legs box the
 	// enemy base so every lap crosses it.
 	legs := [][2]numeric.Fixed{

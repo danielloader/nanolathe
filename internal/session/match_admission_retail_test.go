@@ -96,7 +96,7 @@ func TestAdmittedSkirmishComposesTheLocalBattleRetail(t *testing.T) {
 			t.Fatalf("%s: adapter: %v", c.name, err)
 		}
 		config := resolveMatch(t, r)
-		inputs, err := freezeMatchInputs(fs, cat, config, nil)
+		inputs, err := FreezeMatchInputs(fs, cat, config, nil)
 		if err != nil {
 			t.Fatalf("%s: freeze the configuration's content: %v", c.name, err)
 		}
@@ -153,7 +153,7 @@ func TestAdmissionRefusesContentPreparedForOtherMutatorsRetail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inputs, err := freezeMatchInputs(fs, cat, resolveMatch(t, r), nil)
+	inputs, err := FreezeMatchInputs(fs, cat, resolveMatch(t, r), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

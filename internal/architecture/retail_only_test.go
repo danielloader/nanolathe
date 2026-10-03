@@ -43,6 +43,11 @@ import (
 // rule set whose order answer runs inside the tick. Nothing in the session's
 // imports can reach a package under mods/ (the dependency runs the other
 // way), so a rule set joins this list by hand when it is added.
+//
+// internal/netproto is here as internal/version is: it writes and reads the
+// command payloads phase 1 applies and every identity a lockstep battle is
+// admitted on (DESIGN_MULTIPLAYER §7.4, §8.2, §14), so every audit — imports,
+// float64, map order, goroutines — reads it too. It holds no float at all.
 var authoritativeDirs = []string{
 	"internal/ai",
 	"internal/aikit",
@@ -57,6 +62,7 @@ var authoritativeDirs = []string{
 	"internal/mission",
 	"internal/model",
 	"internal/movement",
+	"internal/netproto",
 	"internal/orders",
 	"internal/path",
 	"internal/pool",

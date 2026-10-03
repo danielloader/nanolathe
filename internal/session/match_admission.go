@@ -148,9 +148,12 @@ func admitMatch(c EffectiveMatchConfig, inputs *content.SimulationInputs) (match
 	// but not the rule set that prepared the catalog clone, and preparation
 	// also asks the set's combat seam for each weapon's reload
 	// (prepareCommunityWeapons). Two sets with one table and different reload
-	// answers are indistinguishable here. Settle by recording the preparing
-	// set's name and base in the freeze request (content's owner, U4), or by
-	// relying on U6's cross-seat content-digest comparison.
+	// answers are indistinguishable here. Across seats, CompareMatchIdentity
+	// (U6) now refuses them: the content digest covers each prepared weapon's
+	// reload time. And FreezeMatchInputs prepares under the configuration's
+	// own set. What remains open is inputs a caller froze some other way;
+	// settle by recording the preparing set's name and base in the freeze
+	// request (content's owner, U4).
 	if got := communityDigest(r.Community); got != inputs.CommunityDigest() {
 		want := inputs.CommunityDigest()
 		refuse(ErrMatchRulesMismatch, "community", fmt.Sprintf("the Community table the frozen content was prepared under, digest %x, got %x", want[:], got[:]))
@@ -189,10 +192,12 @@ func admitMatch(c EffectiveMatchConfig, inputs *content.SimulationInputs) (match
 	// profile's name or directory table, nor of the mod's id, version and
 	// archive digest (§8.6 fields 8 and 9): the mount applied them before the
 	// capture began, and the capture records only the files it read. Neither
-	// can be checked against the content here. Settle by having the mount's
-	// owner record the mounted profile and mod identity with the capture, or
-	// by U6 comparing the mod identity from the mod library beside the
-	// content digest.
+	// can be checked against the content here. The mod half is now compared
+	// at the join (U6): CompareMatchIdentity takes the mod this seat's mount
+	// applied, as its mod library names it, and refuses it unless it is the
+	// configuration's and the other seat's. The profile's name and directory
+	// table remain unattested; settle by having the mount's owner record the
+	// mounted profile with the capture.
 
 	if len(errs) != 0 {
 		return matchAdmission{}, errors.Join(errs...)
@@ -296,7 +301,7 @@ func matchSingleSeat(r *MatchConfigRequest, inputs *content.SimulationInputs) er
 // Normalize, whose defaults would replace an explicit zero resource with 1000
 // (§8.6 player row 1). The options' load observer is the caller's.
 //
-// It also serves the front half (freezeMatchInputs), which reads only the
+// It also serves the front half (FreezeMatchInputs), which reads only the
 // map, the seat count, the rule set and the content fields, so it writes
 // every role: a human row as a human, a watcher as an observer, a computer
 // and the Survival attacker as computers.
@@ -389,23 +394,36 @@ func matchSkirmishSetup(r *MatchConfigRequest) (SkirmishConfig, SkirmishEntryOpt
 	return cfg, options
 }
 
-// freezeMatchInputs is battle entry's front half for an agreed configuration:
-// it captures fs, compiles or validates cat through the capture, prepares it
-// under the configuration's rule set, Community table and mutators, selects
-// the configuration's map for its seat count and freezes the result. Content
+// FreezeMatchInputs is battle entry's front half for an agreed configuration,
+// the step that turns a decoded configuration (DecodeMatchConfig) into the
+// frozen content a battle runs on and is admitted against
+// (DESIGN_MULTIPLAYER §8.7, §8.8). It captures fs, compiles cat through the
+// capture — or validates a supplied catalog against it — prepares it under
+// the configuration's rule set, Community table and mutators, selects the
+// configuration's map for its seat count and freezes the result. Content
 // freezing reads no seat but their count, so it serves every configuration,
 // multi-seat ones included; whether a battle can be composed from the result
-// is NewAdmittedSkirmish's question. A supplied catalog must have been
+// is NewAdmittedSkirmish's question, and whether the result admits the
+// configuration is ValidateMatchInputs'. A supplied catalog must have been
 // compiled under the configuration's content limits, which admission checks.
-func freezeMatchInputs(fs vfs.FSOps, cat *content.Catalog, c EffectiveMatchConfig, progress content.Progress) (*content.SimulationInputs, error) {
+//
+// Every refusal wraps ErrMatchConfigurationRejected (no configuration) or
+// ErrMatchContentMismatch (this install could not capture, compile, select
+// or freeze what the configuration names, its cause chained), in the
+// project's diagnostic shape.
+func FreezeMatchInputs(fs vfs.FSOps, cat *content.Catalog, c EffectiveMatchConfig, progress content.Progress) (*content.SimulationInputs, error) {
 	if c.encoding == nil {
 		return nil, matchAdmissionError(ErrMatchConfigurationRejected, nil, "configuration", "a resolved match configuration")
+	}
+	if fs == nil {
+		return nil, matchAdmissionError(ErrMatchContentMismatch, nil, "filesystem", "the mounted content the configuration's battle is frozen from")
 	}
 	cfg, options := matchSkirmishSetup(&c.request)
 	options.Progress = progress
 	entry, err := prepareSkirmishEntry(fs, cat, cfg, options)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", matchAdmissionError(ErrMatchContentMismatch, nil, "inputs",
+			fmt.Sprintf("content this install can capture, compile, prepare and freeze for map %q, %d seats and rule set %q", c.request.MapName, len(c.request.Seats), c.request.RuleName)), err)
 	}
 	return entry.inputs, nil
 }

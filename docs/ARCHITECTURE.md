@@ -125,6 +125,7 @@ package implements.
 | `internal/session` | The authoritative session: state machine, battle entry for skirmish and mission, the twelve-phase tick, publication, results, save staging and restore, effect strips, eyeballs, status cues | DESIGN_RUNTIME_DETERMINISM (tick, publication), DESIGN_SESSIONS_AI_SAVE (states, entry, results, saves) |
 | `internal/gameplay` | Central gameplay policy vocabulary shared by settings and session: the two reserved words and, through a registry view the session installs, the name of any rule set the build links; no simulation or presentation dependencies | DESIGN_GAMEPLAY_RULES |
 | `internal/version` | Build identity: the profile name, the common build manifest of DESIGN_MULTIPLAYER §8.7 (`BuildManifest`, its codec and digest, `CurrentBuildManifest`) and the stamp the installer's generator `internal/version/stampgen` writes into a verified source tree before the release build | DESIGN_RUNTIME_DETERMINISM, DESIGN_MULTIPLAYER §8.7 |
+| `internal/netproto` | The multiplayer protocol leaf, standard library only: the version-1 wire primitives every Nanolathe payload is written in (varints, zigzag, `text`, `key`, `digest`, `id`, binary32 `amount`), a bounded reader that refuses malformed input before allocating from it, and the identity a seat reports before it may ready. Each payload's schema stays with the package that owns its type; envelopes, relay messages and transport are M6/M7's | DESIGN_MULTIPLAYER §7.4.1, §8.2, §14 |
 
 ### World
 
@@ -225,7 +226,7 @@ presentation  client ─► render, hud, audio, camera, palette, input, model, f
               ui ─► gui, input           render ─► camera, combat, visibility, world, model, palette, frame, content
               hud ─► render, camera, input, frame, units, world, content
 
-composition   session ─► every simulation package below, plus frame, hud, render, audio, save, aikit/brains/utiltac (parameter vocabulary for match admission)
+composition   session ─► every simulation package below, plus frame, hud, render, audio, save, aikit/brains/utiltac (parameter vocabulary for match admission), netproto (command, configuration and identity wire forms)
               headless ─► session, ai, aikit, orders, units, content, pool, vfs
               airdiag ─► session, movement, orders, units, content, pool, vfs
 
@@ -251,7 +252,7 @@ content       content ─► cob, model, palette, formats, vfs
               gui ─► formats, vfs               palette ─► vfs           formats ─► vfs
 
 leaves        vfs, clock, pool, frame(pool, numeric), camera(pool, numeric), input,
-              settings, version, sim/numeric, sim/rng
+              settings, version(netproto), netproto, sim/numeric, sim/rng
 ```
 
 Four boundaries in this graph are enforced by tests in `internal/architecture`

@@ -2,6 +2,8 @@ package session
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"strconv"
 	"strings"
 	"testing"
@@ -201,89 +203,29 @@ func TestDecodeMatchConfigRefusesHostileFields(t *testing.T) {
 	}
 }
 
-// The reader's primitives: shortest varints within their width, booleans of
-// exactly 0 or 1, and text and key lengths checked before the bytes are
-// taken.
-func TestMatchReaderPrimitives(t *testing.T) {
-	read := func(b []byte, f func(*matchReader)) error {
-		r := matchReader{b: b}
-		f(&r)
-		if r.err == nil && r.off != len(b) {
-			t.Fatalf("%x: %d bytes left", b, len(b)-r.off)
-		}
-		return r.err
-	}
+// The configuration encodes through the shared primitives of
+// internal/netproto (whose own tests hold the primitive vectors this file
+// once held for its private reader) byte for byte as it did with its own
+// writer: these are the encodings' SHA-256 and the identities recorded before
+// the primitives moved.
+func TestMatchConfigEncodingIsUnchangedBySharedPrimitives(t *testing.T) {
 	for _, c := range []struct {
-		name string
-		b    []byte
-		bits uint
-		want uint64
-		ok   bool
+		name     string
+		request  MatchConfigRequest
+		length   int
+		encoding string
+		digest   string
 	}{
-		{"zero", []byte{0}, 16, 0, true},
-		{"127", []byte{0x7f}, 16, 127, true},
-		{"128", []byte{0x80, 0x01}, 16, 128, true},
-		{"u16 max", []byte{0xff, 0xff, 0x03}, 16, 65535, true},
-		{"u16 overflow", []byte{0x80, 0x80, 0x04}, 16, 0, false},
-		{"u32 max", []byte{0xff, 0xff, 0xff, 0xff, 0x0f}, 32, 1<<32 - 1, true},
-		{"u32 overflow", []byte{0x80, 0x80, 0x80, 0x80, 0x10}, 32, 0, false},
-		{"u64 max", []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01}, 64, 1<<64 - 1, true},
-		{"u64 overflow", []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x02}, 64, 0, false},
-		{"eleven bytes", []byte{0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00}, 64, 0, false},
-		{"overlong zero", []byte{0x80, 0x00}, 16, 0, false},
-		{"overlong one", []byte{0x81, 0x80, 0x00}, 32, 0, false},
-		{"unterminated", []byte{0x80}, 32, 0, false},
-		{"empty", nil, 32, 0, false},
+		{"skirmish", validMatchRequest(t), 1148, "3a7a322d0faed979d9b29735ef3b2f31a9d85e2fa315f7fd823252ff005aedd7", "2d418627a99d129a12e32a5311afc809b8c2556494a7faa450994f9b800ea338"},
+		{"Survival", validSurvivalRequest(t), 1182, "a468914062cd58c07cf9042d340cbd31e43dd4bdee7030827eec98ff2c001751", "b44568cb3aedeaac0c5eab149ca958639e3447ae1dd3f3892e63481ca7701593"},
 	} {
-		var got uint64
-		err := read(c.b, func(r *matchReader) { got = r.uvarint(c.bits) })
-		if (err == nil) != c.ok || got != c.want {
-			t.Errorf("uvarint %s: got %d, %v", c.name, got, err)
+		config := resolveMatch(t, c.request)
+		payload := encodeMatchForTest(t, config)
+		sum := sha256.Sum256(payload)
+		digest := config.Digest()
+		if len(payload) != c.length || hex.EncodeToString(sum[:]) != c.encoding || hex.EncodeToString(digest[:]) != c.digest {
+			t.Errorf("%s: %d bytes, encoding %x, identity %x; want the recorded %d bytes, %s, %s", c.name, len(payload), sum, digest, c.length, c.encoding, c.digest)
 		}
-	}
-	for _, c := range []struct {
-		b  []byte
-		v  int32
-		ok bool
-	}{{[]byte{0}, 0, true}, {[]byte{1}, -1, true}, {[]byte{2}, 1, true}, {[]byte{0xfe, 0xff, 0xff, 0xff, 0x0f}, 2147483647, true}, {[]byte{0xff, 0xff, 0xff, 0xff, 0x0f}, -2147483648, true}, {[]byte{0x80, 0x80, 0x80, 0x80, 0x10}, 0, false}} {
-		var got int32
-		err := read(c.b, func(r *matchReader) { got = r.s32() })
-		if (err == nil) != c.ok || got != c.v {
-			t.Errorf("s32 %x: got %d, %v", c.b, got, err)
-		}
-		if c.ok {
-			var w matchWriter
-			w.s32(c.v)
-			if !bytes.Equal(w.b, c.b) {
-				t.Errorf("s32 %d writes %x, want %x", c.v, w.b, c.b)
-			}
-		}
-	}
-	for _, c := range []struct {
-		b  byte
-		ok bool
-	}{{0, true}, {1, true}, {2, false}, {0xff, false}} {
-		if err := read([]byte{c.b}, func(r *matchReader) { r.boolean() }); (err == nil) != c.ok {
-			t.Errorf("boolean %d: %v", c.b, err)
-		}
-	}
-	if err := read(append([]byte{17}, strings.Repeat("a", 17)...), func(r *matchReader) { r.text(16) }); err == nil {
-		t.Error("a 17-byte text(16) was read")
-	}
-	if err := read([]byte{0xff, 0xff, 0xff, 0xff, 0x0f}, func(r *matchReader) { r.text(1 << 20) }); err == nil {
-		t.Error("a text longer than the payload was read")
-	}
-	if err := read([]byte{0}, func(r *matchReader) { r.key() }); err == nil {
-		t.Error("an empty key was read")
-	}
-	if err := read(append(uvarintBytes(256), strings.Repeat("k", 256)...), func(r *matchReader) { r.key() }); err == nil {
-		t.Error("a 256-byte key was read")
-	}
-	// A failure sticks: nothing after it advances or allocates.
-	r := matchReader{b: []byte{2, 0, 0}}
-	r.boolean()
-	if r.err == nil || r.u8() != 0 || r.text(10) != "" || r.count(10, 1) != 0 || r.off != 0 {
-		t.Fatal("a reader kept reading after a failure")
 	}
 }
 

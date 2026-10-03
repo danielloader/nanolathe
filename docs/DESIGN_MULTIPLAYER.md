@@ -1391,13 +1391,17 @@ The largest `Order` is bounded even with maximum serials and signed
 coordinates: one ref uses at most 3+10=13 bytes; one position at most
 30+2=32; an area entry at most 45. At the representation ceilings — the
 single-player replay context — the schema below therefore needs at most
-`1 + 2 + 3276*13 + 1 + 13 + 32 + 3 + 3 + 65535*45 = 2,991,718`
-bytes (the actor count uses two bytes at this admitted limit). Under the
+`1 + 2 + 3276*13 + 1 + 2 + 32 + 3 + 3 + 65535*45 = 2,991,707`
+bytes (the actor count uses two bytes at this admitted limit, and the outer
+target beside an area list is the 2-byte null ref, §7.4.3). Under the
 online work limits the largest admissible `Order` is an area order of 10,000
 entries and 104 actors:
-`1 + 1 + 104*13 + 1 + 13 + 32 + 3 + 2 + 10000*45 = 451,405` bytes; the
+`1 + 1 + 104*13 + 1 + 2 + 32 + 3 + 2 + 10000*45 = 451,394` bytes; the
 largest actor list beside an area list, 3,276 actors with 320 entries, needs
-57,042, and an ordinary order of 3,276 actors 42,641. All other
+57,031, and an ordinary order of 3,276 actors, whose outer target is a full
+13-byte ref, 42,641. (Corrected 2026-10-02 by U6's measured encoder: the
+earlier sums counted a 13-byte outer target beside the area list, 11 bytes
+too many; the conclusion is unchanged.) All other
 kinds are smaller, including the 255-byte queue-receipt product. This
 guarantees one maximum advertised selection and maximum admissible area list
 fit in one atomic command. U6 tests these maxima, not just small examples.
@@ -3069,9 +3073,9 @@ and allocation/command APIs; §8.6–§8.8 publish configuration, frozen-input
 and build contracts. U1 allocation references, U4 frozen simulation content
 and U5's configuration and build identities are implemented as described
 below, as are U5b, the admission half (`ValidateMatchInputs`,
-`NewAdmittedSkirmish`), and U2, the explicit seat commands. No command codec
-and no multi-seat session is claimed here: U3 and U6 follow in the sequence
-of "Code ownership and sequence".
+`NewAdmittedSkirmish`), U2, the explicit seat commands, and U6, the command
+codec, the wire primitives and the join comparison. No multi-seat session is
+claimed here; U3, the local interface state, is the last M2 unit.
 
 **U1 allocation references, 2026-10-02.** Both successful creation paths
 assign a battle-wide serial after the fallible COB bind and before creation
@@ -3314,6 +3318,64 @@ reference with serial 0 because the freed-slot record drops
 wire form, so M4's recorder and U6 decide their treatment. Two staged rows
 join the deadcode baseline.
 
+**U6 codecs and admission integration, 2026-10-02.** The version-1 wire
+primitives of §7.4.1 — u8/bool, the varint widths, zigzag `s32`/`s64`,
+`text(N)`, `key`, `digest`, `id`, `amount` with its canonical zero — live in
+the new leaf `internal/netproto` (standard library only, audited by every
+architecture guard as `internal/version` is), with a bounded reader that
+refuses before allocating; the U5 configuration codec and the build manifest
+now encode through them with byte-identical output, pinned by golden digests
+of the two configuration fixtures and the manifest fixture.
+`EncodeSeatCommand`/`DecodeSeatCommand` encode all 28 payload-carrying kinds
+of §7.4.2 by the table (both contexts for 4–10, 12, 14–16, 18, 21–27, 30, 31,
+33, 34; 19 and 32 in their online and replay forms; 17, 20 and 255 replay
+only), refuse the local kinds, the reserved numbers and unlisted numbers in
+both contexts, and establish schema validity before any gameplay code runs:
+unknown kind, extra bytes, invalid booleans, overlong or overflowing
+integers, non-canonical encodings, counts over their bounds before
+allocation, and a replay-only field in an online payload. Every kind is
+round-tripped, truncated at every byte, flipped under six masks and randomly
+edited 20,000 times in both contexts, with a fuzz target besides; the
+hostile online `Give` cases, the work limits (10,000 against 10,001 entries,
+128 × 8,192 against 163 × 6,433) and M2-C11 (replay `NoShake` and `Gameplay`
+keep their effects, the online codec refuses the same bytes, and a replay
+decode delivered to an online session is still refused at phase 1) are
+exercised through decode, enqueue and the tick, comparing both random
+streams, every player record, queues, groups and settings. The M2-C5 size
+proof is derived from the encoder, which corrected §7.4.1's sums by 11
+bytes (an area order's outer target is the null ref, §7.4.3): 2,991,707 and
+451,394 bytes, with an exhaustive search confirming 104 actors × 10,000
+entries as the online maximum and every other kind smaller.
+`CompareMatchIdentity(local MatchJoin, remote netproto.Identity)` reports
+every mismatch at once, one wrapped category each in the order protocol,
+build, content, map, rules, mod, configuration (the last four are
+admission's own errors, so one `errors.Is` covers both), never
+short-circuiting on a matching digest; an unstamped or dirty build is
+refused in a normal room, a development room is an explicit parameter
+carrying a stamped common manifest, and another admitted platform variant of
+the same release is admitted. `FreezeMatchInputs` is the public front half
+from a decoded configuration. The identity carries no variant or binary-hash
+field; the map identity is SHA-256 of `nanolathe/match-map/1` over the
+frozen manifest's map-family entries; the join compares the mounted mod
+against the configuration's and the other seat's, settling the mod half of
+U5b's open item (the content profile's name and directory table remain
+open). Readings: both contexts refuse a reference with serial 0 and a
+duplicate actor (`ErrSeatCommandNoWireForm`) rather than rewriting the
+command, because version 1 cannot represent either; since a stale ordinary
+target with serial 0 would not replay identically if dropped, a
+`TODO(question)` proposes a replay-context-only widening with no layout
+change — a `ref` may carry a nonzero handle with serial 0, and `actors` may
+keep repeats in captured order for every kind but the ordinary Order — which
+awaits the maintainer and M4; negative zero is written as zero and refused
+on decode; the codec checks every context-only rule and the §7.4.2 flag
+combinations, while work limits, the agreed unit limit, coordinate range,
+permissions, key existence and ownership stay with the receiver;
+`Gameplay` encodes only a registered rule-set name. Eighteen reader/writer
+rows left the deadcode baseline and the staged codec, join and front-half
+rows joined it, because nothing shipped can call them before M4's recorder
+and M6's relay. Open: M6's stream driver needs an accessor for the session's
+command context; U2's `onlineAmount` duplicates `netproto.OnlineAmount`.
+
 M2 makes the command boundary explicit and the battle inputs identifiable.
 It does not enable a network battle: perspectives, multiplayer sharing,
 kind-3 lifecycle work and the multi-seat harness still belong to M5. A
@@ -3430,9 +3492,11 @@ reference types, identity registries or codecs in parallel.
   same-tick order. If limits or atomic fragmentation are necessary, specify
   them and their tests before admitting that configuration. Byte limits are
   Nanolathe protocol limits, not retail constants. §7.4.1 records the
-  result: 2,991,718 bytes for the largest `Order` at the representation
-  ceilings (the single-player replay context) and 451,405 bytes under the
-  online per-command work limits, both within the 4 MiB command ceiling.
+  result: 2,991,707 bytes for the largest `Order` at the representation
+  ceilings (the single-player replay context) and 451,394 bytes under the
+  online per-command work limits, both within the 4 MiB command ceiling;
+  U6's test derives both from the encoder and refuses an area order whose
+  outer target is not null.
 - **M2-C6 Local interface.** A local state value is keyed by allocation
   reference, so reused handles cannot inherit selection or a build page.
   Selection readiness uses the existing predicate's complete inputs,

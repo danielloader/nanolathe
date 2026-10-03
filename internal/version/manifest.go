@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/nanolathe-gg/nanolathe/internal/netproto"
 )
 
 // The common build manifest (docs/DESIGN_MULTIPLAYER.md §8.7, M2-C10): what
@@ -26,11 +28,12 @@ import (
 // A build timestamp is not a field either: it would make two builds of the
 // same inputs differ.
 //
-// The encoding uses the primitives of §7.4.1: a digest is 32 raw bytes;
-// text(N) a shortest-varint byte length and at most N bytes of UTF-8 without
-// NUL; key a varint length and 1..255 bytes of a canonical key — ASCII lower
-// case, no NUL and no surrounding space, tab, carriage return or line feed;
-// a collection a varint count. There are no optional fields and no trailing
+// The encoding uses the primitives of §7.4.1, written and read through the
+// shared leaf internal/netproto: a digest is 32 raw bytes; text(N) a
+// shortest-varint byte length and at most N bytes of UTF-8 without NUL; key a
+// varint length and 1..255 bytes of a canonical key — ASCII lower case, no
+// NUL and no surrounding space, tab, carriage return or line feed; a
+// collection a varint count. There are no optional fields and no trailing
 // bytes. Design reading: the payload carries no version of its own; version
 // 1 is named by the identity domain.
 
@@ -113,42 +116,38 @@ func EncodeBuildManifest(m BuildManifest) ([]byte, error) {
 	if err := m.validate(); err != nil {
 		return nil, err
 	}
-	var w buildWriter
-	w.b = append(w.b, m.SourceTree[:]...)
-	w.text(m.GoVersion)
-	w.b = append(w.b, m.GoMod[:]...)
-	w.b = append(w.b, m.GoSum[:]...)
-	w.uvarint(uint64(len(m.Modules)))
+	var w netproto.Writer
+	w.Digest(m.SourceTree)
+	w.Text(m.GoVersion)
+	w.Digest(m.GoMod)
+	w.Digest(m.GoSum)
+	w.U32(uint32(len(m.Modules)))
 	for _, mod := range m.Modules {
-		w.text(mod.Path)
-		w.text(mod.Version)
-		w.text(mod.Sum)
+		w.Text(mod.Path)
+		w.Text(mod.Version)
+		w.Text(mod.Sum)
 	}
-	w.uvarint(uint64(len(m.BuildTags)))
+	w.U32(uint32(len(m.BuildTags)))
 	for _, tag := range m.BuildTags {
-		w.text(tag)
+		w.Key(tag)
 	}
-	w.text(m.GoExperiment)
-	if m.CGOEnabled {
-		w.b = append(w.b, 1)
-	} else {
-		w.b = append(w.b, 0)
-	}
-	w.uvarint(uint64(len(m.BuildArgs)))
+	w.Text(m.GoExperiment)
+	w.Bool(m.CGOEnabled)
+	w.U32(uint32(len(m.BuildArgs)))
 	for _, arg := range m.BuildArgs {
-		w.text(arg)
+		w.Text(arg)
 	}
-	w.uvarint(uint64(len(m.Variants)))
+	w.U32(uint32(len(m.Variants)))
 	for _, v := range m.Variants {
-		w.text(v.GOOS)
-		w.text(v.GOARCH)
-		w.text(v.ArchitectureLevel)
-		w.b = append(w.b, v.ToolchainArchive[:]...)
+		w.Key(v.GOOS)
+		w.Key(v.GOARCH)
+		w.Key(v.ArchitectureLevel)
+		w.Digest(v.ToolchainArchive)
 	}
-	if len(w.b) > buildManifestMaxBytes {
-		return nil, buildFieldError("manifest", fmt.Sprintf("an encoding of at most %d bytes, got %d", buildManifestMaxBytes, len(w.b)))
+	if w.Len() > buildManifestMaxBytes {
+		return nil, buildFieldError("manifest", fmt.Sprintf("an encoding of at most %d bytes, got %d", buildManifestMaxBytes, w.Len()))
 	}
-	return w.b, nil
+	return w.Bytes(), nil
 }
 
 // DecodeBuildManifest reads a version 1 payload. It refuses a payload over
@@ -161,53 +160,44 @@ func DecodeBuildManifest(payload []byte) (BuildManifest, error) {
 	if len(payload) > buildManifestMaxBytes {
 		return BuildManifest{}, buildFieldError("payload", fmt.Sprintf("at most %d bytes, got %d", buildManifestMaxBytes, len(payload)))
 	}
-	r := buildReader{b: payload}
+	r := netproto.NewReader(payload, buildFieldError)
 	var m BuildManifest
-	copy(m.SourceTree[:], r.bytes(32))
-	m.GoVersion = r.text(buildGoVersionMaxBytes)
-	copy(m.GoMod[:], r.bytes(32))
-	copy(m.GoSum[:], r.bytes(32))
-	if n := r.count(buildMaxModules, 3); n > 0 {
+	m.SourceTree = r.Digest()
+	m.GoVersion = r.Text(buildGoVersionMaxBytes)
+	m.GoMod = r.Digest()
+	m.GoSum = r.Digest()
+	if n := r.Count(buildMaxModules, 3); n > 0 {
 		m.Modules = make([]BuildModule, n)
 		for i := range m.Modules {
-			m.Modules[i] = BuildModule{Path: r.text(buildModulePathMax), Version: r.text(buildModuleTextMax), Sum: r.text(buildModuleTextMax)}
+			m.Modules[i] = BuildModule{Path: r.Text(buildModulePathMax), Version: r.Text(buildModuleTextMax), Sum: r.Text(buildModuleTextMax)}
 		}
 	}
-	if n := r.count(buildMaxTags, 2); n > 0 {
+	if n := r.Count(buildMaxTags, 2); n > 0 {
 		m.BuildTags = make([]string, n)
 		for i := range m.BuildTags {
-			m.BuildTags[i] = r.text(buildKeyMaxBytes)
+			m.BuildTags[i] = r.Key()
 		}
 	}
-	m.GoExperiment = r.text(buildExperimentMax)
-	switch cgo := r.u8(); {
-	case cgo == 1:
-		m.CGOEnabled = true
-	case cgo > 1:
-		r.off--
-		r.fail("a boolean of exactly 0 or 1")
-	}
-	if n := r.count(buildMaxArgs, 1); n > 0 {
+	m.GoExperiment = r.Text(buildExperimentMax)
+	m.CGOEnabled = r.Bool()
+	if n := r.Count(buildMaxArgs, 1); n > 0 {
 		m.BuildArgs = make([]string, n)
 		for i := range m.BuildArgs {
-			m.BuildArgs[i] = r.text(buildArgMaxBytes)
+			m.BuildArgs[i] = r.Text(buildArgMaxBytes)
 		}
 	}
-	if n := r.count(buildMaxVariants, 3+32); n > 0 {
+	if n := r.Count(buildMaxVariants, 3+32); n > 0 {
 		m.Variants = make([]BuildVariant, n)
 		for i := range m.Variants {
 			v := &m.Variants[i]
-			v.GOOS = r.text(buildKeyMaxBytes)
-			v.GOARCH = r.text(buildKeyMaxBytes)
-			v.ArchitectureLevel = r.text(buildKeyMaxBytes)
-			copy(v.ToolchainArchive[:], r.bytes(32))
+			v.GOOS = r.Key()
+			v.GOARCH = r.Key()
+			v.ArchitectureLevel = r.Key()
+			v.ToolchainArchive = r.Digest()
 		}
 	}
-	if r.err != nil {
-		return BuildManifest{}, r.err
-	}
-	if r.off != len(payload) {
-		return BuildManifest{}, buildFieldError(fmt.Sprintf("payload byte %d", r.off), "no bytes after the last field")
+	if err := r.End(); err != nil {
+		return BuildManifest{}, err
 	}
 	again, err := EncodeBuildManifest(m)
 	if err != nil {
@@ -506,120 +496,4 @@ func buildArgValue(args []string, flag string) string {
 		}
 	}
 	return ""
-}
-
-// buildWriter appends §7.4.1 primitives to a manifest encoding.
-type buildWriter struct{ b []byte }
-
-func (w *buildWriter) uvarint(v uint64) {
-	for v >= 0x80 {
-		w.b = append(w.b, byte(v)|0x80)
-		v >>= 7
-	}
-	w.b = append(w.b, byte(v))
-}
-
-func (w *buildWriter) text(s string) {
-	w.uvarint(uint64(len(s)))
-	w.b = append(w.b, s...)
-}
-
-// buildReader reads §7.4.1 primitives; the first failure sticks.
-type buildReader struct {
-	b   []byte
-	off int
-	err error
-}
-
-func (r *buildReader) fail(expected string) {
-	if r.err == nil {
-		r.err = buildFieldError(fmt.Sprintf("payload byte %d", r.off), expected)
-	}
-}
-
-func (r *buildReader) u8() uint8 {
-	if r.err != nil {
-		return 0
-	}
-	if r.off >= len(r.b) {
-		r.fail("another byte")
-		return 0
-	}
-	v := r.b[r.off]
-	r.off++
-	return v
-}
-
-// uvarint32 reads the shortest varint of a 32-bit value.
-func (r *buildReader) uvarint32() uint64 {
-	if r.err != nil {
-		return 0
-	}
-	start := r.off
-	var v uint64
-	for i := 0; ; i++ {
-		if r.off >= len(r.b) {
-			r.fail("a complete varint")
-			return 0
-		}
-		c := r.b[r.off]
-		r.off++
-		if i == 4 && c > 0x0f {
-			r.off = start
-			r.fail("a varint within 32 bits")
-			return 0
-		}
-		v |= uint64(c&0x7f) << (7 * uint(i))
-		if c < 0x80 {
-			if i > 0 && c == 0 {
-				r.off = start
-				r.fail("the shortest varint")
-				return 0
-			}
-			return v
-		}
-	}
-}
-
-func (r *buildReader) bytes(n int) []byte {
-	if r.err != nil {
-		return nil
-	}
-	if n < 0 || n > len(r.b)-r.off {
-		r.fail(fmt.Sprintf("%d more bytes", n))
-		return nil
-	}
-	out := r.b[r.off : r.off+n]
-	r.off += n
-	return out
-}
-
-func (r *buildReader) text(max int) string {
-	n := r.uvarint32()
-	if r.err != nil {
-		return ""
-	}
-	if n > uint64(max) {
-		r.fail(fmt.Sprintf("a text of at most %d bytes", max))
-		return ""
-	}
-	return string(r.bytes(int(n)))
-}
-
-// count reads a collection count and checks it against its bound and the
-// bytes remaining before anything is allocated from it.
-func (r *buildReader) count(max, minRecord int) int {
-	n := r.uvarint32()
-	if r.err != nil {
-		return 0
-	}
-	if n > uint64(max) {
-		r.fail(fmt.Sprintf("a count of at most %d", max))
-		return 0
-	}
-	if n*uint64(minRecord) > uint64(len(r.b)-r.off) {
-		r.fail(fmt.Sprintf("%d records of at least %d bytes", n, minRecord))
-		return 0
-	}
-	return int(n)
 }

@@ -128,7 +128,7 @@ func admitConfig(t *testing.T, cfg SkirmishConfig, options SkirmishEntryOptions,
 
 func (f admitFixture) freeze(t *testing.T, c EffectiveMatchConfig) *content.SimulationInputs {
 	t.Helper()
-	inputs, err := freezeMatchInputs(f.fs, f.cat, c, nil)
+	inputs, err := FreezeMatchInputs(f.fs, f.cat, c, nil)
 	if err != nil {
 		t.Fatalf("freeze the configuration's content: %v", err)
 	}

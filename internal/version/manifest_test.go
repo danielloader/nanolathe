@@ -3,6 +3,7 @@ package version
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"runtime"
 	"runtime/debug"
@@ -437,5 +438,24 @@ func TestStampDescribesItsBuild(t *testing.T) {
 	recorded.Settings[0].Value = "-s"
 	if err := untrimmed.describes(recorded, "go1.27.1", "darwin", "arm64"); err == nil {
 		t.Error("an untrimmed build with other ldflags was accepted")
+	}
+}
+
+// The manifest encodes through the shared primitives of internal/netproto
+// byte for byte as it did with its own writer: the encoding's SHA-256 and the
+// identity recorded before the primitives moved.
+func TestBuildManifestEncodingIsUnchangedBySharedPrimitives(t *testing.T) {
+	payload, err := EncodeBuildManifest(validManifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := validManifest().Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(payload)
+	if len(payload) != 509 || hex.EncodeToString(sum[:]) != "2c250b00c2bfb9882e3838305abccf0e6d7cd1de3f915abc133f736738edd557" ||
+		hex.EncodeToString(digest[:]) != "54f1c45e6ec990de9b97d0d93951dbcacb106e868144a515448dd9d7dcb57bd8" {
+		t.Fatalf("%d bytes, encoding %x, identity %x; want the recorded 509 bytes and identities", len(payload), sum, digest)
 	}
 }

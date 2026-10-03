@@ -11,8 +11,8 @@ import (
 // are Nanolathe protocol types, not retail records: the kind numbers, field
 // widths and bounds are the §7.4.1–§7.4.2 tables, and the session applies a
 // stamped value at phase 1 through the same payload implementation the local
-// adapter (EnqueueHumanCommand) reaches. The wire codec is a later unit's;
-// nothing here encodes or decodes bytes.
+// adapter (EnqueueHumanCommand) reaches. The wire codec is
+// seat_command_codec.go; nothing here encodes or decodes bytes.
 
 // CommandContext is the admitted session's decoding and authorization
 // context. The session's admitted kind chooses it; no caller and no payload

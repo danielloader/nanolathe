@@ -3493,6 +3493,25 @@ supplied monotonic host milliseconds; neither reads simulation time [I6].
   starting from the live view; cancelling inside the snap band reaches the lock
   with the same hold. Accepted wheel input clears follow. The ease stays
   anchored at the pointer. F9 and pinch clear pending wheel state.
+* **macOS conventional wheel input** supplies camera zoom with the integer
+  vertical count from `CGEventGetIntegerValueField` and
+  `kCGScrollWheelEventDeltaAxis1`, rather than AppKit's `scrollingDeltaY` line
+  distance. A line distance below one must not lose a deliberate notch, and
+  a large line distance must not invent extra notches. Several ticks reported
+  by one event or collected in one host poll retain their count. A nonzero
+  AppKit line distance keeps its user-preference-adjusted direction; a zero
+  distance retains the integer count's sign. If a conventional event has no
+  integer count or backing CoreGraphics event, a nonzero vertical line distance
+  supplies one signed notch. An event with
+  both zero count and zero vertical distance supplies none. This normalization
+  follows the native precision flag; it does not classify devices from delta
+  magnitude or timing. GUI controls retain the original scrolling distance.
+  Native synthetic-event checks in
+  `internal/platform/ebitenapp/scroll_darwin_test.go` exercise small and large
+  line distances, slow and batched clicks, multiple ticks, both directions,
+  conflicting field signs, the absent-count fallback and touch/momentum
+  exclusion. Physical mouse verification remains a manual acceptance check
+  for issue #91.
 * **macOS two-finger scrolling** pans both axes in Enhanced. A local AppKit
   monitor uses `hasPreciseScrollingDeltas` to distinguish point-based touch
   scrolling from conventional wheel events; Magic Mouse touch scrolling also

@@ -73,7 +73,7 @@ func (c *scrollCollector) setActive(active bool) {
 	c.hasPoint = false
 }
 
-func (c *scrollCollector) add(x, y float64, precise, momentum bool) {
+func (c *scrollCollector) add(x, y, wheelY float64, precise, momentum bool) {
 	var batch scrollBatch
 	if precise {
 		if !momentum {
@@ -84,7 +84,7 @@ func (c *scrollCollector) add(x, y float64, precise, momentum bool) {
 		x *= 0.1
 		y *= 0.1
 	} else if !momentum {
-		batch.zoomY = y
+		batch.zoomY = wheelY
 	}
 	batch.x, batch.y = x, y
 	c.collect(batch, nil)

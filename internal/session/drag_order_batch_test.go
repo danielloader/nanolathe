@@ -38,20 +38,21 @@ func TestDragOrderBatchReplacesAtFirstAdmittedTargetPerActor(t *testing.T) {
 	s.Units.Unit(unfinished).Remaining = 1
 	handles := []pool.Handle{a, b}
 	applyDragOrderBatch(t, s, HumanOrderCommand{Handles: handles, Code: 2, Position: orders.ResolvePos{X: 200 << 16}})
-	applyDragOrderBatch(t, s, HumanOrderCommand{Handles: handles, Code: 8, Targets: []HumanOrderTarget{
+	goals := []HumanOrderTarget{
 		{Target: full}, // A live but full-health target fails nano-reach.
 		{Target: damaged, Position: orders.ResolvePos{X: 999 << 16}},
 		{Target: unfinished},
-	}})
+	}
+	applyDragOrderBatch(t, s, HumanOrderCommand{Handles: handles, Code: 8, Targets: goals})
 	for _, h := range handles {
 		got := orders.QueueForUnit(s.Units.Unit(h)).Primary()
 		if len(got) != 2 || got[0].ID != orders.Lookup("RepairUnit") || got[1].ID != orders.Lookup("HelpBuild") {
 			t.Fatalf("actor %d queue = %+v, want repair then assistance", h, got)
 		}
 		for i, target := range []pool.Handle{damaged, unfinished} {
-			u := s.Units.Unit(target)
-			if got[i].Target != target || got[i].GoalX != u.X || got[i].GoalY != u.Y || got[i].GoalZ != u.Z || got[i].Owner != h {
-				t.Fatalf("actor %d target %d lost live position or owner: %+v", h, target, got[i])
+			point := goals[i+1].Position
+			if got[i].Target != target || got[i].GoalX != point.X || got[i].GoalY != point.Y || got[i].GoalZ != point.Z || got[i].Owner != h {
+				t.Fatalf("actor %d target %d lost captured point or owner: %+v", h, target, got[i])
 			}
 			if got[i].CaptionPending != (i == 0) {
 				t.Fatalf("actor %d target %d caption = %v; only the replacement should speak", h, target, got[i].CaptionPending)

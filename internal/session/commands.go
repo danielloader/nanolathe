@@ -1635,10 +1635,9 @@ func (s *Session) applyBoundOrder(b *boundCommand, tick uint32) CommandOutcome {
 		if id == 0 {
 			continue
 		}
+		// The hovered target and cursor-ground triple are independent inputs;
+		// the constructor keeps the supplied point [04 R-ORD-01 §13].
 		gx, gy, gz := c.Order.Position.X, c.Order.Position.Y, c.Order.Position.Z
-		if target != nil {
-			gx, gy, gz = target.X, target.Y, target.Z
-		}
 		if !c.Order.AssignedPosition && orders.DescriptorFor(id).StaticGate&2 != 0 && count != 0 {
 			goal := humanFormationGoal(c.Order.Position, u, center, count)
 			gx, gy, gz = goal.X, goal.Y, goal.Z
@@ -1716,9 +1715,6 @@ func (s *Session) applyBoundOrderBatch(b *boundCommand, tick uint32) CommandOutc
 				continue
 			}
 			gx, gy, gz := goal.Position.X, goal.Position.Y, goal.Position.Z
-			if target != nil {
-				gx, gy, gz = target.X, target.Y, target.Z
-			}
 			if !queued {
 				q.PurgeUnprotected()
 				q.DropLeadingAutoOps()

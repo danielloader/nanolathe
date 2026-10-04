@@ -4761,6 +4761,16 @@ mask**, with bit 9 cleared when no target was supplied and bit 10 cleared when
 no goal triple was supplied, and with **no runtime bit set**. There is no
 zero-fill byte count to match.
 
+**The supplied goal is independent of the hovered target. Established.** A
+world click supplies both the hovered unit identity and its cursor-ground
+triple `[07 R-P0-11 §6]`. The numeric selection broadcaster preserves that
+triple, except for its descriptor-gated formation adjustment
+`[R-STANCE-01 §5]`; neither it nor the constructor substitutes the hovered
+unit's origin. In particular, an armed ground unit whose primary weapon is
+not anti-air resolves an attack on a friendly unit to `Suppress`
+`[R-ORD-02 §1]`, which has no formation adjustment and binds its weapon slots
+to the supplied ground point `[R-ORD-01 §3]`.
+
 **The static-mask copy's runtime bits.** The copy is one word and the
 runtime bits in it are:
 

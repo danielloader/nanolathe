@@ -742,6 +742,17 @@ world click, and the Modern area drag (§3.11) dispatches its own target list
 and never reaches the producer; its short release does, and is judged, and
 leaves the latch, like any other armed click.
 
+The session command boundary carries the hovered unit identity and clicked
+ground point independently, for both single clicks and area-list entries.
+Revalidating a target does not replace the captured point with the unit's
+origin; only the applicable formation adjustment changes an ordinary click's
+point `[04 R-STANCE-01 §5][04 R-ORD-01 §13]`. An armed ground unit with a
+non-AA primary weapon resolves an attack on an own or friendly unit to
+`Suppress` and fires at that clicked point
+`[04 R-ORD-02 §1][04 R-ORD-01 §3]`. The fast command tests preserve this in
+local and online sessions, and the stock LLT/solar regression compares
+single and batch friendly attacks with a ground-point control in all modes.
+
 **The footer** (`footer.go`). `BuildFooter` composes the bottom readout from the
 committed frame, the catalog and a `FooterHover`: the build-card line for a
 hovered build button, the feature line, and the unit readout with its name,
@@ -4746,15 +4757,6 @@ marked platform gaps in the input and editor paths (§2.2 and §3.9). The other 
 questions these contracts carry follow, with the observation that would settle
 each one.
 
-* Whether the world-click producer receives a goal point alongside a target
-  handle. The match rule takes both arguments optionally, and the click is
-  documented as issuing "at the pointer's world point", so this boundary
-  supplies both and the goal term participates in a target-click match. If
-  retail passes no goal there, a repeat Shift-attack-click on a target that has
-  moved more than one cell since the order was queued would remove it where this
-  build re-queues. A trace of the world-click handler's call into the producer
-  settles it `[07 R-P0-11 §6]` (marked in `internal/session`, which owns the
-  producer).
 * Whether the interface's non-world-click queued issues share that producer. The
   section scopes the test to "every world order the interface issues", and the
   two world-click boundaries are its only callers; the side panel's own buttons

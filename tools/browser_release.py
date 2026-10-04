@@ -5,8 +5,8 @@ number>", carrying the packaged distribution, its build.json and SHA256SUMS.
 The website takes the highest run number whose assets are all present
 (nanolathe-gg.github.io scripts/fetch-play.py), so the newest build wins even
 when an older run finishes later. Once the new release is complete, the other
-"<prefix>*" releases and their tags are pruned, keeping the newest few so a
-website build that is still downloading finds its files.
+"<prefix>*" releases and their tags are pruned, keeping this run's and the
+one before it so a website build that is still downloading finds its files.
 
 The repository uses GitHub's immutable releases: publishing locks a release's
 assets and tag, and a tag name can never be reused, even after the release is
@@ -95,7 +95,7 @@ def main(argv=None):
     parser.add_argument("--revision", required=True, help="the main commit the release targets")
     parser.add_argument("--run-number", required=True, type=int, help="the workflow run number, which names the tag")
     parser.add_argument("--prefix", default="browser-")
-    parser.add_argument("--keep", default=3, type=int, help="complete releases to keep, counting this run's")
+    parser.add_argument("--keep", default=2, type=int, help="complete releases to keep, counting this run's")
     parser.add_argument("--dry-run", action="store_true", help="list releases and print the plan; change nothing")
     parser.add_argument("files", nargs="+", help=f"the distribution assets: {', '.join(ASSETS)}")
     args = parser.parse_args(argv)

@@ -189,8 +189,8 @@ jobs:
 
   # Main's asset-free browser build becomes this run's immutable "browser-<n>"
   # prerelease, which the website pulls in (docs/DESIGN_BROWSER_HOST.md §6);
-  # tools/browser-publish keeps the newest few. No demo or retail content
-  # enters this repository's releases.
+  # tools/browser-publish keeps this run's release and the one before it. No
+  # demo or retail content enters this repository's releases.
   browser-publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [browser, hygiene, simulation]

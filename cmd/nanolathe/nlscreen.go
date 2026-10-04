@@ -92,7 +92,9 @@ type nlScreen struct {
 	capture           nlCapture
 	ctlTable          screenkit.Rect
 	contentTop        int            // first row the content list shows
-	contentList       screenkit.Rect // where the content list was drawn, for the wheel
+	contentList       screenkit.Rect // list and scrollbar wheel target
+	contentDragging   bool
+	contentGrab       float64 // pointer offset within the scrollbar thumb
 	dialog            string
 	pendingV          int
 	resolutionModes   []retailDisplayMode
@@ -259,6 +261,7 @@ func (s *nlScreen) bindShell(g *gameShell) {
 	s.reloadMods(g)
 	s.bindStats(g)
 	s.draft = s.freshDraft(g)
+	s.revealContent(s.draft.mod)
 	s.touched = map[string]bool{}
 	s.pendingPresets = nil
 	s.installsSeen = modDownload.view().installs
@@ -462,6 +465,7 @@ func (s *nlScreen) setCardDraft(c nlCard, next nlDraft) {
 	}
 	nlCopyCard(c, &s.draft, &next)
 	if c.key == "content" {
+		s.revealContent(s.draft.mod)
 		if g := s.shell(); g != nil {
 			s.bindSource(g)
 		}
@@ -591,7 +595,13 @@ func (s *nlScreen) Update() {
 		dt = min(0.1, now.Sub(s.lastInput).Seconds())
 	}
 	s.lastInput = now
-	in := screenkit.ReadInput()
+	s.updateInput(screenkit.ReadInput(), dt)
+}
+
+func (s *nlScreen) updateInput(in screenkit.Input, dt float64) {
+	if in.Pressed || !in.Down {
+		s.contentDragging = false
+	}
 	if s.closing {
 		if !in.Held {
 			s.finishHide()
@@ -663,6 +673,10 @@ func (s *nlScreen) Update() {
 		s.partSel[card.key] = max(0, s.selectedPart(&card)-1)
 	case in.KeyPressed(ebiten.KeyArrowDown) && card.kind == nlGroup:
 		s.partSel[card.key] = min(len(card.parts)-1, s.selectedPart(&card)+1)
+	case in.KeyPressed(ebiten.KeyArrowUp) && card.kind == nlContent:
+		s.step(card, v, -1)
+	case in.KeyPressed(ebiten.KeyArrowDown) && card.kind == nlContent:
+		s.step(card, v, 1)
 	case in.KeyPressed(ebiten.KeyArrowUp):
 		s.step(card, v, 1)
 	case in.KeyPressed(ebiten.KeyArrowDown):
@@ -681,6 +695,14 @@ func (s *nlScreen) Update() {
 	// The wheel steps whole notches, so a trackpad's fine deltas add up
 	// first: over the cards it moves the focus, over the hero the value.
 	s.wheel += in.WheelY
+	if card.kind == nlContent && s.contentList.Contains(in.X, in.Y) {
+		// Keep fractional trackpad travel and consume every whole row in a
+		// larger wheel batch (DESIGN_INTERFACE_HUD_INPUT §3.17).
+		d := int(s.wheel)
+		s.wheel -= float64(d)
+		s.scrollContent(s.contentTop - d)
+		return
+	}
 	if math.Abs(s.wheel) >= 1 {
 		d := int(math.Copysign(1, s.wheel))
 		s.wheel = 0
@@ -688,8 +710,6 @@ func (s *nlScreen) Update() {
 		switch {
 		case in.Y > float64(s.carouselTop()):
 			s.focusCard(max(0, min(len(page.cards)-1, idx-d)))
-		case card.kind == nlContent && s.contentList.Contains(in.X, in.Y):
-			s.contentTop -= d
 		case in.X < 800*u && in.Y > 140*u && card.kind != nlContent:
 			s.step(card, v, d)
 		}
@@ -722,6 +742,9 @@ func (s *nlScreen) step(c nlCard, v, d int) {
 		}
 	}
 	s.setCard(c, max(0, min(len(c.steps)-1, next)))
+	if c.kind == nlContent {
+		s.revealContent(c.get(&s.draft))
+	}
 }
 
 func (s *nlScreen) focusCard(i int) {
@@ -2285,20 +2308,14 @@ func (s *nlScreen) heroHalves(screen *ebiten.Image, card *nlCard, v int, x, y, a
 // the list.
 func (s *nlScreen) heroContent(screen *ebiten.Image, card *nlCard, v int, x, y, a float64) float64 {
 	u := s.u()
-	const visible = 5
 	rowH := 46 * u
 	n := len(card.steps)
-	shown := min(n, visible)
+	shown := min(n, nlContentVisible)
 	list := screenkit.Rect{X: x, Y: y, W: 560 * u, H: float64(shown)*rowH + 12*u}
 	s.well(screen, list, a)
-	// Keep the chosen row in view.
-	if v < s.contentTop {
-		s.contentTop = v
-	}
-	if v >= s.contentTop+visible {
-		s.contentTop = v - visible + 1
-	}
-	s.contentTop = max(0, min(s.contentTop, n-shown))
+	// Scrolling can leave the selected row offscreen. Only a selection
+	// change reveals it again (DESIGN_INTERFACE_HUD_INPUT §3.17).
+	s.scrollContent(s.contentTop)
 	df, bf := s.fonts.Display, s.fonts.Body
 	for row := 0; row < shown; row++ {
 		i := s.contentTop + row
@@ -2360,15 +2377,31 @@ func (s *nlScreen) heroContent(screen *ebiten.Image, card *nlCard, v int, x, y, 
 	// Scroll arrows when the list is longer than its window.
 	if n > shown {
 		ax := list.X + list.W + 10*u
-		s.arrowV(screen, "content-up", screenkit.Rect{X: ax, Y: list.Y, W: 40 * u, H: 40 * u}, true, s.contentTop > 0, func() { s.contentTop-- })
-		s.arrowV(screen, "content-down", screenkit.Rect{X: ax, Y: list.Y + list.H - 40*u, W: 40 * u, H: 40 * u}, false, s.contentTop+shown < n, func() { s.contentTop++ })
+		s.arrowV(screen, "content-up", screenkit.Rect{X: ax, Y: list.Y, W: 40 * u, H: 40 * u}, true, s.contentTop > 0, func() { s.scrollContent(s.contentTop - 1) })
+		s.arrowV(screen, "content-down", screenkit.Rect{X: ax, Y: list.Y + list.H - 40*u, W: 40 * u, H: 40 * u}, false, s.contentTop+shown < n, func() { s.scrollContent(s.contentTop + 1) })
 		track := screenkit.Rect{X: ax + 17*u, Y: list.Y + 46*u, W: 6 * u, H: list.H - 92*u}
 		screenkit.Fill(screen, track, color.RGBA{20, 24, 20, 200})
 		th := track.H * float64(shown) / float64(n)
 		ty := track.Y + (track.H-th)*float64(s.contentTop)/float64(n-shown)
 		screenkit.Fill(screen, screenkit.Rect{X: track.X, Y: ty, W: track.W, H: th}, color.RGBA{120, 200, 120, 220})
+		// The hit target spans the arrow column. A track press centres the
+		// thumb; grabbing the thumb preserves the pointer's offset on redraw.
+		s.hits.Add(screenkit.Region{ID: "content-track", Rect: screenkit.Rect{X: ax, Y: track.Y, W: 40 * u, H: track.H}, Drag: func(_, py float64) {
+			if !s.contentDragging {
+				s.contentDragging = true
+				s.contentGrab = th / 2
+				if py >= ty && py < ty+th {
+					s.contentGrab = py - ty
+				}
+			}
+			frac := clamp((py-track.Y-s.contentGrab)/(track.H-th), 0, 1)
+			s.scrollContent(int(math.Round(frac * float64(n-shown))))
+		}})
 	}
 	s.contentList = list
+	if n > shown {
+		s.contentList.W += 50 * u
+	}
 	return list.Y + list.H
 }
 

@@ -19,6 +19,24 @@ import (
 // with the Mods & Mutators window; the content list removes an installed
 // mod after a confirmation. Installing never selects the mod.
 
+const nlContentVisible = 5
+
+// Scroll and selection have separate ownership: browsing the installed list
+// does not change the draft, and selecting reveals just that row
+// (docs/DESIGN_INTERFACE_HUD_INPUT.md §3.17).
+func (s *nlScreen) scrollContent(top int) {
+	s.contentTop = max(0, min(top, len(s.mods)+1-nlContentVisible))
+}
+
+func (s *nlScreen) revealContent(selected int) {
+	if selected < s.contentTop {
+		s.contentTop = selected
+	} else if selected >= s.contentTop+nlContentVisible {
+		s.contentTop = selected - nlContentVisible + 1
+	}
+	s.scrollContent(s.contentTop)
+}
+
 // nlCatalog is the popup's catalogue fetch, filled by a worker.
 type nlCatalog struct {
 	mu      sync.Mutex
@@ -94,13 +112,17 @@ func (s *nlScreen) removeMod(m modlibrary.Mod) {
 		s.toast, s.toastLeft = err.Error(), 3.5
 		return
 	}
-	chosen := s.modAt(s.draft.mod)
+	selected := s.draft.mod
+	chosen := s.modAt(selected)
 	s.reloadMods(g)
 	s.draft.mod = 0
 	for i := range s.mods {
 		if chosen != nil && sameMod(&s.mods[i], chosen) {
 			s.draft.mod = i + 1
 		}
+	}
+	if s.draft.mod != selected {
+		s.revealContent(s.draft.mod)
 	}
 	s.toast, s.toastLeft = fmt.Sprintf("Removed %s %s", m.Name, m.Version), 2.5
 }
@@ -113,13 +135,17 @@ func (s *nlScreen) pollInstalls() {
 	}
 	s.installsSeen = v.installs
 	if g := s.shell(); g != nil {
-		chosen := s.modAt(s.draft.mod)
+		selected := s.draft.mod
+		chosen := s.modAt(selected)
 		s.reloadMods(g)
 		s.draft.mod = 0
 		for i := range s.mods {
 			if chosen != nil && sameMod(&s.mods[i], chosen) {
 				s.draft.mod = i + 1
 			}
+		}
+		if s.draft.mod != selected {
+			s.revealContent(s.draft.mod)
 		}
 	}
 }

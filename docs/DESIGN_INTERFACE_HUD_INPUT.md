@@ -4163,6 +4163,14 @@ the focused one lifts. Arrow keys choose and change, Tab pages, Space
 compares, Enter applies, Esc goes back. The content list shows every
 installed mod with its version, its rule lock and whether it brings its own
 controls, and scrolls past five rows.
+In the content list, Up selects the preceding row and Down the following row,
+revealing the selection when needed. Wheel and two-finger scrolling, scrollbar
+arrows, track clicks and thumb drags move the viewport without changing the
+draft selection; redraw preserves that viewport even with the selection out
+of view. Fractional wheel travel accumulates, and each whole unit moves one
+row. The wheel target includes the scrollbar column. A track press centres
+the thumb on the pointer; a thumb drag retains the original grab offset and
+continues outside the track, clamped to the first and last viewports.
 Action buttons and key caps borrow the base game's `BUTTONS0` raised and pressed
 frames. Their borders retain their native proportions and their interiors fill
 the settings rectangles; caption placement and the existing hit targets survive.

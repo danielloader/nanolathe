@@ -131,3 +131,70 @@ func TestPreciseScrollAndPinchSurviveInputCopy(t *testing.T) {
 		t.Fatal("empty poll replayed gestures")
 	}
 }
+
+// Browser CSS coordinates share the centred letterbox with pointer input;
+// GUI wheel units survive while touch motion remains camera-only (§4.8).
+func TestBrowserGesturesUseLogicalPointerAndSeparateWheelChannels(t *testing.T) {
+	var collector scrollCollector
+	collector.setActive(true)
+	collector.viewport(800, 600, 1280, 720)
+	collector.collect(scrollBatch{x: -2.5, y: 5, panX: -2.5, panY: 5}, &[2]float64{640, 360})
+	collector.collect(scrollBatch{y: -1, zoomY: -1}, nil)
+	collector.collect(scrollBatch{panX: 3, panY: 4}, nil)
+	batch := collector.take(99, 99)
+	if !batch.hasPointer || batch.pointerX != 400 || batch.pointerY != 300 {
+		t.Fatalf("letterboxed pointer = %+v", batch)
+	}
+	if batch.x != -2.5 || batch.y != 4 || batch.zoomY != -1 || batch.panX != .5 || batch.panY != 9 {
+		t.Fatalf("browser channels crossed = %+v", batch)
+	}
+	if got := collector.take(99, 99); !reflect.DeepEqual(got, scrollBatch{hasPointer: true, pointerX: 400, pointerY: 300}) {
+		t.Fatalf("browser events replayed = %+v", got)
+	}
+	collector.viewport(800, 600, 800, 800)
+	collector.collect(scrollBatch{}, &[2]float64{400, 400})
+	batch = collector.take(0, 0)
+	if batch.pointerX != 400 || batch.pointerY != 300 {
+		t.Fatalf("vertical letterbox = %+v", batch)
+	}
+	collector.setActive(false)
+	collector.collect(scrollBatch{x: 1, y: 2, panX: 3, panY: 4}, &[2]float64{100, 100})
+	collector.setActive(true)
+	if got := collector.take(0, 0); !reflect.DeepEqual(got, scrollBatch{}) {
+		t.Fatalf("inactive browser events retained = %+v", got)
+	}
+}
+
+func TestBrowserGesturePointerAndAnchorsSurviveIdleRefreshPoll(t *testing.T) {
+	var collector scrollCollector
+	collector.setActive(true)
+	collector.viewport(800, 600, 1280, 720)
+	collector.collect(scrollBatch{pinches: []input.PinchEvent{{Began: true}}}, &[2]float64{640, 360})
+	var buffer hostInputBuffer
+	poll := func() {
+		sample := sampledInput{x: 0, y: 0} // Ebiten's unchanged mouse position during touch
+		sample.applyScroll(collector.take(0, 0))
+		buffer.add(sample)
+	}
+	poll() // no 30 Hz service is due yet
+	poll() // an idle 60 Hz refresh must not erase the touch midpoint
+	got := buffer.take()
+	if got.x != 400 || got.y != 300 || len(got.pinches) != 1 || !got.pinches[0].Positioned || got.pinches[0].X != 400 || got.pinches[0].Y != 300 {
+		t.Fatalf("gesture lost in idle poll = %+v", got)
+	}
+	collector.collect(scrollBatch{}, &[2]float64{880, 480})                         // mouse motion resumes
+	collector.collect(scrollBatch{pinches: []input.PinchEvent{{Ended: true}}}, nil) // delayed quiet timer
+	poll()
+	got = buffer.take()
+	if got.x != 600 || got.y != 400 {
+		t.Fatalf("quiet timer moved mouse = %+v", got)
+	}
+	collector.collect(scrollBatch{pinches: []input.PinchEvent{{Began: true}}}, &[2]float64{640, 360})
+	collector.collect(scrollBatch{pinches: []input.PinchEvent{{Ended: true}}}, nil)
+	collector.collect(scrollBatch{pinches: []input.PinchEvent{{Began: true}}}, &[2]float64{880, 480})
+	poll()
+	got = buffer.take()
+	if len(got.pinches) != 3 || got.pinches[0].X != 400 || got.pinches[2].X != 600 {
+		t.Fatalf("batched start anchors coalesced = %+v", got.pinches)
+	}
+}

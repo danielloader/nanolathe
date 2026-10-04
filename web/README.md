@@ -230,6 +230,22 @@ remain follow-up work. These measurements do not establish a mobile memory
 budget or total browser-process memory use. Profiles, JSON and captures remain
 outside the repository.
 
+## Camera gestures
+
+In Enhanced rendering, two-finger trackpad scrolling pans the camera and
+pinch/spread zooms using the existing Smooth/Steps preference. On touchscreens,
+dragging two fingers pans and changing their distance zooms. Gesture controls
+respect the existing battle viewport, UI ownership and focus gates. Single
+touches do not issue unit commands; this is camera support, not full mobile
+playability.
+
+Browsers expose wheel units rather than device identity. Pixel-mode wheel
+events pan, including mouse wheels reported in pixels; line/page wheel events
+keep wheel zoom. Ctrl-wheel follows the pinch path and suppresses browser page
+zoom over the canvas. Browser scrolling may include inertia because DOM events
+do not expose macOS momentum phases. Safari/Firefox and mobile performance
+acceptance remain open (DESIGN_BROWSER_HOST §6).
+
 ## Persistent browser files
 
 Settings now live at `/settings/settings.json` and saves at `/saves`, using the

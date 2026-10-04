@@ -23,6 +23,8 @@ orders, campaign result and save codec retain their existing owners.
 - `web/host.js`: one runtime per origin, module compilation and iframe lifecycle.
 - `web/game.js`: immutable launch configuration, matching Go runtime, filesystem
   binding, command-line host options and tagged diagnostic messages.
+- `web/gestures.js`, `internal/platform/ebitenapp/scroll_js.go`: browser camera
+  gestures, event ownership and the presentation-input bridge.
 - `web/fs.js`: Node-style filesystem adapter consumed by Go's js/wasm runtime.
 - `web/storage.js`: committed IndexedDB settings/save transactions.
 - `web/launcher.js`, `index.html`, `style.css`: player-facing launcher and diagnostics.
@@ -102,6 +104,35 @@ original demo distribution agreement would settle it.
    manifest. Restart uses that same directory, even after the root index changes.
    Deploy the new artifact before replacing the root index, and retain prior
    hashed directories/Wasm/runtime files for already-open launchers.
+8. **Browser camera gestures (user-authorized 2026-10-04).** The child runtime
+   observes gestures over its canvas before Ebitengine, cancels browser page
+   scrolling/zoom there, and forwards them once to the existing camera controls
+   (DESIGN_GPU_RENDERER §16.6). Pixel-mode wheel events pan both axes; line/page
+   wheel events retain wheel zoom. DOM units do not identify devices, so mice
+   reporting pixels also pan; no magnitude or timing heuristic guesses a device.
+   GUI wheel deltas keep Ebitengine's signed browser units. Ctrl-wheel, including
+   Chromium trackpad pinch, supplies magnification `-pixelDeltaY/200`, with line
+   and page deltas converted using 16 CSS pixels/line and the viewport height.
+   These conversions are host tuning choices. A Ctrl-wheel burst begins on its
+   first event and ends after 180 ms of quiet, on ordinary scrolling, or on loss
+   of focus; browsers supply no explicit finger-lift or momentum phase here, so
+   inertial pixel scrolling pans too. Two canvas touches pan by their midpoint
+   displacement and supply pinch magnification `log(newDistance/oldDistance)/2`,
+   matching the existing sensitivity of 2. Lift/cancel retires the gesture; a
+   third touch suspends it. Single touches issue no game commands. Touch input
+   cannot synthesize selection clicks. CSS `touch-action:none` reserves canvas
+   gestures. Positions and deltas convert through the centred letterbox into
+   logical pixels; the camera divides panning by live zoom. Touchstart focuses
+   the canvas. The latest gesture position survives idle refresh polls until
+   mouse motion/button input updates it; each pinch start retains its own logical
+   anchor through batching. Lifecycle-only end/cancel events do not move the
+   pointer. Full-window tools retain their ordinary Ebitengine wheel stream;
+   their ownership cancels and clears camera gestures before returning to battle.
+   The existing focus,
+   viewport, minimap, modal and UI ownership gates and zoom styles still apply.
+   Classic retains its existing camera controls. This adds no gameplay seam,
+   simulation state, RNG draws, resources or orders. Listener/timer cleanup runs
+   on engine exit; iframe replacement destroys the whole adapter.
 
 ## 5. Delivery and measurements
 
@@ -133,7 +164,8 @@ not fingerprint comparisons.
 `tools/browser-check` locks folder traversal and batched drops, manifest bounds
 and integrity, corrupt-cache recovery, failed acquisition, source/run message
 isolation, lock admission/restart cancellation, Blob range reads, read-only
-content, atomic persistence and retry behavior. Authored fixtures contain no
+content, atomic persistence and retry behavior, gesture channel separation,
+touch geometry and pinch lifetime/cancellation. Authored fixtures contain no
 retail bytes. Packaging checks preserve an older launcher's child/engine pairing.
 The CI browser job runs these checks with Node 24/Python 3 and builds the
 asset-free artifact and executes the existing numeric kernel vectors on Wasm

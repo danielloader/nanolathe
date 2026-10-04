@@ -3514,7 +3514,10 @@ the pinch knobs in `cmd/nanolathe/trackpad.go`. The native monitor implements
 these choices using Apple's gesture and scroll-event semantics and returns events
 unchanged; empty native polls stay empty rather than replaying Ebiten's copy, and
 other platforms retain Ebitengine wheel zoom with no device classification
-guessed from delta magnitude or timing.
+guessed from delta magnitude or timing. The browser host now supplies canvas
+two-touch pan/pinch and pixel-wheel pan through this same controller; its
+Ctrl-wheel burst lifetime, DOM-unit policy and unavailable momentum metadata
+are documented in DESIGN_BROWSER_HOST §4 contract 8.
 
 The wheel binding is Nanolathe's, not retail's. Retail leaves the wheel to the
 active GUI list under the pointer [07 §2][07 §10], and the UI boundary still

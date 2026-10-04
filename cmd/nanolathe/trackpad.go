@@ -73,6 +73,9 @@ func (b *battleSession) applyTrackpadGestures(mouse *input.MouseState, allowed b
 			g.pinchZoom = live
 			g.pinchPosition = pinchPositionAt(live, lock)
 			g.anchorX, g.anchorY = beamAnchor(x, y)
+			if event.Positioned {
+				g.anchorX, g.anchorY = beamAnchor(event.X, event.Y)
+			}
 		}
 		if event.Cancelled {
 			g.pinchActive = false

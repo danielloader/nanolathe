@@ -90,6 +90,23 @@ func TestPinchAnchorsAtGestureStart(t *testing.T) {
 	}
 }
 
+func TestBrowserPinchUsesItsBatchedStartAnchor(t *testing.T) {
+	b := zoomTestBattle()
+	b.cam.X, b.cam.Z = 2000, 1500
+	px, py := int32(400), int32(250)
+	wx, wz := b.cam.X+px, b.cam.Z+py
+	b.applyTrackpadGestures(&input.MouseState{Pinches: []input.PinchEvent{
+		{Began: true, Positioned: true, X: px, Y: py}, {Delta: 0.2, Ended: true},
+	}}, true, px+100, py+50)
+	for range 100 {
+		b.zoom.Step(b.cam)
+	}
+	z := b.cam.EffectiveZoom()
+	if gx, gy := z.Project(wx-b.cam.X), z.Project(wz-b.cam.Z); gx < px-2 || gx > px || gy < py-2 || gy > py {
+		t.Fatalf("browser pinch followed later mouse position: (%d,%d)", gx, gy)
+	}
+}
+
 func TestTrackpadPanPreservesSmallDeltasAcrossZoomLevels(t *testing.T) {
 	for _, zoom := range camera.ZoomSteps {
 		b := zoomTestBattle()

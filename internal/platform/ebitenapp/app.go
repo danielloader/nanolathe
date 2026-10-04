@@ -1102,11 +1102,14 @@ func (a *app) Layout(outsideWidth, outsideHeight int) (int, int) {
 	a.beganAt = time.Now()
 	a.paceHeld = a.beganAt.Sub(arrived)
 	a.c.SetOutsideSize(outsideWidth, outsideHeight)
+	browserGestureScreenOwned(a.screenActive())
 	if a.screenActive() {
 		a.layoutW, a.layoutH = a.screenLayout(outsideWidth, outsideHeight)
+		nativeScroll.viewport(a.layoutW, a.layoutH, outsideWidth, outsideHeight)
 		return a.layoutW, a.layoutH
 	}
 	w, h := a.c.Size()
+	nativeScroll.viewport(w, h, outsideWidth, outsideHeight)
 	if outsideWidth > 0 && outsideHeight > 0 {
 		a.scrollPointScale = max(float64(w)/float64(outsideWidth), float64(h)/float64(outsideHeight))
 	}

@@ -6,6 +6,10 @@ package input
 type PinchEvent struct {
 	Delta                   float64
 	Began, Ended, Cancelled bool
+	// Positioned browser starts keep their logical anchor through host batching.
+	// Native gestures use the host service's sampled pointer (§16.6).
+	X, Y       int32
+	Positioned bool
 }
 
 // MouseState and KeyboardState are the platform-neutral host-frame sample.

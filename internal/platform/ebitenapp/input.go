@@ -87,9 +87,7 @@ func readInput(timestamp uint32) sampledInput {
 	sample.heldCommand = runtime.GOOS == "darwin" && (heldModifier(ebiten.KeyMetaLeft) || heldModifier(ebiten.KeyMetaRight))
 	wx, wy := ebiten.Wheel()
 	scroll := nativeScroll.take(wx, wy)
-	sample.wheelX, sample.wheelY = float32(scroll.x), float32(scroll.y)
-	sample.zoomWheelY = float32(scroll.zoomY)
-	sample.panX, sample.panY, sample.pinches = scroll.panX, scroll.panY, scroll.pinches
+	sample.applyScroll(scroll)
 	for key := input.Key(1); key < input.KeyCount; key++ {
 		switch key {
 		case input.KeyShift:
@@ -111,6 +109,15 @@ func readInput(timestamp uint32) sampledInput {
 		}
 	}
 	return sample
+}
+
+func (sample *sampledInput) applyScroll(scroll scrollBatch) {
+	if scroll.hasPointer {
+		sample.x, sample.y = scroll.pointerX, scroll.pointerY
+	}
+	sample.wheelX, sample.wheelY = float32(scroll.x), float32(scroll.y)
+	sample.zoomWheelY = float32(scroll.zoomY)
+	sample.panX, sample.panY, sample.pinches = scroll.panX, scroll.panY, scroll.pinches
 }
 
 // heldModifier removes Ebitengine's release-update modifier retention from the

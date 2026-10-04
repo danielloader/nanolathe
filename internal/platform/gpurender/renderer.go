@@ -1,6 +1,7 @@
 package gpurender
 
 import (
+	"image"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -87,6 +88,10 @@ type Renderer struct {
 	worldW, worldH int
 	// Colour/coverage filtering between native and detail zoom (§16.3).
 	worldFilter bool
+	// The current terrain's framebuffer coverage. Overview border space must
+	// remain void after sprites and effects have drawn (§16.7).
+	worldMap      image.Rectangle
+	worldMapValid bool
 
 	// tileAtlases caches one tile-index atlas per (tile set identity, detail tile
 	// set identity, view scale), built on first Terrain draw at that scale and

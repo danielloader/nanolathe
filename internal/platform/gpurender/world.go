@@ -1,6 +1,8 @@
 package gpurender
 
 import (
+	"image"
+
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
@@ -42,8 +44,10 @@ func (r *Renderer) World(w drawlist.WorldSpace) {
 		r.worldW, r.worldH = r.w, r.h
 		r.worldFilter = false
 		r.sched.clearWorld()
+		r.clearWorldMargins()
 		return
 	}
+	r.worldMapValid = false
 	r.worldW, r.worldH = r.w, r.h
 	if int(w.RecordW) > r.worldW {
 		r.worldW = int(w.RecordW)
@@ -59,6 +63,26 @@ func (r *Renderer) World(w drawlist.WorldSpace) {
 	r.sched.setWorldTransform(k, w.OffsetX, w.OffsetY)
 	r.worldFilter = w.Step.Norm() == camera.ViewScaleDetail && k < 1
 	r.prepareArrival(w)
+}
+
+// Features and effects can overhang the map farther than the fog's border
+// cells reach. Clear those margins after every world layer has resolved, in
+// framebuffer space, before the chrome (DESIGN_GPU_RENDERER §16.7, issue #90).
+// Overlay regions carry no terrain and must not erase already composed UI.
+func (r *Renderer) clearWorldMargins() {
+	if !r.worldMapValid {
+		return
+	}
+	r.worldMapValid = false
+	bounds := r.worldMap.Intersect(image.Rect(0, 0, r.w, r.h))
+	if bounds.Empty() {
+		r.fillSolidExclusive(0, 0, r.w, r.h, 0)
+		return
+	}
+	r.fillSolidExclusive(0, 0, r.w, bounds.Min.Y, 0)
+	r.fillSolidExclusive(0, bounds.Max.Y, r.w, r.h-bounds.Max.Y, 0)
+	r.fillSolidExclusive(0, bounds.Min.Y, bounds.Min.X, bounds.Dy(), 0)
+	r.fillSolidExclusive(bounds.Max.X, bounds.Min.Y, r.w-bounds.Max.X, bounds.Dy(), 0)
 }
 
 // worldFilterLane selects fractional-zoom sampling (§16.3).

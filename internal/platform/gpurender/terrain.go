@@ -2,6 +2,7 @@ package gpurender
 
 import (
 	"image"
+	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
@@ -403,6 +404,17 @@ func (r *Renderer) Terrain(c drawlist.Terrain) {
 	if tileMapW <= 0 || tileMapH <= 0 || len(t.TileIndices) < tileMapW*tileMapH {
 		return
 	}
+	// Use the terrain raster's bounds, including its authored void tiles, rather
+	// than the camera's smaller playable extent (DESIGN_GPU_RENDERER §16.7).
+	// Pixel centres determine coverage just as they do for the tile quads.
+	pixelEdge := func(v float32) int { return int(math.Ceil(float64(v) - .5)) }
+	r.worldMap = image.Rect(
+		pixelEdge(r.sched.txx(float32(scale.Project(-c.OriginX)))),
+		pixelEdge(r.sched.txy(float32(scale.Project(-c.OriginY)))),
+		pixelEdge(r.sched.txx(float32(scale.Project(int32(tileMapW*terrainTileSize)-c.OriginX)))),
+		pixelEdge(r.sched.txy(float32(scale.Project(int32(tileMapH*terrainTileSize)-c.OriginY)))),
+	)
+	r.worldMapValid = true
 	dstW := int(c.DstW)
 	dstH := int(c.DstH)
 	if dstW > r.clipW() {

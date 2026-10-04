@@ -3578,6 +3578,21 @@ and Community controls: the greater axis ratio rounded upward, bounded to
 1/16..2×, with the earlier clamp. Modern alone uses the full-map fit. These
 presentation choices change no simulation, RNG or resource behavior [I6].
 
+**Overview margins (issue #90).** Border space outside the projected terrain
+raster stays at PAL[0]. Features and effects can extend farther beyond the map
+than the fog cache's border cells, so clearing the framebuffer before world
+drawing alone leaves isolated sprite pixels there. The modern executor retains
+the terrain command's raster bounds through the same precise affine transform
+as its tile quads. After resolving the world layers, it clears the four exterior
+rectangles in framebuffer pixels before the chrome and strategic markers.
+Pixel-centre coverage preserves fractional map edges. The bounds use the full
+tile raster, including authored void tiles, rather than the smaller playable
+camera extent. Each region resets its bounds; world overlays without terrain
+leave already composed UI intact. This is Nanolathe presentation policy, with
+no changes to the retail fog contract, classic executor or authoritative state.
+The authored GPU fixture locks all four margins, fractional translation, native
+and detail record steps, repeated frames and the overlay boundary.
+
 The camera also retains the requested factor before clamping. Wheel, pinch and F9
 navigate that request, so the tactical and native stops remain distinct even if
 the map floor gives them the same live factor; animation changes only the live

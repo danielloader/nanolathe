@@ -241,10 +241,11 @@ marks the row. There is no detection or fingerprinting fallback.
 
 **The hosted mods' configs** are authored in the repository, one per release,
 as `modconfigs/<release>/nanolathe-mod.json`: `prota-4.8`,
-`ta-zero-alpha5-20241224`, `escalation-10.2.0` and `mayhem-11.3.0`. They are
+`ta-zero-alpha5-20241224`, `escalation-10.2.0`, `mayhem-11.3.0` and
+`twilight-2.0-beta98`. They are
 packaging, not engine data: nothing embeds them, and future mod authors write
-their own. Their content sections and tables are exactly the removed built-in
-profiles and tables, whose evidence is the packages' own archives,
+their own. The first four configs' content sections and tables reproduce the
+removed built-in profiles and tables, whose evidence is the packages' own archives,
 configuration files and the pinned patch source
 ([mod engine-package compatibility](../research/extensions/mod-engine-compatibility.md),
 [community patch engine behavior](../research/extensions/community-patch-engine.md) §3.1
@@ -263,6 +264,12 @@ locks a setting. They retain the original versions: ProTA `4.8`, Escalation
 update the archive hash, never those version strings (§5.1). Legacy installed
 versions with a `+nanolathe.N` suffix remain separate, selectable versions;
 nothing renames or deletes them.
+
+Twilight's new config uses retail tree names, authored identifier and battle
+limits, and the pinned source's `twilight` Community profile. It recommends
+Community 3.9, names no keyboard preset and locks no settings. Its version is
+`2.0-beta98`; full historical runtime equivalence remains unverified
+([Twilight package](../research/extensions/twilight-engine.md)).
 
 ### 4.3 Selection and precedence
 
@@ -713,6 +720,24 @@ carries the pinned source's `mayhem` build profile as its Community table. The c
 marks compatibility experimental because exact equivalence to its shipped
 runtime DLL and all gameplay/controls paths is not established
 ([Total Mayhem package](../research/extensions/total-mayhem-engine.md)).
+
+**TA: Twilight 2.0 Beta 98.** The TAF installation extracts Base Beta 91
+followed by Beta 98 into one directory, replacing `rev31.gp3` entirely.
+The hosted package keeps the replacement archive, the base's three companion
+archives, icons, changelogs, license and original unit guide. It preserves the
+original installed layout's winning archive bytes and catalog hash; retaining
+the older `rev31.gp3` as a separate root would introduce unintended fallback
+content. Its authored limits and current-source Community profile live only
+in its config, and compatibility remains experimental
+([Twilight package](../research/extensions/twilight-engine.md)).
+
+**Older preservation candidates.** The requested next packages are TAUCP
+Normal 2.3, then original Star Wars TA Advanced Fighter Pack v1.0. TAUCP's
+intact distribution currently lacks an extractable authored payload; SWTA's
+primary fifth-release download is inaccessible. Neither has passed content
+or battle acceptance, and neither receives an unsupported catalogue entry.
+The sourced release identities, requirements and evidence needed to proceed
+are recorded in [legacy packages](../research/extensions/legacy-mod-packages.md).
 
 ## 6. Mutators
 

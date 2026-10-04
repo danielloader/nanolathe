@@ -27,9 +27,15 @@ out.mkdir(parents=True, exist_ok=True)
 env = dict(os.environ, GOOS='js', GOARCH='wasm')
 env.setdefault('GOMAXPROCS', '4')
 env['GOFLAGS'] = env.get('GOFLAGS', '') + ' -trimpath -p=4'
+# Sign extension and saturating float conversion are baseline WebAssembly in
+# every supported browser; Go otherwise emits checked sequences for both.
+env.setdefault('GOWASM', 'satconv,signext')
+# The symbol table and DWARF are not used by the browser diagnostics: heap
+# profiles symbolize through the runtime's own function tables.
+build_args = ['go', 'build', '-ldflags=-s -w', '-o']
 with tempfile.TemporaryDirectory(prefix='nanolathe-browser-') as temp:
     wasm = Path(temp) / 'nanolathe.wasm'
-    subprocess.run(['go', 'build', '-o', str(wasm), './cmd/nanolathe'], cwd=root, env=env, check=True)
+    subprocess.run(build_args + [str(wasm), './cmd/nanolathe'], cwd=root, env=env, check=True)
     data = wasm.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
     wasm_name = f'nanolathe.{digest[:16]}.wasm'
@@ -46,7 +52,7 @@ if manifest:
         shutil.copyfile(source, destination)
     (out / 'demo/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 revision = subprocess.check_output(['git', 'describe', '--always', '--dirty'], cwd=root, text=True).strip()
-build = dict(schema=1, version=revision, wasm=wasm_name, runtime=runtime_name, size=len(data), sha256=digest)
+build = dict(schema=1, version=revision, wasm=wasm_name, wasm_gz=wasm_name + '.gz', runtime=runtime_name, size=len(data), sha256=digest)
 browser_bundle(root / 'web', out, build)
 print(f'Browser build: {out}')
 print(f'Wasm: {len(data)/1024**2:.1f} MiB raw, {(out/(wasm_name+".gz")).stat().st_size/1024**2:.1f} MiB gzip')

@@ -179,3 +179,61 @@ jobs:
         run: go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./internal/sim/numeric
       - name: build asset-free browser distribution
         run: tools/browser-build
+      - name: keep the browser distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-build
+          path: build/browser
+          retention-days: 14
+          if-no-files-found: error
+
+  # Main's asset-free browser build becomes the rolling "browser-latest"
+  # release that the website pulls in (docs/DESIGN_BROWSER_HOST.md §6). No
+  # demo or retail content enters this repository's releases.
+  browser-publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [browser, hygiene, simulation]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: browser-publish
+      cancel-in-progress: false
+    env:
+      RELEASE_TAG: browser-latest
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-build
+          path: build/browser
+      - name: package the distribution
+        run: |
+          set -eu
+          test -f build/browser/build.json
+          tar -C build/browser -czf nanolathe-browser.tar.gz .
+          cp build/browser/build.json build.json
+          sha256sum nanolathe-browser.tar.gz build.json > SHA256SUMS
+          cat SHA256SUMS
+      - name: publish the rolling browser release
+        run: |
+          set -eu
+          notes="Asset-free browser build of main at ${GITHUB_SHA}. Replaced automatically on every push to main; the website publishes it at https://nanolathe.gg/play/ (docs/DESIGN_BROWSER_HOST.md §6)."
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --prerelease --title "Browser build (rolling)" --notes "$notes"
+          fi
+          gh release upload "$RELEASE_TAG" nanolathe-browser.tar.gz build.json SHA256SUMS --clobber
+          gh release edit "$RELEASE_TAG" --prerelease --notes "$notes"
+          gh api -X PATCH "repos/${GH_REPO}/git/refs/tags/${RELEASE_TAG}" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+      - name: ask the website to pull the build
+        env:
+          WEBSITE_DISPATCH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+        run: |
+          set -eu
+          if [ -z "$WEBSITE_DISPATCH_TOKEN" ]; then
+            echo "WEBSITE_DISPATCH_TOKEN is not configured; the website refreshes on its own schedule."
+            exit 0
+          fi
+          GH_TOKEN="$WEBSITE_DISPATCH_TOKEN" gh api repos/nanolathe-gg/nanolathe-gg.github.io/dispatches \
+            -f event_type=browser-build -f "client_payload[revision]=${GITHUB_SHA}"

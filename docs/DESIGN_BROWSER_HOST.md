@@ -55,11 +55,15 @@ responses are verified again before use. Cache failures leave play available.
 A missing manifest disables demo entry while retaining local import.
 
 The supplied readme ends with a copyright notice and contains no
-redistribution grant. Free availability alone has not established permission
-to repackage its assets for an engine hosted on a website.
-**Unknown:** permission for the proposed public distribution. The original
-demo distribution agreement or rights-holder permission would settle it.
-Local compatibility work can proceed; public deployment has not occurred.
+redistribution grant. Hosting the demo archive and readme on nanolathe.gg,
+so that visitors can try the browser build without a game folder, is a
+website decision recorded there (user-authorized 2026-10-03): the two files
+are assets of the website repository's `demo` release, pinned by size and
+SHA-256 in the website's `data/play.json`, and copied into the site at build
+time so they stay same-origin with the launcher. Removing that release and
+its pins withdraws the demo without changing this host.
+**Unknown:** formal rights-holder permission for that distribution. The
+original demo distribution agreement would settle it.
 
 ## 4. Runtime and storage contracts
 
@@ -110,7 +114,9 @@ IndexedDB, Cache Storage and Web Locks. The Run locally link points to the
 existing official installation page; the browser host adds no native binary hosting.
 
 The lower-memory preset retains the existing sparse terrain atlas path and
-GOGC=50, independently of gameplay. Browser Modern rendering currently uses
+GOGC=50, independently of gameplay. The collector shares the one browser
+thread, so the demo defaults to the desktop preset and only retail imports
+default to the lower one. Browser Modern rendering currently uses
 full paused compositions, retaining the native paused-world optimization on
 other targets. Editing a save-name field with browser reuse enabled exposed
 blank modal backgrounds. The underlying WebGL resource discrepancy remains

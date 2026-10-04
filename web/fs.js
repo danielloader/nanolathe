@@ -1,10 +1,11 @@
 // Node-style filesystem for Go's js/wasm runtime. Content files remain read-only
 // browser Blobs; settings and saves use origin-local IndexedDB, tmp stays in RAM.
+const blockSize = 1024 * 1024, cacheLimit = 64 * 1024 * 1024;
 export class BrowserFS {
   constructor(files, storage, log = () => {}, persistence = () => {}) {
     this.storage = storage; this.persistence = persistence;
     this.nodes = new Map(); this.handles = new Map(); this.nextFD = 10; this.nextInode = 1;
-    this.cache = new Map(); this.cacheBytes = 0;
+    this.cache = new Map(); this.cacheBytes = 0; this.loading = new Map();
     this.pending = Promise.resolve();
     this.path = {resolve: (...parts) => this.clean(parts.join('/'))};
     this.process = {cwd: () => '/', chdir: () => {}, getuid: () => 0, getgid: () => 0,
@@ -45,7 +46,13 @@ export class BrowserFS {
         const done = bytes => { buffer.set(bytes.subarray(0, count), offset); if (position == null) h.pos += count; cb(null, count); };
         if (!count) done(new Uint8Array());
         else if (n.bytes) done(n.bytes.subarray(start, start + count));
-        else this.readBlob(n, start, count).then(done, e => cb(this.normalizeError(e)));
+        else {
+          // A cached block completes synchronously, so the Go caller continues
+          // without a microtask hop for every small archive read.
+          const cached = this.cachedBlock(n, start, count);
+          if (cached) done(cached);
+          else this.readBlob(n, start, count).then(done, e => cb(this.normalizeError(e)));
+        }
       } catch (e) { cb(this.normalizeError(e)); }
     };
     fs.writeSync = (fd, buf) => {
@@ -128,22 +135,47 @@ export class BrowserFS {
     if ((flags & 65536) && !n.dir) throw this.error('ENOTDIR', p);
     if (n.dir && ((flags & 3) || (flags & 512))) throw this.error('EISDIR', p);
     if (flags & 512) this.truncate(n, 0);
-    const fd = this.nextFD++; this.handles.set(fd, {node: n, flags, pos: flags & 1024 ? n.size : 0}); return fd;
+    const fd = this.nextFD++; this.handles.set(fd, {node: n, flags, pos: flags & 1024 ? n.size : 0});
+    // Archive directories and small loose files live in the first block; one
+    // slice at open serves the reads that follow instead of one slice each.
+    if (n.blob && n.size > 0) this.readBlob(n, 0, Math.min(blockSize, n.size)).catch(() => {});
+    return fd;
   }
   range(buffer, offset, length, start) {
     if (![offset, length, start].every(Number.isSafeInteger) || offset < 0 || length < 0 || start < 0 || offset + length > buffer.length) throw this.error('EINVAL', 'read/write range');
   }
+  // A range inside one block is served from the block cache; larger or
+  // straddling ranges read the Blob directly.
+  block(n, start, length) {
+    const base = Math.floor(start / blockSize) * blockSize;
+    if (length > blockSize || start + length > base + blockSize) return null;
+    return {base, key: n.ino + ':' + base};
+  }
+  cachedBlock(n, start, length) {
+    const block = this.block(n, start, length);
+    const data = block && this.cache.get(block.key);
+    if (!data) return null;
+    this.cache.delete(block.key); this.cache.set(block.key, data);
+    return data.subarray(start - block.base, start - block.base + length);
+  }
   async readBlob(n, start, length) {
-    const blockSize = 1024 * 1024, base = Math.floor(start / blockSize) * blockSize, key = n.ino + ':' + base;
-    if (length > blockSize || start + length > base + blockSize) return new Uint8Array(await n.blob.slice(start, start + length).arrayBuffer());
-    let data = this.cache.get(key);
-    if (!data) {
-      data = new Uint8Array(await n.blob.slice(base, base + blockSize).arrayBuffer());
-      // Concurrent reads can complete for the same block; account it only once.
-      if (!this.cache.has(key)) { this.cache.set(key, data); this.cacheBytes += data.length; }
-      while (this.cacheBytes > 64 * 1024 * 1024) { const k = this.cache.keys().next().value; this.cacheBytes -= this.cache.get(k).length; this.cache.delete(k); }
-    } else { this.cache.delete(key); this.cache.set(key, data); }
-    return data.subarray(start - base, start - base + length);
+    const block = this.block(n, start, length);
+    if (!block) return new Uint8Array(await n.blob.slice(start, start + length).arrayBuffer());
+    const cached = this.cachedBlock(n, start, length);
+    if (cached) return cached;
+    // Concurrent reads of one block share a single slice and one accounting.
+    let loading = this.loading.get(block.key);
+    if (!loading) {
+      loading = n.blob.slice(block.base, block.base + blockSize).arrayBuffer().then(buffer => {
+        const data = new Uint8Array(buffer);
+        this.cache.set(block.key, data); this.cacheBytes += data.length;
+        while (this.cacheBytes > cacheLimit) { const k = this.cache.keys().next().value; this.cacheBytes -= this.cache.get(k).length; this.cache.delete(k); }
+        return data;
+      }).finally(() => this.loading.delete(block.key));
+      this.loading.set(block.key, loading);
+    }
+    const data = await loading;
+    return data.subarray(start - block.base, start - block.base + length);
   }
   truncate(n, len) {
     this.writable(n.path);

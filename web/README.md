@@ -37,11 +37,24 @@ tools/browser-serve --directory /tmp/nanolathe-browser-demo
 ```
 
 The default artifact is asset-free. Generated output under `build/browser` is
-ignored; no original assets are committed. Check redistribution terms before
-publishing a demo artifact: the supplied readme contains a copyright notice but
-no redistribution grant. No website deployment has been performed.
+ignored; no original assets are committed. Public demo hosting is the
+website's decision and pipeline, recorded in DESIGN_BROWSER_HOST §3 and §6.
 
-The current 47.0 MiB Wasm binary compresses to 11.2 MiB gzip. Demo assets total
+## Publishing
+
+Every push to `main` whose browser, hygiene and simulation CI jobs pass runs
+the `browser-publish` job: it packages the asset-free `tools/browser-build`
+output as `nanolathe-browser.tar.gz`, uploads it with `build.json` and
+`SHA256SUMS` to the rolling `browser-latest` GitHub release, moves that tag to
+the commit, and sends the website repository a `browser-build` dispatch when
+the `WEBSITE_DISPATCH_TOKEN` secret is configured (without it the website
+checks every six hours). The website's `scripts/fetch-play.py` verifies and
+publishes the build at https://nanolathe.gg/play/ together with the demo
+assets it hosts itself. Nothing in this repository's releases contains game
+content.
+
+The current 45.7 MiB Wasm binary compresses to 11.0 MiB gzip; the launcher
+fetches the gzip variant and decompresses it in the page. Demo assets total
 19.5 MiB. Wasm and the matching Go runtime have content-hashed filenames. The index
 also selects a hashed host directory, pinning scripts, the child page and its
 build manifest across restarts. Publish new files before replacing the index;

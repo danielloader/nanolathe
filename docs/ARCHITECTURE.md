@@ -437,7 +437,9 @@ filesystem, IndexedDB and packaging regressions with Node 24 and Python 3.
 The asset-free browser CI job runs it, executes the existing numeric kernel
 vectors on js/wasm under Node with `GOMAXPROCS=1`, and runs
 `tools/browser-build`; it needs no
-desktop graphics headers or original assets. Browser host changes also require
+desktop graphics headers or original assets. On a push to `main` the
+`browser-publish` job turns that artifact into the rolling `browser-latest`
+release the website pulls in. Browser host changes also require
 the ordinary integrated Go gates and manual Chromium acceptance described in
 [DESIGN_BROWSER_HOST §6](DESIGN_BROWSER_HOST.md#6-merge-acceptance-and-release-boundary).
 

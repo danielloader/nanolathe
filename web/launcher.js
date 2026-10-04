@@ -20,6 +20,9 @@ const host = new BrowserHost($('game'), (type, payload) => {
   if (type === 'stopped') { retireView(); measurement = null; profiling = false; pendingMeasureTick = null; diagnostics(false); setStatus(payload); }
 });
 const modulePromise = () => host.compiledModule();
+// Begin the Wasm download and compilation at the first sign of intent, so the
+// demo click finds the module already compiling.
+for (const type of ['pointerover', 'focusin', 'dragenter']) $('welcome').addEventListener(type, () => modulePromise().catch(() => {}), {once: true});
 function diagnostics(ready) {
   $('measure').disabled = !ready || profiling || Boolean(measurement);
   $('heap').disabled = !ready || profiling || Boolean(measurement);
@@ -31,6 +34,9 @@ function selectContent(next) {
   activeConfig = null; measurement = null; pendingMeasureTick = null;
   $('content-name').textContent = next.name;
   const demo = next.kind === 'demo';
+  // The collector shares the one browser thread, so the demo's small scenes
+  // keep the desktop GC pacing; retail imports default to the lower preset.
+  $('memory').value = demo ? 'desktop' : 'lower';
   for (const option of $('entry').options) option.disabled = demo ? ['skirmish','stress'].includes(option.value) : option.value === 'demo';
   $('entry').value = demo ? 'demo' : 'menus'; entryChanged();
   refreshStorage();

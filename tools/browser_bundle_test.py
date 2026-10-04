@@ -1,4 +1,5 @@
 """Authored packaging fixtures; no original game assets."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,6 +30,10 @@ class BundleTests(unittest.TestCase):
             self.assertIn(second + '/launcher.js', (out / 'index.html').read_text())
             self.assertIn(second + '/style.css', (out / 'index.html').read_text())
             self.assertFalse((out / first / 'host.test.mjs').exists())
+            root_manifest = json.loads((out / 'build.json').read_text())
+            self.assertEqual(root_manifest['host'], second)
+            self.assertEqual(root_manifest['files'], ['build.json', 'game.html', 'game.js', 'host.js', 'index.html', 'launcher.js'][1:] + ['build.json'])
+            self.assertNotIn('host', json.loads((out / second / 'build.json').read_text()))
 
 
 if __name__ == '__main__':

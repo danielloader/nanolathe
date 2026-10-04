@@ -22,6 +22,7 @@ has its own design document; this one only says where the boundaries are.
 | [DESIGN_INTERFACE_HUD_INPUT](DESIGN_INTERFACE_HUD_INPUT.md) | GUI files and screens, the battle HUD, input, camera, selection and command dispatch |
 | [DESIGN_SESSIONS_AI_SAVE](DESIGN_SESSIONS_AI_SAVE.md) | session states, campaign and mission loading, triggers, the computer player, saves, the headless runner |
 | [DESIGN_PRESENTATION_CLIENT](DESIGN_PRESENTATION_CLIENT.md) | window and frame loop, the frame composer, model rasterizer, effects, palette, audio |
+| [DESIGN_BROWSER_HOST](DESIGN_BROWSER_HOST.md) | experimental desktop browser launcher, local content import, verified demo acquisition, Wasm artifact and persistent browser files |
 | [DESIGN_DEVELOPER_TOOLS](DESIGN_DEVELOPER_TOOLS.md) | planned developer views, reconnected dormant probes, diagnostic publication and portable host tooling |
 | [DESIGN_GAMEPLAY_RULES](DESIGN_GAMEPLAY_RULES.md) | the gameplay rule seams, how a Modern or Strict 3.1 rule set is bound, and what it may cost |
 | [DESIGN_GPU_RENDERER](DESIGN_GPU_RENDERER.md) | the recorded frame draw list, the classic (software) and modern (GPU) executors, the renderer switch, visual parity policy and prototype gates |
@@ -178,6 +179,7 @@ package implements.
 | `internal/audio` | The eight-slot cue queue, sample decode and cache, positional attenuation, music, briefing speech | DESIGN_PRESENTATION_CLIENT |
 | `internal/audiobackend` | The desktop PCM device boundary behind `internal/audio` | DESIGN_PRESENTATION_CLIENT |
 | `internal/platform/ebitenapp` | The Ebitengine adapter: window and loop lifecycle, device input polling, framebuffer upload, the classic/modern executor switch | DESIGN_PRESENTATION_CLIENT |
+| `web/`, `tools/browser-*`, `tools/browser_*.py` | Browser host and static js/wasm distribution; original content stays external, authoritative game APIs remain in Go | DESIGN_BROWSER_HOST |
 | `internal/debugcapture` | Host-only on-demand bundle writer: runtime profiles, own-process memory counters, file status manifest; receives detached engine projections from the battle owner | DESIGN_PRESENTATION_CLIENT, DEBUG_CAPTURE |
 | `internal/platform/benchlock` | Host file lock serializing benchmark startup and execution across worktrees | BATTLE_BENCHMARK, SIM_BENCHMARK |
 | `internal/drawlist` | The recorded committed-frame draw list: command families carrying physical palette indices, the `Sink` executor interface, ordered replay and model packet boundary | DESIGN_GPU_RENDERER |
@@ -429,6 +431,15 @@ runs taken under similar load. Focused `go test` runs, probes and long
 research sweeps take **no** lock: wrapping them in `tools/host-run` stalls
 every benchmark on the host for their whole duration. Inherited descriptors
 release on process exit, including crashes; never delete the lock files.
+
+**Browser host gate.** `tools/browser-check` runs the authored host, folder, integrity,
+filesystem, IndexedDB and packaging regressions with Node 24 and Python 3.
+The asset-free browser CI job runs it, executes the existing numeric kernel
+vectors on js/wasm under Node with `GOMAXPROCS=1`, and runs
+`tools/browser-build`; it needs no
+desktop graphics headers or original assets. Browser host changes also require
+the ordinary integrated Go gates and manual Chromium acceptance described in
+[DESIGN_BROWSER_HOST §6](DESIGN_BROWSER_HOST.md#6-merge-acceptance-and-release-boundary).
 
 **Test tiers.** `tools/check` clears retail-asset variables and runs tracked-file
 `gofmt`, build, vet and cached short synthetic tests. Package arguments narrow

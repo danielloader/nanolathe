@@ -156,3 +156,26 @@ jobs:
         run: go build -o /tmp/nanolathe ./cmd/nanolathe
       - name: binary runs
         run: /tmp/nanolathe --help
+
+  # Browser host contracts and the actual asset-free Wasm artifact.
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: browser host regressions
+        run: tools/browser-check
+      - name: execute Wasm numeric kernel vectors
+        env:
+          GOOS: js
+          GOARCH: wasm
+          GOMAXPROCS: '1'
+        run: go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./internal/sim/numeric
+      - name: build asset-free browser distribution
+        run: tools/browser-build

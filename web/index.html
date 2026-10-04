@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play Nanolathe in your browser</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><h1>Nanolathe</h1><span>Play in your browser</span><a href="https://nanolathe.gg/get-started/" target="_blank" rel="noopener">Run locally ↗</a></header>
+<section id="welcome">
+  <h2>Try Total Annihilation</h2>
+  <p>Play the original demo's three missions, or bring your own game for skirmish and the full campaigns.</p>
+  <p>Experimental desktop browser build. Chromium is currently verified.</p>
+  <button id="demo" disabled>Checking demo availability…</button>
+  <span id="demo-info"></span>
+  <div id="drop"><strong>Have the full game?</strong><p>Drop your TotalA folder here. Your files stay on your computer.</p>
+    <input id="folder" type="file" webkitdirectory multiple><label for="folder">Choose game folder</label>
+  </div>
+</section>
+<div id="controls" hidden><span id="content-name"></span><button id="start">Restart game</button><button id="stop">Back to launcher</button><button id="fullscreen">Fullscreen</button></div>
+<p id="status" role="status" aria-live="polite">Opening browser host…</p>
+<p id="storage-error" role="alert" hidden></p>
+<div id="game-view" hidden><iframe id="game" title="Nanolathe game" allow="autoplay; fullscreen" hidden></iframe>
+<button id="leave-fullscreen">Exit fullscreen</button></div>
+<details id="advanced"><summary>Graphics and diagnostics</summary>
+<div class="row"><label>Renderer <select id="renderer"><option value="modern">Modern (GPU)</option><option value="classic">Classic (software)</option></select></label>
+<label>Memory <select id="memory"><option value="lower">Lower memory</option><option value="desktop">Desktop default</option></select></label>
+<label>Start <select id="entry"><option value="demo">First demo mission</option><option value="menus">Game menus</option><option value="skirmish">Quick skirmish</option><option value="stress">750-unit stress battle</option></select></label>
+<label id="maplabel" hidden>Map <input id="map" value="comet catcher"></label>
+</div><small>Changes apply on the next start. Click the game to focus it; losing focus pauses play. F2 opens battle options.</small>
+<div class="row"><button id="measure" disabled>Measure 20 seconds</button><button id="export">Export measurements</button><a id="measure-download" hidden>Download measurements</a><button id="heap" disabled>Capture heap profile</button>
+<label><input id="auto-measure" type="checkbox"> Measure stress run from tick 750</label></div>
+<pre id="metrics"></pre><details id="profile" hidden><summary>Heap profile</summary><a id="heapdownload">Download profile</a><pre id="heaptext"></pre></details>
+<details><summary>Startup log and results</summary><pre id="log"></pre></details>
+</details>
+<details id="saved"><summary>Browser settings and saved games</summary><div id="stored">Choose a content source to see its saved games.</div></details>
+<script type="module" src="launcher.js"></script>
+</body></html>

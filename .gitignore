@@ -26,6 +26,13 @@ HANDOFF*
 /patchmatchgo
 __pycache__/
 
+# Browser build outputs; source and assets remain separate.
+/web/nanolathe.wasm
+/web/wasm_exec.js
+
 # The build stamp the installer generates into a verified source tree
 # (internal/version/stampgen); never source.
 /internal/version/stamp_generated.go
+
+# Static browser distribution artifacts (may contain local demo content).
+/build/browser/

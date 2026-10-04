@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Loopback browser preview, with an optional external demo allowlist."""
+import argparse
+import http.server
+import json
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
+from browser_assets import demo_assets
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--port', type=int, default=8766)
+parser.add_argument('--directory', type=Path, default=Path('build/browser'))
+parser.add_argument('--demo-root', type=Path, help='serve only the demo archive/readme without copying them into the build')
+args = parser.parse_args()
+root = args.directory.expanduser().resolve()
+if not (root / 'build.json').is_file():
+    parser.error('directory has no build.json; run tools/browser-build first')
+manifest, sources = demo_assets(args.demo_root) if args.demo_root else (None, {})
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    extensions_map = dict(http.server.SimpleHTTPRequestHandler.extensions_map,
+                          **{'.wasm':'application/wasm', '.js':'text/javascript'})
+    def __init__(self, *handler_args, **kwargs):
+        self.encoding = None
+        super().__init__(*handler_args, directory=str(root), **kwargs)
+    def translate_path(self, path):
+        self.encoding = None
+        translated = super().translate_path(path)
+        candidate = Path(translated)
+        if not candidate.resolve().is_relative_to(root):
+            return str(root / '__unavailable__')
+        if candidate.suffix == '.wasm' and 'gzip' in self.headers.get('Accept-Encoding', ''):
+            compressed = candidate.with_name(candidate.name + '.gz')
+            if compressed.is_file():
+                self.encoding = 'gzip'
+                return str(compressed)
+        return translated
+    def guess_type(self, path):
+        if self.encoding == 'gzip':
+            return 'application/wasm'
+        return super().guess_type(path)
+    def end_headers(self):
+        self.send_header('Cache-Control', 'no-cache' if urlsplit(self.path).path.endswith(('.json','.html','.js','.css','/')) else 'public, max-age=31536000, immutable')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('Referrer-Policy', 'same-origin')
+        if self.encoding:
+            self.send_header('Content-Encoding', self.encoding)
+        if urlsplit(self.path).path.endswith('.wasm'):
+            self.send_header('Vary', 'Accept-Encoding')
+        super().end_headers()
+    def send_head(self):
+        path = unquote(urlsplit(self.path).path)
+        self.encoding = None
+        if manifest and path == '/demo/manifest.json':
+            data = (json.dumps(manifest) + '\n').encode()
+            import io
+            self.send_response(200)
+            self.send_header('Content-Type','application/json')
+            self.send_header('Content-Length',str(len(data)))
+            self.end_headers()
+            return io.BytesIO(data)
+        if manifest and path.startswith('/demo/'):
+            source = sources.get(path[len('/demo/'):])
+            if source is None:
+                self.send_error(404)
+                return None
+            data = source.open('rb')
+            self.send_response(200)
+            self.send_header('Content-Type','application/octet-stream')
+            self.send_header('Content-Length',str(source.stat().st_size))
+            self.end_headers()
+            return data
+        return super().send_head()
+    def list_directory(self, path):
+        self.send_error(404)
+        return None
+
+print(f'Nanolathe browser preview: http://127.0.0.1:{args.port}', flush=True)
+http.server.ThreadingHTTPServer(('127.0.0.1', args.port), Handler).serve_forever()

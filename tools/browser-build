@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Build a static browser host. Original assets require an explicit input."""
+import argparse
+import gzip
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+from browser_bundle import browser_bundle
+import subprocess
+import tempfile
+from browser_assets import demo_assets
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--out', type=Path, default=Path('build/browser'))
+parser.add_argument('--demo-root', type=Path, help='include only TADemo.hpi and its original readme from this extracted demo')
+args = parser.parse_args()
+root = Path(__file__).resolve().parent.parent
+out = args.out.expanduser().resolve()
+if out == root or out == root / 'web' or out in root.parents:
+    parser.error('--out must be a separate build directory, not the source tree')
+if not args.demo_root and (out / 'demo/manifest.json').exists():
+    parser.error('output contains demo assets; choose a fresh --out for an asset-free build')
+manifest, sources = demo_assets(args.demo_root) if args.demo_root else (None, {})
+out.mkdir(parents=True, exist_ok=True)
+env = dict(os.environ, GOOS='js', GOARCH='wasm')
+env.setdefault('GOMAXPROCS', '4')
+env['GOFLAGS'] = env.get('GOFLAGS', '') + ' -trimpath -p=4'
+with tempfile.TemporaryDirectory(prefix='nanolathe-browser-') as temp:
+    wasm = Path(temp) / 'nanolathe.wasm'
+    subprocess.run(['go', 'build', '-o', str(wasm), './cmd/nanolathe'], cwd=root, env=env, check=True)
+    data = wasm.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    wasm_name = f'nanolathe.{digest[:16]}.wasm'
+    (out / wasm_name).write_bytes(data)
+    (out / (wasm_name + '.gz')).write_bytes(gzip.compress(data, compresslevel=9, mtime=0))
+goroot = subprocess.check_output(['go', 'env', 'GOROOT'], cwd=root, text=True).strip()
+runtime = (Path(goroot) / 'lib/wasm/wasm_exec.js').read_bytes()
+runtime_name = 'wasm_exec.' + hashlib.sha256(runtime).hexdigest()[:16] + '.js'
+(out / runtime_name).write_bytes(runtime)
+if manifest:
+    for url, source in sources.items():
+        destination = out / 'demo' / url
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    (out / 'demo/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+revision = subprocess.check_output(['git', 'describe', '--always', '--dirty'], cwd=root, text=True).strip()
+build = dict(schema=1, version=revision, wasm=wasm_name, runtime=runtime_name, size=len(data), sha256=digest)
+browser_bundle(root / 'web', out, build)
+print(f'Browser build: {out}')
+print(f'Wasm: {len(data)/1024**2:.1f} MiB raw, {(out/(wasm_name+".gz")).stat().st_size/1024**2:.1f} MiB gzip')
+if manifest:
+    print('Demo assets included in this local artifact. Check redistribution terms before publishing.')

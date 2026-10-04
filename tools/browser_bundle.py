@@ -1,0 +1,26 @@
+"""Pin every host module and child page to the same engine build."""
+import hashlib
+import json
+from pathlib import Path
+
+
+def browser_bundle(source: Path, out: Path, build: dict) -> str:
+    files = sorted(p for p in source.iterdir()
+                   if p.suffix in ('.js', '.html', '.css')
+                   and p.name != 'wasm_exec.js' and '.test.' not in p.name)
+    encoded = (json.dumps(build, sort_keys=True, indent=2) + '\n').encode()
+    digest = hashlib.sha256(encoded)
+    for path in files:
+        digest.update(path.name.encode() + b'\0' + path.read_bytes())
+    name = 'host.' + digest.hexdigest()[:16]
+    bundle = out / name
+    bundle.mkdir(parents=True, exist_ok=True)
+    for path in files:
+        (bundle / path.name).write_bytes(path.read_bytes())
+    (bundle / 'build.json').write_bytes(encoded)
+    (out / 'build.json').write_bytes(encoded)
+    index = (source / 'index.html').read_text()
+    index = index.replace('href="style.css"', f'href="{name}/style.css"')
+    index = index.replace('src="launcher.js"', f'src="{name}/launcher.js"')
+    (out / 'index.html').write_text(index)
+    return name

@@ -1,0 +1,17 @@
+*{box-sizing:border-box}[hidden]{display:none!important}
+html{height:100%;color-scheme:dark}body{height:100dvh;display:flex;flex-direction:column;margin:0;background:#101419;color:#dce4e8;font:15px system-ui}
+header{flex:none;padding:12px 20px;display:flex;align-items:center;gap:16px;background:#1a222b}header a{margin-left:auto}h1{font-size:20px;margin:0}h2{font-size:26px}a{color:#9edbbe}p{line-height:1.5}
+button,select,input{font:inherit;padding:7px;background:#263443;color:#fff;border:1px solid #516171;border-radius:5px}button,label[for=folder]{cursor:pointer}button:disabled{opacity:.55;cursor:default}
+#welcome{flex:none;margin:20px auto;max-width:720px;padding:0 20px;text-align:center}#demo{background:#205841;padding:12px 22px}#demo-info{display:block;font-size:13px;margin:10px}
+#drop{margin:24px 0 8px;padding:20px;border:2px dashed #657786;border-radius:10px}#drop.over{border-color:#7bd4ad;background:#183329}
+#folder{position:absolute;left:-10000px}label[for=folder]{display:inline-block;background:#263443;padding:10px 18px;border-radius:5px}
+#controls,.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}#controls{justify-content:center;flex:none;padding:8px}#status{flex:none;text-align:center;margin:5px 16px;color:#9edbbe;font-size:13px}
+#game-view{display:flex;position:relative;flex:1;min-height:180px;background:black}
+iframe{display:block;flex:1;width:100%;min-height:180px;border:0;background:black}
+#leave-fullscreen{display:none}#game-view:fullscreen #leave-fullscreen{display:block;position:absolute;right:12px;top:12px;opacity:.8}
+details{flex:none;margin:6px 20px}summary{cursor:pointer}details[open]{max-height:35vh;overflow:auto}.row{margin:10px 0}
+small{color:#99aab5}pre{white-space:pre-wrap;overflow:auto;font:12px monospace;padding:8px;background:#080c10;max-height:180px;margin:8px 0}
+@media(max-width:600px){header{gap:10px;font-size:12px}#welcome{margin-top:8px}h2{font-size:22px}#controls{font-size:12px}}
+
+#storage-error{flex:none;margin:8px 20px;padding:10px;background:#502d24;color:#ffe2c9}
+#game-view:fullscreen #storage-error{position:absolute;left:0;right:0;bottom:0;z-index:1}

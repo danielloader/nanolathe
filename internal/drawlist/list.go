@@ -193,8 +193,14 @@ type Glyphs struct {
 	Font *formats.FNT
 	// Text is the string to lay out from the baseline origin.
 	Text string
-	// X, Y is the baseline origin in screen pixels.
+	// X, Y is the baseline anchor in recorded pixels. Within a world region
+	// only this anchor follows the world transform; the glyph bitmap stays at
+	// native size (docs/DESIGN_GPU_RENDERER.md §14.2, §16.3).
 	X, Y int32
+	// ScreenOffsetX/Y are framebuffer-pixel offsets added after projecting the
+	// anchor. Counter centering, line spacing and outlines must not shrink with
+	// the world. Zero preserves the ordinary baseline-origin layout.
+	ScreenOffsetX, ScreenOffsetY int32
 	// Color is the physical palette index the glyph pixels are written with,
 	// already resolved through the logical map [C-G2][03 §4.3].
 	Color uint8

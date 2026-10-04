@@ -1,6 +1,8 @@
 package gpurender
 
 import (
+	"math"
+
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
 )
@@ -210,6 +212,21 @@ func (r *Renderer) Glyphs(g drawlist.Glyphs) {
 	if fnt == nil || fnt.Height == 0 || len(g.Text) == 0 {
 		return
 	}
+	// World text keeps native glyphs, centering and outline pixels. Project and
+	// snap its anchor once, then compile framebuffer geometry in the existing
+	// schedule so strip/fog ordering and batching remain intact (§14.2, §16.3).
+	if r.sched.worldOn {
+		g.X = int32(math.Floor(float64(r.sched.txx(float32(g.X))) + .5))
+		g.Y = int32(math.Floor(float64(r.sched.txy(float32(g.Y))) + .5))
+		if g.HasClip {
+			x0, y0, x1, y1 := r.sched.txRect(int(g.Clip.X), int(g.Clip.Y), int(g.Clip.X+g.Clip.W), int(g.Clip.Y+g.Clip.H))
+			g.Clip = drawlist.Rect{X: int32(x0), Y: int32(y0), W: int32(x1 - x0), H: int32(y1 - y0)}
+		}
+		r.sched.worldOn = false
+		defer func() { r.sched.worldOn = true }()
+	}
+	g.X += g.ScreenOffsetX
+	g.Y += g.ScreenOffsetY
 	text := g.Text
 	// Truncate-to-width happens before clipping, exactly as drawTextClipped does [07 §7].
 	if int(g.MaxWidth) > 0 {
@@ -221,7 +238,7 @@ func (r *Renderer) Glyphs(g drawlist.Glyphs) {
 	// Whole-string admission uses the baseline origin, not the adjusted glyph
 	// top, and tests one-past text edges against inclusive clip bounds
 	// [03 R-FONT-01 §3].
-	clipX0, clipY0, clipX1, clipY1 := glyphClipBounds(g, r.clipW(), r.clipH())
+	clipX0, clipY0, clipX1, clipY1 := glyphClipBounds(g, r.w, r.h)
 	if int(g.X) < clipX0 || int(g.Y) < clipY0 || int(g.X)+measureText(fnt, text) >= clipX1 || int(g.Y)+int(fnt.Height) >= clipY1 {
 		return
 	}
@@ -231,7 +248,7 @@ func (r *Renderer) Glyphs(g drawlist.Glyphs) {
 	}
 	// Once admitted, the signed baseline may overrun the private surface.
 	// Only framebuffer bounds remain as host storage protection.
-	clipX0, clipY0, clipX1, clipY1 = 0, 0, r.clipW(), r.clipH()
+	clipX0, clipY0, clipX1, clipY1 = 0, 0, r.w, r.h
 	top := int(g.Y) - baselineDescender(fnt)
 	curX := int(g.X)
 	gh := atlas.height

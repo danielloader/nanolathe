@@ -3272,6 +3272,18 @@ translation can arm it even at a rest scale. It is applied at the scheduler's
 intake, so the overlap tests that decide a command's phase compare what actually
 lands on the composite.
 
+**World text.** FNT runs follow the unscaled-glyph contract of §14.2. The
+executor transforms only the recorded baseline anchor, rounds it to the nearest
+framebuffer pixel, then adds `Glyphs.ScreenOffsetX/Y` in screen pixels. Counter
+centering, vertical line spacing and the eight one-pixel outline stamps use
+these offsets, so fractional zoom cannot collapse the glyph strokes or outline.
+An explicit clip follows the world transform; text admission and baseline
+storage clipping then use framebuffer bounds. The glyph quads enter the same
+schedule with its transform held off for that command, preserving strip/fog
+order without adding a submission. The region's transform is restored for the
+next world command. Native and detail rest views preserve their previous text
+pixels. These are presentation rules; no committed state or RNG changes.
+
 **The record extent.** Below the step the recorded world has to cover more pixels
 than the framebuffer has: `recordW = Project_step(Inverse_factor(width))` plus a
 two-step pad for the rounding of the two conversions, and the same on the other

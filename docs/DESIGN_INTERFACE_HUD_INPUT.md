@@ -3637,6 +3637,16 @@ classification; presentation neither walks live cargo links nor reads an order
 queue [I6]. The transport count includes only cargo-list entries whose resolved
 child still points back to this carrier.
 
+**Nanolathe presentation policy — zoom.** The health-bar anchor follows the
+live world transform. Counter glyphs, horizontal centering, spacing above the
+bar and between lines, and all eight outline offsets remain native framebuffer
+pixels at every zoom. The executor rounds the transformed anchor to the nearest
+pixel before adding those offsets. Native and detail rest views retain their
+existing pixels; this also keeps group digits readable during fractional zoom
+(DESIGN_GPU_RENDERER §14.2, §16.3). Device fixtures compare the counter mask
+relative to its anchor across native, fractional and detail factors, including
+fractional camera translation, and check Classic/Modern parity at both rests.
+
 **Reload bar (Established).** For a complete own unit under the same
 `damagebars` gate, scan the three committed weapon slots in order. A slot is
 tagged when either its authored definition or its current live weapon has

@@ -104,15 +104,15 @@ func (c *Client) drawCommunityUnitHUD(u *frame.UnitView, centerX, healthY int32)
 		if fontHeight <= 0 {
 			fontHeight = 8
 		}
-		textY := healthY - fontHeight - 3
+		textOffsetY := -fontHeight - 3
 		if labels.stockpile != "" {
-			c.drawCommunityCounter(labels.stockpile, centerX, textY)
+			c.drawCommunityCounter(labels.stockpile, centerX, healthY, textOffsetY)
 		}
 		if labels.transport != "" {
 			if labels.stockpile != "" {
-				textY -= fontHeight + 1
+				textOffsetY -= fontHeight + 1
 			}
-			c.drawCommunityCounter(labels.transport, centerX, textY)
+			c.drawCommunityCounter(labels.transport, centerX, healthY, textOffsetY)
 		}
 	}
 	if c.communityHUD.ReloadBars {
@@ -122,11 +122,14 @@ func (c *Client) drawCommunityUnitHUD(u *frame.UnitView, centerX, healthY int32)
 	}
 }
 
-func (c *Client) drawCommunityCounter(text string, centerX, y int32) {
+func (c *Client) drawCommunityCounter(text string, centerX, healthY, textOffsetY int32) {
 	if text == "" || c.fnt == nil {
 		return
 	}
-	x := centerX - int32(MeasureText(c.fnt, text))/2
+	offsetX := -int32(MeasureText(c.fnt, text)) / 2
+	// Keep these text-layout offsets in framebuffer pixels. The health-bar
+	// anchor alone follows fractional world zoom (DESIGN_GPU_RENDERER §16.3).
+	glyphs := drawlist.Glyphs{Font: c.fnt, Text: text, X: centerX, Y: healthY}
 	// The source stamps a black one-pixel outline in all eight neighboring
 	// positions, followed by the configured foreground. Nanolathe adopts its
 	// default raw palette index 255 for this compact on/off host option.
@@ -135,10 +138,12 @@ func (c *Client) drawCommunityCounter(text string, centerX, y int32) {
 			if dx == 0 && dy == 0 {
 				continue
 			}
-			c.emitGlyphs(drawlist.Glyphs{Font: c.fnt, Text: text, X: x + dx, Y: y + dy, Color: 0})
+			glyphs.ScreenOffsetX, glyphs.ScreenOffsetY = offsetX+dx, textOffsetY+dy
+			c.emitGlyphs(glyphs)
 		}
 	}
-	c.emitGlyphs(drawlist.Glyphs{Font: c.fnt, Text: text, X: x, Y: y, Color: 255})
+	glyphs.ScreenOffsetX, glyphs.ScreenOffsetY, glyphs.Color = offsetX, textOffsetY, 255
+	c.emitGlyphs(glyphs)
 }
 
 func (c *Client) drawCommunityReloadBar(centerX, topY int32, elapsed, total uint16) {

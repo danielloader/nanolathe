@@ -1038,6 +1038,12 @@ alone reads `[07 "The loading screen"]`; `loadgame.go` is the one
 the `RADAR` preview `[07 R-FE-01 §8]`; `postbattle.go` and `result.go` are the
 post-battle machine, its glamour fade and the score bars `[07 R-FE-01 §10]`.
 
+`briefing_render.go` retains each side's decoded immutable background for the
+current content set, including an absent optional background. Replacing the
+content set invalidates both entries. The cache changes no authored pixels or
+briefing state; it removes archive reads and PCX decoding from each draw.
+`TestBriefingBackgroundCacheTracksContentAndSide` locks the source boundary.
+
 `briefing_render.go` paints wind and gravity from the panorama's custom path,
 using the hidden `SOLARSYSTEM` gadget's rectangle and selected FNT. It uses
 the controller's existing wind display without new random draws, translates

@@ -15,6 +15,7 @@ func (a *app) prepareBattlePresentation() {
 	if a.gpu == nil {
 		w, h := a.c.Size()
 		a.gpu = gpurender.New(a.c.PaletteTables(), w, h)
+		browserPrepareRenderer(a)
 	}
 	a.c.SetEnhanced(true)
 	a.gpu.PrepareTerrain(a.c.BattleTerrainSources())

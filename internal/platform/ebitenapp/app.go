@@ -459,6 +459,7 @@ func rendererName(mode RendererMode) string {
 }
 
 func (a *app) stepClient() {
+	defer browserEndSimulationSample(browserBeginSample())
 	var started time.Time
 	if a.mode == RendererModern && a.options.ShowFPS != nil && a.options.ShowFPS() {
 		started = time.Now()
@@ -575,6 +576,7 @@ func (a *app) Draw(screen *ebiten.Image) {
 		if !due {
 			return
 		}
+		defer browserEndDrawSample(a, browserBeginSample())
 		if a.trace != nil {
 			a.trace.row.due = true
 		}
@@ -603,6 +605,7 @@ func (a *app) Draw(screen *ebiten.Image) {
 	if !a.consumePresentation() {
 		return
 	}
+	defer browserEndDrawSample(a, browserBeginSample())
 	if a.img == nil || a.img.Bounds().Dx() != width || a.img.Bounds().Dy() != height {
 		a.img = ebiten.NewImage(width, height)
 	}

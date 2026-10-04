@@ -422,7 +422,11 @@ func newDirectBattleView(opts Options, cs *contentSet) (*gameShell, *client.Clie
 		authoritative, err = composeLiveFieldBattle(opts, cs, scene)
 	} else {
 		var request freshBattleRequest
-		request, err = directMapBattleRequest(opts, cs, newBattleSeedSource(opts))
+		if opts.Mission != "" {
+			request, _, err = headlessFreshBattleRequest(opts, cs, newBattleSeedSource(opts))
+		} else {
+			request, err = directMapBattleRequest(opts, cs, newBattleSeedSource(opts))
+		}
 		if err == nil {
 			authoritative, err = composeAuthoritativeBattle(request)
 		}
@@ -452,9 +456,19 @@ func newDirectBattleView(opts Options, cs *contentSet) (*gameShell, *client.Clie
 	if err := validatePresentationZoom(shell.opts); err != nil {
 		return nil, nil, err
 	}
-	// Direct entry retains its own skirmish setup, including the pool limit
-	// the save Summary writes, rather than the last menu game's preferences.
-	shell.setup = authoritative.Session.Skirmish
+	// Direct skirmish entry retains its own setup, including the pool limit
+	// the save Summary writes. A mission has no Skirmish config: keep the
+	// loaded preferences which campaign saves and later menus still consume.
+	if authoritative.Kind == headless.ScenarioCampaign {
+		shell.missionDifficultyValue = authoritative.Session.Mission.Difficulty
+		side, known := authoritative.Session.SideForOwner(int(authoritative.Session.LocalOwner))
+		if !known {
+			return nil, nil, fmt.Errorf("nanolathe: campaign presentation failed: logical path %s, providers searched [session], expected the local owner's authored side", opts.Mission)
+		}
+		shell.missionSide = side
+	} else {
+		shell.setup = authoritative.Session.Skirmish
+	}
 	var cl *client.Client
 	cl, err = client.New(client.Options{
 		Buffer: authoritative.Session.Snapshot,
@@ -499,6 +513,9 @@ func newDirectBattleView(opts Options, cs *contentSet) (*gameShell, *client.Clie
 	sess := authoritative.Session
 	shell.pendingDetail = detailArtFor(shell.opts, cs, sess.World, nil)
 	if err := shell.enterBattle(sess, sess.Catalog); err != nil {
+		return nil, nil, err
+	}
+	if err := browserStageBattle(opts, shell); err != nil {
 		return nil, nil, err
 	}
 	if opts.LiveTrace != "" {

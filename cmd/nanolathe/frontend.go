@@ -249,9 +249,12 @@ type gameShell struct {
 	missionDifficultyValue int
 	// briefing owns the explicit campaign presentation state between mission
 	// selection and the shared battle loading request [08 R-CAMP-01 §2].
-	briefing      *campaignBriefingController
-	briefingPanel *ui.Panel
-	briefingNowMS int64
+	briefing                 *campaignBriefingController
+	briefingPanel            *ui.Panel
+	briefingNowMS            int64
+	briefingBackgroundSource *contentSet
+	briefingBackgrounds      [2]*formats.PCX
+	briefingBackgroundLoaded [2]bool
 	// briefingPanoramaBound records this visit's successful panorama callback
 	// installation separately from the retained artwork [08 R-CAMP-01 §2].
 	briefingPanoramaBound bool
@@ -419,11 +422,12 @@ func newGameShell(opts Options, cs *contentSet) (*gameShell, error) {
 }
 
 // runGameShell is the windowed entry: retail menus by default; straight into
-// the battle view when --map was supplied (the established development path).
+// the battle view when --map or --mission was supplied. Both compose through
+// the existing battle-request owners; browser demo entry adds no scenario rules.
 // launch is the command line as given, which a start that must drop the saved
 // mod remounts from.
 func runGameShell(launch, opts Options, cs *contentSet) error {
-	if opts.Map != "" {
+	if opts.Map != "" || opts.Mission != "" {
 		return runBattleView(launch, opts, cs)
 	}
 	started := time.Now()

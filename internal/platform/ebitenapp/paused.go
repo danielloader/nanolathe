@@ -28,6 +28,9 @@ func (p *pausedWorld) clear() {
 // advancement and fraction sampling have already run. Its caller always runs
 // the ordinary update-ledger tail, even when the world was reused (§13.10).
 func (a *app) drawPaused(screen *ebiten.Image, width, height int, timing bool) (presented bool, record, submit time.Duration) {
+	if !browserPausedReuse() {
+		return false, 0, 0
+	}
 	inputs, eligible := a.c.PausedWorldDigest()
 	if !eligible || width <= 0 || height <= 0 {
 		a.paused.clear()

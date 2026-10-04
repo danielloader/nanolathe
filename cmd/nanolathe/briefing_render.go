@@ -445,12 +445,23 @@ func (g *gameShell) briefingBackground() *formats.PCX {
 	if g == nil || g.cs == nil || g.cs.fs == nil {
 		return nil
 	}
-	name := "cor"
-	if g.missionSide == 0 {
-		name = "arm"
+	if g.briefingBackgroundSource != g.cs {
+		g.briefingBackgroundSource = g.cs
+		g.briefingBackgrounds = [2]*formats.PCX{}
+		g.briefingBackgroundLoaded = [2]bool{}
 	}
-	bg, _ := formats.LoadPCXFile(g.cs.fs, "bitmaps/mbrief"+name+".pcx")
-	return bg
+	side, name := 1, "cor"
+	if g.missionSide == 0 {
+		side, name = 0, "arm"
+	}
+	if !g.briefingBackgroundLoaded[side] {
+		// The content mount is immutable for this shell. Retain the decoded
+		// side background instead of rereading it every draw; missing optional
+		// art stays absent [08 R-CAMP-01 §2] (DESIGN_INTERFACE_HUD_INPUT §2.6).
+		g.briefingBackgrounds[side], _ = formats.LoadPCXFile(g.cs.fs, "bitmaps/mbrief"+name+".pcx")
+		g.briefingBackgroundLoaded[side] = true
+	}
+	return g.briefingBackgrounds[side]
 }
 
 func briefingFrame(gaf *formats.GAF, name string, idx int) *formats.GAFFrame {

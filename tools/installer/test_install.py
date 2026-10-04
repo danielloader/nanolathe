@@ -5,6 +5,7 @@ import io
 import os
 from pathlib import Path
 import pty
+import plistlib
 import select
 import subprocess
 import tarfile
@@ -21,7 +22,8 @@ def archive(path, files):
         for name, data in files.items():
             entry = tarfile.TarInfo(name)
             entry.mode = 0o755
-            data = data.encode()
+            if isinstance(data, str):
+                data = data.encode()
             entry.size = len(data)
             out.addfile(entry, io.BytesIO(data))
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -50,9 +52,10 @@ while [ "$#" -gt 0 ]; do
   case "$1" in --output) target=$2; shift 2 ;; https://*) url=$1; shift ;; *) shift ;; esac
 done
 printf '%s\\n' "$url" >> "$FIXTURE_DIR/downloads"
+if [ -n "${NANOLATHE_UPDATE_STATUS:-}" ]; then cat "$NANOLATHE_UPDATE_STATUS" >> "$FIXTURE_DIR/progress-stages"; fi
 case "$url" in
   */release.txt) [ "${OFFLINE:-0}" = 0 ] || exit 28; cp "$FIXTURE_DIR/release.txt" "$target" ;;
-  https://nanolathe.gg/install.sh) cp "$FIXTURE_DIR/install.sh" "$target" ;;
+  https://nanolathe.gg/install.sh) sleep "${UPDATE_DOWNLOAD_DELAY:-0}"; cp "$FIXTURE_DIR/install.sh" "$target" ;;
   https://go.dev/dl/*) cp "$FIXTURE_DIR/go.tar.gz" "$target" ;;
   https://codeload.github.com/*) cp "$FIXTURE_DIR/source.tar.gz" "$target" ;;
   *) exit 12 ;;
@@ -75,13 +78,15 @@ exit "${RUN_FAIL:-0}"
 [ "$CGO_ENABLED" = 0 ] && [ "$GOTOOLCHAIN" = local ] && [ "$GOENV" = off ] || exit 20
 if [ "$1" = run ]; then printf '%s\\n' "$*" >> "$FIXTURE_DIR/stamps"; exit "${STAMP_FAIL:-0}"; fi
 printf built >> "$FIXTURE_DIR/builds"
+if [ -n "${NANOLATHE_UPDATE_STATUS:-}" ]; then cat "$NANOLATHE_UPDATE_STATUS" >> "$FIXTURE_DIR/progress-stages"; fi
+sleep "${BUILD_DELAY:-0}"
 [ "${BUILD_FAIL:-0}" = 0 ] || exit 21
 while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then output=$2; break; fi; shift; done
 cp "$FIXTURE_DIR/engine" "$output"
 chmod +x "$output"
 '''
         self.go_hash = archive(self.path / "go.tar.gz", {"go/bin/go": go})
-        self.source_hash = archive(self.path / "source.tar.gz", {f"nanolathe-{REVISION}/go.sum": "authored fixture\n"})
+        self.source_hash = self.source_archive(REVISION)
         (self.path / "install.sh").write_bytes(INSTALLER.read_bytes())
         self.manifest()
 
@@ -89,6 +94,12 @@ chmod +x "$output"
         path = self.bin / name
         path.write_text(data)
         path.chmod(0o755)
+
+    def source_archive(self, revision):
+        files = {f"nanolathe-{revision}/go.sum": "authored fixture\n"}
+        for name in ("Nanolathe.icns", "update-progress.js"):
+            files[f"nanolathe-{revision}/tools/installer/macos/{name}"] = (INSTALLER.parent / "macos" / name).read_bytes()
+        return archive(self.path / "source.tar.gz", files)
 
     def manifest(self, **overrides):
         values = dict(version="alpha.1", source_revision=REVISION, source_tar_sha256=self.source_hash,
@@ -190,6 +201,11 @@ chmod +x "$output"
         self.install("--no-run", "--root", str(self.root))
         app = self.home / "Applications/Nanolathe.app/Contents"
         self.assertEqual((app / "Resources/install-dir").read_text().strip(), str(self.base))
+        with (app / "Info.plist").open("rb") as file:
+            plist = plistlib.load(file)
+        self.assertEqual(plist["CFBundleIconFile"], "Nanolathe.icns")
+        self.assertEqual((app / "Resources/Nanolathe.icns").read_bytes(),
+                         (INSTALLER.parent / "macos/Nanolathe.icns").read_bytes())
         self.assertTrue((self.path / "signed").exists())
         result = subprocess.run(["/bin/bash", str(app / "MacOS/Nanolathe")], env=self.env, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -240,8 +256,7 @@ chmod +x "$output"
         self.install("--no-run", "--root", str(self.root))
         previous = (self.base / "current").resolve()
         revision = "c" * 40
-        self.source_hash = archive(self.path / "source.tar.gz",
-                                   {f"nanolathe-{revision}/go.sum": "authored update fixture\n"})
+        self.source_hash = self.source_archive(revision)
         self.manifest(source_revision=revision)  # Deliberately retain the version label.
         (self.path / "downloads").write_text("")
         (self.path / "curl-options").write_text("")
@@ -346,6 +361,69 @@ chmod +x "$output"
                 self.assert_played(previous)
                 self.assertFalse((self.path / "unverified-executed").exists())
                 self.assertIn(b"playing the current version", output)
+
+    @unittest.skipUnless(os.uname().sysname == "Darwin", "macOS updater contract")
+    def test_macos_update_progress_lifecycle_and_fallback(self):
+        self.write_command("uname", '#!/bin/bash\ncase "$1" in -s) echo Darwin ;; -m) echo arm64 ;; esac\n')
+        self.write_command("codesign", '#!/bin/bash\nexit 0\n')
+        self.write_command("osascript", '''#!/bin/bash
+if [ "$1" = -l ]; then
+    printf '%s\\n' "$$" > "$FIXTURE_DIR/progress-pid"
+    printf '%s\\n' "$4" > "$FIXTURE_DIR/progress-path"
+    test -f "$3" && test -f "$5" || exit 10
+    [ "${PROGRESS_FAIL:-0}" = 0 ] || exit 11
+    while [ -f "$4" ]; do sleep 0.02; done
+else
+    cat > /dev/null
+    printf '%s\\n' "${UPDATE_CHOICE:-Update & play}"
+fi
+''')
+        previous = self.prepare_update()
+        launcher = previous / "launch.sh"
+        launcher.write_text(launcher.read_text().replace('/usr/bin/osascript', '"$FIXTURE_DIR/bin/osascript"'))
+        installer_bytes = (self.path / "install.sh").read_bytes()
+        valid_manifest = (self.path / "release.txt").read_text()
+        for scenario in ("declined", "checksum", "build", "window-failed", "accepted"):
+            with self.subTest(scenario=scenario):
+                (self.path / "install.sh").write_bytes(installer_bytes)
+                (self.path / "release.txt").write_text(valid_manifest)
+                if scenario == "checksum":
+                    (self.path / "install.sh").write_text('touch "$FIXTURE_DIR/unverified-executed"\n')
+                for name in ("progress-pid", "progress-path", "progress-stages", "launched-binaries"):
+                    (self.path / name).unlink(missing_ok=True)
+                result = subprocess.run(["/bin/bash", str(self.base / "launch.sh")],
+                    env=dict(self.env, UPDATE_DOWNLOAD_DELAY="0.1", BUILD_DELAY="0.1",
+                             UPDATE_CHOICE="Play current version" if scenario == "declined" else "Update & play",
+                             BUILD_FAIL="1" if scenario == "build" else "0",
+                             PROGRESS_FAIL="1" if scenario == "window-failed" else "0"),
+                    stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                    start_new_session=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                selected = (self.base / "current").resolve()
+                if scenario in ("window-failed", "accepted"):
+                    self.assertNotEqual(selected, previous)
+                else:
+                    self.assertEqual(selected, previous)
+                expected = previous if scenario in ("declined", "checksum", "build") else selected
+                self.assertEqual((self.path / "launched-binaries").read_text().splitlines(), [str(expected / "nanolathe")])
+                self.assertFalse((self.path / "unverified-executed").exists())
+                self.assertEqual(list(self.base.glob(".update-*")), [])
+                if scenario == "declined":
+                    self.assertFalse((self.path / "progress-pid").exists())
+                    continue
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(int((self.path / "progress-pid").read_text()), 0)
+                self.assertFalse(Path((self.path / "progress-path").read_text().strip()).exists())
+                stages = (self.path / "progress-stages").read_text()
+                self.assertIn("Downloading the updater", stages)
+                if scenario != "checksum":
+                    self.assertIn("Checking the latest release", stages)
+                    self.assertIn("Downloading Nanolathe", stages)
+                    self.assertIn("Building Nanolathe", stages)
+                if scenario == "window-failed":
+                    # Exercise both GUI outcomes against the same installed launcher.
+                    (self.base / "current").unlink()
+                    (self.base / "current").symlink_to(previous)
 
 
 if __name__ == "__main__":

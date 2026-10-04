@@ -32,6 +32,13 @@ installs into the same user directory, then launches the selected release.
 Build or verification failures leave the previous build selected. Saves and
 settings are outside the versioned release directories.
 
+On Mac, accepting an update from the app opens a native progress window with
+an activity bar and the current download, verification, build or installation
+stage. Compilation has no reliable percentage or time estimate; the window
+stays active until the updater finishes, then closes before the game launches.
+Terminal launches print the same stages. The progress window uses macOS's
+built-in scripting runtime and adds no compiler or application dependency.
+
 **Upgrading the first alpha:** rerun the install command once to replace the
 original shortcut launcher with one that checks for updates. You can also close
 the game and rerun that command whenever you want to update manually.
@@ -54,6 +61,10 @@ can block it without that option. The installers do not change security policy.
 | Mac | `~/Library/Application Support/Nanolathe` | `~/Applications/Nanolathe.app` |
 | Linux | `$XDG_DATA_HOME/nanolathe`, or `~/.local/share/nanolathe` | `$XDG_DATA_HOME/applications/nanolathe.desktop`, or `~/.local/share/applications/nanolathe.desktop` |
 | Windows | `%LOCALAPPDATA%\Nanolathe` | Nanolathe in the user's Start Menu |
+
+The Mac app uses the Nanolathe website's green N mark as its Finder icon.
+Its icon and update-window script are copied from the verified source release;
+they require no separate download.
 
 Within the installation directory:
 

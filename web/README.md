@@ -44,14 +44,19 @@ website's decision and pipeline, recorded in DESIGN_BROWSER_HOST §3 and §6.
 
 Every push to `main` whose browser, hygiene and simulation CI jobs pass runs
 the `browser-publish` job: it packages the asset-free `tools/browser-build`
-output as `nanolathe-browser.tar.gz`, uploads it with `build.json` and
-`SHA256SUMS` to the rolling `browser-latest` GitHub release, moves that tag to
-the commit, and sends the website repository a `browser-build` dispatch when
-the `WEBSITE_DISPATCH_TOKEN` secret is configured (without it the website
-checks every six hours). The website's `scripts/fetch-play.py` verifies and
-publishes the build at https://nanolathe.gg/play/ together with the demo
-assets it hosts itself. Nothing in this repository's releases contains game
-content.
+output as `nanolathe-browser.tar.gz` and `tools/browser-publish` publishes it
+with `build.json` and `SHA256SUMS` as the prerelease `browser-<run number>`,
+then sends the website repository a `browser-build` dispatch when the
+`WEBSITE_DISPATCH_TOKEN` secret is configured (without it the website checks
+every six hours). The website's `scripts/fetch-play.py` takes the highest run
+number whose three assets are present, verifies the build and publishes it at
+https://nanolathe.gg/play/ together with the demo assets it hosts itself.
+The repository's releases are immutable: a published release's assets and tag
+are locked and its tag name is never reusable, so each run gets its own
+release (created as a draft, published once its assets are uploaded) instead
+of a rolling tag, and the publish step prunes every other `browser-*` release
+and tag except the newest two. Nothing in this repository's releases contains
+game content.
 
 The current 45.7 MiB Wasm binary compresses to 11.0 MiB gzip; the launcher
 fetches the gzip variant and decompresses it in the page. Demo assets total

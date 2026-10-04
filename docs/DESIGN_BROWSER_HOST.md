@@ -128,8 +128,8 @@ original demo distribution agreement would settle it.
    anchor through batching. Lifecycle-only end/cancel events do not move the
    pointer. Full-window tools retain their ordinary Ebitengine wheel stream;
    their ownership cancels and clears camera gestures before returning to battle.
-   The existing focus,
-   viewport, minimap, modal and UI ownership gates and zoom styles still apply.
+   The existing focus, viewport, minimap, modal and UI ownership gates and zoom
+   styles still apply.
    Classic retains its existing camera controls. This adds no gameplay seam,
    simulation state, RNG draws, resources or orders. Listener/timer cleanup runs
    on engine exit; iframe replacement destroys the whole adapter.

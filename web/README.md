@@ -251,6 +251,13 @@ zoom over the canvas. Browser scrolling may include inertia because DOM events
 do not expose macOS momentum phases. Safari/Firefox and mobile performance
 acceptance remain open (DESIGN_BROWSER_HOST §6).
 
+Verified on 2026-10-04 in the in-app Chromium browser with the original demo:
+pixel scrolling moved the battle view on both axes; Ctrl-wheel spread reached
+detail zoom and pinch returned to the native lock while launcher page scale
+stayed fixed. Camera/GUI ownership, touch geometry, idle-poll pointer retention,
+batched pinch anchors and cancellation pass the authored regressions. Physical
+touchscreen acceptance remains unverified. Captures are outside the repository.
+
 ## Persistent browser files
 
 Settings now live at `/settings/settings.json` and saves at `/saves`, using the

@@ -9,8 +9,11 @@ cites them as `[I4]`; there is no I15 or I16.
 
 **Rule.** Nothing that can affect simulation state may iterate a Go `map`, use
 `sort.Slice` on a non-total order, or depend on goroutine scheduling. Iterate
-players `0..9` ascending, units by pool slot ascending, projectiles over the
-count captured at phase entry.
+players `0..9` ascending, unit sweeps by pool slot ascending, projectiles over
+the count captured at phase entry. Indexed queries follow their own established
+traversal: repair patrol gathers spatial sectors in Z/X order and each bucket
+head to tail [04 R-ORD-02 §4]. Replacing that query with a unit-slot sweep
+changes the meaning of its random candidate index.
 
 **Why.** Retail's order is the behavior: `[05 "Authoritative settlement order"]`
 notes earlier units consume live stock before later units are tested, so slot

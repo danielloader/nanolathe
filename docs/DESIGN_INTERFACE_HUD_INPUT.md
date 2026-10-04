@@ -805,10 +805,11 @@ directly from the preceding anchor to the order destination; published movement
 route points are not overlay vertices `[07 R-P0-11 §3]`. `BuildMarkerSegments` is
 the eight-segment build marker with its ten-tick sweep.
 
-Remaining integration gap: targeted-order icons/connectors still consume the
-stored goal. The retail target-tracking/cached anchor is established by
-`[07 R-P0-11 §3]`, but needs an immutable publication binding before the overlay
-can follow it faithfully; the code marks this with `TODO(question)`.
+The battle adapter `queueAnchorFrame` supplies targeted-order icons/connectors
+with the target's committed position through a presentation copy. An owned
+target-only assist therefore needs no stored point [07 R-P0-11 §3]. Remaining
+integration gap: the visibility-dependent cached horizontal anchor needs an
+immutable publication binding; the adapter marks it with `TODO(question)`.
 
 ### 2.6 `cmd/nanolathe` — the front-end screens
 

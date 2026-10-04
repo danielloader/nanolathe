@@ -129,10 +129,10 @@ func (s *Service) SiteCentrePublic(node *orders.Node) (x, z numeric.Fixed, footX
 // in the approach phase and advances behind gate `0xE0`; handing the movement
 // controller a goal evicts whatever it held and drops the mover's active-order
 // binding [04 R-ORD-01 §9], so re-installing on every visit would re-submit the
-// path request every tick. HasGroundGoal is the identity-checked "this record
-// already owns the mover's payload" test, and a record that lost the slot to
-// another installs again — which is the same rebind the restore path needs,
-// since a goal payload is derived state that no save box carries.
+// path request every tick. HasGroundGoal tests the current binding; ensureWalk
+// separately checks retained record ownership so maintenance does not revive
+// an object another record displaced [04 R-ORD-01 §9]. Saved goal objects are
+// reconstructed before battle resumes [08 R-SAVE-02 §11].
 func (s *Service) installApproachGoal(builder *units.Unit, node *orders.Node) bool {
 	if s == nil || s.Movement == nil || builder == nil || node == nil {
 		return false
@@ -233,8 +233,9 @@ func (s *Service) unitFootprintAnchor(u *units.Unit, x, z numeric.Fixed) (cellX,
 //     the save box carries it: byte `0x09` of the 58-byte order record is the
 //     "handler-private phase/state byte ... handlers own its interpretation"
 //     [08 R-SAVE-ORDER-01]. A builder saved mid-approach now restores at
-//     State1 and re-installs its goal; one saved past the approach restores at
-//     State2 and does not walk again.
+//     State1 with its saved goal object reconstructed before ticks resume;
+//     one saved past the approach restores at State2. Maintenance does not
+//     revive a displaced approach object [08 R-SAVE-02 §11][04 R-ORD-01 §9].
 //
 // The three arms of [05 R-WORK-01 §13] live in mobileBuildWakeVisit below, and
 // the phase they advance is this predicate's whole state. The reach expression

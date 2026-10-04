@@ -36,16 +36,13 @@ func (s *System) storeRecordGoal(h pool.Handle, owned recordGoal) {
 func (s *System) detachControllerGoal(h pool.Handle) {
 	s.CancelPathRequest(h)
 	s.displaceControllerGoal(h)
-	if route := handleRow(s.Routes, h); route != nil {
-		route.Active = false
-		route.WantsRepath = false
-	}
+	installGroundGoal(handleRow(s.Routes, h), s.unitFor(h), nil, 0, 0, false, false, 0, s.currentGoalTick(h))
+	setHandleRow(&s.activeOrders, h, nil)
+	setHandleRow(&s.arrivalHandles, h, nil)
 }
 
 // displaceControllerGoal replaces only the payload binding. Ground installers
-// leave route acceptance to activation, including adoption of a restored route
-// whose record binding is absent [04 R-PATH-01 §8]. An explicit null-goal
-// release additionally clears the route through detachControllerGoal above.
+// complete route acceptance in the same handler visit [04 R-PATH-01 §8].
 func (s *System) displaceControllerGoal(h pool.Handle) {
 	s.raiseEvictedGoalRelease(h)
 	setHandleRow(&s.moveGoals, h, nil)

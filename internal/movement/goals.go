@@ -108,29 +108,49 @@ func (s *System) installGroundPayload(owner pool.Handle, n *orders.Node, goal pa
 	// the slot held [04 R-ORD-01 §9]. When that is n itself the closing clear
 	// below cancels it, which is the "never observable from an installer" case.
 	s.releaseRecordGoal(n)
+	s.CancelPathRequest(owner)
 	s.displaceControllerGoal(owner)
 	n.Satisfied &^= goalPendingMask
 	g := &moveGoal{order: n, x: x, z: z, goal: goal}
 	s.storeRecordGoal(owner, recordGoal{node: n, ground: g})
 	setHandleRow(&s.moveGoals, owner, g)
-	// An install REPLACES the record's goal, so whatever route the mover is
-	// following is now aimed at the wrong place. Dropping the active-order
-	// binding is what makes the session's mover boundary re-submit against the
-	// payload just installed; ActivateMove admits exactly one submission per
-	// active order, so without this a record that installs a second goal — a
-	// `Move_Ground` re-arm, and every `Attack_Chase` maneuver substate
-	// [04 R-ORD-01 §3] — kept walking to its first one. An ordered attacker
-	// therefore reached the spot its target had been standing on when the order
-	// was given, stopped, and never followed [04 R-ORD-01 §1][04 R-PATH-01 §8].
-	// Detaching the binding from its record — rather than deleting it — is what
-	// routes the next activation down ActivateMove's own re-activation arm: it
-	// cancels the outstanding request and clears the path state before
-	// submitting, and it does not let the stale route be adopted as if it were
-	// still aimed at this goal.
-	if prior := handleRow(s.activeOrders, owner); prior != nil {
-		prior.order = nil
+	// Each handler handoff accepts the points left by the preceding handoff,
+	// before the queue pump can run another record [04 R-PATH-01 §8]. Request
+	// staging at activation must not repeat that acceptance.
+	setHandleRow(&s.activeOrders, owner, nil)
+	s.ClearPathFailure(owner)
+	if u := s.unitFor(owner); u != nil {
+		fx, fz := s.pathFootprint(u)
+		gx, gz, havePoint := groundGoalPoint(goal, u, fx, fz)
+		route := handleRow(s.Routes, owner)
+		if route != nil {
+			route.Status = 0 // the previous search diagnostic belongs to the displaced goal
+		}
+		installGroundGoal(route, u, goal, gx, gz, havePoint, allowSyntheticFor(s.currentOrder(u)), s.staticObstacleRevision(), s.currentGoalTick(owner))
+		s.bindRectSteeringGoal(u, n, goal, fx, fz)
+		s.bindArrivalHandle(u, n)
 	}
 	return true
+}
+
+// A handler may install outside the movement transaction (the later order
+// phase does so too). Its queue binding owns the authoritative current tick.
+func (s *System) currentGoalTick(h pool.Handle) uint32 {
+	if u := s.unitFor(h); u != nil {
+		if q := orders.QueueOfUnit(u); q != nil {
+			if b := q.Binding(); b != nil && b.CurrentTick != nil {
+				return b.Tick()
+			}
+		}
+	}
+	return s.tick
+}
+
+func (s *System) currentOrder(u *units.Unit) *orders.Node {
+	if q := orders.QueueOfUnit(u); q != nil {
+		return q.Head()
+	}
+	return nil
 }
 
 // InstallPointGoal binds a point payload and its arrival radius to n.

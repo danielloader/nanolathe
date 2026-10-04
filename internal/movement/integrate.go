@@ -173,11 +173,9 @@ type System struct {
 	// [04 R-MOV-01 §7][04 R-PATH-01 §8].
 	pathFailures []*PathFailure
 
-	// activeOrders is the single path activation boundary.  A route belongs to
-	// the order node that was active when its request was submitted, not merely
-	// to a unit handle.  Queue heads are stable pointers for their lifetime;
-	// keeping that identity here lets publication reject a result for a stale
-	// head after a replace/purge in the same tick.  Direct movement callers do
+	// activeOrders captures the payload owner's identity and an activation token
+	// so publication rejects a result after its bound goal changes in the same
+	// tick. The owner can differ from the queue head. Direct movement callers do
 	// not bind an order and retain the legacy SubmitMove surface used by the
 	// movement package fixtures.
 	clearanceRoutes []*modernClearanceRoute // one-shot Modern local paths, bound to an order
@@ -423,6 +421,10 @@ func (p *pathProvider) Poll(player int) (path.Request, path.PollResult) {
 	if r.Activation != 0 {
 		binding := handleRow(p.system.activeOrders, h)
 		if binding == nil || binding.token != r.Activation || binding.order == nil {
+			p.dropRequest(player, h)
+			return path.Request{}, path.PollVisited
+		}
+		if g := handleRow(p.system.moveGoals, h); g != nil && g.order != binding.order {
 			p.dropRequest(player, h)
 			return path.Request{}, path.PollVisited
 		}
@@ -863,7 +865,7 @@ func (s *System) pathStartCell(u *units.Unit) path.Cell {
 // livePathOrder resolves the status sink captured by a path request. Search
 // setup and publication can both finish after an order replacement, so all
 // three identities must still agree before either boundary wakes an order:
-// the live unit slot, the activation token, and the current queue-head node
+// the live unit slot, the activation token, and the bound payload owner
 // [04 R-PATH-01 §7][04 R-PATH-01 §9].
 func (s *System) livePathOrder(r path.Request) (*units.Unit, *orders.Node, bool) {
 	if s == nil || s.world == nil || r.Activation == 0 {
@@ -877,8 +879,11 @@ func (s *System) livePathOrder(r path.Request) (*units.Unit, *orders.Node, bool)
 	if u == nil || u.Handle != r.Unit {
 		return nil, nil, false
 	}
-	q, ok := u.Orders.(*orders.Queue)
-	if !ok || q == nil || q.Head() != binding.order {
+	if g := handleRow(s.moveGoals, r.Unit); g != nil {
+		if g.order != binding.order {
+			return nil, nil, false
+		}
+	} else if q := orders.QueueOfUnit(u); q == nil || q.Head() != binding.order {
 		return nil, nil, false
 	}
 	return u, binding.order, true
@@ -1693,9 +1698,15 @@ func (s *System) finalGoalReached(u *units.Unit, hadRoute bool) bool {
 	if ah == nil || ah.order == nil {
 		return false
 	}
-	// Verify handle still belongs to the active head; stale handles after a head
-	// replacement must not signal [R-P0-01][04 §7.3].
-	if q := orders.QueueForUnit(u); q == nil || q.Head() != ah.order {
+	// Arrival follows the controller's bound object, even when its record is
+	// behind a goal-less head [04 R-ORD-01 §9][04 R-PATH-01 §8].
+	if g := handleRow(s.moveGoals, u.Handle); g != nil {
+		if g.order != ah.order || (g.goal != nil && g.goal != ah.payload) {
+			return false
+		}
+	} else if ah.payload != nil {
+		return false
+	} else if q := orders.QueueOfUnit(u); q == nil || q.Head() != ah.order {
 		return false
 	}
 	// Cached tile from occupancy commit (CollisionState.CachedAnchor) [R-P0-01][04 §8.2].
@@ -2300,11 +2311,9 @@ func (s *System) staticObstacleRevision() uint64 {
 	return s.Terrain.StaticObstacleRevision()
 }
 
-// ActivateMove binds the current primary order head and, for a fresh route,
-// isPrimaryHead reports whether head is the record the unit's primary queue
-// walk would reach first — the only record whose handler can be running, and
-// therefore the only one that may own the mover's goal payload [04 §3.3]
-// [04 R-PATH-01 §8]. A unit with no queue, or with an empty primary segment,
+// isPrimaryHead reports whether head is the primary record the retail pump
+// would reach first [04 §3.3]. A previously installed payload can still belong
+// to a different record [04 R-ORD-01 §9]. A unit with no queue or primary segment
 // has no competing record, so a bare fixture is unaffected.
 func isPrimaryHead(u *units.Unit, head *orders.Node) bool {
 	q := orders.QueueOfUnit(u)
@@ -2318,12 +2327,11 @@ func isPrimaryHead(u *units.Unit, head *orders.Node) bool {
 	return prim[0] == head
 }
 
-// submits one path request. The queue head is the authority: a repeated call
-// for the same node is a no-op, while a new node cancels the old request and
-// invalidates its route before submitting the replacement. A usable active
-// route restored without derived bindings is adopted without another request;
-// its follower retains the route's existing request-poll state [04 R-MOV-01
-// §3][04 R-MOV-01 §7][04 R-PATH-01 §8].
+// ActivateMove stages a bound goal's request once without repeating the
+// installer's acceptance gates. It also supplies the derived activation for
+// direct callers and restored routes without a shape payload. A usable restored
+// route retains its request-poll state [04 R-MOV-01 §3][04 R-MOV-01 §7]
+// [04 R-PATH-01 §8]. A queue transition cannot rebind a retained object.
 //
 // The caller must have resolved a target's current position into head.GoalX/Z
 // before calling this method.  Target tracking is deliberately kept at the
@@ -2355,19 +2363,21 @@ func (s *System) ActivateMove(u *units.Unit, head *orders.Node) bool {
 	if u.Def != nil && u.Def.CanFly {
 		return false
 	}
-	if !isPrimaryHead(u, head) {
-		// Only the record the pump is servicing may own the mover. The pump
-		// walks from the front head and stops at the first record whose gate is
-		// nonzero and unsatisfied, so no record behind a blocked head ever runs
-		// its handler [04 §3.3] step 3, and only a handler that ran can install
-		// a goal payload [04 R-ORD-01 §1]; the follower holds exactly one goal
-		// object at a time [04 R-PATH-01 §8]. Honouring a bind for a record
-		// behind the head let a second record steal the mover — a construction
-		// walk stepped past a blocked `Park` head cancelled that head's path
-		// request and deleted its arrival handle on every visit, so the head
-		// waited on an arrival bit nothing could raise and the 30-tick re-arm
-		// that lives behind its gate never ran [04 R-EGRESS-01].
+	boundGoal := handleRow(s.moveGoals, u.Handle)
+	if boundGoal != nil && boundGoal.order != head {
+		return false // queue transitions do not replace a bound object [04 R-ORD-01 §9]
+	}
+	if !isPrimaryHead(u, head) && boundGoal == nil {
+		// With no bound object, a derived activation behind an unsatisfied
+		// head would bypass the primary pump's gate [04 §3.3].
 		return false
+	}
+	if boundGoal == nil {
+		for _, retained := range handleRow(s.recordGoals, u.Handle) {
+			if retained.node == head {
+				return false // only an installer or save reconstruction rebinds it [04 R-PATH-01 §8]
+			}
+		}
 	}
 	// The air executors' phase 0 is the shared takeoff preamble, but it does not
 	// run here: it is the first leg the air executor of [04 R-AIR-01 §6] runs
@@ -2377,7 +2387,8 @@ func (s *System) ActivateMove(u *units.Unit, head *orders.Node) bool {
 		return false // exactly one submission per active order
 	}
 	wasBound := handleRow(s.activeOrders, u.Handle) != nil
-	if wasBound {
+	installed := boundGoal != nil && boundGoal.goal != nil
+	if wasBound && !installed {
 		s.CancelPathRequest(u.Handle)
 		s.invalidatePathState(u.Handle)
 	}
@@ -2388,8 +2399,14 @@ func (s *System) ActivateMove(u *units.Unit, head *orders.Node) bool {
 	token := s.nextActivation
 	binding := &activeMove{order: head, token: token}
 	setHandleRow(&s.activeOrders, u.Handle, binding)
-	s.noteGoal(u.Handle, head.GoalX, head.GoalZ)
-	if route := handleRow(s.Routes, u.Handle); !wasBound && usableActiveRoute(u, route) && !s.HasPathRequest(u.Handle) {
+	if installed {
+		// Target-only work records keep zero stored coordinates. Modern's
+		// existing no-route wait belongs to the installed goal's position.
+		s.noteGoal(u.Handle, boundGoal.x, boundGoal.z)
+	} else {
+		s.noteGoal(u.Handle, head.GoalX, head.GoalZ)
+	}
+	if route := handleRow(s.Routes, u.Handle); !installed && !wasBound && usableActiveRoute(u, route) && !s.HasPathRequest(u.Handle) {
 		// The route is persisted but its order/goal binding is derived. Adoption
 		// does not stamp request-poll state; the wants-repath poll is the writer of
 		// LastRequestTick [04 R-MOV-01 §7][04 R-PATH-01 §8].
@@ -2413,15 +2430,17 @@ func (s *System) ActivateMove(u *units.Unit, head *orders.Node) bool {
 	// the struck point-candidate design, so a builder stood still until the
 	// search published and, when it had polled within the last 60 ticks,
 	// for up to two seconds more.
-	if route := handleRow(s.Routes, u.Handle); route != nil {
+	if route := handleRow(s.Routes, u.Handle); route != nil && !installed {
 		goalPointX, goalPointZ, haveGoalPoint := groundGoalPoint(goalObj, u, fx, fz)
-		installGroundGoal(route, u, goalObj, goalPointX, goalPointZ, haveGoalPoint, allowSyntheticFor(head), s.staticObstacleRevision(), s.tick)
+		installGroundGoal(route, u, goalObj, goalPointX, goalPointZ, haveGoalPoint, allowSyntheticFor(head), s.staticObstacleRevision(), s.currentGoalTick(u.Handle))
 	}
 	if s.consumeModernClearance(u, head, start, goal) {
 		s.bindArrivalHandle(u, head)
 		return true
 	}
-	s.submitGoalForOrder(u, start, goalObj, token)
+	if route := handleRow(s.Routes, u.Handle); route != nil && route.WantsRepath {
+		s.submitGoalForOrder(u, start, goalObj, token)
+	}
 	s.bindArrivalHandle(u, head)
 	return true
 }
@@ -2570,7 +2589,16 @@ func (s *System) hasControllerGoal(h pool.Handle) bool {
 // The ask reports whether it fired so the caller can return it without asking a
 // second time — retail's service asks once.
 func (s *System) serviceGroundFollower(u *units.Unit, head *orders.Node, route *Route, tick uint32) bool {
-	if s == nil || u == nil || head == nil || (u.Def != nil && u.Def.CanFly) {
+	if s == nil || u == nil || (u.Def != nil && u.Def.CanFly) {
+		return false
+	}
+	if g := handleRow(s.moveGoals, u.Handle); g != nil {
+		head = g.order
+		if head != nil {
+			s.ActivateMove(u, head)
+		}
+	}
+	if head == nil {
 		return false
 	}
 	// Modern can finish a terminal point move at a stable local crowd frontier,
@@ -2718,6 +2746,15 @@ func (s *System) DeactivateMove(handle pool.Handle) {
 
 func (s *System) bindArrivalHandle(u *units.Unit, head *orders.Node) {
 	if s == nil || u == nil || head == nil {
+		return
+	}
+	if g := handleRow(s.moveGoals, u.Handle); g != nil && g.goal != nil {
+		fx, fz := s.pathFootprint(u)
+		setHandleRow(&s.arrivalHandles, u.Handle, &arrivalHandle{
+			order: g.order, payload: g.goal,
+			goalX: goalCellForWorld(g.x, fx), goalZ: goalCellForWorld(g.z, fz),
+			threshSq: thresholdSqFromRadius(goalRadiusParamFor(u.Def, g.order)),
+		})
 		return
 	}
 	// The names below are the rows whose arrival this handle serves even when
@@ -3195,7 +3232,11 @@ func groundGoalPoint(goal path.Goal, u *units.Unit, footX, footZ int32) (numeric
 // held points. Terminal acceptance clears wants-repath; half-distance
 // acceptance and the synthetic two-point route keep it armed [04 R-PATH-01 §8].
 func acceptGroundRoute(route *Route, u *units.Unit, goal path.Goal, goalX, goalZ numeric.Fixed, haveGoalPoint, allowSynthetic bool, revision uint64, tick uint32) {
-	if route == nil || goal == nil || u == nil {
+	if route == nil {
+		return
+	}
+	if goal == nil || u == nil {
+		finishGroundHandoff(route, tick)
 		return
 	}
 	accepted := false
@@ -3247,6 +3288,10 @@ func acceptGroundRoute(route *Route, u *units.Unit, goal path.Goal, goalX, goalZ
 		route.Active = false
 	}
 
+	finishGroundHandoff(route, tick)
+}
+
+func finishGroundHandoff(route *Route, tick uint32) {
 	// Step 6 is an unsigned `last <= tick − 10`: a stamp at least ten ticks
 	// old is cleared, and before tick ten the subtraction wraps, so every
 	// stamp is [04 R-PATH-01 §8].
@@ -3311,13 +3356,11 @@ func (s *System) publishFunc(r path.Request, points []path.Point, status path.St
 	// this build leaves without a publication (a callback that outlived its
 	// order node, below).
 	defer s.noteRequestRelease(r.Unit)
-	// A scheduler callback can finish after the queue head has changed (for
-	// example, a replace/purge in the order pump).  Publication belongs only to
-	// the node that activated this request.  Leave the current route untouched
-	// when identity no longer matches; the next active head will submit through
-	// ActivateMove.
+	// Publication belongs to the bound object that activated this request. A
+	// queue rotation keeps that identity; a goal handoff invalidates it. Leave
+	// the current route untouched after the latter [04 R-PATH-01 §7][04 R-PATH-01 §8].
 	boundUnit, boundOrder, liveBinding := s.livePathOrder(r)
-	if bound := int(r.Unit) < len(s.activeOrders) && handleRow(s.activeOrders, r.Unit) != nil; bound && !liveBinding {
+	if r.Activation != 0 && !liveBinding {
 		return
 	}
 	if len(points) == 0 && liveBinding && r.Goal != nil && !r.Goal.StartSatisfied(s.pathStartCell(boundUnit)) {
@@ -3630,7 +3673,8 @@ func (s *System) StepUnit(handle pool.Handle, tick uint32) StepResult {
 		s.applyAirPostMove(u, res, tick)
 		return res
 	}
-	// The queue selects the STEERING TARGET; it does not gate the mover tick.
+	// The bound payload selects the steering target; the queue does not gate
+	// the mover tick [04 R-ORD-01 §9].
 	// The sweep runs the mover tick and then the post-move correction for every
 	// live unit that has a mover, gated on the owner's control byte and never on
 	// an order record [04 R-MOV-03 §1] step 9. The control-byte gate belongs to
@@ -3666,6 +3710,13 @@ func (s *System) StepUnit(handle pool.Handle, tick uint32) StepResult {
 				head = nil
 			}
 		}
+	}
+	// The controller can remain bound while the pump rotates its owner or
+	// prepends a record with no goal. Service and steering follow that object,
+	// independently of the head [04 R-ORD-01 §9][04 R-PATH-01 §8].
+	if g := handleRow(s.moveGoals, handle); g != nil {
+		head = g.order
+		orderless = head == nil
 	}
 	// A building has no mover, so the sweep's mover tick and post-move
 	// correction do not run for it [04 R-MOV-03 §1] step 9. Neither does a unit

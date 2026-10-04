@@ -616,7 +616,7 @@ func repairUnitHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Co
 			return deadlineHold(n, tick, wait) // the phase stays 1: the goal is re-issued on every wake
 		}
 		TakeWorkSlots(u) // "release all slots" [04 R-ORD-01 §5]; see TakeWorkSlots
-		EmitStartBuilding(u, n)
+		EmitStartBuilding(u, n, target.X, target.Z)
 		return 1
 	case 2:
 		return inBuildStanceWait(u, n, pendTargetRemoved, tick)
@@ -783,6 +783,11 @@ func helpBuildHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Cod
 		return 1
 	case 1:
 		if satisfied&gateNoRoute != 0 {
+			// TODO(question): What causes the movement discrepancy in issue 83?
+			// A matched scene with actor identities, construction state and
+			// queue/route history at the first failure would settle the comparison.
+			// This failure imposes no travel interval before another patrol pick
+			// [04 R-ORD-01 §4][04 R-PATH-01 §8].
 			workStatus(u, statusCant, "I can't get there")
 			return 8 // abandon
 		}
@@ -790,7 +795,7 @@ func helpBuildHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Cod
 			return 5 // complete: nothing left to assist
 		}
 		TakeWorkSlots(u) // "release all slots" [04 R-ORD-01 §5]; see TakeWorkSlots
-		EmitStartBuilding(u, n)
+		EmitStartBuilding(u, n, target.X, target.Z)
 		return 1
 	case 2:
 		return inBuildStanceWait(u, n, gateCancelCurrent|pendTargetRemoved, tick)
@@ -984,7 +989,7 @@ func captureHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Code 
 		if !inBuildRangeOf(u, target) {
 			return 0 // restart: phase 0 re-arms the goal and the emitter
 		}
-		EmitStartBuilding(u, n)
+		EmitStartBuilding(u, n, target.X, target.Z)
 		return 1
 	case 2:
 		return inBuildStanceWait(u, n, pendTargetGone, tick)
@@ -1227,7 +1232,8 @@ func reclaimHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Code 
 		if q := QueueForUnit(u); q != nil {
 			_ = q.randBelow(uint32(def.Height))
 		}
-		EmitStartBuilding(u, n)
+		bx, bz := featureBoxCentre(cx, cz, def)
+		EmitStartBuilding(u, n, bx, bz)
 		return 1
 	case 2:
 		return inBuildStanceWait(u, n, 0, tick)
@@ -1406,8 +1412,9 @@ func resurrectHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Cod
 	// feature, so a lookup there would abandon the record one visit before its
 	// completion caption.
 	var def *content.FeatureDef
+	var cx, cz int
 	if n.Phase <= 5 {
-		fdef, _, _, found := featureAtGoal(u, n)
+		fdef, anchorX, anchorZ, found := featureAtGoal(u, n)
 		if !found {
 			// `Resurrection failed` — the single-s spelling, for "there is no
 			// feature at the recorded position" [05 R-WORK-01 §7].
@@ -1418,13 +1425,13 @@ func resurrectHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Cod
 			return 8 // abandon, silently
 		}
 		def = fdef
+		cx, cz = anchorX, anchorZ
 	}
 	switch n.Phase {
 	case 0:
 		if !hasMover(u) || u.Def == nil || !u.Def.CanResurrect {
 			return 7 // cancel-all
 		}
-		cx, cz := int(world.WorldToCell(n.GoalX)), int(world.WorldToCell(n.GoalZ))
 		bx, bz := featureBoxCentre(cx, cz, def)
 		if !installWorkGoal(u, n, bx, n.GoalY, bz) {
 			return 7
@@ -1446,7 +1453,8 @@ func resurrectHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Cod
 		if q := QueueForUnit(u); q != nil {
 			_ = q.randBelow(uint32(def.Height))
 		}
-		EmitStartBuilding(u, n)
+		bx, bz := featureBoxCentre(cx, cz, def)
+		EmitStartBuilding(u, n, bx, bz)
 		return 1
 	case 2:
 		return inBuildStanceWait(u, n, 0, tick)
@@ -1633,7 +1641,7 @@ func TakeWorkSlots(u *units.Unit) {
 // GroundUnitReclaimSetup supplies the order-owned callback and stance phases
 // for construction's per-queue executor [04 R-ORD-01 §5]. The caller owns
 // admission, approach, pulse arithmetic and the work window.
-func GroundUnitReclaimSetup(u *units.Unit, n *Node, satisfied, tick uint32) Code {
+func GroundUnitReclaimSetup(u *units.Unit, n *Node, target *units.Unit, satisfied, tick uint32) Code {
 	switch n.Phase {
 	case 0:
 		captionClearText(u, n, "Reclaiming")
@@ -1643,7 +1651,7 @@ func GroundUnitReclaimSetup(u *units.Unit, n *Node, satisfied, tick uint32) Code
 		if satisfied&gateNoRoute != 0 {
 			return 9
 		}
-		EmitStartBuilding(u, n)
+		EmitStartBuilding(u, n, target.X, target.Z)
 		return 1
 	case 3:
 		return inBuildStanceWait(u, n, 0x10008, tick)

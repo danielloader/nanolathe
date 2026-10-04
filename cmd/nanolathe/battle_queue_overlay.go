@@ -214,11 +214,11 @@ func drawQueueOverlay(c *client.Client, b *battleSession, f *frame.Frame, tick u
 // its stored goal too: the marker helper projects the queued footprint from
 // those same fields [07 §9], and the site a nanoframe stands on is that goal.
 //
-// TODO(question): retail's anchor getter also maintains a cached target
-// position (runtime bit 21 of the record flags [04 R-ORD-01 §13]); when it
-// prefers that cache over the live target — for example for a target outside
-// the viewer's line of sight — is not recorded, and the cache is not
-// published. A trace of the anchor getter's cache branch would settle it.
+// TODO(question): bind the anchor getter's independent cached horizontal
+// position to presentation. Visible targets and targets with no cache use the
+// live position; unseen targets with a valid cache use cached whole X/Z and
+// live Y [07 R-P0-11 §3]. The existing live-target fallback remains until an
+// immutable cache/owner-visibility binding and fixtures settle this gap.
 func queueAnchorFrame(f *frame.Frame) *frame.Frame {
 	if f == nil || len(f.OrderQueues) == 0 {
 		return f

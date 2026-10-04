@@ -275,20 +275,15 @@ func insideRect(c path.Cell, minX, minZ, w, d int32) bool {
 	return c.X >= minX && c.X < minX+w && c.Z >= minZ && c.Z < minZ+d
 }
 
-// TestApproachGoalRebindsOverARestoredRoute covers the save/load path. The
-// movement goal payload is derived state that no save box carries — the arrival
-// handle beside it is not persisted either — so the owner must re-establish it
-// on the first tick after a restore, even when the restored route is still
-// active and the walk submission is therefore skipped. Installing after the
-// idempotency guards would leave the mover steering at the order's stored
-// position for the whole length of that restored route [04 §8.3].
-func TestApproachGoalRebindsOverARestoredRoute(t *testing.T) {
+// An approach with no bound object installs through the ordinary synchronous
+// handoff. Two retained points cannot pass either three-point acceptance gate,
+// and the same unsigned age epilogue applies [04 R-PATH-01 §8].
+func TestApproachGoalInstallOverUnboundRouteUsesHandoff(t *testing.T) {
 	svc, builder, node := approachFixture(t, 10, 10)
 	builder.X, builder.Z = world.CellToWorld(1), world.CellToWorld(1)
 
-	// Stand in for a restore: an active route with no movement goal or active
-	// order bound. The points are deliberately distinct so adoption cannot be
-	// mistaken for fresh activation's synthetic two-point route.
+	// Retain an active route without an installed goal. This is a fresh goal
+	// handoff, not save reconstruction of a serialized object.
 	svc.Movement.EnsureUnit(builder)
 	route := &movement.Route{Active: true, Count: 2, LastRequestTick: 100}
 	route.Points[0] = movement.Point{X: 17, Z: 19}
@@ -296,20 +291,47 @@ func TestApproachGoalRebindsOverARestoredRoute(t *testing.T) {
 	svc.Movement.Routes[builder.Handle] = route
 	svc.Movement.ClearMoveGoal(builder.Handle)
 
-	// Adoption occurs at a nonzero system tick distinct from the route's
-	// existing request tick. Only the wants-repath poll may stamp that field.
+	// The install is at a nonzero tick, at least ten ticks after the last
+	// request. Its handoff epilogue clears that old request stamp.
 	svc.Movement.BeginTick(137)
 	svc.ensureWalk(builder, node)
 	svc.Movement.EndTick(137)
 
 	if !svc.Movement.HasGroundGoal(builder.Handle, node) {
-		t.Fatalf("movement goal payload was not reinstalled over a restored route")
+		t.Fatalf("approach goal payload was not installed")
 	}
-	if !route.Active || route.Count != 2 || route.Points[0] != (movement.Point{X: 17, Z: 19}) || route.Points[1] != (movement.Point{X: 23, Z: 29}) {
-		t.Fatalf("restored route was replaced during adoption: %+v", route)
+	gx, gz, ok := svc.Movement.MoveGoalFor(builder.Handle, node)
+	if !ok || !route.Active || !route.WantsRepath || route.Count != 2 || route.Points[0] != (movement.Point{X: int32(builder.X >> 16), Z: int32(builder.Z >> 16)}) || route.Points[1] != (movement.Point{X: int32(gx >> 16), Z: int32(gz >> 16)}) {
+		t.Fatalf("approach did not apply the installer's synthetic fallback: %+v", route)
 	}
-	if route.LastRequestTick != 100 {
-		t.Fatalf("restored route request tick changed during adoption: got %d want 100", route.LastRequestTick)
+	if route.LastRequestTick != 0 {
+		t.Fatalf("handoff retained an old request stamp: got %d want 0", route.LastRequestTick)
+	}
+}
+
+// Exposing an approach after a temporary order does not rebind its displaced
+// object. The phase's release wake remains available to placement revalidation
+// [04 R-ORD-01 §9][04 R-PATH-01 §8][05 R-WORK-01 §13].
+func TestApproachMaintenanceDoesNotRebindDisplacedGoal(t *testing.T) {
+	svc, builder, node := approachFixture(t, 10, 10)
+	if !svc.installApproachGoal(builder, node) {
+		t.Fatal("initial approach refused")
+	}
+	q := orders.QueueForUnit(builder)
+	other := q.PushHead(orders.Lookup("Move_Ground"), orders.Node{Owner: builder.Handle})
+	if !svc.Movement.InstallPointGoal(orders.PointGoalRequest{Owner: builder.Handle, Node: other, X: world.CellToWorld(20), Z: world.CellToWorld(20)}) {
+		t.Fatal("temporary goal refused")
+	}
+	svc.Movement.ReleaseGoal(other)
+	q.RemoveHead()
+	route := svc.Movement.Routes[builder.Handle]
+	before := *route
+	svc.ensureWalk(builder, node)
+	if !svc.Movement.HasOwnedGroundGoal(builder.Handle, node) || svc.Movement.HasGroundGoal(builder.Handle, node) || *route != before || svc.Movement.HasPathRequest(builder.Handle) {
+		t.Fatal("maintenance revived the displaced approach")
+	}
+	if node.Satisfied&0x80 == 0 {
+		t.Fatal("maintenance consumed the approach's displacement wake")
 	}
 }
 

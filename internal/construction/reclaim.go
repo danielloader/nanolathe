@@ -299,7 +299,7 @@ func (s *Service) unitReclaimVisit(builder *units.Unit, node *orders.Node, satis
 	} else {
 		switch node.Phase {
 		case 0, 2, 3, 4:
-			return orders.GroundUnitReclaimSetup(builder, node, satisfied, tick)
+			return orders.GroundUnitReclaimSetup(builder, node, target, satisfied, tick)
 		case 1:
 			if satisfied&0x20 != 0 {
 				node.MoveState = orders.MoveArrived

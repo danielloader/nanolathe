@@ -68,6 +68,9 @@ func TestRetailLandedAircraftResumePatrolAssistance(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := f.s.Units.Unit(h)
+	// Direct fixture allocation must file the frame in the ordinary sector
+	// population before patrol's spatial gather can find it [04 R-ORD-02 §4].
+	f.s.Movement.EnsureUnit(target)
 	before := target.Remaining
 	// Observe the ordinary service's fraction write, so a HelpBuild caption
 	// or target health bar alone cannot satisfy this check.

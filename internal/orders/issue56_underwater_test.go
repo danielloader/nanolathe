@@ -88,7 +88,7 @@ func TestVTOLPatrolChecksPickedRepairAdmission(t *testing.T) {
 					}
 					b.World = &WorldQueryAdapter{
 						SeaLevel: func() uint8 { return 40 },
-						ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
+						ForEachUnitInRadius: func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
 							visit(target.Handle, target)
 						},
 					}
@@ -128,7 +128,7 @@ func TestVTOLPatrolRejectedPickReachesFeatureWork(t *testing.T) {
 	}
 	b.World = &WorldQueryAdapter{
 		SeaLevel: func() uint8 { return 40 },
-		ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
+		ForEachUnitInRadius: func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
 			for _, candidate := range []*units.Unit{target, &other} {
 				if visit(candidate.Handle, candidate) {
 					return

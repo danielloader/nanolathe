@@ -61,7 +61,7 @@ func TestProTAWorkingWeaponsSwapTheVerbAtFourWorkSites(t *testing.T) {
 			return captureHandler(u, &Node{ID: Lookup("Capture"), Owner: u.Handle, Target: target.Handle}, 0, 1)
 		}},
 		{"ReclaimUnit phase 0", true, func(u, target *units.Unit) Code {
-			return GroundUnitReclaimSetup(u, &Node{ID: Lookup("ReclaimUnit"), Owner: u.Handle, Target: target.Handle}, 0, 1)
+			return GroundUnitReclaimSetup(u, &Node{ID: Lookup("ReclaimUnit"), Owner: u.Handle, Target: target.Handle}, target, 0, 1)
 		}},
 		{"RepairUnitNoMove phase 0", false, func(u, target *units.Unit) Code {
 			return repairUnitNoMoveHandler(u, &Node{ID: Lookup("RepairUnitNoMove"), Owner: u.Handle, Target: target.Handle}, 0, 1)

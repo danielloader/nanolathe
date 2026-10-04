@@ -20,8 +20,9 @@ import (
 // with the switch on, the same call hands them back and the ordinary
 // autonomous scan acquires and fires [06 §3.2]
 // (research/extensions/prota-engine.md "Weapons acquire targets while
-// working"). The repair works in reach; the reclaim's verb is its phase 0, so
-// the case does not need the approach to finish. The `MobileBuild` site is
+// working"). Keep the work target alive and damaged throughout the observation.
+// The repair works in reach; reclaim's weapon switch is in phase 0, so its
+// approach need not finish. The `MobileBuild` site is
 // locked in internal/construction (mobile_build_slots_test.go).
 func TestProTAWorkingCommanderKeepsItsWeapons(t *testing.T) {
 	f := loadRetailFixture(t)
@@ -66,7 +67,13 @@ func TestProTAWorkingCommanderKeepsItsWeapons(t *testing.T) {
 				for i := 0; i < 600; i++ {
 					commander.Flags &^= units.StandingFieldMask << units.StandingMoveShift
 					s.Econ.Players[1].Stock[economy.Energy] = 100
-					friend.Health = 1 // keep the repair from finishing
+					// Keep repair unfinished and reclaim nonlethal. The reclaim
+					// pulse uses the authored definition, so a fresh near-full
+					// target survives each ordinary work visit.
+					friend.Health = friend.MaxHealth - 1
+					if work == "RepairUnit" {
+						friend.Health = 1
+					}
 					s.Step(s.Clock.ScaledAnchor + 1)
 					if head := q.Head(); head == nil || head.ID != id {
 						break

@@ -558,20 +558,21 @@ func (s *Session) stepUnitPhase(tick uint32) {
 				orders.StepDangerResponse(u, tick)
 				ordersPump.PumpUnit(h, tick)
 			}
-			// Pumping can advance the primary head in this same visit.  Reconcile
-			// the activation boundary immediately so a stale request/route cannot
-			// be consumed by movement for the successor order.  The scheduler has
-			// already run for this tick; the replacement is therefore serviced on
-			// its next normal scheduler turn, without a second scheduler call.
-			// It reconciles what the pump above just did with the mover below,
-			// so it belongs to the same gated block.
+			// Ground installers already bind the follower during the pump visit.
+			// A rotation or head insert can leave its owner behind another record;
+			// StepUnit services that bound object independently [04 R-PATH-01 §8].
+			// Reconcile queue-derived activation only when no ground object is held.
 			if work && s.Movement != nil {
 				qActive := orders.QueueOfUnit(u)
 				var active *orders.Node
 				if qActive != nil {
 					active = qActive.Head()
 				}
-				if active != nil {
+				if s.Movement.HasBoundGroundGoal(h) {
+					if active != nil && s.Movement.HasGroundGoal(h, active) {
+						active.MoveState = orders.MoveEnRoute
+					}
+				} else if active != nil {
 					activeName := orders.DescriptorFor(active.ID).Name
 					// Park joins the move family: its phase 0 installs the
 					// rectangle goal that carries a no-rally factory product off

@@ -125,6 +125,11 @@ func setupJamCase(t *testing.T, c jamCase) (*System, pool.Handle, pool.Handle, f
 		q.SetBinding(&orders.QueueBinding{Lookup: w.Unit, World: &orders.WorldQueryAdapter{DeclaresAlliance: func(from, toward uint8) bool { return from == 0 && toward == c.ownerB }}})
 	}
 	head := q.Head()
+	if c.routeless {
+		// A completed/re-armed record suppresses the installer's immediate
+		// synthetic fallback [04 R-PATH-01 §8][05 R-EGRESS-02].
+		head.Flags |= orders.FlagRetryMark
+	}
 	switch {
 	case c.siteCell != 0 && c.assist:
 		// Half a cell of stand-off out to two cells of build distance, as the

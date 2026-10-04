@@ -98,24 +98,24 @@ func emitStopBuilding(u *units.Unit, n *Node) {
 // and its work target's it forms
 //
 //	dx = selfX - targetX
-//	dz = selfZ - targetZ          (both in whole world units)
-//	bearing = round_half_even(atan2(dx, dz) * 65536/2*pi)
+//	dz = selfZ - targetZ          (signed 32-bit raw 16.16 deltas)
+//	bearing = round_half_even(atan2(dx, dz) * 10430.37835047)
 //
 // The reversed delta is not a slip: with the position step of
 // [04 R-MOV-01 §4] travelling along (-sin h, -cos h), the angle of
 // (self - target) is exactly the heading that points from the builder at the
-// target. The scale factor is the compiled-in 65536/2*pi and the store is an
+// target. The scale factor is the stored binary64 value and the store is an
 // x87 integer store, so it rounds to nearest EVEN rather than truncating.
 //
 // I2 allowlist: retail evaluates this in floating point and the allowlist
 // carries the row "`StartBuilding` first-argument bearing"; the float64 is a
 // transient narrowed here at the uint16 angle boundary.
 func startBuildingBearing(selfX, selfZ, targetX, targetZ numeric.Fixed) uint16 {
-	// Whole world units: the high word of a 16.16 coordinate, taken with an
-	// arithmetic shift so negative coordinates floor [03 §2.1].
-	dx := (selfX.Raw() >> 16) - (targetX.Raw() >> 16)
-	dz := (selfZ.Raw() >> 16) - (targetZ.Raw() >> 16)
-	return numeric.AngleFromAtan2(dx, dz).Raw()
+	// Subtract before any conversion, preserving fractions and the native
+	// signed width [04 R-CB-01 §3]. Uniform scaling cancels in atan2.
+	dx := int32(selfX.Raw()) - int32(targetX.Raw())
+	dz := int32(selfZ.Raw()) - int32(targetZ.Raw())
+	return numeric.AngleFromAtan2(int64(dx), int64(dz)).Raw()
 }
 
 // bearingOffset resolves a heading and a radius into the signed component pair
@@ -138,7 +138,7 @@ func bearingOffset(heading uint16, radius numeric.Fixed) (numeric.Fixed, numeric
 // EmitStartBuilding is the StartBuilding emitter [R-ORDER-02 §2] and the ONLY
 // writer of FlagStopBuildingPending. Its nine call sites are the
 // nanolathe/assist handlers: MobileBuild, VTOL_MobileBuild, HelpBuild,
-// VTOL_HelpBuild, Capture (two sites), Reclaim, Resurrect, and RepairUnit.
+// VTOL_HelpBuild, Capture, ReclaimUnit, Reclaim, Resurrect, and RepairUnit.
 // It resolves the function named StartBuilding in the owning unit's COB
 // script and arranges it at arity 1, window words 1..3 zero-filled
 // [R-UNIT-06 §4].
@@ -154,10 +154,9 @@ func bearingOffset(heading uint16, radius numeric.Fixed) (numeric.Fixed, numeric
 // angle. Pushing an order age there turned commander and factory torsos to a
 // meaningless direction.
 //
-// The work target is the order record's goal. The session refreshes a
-// target-bearing record's goal from the live target unit each tick, so the
-// goal is the work position for the unit-target sites (Reclaim, HelpBuild,
-// Capture, Resurrect, RepairUnit) as well as for the placed-site ones.
+// Each caller supplies its work position: live target or newly placed product
+// for unit work, resolved box centre for feature work [04 R-CB-01 §3]. The
+// record's stored position can be absent or refer to a clicked fringe cell.
 //
 // Eight of retail's nine sites subtract the builder's own heading; the ninth,
 // `VTOL_HelpBuild`, passes the absolute bearing so an air builder's script
@@ -165,11 +164,11 @@ func bearingOffset(heading uint16, radius numeric.Fixed) (numeric.Fixed, numeric
 // emitStartBuildingAbsolute in vtolwork.go, which is this emitter without the
 // subtraction below and takes its bearing against the live target rather than
 // the record goal.
-func EmitStartBuilding(u *units.Unit, n *Node) {
+func EmitStartBuilding(u *units.Unit, n *Node, targetX, targetZ numeric.Fixed) {
 	if u == nil || n == nil {
 		return
 	}
-	bearing := startBuildingBearing(u.X, u.Z, n.GoalX, n.GoalZ)
+	bearing := startBuildingBearing(u.X, u.Z, targetX, targetZ)
 	arg := bearing - u.Move.Heading // relative to the builder's facing [04 R-CB-01 §3]
 	arrangeDeferred(callbackBridgeFor(u), "StartBuilding", []int32{int32(arg)})
 	n.Flags |= FlagStopBuildingPending

@@ -641,7 +641,8 @@ func vtolRepairPatrolHandler(u *units.Unit, n *Node, satisfied uint32, tick uint
 					if !spawnPatrolRepair(u, target, tick) {
 						return 3 // *wait*: the code-8 issue was refused
 					}
-					n.DynamicGate = 0
+					// Completed-target assistance retains this leg's gate;
+					// only the unfinished branch releases it [04 R-ORD-01 §7].
 					return 6 // accepted complete target repair rotates
 				}
 			}

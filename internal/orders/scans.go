@@ -117,36 +117,27 @@ func scanAttackUType(u *units.Unit, definition uint32) *units.Unit {
 // ground repeats that direction after its random pick, while VTOL does not.
 func scanRepairCandidates(u *units.Unit, radius int32) []*units.Unit {
 	b := bindingFor(u)
-	if b == nil {
+	if b == nil || b.World == nil || b.World.ForEachUnitInRadius == nil {
 		return nil
 	}
 	var out []*units.Unit
-	b.ForEachUnit(func(h pool.Handle, candidate *units.Unit) bool {
-		if h == 0 || candidate == nil || !candidate.Alive || candidate == u {
-			return scanNext
-		}
-		if scanHostile(b, u, candidate) {
-			return scanNext
-		}
-		if candidate.Def == nil {
-			return scanNext
-		}
-		if moverMode(candidate) != 1 {
-			return scanNext
-		}
-		if health16(candidate) >= uint32(candidate.Def.MaxDamage) && candidate.Remaining == 0 {
-			return scanNext
-		}
-		if candidate.LastDamageSide == u.Owner && candidate.LastDamageCause == 5 {
-			return scanNext
-		}
-		if !withinPlanarRadius(u, candidate.X, candidate.Z, radius) {
+	b.World.ForEachUnitInRadius(u.X, u.Z, numeric.Fixed(int64(int16(radius))<<16), func(h pool.Handle, candidate *units.Unit) bool {
+		if !repairCandidate(b, u, h, candidate) {
 			return scanNext
 		}
 		out = append(out, candidate)
 		return scanNext
 	})
 	return out
+}
+
+// The visitor's five admissions are shared; the caller owns its population
+// and ordering [04 R-ORD-02 §4].
+func repairCandidate(b *QueueBinding, u *units.Unit, h pool.Handle, candidate *units.Unit) bool {
+	return h != 0 && candidate != nil && candidate != u && candidate.Def != nil &&
+		!scanHostile(b, u, candidate) && moverMode(candidate) == 1 &&
+		(health16(candidate) < uint32(candidate.Def.MaxDamage) || candidate.Remaining != 0) &&
+		!(candidate.LastDamageSide == u.Owner && candidate.LastDamageCause == 5)
 }
 
 // airBasePads is the damaged-aircraft base seek both patrol rows run —
@@ -345,7 +336,10 @@ func issuePatrolRepair(u *units.Unit, target *units.Unit, tick uint32) (resolved
 	if move == 3 {
 		return true, false
 	}
-	node := NewNodeForOrder(id, target.Handle, target.X, target.Y, target.Z, tick, u.Handle, false)
+	// The issuer supplies only a target; the work row installs a goal from
+	// that target's live position [04 R-STANCE-01 §4][04 R-ORD-01 §5].
+	node := NewNodeForOrder(id, target.Handle, 0, 0, 0, tick, u.Handle, false)
+	node.GoalSupplied = false
 	node.automaticWork = true
 	if move < 2 {
 		if moveID := Resolve(2, u, nil, &ResolvePos{X: u.X, Y: u.Y, Z: u.Z}); moveID != 0 {

@@ -170,7 +170,7 @@ func TestVTOLHelpBuildPassesTheAbsoluteBearing(t *testing.T) {
 	u2.X, u2.Z = 0, 0
 	u2.Move.Heading = 49152
 	n2 := &Node{ID: Lookup("HelpBuild"), Owner: u2.Handle, Deadline: -1, GoalX: numeric.Fixed(64 << 16), GoalSupplied: true}
-	EmitStartBuilding(u2, n2)
+	EmitStartBuilding(u2, n2, target.X, target.Z)
 	if args2 := startedArgs(vm2); len(args2) != 1 || !argsEqual(args2[0], []int32{0}) {
 		t.Fatalf("ground HelpBuild arrange %v, want [0]: eight of nine sites subtract the heading", args2)
 	}

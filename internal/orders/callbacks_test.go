@@ -381,7 +381,7 @@ func TestEmitStartBuildingSetsPendingFlagAndArgs(t *testing.T) {
 		n := &Node{ID: Lookup("MobileBuild"), Owner: u.Handle, Deadline: -1, CreationTick: 0x12345678,
 			GoalSupplied: true,
 			GoalX:        numeric.Fixed(64 << 16)}
-		EmitStartBuilding(u, n)
+		EmitStartBuilding(u, n, n.GoalX, n.GoalZ)
 		args := startedArgs(vm)
 		if len(args) != 1 || !argsEqual(args[0], []int32{49152}) {
 			t.Fatalf("StartBuilding arrange %v, want [49152] [04 R-CB-01 §3]", args)
@@ -397,7 +397,7 @@ func TestEmitStartBuildingSetsPendingFlagAndArgs(t *testing.T) {
 		n := &Node{ID: Lookup("MobileBuild"), Owner: u.Handle, Deadline: -1,
 			GoalSupplied: true,
 			GoalX:        numeric.Fixed(64 << 16)}
-		EmitStartBuilding(u, n)
+		EmitStartBuilding(u, n, n.GoalX, n.GoalZ)
 		args := startedArgs(vm)
 		if len(args) != 1 || !argsEqual(args[0], []int32{0}) {
 			t.Fatalf("StartBuilding arrange %v, want [0]: a builder already facing its target gets a zero relative bearing [04 R-CB-01 §3]", args)
@@ -406,11 +406,67 @@ func TestEmitStartBuildingSetsPendingFlagAndArgs(t *testing.T) {
 	t.Run("no script: arrange no-ops, flag still set", func(t *testing.T) {
 		u := &units.Unit{Handle: 1} // no production binding
 		n := &Node{ID: Lookup("MobileBuild"), Owner: u.Handle, Deadline: -1}
-		EmitStartBuilding(u, n)
+		EmitStartBuilding(u, n, 0, 0)
 		if n.Flags&FlagStopBuildingPending == 0 {
 			t.Fatalf("flag is written by the emitter regardless of script presence")
 		}
 	})
+}
+
+// Fractional positions and signed subtraction precede the bearing conversion
+// [04 R-CB-01 §3]. These angles differ from whole-position or widened deltas.
+func TestStartBuildingBearingKeepsRawDeltas(t *testing.T) {
+	if got := startBuildingBearing(1<<14, 1<<14, 3<<14, 3<<14); got != 40960 {
+		t.Fatalf("sub-unit diagonal bearing=%d, want 40960", got)
+	}
+	if got := startBuildingBearing(0x7fffffff, 0, -0x80000000, 0); got != 49152 {
+		t.Fatalf("wrapped negative X bearing=%d, want 49152", got)
+	}
+}
+
+// Unit work computes the callback from the live target, independently of the
+// record's stored point or goal-presence bit [04 R-CB-01 §3].
+func TestTargetOnlyWorkEmitsLiveTargetBearing(t *testing.T) {
+	for _, name := range []string{"HelpBuild", "RepairUnit", "Capture"} {
+		t.Run(name, func(t *testing.T) {
+			q, u, target := workFixture()
+			_, vm := cbUnit(cbProgram("StartBuilding"))
+			u.ScriptState = &units.ScriptState{VM: vm, Binding: &cob.Binding{VM: vm, Callbacks: cob.NewCallbackBridge(vm)}}
+			u.X, u.Z, u.Move.Heading = 0, 0, 49152
+			target.X, target.Z, target.Remaining = 64<<16, 0, 0.5
+			n := q.PushHead(Lookup(name), Node{Owner: u.Handle, Target: target.Handle, Phase: 1, Deadline: -1})
+			if code := DescriptorFor(n.ID).Handler(u, n, 0, 1); code != 1 {
+				t.Fatalf("work visit=%d, want advance", code)
+			}
+			if args := startedArgs(vm); len(args) != 1 || !argsEqual(args[0], []int32{0}) {
+				t.Fatalf("callback bearing=%v, want relative live-target bearing [0]", args)
+			}
+			if n.GoalX != 0 || n.GoalY != 0 || n.GoalZ != 0 || n.GoalSupplied {
+				t.Fatal("callback supplied a stored point to the target-only record")
+			}
+		})
+	}
+}
+
+func TestFeatureWorkEmitsResolvedBoxCentreBearing(t *testing.T) {
+	for _, name := range []string{"Reclaim", "Resurrect"} {
+		t.Run(name, func(t *testing.T) {
+			def := &content.FeatureDef{FootprintX: 2, FootprintZ: 2, Height: 1, Reclaimable: true}
+			q, u, _ := reclaimFixture([]*content.FeatureDef{def})
+			_, vm := cbUnit(cbProgram("StartBuilding"))
+			u.ScriptState = &units.ScriptState{VM: vm, Binding: &cob.Binding{VM: vm, Callbacks: cob.NewCallbackBridge(vm)}}
+			// Anchor (4,5), footprint 2x2: centre (80,96). The click at
+			// (70,90) would aim diagonally; the centre is directly east.
+			u.X, u.Z, u.Move.Heading = 64<<16, 96<<16, 49152
+			n := q.PushHead(Lookup(name), Node{Owner: u.Handle, Phase: 1, GoalX: 70 << 16, GoalZ: 90 << 16, GoalSupplied: true})
+			if code := DescriptorFor(n.ID).Handler(u, n, 0, 1); code != 1 {
+				t.Fatalf("feature work visit=%d, want advance", code)
+			}
+			if args := startedArgs(vm); len(args) != 1 || !argsEqual(args[0], []int32{0}) {
+				t.Fatalf("feature callback bearing=%v, want relative centre bearing [0]", args)
+			}
+		})
+	}
 }
 
 func TestCancelNotificationMaskDeliveredOnRemoval(t *testing.T) {

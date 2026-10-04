@@ -263,13 +263,17 @@ type FeatureView struct {
 // queries. ForEachUnit and ForEachFeature must invoke callbacks in retail pool
 // order; callers must not replace them with map traversal [P0-00 A,D][I1].
 type WorldQueryAdapter struct {
-	LookupUnit     func(pool.Handle) *units.Unit
-	Hostile        func(*units.Unit, *units.Unit) bool
-	ForEachUnit    func(func(pool.Handle, *units.Unit) bool)
-	LookupFeature  func(int32, int32) (FeatureView, bool)
-	ForEachFeature func(func(FeatureView) bool)
-	TerrainHeight  func(numeric.Fixed, numeric.Fixed) (numeric.Fixed, bool)
-	SeaLevel       func() uint8
+	LookupUnit  func(pool.Handle) *units.Unit
+	Hostile     func(*units.Unit, *units.Unit) bool
+	ForEachUnit func(func(pool.Handle, *units.Unit) bool)
+	// ForEachUnitInRadius uses the spatial-sector walk and raw squared-distance
+	// predicate of the repair collector. Its radius is full 16.16, and true
+	// stops the visitor, as with ForEachUnit [04 R-ORD-02 §4].
+	ForEachUnitInRadius func(numeric.Fixed, numeric.Fixed, numeric.Fixed, func(pool.Handle, *units.Unit) bool)
+	LookupFeature       func(int32, int32) (FeatureView, bool)
+	ForEachFeature      func(func(FeatureView) bool)
+	TerrainHeight       func(numeric.Fixed, numeric.Fixed) (numeric.Fixed, bool)
+	SeaLevel            func() uint8
 	// DeclaresAlliance is the one-directional row read of [05 R-SHARE-01 §1]:
 	// row A of `from` indexed by `toward`. `Hostile` above answers the
 	// symmetric question the command resolver asks [04 R-ORD-02 §1]; this
@@ -401,7 +405,7 @@ func (b *QueueBinding) Validate() error {
 	if b.Work.Ready == nil || !b.Work.Ready() || b.Weapons.Ready == nil || !b.Weapons.Ready() || b.Presentation.Ready == nil || !b.Presentation.Ready() {
 		return fmt.Errorf("orders: incomplete single-player subsystem service")
 	}
-	if b.World.LookupUnit == nil || b.World.Hostile == nil || b.World.ForEachUnit == nil || b.World.ForEachFeature == nil || b.World.LookupFeature == nil || b.World.TerrainHeight == nil || b.World.SeaLevel == nil {
+	if b.World.LookupUnit == nil || b.World.Hostile == nil || b.World.ForEachUnit == nil || b.World.ForEachUnitInRadius == nil || b.World.ForEachFeature == nil || b.World.LookupFeature == nil || b.World.TerrainHeight == nil || b.World.SeaLevel == nil {
 		return fmt.Errorf("orders: incomplete world query service")
 	}
 	// Command resolution's two owned-elsewhere gates: code 14's build list and

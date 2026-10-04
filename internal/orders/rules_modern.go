@@ -7,6 +7,7 @@ package orders
 
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/combat"
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
@@ -70,7 +71,7 @@ func (*ModernRules) GuardWorksNearby(u *units.Unit, n *Node, tick uint32) bool {
 	}
 	q := QueueOfUnit(u)
 	if resources, ok := playerResources(u); ok && resourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1]) {
-		for _, target := range scanRepairCandidates(u, u.Def.SightDistance) {
+		for _, target := range scanModernGuardRepairCandidates(u) {
 			if id := Resolve(8, u, target, nil); id != 0 {
 				releaseGoalPayload(u, n)
 				work := NewNodeForOrder(id, target.Handle, target.X, target.Y, target.Z, tick, u.Handle, false)
@@ -141,4 +142,22 @@ func (*ModernRules) GuardResumesFromPad(u *units.Unit) bool {
 func modernGuardWorkRetry(n *Node, tick uint32) {
 	n.DynamicGate = gateDeadline
 	n.Deadline = int32(tick + 30)
+}
+
+// Nanolathe Modern policy: guard assistance keeps its unit-slot first pick and
+// whole-position sight test (DESIGN_UNITS_ORDERS_COB "Modern guard assistance").
+// Patrol's retail spatial gather has a different ordering and arithmetic.
+func scanModernGuardRepairCandidates(u *units.Unit) []*units.Unit {
+	b := bindingFor(u)
+	if b == nil || b.World == nil || b.World.ForEachUnit == nil {
+		return nil
+	}
+	var out []*units.Unit
+	b.ForEachUnit(func(h pool.Handle, candidate *units.Unit) bool {
+		if candidate != nil && candidate.Alive && repairCandidate(b, u, h, candidate) && withinPlanarRadius(u, candidate.X, candidate.Z, u.Def.SightDistance) {
+			out = append(out, candidate)
+		}
+		return scanNext
+	})
+	return out
 }

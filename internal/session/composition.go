@@ -975,6 +975,11 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 				}
 			})
 		},
+		ForEachUnitInRadius: func(x, z, radius numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
+			if s.Movement != nil {
+				s.Movement.VisitUnitsInRadius(x, z, radius, visit)
+			}
+		},
 		LookupFeature: func(cx, cz int32) (orders.FeatureView, bool) {
 			if s.Features == nil || s.World == nil {
 				return orders.FeatureView{}, false

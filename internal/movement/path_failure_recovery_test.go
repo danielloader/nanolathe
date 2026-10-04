@@ -37,6 +37,7 @@ func TestPathFailureRecoveryRearmsEverySixtyTicks(t *testing.T) {
 		t.Fatal("Move_Ground order is unavailable")
 	}
 	q := orders.QueueForUnit(u)
+	q.SetBinding(&orders.QueueBinding{Movement: &orders.MovementGoalAdapter{Destroy: system.ReleaseGoal}})
 	q.Push(moveID, orders.Node{Owner: h, GoalX: world.CellToWorld(8), GoalZ: world.CellToWorld(1), GoalSupplied: true})
 	head := q.Head()
 	if head == nil {
@@ -115,6 +116,9 @@ func TestPathFailureRecoveryRearmsEverySixtyTicks(t *testing.T) {
 	q.RemoveHead()
 	q.Push(moveID, orders.Node{Owner: h, GoalX: world.CellToWorld(9), GoalZ: world.CellToWorld(1), GoalSupplied: true})
 	newHead := q.Head()
+	if newHead != nil {
+		system.InstallPointGoal(orders.PointGoalRequest{Owner: h, Node: newHead, X: newHead.GoalX, Z: newHead.GoalZ, Radius: 4})
+	}
 	if newHead == nil || !system.ActivateMove(u, newHead) {
 		t.Fatal("activate replacement")
 	}
@@ -128,9 +132,13 @@ func TestPathFailureRecoveryRearmsEverySixtyTicks(t *testing.T) {
 		t.Fatal("replacement did not submit its own request")
 	}
 	system.CancelPathRequest(h)
-	system.serviceGroundFollower(u, head, route, 180)
+	before := *route
+	system.publishFunc(path.Request{Unit: h, Activation: oldToken}, nil, path.StatusRejected)
+	if *route != before || newHead.Satisfied&0x40 != 0 {
+		t.Fatal("old goal publication changed the replacement follower or notified its owner")
+	}
 	if got := system.PathRequestsSnapshot(); len(got) != 0 {
-		t.Fatalf("old head re-armed after replacement: %v", got)
+		t.Fatalf("old goal publication re-armed after replacement: %v", got)
 	}
 
 	// A transport transition uses the same reset boundary. The carried unit

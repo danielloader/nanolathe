@@ -292,6 +292,15 @@ footprint by the mover's own footprint, a builder that arrives is standing clear
 of the site it is about to stamp; `mustClearSite` keeps the walk installed until
 it is.
 
+Approach maintenance distinguishes a bound object from a retained object that
+another order displaced. A fresh approach installs its rectangle; maintenance
+cannot rebind the displaced one when its order becomes exposed again. Its
+release wake instead reaches the ordinary placement revalidation and blocked
+area retry path [04 R-ORD-01 §9][04 R-PATH-01 §8][05 R-WORK-01 §13]. Saved
+objects are reconstructed before ticks resume [08 R-SAVE-02 §11]. The focused
+approach ownership regression locks this boundary; Modern site-clearance moves
+retain their existing ordinary order installs.
+
 An in-range cannot-get-there wake can retire the approach while its rectangle
 goal remains bound. Placement preserves that follower binding and its inactive
 route; the ordinary follower owns any subsequent search and movement during

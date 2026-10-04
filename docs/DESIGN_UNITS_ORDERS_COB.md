@@ -296,6 +296,14 @@ owns the air preamble and marker. The ground work phase follows
 emits `StartBuilding` or a reveal stamp and has no stance wait
 `[04 R-ORD-01 §5]` `[04 R-ORD-01 §7]` `[04 R-COB-06]`.
 
+Every `StartBuilding` caller passes its resolved work position to the emitter:
+the current unit/product position or the resolved feature footprint centre.
+Target-only records retain their absent stored point. The shared bearing helper
+subtracts raw signed 32-bit fixed-point coordinates before conversion, preserving
+fractional displacement and wrap; the VTOL assist site keeps its absolute
+bearing while the other eight sites subtract the builder's facing
+`[04 R-CB-01 §3]`.
+
 **The handler families.** `standing.go` (the trivial, standing, cloak, wait,
 paralyze, teleport and standby rows), `selfdestruct.go`, `work.go` (capture,
 reclaim, resurrect, assist and the repair trio), `vtolwork.go` (the five VTOL
@@ -841,9 +849,9 @@ Modern adds these branches at the existing guard maintenance cadence:
 * After combat support and direct ward assistance, mobile builders scan for
   nearby work, unless the ward is a factory with production queued (see
   "A factory ward" below). Repair requires energy at least one fifth of
-  storage, as in repair patrol. Candidates use the patrol visitor's inclusive
-  sight radius, friendship, grounded state, damage/build progress and
-  active-reclaim exclusions `[04 R-ORD-01 §4]` `[04 R-ORD-02 §4]`. The first
+  storage, as in repair patrol. Candidates use the patrol visitor's friendship, grounded state, damage/build
+  progress and active-reclaim exclusions, with the guard policy's inclusive
+  whole-position sight-radius comparison `[04 R-ORD-01 §4]` `[04 R-ORD-02 §4]`. The first
   candidate in unit-slot order that resolves command 8 receives the ordinary
   repair or build-assist order. Its existing water and capability admission
   still apply.
@@ -1570,11 +1578,45 @@ Notes the table cannot carry:
 `RepairPatrol` runs the bound repair-candidate scan and resource-gated feature
 pairing; `VTOL_Patrol` runs pad selection and its opportunity scan. These use
 the queue binding's enumerators and simulation RNG, including the no-candidate
-arms `[04 R-ORD-01 §4]` `[04 R-ORD-02 §2]` [I4]. The implementations live in
-`internal/orders/patrol.go` and the shared scan helpers. Existing
-`TestPatrolScansKeepSlotOrderAndDrawOnlyAfterGates`,
-`TestOpportunityScanIsFireAtWillOnly` and `TestVTOLPatrolSeeksAPadOnlyWhenHurt`
-lock the scan ordering, gates and pad-selection boundaries.
+arms [04 R-ORD-01 §4][04 R-ORD-02 §2] [I4]. Both repair patrols gather through
+movement's existing spatial-sector index: Z rows before X columns, each sector
+head to tail, with the full signed sight radius and the raw fixed-point
+circular comparison [04 R-ORD-02 §4]. The random candidate index refers to
+that order. The visitor adds no death-pending exclusion. Modern guard assistance
+keeps its separately approved first candidate in unit-slot order and existing
+whole-position sight test; correcting patrol gathering changes no guard policy.
+`TestPatrolScansKeepSuppliedOrderAndDrawOnlyAfterGates`,
+`TestRepairRadiusSquaresFullFixedDeltas`, `TestRepairRadiusUsesSectorRowsAndRelinkOrder`,
+`TestPatrolAcceptedAssistanceKeepsMovementGate` and the primary deadline tests lock
+these boundaries. Accepted ground and completed-target air assistance preserve
+the patrol's gate/deadline. Automatic assistance starts with only a target
+reference; the ordinary work handler supplies its approach goal. The return
+move keeps the actor's exact departure position [04 R-STANCE-01 §4].
+
+**Unresolved patrol resumption ([issue 83](https://github.com/nanolathe-gg/nanolathe/issues/83)).**
+An unreachable automatic-assist target can remain eligible after `HelpBuild`
+abandons. Its saved return move reports arrival, then the patrol can select
+the same target before making progress along its next leg. An authored
+blocked-target reproduction shows this loop in Strict 3.1 and Modern.
+The traced retail 3.1 path abandons assistance, runs any saved return move,
+and resumes the ordinary patrol queue; it imposes no minimum patrol travel
+before another pick [04 R-ORD-01 §4] [04 R-ORD-01 §5]
+[04 R-ORD-01 §9] [04 R-STANCE-01 §4]. A pre-existing route can affect motion
+through the goal installer's acceptance tests [04 R-PATH-01 §8]. Retail applies
+those tests synchronously at every handoff. Movement now does the same, and
+service, repath polling and publication follow the bound payload independently
+of the head. Queue transitions do not revive a retained successor object. The
+combined corrections increase travel and reduce failures in a stock ring
+scenario where construction starts during an existing patrol, but the retry
+loop still occurs when the target is already present at patrol start. Stock Core KBot diagnostics reproduce failures beside a ring of
+stock solar buildings, including nanoframe creation during patrol. The
+single-actor diagnostics have not reproduced two arrival messages per failure.
+Retail's Medium unit-chat text setting hides arrival captions; that explains
+only a possible text difference, not the reported movement discrepancy
+[07 R-CAM-01 §7]. The cause remains **Unknown**, recorded in document 04's
+Orders and queues unknown list. The assist failure site carries `TODO(question)`
+pending a matched scene with ongoing construction and actor-specific events; no failed
+target delay or exclusion is established as retail behavior.
 
 `VTOL_RepairPatrol` applies shared repair admission **after** the bounded
 candidate pick, before either a repair issue or an explicit `VTOL_HelpBuild`

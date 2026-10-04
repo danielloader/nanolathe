@@ -168,20 +168,35 @@ import (
 // its initial, warm and 6000-tick states and all Strict/Community locks remain
 // unchanged. The captured Flash/Weasel regression isolates the new behavior:
 // disabling only repositioning leaves the Flash parked behind the rock.
+// Retail goal handoffs now accept or synthesize a route during each handler
+// visit, and service follows the bound object independently of the queue head
+// [04 R-PATH-01 §8]. A movement-only build reproduces the new Strict benchmark
+// final and Modern warm/final fingerprints exactly; the repair gather and
+// gate corrections add no further changes to these scenes. Initial states,
+// Strict warm, Community locks and the short Ashap locks remain unchanged.
+//
+// StartBuilding now preserves fractional raw fixed-point deltas and receives
+// the caller's live unit/product or resolved feature centre [04 R-CB-01 §3].
+// A diagnostic overlay restoring only whole-coordinate bearing reproduces all
+// preceding Ashap/benchmark hashes and the Modern ending, isolating the new
+// changes to the bearing precision. Stock scripts turn the build piece and
+// wait before setting INBUILDSTANCE; its changed pose also changes the nano
+// source and authoritative particle lifetime. All warm/final and Ashap locks
+// move, initial compositions stay fixed, and every mode reaches 54000 ticks.
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
 	lockAshapUnitLimit             = 250 // Strict setting; Community's table overrides it.
 	lockDifficulty                 = 1
-	lockAshapStrict6000            = "partial-v1:aa2d3cb661ac26c4"
-	lockAshapCommunity6000         = "partial-v1:abd94817ece852a4"
-	lockAshapModern6000            = "partial-v1:a2c6fc1f6d2e6836"
-	lockAshapStrict54000           = "partial-v1:24da164ea104466e"
-	lockAshapCommunity54000        = "partial-v1:a76a48f358418a68"
-	lockAshapModern54000           = "partial-v1:c68fedd7da4f36d0"
+	lockAshapStrict6000            = "partial-v1:48023152593bee2d"
+	lockAshapCommunity6000         = "partial-v1:61f603cde55fa26e"
+	lockAshapModern6000            = "partial-v1:b574c1e0b3361b82"
+	lockAshapStrict54000           = "partial-v1:8fa5964cb1b804df"
+	lockAshapCommunity54000        = "partial-v1:8bd157c5a04b67cd"
+	lockAshapModern54000           = "partial-v1:36216fb2df6814e2"
 	lockAshapStrictEnd      uint32 = 54000
 	lockAshapCommunityEnd   uint32 = 54000
-	lockAshapModernEnd      uint32 = 49350
+	lockAshapModernEnd      uint32 = 54000
 
 	lockBenchSeed             uint32 = 7
 	lockBenchWarmupTicks             = 600
@@ -189,12 +204,12 @@ const (
 	lockBenchStrictInitial           = "partial-v1:bf488aacf042d582"
 	lockBenchCommunityInitial        = "partial-v1:55165c066f8b6eaa"
 	lockBenchModernInitial           = "partial-v1:55165c066f8b6eaa"
-	lockBenchStrictWarm              = "partial-v1:5afe0089d8db02b8"
-	lockBenchCommunityWarm           = "partial-v1:32013bdf5ea1c7ef"
-	lockBenchModernWarm              = "partial-v1:ad31aa25d9f87893"
-	lockBenchStrictFinal             = "partial-v1:2ccfe9ca8e307df2"
-	lockBenchCommunityFinal          = "partial-v1:67c87da793a68133"
-	lockBenchModernFinal             = "partial-v1:3854f2d414673aa0"
+	lockBenchStrictWarm              = "partial-v1:6b71c463c7f5fef9"
+	lockBenchCommunityWarm           = "partial-v1:b4cc704e749819f3"
+	lockBenchModernWarm              = "partial-v1:eee9e3d0c9d0a5fc"
+	lockBenchStrictFinal             = "partial-v1:5c7c938698477510"
+	lockBenchCommunityFinal          = "partial-v1:e73cccda0a0a136e"
+	lockBenchModernFinal             = "partial-v1:f4ba52e0d540c585"
 )
 
 // TestStrictFingerprintIsLocked holds the retail baseline. Nothing in a Modern
@@ -222,6 +237,11 @@ func TestStrictFingerprintIsLocked(t *testing.T) {
 // the effect service has refused 143 admissions because the pool was full
 // (its cumulative RefusedAtCapacity count; shatter quads refused inside the
 // pool are not included). Forcing the timing lookup off moves this constant.
+// Retained construction goals are no longer rebound by approach maintenance
+// [04 R-PATH-01 §8]; an overlay restoring only that maintenance reproduced the
+// old pool hash. The fractional StartBuilding bearing correction above changes
+// it again: the same seed now first samples full at tick 1700 and refuses 11
+// admissions by step 4500. The capacity assertion still exercises timing.
 //
 // The test asserts that the pool refused at capacity as well as the
 // fingerprint, so a later behaviour change that leaves the pool below capacity
@@ -230,7 +250,7 @@ func TestStrictFingerprintIsLocked(t *testing.T) {
 const (
 	lockPoolSeed           uint32 = 5
 	lockPoolSteps                 = 4500
-	lockPoolStrictAt4500          = "partial-v1:4627ce44dbf37671"
+	lockPoolStrictAt4500          = "partial-v1:b434fe20d2382cd6"
 	lockPoolStrictCapacity        = 300 // retail's fixed active-effect pool [03 §1]
 )
 

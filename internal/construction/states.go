@@ -563,7 +563,7 @@ func (s *Service) successEpilogueMobile(builder *units.Unit, node *orders.Node, 
 	// removal path. The slot-form heading variant is the construction-command
 	// producer, is not among the nine call sites, and writes no flag
 	// (corrected [04 §5.3]) — so it is not used here.
-	orders.EmitStartBuilding(builder, node)
+	orders.EmitStartBuilding(builder, node, product.X, product.Z)
 	if s != nil && s.OnRefresh != nil {
 		s.OnRefresh(builder)
 	}

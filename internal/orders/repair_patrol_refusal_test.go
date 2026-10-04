@@ -60,7 +60,7 @@ func repairPatrolRefusalFixture(t *testing.T, air bool) (*units.Unit, []*units.U
 			Release:      func(*Node) bool { return true },
 		},
 		World: &WorldQueryAdapter{
-			ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
+			ForEachUnitInRadius: func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
 				if visit(actor.Handle, actor) {
 					return
 				}

@@ -7631,6 +7631,17 @@ byte alone. For MOBILEBUILD and VTOL_MOBILEBUILD that byte is **0**, so a
 queued build site draws no per-order icon — the sprites a player sees strung
 between queued build sites are the `pathicon` dash chain, not order icons.
 
+**Established — target visibility and the independent cache.** The anchor
+getter tests target visibility from the order owner's player through
+[03 §3.2]; a same-owner target passes immediately. A visible target, or a
+target with no valid cached position yet, supplies its current full X/Y/Z and
+refreshes cached signed 16-bit whole X/Z coordinates. An unseen target with
+a valid cache supplies those cached horizontal coordinates promoted to 16.16
+and the target's current Y. The cache validity is independent of goal
+presence. These overlay reads and cache updates do not rewrite the order's
+stored goal triple. In particular an owned target-only assist uses the live
+product position even while the stored triple remains zero.
+
 **Established — direct order connectors.** Each dash helper saves the incoming
 anchor, resolves the current order's single anchor, and places sprites along
 that one straight three-dimensional segment. It never reads the movement

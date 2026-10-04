@@ -1151,7 +1151,7 @@ func (q *Queue) applyPrimaryResultCode(n *Node, code Code, tick uint32) bool {
 	case 2, 4:
 		// [04 §3.3] continue walking unchanged
 	case 3:
-		n.DynamicGate = 1                               // [04 §3.3] lowest gate bit
+		n.DynamicGate |= 1                              // [04 §3.3] retain gates armed by the handler
 		n.Deadline = int32(tick + 30 + q.randBelow15()) // [04 §3.3][I4] wait 30..44; the only arm drawing RNG(15)
 	case 5, 8:
 		q.unlinkPrimary(n) // [04 §3.3][05 "Queue subtraction"]
@@ -1192,7 +1192,7 @@ func (q *Queue) applyPrimaryResultCode(n *Node, code Code, tick uint32) bool {
 			// [R-P0-01][04 §3.3] last record re-arms: phase reset, wait
 			// 30..59 — the distinct RNG(30) arm, not code 3's RNG(15).
 			n.Phase = 0
-			n.DynamicGate = 1
+			n.DynamicGate |= 1
 			n.Deadline = int32(tick + 30 + q.randBelow30())
 			return true
 		}

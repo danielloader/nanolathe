@@ -51,6 +51,9 @@ func TestRepairPatrolIssuerRetainsReturnAction(t *testing.T) {
 			if assist.ID != Lookup("RepairUnit") || assist.Target != target.Handle || assist.Param3 != tc.wantLeash || assist.CreationTick != 7 {
 				t.Fatalf("repair identity/target/leash/tick differ: %+v", assist)
 			}
+			if assist.GoalSupplied || assist.GoalX != 0 || assist.GoalY != 0 || assist.GoalZ != 0 {
+				t.Fatal("automatic assistance retained a supplied position instead of only its target [04 R-STANCE-01 §4]")
+			}
 			if !tc.wantPost {
 				if hasSuccessor(actor, assist) || assist.GuardX != 0 || assist.GuardY != 0 {
 					t.Fatal("roaming assist acquired a return move or anchor")

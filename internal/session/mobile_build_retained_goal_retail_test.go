@@ -20,6 +20,9 @@ func TestMobileBuildFailurePreservesInactiveApproachRetail(t *testing.T) {
 	for _, mode := range []gameplay.Mode{gameplay.Modern, gameplay.Strict31} {
 		t.Run(string(mode), func(t *testing.T) {
 			s := aiE2ESkirmishAtMode(t, "ashap plateau", aiE2ESeed, SkirmishDefaultDifficulty, mode)
+			// The ordinary unit phase binds this lookup before any handler's
+			// synchronous goal handoff. This fixture invokes that handoff directly.
+			s.Movement.BindWorld(s.Units)
 			var commander *units.Unit
 			for _, u := range s.Units.IterSliced() {
 				if u.Def.Commander && u.Owner == uint8(s.LocalOwner) {
@@ -57,6 +60,9 @@ func TestMobileBuildFailurePreservesInactiveApproachRetail(t *testing.T) {
 			// publication preserves stale route bytes [04 §7.3] C14.
 			s.Movement.CancelPathRequest(h)
 			route := s.Movement.Routes[h]
+			if !route.Active || route.Count != 2 {
+				t.Fatal("fixture must have two active points before the failed publication")
+			}
 			route.Publish(nil)
 			points, count := route.Points, route.Count
 			node.Satisfied |= 0x40

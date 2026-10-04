@@ -142,9 +142,9 @@ route point in signed world coordinates; `Rect` is an inclusive lattice
 rectangle `[04 §7.1]`. `Status` carries the two notified codes, `0x100`
 already-satisfied and `0x200` rejected `[04 §7.2]`. `Request` names the unit,
 the player, the start cell, the goal and an activation token: a monotonically
-increasing value the movement system binds to the order node that was head when
-the request was submitted, so a late result cannot publish onto a queue head
-that has since been replaced `[04 R-PATH-01 §8]`.
+increasing value the movement system binds to the installed payload owner,
+which can differ from the queue head. A goal handoff invalidates that identity;
+a queue rotation alone does not `[04 R-PATH-01 §8]`.
 
 **Goals** (`goals.go`). `Goal` is the family interface: `Enumerate` yields the
 goal cells, `StartSatisfied` is the early-exit predicate, `H` is the pre-scale
@@ -1097,8 +1097,25 @@ rule that governs it is that this package supplies *structure* and never a
 radius. Every radius is the handler's own, computed from authored data and
 installed through the record's payload installer; the wiring below consults the
 bound payload first and only falls back to a family when a record's payload is
-not bound — one restored from a save, or one re-activated after another record
-evicted the mover's single goal slot `[04 §7.2]` `[04 §7.4]` `[04 §3.5]`.
+not bound during save reconstruction or a direct call without an installed
+object. Battle queue transitions do not reactivate a retained successor's
+object `[04 §7.2]` `[04 §7.4]` `[04 §3.5]`.
+
+Ground installers apply cancellation, route acceptance and synthetic fallback
+during each handler visit, using the queue's authoritative current tick. Several
+installs in one pump pass each see the preceding install's mutations. Ground
+service, arrival, scheduler polling and publication follow the bound object
+rather than the primary head; session reconciliation preserves that binding.
+Construction approach maintenance checks retained record ownership before any
+new installation, so it cannot revive a displaced object when its record is
+exposed again. Fresh approaches still install, and Modern site-clearance moves
+keep their existing phase-owned installs.
+A null handoff keeps the points/count but clears active/repath, applies the
+unsigned inclusive ten-tick request-age reset and marks the route dirty
+[04 R-PATH-01 §8]. `ground_handoff_parity_test.go` checks all three goal
+families, intermediate handoffs, completion-flag scope, age/wrap boundaries,
+bound-owner outcomes and stale publication. The session binding test checks a
+goal-less gated head ahead of the owner.
 
 Factory `QMove` and `QPatrol` records are rally markers with a 60-tick delayed
 rotate, not movement goals. Session activation excludes them; `GetBuilt`
@@ -3701,6 +3718,11 @@ search cost is charged with the second. The unit follows the route as far as
 its friends let it, since the commit refuses a step onto a held cell as
 always, and waits behind one that is on its own way.
 
+The failed-search wait is keyed by the installed goal's horizontal position,
+including target-only assistance whose order stores no point. Reinstalling the
+same position preserves the wait; switching to another position starts it anew.
+Strict 3.1 does not use this wait.
+
 **Measured.** After five seconds it costs a trip nothing (−85 ± 7 on the
 tuning moments against −82 ± 8 without). Searched the first time a search
 fails it costs 28 ticks a trip: friends setting off leave a unit among them
@@ -3712,4 +3734,5 @@ refuses such a unit to stand aside was measured and left out.
 
 **Verification.** `movement.TestThroughPlansThroughTheFriendsThatBoxAUnitIn`,
 `TestThroughWaitsBeforeItPlansThroughFriends`,
-`TestThroughKeepsAnotherPlayersUnits` and `TestThroughLeavesAFoundRouteAlone`.
+`TestThroughKeepsAnotherPlayersUnits`, `TestThroughLeavesAFoundRouteAlone` and
+`TestTargetOnlyGoalRestartsThroughWait`.

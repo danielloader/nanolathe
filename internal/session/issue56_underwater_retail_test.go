@@ -40,6 +40,7 @@ func TestStockConstructorsShareWaterAdmissionRetail(t *testing.T) {
 					}
 					frame := s.Units.Unit(h)
 					s.bindOrderQueue(frame)
+					s.Movement.EnsureUnit(frame)
 					top := int32(int16(frame.Y.Floor())) + int32(int16(def.ModelTopFixed>>16))
 					t.Logf("%s on Gods of War: site=(%d,%d,%d), sea=%d, model-height=%d, lifted-height=%d",
 						tc.product, x.Floor(), y.Floor(), z.Floor(), s.World.SeaLevel, def.ModelTopFixed>>16, top)

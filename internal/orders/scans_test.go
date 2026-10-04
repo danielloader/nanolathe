@@ -11,7 +11,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
-func TestPatrolScansKeepSlotOrderAndDrawOnlyAfterGates(t *testing.T) {
+func TestPatrolScansKeepSuppliedOrderAndDrawOnlyAfterGates(t *testing.T) {
 	def := &content.UnitDef{UnitDefID: 9, MaxDamage: 100, SightDistance: 300}
 	actor := &units.Unit{Handle: 1, Owner: 0, Def: def, Alive: true, X: numeric.Fixed(0), Z: numeric.Fixed(0)}
 	friendly := &units.Unit{Handle: 2, Owner: 0, Def: def, Alive: true, X: numeric.Fixed(20 << 16), Z: numeric.Fixed(0), Health: 50}
@@ -55,6 +55,9 @@ func TestPatrolScansKeepSlotOrderAndDrawOnlyAfterGates(t *testing.T) {
 		}},
 	}}
 	BindQueue(actor, q)
+	q.binding.World.ForEachUnitInRadius = func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
+		q.binding.World.ForEachUnit(visit)
+	}
 
 	if got := scanAttackUType(actor, def.UnitDefID); got != hostile {
 		t.Fatalf("typed attack winner = %v, want hostile candidate", got)
@@ -147,7 +150,7 @@ func simPtr(s *rng.Simulation) *rng.Simulation { return s }
 // off the enumerator — its candidates are the target registry's third list, not
 // a live-unit walk [04 R-AIR-01 §11] — so the repair-candidate scan, which
 // still walks every slot, stands in its place.
-func TestLiveUnitEnumeratorAnswersTheStopQuestion(t *testing.T) {
+func TestRepairRadiusEnumeratorAnswersTheStopQuestion(t *testing.T) {
 	plain := &content.UnitDef{MaxDamage: 100}
 	actor := &units.Unit{Handle: 1, Owner: 0, Def: plain, Alive: true}
 	first := &units.Unit{Handle: 2, Owner: 0, Def: plain, Alive: true, X: numeric.Fixed(10 << 16), Health: 50}
@@ -163,7 +166,7 @@ func TestLiveUnitEnumeratorAnswersTheStopQuestion(t *testing.T) {
 	q := &Queue{binding: &QueueBinding{
 		SimRNG:    &sim,
 		Hostility: func(_, _ *units.Unit) bool { return false },
-		World: &WorldQueryAdapter{ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
+		World: &WorldQueryAdapter{ForEachUnitInRadius: func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
 			stopped := false
 			for _, candidate := range pool4 {
 				if stopped {

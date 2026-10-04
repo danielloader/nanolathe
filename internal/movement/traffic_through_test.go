@@ -210,3 +210,55 @@ func TestThroughWaitsBeforeItPlansThroughFriends(t *testing.T) {
 func plannedThrough(s *System, h pool.Handle) bool {
 	return handleRow(s.traffic, h).through != 0
 }
+
+// The Modern no-route wait follows installed work positions, including target-only
+// orders. Reinstalling the same position preserves it; a different position
+// restarts it (DESIGN_MOVEMENT_PATH, Modern routes through friends).
+func TestTargetOnlyGoalRestartsThroughWait(t *testing.T) {
+	sys, w, a, _ := throughFixture(t, Traffic{Through: 2, ThroughAfter: 90}, false, 0)
+	u := w.Unit(a)
+	q := orders.QueueOfUnit(u)
+	request := path.Request{}
+	install := func(tick uint32, n *orders.Node, x, z int32) {
+		sys.BeginTick(tick)
+		if !sys.InstallAnnulusGoal(orders.AnnulusGoalRequest{Owner: a, Node: n, X: world.CellToWorld(x) + 8<<16, Z: world.CellToWorld(z) + 8<<16, InnerRadius: 16, OuterRadius: 32}) {
+			t.Fatal("install")
+		}
+		if !sys.ActivateMove(u, n) {
+			t.Fatal("activation")
+		}
+		sys.CancelPathRequest(a)
+		g := handleRow(sys.moveGoals, a)
+		request = path.Request{Unit: a, Player: 0, Start: path.Cell{X: 5, Z: 10}, Goal: g.goal, Activation: handleRow(sys.activeOrders, a).token}
+	}
+	search := func(tick uint32) bool {
+		sys.BeginTick(tick)
+		for range 64 {
+			if res := sys.searchFunc(request, 0x18000, 1000); res.Done {
+				return len(res.Points) != 0
+			}
+		}
+		t.Fatal("search did not finish")
+		return false
+	}
+	n1 := q.PushHead(orders.Lookup("HelpBuild"), orders.Node{Owner: a, Target: 10})
+	install(100, n1, 12, 10)
+	if search(100) || search(189) || !search(190) {
+		t.Fatal("first target wait boundary")
+	}
+	install(195, n1, 12, 10)
+	if !search(195) {
+		t.Fatal("identical installed goal reset its wait")
+	}
+	n2 := q.PushHead(orders.Lookup("HelpBuild"), orders.Node{Owner: a, Target: 11})
+	install(200, n2, 15, 12)
+	if n1.GoalX != 0 || n1.GoalZ != 0 || n2.GoalX != 0 || n2.GoalZ != 0 {
+		t.Fatal("fixture is not target-only")
+	}
+	if search(200) {
+		t.Fatal("different installed target inherited old no-route wait")
+	}
+	if search(289) || !search(290) {
+		t.Fatal("new target wait boundary")
+	}
+}

@@ -184,7 +184,8 @@ func communityPatrolFixture(t *testing.T, air bool, option PatrolWorkOption) (*u
 		return ResourceView{Stock: [2]float32{0, 50}, Capacity: [2]float32{100, 100}}, true
 	}
 	b.World = &WorldQueryAdapter{
-		ForEachUnit: func(func(pool.Handle, *units.Unit) bool) { unitScans++ },
+		ForEachUnit:         func(func(pool.Handle, *units.Unit) bool) { unitScans++ },
+		ForEachUnitInRadius: func(_, _, _ numeric.Fixed, _ func(pool.Handle, *units.Unit) bool) { unitScans++ },
 		LookupFeature: func(int32, int32) (FeatureView, bool) {
 			featureScans++
 			return FeatureView{ID: 7, Energy: 10, Reclaimable: true, Autoreclaimable: true}, true

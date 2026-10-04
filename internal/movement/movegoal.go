@@ -101,6 +101,27 @@ func (s *System) HasGroundGoal(h pool.Handle, head *orders.Node) bool {
 	return g != nil && g.order == head
 }
 
+// HasBoundGroundGoal asks whether this follower holds an object, independently
+// of the queue head [04 R-ORD-01 §9]. Queue transitions do not rebind objects.
+func (s *System) HasBoundGroundGoal(h pool.Handle) bool {
+	return s != nil && handleRow(s.moveGoals, h) != nil
+}
+
+// HasOwnedGroundGoal includes displaced objects that the record retains.
+// Maintenance may activate an installed object, but cannot rebind a retained
+// one merely because its record is exposed again [04 R-ORD-01 §9].
+func (s *System) HasOwnedGroundGoal(h pool.Handle, n *orders.Node) bool {
+	if s == nil || n == nil {
+		return false
+	}
+	for _, owned := range handleRow(s.recordGoals, h) {
+		if owned.node == n && owned.ground != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *System) moveGoalPayload(h pool.Handle, head *orders.Node) path.Goal {
 	if s == nil || s.moveGoals == nil || head == nil {
 		return nil
@@ -148,12 +169,15 @@ func (s *System) moveGoalFor(h pool.Handle, head *orders.Node) (x, z numeric.Fix
 	return 0, 0, false
 }
 
-// moveGoalForUnit resolves the steering target from a unit's primary head.
+// moveGoalForUnit resolves the controller's goal before consulting the queue.
 // It is the single accessor the mover's steering, threshold and arrival paths
 // share, so those three can never disagree about where the unit is going.
 func (s *System) moveGoalForUnit(u *units.Unit) (x, z numeric.Fixed, ok bool) {
 	if u == nil {
 		return 0, 0, false
+	}
+	if g := handleRow(s.moveGoals, u.Handle); g != nil {
+		return g.x, g.z, true
 	}
 	q := orders.QueueForUnit(u)
 	if q == nil {

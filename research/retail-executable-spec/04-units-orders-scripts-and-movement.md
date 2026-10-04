@@ -782,7 +782,7 @@ The handler's return code drives the queue [P0-07][P0-08]:
 | 0 | reset the phase to zero and continue walking |
 | 1 | advance the phase by one and continue walking |
 | 2, 4 | continue walking unchanged |
-| 3 | set the lowest gate bit, set the deadline to the current tick plus 30 plus a random value below 15, and continue — range 30 to 44 [P0-08] |
+| 3 | OR the lowest gate bit into the existing gate, set the deadline to the current tick plus 30 plus a random value below 15, and continue — range 30 to 44 [P0-08] |
 | 5, 8 | unlink, free, and continue |
 | 6 | move the record to the tail of its segment and continue (primary); in the secondary pump remove the single record and return without tail yield |
 | 7 | free every record on both segments and return — this is cancel-all (primary); in the secondary pump remove the single record and return without cancel-all |
@@ -792,7 +792,8 @@ The handler's return code drives the queue [P0-07][P0-08]:
 **The two deadline draws [R-P0-01] (Established).** The primary pump's switch
 loads the bound 15 in the code-3 arm and the bound 30 in the code-9
 last-record arm into the same shared draw epilogue (`gate |= 1`,
-`deadline = tick + draw + 30`), so code 3 waits 30 to 44 ticks and code 9's
+`deadline = tick + draw + 30`), preserving any gate bits the handler already
+armed, so code 3 waits 30 to 44 ticks and code 9's
 last-record wait 30 to 59 (section 8.3). The code-9 non-last arm unlinks and
 frees. The secondary pump draws only for its code-3 arm; its code-9 arm is a
 plain remove, and the above-9 delegate never draws.
@@ -2052,6 +2053,12 @@ issuer's:
 | 1 maneuver | assist, then a move back to the unit's own position; anchor written | definition `maneuverleashlength`, unsigned 16-bit |
 | 2 roam | assist only | 0 (unlimited) |
 | 3 | nothing is queued; the issuer refuses | — |
+
+**Established — assistance carries only the target reference.** The issuer
+creates the assist or repair record without a supplied position; its initial
+coordinates are zero. The work handler later derives its own movement goal
+from the live target. The saved return move instead carries the scanning unit's
+exact position at issue time, including its fractional coordinates.
 
 A non-zero `force` argument makes this issuer refuse in every arm. Note that,
 unlike the attack issuer, **hold position does not refuse here**: a
@@ -3835,11 +3842,50 @@ grounded mover mode, damaged-or-unfinished state, and the last-damage reclaim
 exclusion. Ground repair repeats that same diplomacy check after the pick;
 when it remains nonhostile, resolve command code 8 (assist or repair) against
 the target. Only a **resolved** command that the issue helper then **refuses**
-returns *wait*; acceptance returns *rotate*. An **unresolvable** code 8 does
-not wait — it falls straight through to the storage gates and the feature
-pairing below **in the same visit**, exactly as a hostile post-pick verdict or
-an empty gather does, and therefore still spends that visit's feature
-tournament draws. (An implementation that merges the unresolvable and refused
+returns *wait*; acceptance returns *rotate*.
+
+**Established — accepted repair retains the patrol gate.** Acceptance does
+not clear the dynamic gate or release the patrol payload: the deadline and
+movement gate armed earlier in this visit remain in place when the record
+rotates. A spawned work record can displace that payload, leaving a release
+notification for the patrol to consume when it next reaches the head
+[R-ORD-01 §9]. This differs from the
+reclaim spawn below, which explicitly clears the gate before returning
+*wait*.
+
+**Established — failed assistance resumes the ordinary queue.** A failed
+`HelpBuild` approach reports `I can't get there` and abandons its record
+[R-ORD-01 §5]. That failure path does not mark its target ineligible, reset
+the patrol chain, or arm a patrol retry delay. Hold-position and maneuver
+issuers have placed a return move underneath the assistance; roam has not
+[R-STANCE-01 §4]. The return move's ordinary arrival raises status kind 6
+(`Arrived`) and completes, including for an automatic return with successors.
+Display and voice admission remain subject to the ordinary unit-chat settings
+[07 R-CAM-01 §7]: the shipped Medium text level hides the priority-3 arrival
+caption while admitting the priority-8 failure caption [03 §8.3]. Absence of
+displayed arrival text therefore does not establish absence of an arrival
+transition. The primary pump then reloads the next head [R-ORD-01 §10]. A
+repair-patrol record awakened by arrival, no-route or payload release rotates
+before installing another goal; an ungated visit or a deadline-only wake
+installs its waypoint and scans in the same visit. The row does not require
+displacement or completion of another patrol leg before its next candidate
+pick. The candidate visitor and issuer contain no failed-target exclusion
+or retry cooldown [R-ORD-02 §4] [R-STANCE-01 §4].
+
+**Established — retained routes can affect resumption.** An empty route
+publication leaves stored points and count intact while clearing active and
+repath. A later goal installation can reactivate three or more stored points
+through the terminal-cell or strict half-distance acceptance test
+[R-PATH-01 §7] [R-PATH-01 §8]. The saved return move subjects those points to
+its own tests and replaces a rejected route with two synthetic points. With
+no displacement out of its starting cell, that move can arrive before
+steering. These mechanics provide no guaranteed interval of patrol travel:
+after a queue cascade, steering uses whichever goal remains bound.
+
+An **unresolvable** code 8 does not wait — it falls straight through to the
+storage gates and the feature pairing below **in the same visit**, exactly as
+a hostile post-pick verdict or an empty gather does, and therefore still
+spends that visit's feature tournament draws. (An implementation that merges the unresolvable and refused
 cases into one *wait* consumes the wrong number of simulation draws on the
 unresolvable path and desynchronises every later draw in the session.) Then
 when both energy and metal are at least 20 % of their storages → hold.
@@ -4333,7 +4379,9 @@ position; the patrol-chain setup of [R-ORD-01 §4]; preamble with
    pick.** Apply the repair admission below to the selected unit before either
    branch. A rejected unit falls through to feature pairing; there is no second
    unit pick. An admitted complete `u` reaches the issue helper for command
-   code 8: acceptance → *rotate*, refusal → *wait*. An admitted unfinished
+   code 8: acceptance → *rotate*, refusal → *wait*. Both preserve the patrol
+   payload, armed gate and 45-tick deadline from step 2; acceptance does not
+   clear that gate. An admitted unfinished
    `u` releases the payload, explicitly spawns `VTOL_HelpBuild` on `u` at the
    head, gate = 0, and returns *wait*. The explicit spawn bypasses the command
    issuer's stance and return-move additions, but does not bypass admission.
@@ -5450,6 +5498,24 @@ phase: cancel-all.
   The visitor has **no static call site**: the handler plants a pointer to it
   in the gather descriptor it builds on its own frame, through a one-entry
   function-pointer table, so a call census cannot see it.
+  **Established — both patrols share the surrounding full-radius gather.**
+  Ground and VTOL repair patrol sign-extend the authored 16-bit sight distance
+  and convert it to 16.16 without halving it. The collector visits the
+  intersecting ordinary 128-world-unit spatial sectors in ascending Z, then
+  ascending X; each of the four bounding-sector endpoints is independently
+  clamped into the valid sector range. Within each sector it walks
+  the existing unit list from head to tail. This order determines the gathered
+  list and hence the meaning of the bounded random index. Units outside those
+  ordinary sectors, including carried units in the off-map sector, are absent.
+  Its circular test subtracts full 16.16 X and Z positions with signed 32-bit
+  wrap, squares each delta separately in signed 64 bits, shifts each square
+  right by 32 and keeps its low 32 bits. It adds those results with 32-bit
+  wrap and compares inclusively with the similarly reduced squared radius
+  using a signed 32-bit comparison. Subtracting already-truncated world
+  positions is different at the boundary. The gather adds no height, footprint,
+  line-of-sight, radar or visibility test. The visitor adds no alive or
+  death-pending exclusion; the ordinary spatial lists define its population,
+  and final destruction removes the unit from those lists.
 * **The guard-candidate visitor** (`VTOL_SeekGuard` phase 1) admits `u`
   when `u`'s owner's diplomacy byte toward my side is nonzero, `u` is not
   `canfly`, and `u` is not the seeker. The list is in enumeration order; the
@@ -8313,7 +8379,9 @@ for one thing only: setting the StopBuilding-pending flag on it.
 
 All nine handler call sites compute that heading the same way, from a shared
 two-argument bearing helper: given two world positions it forms
-`dx = selfX − targetX` and `dz = selfZ − targetZ`, computes `atan2(dx, dz)` on
+`dx = selfX − targetX` and `dz = selfZ − targetZ` as signed 32-bit raw 16.16
+subtractions, with wrap before widening. It preserves fractional positions;
+it does not truncate either position to whole world units. It computes `atan2(dx, dz)` on
 the x87 stack, multiplies by the compiled-in constant `65536 / 2π`
 (`10430.37835047`, an f64 in the read-only data), and stores the result with
 an x87 integer store — so the conversion **rounds to nearest even**, it does
@@ -8322,6 +8390,19 @@ pass the low 16 bits, giving a heading relative to the unit's facing; the
 ninth (an aircraft assist path) passes the absolute bearing with no
 subtraction. One site inlines the `atan2` helper on raw axis deltas instead of
 going through the two-position wrapper; the arithmetic is identical.
+
+**Established — each caller supplies its resolved work point at emission.**
+Ground `HelpBuild`, `RepairUnit`, `Capture` and `ReclaimUnit` use the live
+target's current X and Z; `MobileBuild` and `VTOL_MobileBuild` use the newly
+created product's current position. Feature `Reclaim` and `Resurrect` use the
+resolved feature anchor and footprint: per axis, the centre is
+`(2·anchorCell + footprintCells)·2^19`, formed at signed 32-bit width. A click
+on a feature's fringe resolves to its anchor before this calculation. The
+feature handlers retain their preceding height draw even though bearing uses
+no Y component. `VTOL_HelpBuild` uses its current live target and passes the
+absolute bearing; the other eight subtract the actor's current heading.
+Neither ground approach installation nor the emission writes the order's
+stored goal triple. The emitter uses the record only for the pending flag.
 
 So the contract is: **cell 0 of the record-form `StartBuilding` is the bearing
 from the builder to its work target, in the 65536-per-circle domain, relative
@@ -10228,11 +10309,12 @@ class's query. The other two:
 
 * **Annulus.** The centre cell is converted to world exactly as for the point
   class (`(FootPrint + 2·cell) · 2^19` per axis, footprint from the owning
-  order's unit); then `b = bearing(unitPos, centre)` (the section-10 helper,
-  argument order self-then-other) and `r = ((inner + outer) / 2) << 16`, the
-  divide a signed integer division; the query returns `centre + polar(b, r)`
-  on X and Z, with Y untouched. `inner` and `outer` are the octile radii the
-  installer supplied.
+  order's unit); then `b = atan2(unitX − centreX, unitZ − centreZ)` through
+  the section-10 bearing helper and `r = ((inner + outer) / 2) << 16`, the
+  divide a signed integer division. The query returns `centre + polar(b, r)`
+  on X and Z, with Y untouched. A positive midpoint radius places the point
+  on the unit-facing side of the centre. `inner` and `outer` are the octile
+  radii the installer supplied.
 * **Rectangle.** `X = (FootPrintX + 2·((x1 + x2) / 2)) · 2^19` (signed
   integer division) and `Z = (FootPrintZ + 2·z2) · 2^19` — the middle column
   and the **far** Z edge, not the centre.
@@ -10762,6 +10844,18 @@ publication contract lists — clamp the count to 20, store the count, copy the
 points, set has-waypoint and dirty, clear wants-repath — with no point-count
 test, no goal-point query, no terminal-cell test, no half-distance test and no
 synthetic rewrite. A published route is adopted verbatim.
+
+**Established — every handoff takes effect during the handler visit.** The
+installer completes cancellation, payload replacement, route acceptance and
+synthetic fallback synchronously before returning to its caller. If one queue
+pass installs several goals, each handoff observes the route state left by the
+preceding handoff. Deferring these operations until only the final queue head
+is known loses intermediate route mutations. Per-tick follower service asks
+the currently bound payload, independently of the queue head; the scheduler's
+repath poll and the search publisher use that same bound identity. Rotation
+and removal do not implicitly rebind a successor's retained payload. Retained
+payload rebinding is present in save reconstruction after the queues are
+rebuilt, not in the inspected battle queue-transition paths.
 
 Applying the gates to publications is a liveness defect, not a nuance:
 collinear removal collapses a straight or diagonal A\* run to exactly **two**
@@ -15042,6 +15136,24 @@ and the decider that would close it.
   · doc 08 · static trace.
 
 ### Orders and queues
+
+- **Unknown:** the cause of the patrol movement discrepancy in
+  [issue 83](https://github.com/nanolathe-gg/nanolathe/issues/83), reported for
+  both construction vehicles and stock construction KBots. The exact compared
+  executable within retail 3.1 or community 3.9.x is unconfirmed. The retail
+  3.1 failure and queue resumption are established [R-ORD-01 §4]; the traced
+  path enforces no travel interval or failed-target exclusion. Arrival caption
+  filtering explains a possible notification difference, not the reported
+  movement difference. Nanolathe diagnostics reproduce the retry loop with
+  stock KBots and vary target creation during an existing patrol; they have
+  not matched the reported two arrival captions per failure for one actor.
+  Decider: a matched manual retail scene establishing the actor identities,
+  geometry, ongoing construction, stance, and queue/route state at the first
+  failure. The synchronous handoff and bound-object service corrections
+  [R-PATH-01 §8] improve some Nanolathe patrol histories but do not eliminate
+  its authored retry loop, including with an active inner builder. Do not infer
+  a cooldown, blacklist or an additional recovery transition from the
+  observation.
 
 - **Unknown:** run-specific uninitialized coordinate values consumed after
   failed InitialMission scans, and consequences of token-buffer overflow

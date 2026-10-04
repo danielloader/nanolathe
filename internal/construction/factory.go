@@ -233,8 +233,8 @@ type Service struct {
 	// in stable slots (steps 7–9) [08 "Load process"]. A placement record is
 	// exactly derived occupancy — the footprint rectangle a live unit's
 	// position and definition already determine — so a restore rebuilds this
-	// map by re-registering each live building, the same way a goal payload is
-	// re-installed rather than saved (Service.installApproachGoal). What a save
+	// map by re-registering each live building. Saved order goal objects are
+	// reconstructed separately [08 R-SAVE-02 §11]. What a save
 	// does carry for this service is the order record itself (phase, count,
 	// target), which internal/orders owns. There is no alternate Nanolathe save
 	// codec [I13]; do not invent a factory-only format.
@@ -614,10 +614,10 @@ func (s *Service) isWithinNanoRange(builder *units.Unit, siteX, siteZ numeric.Fi
 	return distWorld-builderPad-targetPad <= int32(uint16(builder.Def.BuildDistance))
 }
 
-// ensureWalk activates a walk toward the site through movement's current-head
-// boundary [04 R-MOV-01 §3][04 R-PATH-01 §8]. ActivateMove owns exactly-once
-// submission and restored-route adoption; repeated visits for the same node do
-// not resubmit, preserving determinism I1 and RNG call order I4.
+// ensureWalk stages a fresh or currently bound approach through movement's
+// request boundary. The goal installer owns route acceptance, and activation
+// cannot revive a retained displaced object [04 R-PATH-01 §8]. Repeated visits
+// for the same bound node do not resubmit, preserving I1 and RNG call order I4.
 //
 // The goal handed to path search is the RECTANGLE goal on the product
 // footprint, never the footprint centre and never a hand-picked perimeter
@@ -630,12 +630,13 @@ func (s *Service) ensureWalk(builder *units.Unit, node *orders.Node) {
 	if s == nil || s.Movement == nil || s.Movement.Scheduler == nil || builder == nil || node == nil {
 		return
 	}
-	// Install the goal BEFORE the idempotency guards below. The payload is
-	// derived state that no save box carries, so the first tick after a restore
-	// must re-establish it even when the restored route is still active —
-	// otherwise the mover would spend that route steering at the order's stored
-	// position and walk into the site [04 §8.3][04 R-PATH-01 §13].
-	s.installApproachGoal(builder, node)
+	// A fresh approach can supply its goal here, but maintenance cannot rebind
+	// an object another record displaced. The saved-object reconstruction and
+	// explicit phase installs own those transitions [04 R-ORD-01 §9]
+	// [04 R-PATH-01 §8][08 R-SAVE-02 §11].
+	if !s.Movement.HasOwnedGroundGoal(builder.Handle, node) {
+		s.installApproachGoal(builder, node)
+	}
 	s.Movement.EnsureUnit(builder)
 	s.Movement.ActivateMove(builder, node)
 }

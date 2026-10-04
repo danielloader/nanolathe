@@ -285,7 +285,8 @@ func repairPatrolHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) 
 					resolved, accepted := issuePatrolRepair(u, target, tick)
 					switch {
 					case accepted:
-						n.DynamicGate = 0
+						// The armed deadline and movement gate survive rotation;
+						// the assist may displace this payload [04 R-ORD-01 §4].
 						return 6 // rotate after the accepted repair issue
 					case resolved:
 						return 3 // *wait*: the issue helper refused

@@ -101,6 +101,44 @@ func TestMinZoomShowsTheFullMapAndCentresTheSpareAxis(t *testing.T) {
 	}
 }
 
+func TestFullMapZoomBoundsRetainOnlyTheOverviewMargin(t *testing.T) {
+	c := &Camera{ViewW: 1024, ViewH: 768, MapW: 4096, MapH: 2048}
+	c.SetZoomAbout(OriginX, OriginY, c.MinZoom())
+	x, z := c.X, c.Z
+	c.Pan(10000, -10000)
+	if c.X != x || c.Z != z {
+		t.Fatal("panning moved the centred full-map view")
+	}
+	c.SetZoomAbout(OriginX, OriginY, ZoomUnit)
+	// The 896x704 viewport fits this map at 0.21875x. Its spare
+	// vertical margin is (704 - 2048*0.21875)/2 = 128 screen pixels.
+	for _, direction := range []int32{-1, 1} {
+		c.JumpTo(direction*10000, direction*10000)
+		wantX, wantZ := int32(-OriginX), int32(-OriginY-128)
+		if direction > 0 {
+			wantX, wantZ = c.MapW-c.ViewW, c.MapH-c.ViewH+OriginY+128
+		}
+		if c.X != wantX || c.Z != wantZ {
+			t.Fatalf("direction %d: bounds (%d,%d), want (%d,%d)", direction, c.X, c.Z, wantX, wantZ)
+		}
+	}
+	// Unzoomed and legacy cameras keep their existing retail clamp.
+	for _, legacy := range []bool{false, true} {
+		c := &Camera{ViewW: 1024, ViewH: 768, MapW: 4096, MapH: 2048, ViewportZoomFloor: legacy}
+		if legacy {
+			c.Zoom = ZoomUnit
+		}
+		c.JumpTo(-10000, -10000)
+		if c.X != -OriginX || c.Z != -OriginY {
+			t.Fatalf("legacy=%t: minimum (%d,%d) changed", legacy, c.X, c.Z)
+		}
+		c.JumpTo(10000, 10000)
+		if c.X != c.MapW-c.ViewW || c.Z != c.MapH-c.ViewH+OriginY {
+			t.Fatalf("legacy=%t: maximum (%d,%d) changed", legacy, c.X, c.Z)
+		}
+	}
+}
+
 func TestFullMapFloorRoundsDownAndKeepsNativeReachable(t *testing.T) {
 	for _, tc := range []struct {
 		viewW, viewH, mapW, mapH int32

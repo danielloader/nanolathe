@@ -2635,7 +2635,10 @@ by a simulation phase, and is not saved [I6].
   The choice is Modern host policy and is ignored by Strict and
   Community controls. Wheel input then needs 180 host milliseconds of quiet
   before a new burst can leave the stop; pinch needs a fresh gesture.
-  The world point under the pointer stays put; fractional wheel travel banks
+  The world point under the pointer stays put within the camera bounds. Modern
+  retains the centred overview's spare border in screen pixels at higher zoom
+  factors, so rectangular maps do not re-centre their shorter axis during
+  zooming in (DESIGN_GPU_RENDERER §16.7). Fractional wheel travel banks
   until it is worth a notch. The live wheel factor eases toward its target
   on the host Update grid; pinch follows the fingers directly. The
   classic executor takes no wheel zoom at all.

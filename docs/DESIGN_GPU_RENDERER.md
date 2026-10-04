@@ -3398,8 +3398,9 @@ factor.
 `Camera.SetZoomAbout(mx, my, f)` is `SetScaleAbout` generalized: the world point
 under (mx, my) is computed through the old factor, the new origin is that point
 less the same quantity at the new factor, the record step is re-derived, and the
-camera is clamped. The world point under the anchor does not move. The anchor is
-in **beam pixels** — the framebuffer point plus the viewport offset (128, 32) —
+camera is clamped. The world point under the anchor does not move within the
+camera bounds. The anchor is in **beam pixels** — the framebuffer point plus
+the viewport offset (128, 32) —
 which is the space `ScreenToWorld` takes, because the recorder stores a world
 point at its beam position less that offset [03 §2.5]. The battle's zoom writers
 convert the pointer, the viewport centre and `--shot-focus` from framebuffer
@@ -3557,8 +3558,20 @@ its exact native/detail scale cycle instead of adopting fractional stops.
 `min(viewW/mapW, viewH/mapH)` over the battle viewport and the playable map,
 rounded down and bounded to 1/1024..1×, so native remains reachable even when
 the map already fits at 1×. Both playable axes fit at the floor.
-For a camera with an explicit zoom, an axis smaller than the visible span is
-centred, leaving space around the map. Targets below it are clamped at the controller and
+For a camera with an explicit zoom, the floor centres both axes, leaving space
+around the map. Above the floor, the clamp retains each axis's overview margin
+in screen pixels instead of re-centring its shorter axis at every factor.
+For an axis with native viewport span `V`, playable map size `M`, floor `f`
+and live factor `z`, the allowed padding in world pixels is
+`floor(max(V - M*f, 0) / (2*z))`. It extends both ordinary map-edge bounds;
+when integer rounding inverts them, that axis remains centred. This bounded
+border space also applies to panning after an explicit zoom, including at
+native and detail factors. It lets a point anywhere within the centred overview
+stay under the pointer throughout zooming in, even while the shorter axis fits
+entirely on screen. A pointer in the border space can still reach a clamp.
+Unzoomed cameras and legacy controls retain their existing bounds.
+This is Nanolathe presentation policy (user-authorized 2026-10-04), with no
+authoritative effects. Targets below the floor are clamped at the controller and
 camera. The viewport span is taken in framebuffer pixels, because the chrome
 does not move with the zoom. The host sets `Camera.ViewportZoomFloor` for legacy
 and Community controls: the greater axis ratio rounded upward, bounded to
@@ -3580,9 +3593,11 @@ exception immediately. The paused world cache includes this gate; resolution
 changes refit the retained tactical request to the new floor.
 
 The step writer deliberately does **not** apply this floor: a step is always at
-least 1×. Modern centring is applied around `clampAxis`, leaving the retail
-primitive intact. Camera tests cover full-map fit, collapsed stops, preferred-lock
-barriers, reversal, fractional wheel travel and wrapping host milliseconds.
+least 1×. Modern border bounds are applied alongside `clampAxis`, leaving the
+retail primitive intact. Camera tests cover direct and eased pointer anchoring on wide,
+tall and square maps, bounded border panning and the legacy bypass, alongside
+full-map fit, collapsed stops, preferred-lock barriers, reversal, fractional
+wheel travel and wrapping host milliseconds.
 Host tests cover the three mode boundaries, both pinch styles, input ownership,
 overview return and the retained legacy controls. `TestPreferredZoomLockBandAndCrossings`,
 `TestPreferredZoomLockWheelHoldAndReset`, `TestCustomZoomLockDoesNotCatchNative`

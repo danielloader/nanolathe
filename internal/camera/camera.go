@@ -339,16 +339,29 @@ func (c *Camera) Clamp() {
 	}
 	spanW, spanH := c.BattleView()
 	leadX, _, leadZ, _ := c.clampInsets()
+	if !c.ViewportZoomFloor && c.Zoom > 0 {
+		floor, live := c.MinZoom(), c.zoom()
+		c.X = clampZoomAxis(c.X, c.MapW, spanW, leadX, c.ViewW-OriginX, floor, live)
+		c.Z = clampZoomAxis(c.Z, c.MapH, spanH, leadZ, c.ViewH-2*OriginY, floor, live)
+		return
+	}
 	c.X = clampAxis(c.X, c.MapW, spanW, leadX)
 	c.Z = clampAxis(c.Z, c.MapH, spanH, leadZ)
-	// Full-map zoom: centre an axis the view has outgrown instead
-	// of applying the retail clamp to its inverted bounds (DESIGN_GPU_RENDERER §16.7).
-	if !c.ViewportZoomFloor && c.Zoom > 0 && spanW > c.MapW {
-		c.X = (c.MapW-spanW)/2 - leadX
+}
+
+// clampZoomAxis retains the full-map view's spare margin in screen pixels.
+// Re-centring a shorter axis at every factor would move the point under the
+// pointer; this bounded space lets zoom keep its anchor (DESIGN_GPU_RENDERER
+// §16.5, §16.7). At the floor the bounds meet at the centred overview.
+func clampZoomAxis(origin, mapSize, span, leading, screenSpan int32, floor, live Zoom) int32 {
+	spare := max(int64(screenSpan)*int64(ZoomUnit)-int64(mapSize)*int64(floor), 0)
+	padding := int32(spare / (2 * int64(live)))
+	minimum := -leading - padding
+	maximum := mapSize - span - leading + padding
+	if live <= floor || minimum > maximum {
+		return (mapSize-span)/2 - leading
 	}
-	if !c.ViewportZoomFloor && c.Zoom > 0 && spanH > c.MapH {
-		c.Z = (c.MapH-spanH)/2 - leadZ
-	}
+	return max(minimum, min(maximum, origin))
 }
 
 // Drag pans by a screen-pixel delta via middle-drag, converted to world pixels
@@ -385,8 +398,8 @@ func (c *Camera) SetScaleAbout(mx, my int32, newS ViewScale) {
 	// A step change is a zoom to that step's own factor: it sets the record step
 	// and the live factor together, which is the classic executor's only mode
 	// and F9's classic cycle (§16.8). The map-derived floor of MinZoom is NOT
-	// applied here — a step is always at least 1x, and the view-larger-than-map
-	// domain of clampAxis stays exactly where [07 §10] left it.
+	// applied here — a step is always at least 1x. Legacy controls keep the
+	// retail clamp domain; Modern uses its bounded overview margin (§16.7).
 	c.requestedZoom = ZoomOf(newS)
 	c.setZoomAboutRaw(mx, my, ZoomOf(newS))
 	c.Scale = newS.Norm()
@@ -436,8 +449,8 @@ func (c *Camera) TacticalAtFloor() bool {
 		c.requestedZoom <= c.MinZoom() && c.EffectiveZoom() <= c.MinZoom()
 }
 
-// setZoomAboutRaw is SetZoomAbout without the map-derived floor, so the step
-// path can keep clampAxis's view-larger-than-map domain untouched.
+// setZoomAboutRaw is SetZoomAbout without the map-derived floor, so explicit
+// steps remain reachable even under the legacy viewport-filling floor.
 func (c *Camera) setZoomAboutRaw(mx, my int32, newZ Zoom) {
 	oldZ := c.zoom()
 	view := c.PresentationView()

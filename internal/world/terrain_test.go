@@ -449,7 +449,7 @@ func TestLegacyTerrainLoads(t *testing.T) {
 // alike, and the absent case must agree with an explicit authored zero.
 func TestCanonicalGlobalsTreatOmissionAsTheParserDefault(t *testing.T) {
 	parsed := func(mutate func(*content.MapHeader)) *content.MapHeader {
-		mh := &content.MapHeader{RawOTA: &formats.OTA{Global: &formats.Section{}}}
+		mh := &content.MapHeader{GlobalHeader: true}
 		if mutate != nil {
 			mutate(mh)
 		}
@@ -513,7 +513,7 @@ func TestTidalScalarPreservesFractionAndFloatStore(t *testing.T) {
 		{-1e-50, 0x80000000}, // source rounds to negative zero before the strict test
 		{-1, 0x3f000000},
 	} {
-		h := &content.MapHeader{RawOTA: &formats.OTA{Global: &formats.Section{}}, TidalStrength: tt.source}
+		h := &content.MapHeader{GlobalHeader: true, TidalStrength: tt.source}
 		if got := math.Float32bits(canonicalTidal(h)); got != tt.bits {
 			t.Fatalf("tidal %g=%08x, want %08x", tt.source, got, tt.bits)
 		}

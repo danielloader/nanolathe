@@ -235,6 +235,53 @@ remain follow-up work. These measurements do not establish a mobile memory
 budget or total browser-process memory use. Profiles, JSON and captures remain
 outside the repository.
 
+## Frame-rate pass — 2026-10-04
+
+Chrome 154 on the M3 Pro (120 Hz display, ANGLE Metal), visible and focused,
+Town & Country stress fixture, seed 7, lower memory, 800×600 logical surface,
+1400×727 game view. Each row is a 20-second window from tick ~830 with 757
+units, captured through the launcher's own samples plus a rAF-interval
+recorder in the game frame. Runs alternated between builds; rows of one
+build agree within about 1.5 frames per second. "Before" Modern rows include the
+candidate build with its pre-record switched back on.
+
+| Build | Renderer | Mean FPS | Median frame | p90 frame | Allocation | GCs / 20 s |
+|---|---|---:|---:|---:|---:|---:|
+| Before | Modern | 46.5–47.1 | 24.8–24.9 ms | 32.1–33.3 ms | 7.6–7.8 MiB/s | 1 |
+| Frame recorded in its own Draw | Modern | 51.8–53.3 | 16.7 ms | 25.1 ms | 7.6–8.1 MiB/s | 1 |
+| + audio frames, Classic body planes | Modern | 54.4 | 16.7 ms | 25.0–25.1 ms | 8.0–8.3 MiB/s | 0–1 |
+| Before | Classic | 28.9–29.2 | 16.4–16.6 ms | 32.8–33.3 ms | 45.5–46.0 MiB/s | 3 |
+| + audio frames, Classic body planes | Classic | 29.7 | 16.3–16.4 ms | 26.9 ms | 14.2–14.3 MiB/s | 1 |
+
+Chrome CPU profiles showed the page thread saturated (under 1% idle) in Modern:
+about 30% recording, 24% simulation, 20% model placement and submission and,
+before the change, 6% mixing audio, which native builds do on another thread.
+The skipped pre-records had missed their predicted fraction on 22% of frames.
+Classic now has about 4% idle time at its 30 FPS presentation rate.
+
+Every Go collection paused the page for one long task: `GODEBUG=gctrace=1` showed
+224 and 176 ms of mark wall time with about 900 MB live. With the map catalog no
+longer holding parsed OTA documents the same marks took 109 and 117 ms with about
+840 MB live. The demo mission keeps about 220 MB in the heap and allocates about
+0.3 MiB/s, so it collects every few minutes.
+
+Native battle benchmark (version 2, scene 5, seed 7, two runtime workers),
+alternating base and candidate. Censuses match. The first two Classic
+candidates predate the OTA change; the third Classic pair and both Modern pairs
+include every change.
+
+| Renderer | Build | Mean DrawWork | Allocation per frame | Heap after GC | Live heap objects |
+|---|---|---:|---:|---:|---:|
+| Classic | Before | 24.64 / 24.72 / 27.23 ms | 3.59 MB | 484 MiB | 1.56 M |
+| Classic | Candidate | 23.69 / 23.90 / 26.45 ms | 1.01 MB | 485 / 485 / 408 MiB | 1.56 / 1.56 / 0.47 M |
+| Modern | Before | 12.23 / 11.66 ms | 0.75–0.78 MB | 554–561 MiB | 1.60 M |
+| Modern | Candidate | 11.89 / 11.76 ms | 0.74 MB | 482–490 MiB | 0.52 M |
+
+The third Classic pair ran while the host was busier; it is compared only with
+its own partner. The audio reader's benchmark fell from 202 to 90 µs per second
+of panned PCM natively and from 918 to 429 µs under Node's Wasm. Profiles,
+traces and captures remain outside the repository.
+
 ## Camera gestures
 
 In Enhanced rendering, two-finger trackpad scrolling pans the camera and

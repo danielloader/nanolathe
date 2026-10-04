@@ -1307,7 +1307,6 @@ func cloneMapHeader(mh *MapHeader) *MapHeader {
 	if mh.Schemas != nil {
 		out.Schemas = append([]MapSchema(nil), mh.Schemas...)
 	}
-	// RawOTA is immutable after Compile [PLAN 02]; share pointer.
 	// Provenance and DefinitionHeader are value copies.
 	return &out
 }

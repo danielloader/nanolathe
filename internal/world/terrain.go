@@ -575,7 +575,7 @@ func gravityFromAuthored(authored int32) numeric.Fixed {
 // OTAs author all four keys [RWU-19-8 census], so this is unreachable on stock
 // content.
 func canonicalGlobals(mh *content.MapHeader) *content.MapHeader {
-	if mh == nil || mh.RawOTA == nil || mh.RawOTA.Global == nil {
+	if mh == nil || !mh.GlobalHeader {
 		return nil
 	}
 	return mh

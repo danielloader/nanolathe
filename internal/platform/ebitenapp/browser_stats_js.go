@@ -121,3 +121,10 @@ func browserPrepareRenderer(a *app) {
 // TODO(question): isolate the WebGL paused snapshot discrepancy by comparing
 // cached and full modal captures (docs/DESIGN_BROWSER_HOST.md §5).
 func browserPausedReuse() bool { return false }
+
+// The browser records each Modern frame in its own Draw. Go's js/wasm
+// scheduler returns to the browser only once every goroutine has blocked, so a
+// next-frame pre-record ran in the same task as the Draw before it and
+// overlapped nothing; a predicted miss recorded the frame twice
+// (DESIGN_BROWSER_HOST §5).
+func browserPreRecord() bool { return false }

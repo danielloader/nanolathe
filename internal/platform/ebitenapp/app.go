@@ -847,7 +847,7 @@ func (a *app) syncRendererSources() {
 // launchPreRecord rechecks the executor after the deferred Update: that body
 // can process F10, so entering this Draw as modern is not sufficient.
 func (a *app) launchPreRecord(now, sampledAt time.Time, period time.Duration, tick16 int32) {
-	if a.mode == RendererModern && !a.exitPending && !a.c.PresentationPaused() && period > 0 {
+	if a.mode == RendererModern && !a.exitPending && !a.c.PresentationPaused() && period > 0 && browserPreRecord() {
 		nextAt := now.Add(period)
 		if nextTick16, nextCamera16, ok := a.pipe.predictNext(nextAt, sampledAt, a.updatedAt, tick16); ok {
 			// A battle's presentation clock is sampled at the predicted instant

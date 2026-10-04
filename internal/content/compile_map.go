@@ -107,9 +107,12 @@ type MapHeader struct {
 	TNTVersion     uint32 // IDVersion, must be 0x2000 for retail [fmt tnt]
 	UnknownHeader1 uint32 // header word 0x2C — always 1 in retail corpus [fmt tnt]
 
-	// Raw OTA is retained for mission consumers that need placement records later.
-	// It is immutable after compilation; sim packages never mutate it.
-	RawOTA *formats.OTA
+	// GlobalHeader records that the OTA's [GlobalHeader] was parsed, so the
+	// compiled globals above hold authored values or the parser's own defaults
+	// [03 §2.2]. The parsed document itself is not retained: missions load their
+	// own OTA, and every catalogued map's placement sections kept a million
+	// small objects alive for the collector to walk.
+	GlobalHeader bool
 }
 
 // compileMapHeader compiles a single paired OTA/TNT into a MapHeader [02 "Map files"] [fmt ota] [fmt tnt].
@@ -121,7 +124,7 @@ func compileMapHeader(otaLogical, tntLogical string, otaProv, tntProv Provenance
 		LogicalTNT:     tntLogical,
 		OTAProvenance:  otaProv,
 		TNTProvenance:  tntProv,
-		RawOTA:         ota,
+		GlobalHeader:   ota.Global != nil,
 		TNTWidth:       tntHeader.Width,
 		TNTHeight:      tntHeader.Height,
 		TNTSeaLevel:    tntHeader.SeaLevel,

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
@@ -39,7 +38,7 @@ func TestLoadRetainsOTAGravitySeparatelyFromTerrain(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mh := &content.MapHeader{Gravity: tc.value}
 			if tc.parsed {
-				mh.RawOTA = &formats.OTA{Global: &formats.Section{}}
+				mh.GlobalHeader = true
 			}
 			cat := &content.Catalog{Maps: map[string]*content.MapHeader{"legacy": mh}}
 			terrain, err := Load(fs, cat, "legacy")

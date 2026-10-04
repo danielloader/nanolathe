@@ -152,7 +152,23 @@ full paused compositions, retaining the native paused-world optimization on
 other targets. Editing a save-name field with browser reuse enabled exposed
 blank modal backgrounds. The underlying WebGL resource discrepancy remains
 unknown; compare captures of the cached paused snapshot with the ordinary
-full-composition path before enabling browser reuse. Diagnostics remain outside the tick.
+full-composition path before enabling browser reuse.
+
+Browser Modern rendering records each presented frame in its own Draw; it never
+launches the next frame's pre-record (DESIGN_GPU_RENDERER §13.10). Go's js/wasm
+scheduler returns to the browser only once every goroutine has blocked, so a
+pre-record ran in the same browser task as the Draw before it and overlapped
+nothing, and each predicted miss recorded that frame a second time: 22% of
+frames in the 750-unit stress fixture. The asynchronous simulation (§13.13 there)
+is unchanged; switching it off measured no difference on one thread.
+
+Go's collector shares the thread too. Its idle mark worker is not interrupted by
+browser events, so the rest of a cycle's marking finishes inside one browser
+task. In the 750-unit stress fixture that task took 109–117 ms (176–224 ms
+while the map catalog retained every parsed OTA document). How often it happens
+follows the allocation rate, and how long follows the live heap's object count,
+so allocation churn and retained small objects are browser frame-time costs even
+where native profiles show them as cheap. Diagnostics remain outside the tick.
 FPS counts composed frames; TPS uses committed tick deltas; Go heap is not
 total browser/GPU memory; Wasm capacity can grow but cannot shrink per instance.
 Capture with focus held and inspect samples: a lost-focus interval lowers TPS.

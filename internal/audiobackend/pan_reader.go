@@ -33,6 +33,7 @@ func newPanReader(data []byte, pan float64) *panReader {
 func (r *panReader) Read(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	leftGain, rightGain := panGains(r.pan)
 	n := 0
 	for n < len(p) {
 		if r.framePos == len(r.frame) {
@@ -45,6 +46,15 @@ func (r *panReader) Read(p []byte) (int, error) {
 					}
 					return n, io.EOF
 				}
+			}
+			// Whole frames go straight into the device buffer; only a frame
+			// the buffer splits is staged. The device asks for thousands of
+			// frames per read, and the browser mixes them on its one thread.
+			if whole := min(len(p)-n, len(r.data)-r.offset) &^ (len(r.frame) - 1); whole > 0 {
+				panFrames(p[n:n+whole], r.data[r.offset:r.offset+whole], leftGain, rightGain)
+				n += whole
+				r.offset += whole
+				continue
 			}
 			r.loadFrame()
 		}
@@ -115,11 +125,20 @@ func (r *panReader) SetLoop(loop bool) {
 
 func (r *panReader) loadFrame() {
 	leftGain, rightGain := panGains(r.pan)
-	left := math.Float32frombits(binary.LittleEndian.Uint32(r.data[r.offset:]))
-	right := math.Float32frombits(binary.LittleEndian.Uint32(r.data[r.offset+4:]))
-	binary.LittleEndian.PutUint32(r.frame[:], math.Float32bits(scaleChannel(left, leftGain)))
-	binary.LittleEndian.PutUint32(r.frame[4:], math.Float32bits(scaleChannel(right, rightGain)))
+	panFrames(r.frame[:], r.data[r.offset:r.offset+len(r.frame)], leftGain, rightGain)
 	r.framePos = 0
+}
+
+// panFrames writes the placed copy of whole stereo float32 frames from src to
+// dst, which has the same length. Staged and direct reads share it, so a
+// split frame carries exactly the bytes a whole-frame read would.
+func panFrames(dst, src []byte, leftGain, rightGain float64) {
+	for i := 0; i+8 <= len(src) && i+8 <= len(dst); i += 8 {
+		left := math.Float32frombits(binary.LittleEndian.Uint32(src[i:]))
+		right := math.Float32frombits(binary.LittleEndian.Uint32(src[i+4:]))
+		binary.LittleEndian.PutUint32(dst[i:], math.Float32bits(scaleChannel(left, leftGain)))
+		binary.LittleEndian.PutUint32(dst[i+4:], math.Float32bits(scaleChannel(right, rightGain)))
+	}
 }
 
 func panGains(pan float64) (left, right float64) {

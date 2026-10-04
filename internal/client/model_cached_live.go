@@ -621,20 +621,31 @@ func drawPieceStates(draw *presentationrender.UnitDraw) []model.PieceState {
 	return draw.PieceStates
 }
 
-func cloneModelTarget(src *modelTarget) *modelTarget {
+// cloneModelTargetInto copies src's planes and placement into dst, reusing
+// dst's plane storage, and returns it; a nil dst gets a new target. Fields the
+// copy does not carry are cleared, and an empty plane stays nil, exactly as a
+// fresh copy would leave them.
+func cloneModelTargetInto(dst, src *modelTarget) *modelTarget {
 	if src == nil {
 		return nil
 	}
-	out := &modelTarget{
-		color: append([]uint8(nil), src.color...), height: append([]uint8(nil), src.height...),
-		covered: append([]bool(nil), src.covered...), width: src.width, heightPx: src.heightPx,
+	if dst == nil {
+		dst = &modelTarget{}
+	}
+	*dst = modelTarget{
+		color: reusePlane(dst.color, src.color), height: reusePlane(dst.height, src.height),
+		covered: reusePlane(dst.covered, src.covered), width: src.width, heightPx: src.heightPx,
 		originX: src.originX, originY: src.originY, anchorX: src.anchorX, anchorY: src.anchorY,
 		transparent: src.transparent, scale: src.scale,
 	}
-	if src.height == nil {
-		out.height = nil
+	return dst
+}
+
+func reusePlane[T any](dst, src []T) []T {
+	if len(src) == 0 {
+		return nil
 	}
-	return out
+	return append(dst[:0], src...)
 }
 
 func (c *Client) cachedBody(id uint64) *cachedModelBody {
@@ -703,8 +714,15 @@ func (c *Client) replaceCachedBody(id uint64, v frame.UnitView, draw *presentati
 		c.cachedModelBodies = make(map[uint64]*cachedModelBody)
 	}
 	inputs := c.cachedBodyInputs(draw)
+	// A rebuilt body is a new record, but it keeps the previous image's plane
+	// storage: turning units rebuild their bodies many times a second, and
+	// only cachedBodyImage reads the planes, by copying them.
+	var planes *modelTarget
+	if old := c.cachedModelBodies[id]; old != nil {
+		planes, old.image = old.image, nil
+	}
 	c.cachedModelBodies[id] = &cachedModelBody{
-		image: cloneModelTarget(image), model: draw.Model.Name,
+		image: cloneModelTargetInto(planes, image), model: draw.Model.Name,
 		cacheRevision: v.CacheRevision, validityRevision: v.CacheValidityRevision,
 		structure: draw.Structure, construction: v.BuildRemaining, teamColor: unitTeamColor(v),
 		shaded: inputs.shaded, supersampled: inputs.supersampled, scale: inputs.scale, palette: inputs.palette,

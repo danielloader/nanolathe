@@ -2285,6 +2285,12 @@ cached lanes of units whose interpolated heading, pitch or bank moved since the
 last presented frame (240 to 450 a frame in a 1,600-unit battle once the armies
 meet).
 
+**The browser host does not pre-record.** On js/wasm there is one thread and no
+render thread: the pre-record ran inside the same browser task as the Draw that
+launched it, so it hid nothing, and every predicted miss paid for the frame
+twice. The browser records each frame synchronously in its Draw instead
+(DESIGN_BROWSER_HOST §5); the ledger, digest and executor are unchanged.
+
 ### 13.11 Flash quads and same-stream phases
 
 Two changes, the first exact and the second an Enhanced-only approximation the

@@ -35,6 +35,33 @@ func TestPanReaderMatchesWholeConversionAcrossShortReads(t *testing.T) {
 	}
 }
 
+// Device reads mix whole frames written directly with frames a short or
+// unaligned read splits; every mix, wrapped or not, must keep the stream.
+func TestPanReaderMixedReadSizesMatchWholeConversion(t *testing.T) {
+	sample := oneSecondMono8()
+	for _, pan := range []float64{-0.75, 0, 0.4} {
+		want := retailaudio.ConvertSample(sample, 1, pan, 44100)
+		reader := newPanReader(sample.RegisteredPCM(44100), pan)
+		reader.SetLoop(true)
+		var got []byte
+		for i, size := 0, 0; len(got) < 3*len(want); i++ {
+			size = []int{4096, 3, 8, 13, 70001, 1, 7, 8192}[i%8]
+			buf := make([]byte, size)
+			n, err := reader.Read(buf)
+			if err != nil || n != size {
+				t.Fatalf("pan %v read %d = %d, %v", pan, size, n, err)
+			}
+			got = append(got, buf...)
+		}
+		for start := 0; start < len(got); start += len(want) {
+			end := min(start+len(want), len(got))
+			if !bytes.Equal(got[start:end], want[:end-start]) {
+				t.Fatalf("pan %v: mixed reads changed the looped PCM stream at byte %d", pan, start)
+			}
+		}
+	}
+}
+
 func TestRegisteredPlaysKeepPanAndReplacementIndependent(t *testing.T) {
 	b := NewWithRate(44100)
 	var played [][]byte

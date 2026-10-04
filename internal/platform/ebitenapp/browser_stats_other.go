@@ -11,3 +11,5 @@ func browserEndSimulationSample(_ browserSampleTime)   {}
 func browserPrepareRenderer(_ *app) {}
 
 func browserPausedReuse() bool { return true }
+
+func browserPreRecord() bool { return true }

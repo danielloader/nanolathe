@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
@@ -169,7 +171,7 @@ func TestGeneratedPageClonesTemplateAndPatchesAuthoredSlots(t *testing.T) {
 		{ProductKey: "slot-one-new", Button: 1}, // later authored claim wins
 		{ProductKey: "invalid", Button: 255},
 	}
-	got, _, err := h.numberedPage("armlab2", placements)
+	got, _, err := h.numberedPage("armlab2", 2, placements)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +193,7 @@ func TestGeneratedPageClonesTemplateAndPatchesAuthoredSlots(t *testing.T) {
 	if template.Gadgets[5].Name != "UNCHANGED" || template.Gadgets[8].Name != "UNCHANGED" {
 		t.Fatalf("source template was mutated: %+v", template.Gadgets)
 	}
-	again, _, err := h.numberedPage("armlab2", placements)
+	again, _, err := h.numberedPage("armlab2", 2, placements)
 	if err != nil || again != got {
 		t.Fatalf("generated page cache = %p, %v; want %p", again, err, got)
 	}
@@ -204,7 +206,7 @@ func TestGeneratedPageOverlaysExistingNumberedPage(t *testing.T) {
 		side:    &content.SideDef{NamePrefix: "COR"},
 		windows: map[string]*gui.Window{"coralab1": source},
 	}
-	got, _, err := h.numberedPage("coralab1", []frame.GeneratedProductPlacement{{ProductKey: "corfast", Button: 3}})
+	got, _, err := h.numberedPage("coralab1", 1, []frame.GeneratedProductPlacement{{ProductKey: "corfast", Button: 3}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +225,7 @@ func TestAbsentNumberedPageFallsBackToDLWithoutPlacements(t *testing.T) {
 		side:    &content.SideDef{NamePrefix: "ARM"},
 		windows: map[string]*gui.Window{"armdl": template},
 	}
-	got, _, err := h.numberedPage("unresolved2", nil)
+	got, _, err := h.numberedPage("unresolved2", 2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,5 +365,100 @@ func TestProductButtonCaptionNullSlotFallsBackToFNT(t *testing.T) {
 	wantX, wantY, _, _ := retailButtonCaptionPen(gad, r, client.MeasureText(fnt, "+3"), int(fnt.Height))
 	if x != wantX || y != wantY {
 		t.Fatalf("FNT fallback pen = (%d,%d), want (%d,%d)", x, y, wantX, wantY)
+	}
+}
+
+func TestNumberedPageEmptyFileUsesDLButMalformedFileFails(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		data       []byte
+		placements []frame.GeneratedProductPlacement
+		wantError  bool
+	}{
+		{name: "empty with products", placements: []frame.GeneratedProductPlacement{{ProductKey: "fixture", Button: 1}}},
+		{name: "empty without products"},
+		{name: "nonempty malformed", data: []byte("[GADGET0] {"), wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.Mkdir(filepath.Join(root, "guis"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "guis", "builder2.gui"), test.data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			fs := vfs.New()
+			if err := fs.MountDirectory(root, 0); err != nil {
+				t.Fatal(err)
+			}
+			defer fs.Close()
+			template := generatedPageFixture("guis/armdl.gui")
+			h := &retailBattleHUD{fs: fs, side: &content.SideDef{NamePrefix: "ARM"}, windows: map[string]*gui.Window{"armdl": template}}
+			got, _, err := h.numberedPage("builder2", 2, test.placements)
+			if test.wantError {
+				if err == nil {
+					t.Fatal("nonempty malformed page selected DL")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got == nil || got == template || got.Name != template.Name {
+				t.Fatal("empty page did not clone DL")
+			}
+			if len(test.placements) != 0 && got.Gadgets[5].Name != "fixture" {
+				t.Fatal("download product lost its authored slot")
+			}
+			if template.Gadgets[5].Name != "UNCHANGED" {
+				t.Fatal("DL source was mutated")
+			}
+		})
+	}
+}
+
+// The page opener owns enabledness, not the authored grayedout low bit
+// [07 R-HUD-03 §6]. Unknown products and non-product controls remain disabled.
+func TestNumberedPageReplacesAuthoredProductGreyBit(t *testing.T) {
+	for _, generated := range []bool{false, true} {
+		t.Run(map[bool]string{false: "physical", true: "download"}[generated], func(t *testing.T) {
+			source := &gui.Window{Name: "guis/builder1.gui", Gadgets: []gui.Gadget{
+				{Kind: gui.KindPanel}, {}, {}, {},
+				{Kind: gui.KindButton, Name: "known", CommonAttribs: 4, GrayedOut: 3},
+				{Kind: gui.KindButton, Name: "missing", CommonAttribs: 4, GrayedOut: 2},
+				{Kind: gui.KindButton, Name: "ORDERS", GrayedOut: 3},
+			}}
+			h := &retailBattleHUD{fs: vfs.New(), cat: &content.Catalog{Units: map[string]*content.UnitDef{
+				"known": {UnitName: "known"}, "download": {UnitName: "download"},
+			}}, windows: map[string]*gui.Window{"builder1": source}}
+			var placements []frame.GeneratedProductPlacement
+			if generated {
+				placements = []frame.GeneratedProductPlacement{{ProductKey: "download", Button: 0}}
+			}
+			w, _, err := h.numberedPage("builder1", 1, placements)
+			if err != nil || w == nil {
+				t.Fatalf("page open: %v", err)
+			}
+			if w.Gadgets[4].GrayedOut != 2 || w.Gadgets[5].GrayedOut != 3 || w.Gadgets[6].GrayedOut != 3 {
+				t.Fatalf("page grey words = %d,%d,%d; want 2,3,3", w.Gadgets[4].GrayedOut, w.Gadgets[5].GrayedOut, w.Gadgets[6].GrayedOut)
+			}
+			if generated && source.Gadgets[4].GrayedOut != 3 {
+				t.Fatal("download page changed its authored source")
+			}
+		})
+	}
+}
+
+func TestCustomPageZeroPreservesAuthoredProductGreyBit(t *testing.T) {
+	source := &gui.Window{Gadgets: []gui.Gadget{
+		{Kind: gui.KindButton, Name: "known", CommonAttribs: 4, GrayedOut: 3},
+		{Kind: gui.KindButton, Name: "missing", CommonAttribs: 4, GrayedOut: 2},
+	}}
+	h := &retailBattleHUD{fs: vfs.New(), cat: &content.Catalog{Units: map[string]*content.UnitDef{
+		"known": {UnitName: "known"},
+	}}, windows: map[string]*gui.Window{"builder0": source}}
+	w, _, err := h.numberedPage("builder0", 0, nil)
+	if err != nil || w == nil || w.Gadgets[0].GrayedOut != 3 || w.Gadgets[1].GrayedOut != 2 {
+		t.Fatalf("custom page zero changed authored grey words: %#v, %v", w, err)
 	}
 }

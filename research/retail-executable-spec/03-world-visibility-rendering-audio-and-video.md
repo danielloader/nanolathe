@@ -1397,6 +1397,18 @@ image: it positions the child within the union before the completed image is
 blitted. The final image placement therefore moves the carrier and its
 composited children together; it is not another independent child placement.
 
+**Attachment membership (Established, direct-static).** Both staging bounds
+and child composition traverse the carrier's linked cargo list. Neither pass
+searches for unrelated units whose footprints or model bounds overlap the
+carrier. Once completion detaches a factory product [04 R-FAC-02 §3], overlap
+with the factory does not restore that product to the staging image. It follows
+the ordinary independent unit draw with its own key base and final waterline
+and Digger processing. This distinction matters for an ordinary stationary
+product left at a Digger factory's origin: the factory's final erase does not
+act on the detached product's image. For actual attachments the child composite
+still adds only the world-height difference, without compensating for differing
+Digger key bases; the parent's final passes apply to the joined image.
+
 **Store width of the shifted key (Established, direct-static).** In step 2 the comparison is made at full register width — both
 stored key bytes widened, the signed height delta added to the child's — but
 the store narrows: the staging plane receives the **low byte** of

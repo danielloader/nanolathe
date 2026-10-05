@@ -1409,17 +1409,44 @@ the published offset to the camera.
   in committed unit order. A unit overlapping multiple factories joins the
   first admitted factory in that order. Existing visibility and pass-A window
   admission apply independently to both subjects. Independent occupants join
-  only factories with the same current cloak state: the combined image has
-  just the carrier's final blend `[03 R-RAST-01 §7]`. Differing cloak states
+  only factories with the same current cloak and Digger state: the combined
+  image has just the carrier's final blend `[03 R-RAST-01 §7]`. Differing cloak states
   retain ordinary independent row painting, including its factory occlusion
   limits, so grouping cannot make a cloaked occupant opaque or tint an opaque
-  one. This admission is recomputed each frame; actual attached cargo retains
-  its established carrier composition. A grouped occupant has one
+  one. Matching Digger state preserves the shared key base and final buried-face
+  erase `[03 R-REN-03A §2, §8]`. Differing Digger states retain the retail
+  independent image path; an unrelated overlapping product is not a retail
+  attachment `[03 R-REN-03A §4]`. This admission is recomputed each frame;
+  actual attached cargo retains its established carrier composition. A grouped occupant has one
   body present, through the factory; geometry preparation skips its standalone
   packet. Neither positions, attachment links nor height keys change. The
   existing per-pixel height test keeps the factory walls able to occlude the
   unit while the lower plate cannot overwrite its higher surfaces. This policy
   applies to both executors and uses no depth bias.
+
+  **Mixed Digger regression — Twilight Beta 98.** A
+  completed ordinary nano turret overlaps its Digger nano platform after
+  detachment. Before the correction, independent occupant grouping put both bodies in the
+  platform's staging image. An ordinary model's height key includes 50, while a
+  Digger model adds another 75 `[03 R-REN-03A §2]` `[03 R-REN-03A §8]`.
+  `composeCarrier` and `recordCarrierGeometry` adjust child keys only by the
+  world-height difference, so these independent occupants retained different key
+  bases. At equal origins the turret lost depth comparisons, and the
+  platform's final erase at keys at or below 125 removed its remaining body
+  pixels. Its separately emitted shadow survived. A bounded Beta 98 platform
+  construction capture reproduced the shadow-only turret in both executors;
+  disabling only independent grouping restored it in the classic capture.
+
+  This was an implementation defect in the host grouping policy. The correction
+  excludes independent occupants whose Digger state differs from their factory's,
+  retaining actual cargo and groups with matching state. Preserving mixed
+  independent groups instead would require a shared key basis and each
+  occupant's own clipping semantics. Actual attached children retain their
+  established world-height adjustment `[03 R-REN-03A §4]`, including mixed
+  Digger attachments. Synthetic checks lock both mismatch directions, the
+  independent classic pixels and modern geometry packets, matching-state
+  admission and preservation of actual cargo. The Community evidence boundary
+  remains in [Community patch rendering](../research/extensions/community-patch-rendering.md#ordinary-model-composition-and-digger-boundary).
 
 * **The burning-debris fire effect is stepped by the tick, not by the frame.**
   Retail creates one fire container per rendered frame per burning piece, four

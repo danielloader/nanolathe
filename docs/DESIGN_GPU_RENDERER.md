@@ -520,6 +520,11 @@ geometry and does not justify introducing an unverified retail key constant.
   `ModelCommands` still deep-copy all mutable planes for retained consumers.
   Carrier/factory staging images borrow their own composition scratch slot and
   are copied into the draw list only after child composition finishes.
+  Independent factory occupants join only when their cloak and Digger state
+  match the factory's (DESIGN_PRESENTATION_CLIENT §5). A mixed Digger pair
+  records two independent bodies, preserving each subject's own key base and
+  final erase; actual attachments retain the ordinary carrier composition
+  [03 R-REN-03A §4]. This admission is shared with the classic executor.
 * **C-G6 Structure supersample.** The classic executor preserves the cached/all
   versus live gate, pre-shear doubled projection, ordered ALP colour resolve,
   and top-left key resolve [03 R-REN-03A §6–§7]. Live pieces draw at native

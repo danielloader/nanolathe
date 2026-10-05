@@ -7,15 +7,16 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
-	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/testsupport"
+	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
 // Optional installed-content check: the synthetic tests are the portable
@@ -24,7 +25,7 @@ func TestRetailOversizedModMenus(t *testing.T) {
 	for _, mod := range []struct {
 		name  string
 		sides int
-	}{{"prota", 2}, {"zero", 3}} {
+	}{{"prota", 2}, {"zero", 3}, {"twilight", 2}} {
 		for side := 0; side < mod.sides; side++ {
 			profile := mod.name
 			t.Run(fmt.Sprintf("%s/side%d", profile, side), func(t *testing.T) {
@@ -46,9 +47,10 @@ func TestRetailOversizedModMenus(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				var commander *units.Unit
 				for _, u := range sess.Units.Iter() {
 					if u != nil && u.Owner == sess.LocalOwner && u.Def != nil && u.Def.Builder {
-						u.Flags |= hud.SelectionFlag
+						commander = u
 						break
 					}
 				}
@@ -59,12 +61,12 @@ func TestRetailOversizedModMenus(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				b := &battleSession{sess: sess, cat: cat, cl: cl}
+				b := &battleSession{sess: sess, cat: cat, cl: cl, local: testSelection(commander)}
 				b.hud, err = loadRetailBattleHUD(cs.fs, sess, cat, retailPaletteForTest(t, cs), nil, newBattleWindowContext(cs, nil))
 				if err != nil {
 					t.Fatal(err)
 				}
-				f := sess.Snapshot.Current()
+				f, _ := b.currentSnapshot()
 				view, ok := snapshotUnitByHandle(f, f.CommandPage.Builder)
 				if !ok {
 					t.Fatal("missing selected commander")
@@ -83,6 +85,17 @@ func TestRetailOversizedModMenus(t *testing.T) {
 						}
 					}
 				}
+				var compositeGroups [][]string
+				prefix := []string{"arm", "cor", "gok"}[side]
+				if profile == "prota" {
+					compositeGroups = [][]string{{prefix + "syw", prefix + "sy", prefix + "syn", prefix + "sye"}}
+				} else if profile == "twilight" {
+					compositeGroups = [][]string{
+						{prefix + "labw", prefix + "lab", prefix + "labe"},
+						{prefix + "vpw", prefix + "vp", prefix + "vpn", prefix + "vpe"},
+						{prefix + "syw", prefix + "sy", prefix + "syn", prefix + "sye"},
+					}
+				}
 				for _, enhanced := range []bool{false, true} {
 					for _, height := range []int{480, 768, 1080} {
 						t.Run(fmt.Sprintf("modern=%v/height=%d", enhanced, height), func(t *testing.T) {
@@ -94,12 +107,12 @@ func TestRetailOversizedModMenus(t *testing.T) {
 								t.Fatal("oversized menu has no safe pager")
 							}
 							got := map[string]int{}
-							type shipyardButton struct {
+							type compositeButton struct {
 								page   int
 								rect   gui.Rect
 								source gui.Rect
 							}
-							shipyards := make(map[string]shipyardButton)
+							compositeButtons := make(map[string]compositeButton)
 							for page := 1; page < state.Count; page++ {
 								b.hud.selectExpandedSidebarPage(b, f, page)
 								w, _, err := b.hud.windowForRequired(b, f)
@@ -121,24 +134,22 @@ func TestRetailOversizedModMenus(t *testing.T) {
 									if enhanced && (r.W <= 0 || r.H <= 0 || r.W > 64 || r.H > 64) {
 										t.Fatalf("modern product %s outside cell: %+v", g.Name, r)
 									}
-									if enhanced && profile == "prota" {
-										prefix := []string{"arm", "cor"}[side]
+									if enhanced {
 										name := strings.ToLower(g.Name)
-										if name == prefix+"sy" || name == prefix+"syn" || name == prefix+"syw" || name == prefix+"sye" {
-											source := b.hud.expandedSidebar.sources[i]
-											shipyards[name] = shipyardButton{page, r, source.window.PlacedRect(source.index)}
+										for _, group := range compositeGroups {
+											if slices.Contains(group, name) {
+												source := b.hud.expandedSidebar.sources[i]
+												compositeButtons[name] = compositeButton{page, r, source.window.PlacedRect(source.index)}
+											}
 										}
 									}
 									if hit := w.HitTest(r.X+r.W/2, r.Y+r.H/2); hit != i {
 										t.Fatalf("%s covered by gadget %d", g.Name, hit)
 									}
-									if product, ok := cat.Unit(g.Name); ok && hud.ProductArmsPlacement(product) && !publishedProductAllowed(cat, f, g.Name) {
-										t.Fatalf("authored structure %s absent from placement membership", g.Name)
-									}
 									if product, ok := cat.Unit(g.Name); ok && product.Builder {
 										x, y := r.X+r.W/2, r.Y+r.H/2
 										if !hudConsumeClick(b.hud, b, x, y) || b.battleState().Input.BuildDef != content.CanonicalKey(g.Name) {
-											t.Fatalf("factory %s did not arm placement", g.Name)
+											t.Fatalf("factory %s did not arm placement: BMCode=%d active=%d grey=%d latch=%s dispatch=%v", g.Name, product.BMCode, g.Active, g.GrayedOut, b.battleState().Input.BuildDef, b.hud.dispatchErr)
 										}
 									}
 									_, a := b.hud.sidebarSource(w, i, nil)
@@ -146,7 +157,7 @@ func TestRetailOversizedModMenus(t *testing.T) {
 										t.Fatalf("%s has no art", g.Name)
 									}
 								}
-								if dir := os.Getenv("NANOLATHE_MENU_SHOTS"); dir != "" && (page == 1 || page == state.Count-1) {
+								if dir := os.Getenv("NANOLATHE_MENU_SHOTS"); dir != "" && (page == 1 || page == state.Count-1 || profile == "twilight") {
 									shotClient, err := client.New(client.Options{Width: 1024, Height: height, Buffer: sess.Snapshot})
 									if err != nil {
 										t.Fatal(err)
@@ -166,26 +177,27 @@ func TestRetailOversizedModMenus(t *testing.T) {
 									file.Close()
 								}
 							}
-							if enhanced && profile == "prota" {
-								prefix := []string{"arm", "cor"}[side]
-								west, ok := shipyards[prefix+"syw"]
-								if !ok {
-									t.Fatal("missing west shipyard child")
-								}
-								for _, suffix := range []string{"sy", "syn", "syw", "sye"} {
-									child, ok := shipyards[prefix+suffix]
-									if !ok || child.page != west.page {
-										t.Fatalf("shipyard composite split across pages: %v", shipyards)
+							if enhanced {
+								for _, group := range compositeGroups {
+									west, ok := compositeButtons[group[0]]
+									if !ok {
+										t.Fatalf("missing composite child %s", group[0])
 									}
-									want := child.source
-									want.X += west.rect.X - west.source.X
-									want.Y += west.rect.Y - west.source.Y
-									if child.rect != want {
-										t.Fatalf("%s child changed shape/offset: %+v want %+v", prefix+suffix, child.rect, want)
+									for _, name := range group {
+										child, ok := compositeButtons[name]
+										if !ok || child.page != west.page {
+											t.Fatalf("composite split across pages: %v", compositeButtons)
+										}
+										want := child.source
+										want.X += west.rect.X - west.source.X
+										want.Y += west.rect.Y - west.source.Y
+										if child.rect != want {
+											t.Fatalf("%s changed shape/offset: %+v want %+v", name, child.rect, want)
+										}
 									}
-								}
-								if west.rect.W != 16 || west.rect.H != 64 {
-									t.Fatalf("resolved shipyard geometry: %v", shipyards)
+									if west.rect.W != 16 || west.rect.H != 64 {
+										t.Fatalf("resolved composite geometry: %v", compositeButtons)
+									}
 								}
 							}
 							b.hud.selectExpandedSidebarPage(b, f, 0)

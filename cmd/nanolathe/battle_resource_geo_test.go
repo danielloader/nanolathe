@@ -8,6 +8,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/features"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
@@ -23,6 +24,8 @@ func resourceGeoFixture(t *testing.T) (*battleSession, *client.Client, *fakeMill
 	u.SoundCategory, u.EnergyUse = "", -100
 	b.cat.Units["geo"] = &u
 	b.cat.BuildMenus["armcons"].Buttons = append(b.cat.BuildMenus["armcons"].Buttons, "geo")
+	page := b.hud.windows["armcons1"]
+	page.Gadgets = append(page.Gadgets, gui.Gadget{Kind: gui.KindButton, Name: "geo", Active: 1, CommonAttribs: 4})
 	fd := &content.FeatureDef{FootprintX: 1, FootprintZ: 1, Geothermal: true, Indestructible: true}
 	fd.CanonicalKey = "vent"
 	b.cat.Features["vent"] = fd
@@ -144,8 +147,8 @@ func TestResourceGeothermalSpacingKeepsRequiredYardOnVent(t *testing.T) {
 }
 
 func TestResourceGeothermalRetailCapabilities(t *testing.T) {
-	cat, _ := retailcat.Shared(t)
-	b := &battleSession{cat: cat}
+	cat, fs := retailcat.Shared(t)
+	b := &battleSession{cat: cat, hud: &retailBattleHUD{cat: cat, fs: fs}}
 	for _, side := range []struct{ builder, product string }{{"armck", "armgeo"}, {"corck", "corgeo"}} {
 		_, _, geo := b.resourceProducts(side.builder)
 		if geo == nil || geo.CanonicalKey != side.product {

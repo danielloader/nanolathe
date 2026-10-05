@@ -670,3 +670,32 @@ func TestExpandedSidebarSharedCommandsUseOrdersShortcut(t *testing.T) {
 		t.Fatal("canonical command shortcut did not activate")
 	}
 }
+
+func TestBuildProductAuthoredGreyDoesNotBlockResolvedAction(t *testing.T) {
+	for _, modern := range []bool{false, true} {
+		t.Run(fmt.Sprintf("modern=%v", modern), func(t *testing.T) {
+			b, cl, sources := expandedSidebarFixture(t)
+			b.hud.cat = b.cat
+			sources[0].Gadgets[4].GrayedOut = 3
+			sources[0].Gadgets[4].QuickKey = 't'
+			cl.SetEnhanced(modern)
+			w := expandedWindow(t, b)
+			i := expandedIndex(t, w, "product0")
+			if w.Gadgets[i].GrayedOut != 2 {
+				t.Fatalf("resolved product retained authored disabled bit: %d", w.Gadgets[i].GrayedOut)
+			}
+			before := len(b.sess.PendingHumanCommands())
+			paletteCallbackClick(t, b, cl, w, i, false, false)
+			paletteCallbackToken(t, b, cl, 't')
+			pending := b.sess.PendingHumanCommands()
+			if len(pending) != before+2 {
+				t.Fatalf("resolved product click/key dispatched %d commands, want 2", len(pending)-before)
+			}
+			for _, command := range pending[before:] {
+				if command.Kind != session.HumanFactoryBuild || command.FactoryBuild.Product != "product0" {
+					t.Fatalf("resolved product action = %+v", command)
+				}
+			}
+		})
+	}
+}

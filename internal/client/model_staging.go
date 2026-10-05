@@ -134,11 +134,10 @@ func (c *Client) composeCarrier(v frame.UnitView, sx, sy int32, children []frame
 		staged = append(staged, stagingChild{
 			model:    child,
 			rasterDX: dx, rasterDY: dy,
-			// "the child's world-height difference added to every key it
-			// contributes": a child's keys are relative to its own origin, and
-			// this is what puts them on the carrier's scale. Both images carry
-			// the same key bias, so the bias cancels and only the world
-			// difference remains [R-REN-03A §2][R-REN-03A §4].
+			// Retail adds only the child's world-height difference, even when
+			// actual attachments have different Digger key bases. Independent
+			// factory occupants must have matching bases before joining this
+			// path [R-REN-03A §2][R-REN-03A §4]; presentation design §5.
 			keyDelta: int32(int64(children[i].Y)>>16) - int32(int64(v.Y)>>16),
 		})
 	}

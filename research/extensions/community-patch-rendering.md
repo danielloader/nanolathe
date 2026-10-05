@@ -30,6 +30,39 @@ and creation remain owned by
 and author-key registration by its CP-UD-2. Settings and selection controls
 remain in that document's §4 rather than being duplicated here.
 
+## Ordinary model composition and Digger boundary
+
+**Established — historical documentation, 3.9.02 Beta.** The
+[primary patch readme](https://archive.org/download/ta3902b_patch/Total%20Annihilation%20v3.9.02%20Beta%20Patch%20Readme.txt),
+whose identity is recorded in
+[Community patch pathfinding](community-patch-pathfinding.md), documents
+gamma-correct antialiasing and shading, and increases the model composition
+capacity from 600 × 600 to 1280 × 1280. It documents no change to Digger height
+keys, buried-face clipping or detached factory-product composition. Absence
+from that feature list does not prove absence from the shipped runtime.
+
+**Established — bounded current-source inspection at the revision above.**
+`LimitCrack` and `IncreaseCompositeBuf::WriteNewLimit` enlarge the existing
+engine composition buffers from `X_CompositeBuf` and `Y_CompositeBuf`, each
+defaulting to 1280. `CompositeAABBClampProc` limits a composition image's
+width and height independently to those live capacities, or to 600 when no
+capacity object is available. These operations neither select independent
+factory occupants nor alter child height keys or Digger clipping. Source:
+[LimitCrack.cpp](https://github.com/tanvanman/TADR/blob/dcff5ddeb6bd1030e3f452c0f16e5f005850f62f/src/DDraw/LimitCrack.cpp),
+[TABugFix.cpp](https://github.com/tanvanman/TADR/blob/dcff5ddeb6bd1030e3f452c0f16e5f005850f62f/src/DDraw/TABugFix.cpp).
+The latter's comments propose a completed-product detach fix, but the installed
+operation is the dimension clamp; a proposal is not implemented behavior.
+The shade fallback, construction recolouring and separate placement-preview
+renderer described below establish no additional ordinary body-depth rule.
+
+**Unknown — older runtime equivalence.** Neither this documentation nor the
+bounded source inspection establishes how every historical 3.9 build or
+Twilight's shipped executable handles a completed turret at its platform's
+origin. Version-matched licensed source or a bounded manual observation would
+settle that release boundary. Nanolathe's mixed-Digger correction follows the
+retail attachment-membership contract `[03 R-REN-03A §4]`; it does not claim a
+historical Community-specific clipping exception.
+
 ## Shade-level zero fallback
 
 **Established — `ShadingFix.cpp`, `Install` and `ShadeLevelProc`.**

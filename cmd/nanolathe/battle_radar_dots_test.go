@@ -7,6 +7,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
+	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
@@ -15,6 +16,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/visibility"
+	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
 func radarDotBattle(t *testing.T, mode gameplay.Mode, style int) (*battleSession, pool.Handle) {
@@ -166,6 +168,12 @@ func TestModernRadarDotShiftClickBypassesResourceConstruction(t *testing.T) {
 	b, target := radarDotBattle(t, gameplay.Modern, 2)
 	b.cat.Units["armsolar"].Category = "SOLAR"
 	b.cat.Units["armsolar"].EnergyUse = -20
+	b.cat.Units["armcons"].BuildPageCount = 2
+	b.hud = &retailBattleHUD{cat: b.cat, fs: vfs.New(), windows: map[string]*gui.Window{
+		"armcons1": {Name: "guis/armcons1.gui", Gadgets: []gui.Gadget{
+			{Kind: gui.KindButton, Name: "armsolar", Active: 1, CommonAttribs: 4},
+		}},
+	}}
 	b.cl.SetFocused(true)
 	b.cl.SetRadarDots(1)
 	if _, ok := b.resourceSite(320, 180); !ok {

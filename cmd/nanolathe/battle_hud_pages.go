@@ -123,15 +123,16 @@ func (h *retailBattleHUD) authoredWindowForRequired(b *battleSession, f *frame.F
 		window, page := h.loadWindow(name)
 		return window, page, nil
 	}
-	return h.numberedPage(name, f.CommandPage.GeneratedProducts)
+	return h.numberedPage(name, pageNum, f.CommandPage.GeneratedProducts)
 }
 
 // numberedPage opens an ordinary physical page when it has no generated
 // placements. A physical page with placements is cloned and patched; an
 // absent physical page is always cloned from the side's DL template, including
-// when every authored product failed catalog resolution. An existing malformed
-// page is still an error: only ErrNotFound selects DL [07 R-HUD-03 §6].
-func (h *retailBattleHUD) numberedPage(name string, placements []frame.GeneratedProductPlacement) (*gui.Window, *formats.GAF, error) {
+// when every authored product failed catalog resolution. Zero-byte files are
+// absent to the TDF reader [02 R-MALF-01 §1] and select DL as well. Nonempty
+// malformed pages remain errors [07 R-HUD-03 §6].
+func (h *retailBattleHUD) numberedPage(name string, pageNumber int, placements []frame.GeneratedProductPlacement) (*gui.Window, *formats.GAF, error) {
 	if h == nil || name == "" {
 		return nil, nil, nil
 	}
@@ -141,8 +142,8 @@ func (h *retailBattleHUD) numberedPage(name string, placements []frame.Generated
 	physical := h.windows[name] != nil
 	if !physical {
 		logical := "guis/" + name + ".gui"
-		if _, err := h.fs.Stat(logical); err == nil {
-			physical = true
+		if info, err := h.fs.Stat(logical); err == nil {
+			physical = info.Size > 0
 		} else {
 			if !errors.Is(err, vfs.ErrNotFound) {
 				return nil, nil, hudAssetError(h.fs, logical, "builder GUI probe "+name+" [07 R-HUD-03 §6]", err)
@@ -151,6 +152,7 @@ func (h *retailBattleHUD) numberedPage(name string, placements []frame.Generated
 	}
 	if physical && len(placements) == 0 {
 		window, page, err := h.loadWindowRequired(name)
+		h.resolveProductPageGrey(window, pageNumber)
 		h.ensureWindowBuilt(name, window, page)
 		return window, page, err
 	}
@@ -187,6 +189,7 @@ func (h *retailBattleHUD) numberedPage(name string, placements []frame.Generated
 		}
 		h.generatedProducts[content.CanonicalKey(placement.ProductKey)] = true
 	}
+	h.resolveProductPageGrey(window, pageNumber)
 	h.installWindow(window, sourceArt)
 	if h.generatedWindows == nil {
 		h.generatedWindows = make(map[string]*gui.Window)
@@ -197,6 +200,25 @@ func (h *retailBattleHUD) numberedPage(name string, placements []frame.Generated
 	}
 	h.generatedPageArt[name] = sourceArt
 	return window, sourceArt, nil
+}
+
+// A numbered build-page open replaces the authored low grey bit with the
+// product-name resolution result after download placement; higher bits survive
+// [07 R-HUD-03 §6]. Apply before either sidebar copies its source records.
+func (h *retailBattleHUD) resolveProductPageGrey(window *gui.Window, page int) {
+	if page <= 0 || window == nil || h.cat == nil {
+		return
+	}
+	for i := range window.Gadgets {
+		gad := &window.Gadgets[i]
+		if gad.CommonAttribs&4 == 0 {
+			continue
+		}
+		gad.GrayedOut &^= 1
+		if product, _ := h.cat.Unit(gad.Name); product == nil {
+			gad.GrayedOut |= 1
+		}
+	}
 }
 
 func cloneGUIWindow(source *gui.Window) *gui.Window {

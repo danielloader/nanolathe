@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/testsupport/retailcat"
+	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
 // These fixtures lock the requested modern input policy, not retail gestures.
@@ -36,6 +38,14 @@ func resourceFixture(t *testing.T, deposit bool) (*battleSession, *client.Client
 		b.cat.Units[item.key] = &u
 	}
 	b.cat.BuildMenus["armcons"].Buttons = []string{"armsolar", "extractor", "advanced"}
+	b.cat.Units["armcons"].BuildPageCount = 2
+	b.hud = &retailBattleHUD{cat: b.cat, fs: vfs.New(), windows: map[string]*gui.Window{
+		"armcons1": {Name: "guis/armcons1.gui", Gadgets: []gui.Gadget{
+			{Kind: gui.KindButton, Name: "armsolar", Active: 1, CommonAttribs: 4},
+			{Kind: gui.KindButton, Name: "extractor", Active: 1, CommonAttribs: 4},
+			{Kind: gui.KindButton, Name: "advanced", Active: 1, CommonAttribs: 4},
+		}},
+	}}
 	// Membership is published; update the fixture through a tick.
 	b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
 	if deposit {
@@ -343,8 +353,8 @@ func TestResourceClassificationAvoidsOtherProducers(t *testing.T) {
 // Installed data establishes the explicit category association; custom content
 // without the token remains unclassified instead of falling back to fusion.
 func TestResourceRetailBuildMenuClassification(t *testing.T) {
-	cat, _ := retailcat.Shared(t)
-	b := &battleSession{cat: cat}
+	cat, fs := retailcat.Shared(t)
+	b := &battleSession{cat: cat, hud: &retailBattleHUD{cat: cat, fs: fs}}
 	for _, side := range []struct{ builder, solar, mex, advanced, moho string }{
 		{"armcom", "armsolar", "armmex", "armack", "armmoho"},
 		{"corcom", "corsolar", "cormex", "corack", "cormoho"},
@@ -553,5 +563,80 @@ func TestResourceFeedbackCancelsWhenSelectionExpands(t *testing.T) {
 	b.updateResourceQueueFeedback(cl)
 	if b.resourceQueueFeedback != nil {
 		t.Fatal("expanded selection kept stale feedback")
+	}
+}
+
+func TestResourceShortcutIgnoresHiddenConstructionProducts(t *testing.T) {
+	b, cl, ms, _ := resourceFixture(t, true)
+	bonus := *b.cat.Units["advanced"]
+	bonus.CanonicalKey, bonus.DefinitionHeader.CanonicalKey, bonus.UnitName = "bonus", "bonus", "bonus"
+	bonus.ExtractsMetal, bonus.EnergyMake = 8, 500
+	b.cat.Units["bonus"] = &bonus
+	menu := b.cat.BuildMenus["armcons"]
+	menu.Buttons = append([]string{"BONUS"}, menu.Buttons...)
+	before := slices.Clone(menu.Buttons)
+	b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
+
+	// The strongest human product lives on another page, not the current one.
+	first := b.hud.windows["armcons1"]
+	last := first.Gadgets[len(first.Gadgets)-1]
+	first.Gadgets = first.Gadgets[:len(first.Gadgets)-1]
+	last.Name, last.GrayedOut = "ADVANCED", 1 // the numbered opener resolves this bit
+	b.hud.windows["armcons2"] = &gui.Window{Name: "guis/armcons2.gui", Gadgets: []gui.Gadget{last}}
+	b.cat.Units["armcons"].BuildPageCount = 3
+
+	x, y := o5ScreenWorld(b.cam, numeric.FixedFromInt(366), 0, numeric.FixedFromInt(366))
+	resourceClickAt(b, cl, x, y, true)
+	ms.ms += 100
+	resourceClickAt(b, cl, x, y, true)
+	commands := resourceBuildCommands(b.sess)
+	if len(commands) != 1 || commands[0].Product != "advanced" {
+		t.Fatalf("shortcut selected a hidden product or lost a later page: %+v", commands)
+	}
+	if !slices.Equal(menu.Buttons, before) || b.cat.Units["bonus"].EnergyMake != 500 {
+		t.Fatal("human shortcut changed AI membership or authored bonus")
+	}
+}
+
+func TestResourceShortcutUsesGeneratedBuildPage(t *testing.T) {
+	b, _, _, _ := resourceFixture(t, true)
+	first := b.hud.windows["armcons1"]
+	first.Gadgets = first.Gadgets[:len(first.Gadgets)-1]
+	b.cat.Units["armcons"].BuildPageCount = 3
+	b.hud.side = &content.SideDef{NamePrefix: "ARM"}
+	b.hud.windows["armdl"] = generatedPageFixture("guis/armdl.gui")
+	b.hud.windows["armdl"].Gadgets[4].Active = 1
+	b.cat.DownloadPlacements = []content.DownloadMenuPlacement{{Builder: "armcons", Product: "advanced", Menu: 3, Button: 0, BuilderResolved: true, ProductResolved: true}}
+	mex, _, _ := b.resourceProducts("armcons")
+	if mex == nil || mex.CanonicalKey != "advanced" {
+		t.Fatalf("shortcut lost generated-page extractor: %v", mex)
+	}
+}
+
+func TestResourceShortcutChoosesExtractorForLandAndWater(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		sea        uint8
+	}{{"land", "advanced", 0}, {"water", "underwater", 16}} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, cl, ms, _ := resourceFixture(t, true)
+			underwater := *b.cat.Units["advanced"]
+			underwater.CanonicalKey, underwater.DefinitionHeader.CanonicalKey, underwater.UnitName = "underwater", "underwater", "underwater"
+			underwater.ExtractsMetal, underwater.MinWaterDepth, underwater.MaxWaterDepth = 5, 2, 10000
+			b.cat.Units["underwater"] = &underwater
+			b.cat.BuildMenus["armcons"].Buttons = append(b.cat.BuildMenus["armcons"].Buttons, "underwater")
+			page := b.hud.windows["armcons1"]
+			page.Gadgets = append(page.Gadgets, gui.Gadget{Kind: gui.KindButton, Name: "underwater", Active: 1, CommonAttribs: 4})
+			b.sess.World.SeaLevel = tc.sea
+			b.sess.Step(b.sess.Clock.ScaledAnchor + 1)
+			x, y := o5ScreenWorld(b.cam, numeric.FixedFromInt(344), numeric.FixedFromInt(int64(tc.sea)), numeric.FixedFromInt(344))
+			resourceClickAt(b, cl, x, y, true)
+			ms.ms += 100
+			resourceClickAt(b, cl, x, y, true)
+			commands := resourceBuildCommands(b.sess)
+			if len(commands) != 1 || commands[0].Product != tc.want {
+				t.Fatalf("shortcut product = %+v, want %s", commands, tc.want)
+			}
+		})
 	}
 }

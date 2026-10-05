@@ -19,7 +19,7 @@ func TestGeneratedPageUsesAuthoredExtendedSlotsWithoutReplacingCommands(t *testi
 	}
 	source.Gadgets = append(source.Gadgets, gui.Gadget{Kind: gui.KindButton, Name: "ARMNEXT"})
 	h := &retailBattleHUD{fs: vfs.New(), side: &content.SideDef{NamePrefix: "ARM"}, windows: map[string]*gui.Window{"armdl": source}}
-	w, _, err := h.numberedPage("builder2", []frame.GeneratedProductPlacement{{ProductKey: "factory-eight", Button: 8}, {ProductKey: "factory-eleven", Button: 11}, {ProductKey: "must-not-replace-next", Button: 12}})
+	w, _, err := h.numberedPage("builder2", 2, []frame.GeneratedProductPlacement{{ProductKey: "factory-eight", Button: 8}, {ProductKey: "factory-eleven", Button: 11}, {ProductKey: "must-not-replace-next", Button: 12}})
 	if err != nil {
 		t.Fatal(err)
 	}

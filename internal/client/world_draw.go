@@ -307,6 +307,13 @@ func (b *worldBuckets) indexFactoryOccupants(win worldWindow) {
 			if u.Cloaked != factory.Cloaked {
 				continue
 			}
+			// Digger changes both the key base and the carrier's final erase
+			// [03 R-REN-03A §2, §8]. Retail stages only actual attachments
+			// [03 R-REN-03A §4]; independent occupants with different Digger
+			// state must keep their own keys and clipping (presentation §5).
+			if u.Digger != factory.Digger {
+				continue
+			}
 			idx := int(candidate.index)
 			b.factoryParent[idx] = factory.Slot
 			if tail < 0 {

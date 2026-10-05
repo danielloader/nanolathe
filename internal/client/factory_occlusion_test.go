@@ -325,6 +325,9 @@ func TestFactoryOccupantAdmission(t *testing.T) {
 		want   bool
 	}{
 		{name: "completed occupant", want: true},
+		{name: "matching Digger occupant", change: func(v []frame.UnitView) { v[0].Digger, v[1].Digger = true, true }, want: true},
+		{name: "ordinary occupant in Digger factory", change: func(v []frame.UnitView) { v[0].Digger = true }},
+		{name: "Digger occupant in ordinary factory", change: func(v []frame.UnitView) { v[1].Digger = true }},
 		{name: "unfinished occupant", change: func(v []frame.UnitView) { v[1].BuildRemaining = .5 }},
 		{name: "airborne occupant", change: func(v []frame.UnitView) { v[1].MoverMode = 2 }},
 		{name: "ordinary structure", change: func(v []frame.UnitView) { v[0].IsFactory = false }},
@@ -350,6 +353,69 @@ func TestFactoryOccupantAdmission(t *testing.T) {
 			b.indexFactoryOccupants(worldWindow{rowCount: 1})
 			if got := b.isFactoryOccupant(1); got != tc.want {
 				t.Fatalf("grouped=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// The host's independent factory occupants must retain their own body image
+// when their Digger keys and clipping differ [03 R-REN-03A §2, §4, §8]. The
+// inverse pairing also checks that a Digger occupant's buried faces stay cut.
+func TestFactoryOccupantKeepsIndependentDiggerImage(t *testing.T) {
+	for _, factoryDigger := range []bool{false, true} {
+		t.Run(fmt.Sprintf("factory_Digger_%v", factoryDigger), func(t *testing.T) {
+			c := newPieceFixtureClient(t)
+			c.models["platform"] = syntheticModel([]pieceInfo{{name: "base", parent: -1}}, []syntheticTri{
+				makeTriangle(0, "base", [3][3]float64{{0, 8, 0}, {32, 8, 0}, {0, 8, 16}}, 31, 0),
+			}, 0)
+			c.models["turret"] = syntheticModel([]pieceInfo{{name: "base", parent: -1}}, []syntheticTri{
+				makeTriangle(0, "base", [3][3]float64{{0, 4, 0}, {16, 4, 0}, {0, 4, 16}}, 99, 0),
+				makeTriangle(0, "base", [3][3]float64{{16, -4, 0}, {32, -4, 0}, {16, -4, 16}}, 88, 1),
+			}, 0)
+			factory := frame.UnitView{Slot: 1, InstanceID: 1, Model: "platform", IsFactory: true, Digger: factoryDigger,
+				ZBuffer: true, FootX: 4, FootZ: 4, MoverMode: moverModeGrounded, X: 100 << 16, Z: 100 << 16}
+			occupant := frame.UnitView{Slot: 2, InstanceID: 2, Model: "turret", BMCode: true, Digger: !factoryDigger,
+				ZBuffer: true, FootX: 2, FootZ: 2, MoverMode: moverModeGrounded, X: factory.X, Z: factory.Z}
+			got := c.composeUnits(t, &frame.Frame{}, []frame.UnitView{factory, occupant})
+			independent := factory
+			independent.IsFactory = false
+			want := c.composeUnits(t, &frame.Frame{}, []frame.UnitView{independent, occupant})
+			if !bytes.Equal(got, want) || bytes.Count(got, []byte{99}) == 0 {
+				t.Fatal("mixed Digger occupant did not keep its independent visible body")
+			}
+			if occupant.Digger && bytes.Count(got, []byte{88}) != 0 {
+				t.Fatal("Digger occupant lost its own buried-face erase")
+			}
+
+			// The GPU consumes this same admission decision as independent
+			// geometry, rather than a shadow-only child of the platform.
+			c.geometryOnlyModels = true
+			c.resetListForTest()
+			f := frame.Frame{Units: []frame.UnitView{factory, occupant}}
+			c.drawWorldPass(&f, true)
+			c.drawWorldPassB(&f, true)
+			commands := c.list.ModelCommands()
+			if len(commands) != 2 {
+				t.Fatalf("%d model commands, want two independent bodies", len(commands))
+			}
+			for _, cmd := range commands {
+				if cmd.ShadowOnly || cmd.Geometry == nil || len(cmd.Geometry.Children) != 0 {
+					t.Fatal("GPU packet still groups mixed Digger bodies")
+				}
+			}
+
+			// A real attachment still follows the retail carrier path even
+			// with different Digger state; the host guard is only for occupants.
+			factory.Cargo = []pool.Handle{occupant.Slot}
+			occupant.Carrier, occupant.CarriedPiece, occupant.MoverMode = factory.Slot, 0, 0
+			c.resetListForTest()
+			f.Units = []frame.UnitView{factory, occupant}
+			c.drawWorldPass(&f, true)
+			c.drawWorldPassB(&f, true)
+			commands = c.list.ModelCommands()
+			if len(commands) != 2 || !commands[0].ShadowOnly || len(commands[1].Geometry.Children) != 1 ||
+				commands[1].Geometry.Children[0].KeyDelta != 0 {
+				t.Fatal("mixed Digger guard changed real attachment composition")
 			}
 		})
 	}

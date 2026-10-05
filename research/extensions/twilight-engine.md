@@ -68,6 +68,130 @@ Rendered battle captures were inspected through both existing renderers.
 This checks startup and ordinary construction,
 not long-match completion, every unit, campaign compatibility or save parity.
 
+## Authored build-menu geometry
+
+**Established — Beta 98 authored files.** In the replacement `rev31.gp3`,
+`guis/armcom2.gui` and `guis/corcom2.gui` each place a three-piece factory cell
+beside a four-piece factory cell in the first row. The left cell consists of
+16-by-64 side strips and a 32-by-64 centre. The right cell uses the same side
+strips with two 32-by-32 centre buttons. Each cell fills one 64-by-64 square,
+at horizontal origins 0 and 64. Their GAF frames match those hit rectangles.
+The second row places a complete air-factory button beside another four-piece
+shipyard cell. Constructor menus reuse these split layouts.
+
+**Established — bounded Nanolathe reproduction.** Considering a square at every
+child's corner also finds shifted squares that combine pieces from the adjacent
+factories. The original Modern sidebar's ambiguity fallback therefore split the
+first row into individual cells. Nanolathe's host layout now accepts a complete
+cover on the rail's two-column grid, retaining every child action and its shape.
+This is presentation policy owned by DESIGN_INTERFACE_HUD_INPUT §3.3, not an
+inference about Twilight's patched runtime.
+
+**Established — overlay interaction.** Beta 98 overlays `guis/armlab2.gui` and
+`guis/corcom4.gui` with zero-byte files. The reference base install's downloaded
+unit records can still raise those builders' page counts and request those
+pages. The HUD must give these empty files the absent-page DL fallback already
+used by the catalog probe and documented TDF loader. It must not suppress
+inherited download membership or treat nonempty malformed GUIs as absent.
+
+**Established — authored state and retail baseline.** Some resolved factory
+children in Beta 98's commander GUI files author `grayedout=1`. The retail
+numbered-page opener replaces that low bit from product-name resolution,
+enabling known definitions and disabling unknown names. Preserving the authored
+bit in Nanolathe left those factory children unclickable; applying the documented
+page-open writer corrects both sidebar presentations without inventing a
+Twilight-specific enable rule.
+
+## Nano platform and turret acceptance
+
+**Established — Beta 98 authored definitions.** The replacement `rev31.gp3`
+defines `ARMNANOB` and `CORNANOB` as structure builders (`BMcode=0`);
+`ARMNANOB` authors `Digger=1`. Their nano turret products use `BMcode=1`, `Builder=1` and
+`CanMove=0`; the regular `ARMNANOTC` and `CORNANOTC` each have build distance
+1,000 and worker time 300. Their models and script programs resolve from the
+mounted content. These authored classes matter independently of mobility:
+the platforms receive factory rally patrols, while the turret products receive
+ordinary repair patrols under the retail resolver `[04 R-ORD-02 §1]`.
+
+**Established — bounded Nanolathe acceptance, October 4, 2026.** On Ashap
+Plateau with seed 7, an ARM platform completed its regular turret through
+ordinary factory construction. The product detached at the platform's origin.
+Both renderers displayed only its shadow while the independent factory
+occupant policy grouped it with the platform. Removing only that grouping in
+the classic committed-frame capture restored the turret body. The confirmed
+key-basis and clipping defect is owned by
+[DESIGN_PRESENTATION_CLIENT §5](../../docs/DESIGN_PRESENTATION_CLIENT.md#5-divergences).
+This is a Nanolathe limitation; it establishes no historical patch behavior.
+
+**Established — corrected bounded acceptance, October 5, 2026 UTC.** Repeating
+the same platform construction after excluding independent mixed-Digger
+occupants restores the completed turret body in classic and GPU captures.
+Actual attachments still use the researched carrier composition. The retail
+contract `[03 R-REN-03A §4]` groups linked cargo, not unrelated overlapping
+units; the [Community rendering evidence](community-patch-rendering.md#ordinary-model-composition-and-digger-boundary)
+establishes no historical turret-specific depth exception.
+
+**Established — bounded patrol acceptance.** In a separate seeded battle, the
+platform-built ARM turret on Roam automatically completed a half-built friendly
+solar collector 100 world units away with full resource stores and no script
+diagnostics. With the mounted Community patrol filter enabled, Hold Position
+left a reset half-built target unchanged with full stores; Roam likewise left
+it unchanged with energy at 10% of storage. Returning to Roam with full stores
+completed it. The two gates are the existing
+[Community patrol preference](community-patch-engine.md) (CP-CON-3)
+and retail energy-storage test `[04 R-ORD-01 §4]`. This acceptance does not
+identify the settings or resource state of the reported live battle, prove
+every turret variant, or establish Beta 98's historical runtime equivalence.
+
+## Extractor bonuses and human shortcut admission
+
+**Established — Beta 98 authored unit data and changelog.** `AAIMEXX` and
+`CAIMEXX` are special ARM and CORE AI metal extractors. They share the normal
+extractors' display name, but author 500 energy production, 8 passive metal,
+3 energy upkeep, an extraction rate of 0.003, 6,000 energy storage and 2,000
+metal storage. The packaged `TAT-v2.0-Beta-Changelog.txt` explicitly describes
+the AI extractor bonuses and the increases to 500 energy and 8 passive metal.
+Ordinary `ARMMEX` and `CORMEX` author no energy or passive metal production,
+15 energy upkeep and an extraction rate of 0.001.
+
+**Established — bounded authored membership observation.** The special units
+occur in the corresponding basic builders' CANBUILD lists, allowing the
+computer player to choose them, but not on those builders' resolved human GUI
+pages. Their absence is established from product identities, not an inferred
+filter for names containing `AI`.
+
+**Established — bounded Nanolathe reproduction.** Before the host-input fix,
+Shift-double-click's strongest-extractor selection read construction membership
+alone and chose these hidden products for both factions. Ordinary production
+accounting then correctly yielded their authored 500 energy. The fix intersects
+rule-selected membership with active, enabled product buttons across all human
+build pages, including generated downloads. It changes neither AI membership
+nor authored resource values. Twilight's underwater extractors are stronger
+than its ordinary land extractors; the shortcut also uses ordinary placement
+and queue preview to select the strongest fitting human product at the deposit.
+This is the existing input convenience's human
+availability contract, owned by DESIGN_INTERFACE_HUD_INPUT §3.10; it is not a
+new economy rule or a claim about Twilight's patched runtime.
+
+**Established — bounded script-port inventory.** A static instruction and
+literal-stack scan of the installed catalogue's 509 linked unit programs found
+3,494 decoded port calls. Their selectors resolved only to retail ports or the
+already adopted Community getters 69–75. It traversed every authored function
+entry and both conditional branches; no unsupported extension selector was
+observed. These are static call sites per linked unit, not runtime call counts.
+Two authored death-script boundaries remain outside complete decoding: `CMGEO`
+reaches an unmatched word and `CORCRW` can branch to the end of its code. This
+inventory does not establish complete runtime compatibility.
+
+**Unknown — scoped runtime acceptance.** Twilight's actual Galactic Gate
+linking and transfer scripts, switchable Guardian/Punisher weapon modes, armed
+transport passenger gates, and death-script boundary outcomes still need
+bounded gameplay and save-continuation checks. Existing generic engine
+primitives and the port inventory do not prove those complete unit behaviours.
+Versioned primary documentation, appropriately licensed matching source or
+manual observations are needed wherever those checks reveal an extension
+contract not already established; third-party runtime disassembly is excluded.
+
 ## Runtime boundary
 
 **Established — file identity.** The update's `TotalA.exe` is 1,178,624 bytes

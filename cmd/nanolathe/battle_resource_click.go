@@ -11,6 +11,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
@@ -65,11 +66,21 @@ func resourceSolar(u *content.UnitDef) bool {
 		(resourceToken(u.SoundCategory, "solar") || resourceToken(u.Category, "solar"))
 }
 
-// Walk the complete authored menu, not just its currently displayed page.
-// Equal extraction rates retain menu order; fabricators are not extractors.
+// Walk every human build page, independently of the displayed page, and
+// intersect it with the selected construction membership (HUD design §3.10).
+// CANBUILD also contains hidden AI products; it cannot establish human access.
+// Equal extraction rates retain membership order; fabricators are not extractors.
 func (b *battleSession) resourceProducts(builder string) (extractor, solar, geothermal *content.UnitDef) {
+	return b.resourceProductsMatching(builder, nil)
+}
+
+func (b *battleSession) resourceProductsMatching(builder string, fitsExtractor func(*content.UnitDef) bool) (extractor, solar, geothermal *content.UnitDef) {
+	if b == nil || b.cat == nil || b.hud == nil {
+		return nil, nil, nil
+	}
+	def, found := b.cat.Unit(builder)
 	menu := b.cat.BuildMenus[content.CanonicalKey(builder)]
-	if menu == nil {
+	if !found || def == nil || menu == nil {
 		return nil, nil, nil
 	}
 	products := menu.Buttons
@@ -78,7 +89,26 @@ func (b *battleSession) resourceProducts(builder string) (extractor, solar, geot
 			products = hud.AllowedBuildProducts(b.cat, f)
 		}
 	}
+	visible := make(map[string]bool)
+	start := 1
+	if def.HasPageZeroGUI {
+		start = 0
+	}
+	for page := start; page < int(def.BuildPageCount); page++ {
+		window, _ := b.hud.sidebarBuildPage(b.cat, def, page)
+		if window == nil {
+			continue
+		}
+		for _, gadget := range window.Gadgets {
+			if gadget.Kind == gui.KindButton && gadget.Active != 0 && gadget.CommonAttribs&4 != 0 && gadget.GrayedOut&1 == 0 && !sidebarEmptySlot(gadget.Name) {
+				visible[content.CanonicalKey(gadget.Name)] = true
+			}
+		}
+	}
 	for _, key := range products {
+		if !visible[content.CanonicalKey(key)] {
+			continue
+		}
 		u, ok := b.cat.Unit(key)
 		if !ok || u == nil {
 			continue
@@ -89,7 +119,7 @@ func (b *battleSession) resourceProducts(builder string) (extractor, solar, geot
 			}
 			continue // a vent-dependent product cannot be a ground shortcut
 		}
-		if u.BMCode == 0 && !u.Builder && u.ExtractsMetal > 0 && (extractor == nil || u.ExtractsMetal > extractor.ExtractsMetal) {
+		if u.BMCode == 0 && !u.Builder && u.ExtractsMetal > 0 && (extractor == nil || u.ExtractsMetal > extractor.ExtractsMetal) && (fitsExtractor == nil || fitsExtractor(u)) {
 			extractor = u
 		}
 		if solar == nil && resourceSolar(u) {
@@ -149,6 +179,18 @@ func (b *battleSession) resourceSite(mx, my int32) (resourceBuildSite, bool) {
 		product = extractor
 		deposit = resourceRect{feature.CX, feature.CZ, fx, fz}
 		wx, wz = world.PlacementCenter(feature.CX, feature.CZ, fx, fz)
+		// The human menu may include stronger underwater extractors. Choose
+		// among products the ordinary placement/queue preview admits here;
+		// keep the normal refusal path when none fits (HUD design §3.10).
+		fitting, _, _ := b.resourceProductsMatching(v.DefName, func(candidate *content.UnitDef) bool {
+			footX, footZ := footprintCellsForCatalog(b.cat, candidate)
+			x, z := world.PlacementAnchor(wx, wz, footX, footZ)
+			_, _, ok := b.spaceResourceBuild(resourceBuildSite{product: candidate, x: x, z: z, deposit: deposit}, v.Slot)
+			return ok
+		})
+		if fitting != nil {
+			product = fitting
+		}
 		break
 	}
 	if deposit.w == 0 && geothermal != nil {

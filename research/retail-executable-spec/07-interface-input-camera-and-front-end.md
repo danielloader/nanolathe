@@ -4851,7 +4851,7 @@ definition's internal name and the page number — `ARMCOM1.GUI` is page 1 —
 and, if that window is not already open for the same unit, asks the page
 opener to open it. The opener requires the builder to be complete (remaining
 construction fraction exactly `0.0`), resolves `guis/<name>` through the VFS,
-and when the file is **absent** opens the window `"%sDL"` with the side's
+and when the file is **absent or zero bytes** opens the window `"%sDL"` with the side's
 `nameprefix` instead (`ARMDL` / `CORDL`), the download-page template whose
 `IGPATCH` product slots the generated-page assembly of §9 then patches with
 every build-menu entry whose builder matches and whose authored `PAGE` byte
@@ -4926,8 +4926,12 @@ The gadgets `"%sPREV"` and `"%sNEXT"` (prefix-named, `ARMPREV`/`ARMNEXT`)
 are hidden (`active := 0`) after a page opens when the page-count byte is
 below 2. `ONOFF` on a page shows the builder's on/off bit as its stage when
 the builder is a building (status bit 29). On a page above 0, every gadget
-with attribute bit `0x04` (a product slot) is greyed when its name does not
-resolve to a definition. Queue counts on product buttons are [R-P0-11 §2].
+with `commonattribs` bit `0x04` (a product slot) has its low grey bit set when its
+name does not resolve to a definition and cleared when it does. This replaces
+the authored `grayedout` low bit; other bits of the grey word survive. The
+product-resolution pass follows download placement and applies to ordinary
+authored pages as well as generated pages. Queue counts on product buttons
+are [R-P0-11 §2].
 
 **Established — command-button stage and grey state.** After a page opens,
 the command buttons are set from the selection-aggregate words the refresh

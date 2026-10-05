@@ -84,7 +84,7 @@ func (h *retailBattleHUD) sidebarBuildPage(cat *content.Catalog, def *content.Un
 	for _, placement := range cat.DownloadPlacementsForPage(def.CanonicalKey, page) {
 		placements = append(placements, frame.GeneratedProductPlacement{ProductKey: placement.Product, Button: placement.Button})
 	}
-	window, art, err := h.numberedPage(name, placements)
+	window, art, err := h.numberedPage(name, page, placements)
 	if err != nil {
 		// Optional extension failure keeps the selected page usable. Selecting
 		// the failing page normally still reports its original diagnostic.

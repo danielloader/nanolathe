@@ -58,8 +58,40 @@ func (h *retailBattleHUD) sidebarBuildCells(w *gui.Window, art *formats.GAF, pag
 			candidates = append(candidates, candidate{bounds, members})
 		}
 	}
-	// A run of adjacent narrow buttons can admit several different tilings.
-	// Do not choose one arbitrarily; all intersecting candidates stay individual.
+	// Adjacent composites can also tile shifted squares across their boundary.
+	// Prefer the rail's two-column grid only when it uniquely covers every
+	// candidate product. A partial row cannot justify dropping an alternative
+	// tiling (Modern host policy, DESIGN_INTERFACE_HUD_INPUT §3.3).
+	if w.Rect.W == 128 && len(candidates) > 1 {
+		top := w.PlacedRect(indices[0]).Y
+		for _, i := range indices {
+			top = min(top, w.PlacedRect(i).Y)
+		}
+		onGrid := func(c candidate) bool {
+			dx, dy := c.bounds.X-w.OriginX, c.bounds.Y-top
+			return (dx == 0 || dx == 64) && dy >= 0 && dy%64 == 0
+		}
+		coverage := make([]int, len(w.Gadgets))
+		for _, c := range candidates {
+			if onGrid(c) {
+				for _, i := range c.indices {
+					coverage[i]++
+				}
+			}
+		}
+		complete := true
+		for _, c := range candidates {
+			for _, i := range c.indices {
+				if coverage[i] != 1 {
+					complete = false
+				}
+			}
+		}
+		if complete {
+			candidates = slices.DeleteFunc(candidates, func(c candidate) bool { return !onGrid(c) })
+		}
+	}
+	// Without a complete grid cover, keep all competing tilings individual.
 	memberships := make([]int, len(w.Gadgets))
 	for _, c := range candidates {
 		for _, i := range c.indices {

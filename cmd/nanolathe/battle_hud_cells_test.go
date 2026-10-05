@@ -107,7 +107,7 @@ func TestCompositeBuildCellRejectsAmbiguousGeometry(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			w := &gui.Window{Gadgets: []gui.Gadget{{Kind: gui.KindPanel}}}
+			w := &gui.Window{Rect: gui.Rect{W: 128}, Gadgets: []gui.Gadget{{Kind: gui.KindPanel}}}
 			var indices []int
 			for _, r := range tc.rects {
 				indices = append(indices, len(w.Gadgets))
@@ -118,5 +118,37 @@ func TestCompositeBuildCellRejectsAmbiguousGeometry(t *testing.T) {
 				t.Fatalf("ambiguous layout collapsed %d buttons into %d cells", len(tc.rects), len(cells))
 			}
 		})
+	}
+}
+
+func TestCompositeBuildCellsKeepAdjacentFactoriesOnAuthoredGrid(t *testing.T) {
+	// Three vertical pieces beside a four-piece square also admit squares
+	// shifted across their boundary. Their complete two-column cover owns the
+	// grouping, including when the source has an offset origin and tab row.
+	w := &gui.Window{Rect: gui.Rect{W: 128}, OriginX: 9, OriginY: 128, Gadgets: []gui.Gadget{{Kind: gui.KindPanel}}}
+	rects := []gui.Rect{
+		{X: 16, Y: 27, W: 32, H: 64}, {Y: 27, W: 16, H: 64}, {X: 48, Y: 27, W: 16, H: 64},
+		{X: 80, Y: 59, W: 32, H: 32}, {X: 112, Y: 27, W: 16, H: 64}, {X: 80, Y: 27, W: 32, H: 32}, {X: 64, Y: 27, W: 16, H: 64},
+	}
+	var indices []int
+	for _, r := range rects {
+		indices = append(indices, len(w.Gadgets))
+		w.Gadgets = append(w.Gadgets, gui.Gadget{Kind: gui.KindButton, Active: 1, CommonAttribs: 4, Name: "product", Rect: r})
+	}
+	cells := (&retailBattleHUD{}).sidebarBuildCells(w, nil, 1, indices)
+	if len(cells) != 2 || len(cells[0].products) != 3 || len(cells[1].products) != 4 {
+		t.Fatalf("adjacent factories split: %+v", cells)
+	}
+	for n, cell := range cells {
+		if cell.bounds != (gui.Rect{X: 9 + int32(n)*64, Y: 155, W: 64, H: 64}) {
+			t.Fatalf("factory %d bounds=%+v", n, cell.bounds)
+		}
+		for _, product := range cell.products {
+			r := w.PlacedRect(product.source.index)
+			r.X, r.Y = r.X-cell.bounds.X, r.Y-cell.bounds.Y
+			if product.rect != r {
+				t.Fatalf("child shape changed: %+v want %+v", product.rect, r)
+			}
+		}
 	}
 }

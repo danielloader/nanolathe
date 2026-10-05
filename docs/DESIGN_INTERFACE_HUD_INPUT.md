@@ -1729,7 +1729,8 @@ extended-slot safety, mixed groups, product reachability and resize anchoring.
 `TestRetailOversizedModMenus` optionally checks all installed commander products
 and Orders for every authored faction at 480, 768 and 1080 pixels under both renderer
 selections. Supply
-`NANOLATHE_MOD_ROOTS_PROTA` and `NANOLATHE_MOD_ROOTS_ZERO` as host path lists,
+`NANOLATHE_MOD_ROOTS_PROTA`, `NANOLATHE_MOD_ROOTS_ZERO` and
+`NANOLATHE_MOD_ROOTS_TWILIGHT` as host path lists,
 with the usual retail asset variable; `NANOLATHE_MENU_SHOTS` saves HUD
 captures outside the repository. The capture is the common software HUD
 composition with the selected Classic or Modern sidebar policy; it does not
@@ -1763,7 +1764,11 @@ slots and inactive records; retain duplicate real entries and separate direction
 shipyard definitions. CANBUILD is neither a source of button identities nor a
 button-state or placement gate: a physical page may name a product that differs
 from CANBUILD (ARMPLAT's ARMCSA, CORCS's CORSY and CORLLT), and such a cell greys
-only when its name resolves to no definition [07 R-HUD-03 §6]. Do not reconstruct this list from membership or infer
+only when its name resolves to no definition [07 R-HUD-03 §6]. Opening a
+numbered page above zero replaces the authored low grey bit with that resolution
+result after
+download placement, preserving the higher bits, before either sidebar copies
+the records. Custom page zero retains its authored enabledness. Do not reconstruct this list from membership or infer
 relationships from unit-name suffixes. Arbitrary building rotation is deferred.
 
 Each list entry is one logical cell containing one or more product buttons.
@@ -1776,7 +1781,14 @@ placements and art resolution, group multiple active, resolved products only
 when their positive hit rectangles completely tile a 64-by-64 square on the same
 source page, without overlap, crossing products, or artwork extending outside
 a child's rectangle. The candidate square starts at an authored child corner;
-if multiple possible tilings share any child, leave those products separate.
+if multiple possible tilings share any child, leave those products separate
+unless the source is a 128-pixel rail and its two-column grid uniquely covers
+every product participating in a candidate tiling. That grid uses the window's
+horizontal origin and the topmost resolved product row, with 64-pixel steps.
+Keep only grid-aligned candidates when that cover is complete; a partial cover
+retains the ambiguity fallback. This prevents shifted squares across adjacent
+Twilight factory composites from competing with their own complete cells,
+without grouping a partial strip run or consulting product names.
 Do not group merely because four nearby icons exist, and do not consult unit
 names, mod identities or gameplay relationships. Sparse, overlapping or otherwise ambiguous layouts retain individual normalized
 cells; duplicate product records are never removed. Empty slots
@@ -1880,14 +1892,19 @@ new builder, changed selection or external authored-page change seeds the view
 from that source page. Renderer/preference changes discard local paging state.
 Compile the immutable list independently of the composed-window cache so page
 changes and resizes do not re-extract all source pages. Source windows, catalogs
-and committed frames must not be mutated. Resize, selection/page changes and
-renderer/preference switches retire stale retained pointer capture.
+and committed frames must not be mutated by expansion. Resize, selection/page
+changes and renderer/preference switches retire stale retained pointer capture.
+
+Numbered GUI files with zero bytes follow the absent-page DL fallback, matching
+the catalog's probe and the TDF loader [02 R-MALF-01 §1]; nonempty malformed
+pages retain their errors. A base-install download may raise the page count
+even when a mod overlays that page with an empty file [07 R-HUD-03 §6].
 
 Verification covers ordered exact product coverage across physical and generated
 pages, empty slots, duplicates, mixed artwork dimensions, short and tall surfaces,
 resize anchoring, source identity, factory button identity, custom Orders,
 shared input/shortcuts, composite tiling ambiguity, indivisible child groups,
-fallback and capture retirement. Installed OTA, ProTA and
+fallback and capture retirement. Installed OTA, ProTA, Twilight and
 Zero checks exercise all factions and visually inspect normalized products and
 controls. OTA coverage must also enter after the completed front-end transition
 and select every builder with authored product pages, including foreign-faction
@@ -2996,9 +3013,19 @@ plant, or on ordinary ground to build a solar collector. Every
 Shift-double-click appends, preserving the normal queue-command modifier. The
 typed mobile-build command carries explicit `Queued` and `AppendOnly` intent: existing work is
 preserved; a repeated site is moved clear of queued footprints instead of
-using the manual Shift-placement removal gesture. The complete authored build
-menu supplies candidates, independent of the currently displayed page. Equal
-extractor strengths and multiple solar or geothermal candidates retain authored menu order.
+using the manual Shift-placement removal gesture. Candidates must occur both
+in the rule-selected construction membership and as active, enabled product
+buttons on the builder's human GUI pages, including generated download pages.
+All pages participate, independent of the currently displayed page. CANBUILD
+alone also contains products reserved for the computer player and cannot
+establish human availability. Equal extractor strengths and multiple solar or
+geothermal candidates retain construction-membership order. Missing or
+unresolved human pages never fall back to the AI construction list. For a metal
+deposit, prefer the strongest candidate that the ordinary placement and queued
+footprint preview admits there; this preserves underwater products on water
+without choosing them for land. If none fits, retain the strongest human
+candidate and the existing refusal path. This changes input selection only,
+never placement legality or the simulation's build admission.
 Factories, unit targets, other features, armed commands, HUD and minimap input
 keep their existing paths. Classic does not use this shortcut.
 

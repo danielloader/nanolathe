@@ -20,6 +20,7 @@ var modRootsConfig = map[string]string{
 	"zero":       "ta-zero-alpha5-20241224",
 	"escalation": "escalation-10.2.0",
 	"mayhem":     "mayhem-11.3.0",
+	"twilight":   "twilight-2.0-beta98",
 }
 
 // modRootsConfigPath is the --mod-config path for a NANOLATHE_MOD_ROOTS_*

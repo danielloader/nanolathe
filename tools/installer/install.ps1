@@ -34,6 +34,18 @@ function Read-NanolatheManifest([string]$Text) {
     return $values
 }
 
+function Get-NanolatheMainRevision([int]$TimeoutSeconds = 30) {
+    $path = Join-Path ([IO.Path]::GetTempPath()) ('nanolathe-main-' + [guid]::NewGuid().ToString('N'))
+    try {
+        Get-NanolatheUpdateDownload 'https://api.github.com/repos/nanolathe-gg/nanolathe/commits/main' $path $TimeoutSeconds 'application/vnd.github.sha'
+        $revision = [IO.File]::ReadAllText($path).Trim()
+        if ($revision -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid main commit returned by GitHub.' }
+        return $revision
+    } finally {
+        if ([IO.File]::Exists($path)) { [IO.File]::Delete($path) }
+    }
+}
+
 function Resolve-NanolatheWindowsArchitecture([int[]]$NativeArchitectures, [bool]$Is64BitProcess) {
     if (!$Is64BitProcess) { throw 'Run 64-bit PowerShell to install Nanolathe.' }
     # Native CPU information also identifies ARM64 from an emulated x64 shell.
@@ -57,7 +69,7 @@ function Get-NanolatheDownload([string]$Url, [string]$Path, [string]$Hash) {
 }
 
 function Expand-NanolatheArchive([string]$Archive, [string]$Destination) {
-    Write-Host "Extracting verified archive: $Archive"
+    Write-Host "Extracting archive: $Archive"
     # Use the Framework ZIP implementation to avoid per-entry PowerShell
     # overhead. Callers supply a fresh directory inside the temporary workspace.
     Add-Type -AssemblyName System.IO.Compression
@@ -91,12 +103,16 @@ function Publish-NanolatheRelease([string]$Base, [string]$Stage, [string]$Name, 
 }
 
 # Launch-time updates are host installation policy; see tools/installer/README.md.
-function Get-NanolatheUpdateDownload([string]$Url, [string]$Path, [int]$TimeoutSeconds) {
+function Get-NanolatheUpdateDownload([string]$Url, [string]$Path, [int]$TimeoutSeconds, [string]$Accept = 'application/octet-stream') {
     Add-Type -AssemblyName System.Net.Http
     $handler = New-Object Net.Http.HttpClientHandler
     # The public endpoints are fixed HTTPS URLs. A redirect is a failed check.
     $handler.AllowAutoRedirect = $false
     $client = New-Object Net.Http.HttpClient($handler)
+    $client.DefaultRequestHeaders.UserAgent.ParseAdd('Nanolathe-installer')
+    $client.DefaultRequestHeaders.Accept.ParseAdd($Accept)
+    $client.DefaultRequestHeaders.CacheControl = New-Object Net.Http.Headers.CacheControlHeaderValue
+    $client.DefaultRequestHeaders.CacheControl.NoCache = $true
     $response = $null
     $tlsBefore = [Net.ServicePointManager]::SecurityProtocol
     try {
@@ -170,11 +186,18 @@ function Invoke-NanolatheUpdate([string]$Base, [string]$Release) {
         $manifestPath = Join-Path $temporary 'release.txt'
         Get-NanolatheUpdateDownload 'https://nanolathe.gg/install/release.txt' $manifestPath 3
         $available = Read-NanolatheManifest ([IO.File]::ReadAllText($manifestPath))
-        if ($available.source_revision -ceq $installed.source_revision) { return $null }
+        $installedRevision = $installed.source_revision
+        $revisionPath = Join-Path $selected 'source-revision'
+        if ([IO.File]::Exists($revisionPath)) {
+            $installedRevision = [IO.File]::ReadAllText($revisionPath).Trim()
+            if ($installedRevision -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid installed commit.' }
+        }
+        $revision = Get-NanolatheMainRevision 3
+        if ($revision -ceq $installedRevision) { return $null }
         if (!$available.ContainsKey('installer_ps1_sha256') -or $available.installer_ps1_sha256 -cnotmatch '^[0-9a-fA-F]{64}$') {
             throw 'Missing or invalid installer checksum.'
         }
-        if (!(Confirm-NanolatheUpdate $available.version)) { return $null }
+        if (!(Confirm-NanolatheUpdate ('main-' + $revision.Substring(0,12)))) { return $null }
         Write-Host 'Updating Nanolathe. The build may take several minutes...'
         $installerPath = Join-Path $temporary 'install.ps1'
         Get-NanolatheUpdateDownload 'https://nanolathe.gg/install.ps1' $installerPath 60
@@ -286,7 +309,7 @@ try {
 }
 '@
     $helpers = foreach ($name in @('Read-NanolatheManifest', 'Test-NanolatheChecksum',
-        'Get-NanolatheUpdateDownload', 'Confirm-NanolatheUpdate', 'Invoke-NanolatheUpdate')) {
+        'Get-NanolatheUpdateDownload', 'Get-NanolatheMainRevision', 'Confirm-NanolatheUpdate', 'Invoke-NanolatheUpdate')) {
         "function $name {`n" + (Get-Item "function:$name").Definition + "`n}"
     }
     return $template.Replace('UPDATE_HELPERS', ($helpers -join "`n"))
@@ -310,6 +333,15 @@ try {
     return '-NoProfile -STA -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
 }
 
+function Set-NanolatheShortcutProperties($Shortcut, [string]$Base, [string]$Release) {
+    $Shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $Shortcut.Arguments = Get-NanolatheLaunchCommand $Base
+    $Shortcut.WorkingDirectory = $Base
+    $Shortcut.Description = 'Play Nanolathe using your Total Annihilation game assets'
+    # The icon lives beside the selected release, outside the temporary build.
+    $Shortcut.IconLocation = (Join-Path $Release 'Nanolathe.ico') + ',0'
+}
+
 function Invoke-NanolatheInstaller {
     # Windows PowerShell 5.1 renders progress for each download chunk. Suppress
     # that overhead only in this invocation; explicit stage messages remain.
@@ -320,7 +352,7 @@ Nanolathe source installer for x64 and ARM64 Windows (PowerShell 5.1 or later).
 Usage: & ([scriptblock]::Create((irm https://nanolathe.gg/install.ps1))) [-Root PATH] [-NoRun]
 Rerun the same command to update. -NoRun skips game-folder selection and launch.
 Set NANOLATHE_INSTALL_DIR to override the default LOCALAPPDATA\Nanolathe folder.
-Downloads verified source and a private Go compiler. Original game assets are required to play.
+Builds the latest commit on main with a checksum-verified private Go compiler. Original game assets are required to play.
 '@
         return
     }
@@ -349,7 +381,9 @@ Downloads verified source and a private Go compiler. Original game assets are re
         Write-Host 'Downloading release manifest...'
         $manifestText = (Invoke-WebRequest -UseBasicParsing -Uri 'https://nanolathe.gg/install/release.txt' -TimeoutSec 60).Content
         $manifest = Read-NanolatheManifest $manifestText
-        Write-Host "Release manifest verified: $($manifest.version)"
+        $revision = Get-NanolatheMainRevision
+        $version = 'main-' + $revision.Substring(0,12)
+        Write-Host "Building main commit: $revision"
         $work = Join-Path $base ('work-' + [guid]::NewGuid().ToString('N'))
         [void][IO.Directory]::CreateDirectory($work)
         $goHash = $manifest["go_windows_${goArch}_sha256"]
@@ -365,10 +399,12 @@ Downloads verified source and a private Go compiler. Original game assets are re
             [IO.Directory]::Move($unpack, $toolchain)
         }
         $archive = Join-Path $work 'source.zip'
-        Get-NanolatheDownload "https://codeload.github.com/nanolathe-gg/nanolathe/zip/$($manifest.source_revision)" $archive $manifest.source_zip_sha256
+        # Source hashes in the manifest belong to its legacy pinned commit.
+        # Fetch current main over HTTPS using the immutable commit resolved above.
+        Invoke-WebRequest -UseBasicParsing -Uri "https://codeload.github.com/nanolathe-gg/nanolathe/zip/$revision" -OutFile $archive -TimeoutSec 600
         $unpack = Join-Path $work 'source'
         Expand-NanolatheArchive $archive $unpack
-        $source = Join-Path $unpack ('nanolathe-' + $manifest.source_revision)
+        $source = Join-Path $unpack ('nanolathe-' + $revision)
         if (!(Test-Path -LiteralPath (Join-Path $source 'go.sum'))) { throw 'Source archive is missing go.sum.' }
         $sumBefore = (Get-FileHash -LiteralPath (Join-Path $source 'go.sum') -Algorithm SHA256).Hash
         $environment = @{
@@ -383,18 +419,18 @@ Downloads verified source and a private Go compiler. Original game assets are re
             $savedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
             [Environment]::SetEnvironmentVariable($key, $environment[$key], 'Process')
         }
-        $name = $manifest.version + '-' + $manifest.source_revision + '-' + [guid]::NewGuid().ToString('N')
+        $name = $version + '-' + $revision + '-' + [guid]::NewGuid().ToString('N')
         $stage = Join-Path $base ('stage-' + [guid]::NewGuid().ToString('N'))
         [void][IO.Directory]::CreateDirectory($stage)
         # The common build manifest (docs/DESIGN_MULTIPLAYER.md section 8.7) is stamped
-        # into the verified source before the build, from the verified archive,
+        # into the resolved source before the build, from the downloaded archive,
         # so every platform's install of this release names one build. These
         # build arguments are the Unix installer's: one common manifest needs
         # one argument list. Each is passed to the stamp as an -arg value,
         # since Windows PowerShell can drop a bare "--" before a native command.
         $buildArgs = @('-mod=readonly', '-trimpath', '-buildvcs=false', '-ldflags=-s -w', './cmd/nanolathe')
         $stampArgs = @($buildArgs | ForEach-Object { '-arg=' + $_ }) + @(
-            '-source', (Join-Path $work 'source.zip'), '-prefix', ('nanolathe-' + $manifest.source_revision + '/'), '-write', $source, '-cgo', '0',
+            '-source', (Join-Path $work 'source.zip'), '-prefix', ('nanolathe-' + $revision + '/'), '-write', $source, '-cgo', '0',
             '-variant', ('darwin/amd64/v1=' + $manifest.go_darwin_amd64_sha256), '-variant', ('darwin/arm64/v8.0=' + $manifest.go_darwin_arm64_sha256),
             '-variant', ('linux/amd64/v1=' + $manifest.go_linux_amd64_sha256), '-variant', ('linux/arm64/v8.0=' + $manifest.go_linux_arm64_sha256),
             '-variant', ('windows/amd64/v1=' + $manifest.go_windows_amd64_sha256), '-variant', ('windows/arm64/v8.0=' + $manifest.go_windows_arm64_sha256))
@@ -422,6 +458,9 @@ Downloads verified source and a private Go compiler. Original game assets are re
         } finally { Pop-Location }
         [IO.File]::WriteAllText((Join-Path $stage 'launch.ps1'), (Get-NanolatheLauncher), (New-Object Text.UTF8Encoding($false)))
         [IO.File]::WriteAllText((Join-Path $stage 'release.txt'), $manifestText, (New-Object Text.UTF8Encoding($false)))
+        [IO.File]::WriteAllText((Join-Path $stage 'source-revision'), $revision, (New-Object Text.UTF8Encoding($false)))
+        # The icon is part of the resolved source commit archive.
+        [IO.File]::Copy((Join-Path $source 'tools\installer\windows\Nanolathe.ico'), (Join-Path $stage 'Nanolathe.ico'))
         $release = Publish-NanolatheRelease $base $stage $name {
             param($exe)
             $ErrorActionPreference = 'Continue'
@@ -437,17 +476,13 @@ Downloads verified source and a private Go compiler. Original game assets are re
             try {
                 $temporaryShortcut = Join-Path $work 'Nanolathe.lnk'
                 $shortcut = $shell.CreateShortcut($temporaryShortcut)
-                $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-                $shortcut.Arguments = Get-NanolatheLaunchCommand $base
-                $shortcut.WorkingDirectory = $base
-                $shortcut.Description = 'Play Nanolathe using your Total Annihilation game assets'
-                $shortcut.IconLocation = (Join-Path $destination 'nanolathe.exe') + ',0'
+                Set-NanolatheShortcutProperties $shortcut $base $destination
                 $shortcut.Save()
                 [IO.File]::Copy($temporaryShortcut, (Join-Path ([Environment]::GetFolderPath('Programs')) 'Nanolathe.lnk'), $true)
             } finally { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
         }
         $stage = $null
-        Write-Host "Installed $($manifest.version). Launch Nanolathe from the Start Menu."
+        Write-Host "Installed $version. Launch Nanolathe from the Start Menu."
         Write-Host "Settings and saves: $base"
     } catch {
         Write-Host "Nanolathe installation failed: $($_.Exception.Message)" -ForegroundColor Red

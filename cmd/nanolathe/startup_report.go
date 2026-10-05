@@ -25,14 +25,11 @@ func writeStartupSystemReport(w io.Writer) {
 	info, _ := debug.ReadBuildInfo()
 	revision, modified, engine := startupBuildIdentity(info)
 	// Source installers build an archive without VCS metadata and place the
-	// pinned release manifest beside the executable (tools/installer/README.md).
+	// actual source revision beside the executable (tools/installer/README.md).
 	if revision == "unavailable" {
 		if exe, err := os.Executable(); err == nil {
-			if f, err := os.Open(filepath.Join(filepath.Dir(exe), "release.txt")); err == nil {
-				if installed := installedSourceRevision(f); installed != "" {
-					revision = installed + " (release manifest)"
-				}
-				_ = f.Close()
+			if installed := startupInstalledRevision(filepath.Dir(exe)); installed != "" {
+				revision = installed
 			}
 		}
 	}
@@ -81,6 +78,27 @@ func startupBuildIdentity(info *debug.BuildInfo) (revision, modified, engine str
 		}
 	}
 	return
+}
+
+func startupInstalledRevision(directory string) string {
+	if f, err := os.Open(filepath.Join(directory, "source-revision")); err == nil {
+		data, readErr := io.ReadAll(io.LimitReader(f, 128))
+		_ = f.Close()
+		revision := strings.TrimSpace(string(data))
+		if readErr == nil && len(revision) == 40 {
+			if _, err := hex.DecodeString(revision); err == nil {
+				return revision + " (installed source)"
+			}
+		}
+	}
+	// Older installers only recorded the pinned source in their release manifest.
+	if f, err := os.Open(filepath.Join(directory, "release.txt")); err == nil {
+		defer f.Close()
+		if revision := installedSourceRevision(f); revision != "" {
+			return revision + " (release manifest)"
+		}
+	}
+	return ""
 }
 
 func installedSourceRevision(r io.Reader) string {

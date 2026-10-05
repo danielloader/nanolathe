@@ -15,6 +15,7 @@ import unittest
 
 INSTALLER = Path(__file__).with_name("install.sh").resolve()
 REVISION = "a" * 40
+MAIN_URL = "https://api.github.com/repos/nanolathe-gg/nanolathe/commits/main"
 
 
 def archive(path, files):
@@ -54,6 +55,7 @@ done
 printf '%s\\n' "$url" >> "$FIXTURE_DIR/downloads"
 if [ -n "${NANOLATHE_UPDATE_STATUS:-}" ]; then cat "$NANOLATHE_UPDATE_STATUS" >> "$FIXTURE_DIR/progress-stages"; fi
 case "$url" in
+  https://api.github.com/*) [ "${MAIN_OFFLINE:-0}" = 0 ] || exit 28; if [ -n "${MAIN_REVISION:-}" ]; then printf '%s' "$MAIN_REVISION"; else cat "$FIXTURE_DIR/main-revision"; fi ;;
   */release.txt) [ "${OFFLINE:-0}" = 0 ] || exit 28; cp "$FIXTURE_DIR/release.txt" "$target" ;;
   https://nanolathe.gg/install.sh) sleep "${UPDATE_DOWNLOAD_DELAY:-0}"; cp "$FIXTURE_DIR/install.sh" "$target" ;;
   https://go.dev/dl/*) cp "$FIXTURE_DIR/go.tar.gz" "$target" ;;
@@ -89,6 +91,7 @@ chmod +x "$output"
         self.source_hash = self.source_archive(REVISION)
         (self.path / "install.sh").write_bytes(INSTALLER.read_bytes())
         self.manifest()
+        (self.path / "main-revision").write_text(REVISION)
 
     def write_command(self, name, data):
         path = self.bin / name
@@ -125,10 +128,23 @@ chmod +x "$output"
         self.install("--no-run", success=False)
         self.assertFalse((self.path / "builds").exists())
         self.assertFalse((self.base / "current").exists())
-        self.manifest(source_tar_sha256="0" * 64)
-        self.install("--no-run", success=False)
-        self.assertFalse((self.path / "builds").exists())
-        self.assertFalse((self.base / "current").exists())
+
+    def test_resolves_main_independently_of_manifest(self):
+        self.manifest(source_revision="b" * 40, source_tar_sha256="0" * 64)
+        self.install("--no-run")
+        release = (self.base / "current").resolve()
+        self.assertEqual((release / "source-revision").read_text().strip(), REVISION)
+        self.assertIn("main-" + REVISION[:12], release.name)
+        self.assertIn("/tar.gz/" + REVISION, (self.path / "downloads").read_text())
+
+    def test_main_resolution_failure_preserves_release(self):
+        self.install("--no-run")
+        previous = (self.base / "current").resolve()
+        for environment in ({"MAIN_OFFLINE": "1"}, {"MAIN_REVISION": "invalid"},
+                            {"MAIN_REVISION": "$(touch injected)"}):
+            self.install("--no-run", success=False, **environment)
+            self.assertEqual((self.base / "current").resolve(), previous)
+        self.assertEqual((self.path / "builds").read_text(), "built")
 
     def test_failed_update_preserves_release(self):
         self.install("--no-run", "--root", str(self.root))
@@ -140,7 +156,7 @@ chmod +x "$output"
         downloads = (self.path / "downloads").read_text()
         self.assertEqual(downloads.count("https://go.dev/"), 1)
 
-    def test_build_is_stamped_from_the_verified_archive_and_stamp_failure_keeps_release(self):
+    def test_build_is_stamped_from_the_resolved_archive_and_stamp_failure_keeps_release(self):
         self.install("--no-run")
         stamp = (self.path / "stamps").read_text()
         for want in ("./internal/version/stampgen", "-source", "source.tar.gz", f"nanolathe-{REVISION}/", "-cgo 0",
@@ -170,7 +186,8 @@ chmod +x "$output"
         self.install("--no-run", success=False)
         self.assertEqual((self.base / "current").resolve(), before)
 
-    def test_spaces_and_launch_only_downloads_manifest(self):
+    def test_stale_manifest_does_not_offer_current_main_again(self):
+        self.manifest(source_revision="b" * 40)
         self.install("--no-run", "--root", str(self.root))
         before = (self.path / "downloads").read_text()
         result = subprocess.run(["/bin/bash", str(self.base / "launch.sh")], env=self.env, capture_output=True)
@@ -179,7 +196,7 @@ chmod +x "$output"
                          ["--root", str(self.root), "--save-dir", str(self.base / "saves")])
         self.assertEqual((self.path / "settings-path").read_text().strip(), str(self.base / "settings.json"))
         self.assertEqual((self.path / "downloads").read_text(),
-                         before + "https://nanolathe.gg/install/release.txt\n")
+                         before + "https://nanolathe.gg/install/release.txt\n" + MAIN_URL + "\n")
         desktop = (self.home / "share/applications/nanolathe.desktop").read_text()
         self.assertIn("Terminal=true", desktop)
         self.assertIn(r"\\$literal", desktop)
@@ -210,6 +227,27 @@ chmod +x "$output"
         result = subprocess.run(["/bin/bash", str(app / "MacOS/Nanolathe")], env=self.env, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.path / "launch-args").exists())
+
+    @unittest.skipUnless(os.uname().sysname == "Darwin", "native macOS app update test")
+    def test_macos_update_refreshes_existing_app_and_icon(self):
+        self.write_command("uname", '#!/bin/bash\ncase "$1" in -s) echo Darwin ;; -m) echo arm64 ;; esac\n')
+        self.write_command("codesign", '#!/bin/bash\nprintf signed >> "$FIXTURE_DIR/signed"\n')
+        previous = self.prepare_update()
+        app = self.home / "Applications/Nanolathe.app"
+        plistPath = app / "Contents/Info.plist"
+        with plistPath.open("rb") as file:
+            plist = plistlib.load(file)
+        del plist["CFBundleIconFile"]
+        plistPath.write_bytes(plistlib.dumps(plist))
+        icon = app / "Contents/Resources/Nanolathe.icns"
+        icon.write_bytes(b"old icon")
+        self.install("--no-run")
+        selected = (self.base / "current").resolve()
+        self.assertNotEqual(selected, previous)
+        with plistPath.open("rb") as file:
+            self.assertEqual(plistlib.load(file)["CFBundleIconFile"], "Nanolathe.icns")
+        self.assertEqual(icon.read_bytes(), (selected / "Nanolathe.icns").read_bytes())
+        self.assertEqual((self.path / "signed").read_text(), "signedsigned")
 
     def run_terminal(self, command, prompt, answer, **environment):
         # Establish a controlling terminal while the command may have piped stdin.
@@ -257,7 +295,7 @@ chmod +x "$output"
         previous = (self.base / "current").resolve()
         revision = "c" * 40
         self.source_hash = self.source_archive(revision)
-        self.manifest(source_revision=revision)  # Deliberately retain the version label.
+        (self.path / "main-revision").write_text(revision)  # Website manifest stays unchanged.
         (self.path / "downloads").write_text("")
         (self.path / "curl-options").write_text("")
         return previous
@@ -290,15 +328,15 @@ chmod +x "$output"
         self.assert_played(selected)
         self.assertEqual((self.base / "game-root").read_text().strip(), str(self.root))
         downloads = (self.path / "downloads").read_text().splitlines()
-        self.assertEqual(downloads, ["https://nanolathe.gg/install/release.txt",
+        self.assertEqual(downloads, ["https://nanolathe.gg/install/release.txt", MAIN_URL,
                                      "https://nanolathe.gg/install.sh",
-                                     "https://nanolathe.gg/install/release.txt",
+                                     "https://nanolathe.gg/install/release.txt", MAIN_URL,
                                      "https://codeload.github.com/nanolathe-gg/nanolathe/tar.gz/" + "c" * 40])
         options = (self.path / "curl-options").read_text().splitlines()
         self.assertTrue(options[0].startswith("--disable "))
         self.assertIn("--max-time 3", options[0])
         self.assertIn("--proto-redir =https", options[0])
-        self.assertIn("--max-time 60", options[1])
+        self.assertIn("--max-time 60", options[2])
 
     def test_declined_update_keeps_current_without_payload_download(self):
         previous = self.prepare_update()
@@ -306,7 +344,7 @@ chmod +x "$output"
         self.assertTrue(answered, output)
         self.assert_played(previous)
         self.assertEqual((self.path / "downloads").read_text().splitlines(),
-                         ["https://nanolathe.gg/install/release.txt"])
+                         ["https://nanolathe.gg/install/release.txt", MAIN_URL])
         self.assertEqual((self.path / "builds").read_text(), "built")
 
     def test_unattended_update_keeps_current_without_prompt(self):
@@ -319,17 +357,19 @@ chmod +x "$output"
         self.assertEqual((self.path / "launched-binaries").read_text().splitlines(),
                          [str(previous / "nanolathe")])
         self.assertEqual((self.path / "downloads").read_text().splitlines(),
-                         ["https://nanolathe.gg/install/release.txt"])
+                         ["https://nanolathe.gg/install/release.txt", MAIN_URL])
 
     def test_failed_check_never_prompts_and_plays_current(self):
         previous = self.prepare_update()
         valid = (self.path / "release.txt").read_text()
         cases = [
-            (valid.replace("c" * 40, REVISION), {}),
+            (valid, {"MAIN_REVISION": REVISION}),
+            (valid, {"MAIN_REVISION": "invalid"}),
+            (valid, {"MAIN_OFFLINE": "1"}),
             (valid, {"OFFLINE": "1"}),
             (valid + "version=duplicate\n", {}),
             (valid.replace("version=alpha.1", "version=$(touch injected)"), {}),
-            (valid.replace("source_revision=" + "c" * 40 + "\n", ""), {}),
+            (valid.replace("source_revision=" + REVISION + "\n", ""), {}),
             (valid.replace("go_version=1.25.0", "go_version=bad"), {}),
             ("\n" + valid, {}),
             (valid.replace("version=alpha.1", "version=alpha.\x001"), {}),
@@ -343,8 +383,10 @@ chmod +x "$output"
                 answered, output = self.launch_update(**environment)
                 self.assertFalse(answered, output)
                 self.assert_played(previous)
-                self.assertEqual((self.path / "downloads").read_text().splitlines(),
-                                 ["https://nanolathe.gg/install/release.txt"])
+                expected = ["https://nanolathe.gg/install/release.txt"]
+                if "MAIN_REVISION" in environment or "MAIN_OFFLINE" in environment:
+                    expected.append(MAIN_URL)
+                self.assertEqual((self.path / "downloads").read_text().splitlines(), expected)
 
     def test_update_checksum_or_build_failure_plays_previous(self):
         previous = self.prepare_update()

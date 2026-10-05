@@ -1,6 +1,6 @@
 # Source installer
 
-The public alpha installer builds a pinned source release on the player's own
+The public alpha installer builds the latest commit on `main` on the player's
 computer. It downloads a private Go toolchain and dependencies, creates a
 shortcut, and starts the game. Original Total Annihilation assets are supplied
 by the player. This is Nanolathe host installation policy, not retail behavior.
@@ -19,10 +19,10 @@ Windows x64 or ARM64, in PowerShell:
 & ([scriptblock]::Create((irm https://nanolathe.gg/install.ps1)))
 ```
 
-The shortcut checks `https://nanolathe.gg/install/release.txt` at launch. If its
-source revision differs from the installed release, it offers **Update & play**
+The shortcut checks the latest commit on `main` at launch. If it
+differs from the installed release, it offers **Update & play**
 or **Play current version**. The check has a short timeout; an unavailable or
-invalid manifest leaves the installed game usable. Declining the update also
+invalid response leaves the installed game usable. Declining the update also
 starts the current build. Downloads and compilation only happen after accepting
 an update, or when you run the install command yourself.
 
@@ -62,16 +62,19 @@ can block it without that option. The installers do not change security policy.
 | Linux | `$XDG_DATA_HOME/nanolathe`, or `~/.local/share/nanolathe` | `$XDG_DATA_HOME/applications/nanolathe.desktop`, or `~/.local/share/applications/nanolathe.desktop` |
 | Windows | `%LOCALAPPDATA%\Nanolathe` | Nanolathe in the user's Start Menu |
 
-The Mac app uses the Nanolathe website's green N mark as its Finder icon.
-Its icon and update-window script are copied from the verified source release;
-they require no separate download.
+The Mac app and Windows Start Menu shortcut use the Nanolathe website's green
+N mark. Their icons, and the Mac update-window script, are copied from the
+resolved source commit; they require no separate download. Every successful
+install or update refreshes the existing Mac app bundle or Windows shortcut.
+The Windows icon stays in its installed release directory, so deleting the
+temporary download and build files cannot remove it.
 
 Within the installation directory:
 
 - `saves`: newly written `.SAV` files.
 - `settings.json`: launcher-specific preferences.
 - `logs`: installation and game diagnostics.
-- `releases`: versioned builds, each with the exact `release.txt` manifest.
+- `releases`: versioned builds, each with the toolchain `release.txt` manifest and actual `source-revision`.
 - `toolchains` and `cache`: private Go installation, dependencies, and build cache.
 - Unix `current` symlink or Windows `current.txt`: selected release.
 - Unix `game-root` or Windows `root.txt`: the remembered game-data directory.
@@ -90,7 +93,8 @@ lines and the error). Startup records the build/source revision, OS and CPU
 architecture, Go runtime, content profile/mod, archive counts and provider
 precedence, map count and skipped maps, effective game/display settings, load
 times, heap allocation, graphics backend and configured audio rate. The source
-revision comes from the installed release manifest when VCS metadata is absent.
+revision comes from `source-revision` when VCS metadata is absent, falling
+back to the release manifest for older installations.
 Rejected archives and unreadable maps include their provider names. More than
 ten HPI archives is valid and does not produce a warning. Manual launches write
 these diagnostics to standard error; capture them with `2>nanolathe.log`.
@@ -134,17 +138,21 @@ compiler and cache too. The original TA installation remains separate.
 ## Release maintenance
 
 The canonical scripts live here; the website serves byte-for-byte copies as
-`/install.sh` and `/install.ps1`. A website-owned `/install/release.txt` pins the
-source commit, source archive hashes, Go patch version, and per-platform Go
-archive hashes. Manifest data is never evaluated as code. Downloads use HTTPS;
-hashes pin the expected bytes but are not a separate publisher signature.
+`/install.sh` and `/install.ps1`. A website-owned `/install/release.txt` records a
+legacy source snapshot and pins the Go patch version, per-platform Go archive
+hashes, and public installer hashes.
+Installers resolve current `main` once and fetch its immutable archive over
+GitHub HTTPS, recording the commit in `source-revision`; the legacy source
+archive hashes do not verify current-main downloads. Manifest data is never
+evaluated as code. Downloads use HTTPS; hashes pin the expected bytes but are not
+a separate publisher signature.
 
 1. Integrate changes and run `tools/check`, `tools/check-retail`, and the native
    **Source installer** CI workflow. Offline tests run with
    `python3 tools/installer/test_install.py` and
    `powershell -NoProfile -File tools/installer/test-install.ps1`.
 2. Push the tested engine commit. In the website checkout, run
-   `python3 scripts/prepare-source-release.py --engine /path/to/nanolathe --revision FULL_COMMIT --version RELEASE_LABEL --go-version GO_PATCH`.
+   `python3 scripts/prepare-source-release.py --sync-installers --engine /path/to/nanolathe --revision FULL_COMMIT --version RELEASE_LABEL --go-version GO_PATCH`.
    It checks public archive scripts against that local commit and reads official
    Go checksums. Review the scripts and manifest together.
 3. Push the website changes to a review branch. Dispatch the engine's
@@ -155,10 +163,10 @@ hashes pin the expected bytes but are not a separate publisher signature.
    battle, and check saving/loading. A successful compiler run alone does not
    establish a playable installation. Check platform-specific shortcuts and
    folder selection on the platforms being promoted.
-5. Run website `make check` and publish its reviewed commit. Future installs
-   resolve the newly published manifest; launchers offer its source revision on
-   the next launch. Pushes to engine `main` alone do not publish a release. Prior
-   builds stay installed until the user removes them.
+5. Run website `make check` and publish its reviewed commit. This refreshes the
+   public installer scripts and their checksums. Future installs and launch-time
+   update checks resolve engine `main`; new main commits need no manifest change.
+   Prior builds stay installed until the user removes them.
 
 The first install has a cold compiler/dependency cache, so measure its time
 separately from updates. No first-install duration is promised.

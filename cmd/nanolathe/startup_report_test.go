@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -41,6 +43,35 @@ func TestInstalledSourceRevisionIsBoundedAndDoesNotPrintArbitraryText(t *testing
 		if got := installedSourceRevision(strings.NewReader(tc.manifest)); got != tc.want {
 			t.Fatalf("installed source revision = %q, want %q", got, tc.want)
 		}
+	}
+}
+
+func TestStartupInstalledRevisionPrefersActualCommitOverLegacySnapshot(t *testing.T) {
+	const actual = "0123456789abcdef0123456789abcdef01234567"
+	const legacy = "abcdef0123456789abcdef0123456789abcdef01"
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "release.txt"), []byte("source_revision="+legacy+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ source, want string }{
+		{actual + "\n", actual + " (installed source)"},
+		{actual + "\r\n", actual + " (installed source)"},
+		{"invalid\n", legacy + " (release manifest)"},
+		{strings.Repeat("z", 40), legacy + " (release manifest)"},
+		{strings.Repeat(" ", 128) + actual, legacy + " (release manifest)"},
+	} {
+		if err := os.WriteFile(filepath.Join(directory, "source-revision"), []byte(tc.source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := startupInstalledRevision(directory); got != tc.want {
+			t.Fatalf("installed revision = %q, want %q", got, tc.want)
+		}
+	}
+	if err := os.Remove(filepath.Join(directory, "source-revision")); err != nil {
+		t.Fatal(err)
+	}
+	if got := startupInstalledRevision(directory); got != legacy+" (release manifest)" {
+		t.Fatalf("legacy install revision = %q", got)
 	}
 }
 

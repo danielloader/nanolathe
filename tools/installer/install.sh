@@ -56,6 +56,16 @@ verify() {
 replace_pointer() {
     if [ "$os" = darwin ]; then mv -fh "$1" "$2"; else mv -fT "$1" "$2"; fi
 }
+# Resolve main once, then download the immutable commit archive (no Git dependency).
+latest_revision() {
+    local revision
+    revision=$(curl --disable --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location --silent --show-error \
+        --connect-timeout 2 --max-time "$1" --max-filesize 128 \
+        --header 'Accept: application/vnd.github.sha' --header 'Cache-Control: no-cache' \
+        --user-agent 'Nanolathe-installer' https://api.github.com/repos/nanolathe-gg/nanolathe/commits/main) || return 1
+    [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+    printf '%s' "$revision"
+}
 install_release() {
     stage=$(mktemp -d "$base/.install-XXXXXXXX")
     progress 'Checking the latest release…'
@@ -85,6 +95,8 @@ install_release() {
     for value in "$version" "$revision" "$source_hash" "$go_version" "$zip_hash" "$go_da" "$go_dx" "$go_la" "$go_lx" "$go_wx" "$go_wa"; do
         [ -n "$value" ] || fail 'manifest is missing a required key'
     done
+    revision=$(latest_revision 30) || fail 'could not resolve the latest commit on main'
+    version="main-${revision:0:12}"
     local go_hash toolchain release
     case "$os-$arch" in darwin-arm64) go_hash=$go_da ;; darwin-amd64) go_hash=$go_dx ;; linux-arm64) go_hash=$go_la ;; linux-amd64) go_hash=$go_lx ;; esac
     toolchain="$base/toolchains/go$go_version-$os-$arch-$go_hash"
@@ -98,8 +110,9 @@ install_release() {
     fi
     progress 'Downloading Nanolathe…'
     fetch "https://codeload.github.com/nanolathe-gg/nanolathe/tar.gz/$revision" "$stage/source.tar.gz"
-    progress 'Verifying and unpacking the download…'
-    verify "$stage/source.tar.gz" "$source_hash"
+    progress 'Unpacking the download…'
+    # The source hashes describe the legacy snapshot. Current main is downloaded
+    # over HTTPS using the immutable commit resolved above.
     mkdir "$stage/source" "$stage/release"
     tar -xzf "$stage/source.tar.gz" -C "$stage/source"
     local source="$stage/source/nanolathe-$revision"
@@ -108,7 +121,7 @@ install_release() {
     export GOROOT="$toolchain" GOWORK=off GOFLAGS= GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org GOPRIVATE= GONOSUMDB= GONOPROXY=
     unset GOOS GOARCH GOAMD64 GOARM64 GOEXPERIMENT
     # The common build manifest (docs/DESIGN_MULTIPLAYER.md §8.7) is stamped
-    # into the verified source before the build. It is read from the verified
+    # into the resolved source before the build. It is read from the downloaded
     # archive, so every platform's install of this release names one build,
     # and it records exactly the build arguments below, the cleared
     # environment's cgo setting and the six admitted toolchain archives.
@@ -129,8 +142,9 @@ install_release() {
         "$stage/release/nanolathe" --check-install --root "$root_arg"
     fi
     cp "$stage/release.txt" "$stage/release/release.txt"
+    printf '%s\n' "$revision" > "$stage/release/source-revision"
     if [ "$os" = darwin ]; then
-        # Both resources come from the checksum-verified source archive.
+        # Both resources come from the resolved source commit archive.
         cp "$source/tools/installer/macos/Nanolathe.icns" "$stage/release/Nanolathe.icns"
         cp "$source/tools/installer/macos/update-progress.js" "$stage/release/update-progress.js"
     fi
@@ -164,6 +178,16 @@ base=$1; shift
 # Keep the installed executable selected if any update step fails.
 release=$(cd "$base/current" && pwd -P)
 binary="$release/nanolathe"
+# Resolve main once, then download the immutable commit archive (no Git dependency).
+latest_revision() {
+    local revision
+    revision=$(curl --disable --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location --silent --show-error \
+        --connect-timeout 2 --max-time "$1" --max-filesize 128 \
+        --header 'Accept: application/vnd.github.sha' --header 'Cache-Control: no-cache' \
+        --user-agent 'Nanolathe-installer' https://api.github.com/repos/nanolathe-gg/nanolathe/commits/main) || return 1
+    [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+    printf '%s' "$revision"
+}
 read_update_manifest() {
     local line key value seen='|'
     manifest_revision= manifest_installer= manifest_version=
@@ -206,8 +230,15 @@ offer_update() (
         --output "$update_stage/release.txt" https://nanolathe.gg/install/release.txt 2>/dev/null || return 1
     read_update_manifest "$release/release.txt" || return 1
     installed_revision=$manifest_revision
+    if [ -f "$release/source-revision" ]; then
+        installed_revision=$(cat "$release/source-revision") || return 1
+        [[ "$installed_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+    fi
     read_update_manifest "$update_stage/release.txt" || return 1
-    [ -n "$manifest_installer" ] && [ "$manifest_revision" != "$installed_revision" ] || return 1
+    [ -n "$manifest_installer" ] || return 1
+    manifest_revision=$(latest_revision 3) || return 1
+    [ "$manifest_revision" != "$installed_revision" ] || return 1
+    manifest_version="main-${manifest_revision:0:12}"
     answer= gui_update=false
     if { exec 6<> /dev/tty; } 2>/dev/null; then
         printf '\nNanolathe %s has an update. Update & play? [y/N] (N: Play current version): ' "$manifest_version" >&6
@@ -377,6 +408,7 @@ exec /bin/bash "$base/launch.sh"
 APP
         chmod +x "$app/Contents/MacOS/Nanolathe"
         if command -v codesign >/dev/null; then codesign --force --deep --sign - "$app" || printf 'Shortcut signing failed; use %s directly.\n' "$base/launch.sh" >&3; fi
+        touch "$app"
         printf 'Application shortcut: %s\n' "$app" >&3
     else
         local menu="${XDG_DATA_HOME:-$HOME/.local/share}/applications" escaped

@@ -3192,8 +3192,32 @@ the FBI files by the front end's pre-load state before every battle, so
 the removal lasts one battle. An implementation should therefore apply
 `UseOnlyUnits` as a catalog filter at battle entry — remove, re-sort,
 renumber — and keep the allocator's bit test as the cheap invariant it is
-in retail, not as the mechanism. The ordering of the multiplayer apply
-against that pre-load rebuild was not traced (out of scope).
+in retail, not as the mechanism.
+
+*The multiplayer apply sits in the same order (Established).* The front
+end's pre-battle worker runs once per frame and does two things in order:
+the conditional catalog reload — taken only when the table is empty or when
+the reload flag a previous battle's compile left set is still set — and
+then the front-end state machine. The lobby's leave-for-battle step, which
+applies the restriction tree of §9 to the loaded table and then frees the
+tree, runs inside that state machine; the worker then installs the loading
+state, whose frames no longer run the worker. The reload has exactly one
+caller, the worker's first step, so no reload can fall between the apply
+and the battle-entry compile, and the reload the lobby needed happened on
+the lobby's first frame, before the tree was seeded from the reloaded
+table. A multiplayer definition whose creatable bit the apply clears — a
+count of 0, or a definition the lobby's agreement exchange left unsynced —
+is therefore compacted out exactly as a kind-1 exclusion is: no unit index,
+no spawn by name, and a greyed slot on any authored build page that names
+it ([07 R-HUD-03 §6]: the page opener greys a product slot whose name no
+longer resolves, and a greyed button swallows its click, so no build
+request is ever formed). A definition with a positive count keeps its
+record; the record-move helper carries the limit field with the record
+through the compaction and the sort, so step 3 above reads the lobby's
+count at the survivor's new index. A player at a positive count sees the
+button as any other and may queue the product; the refusal is the
+allocator's, at creation, through the failure table above — nothing before
+the allocator reads the limit.
 
 #### The per-definition limit field, its writers, and `norestrict` [R-SHARE-01 §9]
 
@@ -3208,33 +3232,57 @@ non-sentinel record and re-sets it per listed name before the battle-entry
 compile removes the cleared records ([08 R-ENTRY-01 §2] step 4; the
 creatable-bit paragraphs of §8). The limit field is untouched by that path.
 
-**Established — the only other writer is the multiplayer restriction
-dialog.** The multiplayer lobby's `RESTRICTIONS` button constructs a
-restriction tree seeded with one node per catalog definition (keyed by the
-definition's identity word) whose limit value is `-1`, or `0` when the
-definition's `wacky` flag is set. The `RESTRICT2.GUI` screen edits nodes: its
-`COUNT` field accepts a value below `101` as the count and anything else as
-`No Limit` (`-1`); closing the screen marks each node "restricted"
-(`enable = 1`) when its row value is non-zero and "unrestricted" (`enable =
-0`) when the row value is zero, skipping definitions that carry
-`norestrict` ([08 R-SKIR-01 §10] owns the screen, its row shape and the
-`Reset`/`Cancel` paths). When the front end leaves the multiplayer lobby for the battle
-it applies the tree to the catalog: for a definition with a node,
-`creatable bit = (enable != 0 && synced != 0)` and `limit field = node
-limit`; for a definition without a node, `limit field = 0` and the creatable
-bit is cleared. The `synced` word is written by the lobby's restriction
-synchronization acknowledgement (multiplayer transport, out of scope). The
-apply step runs only under the front end's multiplayer-lobby flag, so a
-skirmish or campaign battle never executes it.
+**Established — the only other writer is the multiplayer lobby's
+restriction apply.** The lobby record constructed when the multiplayer
+battleroom opens seeds a restriction tree with one node per loaded
+definition above the sentinel, keyed by the definition's content checksum
+([02 "Content checksum"]). A node holds three words: *enable*, seeded `1`;
+*synced*, seeded `1` on the host machine and `0` on every other; and
+*limit*, seeded `-1`, or `0` when the definition's `wacky` flag is set. The
+`RESTRICT2.GUI` screen edits the nodes ([08 R-SKIR-01 §10] owns the screen,
+its rows, greying, `Reset`, `Cancel`, `Save` and `Load`): every slider
+change writes the node's limit at once — a slider value below `101` is the
+count, the top position is `No Limit` and stores `-1` — and closing the
+screen on the host sets every offered definition's *enable* word to `1`
+when its row value is non-zero and to `0` when it is zero, skipping
+`norestrict` definitions. Only the host's edits count: the host broadcasts
+each node it writes to every peer, whose trees mirror it, and a peer's own
+controls are greyed. The host recomputes a definition's *synced* word from
+the peers' per-definition content-hash reports — `1` only when every
+reporting peer's hash equals the host's own — which is the lobby's agreement
+exchange and is otherwise transport, out of scope here.
+
+When the front end leaves the lobby for the battle it applies the tree to
+the loaded, not yet compiled, table, for every record above the sentinel:
+with a node, `creatable bit = (enable != 0 && synced != 0)` and `limit
+field = node limit`; without a node, `limit field = 0` and the creatable bit
+is cleared. It then frees the lobby record, tree included, before the world
+is built, so nothing in a battle can read the tree. The apply carries no
+kind test of its own; it is reached only from the multiplayer battleroom's
+leave-for-battle step, so a skirmish or campaign battle never executes it,
+and the battleroom's leave-the-lobby step frees the record without
+applying. The
+compile that follows removes the bit-clear records (§8), so a count of `0`
+— or an unsynced definition — is absent from the battle catalog, while a
+positive count survives as the per-player limit of §8 step 3.
 
 **Established — `norestrict` reader census.** The capability parses into bit
 15 of the definition's second flag word (both parser entry points write it).
-Exactly two readers exist, both in the `RESTRICT2.GUI` screen: the picture-list
-builder skips such definitions, and the close handler skips them when marking
-nodes ([08 R-SKIR-01 §10] reads the same pair from the screen's side). The allocator, the settlement, the AI, and every other simulation
-consumer never read the bit. A `norestrict` definition therefore keeps its
-seeded node (limit `-1`, or `0` for `wacky`) and its `enable` word at the
-seed value — an effect the lobby side owns and this document does not state.
+Exactly three readers exist, all in the `RESTRICT2.GUI` screen: the row
+builder and the picture-list builder skip such definitions, and the close
+handler skips them both when marking nodes and on its `Cancel` path. The
+allocator, the settlement, the AI, and every other simulation consumer never
+read the bit. A `norestrict` definition therefore keeps its seeded node —
+*enable* `1`, *limit* `-1` (or `0` when it is also `wacky`), *synced* as
+the exchange sets it — and the apply treats that node like any other: the
+definition is creatable and unlimited whenever it is synced, and it is
+removed like any other when it is not. In the reference install (base, Core
+Contingency, Battle Tactics and the 3.1 patch mounted) fourteen definitions
+author `norestrict`: `ARMCOM`, `CORCOM`, `ARMGATE`, `CORGATE`, `CORBUILD`
+and `CORTRUCK` from the patch archive, and `ARMBEAC`, `CORBEAC`, `ARMDEV1`,
+`CORDEV1`, `ARMSCORP`, `CORSCORP`, `ARMSS` and `CORSS` from the Core
+Contingency archive; no stock definition authors `wacky`, so every stock
+node seeds at `-1` (asset census of the compiled reference catalog).
 
 **Established — consequence for the single-player build.** With no
 restriction tree, the allocator's step 2 always passes and step 3 is skipped
@@ -7387,11 +7435,6 @@ body and are not restated here.
   runs from the window message pump the main loop services between executor
   calls) — a Supported inference · [R-SHARE-01 §5] · static trace of the
   pump/executor interleaving.
-- Effect of a `norestrict` definition's untouched restriction node on the
-  lobby side (seeded limit `-1`, or `0` when `wacky`; `enable` word at its
-  seed value) · [R-SHARE-01 §9] · static trace of the node seed's `enable`
-  word and of the synchronization acknowledgement; multiplayer lobby, out of
-  scope for the simulation.
 - Trigger for the deadline catch-up burst, which is structurally present in
   the pre-gameplay setup pass with no natural trigger identified
   · "Authoritative settlement order" · static trace.

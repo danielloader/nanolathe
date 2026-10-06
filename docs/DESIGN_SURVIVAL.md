@@ -450,6 +450,21 @@ The whole unspawned tail is discarded immediately, including across entry
 directions; freed slots do not restart it. A per-definition limit drops only
 that pick, since other types may still fit the player's slice.
 
+**Unit restrictions** (user-authorized 2026-10-05,
+[DESIGN_MODS_MUTATORS §15](DESIGN_MODS_MUTATORS.md#15-unit-restrictions))
+bind every Survival player in every mode, the attacker included. The pool is
+derived from the restricted catalog, so a removed unit is never planned, nor
+is a unit reachable only through a removed builder (§5); an authored roster
+loses its removed entries before the §5.1 checks, and entry is refused,
+naming the restrictions, when no ordinary tier-1 attacker remains. A capped
+unit is planned from the same draws as before; the allocator counts the
+attacker's own records of it, and once the cap is reached the per-definition
+refusal above drops the pick — it uses that tick's creation, draws nothing
+and is never retried, so the director needs no change. Each survivor meets a
+cap on its own slice; the team's shared sight and income do not pool unit
+records. The design's Survival rules are
+[DESIGN_MODS_MUTATORS §15.6](DESIGN_MODS_MUTATORS.md#156-survival).
+
 ### 6.6 Spawn cells and reachability
 
 For each direction, the entry point is where the ray from the centre site at

@@ -4,8 +4,10 @@ How a player installs, selects and switches content mods such as ProTA,
 TA Zero and TA: Escalation without command-line flags; how global
 **mutators** (build speed, cost, health, damage, blast size, sight and radar
 multipliers)
-are selected and locked for a battle; and how a Nanolathe save records all of
-it so that loading the save restores the same match.
+are selected and locked for a battle; how retail's multiplayer **unit
+restrictions** are offered in skirmish and Survival (§15); and how a
+Nanolathe save records all of it so that loading the save restores the same
+match.
 
 **Status: implemented (2026-09-24)** apart from the follow-ups in §13 unit 9.
 The mutators, the mod library with drop-to-install, the remote catalogue
@@ -16,12 +18,13 @@ mod which is not installed is refused with a message naming it and saying
 whether *Get more mods* offers it; the load does not start the download
 itself (§7.3 step 2). The maintainer's decisions of 2026-09-23 are in §2. The
 proposals this document made were confirmed the same day and are listed in
-§12.
+§12. **Unit restrictions (§15) are designed and approved, not implemented
+(2026-10-05)**; their proposals, approved the same day, are in §15.10.
 
 This document owns the mod library, the mod config every mod ships in its
-own `nanolathe-mod.json` (§4.2), the remote catalogue, the mutator transform
-and the save sidecar. It builds on mechanisms owned elsewhere and restates
-none of them: the overlay and content profiles
+own `nanolathe-mod.json` (§4.2), the remote catalogue, the mutator transform,
+the unit-restriction transform and its editor (§15) and the save sidecar. It
+builds on mechanisms owned elsewhere and restates none of them: the overlay and content profiles
 ([DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md#5-divergences) "Content
 profiles"), the gameplay rule sets and their registry
 ([DESIGN_GAMEPLAY_RULES](DESIGN_GAMEPLAY_RULES.md)), the Community feature
@@ -31,7 +34,7 @@ and the retail save bank
 
 ## 1. Purpose and boundary
 
-Three features share one idea — the **match selection** (§3), the complete
+Four features share one idea — the **match selection** (§3), the complete
 set of choices that decides what a battle is:
 
 1. **The mod library.** Mods live in a Nanolathe data directory, one extracted
@@ -45,6 +48,10 @@ set of choices that decides what a battle is:
 3. **Match identity.** A Nanolathe sidecar file beside every save records the
    match selection. Loading the save restores it, switching mod if needed,
    and the loading screen shows it.
+4. **Unit restrictions** (§15). Retail's multiplayer per-unit counts — remove
+   a unit from the battle, or cap how many of it each player may have —
+   applied to the per-battle catalog clone of a skirmish or Survival battle
+   and fixed for that battle.
 
 **Out of scope.** Multiplayer and lobby handshakes (the match selection is
 designed to be the future handshake, not implemented as one). Stacked or
@@ -81,13 +88,17 @@ To keep the two apart, code for this feature never uses the bare identifier
 
 | D16 | (2026-09-29) Each mod gets its own settings by default and the player can change them: the settings a battle plays are the base settings, then the running mod's recommendations, then the player's own changes for that mod, kept per mod. Saved presets let the player apply a set of settings to any mod (§4.6). |
 | D15 | (2026-09-29) Each mod's own `nanolathe-mod.json` is the single source of its Nanolathe configuration — content layout, limits, front-end art, rules, recommended settings, keys and locks (§4.2). The engine carries no per-mod data: the built-in content profiles and per-mod Community tables are removed, and the base game's defaults stay in the engine because the base game is not a mod. A mod without a config mounts as plain content with a notice; nothing detects content. A mod may choose Strict 3.1, Community 3.9 or Modern as a whole and set Community 3.9 feature values; it may not switch off an individual Modern policy. |
+| D17 | (2026-10-05) Retail restrictions, every mode: retail's multiplayer unit-restriction rules are implemented once and offered in skirmish and Survival beside the mutators, in every gameplay mode, Strict 3.1 included, edited in the unit viewer; the multiplayer lobby reuses them later. Strict 3.1 with no restrictions remains the retail baseline and every fingerprint lock runs with none (§15). |
+| D18 | (2026-10-05) In Survival everyone obeys the restrictions, the wave attacker included, as retail binds computer players exactly as it binds humans (§15.6). |
+| D19 | (2026-10-05) Classic computer players keep retail's behaviour — a capped product stalls with the allocator's 300-tick retry — while the Modern AI does not choose a unit once it has reached that unit's cap (§15.7). |
 
 D9–D13 were proposed in review and accepted with the rest of the design
 direction. D14 is the maintainer's layout for the screen. D13's offer was
 extended on 2026-09-24: a mod that starts by any other route is offered its
 preset once on the main menu, and the preset became the mod's full recommended
 settings (§4.3). D15 supersedes D12's content profile: a mod's config is its
-own, so no preference can apply one mod's table to another.
+own, so no preference can apply one mod's table to another. D17–D19 are the
+user's decisions for unit restrictions, recorded in §15.
 
 ## 3. The match selection
 
@@ -99,6 +110,7 @@ own, so no preference can apply one mod's table to another.
 | Community sources and entry table | the config's `rules.communityFeatures`, settings, `--gameplay-feature` ([DESIGN_COMMUNITY_PATCH §3.2](DESIGN_COMMUNITY_PATCH.md#32-sources-and-precedence)) | battle entry | sidecar |
 | Unit limit | settings `unitLimit`, `--unit-limit` | battle entry | sidecar |
 | Mutators | Mods & Mutators screen, `--mutator`, settings `mutators` | battle entry, for the whole battle | sidecar, catalog hash, reports |
+| Unit restrictions (skirmish and Survival only) | the unit viewer's editor and the Nanolathe screen card, `--restrict`, settings `restrictions` per mod (§15.9) | battle entry, for the whole battle | sidecar, catalog hash, reports (§15.5) |
 
 Renderer, audio, display and other host preferences are not part of the
 selection and are never recorded.
@@ -206,8 +218,9 @@ diagnostic, so a misspelling is reported rather than ignored.
   settings defaults exactly as the settings file is read, closed. It may not
   carry the match selection or bookkeeping: `gameplay` and
   `gameplayFeatures` (they are `rules`), `unitLimit` (a table field),
-  `keyBindings` (the `keys` section), `mod`, `mutators`, `contentProfile`,
-  `modernAI`, `controlsOffered`, `modLockOverrides` and `version`.
+  `keyBindings` (the `keys` section), `mod`, `mutators`, `restrictions`
+  (§15.9), `contentProfile`, `modernAI`, `controlsOffered`,
+  `modLockOverrides` and `version`.
 - **`keys`** is the settings file's `keyBindings` block: a keyboard profile
   (`retail`, `community` or `zero`) and rebound actions, each a catalogued,
   rebindable action with chords the battle can deliver.
@@ -507,7 +520,8 @@ settings key `modSettings.<mod id>`. Objects merge key by key and other
 values replace; `keyBindings` and `gameplayFeatures` replace whole, so a layer
 can drop a binding a lower one set. Only the mod-scoped paths
 (`settings.ModScoped`: rules, the presentation block, glow, digit keys,
-interface type, clock, sound mode, voices, music mode, keys, skirmish rows)
+interface type, clock, sound mode, voices, music mode, keys, skirmish rows
+and, because they name one content set's units, unit restrictions, §15.9)
 take part; window, volume, mod and mutator choices are the player's alone.
 A save while a mod runs keeps the base block's mod-scoped values, takes the
 global ones from the live settings, and stores the difference between the
@@ -911,6 +925,10 @@ save load (§7.3), and both act in the front end before a battle starts.
 Mutators apply to campaign missions as well as skirmish. The
 campaign progress bank does not record them; each save's sidecar does.
 
+In a skirmish or Survival battle with unit restrictions (§15), the
+restrictions are applied to the clone first and the mutators to the
+restricted catalog, in fresh entry and in restore alike (§15.1).
+
 ### 6.4 Arithmetic
 
 The transform starts from each field's compiled value, which is already in
@@ -1007,7 +1025,9 @@ Sight needs no recompute.
 
 - The clone's `Catalog.Hash` becomes a hash of `mutators/2`, the base hash and
   `Mutators.String()`. With no mutators, nothing is transformed and nothing is
-  rehashed, so every existing identity and fingerprint is unchanged.
+  rehashed, so every existing identity and fingerprint is unchanged. When the
+  battle also has unit restrictions, the base hash is the restricted one
+  (§15.4).
 - Per-definition `Hash` fields stay identities of authored records. The
   implementing unit checks every consumer that compares them (save restore,
   presentation caches) and routes any consumer that must see mutated values to
@@ -1071,7 +1091,11 @@ root stack. `unitLimit` is the configured unit-limit word, the one that sizes
 a battle. `catalog` and `contentManifest` are the battle catalog's identity
 after mutators and the mounted set's manifest hash. A sidecar with another
 `schema`, or one that does not parse, refuses the load rather than being read
-as absent, which would silently drop the selection it records. `contentProfile`
+as absent, which would silently drop the selection it records. A battle with
+unit restrictions adds `"restrictions": {"armkrog": 0, "armpw": 20}` and is
+written as schema 2, so that a build reading only schema 1 refuses it rather
+than restoring the bank without them; every other sidecar stays schema 1
+(§15.5). `contentProfile`
 is the mounted content's report name: the running config's id, or `retail`
 for content without one. `community` records the session's Community sources and its
 battle-entry table (`Session.CommunitySources`, `Session.EntryCommunity`), so
@@ -1129,6 +1153,9 @@ record naming a parameter this build does not know refuses the load.
 6. **Mutators.** Apply the recorded mutators to the restore clone and make
    them the selected mutators (P6). The settings, the chip, a restart of the
    battle and the next new battle then all match the game that was loaded.
+   A skirmish save's recorded unit restrictions are checked and applied to
+   the clone before the mutators, before the terrain, the pool and every
+   unit, and become the running content's restriction setting (§15.5).
 7. **Integrity.** Compare the recorded `catalog` hash with the restored
    catalog's. A mismatch (a different base install, different mod bytes) loads
    with a warning on the battle message line rather than refusing.
@@ -1172,7 +1199,8 @@ resolves the host's, as every new battle does.
 
 A Nanolathe-owned control drawn by the host over the authored `MAINMENU`, in a
 fixed position on the logical 640×480 surface. Its button reads *NANOLATHE*
-and its status line, for example, *ProTA 4.8 · Community 3.9 · 2 mutators*.
+and its status line, for example, *ProTA 4.8 · Community 3.9 · 2 mutators*
+(with unit restrictions, *· 3 restrictions* follows, §15.9).
 In the window it opens the Nanolathe screen
 ([DESIGN_INTERFACE_HUD_INPUT §3.17](DESIGN_INTERFACE_HUD_INPUT.md#317-the-nanolathe-screen)),
 which chooses the mod, the rules and the mutators together; a shell with no
@@ -1256,8 +1284,11 @@ line:
    a Community feature table's limit applies (DESIGN_COMMUNITY_PATCH §3.2),
    and the field then names the source, as in *Unit limit 1500 (set by
    ProTA)*. Strict 3.1 ignores the table and shows the setting;
-2. `Mutators: Build speed ×2, Health ×1.5`, omitted when there are none;
-3. any warning from §7.3.
+2. `Mutators: Build speed ×2, Health ×1.5`, omitted when there are none,
+   followed on a skirmish or Survival battle with unit restrictions by
+   `Restrictions: 3 removed, 2 capped` (§15.9);
+3. any warning from §7.3, and the notice for saved restrictions the running
+   content cannot apply (§15.3).
 
 This is a Nanolathe divergence from the authored screen
 ([07 "The loading screen"]). A restored battle does not pass through the
@@ -1266,7 +1297,8 @@ loading screen, so §7.3's warnings go to the battle message line instead.
 ### 8.4 The load dialog
 
 The selected save's summary panel gains one line with the sidecar's mod and
-mutators, so the player knows before loading that it will switch. It is a
+mutators, and the count of its unit restrictions when it has any (§15.5),
+so the player knows before loading that it will switch. It is a
 Nanolathe label (`NLSIDECAR`) beneath the authored `TIME` field; a mod the
 library lacks is marked *(not installed)*, and a save without a sidecar
 leaves the line empty (DESIGN_INTERFACE_HUD_INPUT §2.6).
@@ -1278,12 +1310,12 @@ leaves the line empty (DESIGN_INTERFACE_HUD_INPUT §2.6).
 | `internal/modlibrary` | data directory layout, metadata and the mod's config (§4.2), installed listing, selection resolution (mod → root, config, minimum, preset), extraction and validation, receipts. No network. | both commands |
 | `internal/maplibrary` | separate installed-map root and map-only payload validation, reusing modlibrary extraction and receipts. No network. | desktop command |
 | `internal/modfetch` | mod and map manifest fetch and cache, downloads with resume and progress. The only package that imports `net/http`. | `cmd/nanolathe` only |
-| `internal/content` | `Factor`, `Mutators`, `ApplyMutators`, the mutated catalog identity | session, commands |
+| `internal/content` | `Factor`, `Mutators`, `ApplyMutators`, the mutated catalog identity; `Restrictions`, `CheckRestrictions`, `ApplyRestrictions` and the restricted identity (§15.2) | session, commands |
 | `internal/save` | the sidecar type and its read/write, separate from the bank's bytes | session, commands |
-| `internal/session` | mutators and recorded Community sources in battle-entry and restore requests; building the sidecar value; reports | commands |
-| `internal/settings` | the `mod` and `mutators` keys | commands |
-| `cmd/nanolathe` | chip, screen, in-process reload, loading-screen lines, drop-to-install, `--mod`, `--mutator` | — |
-| `cmd/nanolathe-headless` | `--mutator` and `--mod` (flags only, never the settings file). `--mod` mounts an installed mod from the library as the last root with its own config, through `modlibrary`'s command-line selection; it is refused beside several `--root` flags, and the command never fetches. `--mod-config` names a config file for a manual stack or in place of the mod's own | — |
+| `internal/session` | mutators, unit restrictions and recorded Community sources in battle-entry and restore requests; building the sidecar value; reports | commands |
+| `internal/settings` | the `mod`, `mutators` and mod-scoped `restrictions` keys | commands |
+| `cmd/nanolathe` | chip, screen, in-process reload, loading-screen lines, drop-to-install, `--mod`, `--mutator`, `--restrict`, the restriction card and the unit viewer's restriction editor (§15.9) | — |
+| `cmd/nanolathe-headless` | `--mutator`, `--restrict` and `--mod` (flags only, never the settings file). `--mod` mounts an installed mod from the library as the last root with its own config, through `modlibrary`'s command-line selection; it is refused beside several `--root` flags, and the command never fetches. `--mod-config` names a config file for a manual stack or in place of the mod's own | — |
 
 **Guards.** New architecture tests: only `internal/modfetch` imports
 `net/http`; only `cmd/nanolathe` imports `internal/modfetch`; no simulation
@@ -1324,6 +1356,7 @@ dependencies.
 | The reclaim-pulse product at the maximum step for the stock catalog (§6.5) | `content`, retail tier |
 | Chip on retail, ProTA and Escalation menus; Mods & Mutators screen and the *Get more mods* dialog; loading-screen lines | `--shot` captures, reviewed |
 | A merged hosted zip resolves the same winners and catalog hash as its original root list | the check tool (§13 unit 8) |
+| Unit restrictions | the tests of §15.11 |
 
 The applicable gates are those in [ARCHITECTURE §6](ARCHITECTURE.md#6-verification).
 
@@ -1342,6 +1375,17 @@ The applicable gates are those in [ARCHITECTURE §6](ARCHITECTURE.md#6-verificat
   lines.
 - [PROTA_SUPPORT](PROTA_SUPPORT.md): the Mods & Mutators screen as the
   ordinary route, with manual roots as the alternative.
+- For unit restrictions (§15): AGENTS.md and [INVARIANTS](INVARIANTS.md) I11
+  (the fifth mode-independent exception; INVARIANTS done with this design,
+  AGENTS.md by the maintainer);
+  [DESIGN_MULTIPLAYER](DESIGN_MULTIPLAYER.md) §3.3 and §8.6 field 12 (done with
+  this design); [DESIGN_SURVIVAL](DESIGN_SURVIVAL.md) §6.5 and
+  [DESIGN_SESSIONS_AI_SAVE](DESIGN_SESSIONS_AI_SAVE.md#modern-ai-restriction-caps)
+  (done with this design); on implementation,
+  [DESIGN_INTERFACE_HUD_INPUT §3.17](DESIGN_INTERFACE_HUD_INPUT.md#317-the-nanolathe-screen)
+  (the card) and
+  [DESIGN_DEVELOPER_TOOLS §7](DESIGN_DEVELOPER_TOOLS.md#7-3d-unit-viewer-preview)
+  (a pointer to the editor of §15.9).
 
 ## 12. Confirmed proposals (2026-09-23)
 
@@ -1402,6 +1446,8 @@ fingerprint. Units 1–8 are implemented.
 10. **Follow-ups.** Manifest signatures (§5.4); fuzz targets for the exposed
    readers, recommended before the catalogue is advertised widely;
    `minimumEngine` once releases are stamped.
+11. **Unit restrictions.** Designed, not implemented; its own units are
+   §15.12.
 
 ## 14. Research map
 
@@ -1423,3 +1469,588 @@ fingerprint. Units 1–8 are implemented.
 | Sight-shape and terrain-ray quantization | [03 §3.2] |
 | Configured unit-limit carry on load | [08 R-SESS-01 §9] |
 | The loading screen | [07 "The loading screen"] |
+| Unit restrictions: the allocator gate, its census and failure table; removal as compaction | [05 R-SHARE-01 §8], [05 R-ECO-02 §4], [08 R-ENTRY-01 §2] |
+| Unit restrictions: the limit field, the lobby apply, `norestrict` and `wacky` | [05 R-SHARE-01 §9] |
+| Unit restrictions: the computer player never reads them | [05 R-SHARE-01 §10], [08 R-AI-01 §12] |
+| Unit restrictions: the `RESTRICT2` screen, slider range, Reset and `.LST` lists | [08 R-SKIR-01 §10], [08 R-SAVE-02 §5] |
+| Unit restrictions: a removed product's greyed slot | [07 R-HUD-03 §6] |
+| Unit restrictions: sort, `CANBUILD` and download appends after compaction | [02 R-CAT-01 §5], [02 R-CAT-01 §8] |
+
+## 15. Unit restrictions
+
+**User-authorized 2026-10-05; design approved the same day, not implemented.** On 2026-10-05 the
+user chose *Retail restrictions, every mode*: implement retail's multiplayer
+restriction rules once, offer them in
+skirmish and Survival beside the mutators, edit them in the unit viewer, and
+let the multiplayer lobby reuse them later (D17). The same day the user
+decided that in Survival everyone obeys them, the wave attacker included, as
+retail binds computer players exactly as it binds humans (D18), and that
+Classic computer players keep retail's behaviour while the Modern AI does not
+choose a unit once it has reached that unit's cap (D19). Like the mutators,
+Survival, the Modern AI computer player and multiplayer, unit restrictions are
+a mode-independent exception (AGENTS.md,
+[INVARIANTS I11](INVARIANTS.md#i11--retail-baseline-and-modern-gameplay)).
+What this section had to decide beyond those words is listed in §15.10;
+the user approved every proposal there as written on 2026-10-05.
+
+### 15.1 Policy and boundary
+
+**What a restriction is.** One count per unit definition in the battle's
+match selection (§3):
+
+- **absent** — *No limit*. The definition keeps the parser's `-1` limit and
+  the allocator skips its per-definition test, as in every retail
+  single-player battle [05 R-SHARE-01 §9].
+- **0** — the definition is **removed from the battle**. Battle entry deletes
+  it from the per-battle catalog clone exactly as retail's battle-entry
+  compile deletes a record whose creatable bit is clear: the survivors are
+  renumbered, and the removed definition has no unit index, no build-menu
+  button and cannot be spawned by name [05 R-SHARE-01 §8]
+  [08 R-ENTRY-01 §2]. It is retail's multiplayer path for a row left at zero,
+  whose definition the lobby's close and apply mark not creatable before the
+  compile compacts it out [05 R-SHARE-01 §9] [08 R-SKIR-01 §10].
+- **1 to 100** — a **per-player cap**. The definition stays and its limit
+  field holds the count. The allocator's third test counts the records of
+  that definition in the creating player's own slice — nanoframes, completed
+  units and dead units whose teardown has not yet cleared the index — and
+  refuses when the count has reached the cap [05 R-SHARE-01 §8]. Nothing
+  before the allocator reads the field: the button is drawn like any other,
+  the product can be queued and placed, and the refusal is the allocator's,
+  through its failure table — the factory, mobile-build and resurrect
+  caption with its 300-tick wait, the VTOL build that abandons, the
+  ownership transfer that leaves the unit with its owner, the spawner that
+  continues [05 R-SHARE-01 §8] [05 R-ECO-02 §4].
+
+The range is retail's slider, 0 to 100 with *No Limit* above it
+[08 R-SKIR-01 §10].
+
+**Every mode, two sessions.** Retail offers restrictions only in the
+multiplayer battleroom: no skirmish path reaches its screen, and a skirmish
+or campaign battle never runs its apply [08 R-SKIR-01 §10]
+[05 R-SHARE-01 §9]. Nanolathe offers them in skirmish and Survival under
+every gameplay mode, Strict 3.1 included, because, like a mutator, a
+restriction transforms the battle's content rather than a rule. It is
+applied once to the per-battle catalog clone at battle entry, adds no seam to
+`session.RuleSet`, draws no random numbers and keeps no per-tick state.
+Inside a tick its caps are read where retail reads them, by the allocator's
+existing per-definition test on every creation path, and otherwise only by
+the Modern AI's observation (§15.7). The retail arithmetic that consumes
+them — the compaction and the allocator's census — is unchanged in every
+mode.
+
+**Not campaign missions.** A mission is entered under its own authored
+restriction, the `UseOnlyUnits` list ([08 R-ENTRY-01 §2] step 4,
+`Catalog.RestrictToCreatable`), and its placement, its triggers and its AI
+profile name the unit types that list keeps
+([DESIGN_SESSIONS_AI_SAVE §2.3](DESIGN_SESSIONS_AI_SAVE.md#23-internaltriggers--the-eighteen-conditions)).
+A player's restriction layered on top could remove a unit a victory
+condition counts or a placement creates and make the mission unwinnable
+without saying so, and a campaign would have to carry the set from mission
+to mission. The authorization names skirmish and Survival; mission entry,
+mission restore and continuation saves take no restriction set. Mutators,
+which change numbers rather than which units exist, still apply to missions
+(P5).
+
+**Who obeys.** Everyone. Every creation passes through the allocator, which
+binds a computer player exactly as it binds a human [05 R-SHARE-01 §10]:
+human players, Classic and Modern computer players and, in Survival, the wave
+attacker (§15.6). How each kind of computer player meets a restriction is
+§15.7.
+
+**`norestrict` and `wacky`.** A definition authoring `norestrict` is never
+restricted: retail's screen does not offer it, and the bit has no other
+reader [05 R-SHARE-01 §9] [08 R-SKIR-01 §10]. An entry naming one is refused
+(§15.3). The reference install has fourteen such definitions, both
+commanders among them, and no stock definition authors `wacky`
+[05 R-SHARE-01 §9]. A `wacky` definition is restricted like any other; it
+differs only under the editor's *Reset*, which gives it 0 as retail's does
+(§15.9).
+
+**Nothing is seeded.** The empty set is the default and changes nothing:
+battle entry hands the compiled catalog through unaltered — the same catalog
+value, as with no mutators — so `Catalog.Hash`, every definition index and
+per-definition `Hash`, the simulation-content manifest and every fingerprint
+are what they were, for content with `wacky` definitions as for any other.
+Retail's lobby seeds a `wacky` definition's restriction at 0 and its *Reset*
+puts every row at 100 [05 R-SHARE-01 §9] [08 R-SKIR-01 §10]; neither is a
+default here:
+
+1. the seed belongs to the multiplayer lobby record, which a retail skirmish
+   never builds, so a retail skirmish runs every definition, `wacky` ones
+   included, with no per-definition limit [05 R-SHARE-01 §9] — the baseline
+   this feature starts from;
+2. a seed would restrict content the player never chose to restrict and move
+   the identity of every battle on that content: a hidden selection of the
+   kind §4.3 rules out;
+3. a board of 100s caps every unit, which is a choice, not the absence of
+   one.
+
+Both are editor actions the player takes (§15.9). Retail's seeded state with
+the restriction screen never closed — a `wacky` record kept with limit 0, on
+the menus and refused at every creation — has no single-player equivalent and
+is left to the online lobby (DESIGN_MULTIPLAYER §15 Q16).
+
+**Baseline.** Strict 3.1 with no restrictions and no mutators is the retail
+baseline, and every fingerprint lock runs with neither.
+
+**Order with the other transforms.** Restrictions apply immediately after
+the catalog compile, before the Community weapon preparation and the
+mutators: the position mission entry gives `RestrictToCreatable`. The
+mutators then see the restricted catalog, as they see a mission's: Build cost
+reaches the corpse chains of the definitions that remain, and Sight extends
+rasters only for radii a remaining definition needs. A restore applies them
+in the same order (§15.5), so a restored battle's catalog is the one its
+fresh entry built.
+
+### 15.2 Shape
+
+```go
+package content
+
+// RestrictionMaxCount is the largest per-player count: retail's slider
+// stores 0..100 and shows No Limit above it [08 R-SKIR-01 §10].
+const RestrictionMaxCount = 100
+
+// Restriction is one entry. Count 0 removes every retained record carrying
+// the name from the battle; 1..RestrictionMaxCount caps each player's
+// records of it (§15.1).
+type Restriction struct {
+	Unit  string // CanonicalKey of the unit name
+	Count uint8
+}
+
+// Restrictions is one battle's set: at most one entry per key, kept in
+// ascending key order. A unit without an entry has No limit. The zero value
+// restricts nothing.
+type Restrictions struct{ entries []Restriction }
+
+func ParseRestrictions(values map[string]int) (Restrictions, error) // settings and sidecar spelling
+func ParseRestriction(text string) (Restriction, error)            // flag spelling, "armpw=20"
+func (r Restrictions) IsZero() bool
+func (r Restrictions) Entries() []Restriction // a copy, in key order
+func (r Restrictions) Count(unit string) (count uint8, restricted bool)
+func (r *Restrictions) Set(unit string, count uint8) error // refuses a count above 100
+func (r *Restrictions) Clear(unit string)                  // back to No limit
+func (r Restrictions) Equal(o Restrictions) bool
+func (r Restrictions) Map() map[string]int // settings and sidecar spelling; empty when zero
+func (r Restrictions) String() string      // canonical, e.g. "armkrog=0,armpw=20"; "" when zero
+func (r Restrictions) Digest() string      // HashDefinition("restrictions/1\n" + String() + "\n")
+
+// RestrictionIssue says why one entry cannot apply to a catalog (§15.3).
+type RestrictionIssue struct {
+	Unit   string
+	Reason RestrictionReason // RestrictionUnknownUnit, RestrictionNoRestrict, RestrictionRemovesCommander
+}
+
+// CheckRestrictions splits r into the entries this catalog accepts and an
+// issue for every other entry, both in key order. It reads only immutable
+// definition data and writes nothing.
+func (c *Catalog) CheckRestrictions(r Restrictions) (accepted Restrictions, issues []RestrictionIssue)
+
+// ApplyRestrictions transforms a per-battle clone in place (§15.4). Like
+// RestrictToCreatable and ApplyMutators, it is never called on a shared
+// compiled catalog. It writes nothing and returns an error when
+// CheckRestrictions would report any issue, so an unchecked set can never
+// half-apply.
+func (c *Catalog) ApplyRestrictions(r Restrictions) error
+```
+
+The set is a sorted slice, not a map, so no reader ranges a map (INVARIANTS
+I1), and two sets compare with `Equal`. Parsing checks spelling only: a key
+that is not already its own `CanonicalKey` (field 12 refuses the same), a
+count outside 0..100, a flag count with a sign, a fraction or a leading zero,
+a flag without `=`, and a key given twice are refused. Whether a key names a
+unit is the catalog's question (§15.3). The type is closed; a later kind of
+restriction is a new field and its tests, as a new mutator is.
+
+### 15.3 Names and resolution
+
+**A key is a unit name, and it means every record so named.** An entry
+applies to every retained record whose unit name has its key, not only to the
+record the catalog's name lookup (`Catalog.Unit`) returns. That lookup
+returns the first record of a name in the sorted table and hides the later
+ones [02 R-CAT-01 §5], while retail's tree holds one entry per record, keyed
+by the record's content checksum, so its screen lists every record
+[05 R-SHARE-01 §9]. Restricting only the record the lookup returns would let
+a removal expose a hidden record under the same name, on the same menus,
+which no player means; restricting the name restricts the unit as the player
+sees it (proposal R-P1). A name counts as `norestrict` when any record
+carrying it authors `norestrict`, and as `wacky` when any record carrying it
+authors `wacky`.
+
+**Checks.** `CheckRestrictions` refuses an entry for one of three reasons:
+
+| Issue | When |
+|---|---|
+| `RestrictionUnknownUnit` | no retained record carries the name |
+| `RestrictionNoRestrict` | a record carrying the name authors `norestrict` (§15.1) |
+| `RestrictionRemovesCommander` | the count is 0 and a side record names the unit as its commander. Skirmish entry places a commander for every player and, never fabricating one, refuses a side whose commander the catalog lacks, so such a set would stop every battle on that content. This is a Nanolathe check on the selection, not a claim about retail's start spawn. A positive count is accepted (proposal R-P3). |
+
+Each source of a set answers an issue in its own way, so that a saved
+preference never stops a game and an explicit request never silently loses
+an entry (proposal R-P4):
+
+| Source | On an issue, or a malformed entry |
+|---|---|
+| `--restrict` | the command stops with its standard diagnostic naming the entry, as for a bad `--ai-player` row: `nanolathe: unit restriction armfoo=0: logical path --restrict, providers searched [unit catalog], expected a unit the running content defines that is not marked norestrict` |
+| the settings key (§15.9) | the entry is left out of that battle and named in a notice on the loading screen (§8.3) and on the Nanolathe screen card; it stays in the file and applies again whenever content that has the unit runs |
+| a save's sidecar (§15.5) | the load is refused, naming the entry: the bank's definition indices were written against the restricted table, which can no longer be rebuilt |
+| battle-configuration field 12 | the configuration is rejected (DESIGN_MULTIPLAYER §8.6) |
+
+**Field 12.** DESIGN_MULTIPLAYER's battle-configuration field 12 carries
+`{DefinitionID u16, Unit key, Limit u8}` records in ascending definition-ID
+order. A `Restrictions` value becomes one record for every retained record an
+entry names: that record's index in the unrestricted compiled catalog, the
+entry's key and its count. An entry for a duplicated name therefore gives one
+record per copy, which is how the field keeps duplicate-name identities. The
+reverse mapping requires every record carrying a named key to be present
+with one limit, refuses the three issues above, and gives back the same
+`Restrictions`. Admission compares it with the set the frozen inputs record
+(§15.5), as it compares the mutators.
+
+**Retail `.LST` lists** — the `SAVEGAME\<name>.LST` files of
+`(content checksum, restriction value)` pairs that retail's restriction
+screen saves and loads [08 R-SAVE-02 §5] [08 R-SKIR-01 §10] — are a later
+item, not part of
+this delivery (proposal R-P12). Matching them to definitions needs the
+composite per-definition checksum of [02 "Content checksum"], which Nanolathe
+does not compute today, and a per-record key, which the name-level set does
+not express.
+
+### 15.4 The transform
+
+`ApplyRestrictions` changes the clone in three steps:
+
+1. **Removal.** Every retained record carrying a name whose count is 0 leaves
+   the table. The survivors keep their relative order and are renumbered from
+   1 (`UnitDefID`). The first-name index (`Catalog.Units`), the category
+   registry with every definition's masks, and each survivor's
+   per-definition `Hash`, which covers its index, are rebuilt as
+   `RestrictToCreatable` rebuilds them. Records taken out of a table sorted by
+   name leave it sorted, so for survivors with distinct names this is the
+   order retail's battle-entry sort gives the compacted table
+   [02 R-CAT-01 §5]. `TODO(question)`: whether retail's sort, which does not
+   keep equal names in their input order, gives a group of same-name
+   survivors the order they had in the full table is not established. Settle
+   it by keeping each record's discovery position and discovery-time name at
+   compile and re-running the retained sort over the survivors, or by a
+   trace; until then the group keeps its compiled order. An authored Survival
+   roster (DESIGN_SURVIVAL §5.1) drops its entries for removed units, so the
+   clone's roster names only definitions the clone holds.
+2. **Caps.** Every retained record carrying a name whose count is 1 to 100
+   gets `Limit = count` and `LimitEnabled = true`. `Limit` is excluded from
+   definition identity, so caps move no per-definition `Hash`; the
+   simulation-content manifest digests it with each unit (DESIGN_MULTIPLAYER
+   §8.7).
+3. **Identity.** `Catalog.Hash` becomes
+   `HashDefinition("catalog+restrictions\n" + base + "\n" + r.Digest() + "\n")`,
+   `base` being the clone's hash before the call, as the mutators restamp it.
+   The tag `restrictions/1` inside `Digest` moves whenever the transform
+   changes meaning. The mutators then hash over this value (§6.6), so a
+   battle with both has the identity `mutators(restrictions(compiled))`.
+
+**What it leaves alone.** Build menus are not recompiled. Every consumer
+resolves a product's name through the catalog lookup, and a removed product
+resolves to nothing: its menu slot is greyed (§15.8), and the computer
+players' tables and the Survival tier walk skip it. Weapons, features — a
+removed unit's corpse feature stays, since a map may place it — movement
+classes, sides and AI profiles are untouched. One difference from retail
+remains, shared with `RestrictToCreatable`: retail resolves each builder's
+`CANBUILD` list and its download appends after the compaction, so a removed
+product takes none of the list's 30 resolved positions, and a builder whose
+list reaches that bound can admit a later download entry
+[02 R-CAT-01 §5] [02 R-CAT-01 §8]. The compiled lists keep their positions.
+Rebuilding them over the filtered table, for both filters, is a follow-up
+(§15.12).
+
+### 15.5 Battle entry, saves, replays and reports
+
+- **Entry.** `session.SkirmishEntryOptions.Restrictions` (a
+  `content.Restrictions`) travels beside `Mutators` and is fixed for the
+  battle; a Survival battle is a skirmish entry and takes the same field.
+  `prepareSkirmishEntry` calls `applyEntryRestrictions` after the compile and
+  before `prepareCommunityWeapons` and `applyEntryMutators`. A zero set
+  returns the catalog itself; any other set clones, checks and applies, and an
+  issue is an entry error, because the host has already resolved its
+  preference (§15.3). The prepared catalog is what the frozen inputs hold, so
+  composition and admission see the restricted table; the frozen selection
+  records the set beside the mutators (`SimulationInputs.Restrictions()`). The
+  manifest needs no entry of its own — the restricted records carry the
+  effect — so an unrestricted battle's manifest digest is unchanged.
+  `Session.Restrictions` records the set, as `Session.Mutators` does.
+  `MissionEntryOptions` has no such field.
+- **Restore.** `session.RetailLoadDeps.Restrictions` applies a skirmish
+  save's recorded set to the restore clone where mission restore applies
+  `UseOnlyUnits` — before the terrain, the pool and every unit, and before the
+  mutators — so the restored definition index space is the one the bank was
+  written against [08 R-ENTRY-01 §8]. A sidecar that pairs a set with a
+  campaign bank is refused.
+- **Sidecar.** `save.Sidecar.Restrictions` (`map[string]int`,
+  `"restrictions": {"armkrog": 0, "armpw": 20}`), written from
+  `Session.Restrictions.Map()` by `session.SaveSidecar` when the battle has a
+  set. A sidecar carrying it is written as schema 2 (proposal R-P7): a build
+  that reads only schema 1 refuses it (§7.2), where it would otherwise load
+  the bank without the restrictions and misread its definition indices. A
+  sidecar without restrictions stays schema 1, so every other save remains
+  readable by older builds. This build reads both; a schema-1 sidecar with
+  `restrictions`, or a schema-2 sidecar without a non-empty one, is malformed.
+- **Load.** §7.3 step 6 re-checks the recorded set against the restore's base
+  catalog (§15.3: an issue refuses the load), applies it before the
+  mutators, and makes it the running content's restriction setting, as P6
+  does for mutators, so the settings, a restart and the next battle match the
+  game that was loaded (proposal R-P6). A load without a sidecar restores no
+  restrictions (§7.3 step 1). The catalog-hash comparison of step 7 then
+  covers the restricted identity.
+- **Replays.** Nothing in a battle changes the set, so no command kind
+  carries it. The single-player recording header (DESIGN_MULTIPLAYER §10,
+  milestone M4, not built yet) records it beside the mutators, as field-12
+  records (§15.3), and playback composes with it; a recording without it
+  would replay another battle.
+- **Reports.** The headless report of both commands (read also by the
+  simulation-cost benchmark), the battle benchmark's scene metadata and the
+  debug-capture metadata gain `restrictions`: the canonical `String()`, empty
+  for none, beside `mutators` (§6.6).
+- **Flags.** `--restrict <unit>=<count>` (repeatable, count 0 to 100) on
+  `nanolathe` and `nanolathe-headless`, and `--restrict none` for an
+  explicitly empty set (proposal R-P11). Any `--restrict` replaces the saved
+  set for that run. A key given twice, `none` beside an entry, and
+  `--restrict` beside `--mission` or `--load-save` (a save brings its own set)
+  stop the command; names are checked once the content is compiled (§15.3).
+- **Reproduction.** The desktop command's `--shot`, `--film`,
+  `--battle-benchmark` and `--headless`, and the whole displayless command,
+  never read the settings key, so fingerprint, capture and benchmark runs
+  reproduce from their command line, exactly as for the mutators (§6.6).
+
+### 15.6 Survival
+
+Everyone obeys (D18). The wave pool is built from the restricted catalog, so
+a removed unit is never planned, and neither is a unit reachable only
+through a removed builder, because the tier walk resolves every product
+through the catalog (DESIGN_SURVIVAL §5). An authored roster has already
+lost its removed entries (§15.4 step 1). Under a restriction set the pool,
+walked or authored, must still hold an ordinary tier-1 attacker — the
+opening rule DESIGN_SURVIVAL §5.1 already applies to rosters — and when it
+does not, or the pool is empty, Survival entry is refused with the existing
+diagnostics, which then name the restriction set; an unrestricted battle's
+checks are unchanged. The start site and the
+extra deposits are measured with the first factory and the first extractor
+on the commander's menu that remain (DESIGN_SURVIVAL §4.2, §4.5).
+
+A capped unit is planned as before, from the same draws. At creation the
+allocator counts the attacker's own records of it and refuses once the cap
+is reached, and the director already drops a refused pick
+(DESIGN_SURVIVAL §6.5): the pick uses one of that tick's creations, draws
+nothing, is not retried and does not hold up the rest of the wave, so the
+director neither stalls nor spins and needs no change in any mode
+(proposal R-P9). A wave whose picks were refused is smaller than its budget,
+as when the attacker reaches its unit limit, and still scores the budget it
+was planned with; best scores, when they are kept, include the restriction
+set in their key (DESIGN_SURVIVAL §8). Infection's takeover is an ownership
+transfer through the allocator, so a cap refuses it and leaves the victim
+with its owner, as at the unit limit (DESIGN_SURVIVAL §6.7).
+
+The survivors share sight, radar and income, but each owns its own slice of
+the unit pool [05 R-SHARE-01 §7], so each meets a cap on its own records; a
+teammate's units never count against it.
+
+### 15.7 Computer players
+
+- **Classic.** Unchanged in every mode (D19). The retail planner reads
+  neither the restriction set nor the limit field [08 R-AI-01 §12]
+  [05 R-SHARE-01 §10]. A removed type is absent from the class vectors it
+  compiles over the restricted catalog; a capped type it chooses is refused
+  at the allocator like any other exhaustion, its factory showing the caption
+  and retrying 300 ticks later [05 R-SHARE-01 §8].
+- **Modern.** The Modern AI does not choose a unit once its own records have
+  reached that unit's cap; the policy, the state it reads and its tests are
+  [Modern AI restriction caps](DESIGN_SESSIONS_AI_SAVE.md#modern-ai-restriction-caps).
+  A removed type is absent from its table, which is built over the battle
+  catalog.
+- **Whose records.** A cap counts the records in the creating player's own
+  slice [05 R-SHARE-01 §8], so a computer player's "side" is the player
+  itself, in skirmish and in Survival alike (proposal R-P10).
+
+### 15.8 In battle
+
+- **Removed products.** A product slot naming a removed definition is greyed,
+  and a greyed button swallows its click, so no build request forms: on
+  authored and generated pages through retail's product-name resolution pass
+  [07 R-HUD-03 §6], and in the Modern expanded sidebar through its existing
+  rule that a cell whose name resolves to no definition greys, without
+  repaginating or regrouping
+  ([DESIGN_INTERFACE_HUD_INPUT](DESIGN_INTERFACE_HUD_INPUT.md) "Modern
+  expanded sidebar"). The unit cannot be spawned by name, and the developer
+  spawn command's patterns no longer match it.
+- **Capped products.** An ordinary button: placing and queueing work as for
+  any product, and the refusal is the allocator's, with the retail caption
+  `Unable to create any more units` and the failure table's wait or abandon
+  [05 R-SHARE-01 §8].
+- **Optional.** Drawing the remaining allowance on a capped product's button
+  (for example `3/5`) would be a Nanolathe presentation preference read from
+  the committed frame, off by default and never a gameplay input. It is not
+  part of this delivery.
+
+### 15.9 Editing and storage
+
+**Storage.** The settings key `restrictions` holds the canonical map,
+`{"armkrog": 0, "armpw": 20}`, kept verbatim by `internal/settings` and
+parsed by `content.ParseRestrictions`, as `mutators` is. Unlike the
+mutators, which are the player's alone (§4.6), a restriction names one
+content set's units, so `restrictions` is a mod-scoped path: the base block
+holds the original game's set and `modSettings.<mod id>.restrictions` the
+player's set for that mod, layered as §4.6 describes. It is atomic, like
+`keyBindings`: a mod's layer that states a set replaces the base set whole
+rather than merging with it, and a mod with no set of its own plays the base
+set, whose names it lacks are left out with the notice of §15.3
+(proposal R-P5). A mod's config cannot recommend restrictions: `restrictions`
+joins the match-selection keys its `settings` section refuses (§4.2). A
+manual root stack and the original game play the base set.
+
+**The Nanolathe screen card.** The Mutators tab of the Nanolathe screen
+([DESIGN_INTERFACE_HUD_INPUT §3.17](DESIGN_INTERFACE_HUD_INPUT.md#317-the-nanolathe-screen))
+gains a *Unit restrictions* card after the mutator cards. Its control is a
+summary, not the editor, so it never grows with the catalogue: *No
+restrictions*, or the numbers removed and capped and up to four names with
+their states, then *and N more*; *Edit…* opens the unit viewer's editor over
+the screen; *Clear* empties the draft. Its description says that
+restrictions apply to skirmish and Survival under every rule set, Strict 3.1
+included, that every player obeys them, computer players and Survival waves
+included, and that campaign missions keep their own unit lists. Its chips name
+saved entries the running content leaves out (§15.3). It has no comparison
+scene: a restriction changes which units exist, not how a scene looks. The
+set is part of the
+screen's draft: *Apply* writes it to the running content's layer and *Back*
+discards it. The line under the wordmark names the restriction count beside
+the mutators.
+
+**The unit viewer's editor.** The unit viewer
+([DESIGN_DEVELOPER_TOOLS §7](DESIGN_DEVELOPER_TOOLS.md#7-3d-unit-viewer-preview))
+gains a restriction editor, which this section owns. The viewer stays
+presentation only: it edits a `content.Restrictions` draft beside its own
+unrestricted preview catalog, and nothing it does creates a battle, compiles
+a battle catalog or reaches the simulation.
+
+- *Rows.* Each library row shows its name's state: nothing for *No limit*,
+  the count for a cap, *Removed* and a dimmed row for 0, and a padlock with
+  its reason for a name that cannot be restricted (authored `norestrict`) or
+  cannot be removed (a side's commander, which still takes a cap). Every
+  record carrying a name shows that name's state, and a record hidden by a
+  duplicate name says the entry covers every record so named.
+- *Selected unit.* An *On/Off* switch, *On* being *No limit* and *Off* being 0,
+  and a count stepper over 0…100 with *No limit* above 100, as retail's slider
+  runs [08 R-SKIR-01 §10]: stepping down from *No limit* gives 100, and up from
+  100 gives *No limit*. A `norestrict` unit's controls are disabled, and a
+  commander's *Off* and 0, each saying why.
+- *Restricted only* narrows the library to names with an entry, together with
+  the search.
+- *Reset* gives every name that is not locked 100, and 0 when the name is
+  `wacky`, as retail's *Reset* does [08 R-SKIR-01 §10]; a name that cannot be
+  removed keeps 100. *Clear all* empties the set.
+- A footer counts the names removed and capped.
+- *Entry and exit* (proposal R-P8). Opened from the card, the editor edits the
+  Nanolathe screen's draft, and *Back* returns to the screen with it. Opened
+  from the main menu with Ctrl+U, the viewer shows *Apply*, with the number of
+  changed names, beside *Back* once the draft differs: *Apply* writes the
+  running content's layer and *Back* discards. The card is a visible route to
+  the editor; the viewer itself stays unlisted.
+
+**Other surfaces.** The main-menu chip's status line adds the restriction
+count (§8.1); the loading screen adds `Restrictions: 3 removed, 2 capped`
+under the mutators, and its warning line names entries left out (§8.3); the
+load dialog's sidecar line adds the count (§8.4). These are Nanolathe
+divergences, like the lines they join.
+
+### 15.10 Proposals (approved 2026-10-05)
+
+D17–D19 settle the policy. These are the choices this design made beyond
+them; each is implementable as written and none moves the retail baseline.
+The user approved all twelve as written on 2026-10-05.
+
+| ID | Proposal | Section |
+|---|---|---|
+| R-P1 | A restriction names a unit name and applies to every retained record of that name, not only to the record the name lookup returns, so a removal never exposes a hidden duplicate under the same name | §15.3 |
+| R-P2 | Removal keeps the survivors' compiled order and renumbers them; the order of same-name survivors stays a `TODO(question)` | §15.4 |
+| R-P3 | A side's commander can be capped but not removed, because skirmish entry needs one per player | §15.3 |
+| R-P4 | An entry the content cannot take stops a `--restrict` command, is left out with a notice from the settings, refuses a save's load, and rejects a field-12 configuration | §15.3 |
+| R-P5 | `restrictions` is a mod-scoped, atomic settings path (per mod, inherited from the base when a mod has none); a mod's config cannot recommend restrictions | §15.9 |
+| R-P6 | Loading a save makes its recorded restrictions the running content's setting, as P6 does for mutators | §15.5 |
+| R-P7 | A sidecar with restrictions is written as schema 2, every other sidecar stays schema 1 | §15.5 |
+| R-P8 | The card sits on the Mutators tab and opens the editor; the viewer opened with Ctrl+U gains *Apply* | §15.9 |
+| R-P9 | Survival plans a capped unit as before and drops a refused pick, with no re-pick; the wave keeps its planned budget for scoring; a unit reachable only through a removed builder leaves the pool; a roster loses its removed entries | §15.6 |
+| R-P10 | The Modern AI's cap is its own slice's count, plus its own requests that have no record yet; the executor drops a command whose product's cap was reached in the reaction window | §15.7, [DESIGN_SESSIONS_AI_SAVE](DESIGN_SESSIONS_AI_SAVE.md#modern-ai-restriction-caps) |
+| R-P11 | `--restrict none` selects an explicitly empty set | §15.5 |
+| R-P12 | Retail `.LST` import and export are a later item | §15.3 |
+
+### 15.11 Verification
+
+Contract-level and light, as the test policy asks; every relationship is
+checked under Strict 3.1 and under Modern unless the row says otherwise.
+
+| What | Where |
+|---|---|
+| Parsing: canonical keys only, counts 0..100, flag spellings, a key given twice, `String`/`Map`/`ParseRestrictions` round trip, `Digest` independent of input order | `content` |
+| An empty set: `applyEntryRestrictions` returns the catalog itself; a clone given the empty set to `ApplyRestrictions` is deep-equal with an equal `Hash`, on a fixture with a `wacky` definition | `content`, `session` |
+| Removal: absent from `Units` and `UnitRecords`, survivors renumbered in order with masks and per-definition hashes rebuilt; every record of a duplicated name removed; the roster loses the entry; the source catalog untouched | `content` |
+| Caps set `Limit`/`LimitEnabled` and leave every per-definition `Hash` alone; `Catalog.Hash` follows `catalog+restrictions` over the base and the set | `content` |
+| `CheckRestrictions` refuses unknown, `norestrict` (any record of the name) and commander removal, accepts a commander cap; `ApplyRestrictions` writes nothing on an issue | `content` |
+| Under a cap of N, the allocator refuses the (N+1)th record of a player's slice with nanoframes counted, accepts again after a teardown, and another player's records do not count; the factory shows the retail caption and retries after 300 ticks (relationships, Strict and Modern) | `session` |
+| A removed product cannot be built or spawned by name; a builder's page with a removed product shows the slot greyed | `session`; a reviewed `--shot` capture (unit 4) |
+| Restrictions then mutators: the restricted-and-mutated hash is `mutators(restrictions(compiled))` at fresh entry (unit 1), and a restore gives the same catalog (unit 2) | `session` |
+| No fingerprint lock moves; the reserved sets' headless reports match the pre-change bytes apart from the new empty `restrictions` field | `headless`, retail tier |
+| Survival: a removed unit never enters the pool or a plan; a capped attacker pick is refused, dropped, not retried and draws nothing; the wave plan's draws are unchanged by a cap; a roster that loses its only tier-1 opener refuses entry naming the restrictions | `survival`, `session` |
+| Classic computer player against a capped product: refused, retried after 300 ticks, no other change | `session` (retail tier) |
+| Modern AI: a candidate at its cap is not chosen; its pending requests count; a stale capped command is dropped by the executor; synchronous and asynchronous hosts agree | `aikit` (see [Modern AI restriction caps](DESIGN_SESSIONS_AI_SAVE.md#modern-ai-restriction-caps)) |
+| Sidecar: schema 2 with restrictions and schema 1 without; a save and load restores the restricted index space and selects the set; an unknown recorded unit refuses the load | `save`, `main` (retail tier) |
+| Settings: the per-mod layer replaces the base set whole; a name the content lacks is left out with the notice; a mod config naming `restrictions` is refused | `settings`, `modlibrary`, `main` |
+| Flags: `--restrict` replaces the saved set, `none`, the refusals of §15.5; capture and benchmark modes never read the key | `main`, `nanolathe-headless` |
+| Editor and card: row states, stepper ends, Reset with a `wacky` and a commander name, Clear all, *Restricted only*, draft and *Apply*/*Back* from both entries; captures of the card and the editor reviewed | `main`, `--shot` |
+
+### 15.12 Work units
+
+Ordered so that each lands green on its own; none moves a fingerprint lock.
+Units 2 and 3 can run in parallel after unit 1; unit 4 follows unit 2.
+
+1. **Core, entry and reports.** Owns `internal/content/restrictions.go` and
+   its test (new), `internal/content/catalog.go` (factoring the rebuild
+   `RestrictToCreatable` performs into a helper both filters share, with no
+   change to `RestrictToCreatable`'s behaviour), `internal/content/sim_inputs.go`,
+   `internal/session/restrictions.go` (new), `internal/session/skirmish.go`,
+   `internal/session/session.go`, `internal/headless/runner.go` and
+   `report.go`, `cmd/nanolathe-headless/main.go`, and in `cmd/nanolathe`
+   `flags.go`, `battle_composition.go`, `headless.go` and
+   `battle_benchmark.go`. Delivers §15.2–§15.4, the entry half of §15.5, the
+   flags and the report fields. *Done when* the content and session rows of
+   §15.11 pass, `tools/check ./internal/content ./internal/session
+   ./internal/headless ./cmd/nanolathe ./cmd/nanolathe-headless` is green and
+   the fingerprint locks hold.
+2. **Settings, sidecar and restore.** Owns `internal/settings/settings.go`
+   and `layers.go`, `internal/modlibrary/config.go`, `internal/save/sidecar.go`,
+   `internal/session/sidecar.go` and `retail_stage.go`, and in
+   `cmd/nanolathe` `settings.go`, `mods.go` (saved-set resolution, notices,
+   the chip) and `save_sidecar.go` (load, selection, the load-dialog line).
+   Delivers §15.9's storage, the rest of §15.5 and §15.3's per-source
+   handling; the replay header is M4's to build (§15.5). *Done when* the
+   sidecar, settings and load rows of §15.11 pass.
+3. **Survival and the Modern AI.** Owns `internal/session/survival.go`; the
+   allocator's per-definition census factored into one read-only function
+   that the allocator gate and a new `units.World` accessor share, in
+   `internal/pool/pool.go` and `internal/units/units.go`; and in
+   `internal/aikit` `info.go`, `obs.go`,
+   `host.go`, `cmd.go` and the candidate sites of `brains/utility` and
+   `brains/survival`. Delivers §15.6 and the policy of
+   [Modern AI restriction caps](DESIGN_SESSIONS_AI_SAVE.md#modern-ai-restriction-caps).
+   *Done when* the Survival, Classic and Modern AI rows of §15.11 pass and
+   the arena's synchronous and asynchronous runs agree.
+4. **Editor, card and lines.** Owns `cmd/nanolathe/unit_viewer*.go`,
+   `nlscreen_pages.go`, `nlscreen.go` and `loading.go`, and the pointer
+   paragraphs in DESIGN_INTERFACE_HUD_INPUT §3.17 and DESIGN_DEVELOPER_TOOLS
+   §7. Delivers the card, the editor and the loading-screen lines of §15.9.
+   *Done when* the editor row of §15.11 passes and captures of the card and
+   the editor at 1440×900 and 1024×640 are reviewed.
+
+**Follow-ups**, not in this delivery: retail `.LST` import and export
+(R-P12); rebuilding `CANBUILD` lists over a filtered table for both filters
+(§15.4); the equal-name `TODO(question)` (§15.4); the optional allowance on
+capped buttons (§15.8); and online restrictions in the lobby, field 12's
+enforcement and retail's seeded-but-unclosed state (DESIGN_MULTIPLAYER §15
+Q16).

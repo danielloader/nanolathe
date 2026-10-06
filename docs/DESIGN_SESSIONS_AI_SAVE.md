@@ -2346,6 +2346,71 @@ definition-level policy, which reads the catalog's compiled infector flag
 ([Modern infection](DESIGN_UNITS_ORDERS_COB.md#modern-infection)), so it
 tokenizes nothing per contact.
 
+#### Modern AI restriction caps
+
+**Nanolathe Modern AI policy, user-authorized 2026-10-05.** Under
+[unit restrictions](DESIGN_MODS_MUTATORS.md#15-unit-restrictions) a positive
+count caps each player's records of a definition at the allocator
+`[05 R-SHARE-01 §8]`. The user decided that Classic computer players keep
+retail's behaviour while the Modern AI does not choose a unit once it has
+reached that unit's cap. Like the other Modern AI policies it applies in
+every gameplay mode, including Strict 3.1, and extends the per-player
+controller exception, not the rule registry.
+
+**Classic baseline.** Unchanged. The retail planner reads neither the
+restriction set nor the definition's limit field `[08 R-AI-01 §12]`
+`[05 R-SHARE-01 §10]`; a capped type it chooses is refused at creation like
+any other exhaustion, and its factory shows the caption and retries 300 ticks
+later `[05 R-SHARE-01 §8]`. A removed type is absent from the class vectors
+compiled over the restricted catalog.
+
+**What the controller reads.** Only its observation, built on the
+simulation thread by the host (`aikit` `buildObs`), as for everything else it
+knows:
+
+- `UnitInfo.Cap`, immutable per battle: −1 for *No limit*, otherwise the
+  definition's `Limit` in the battle catalog. The table is built over that
+  catalog, so a removed definition has no entry and no product list names it.
+- `Obs.Capped`, one record per capped definition in table order, holding the
+  definition's info and `Records`: the allocator's own census of the
+  observer's slice — records whose definition index is that definition,
+  nanoframes and records awaiting teardown included `[05 R-SHARE-01 §8]` —
+  read through a `units.World` accessor that shares the allocator gate's
+  counting function, so the number is exactly what the allocator will
+  compare. A battle without caps leaves the list empty and adds no work.
+
+"Its own" is the observer's slice: the allocator counts the creating
+player's records only, so in Survival a teammate's units do not count,
+although the team shares sight and income
+([DESIGN_SURVIVAL §4.3](DESIGN_SURVIVAL.md#43-one-side-against-the-world)).
+
+**Decision.** A product's allowance is `Cap − Records − Pending`, where
+`Pending` is the brain's own outstanding requests for that definition that
+have no record yet — the factory requests and accepted build commitments it
+already tracks for its budget. Where the allowance is zero or less the
+economy, production and survival-defence layers do not offer the product as
+a candidate, and a factory request queues at most the allowance. The
+executor backs this up when it applies a batch after the persona's reaction
+window: a placement or factory-queue command whose product's live census has
+reached its cap is dropped as stale, like the executor's other
+revalidations, and spends nothing. Commands issued before the cap was
+reached follow the ordinary paths, including the allocator's refusal.
+
+**Boundaries and verification.** No random draw, resource charge, rule seam
+or saved state is added: the census is copied afresh each observation and a
+load rebuilds it, and the brain's reasoning stays a pure function of its
+observation, so the synchronous and asynchronous hosts still agree. Classic
+players never read the new fields, so no fingerprint lock moves. Tests: an
+`aikit` host test in which a capped definition's census reaches its cap — the
+brain stops offering it, its pending factory requests count against the
+allowance, and a stale queued command is dropped at application; a census
+test proving the accessor equals the allocator's count with a nanoframe and a
+dying record present; a retail-tier Survival battle in Strict 3.1 and Modern
+whose Modern buddy meets a cap on its own slice while its teammate's units of
+that type do not count; the Classic control of
+[DESIGN_MODS_MUTATORS §15.11](DESIGN_MODS_MUTATORS.md#1511-verification);
+and the existing synchronous/asynchronous arena comparison.
+
 ## 6. Research map
 
 | Behaviour | Owning research |

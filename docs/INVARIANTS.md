@@ -472,6 +472,22 @@ seats through the existing RuleSet, as documented in DESIGN_MULTIPLAYER
 fingerprint lock runs single-player. It is owned by
 [DESIGN_MULTIPLAYER](DESIGN_MULTIPLAYER.md) and is not yet implemented.
 
+**Unit restrictions** (user-authorized 2026-10-05) are likewise available in
+every mode, for skirmish and Survival. A restriction is retail's multiplayer
+per-definition count — 0 removes the definition from the per-battle catalog
+clone at battle entry, 1–100 caps each player's records of it at the
+allocator's existing per-definition test — applied before the mutators, with
+no seam, no RNG and no per-tick state; campaign missions keep their own
+authored unit lists. Every player obeys it, Survival's attacker included:
+Classic computer players meet a capped product as retail's allocator refusal,
+and the Modern AI computer player does not choose a product its own records
+have reached. `norestrict` definitions are never restricted and nothing is
+seeded, so an empty set leaves the catalog, its hash and every identity
+untouched. Strict 3.1 *with no restrictions* is the retail baseline, and every
+fingerprint lock runs with none. It is owned by
+[DESIGN_MODS_MUTATORS](DESIGN_MODS_MUTATORS.md) §15 and is not yet
+implemented.
+
 The mode word also selects a **registered** set by name: a third-party set is
 compiled in through `mods/`, which only a command may import, and it composes
 the shipped implementations rather than reimplementing a policy. Such a set

@@ -3009,29 +3009,59 @@ the machine that hosts it ([R-AI-01 §21]).
 
 ### Map restrictions [R-SKIR-01 §10]
 
-`RESTRICT2.GUI` is opened only by the multiplayer battleroom handler; no
-skirmish path reaches it. The screen builds, for every definition except
-index 0 whose `norestrict` capability bit is clear — this is the reader of
-`norestrict`: a `norestrict` definition is simply not offered for
-restriction — a 98-byte row (caption
-`"%s\r%s %dM  %dE"`, definition index, current limit, and the restriction
-lookup's status) sorted by a comparator over the row, plus `OLDCOUNTS`, an integer
-per row snapshotting each limit before editing. Each `SLIDER%d` runs
-`0..101`; a value `< 101` is stored as the limit and printed, `101` prints
-`No Limit` and stores `-1`; every change is written straight into the
-restriction container (a tree keyed by definition, one record per
-definition holding a *restricted* short and a *limit* word). `Reset`
-sets every row to `100`, or to `0` when the definition's `wacky` capability
-bit is set, writing only rows whose value changed; `Cancel` (`Previous` cue)
-writes every `OLDCOUNTS` value back. The close path, when this machine is the
-host (the host slot — the lobby record that carries the host flag — is live
-with control byte `1` or `2`, [R-SKIR-01 §13]),
-walks the rows and marks each definition restricted (limit
-`0`) or unrestricted through the container's two setters. The container is
-process-lifetime memory: no registry, save or file writer touches it, and the
-per-definition limit field is this container's *limit* word. Simulation
-consumers (the build-menu and order gates) are doc 05's; the AI's
-construction task consults the same container.
+`RESTRICT2.GUI` is opened only by the multiplayer battleroom handler's
+`RESTRICTIONS` button, by any player, host or not; no skirmish path reaches
+it. The screen builds, for every definition except index 0 whose
+`norestrict` capability bit is clear — this is the reader of `norestrict`:
+a `norestrict` definition is simply not offered for restriction — a 98-byte
+row (caption `"%s\r%s %dM  %dE"` from the name, the description and the two
+costs; the definition index; the current count; and the node's *synced*
+word) sorted by a byte-wise comparator over the caption, plus `OLDCOUNTS`,
+an integer per row snapshotting each count before editing. The current
+count is the node's limit, shown as `101` when it is the unlimited `-1`.
+Each `SLIDER%d` has range `0..101`; a value `< 101` is stored as the count
+and printed, `101` prints `No Limit` and stores `-1`; every change is
+written straight into the restriction container — a tree keyed by the
+definition's content checksum, one node per definition holding an *enable*
+word, a *synced* word and a *limit* word, seeded as [05 R-SHARE-01 §9]
+states — and the per-definition limit field of doc 05 is written from that
+*limit* word at lobby exit, not from the screen. A row's slider is greyed
+when this machine is not the host or when the row's definition is not
+synced; `Load`, `Save` and `Reset` are greyed when this machine is not the
+host. `Reset` sets every row to `100`, or to `0` when the definition's
+`wacky` capability bit is set, writing only rows whose value changed — a
+reset board is a board of per-player counts of `100`, not of `No Limit`;
+`Cancel` (`Previous` cue) writes every `OLDCOUNTS` value back. The close
+path, when this machine is the host (the host slot — the lobby record that
+carries the host flag — is live with control byte `1` or `2`, [R-SKIR-01
+§13]), walks the rows and sets each offered definition's *enable* word to
+`1` when its row value is non-zero and to `0` when it is zero; the count
+itself was already written by the slider. The host sends every node it
+writes to its peers, whose screens refresh their rows from the mirrored
+tree each frame; a row carries a *not synced* flag and a *count 0* flag as
+two distinct row states.
+
+`Save` and `Load` open `SAVELIST.GUI` / `LOADLIST.GUI` over
+`SAVEGAME\*.LST` ([R-SAVE-02 §5] owns the file): `Save` writes the current
+rows as `(content checksum, count)` pairs, `Load` reads a file's pairs into
+the rows whose checksum matches and pushes each through the slider path
+into the tree. That is the only persistence the restriction state has. The
+container is process-lifetime memory, freed when the battle starts after
+its apply ([05 R-SHARE-01 §9]); no registry value, save account or replay
+record carries it, and the per-definition limit field it writes is reloaded
+to `-1` with the catalog before the next lobby ([05 R-SHARE-01 §8]).
+
+Simulation consumers: the apply at lobby exit writes each definition's
+creatable bit and limit field, and the battle-entry compile then removes
+the bit-clear records, so a count of `0` is a missing definition — no
+index, no button; a build page's slot naming it is greyed ([07 R-HUD-03
+§6]) — while a positive count is enforced by the allocator alone, at
+creation ([05 R-SHARE-01 §8]). The computer player never reads the tree
+or the limit field: its candidates come from the class vectors compiled
+over the compacted catalog and its own profile limits ([R-AI-01 §12],
+[05 R-SHARE-01 §10]), so a count-limited type it chooses is refused at the
+allocator like any other exhaustion, and its factory waits the ordinary
+300 ticks before retrying ([05 R-SHARE-01 §8]).
 
 ### `GAMEOPTIONS.GUI` and the remaining tokens [R-SKIR-01 §11]
 
@@ -4815,6 +4845,17 @@ per-definition passes run in slot order.
   per-type limit and, on an exact naming, sets the limit lock. `-1` means
   unlimited; the construction score's fourth hard gate requires
   `completedCount < limit` [R-P0-05 §3].
+
+**The multiplayer restriction count is a different word (Established).**
+The per-definition limit the lobby's restriction screen writes
+([R-SKIR-01 §10], [05 R-SHARE-01 §9]) is read by the unit allocator alone.
+No planner routine reads that field or the lobby's restriction tree —
+the tree is freed at lobby exit, before the AI records of [R-ENTRY-01 §3]
+step 24 exist — so a restricted type reaches the computer player only as a
+missing catalog record (a count of `0`, removed by the battle-entry
+compile) or as the allocator's refusal of a count-limited type, which the
+planner cannot tell from any other creation failure
+([05 R-SHARE-01 §10]).
 
 **The name matcher and the two lock vectors.** The name argument of `weight`
 and `limit` is first binary-searched against the definition catalog by authored
@@ -8576,7 +8617,9 @@ extension `LST`: `SAVEGAME\<name>.LST`. The list shows the file base names
 with their extension stripped (no bank is opened). The writer emits a binary
 file: a `u32` count (one less than the number of loaded definitions), then,
 for each definition index from `1` upward that has a restriction record,
-one `u32` definition id word and one `u32` restriction value. The empty-list message is `There are no saved lists
+one `u32` definition content checksum ([02 "Content checksum"]) — the
+restriction tree's key, which is why `Load` matches a file's pairs to rows by
+checksum rather than by index — and one `u32` restriction value. The empty-list message is `There are no saved lists
 to choose from`. Nothing in this family touches a save bank. [Established]
 
 **Established — supplied demo asset inventory.** The demo identified in
@@ -9910,6 +9953,15 @@ properties:
 
 ## Missing and unknown
 
+- **Unknown — a definition only the host holds:** the host seeds every
+  node's *synced* word to `1` and recomputes it only when a peer reports
+  that definition's content hash; a definition no peer holds is never
+  reported, so whether the lobby's start gate refuses to start, or the
+  host's catalog keeps the definition creatable while the peers' lack it,
+  is not traced [R-SKIR-01 §10]. Decider: static trace of the start gate's
+  per-peer report accounting against the host's definition count;
+  multiplayer transport, out of scope for the simulation. Nanolathe
+  requires identical catalogs instead.
 - **Unknown — duplicate command-name registration reachability:** insertion
   ordering folds case, but existing-entry equality compares exact bytes. The
   traced profile bootstrap registers the fixed names `plan`, `weight` and

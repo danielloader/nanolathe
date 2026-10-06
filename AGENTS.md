@@ -131,6 +131,26 @@ single-player. It is owned by
 [DESIGN_MULTIPLAYER](docs/DESIGN_MULTIPLAYER.md), which stages the work in
 milestones (§16): build them in that order.
 
+**Unit restrictions are the fifth mode-independent exception (user-authorized
+2026-10-05).** A restriction is retail's multiplayer unit-restriction count,
+offered for skirmish and Survival in every gameplay mode, Strict 3.1
+included, and edited in the unit viewer from a card beside the mutators. A
+count of 0 removes the definition from the per-battle catalog clone at battle
+entry, as retail's battle-entry compile removes a cleared record; a count of
+1–100 caps each player's records of it at the allocator's existing
+per-definition test, nanoframes included. It is applied before the mutators,
+adds no seam, no RNG and no per-tick state, and campaign missions keep their
+own authored unit lists. Everyone obeys, the Survival wave attacker included.
+Classic computer players keep retail's behaviour — a capped product is
+refused at creation and retried 300 ticks later — while the Modern AI does
+not choose a unit once its own records have reached the cap. Definitions
+authored `norestrict` can never be restricted, and nothing is seeded: an
+empty set leaves the catalog, its hash and every identity untouched, `wacky`
+content included. Strict 3.1 *with no restrictions* is the retail baseline,
+and every fingerprint lock runs with none. The multiplayer lobby reuses the
+same set later as battle-configuration field 12. It is owned by
+[DESIGN_MODS_MUTATORS](docs/DESIGN_MODS_MUTATORS.md) §15.
+
 Current policies: [terrain admission](docs/DESIGN_WEAPONS_PROJECTILES.md#231-modern-terrain-admission),
 [Hold Fire](docs/DESIGN_UNITS_ORDERS_COB.md#modern-hold-fire), and
 [factory-exit yielding](docs/DESIGN_ECONOMY_CONSTRUCTION.md#modern-factory-exit-yielding), and
@@ -159,7 +179,8 @@ Current policies: [terrain admission](docs/DESIGN_WEAPONS_PROJECTILES.md#231-mod
 2026-10-05) with its
 [Survival infection hunters and infector waves](docs/DESIGN_SURVIVAL.md#modern-infection-hunters),
 [infector target preference](docs/DESIGN_WEAPONS_PROJECTILES.md#modern-infector-target-preference)
-and [Modern AI infector focus](docs/DESIGN_SESSIONS_AI_SAVE.md#modern-ai-infector-focus).
+and [Modern AI infector focus](docs/DESIGN_SESSIONS_AI_SAVE.md#modern-ai-infector-focus), and
+[Modern AI restriction caps](docs/DESIGN_SESSIONS_AI_SAVE.md#modern-ai-restriction-caps).
 Retired from Modern by its traffic policy, and kept only as the pathfinding
 laboratory's baseline (`movement.OverlapRules`): re-route staggering, allied
 pass-through, jam release and pocket release. Do not restore them as parity

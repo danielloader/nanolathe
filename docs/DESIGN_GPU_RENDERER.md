@@ -5361,6 +5361,123 @@ planes, stable near-coincident priority, shared-edge coverage, depth byte carrie
 negative/large heights and texture holes. The screen and record contracts are
 owned by DESIGN_DEVELOPER_TOOLS §7.
 
+#### Attached model and nanoframe
+
+**Established (implementation); viewer policy.** A projected record can carry
+a second model, such as a factory's product under construction on its pad, in
+the same output-pixel and depth frame as the previewed model. The API:
+
+```go
+type ModelPreviewPlacement struct {
+	Position             [3]numeric.Fixed // root-local attachment origin
+	Heading, Pitch, Bank uint16           // added to the attachment's root, Y/X/Z
+}
+type ModelPreviewAttachment struct {
+	Model                       string
+	Structure, KeyPlane         bool
+	PiecePoses                  []frame.PieceView
+	HiddenPieces                []string
+	Placement                   ModelPreviewPlacement
+	BuildRemaining              float32 // 0 complete; (0, 1] nanoframe
+	NanoframeID                 uint16  // pulse identity
+	NanoframeTick               uint32  // pulse tick
+}
+type ModelPreviewPiece struct {
+	Attachment bool
+	Name       string
+}
+
+// ModelPreviewOptions.Attachment *ModelPreviewAttachment
+func (r *ModelPreviewRenderer) PiecePlacement(model string, poses []frame.PieceView, piece string) (ModelPreviewPlacement, error)
+func (r *ModelPreviewRenderer) ProjectedPieces(opts ModelPreviewOptions, projection ModelPreviewProjection, pieces []ModelPreviewPiece) ([]drawlist.ModelPreviewPosition, error)
+```
+
+Only `RecordProjectedGeometry` and `ProjectedPieces` accept an attachment;
+`RecordModel` and `RecordGeometry` reject it, and the previewed model still
+rejects construction, children, cloak, Digger, waterline and `Scale`. The
+attachment takes the previewed model's owner. The record's
+`Projected.Attachment` (`drawlist.ModelPreviewAttachment`) holds its faces,
+`Reveal` and `Outline`; its ordinary packet follows the parent's in `List`
+only so list consumers bound both. Without an attachment the record, the
+shader source, the vertex batch and the passes are unchanged, byte for byte.
+
+*Frame.* The placement is in the parent's root-local model space, the root
+piece's frame before its own transform. The attachment's loaded model is
+grafted below a proxy piece holding the parent root's translation and its
+folded state, so the shared transform chain carries the attachment with the
+parent's root transform and per-axis rounding [03 §2.4] C21, and shaded
+normals see the final orientation. `PiecePlacement` returns a piece's
+locator chain below the root [04 R-REV-02] and its own turns, which the
+battle adds to the factory orientation without folding an ancestor
+[04 R-FAC-02 §2]; the root piece places at the root origin with no turn. At
+zero view orientation the attachment therefore lands where the battle draws
+a product of a factory at heading zero; ARMLAB/ARMPW and CORAP/CORVENG
+sessions reproduced the published product offset and heading exactly. Any
+other view orientation turns the assembly rigidly, as an orbiting camera
+would, so the attachment's own root offset turns with it rather than staying
+axis-aligned as a separately oriented battle unit's does. Composing under the
+root also applies a script turn of the root itself, which the battle's
+orientation copy would not; a census of the reference install's 21 scripts
+answering `QueryBuildInfo` found no turn, spin or immediate turn of a root
+piece. The parent's pivot, fit and `PixelsPerUnit` frame both models. The
+floater sea-level clamp has no water to clamp to, and the signed hang-byte
+edge [04 R-FAC-02 §1] belongs to the caller that resolves the script's piece
+index to a name.
+
+*Reveal.* The client reuses the battle's reveal and pulses
+(`unitNanoframeReveal`, from `NanoframePulse(NanoframeID, NanoframeTick)`)
+[03 R-P0-19-N], including the §37.1 host team-colour mapping, which the
+viewer's private client leaves off: the viewer shows the stock ramp. Each
+attachment corner's key is its whole height above the attachment origin plus
+the bias, in the battle's own frame (the local composition at the placement
+angles), so the reveal never follows the orbit [03 R-COMP-01 §3]. The device
+interpolates keys through the quad mapper's two-chain walk on quads, as the
+battle does, and linearly on other faces with a 1/64 bias that keeps a
+constant whole key whole; a lane-less face carries its key as
+`-(key + 32768)` in the quad-index channel. The key wraps to the stored byte.
+The attachment finishes its own image first, as a carried child does: three
+depth passes find its top surface and the colour pass applies the verdict
+there per 2× sample. Erase leaves the sample uncovered, so the parent shows
+through and never the attachment's far side; an index replaces the colour
+unshaded and without glint or finish; keep leaves the composed colour.
+
+*Outline.* Every ring of every visible piece, last piece first and without
+the selection plate, takes the battle's edge walk [03 R-COMP-01 §3]
+[03 R-RAST-01 §1] translated to the viewer raster: retail samples rows at
+integer corners and covers columns `ceil(xL)` to `ceil(xR)`, exclusive; the
+device samples pixel centres, so each output row is sampled at its centre and
+covers `ceil(xL-1/2)` to `ceil(xR-1/2)`. Where `xR-xL` is strictly positive
+the two bounding columns are written, as whole output pixels in the outline
+pulse; back-facing and empty rows write nothing. The outline is one output
+pixel wide at every `PixelsPerUnit`. Each pixel carries the depth plane of the
+face's fan triangle at its edge, clamped to the ring's span; it joins the
+attachment's depth passes, so it stores its depth as a retail endpoint stores
+its key, and is drawn after the reveal.
+
+*Device passes.* The attachment's three depth passes and colour pass, then
+the parent's as an isolated record draws them, then one pass that merges the
+two per sample by depth, the attachment winning ties as a carried child wins
+its carrier's key ties [03 R-REN-03A §4], and resolves the coverage. A
+separate compiled shader adds the key lane and verdict uniforms; the merge
+pass is its own shader. Two attachment planes are allocated at the planes'
+size for the first record with an attachment, and `ResetSources` releases
+them with the rest. Battle renderer preference does not select this path: the
+viewer shows this look under Classic and Enhanced alike. The look is the
+battle reveal's: Classic and Enhanced battles differ only in raster detail.
+
+`ProjectedPieces` returns piece origins of either model through the same
+transforms and projection, for an overlay such as nanolathe spray from a
+`QueryNanoPiece` piece to the product. Client tests lock the unchanged
+isolated record, the battle placement at zero view orientation, the placement
+helper, product-local keys, the fraction boundaries (0 complete; 1 erases a
+low body leaving the outline; a vanishing fraction keeps it), piece points
+equal to drawn corners and the outline's row-extreme rule; with retail
+assets, a running ARMLAB session's ARMPW offset and heading match the
+composition on the pad its script names. The real-device
+fixture locks crossing-plane occlusion, attachment-wins ties, erase showing
+the parent rather than the attachment's far side, wrapped keys through both
+key lanes, outline depth tests and both fraction boundaries.
+
 ## 23. Battle lighting (Enhanced)
 
 ### 23.1 Scope and inputs

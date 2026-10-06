@@ -65,6 +65,10 @@ type ModelPreviewOptions struct {
 	// positions are relative to this preview's world origin; identities and
 	// definition-derived fields are provided explicitly by the caller.
 	Children []frame.UnitView
+	// Attachment composes a second model, such as a factory's product, into a
+	// projected record. Only RecordProjectedGeometry and ProjectedPieces accept
+	// it (DESIGN_GPU_RENDERER §22.5); the ordinary entries reject it.
+	Attachment *ModelPreviewAttachment
 }
 
 // ModelPreviewRecord is one reproducible static preview. Image is the classic
@@ -127,16 +131,9 @@ func (r *ModelPreviewRenderer) recordModel(opts ModelPreviewOptions, geometryOnl
 	if r == nil || r.client == nil || r.palette == nil {
 		return ModelPreviewRecord{}, fmt.Errorf("nanolathe: rendering model preview: renderer is not initialized")
 	}
-	name := strings.TrimSpace(opts.Model)
-	if name == "" {
+	renderName := previewRenderName(opts.Model)
+	if renderName == "" {
 		return ModelPreviewRecord{}, fmt.Errorf("nanolathe: rendering model preview: logical path objects3d, providers searched %s, expected model name", previewProviders(r.client.modelFS))
-	}
-	// The production loader accepts either a bare model name or a complete
-	// logical path. Make the command's documented "armcom.3do" shorthand a
-	// complete path before entering that loader.
-	renderName := name
-	if strings.HasSuffix(strings.ToLower(name), ".3do") && !strings.ContainsAny(name, `/\`) {
-		renderName = "objects3d/" + name
 	}
 	if opts.Width <= 0 || opts.Height <= 0 || opts.Width > maxModelPreviewDimension || opts.Height > maxModelPreviewDimension {
 		return ModelPreviewRecord{}, fmt.Errorf("nanolathe: rendering model preview: output size %dx%d outside 1..%d", opts.Width, opts.Height, maxModelPreviewDimension)
@@ -147,6 +144,9 @@ func (r *ModelPreviewRenderer) recordModel(opts ModelPreviewOptions, geometryOnl
 	// magnification is unavailable instead of silently receiving another one.
 	if opts.Scale != 0 && opts.Scale != 1 && opts.Scale != 2 {
 		return ModelPreviewRecord{}, fmt.Errorf("nanolathe: rendering model preview: scale %.3g is not 1 or 2", opts.Scale)
+	}
+	if opts.Attachment != nil && projection == nil {
+		return ModelPreviewRecord{}, fmt.Errorf("nanolathe: rendering model preview: logical path %s, providers searched [preview options], expected attachment only on the projected entry", renderName)
 	}
 
 	c := r.client
@@ -178,46 +178,9 @@ func (r *ModelPreviewRenderer) recordModel(opts ModelPreviewOptions, geometryOnl
 	c.pointArena = c.pointArena[:0]
 	c.list.RecordClear()
 	c.list.RecordFill(drawlist.Fill{Rect: drawlist.Rect{W: int32(opts.Width), H: int32(opts.Height)}, Index: opts.Background, Style: drawlist.FillSolid})
-	// World position is chosen so modelAnchor lands on the image centre. Scale
-	// magnifies the ordinary orthographic game-camera projection without
-	// changing its angle or shear [03 §2.5][R-REN-03A §1].
-	scale := camera.ViewScale(opts.Scale * 2).Norm()
-	anchorX := int64(scale.Inverse(int32(opts.Width / 2)))
-	anchorZ := int64(scale.Inverse(int32(opts.Height/2))) + int64(opts.WorldHeight>>1)
-	c.cam = &camera.Camera{
-		ViewW: int32(opts.Width), ViewH: int32(opts.Height),
-		MapW: int32(opts.Width), MapH: int32(opts.Height), Scale: scale,
-	}
-	view := frame.UnitView{
-		Slot:       1,
-		InstanceID: 1,
-		Owner:      opts.Owner,
-		OwnerColor: opts.Owner,
-		// A preview has an explicit colour-byte input even when it is outside
-		// the LOGOS entry. The resolver will leave those team faces empty;
-		// rejecting or wrapping it would invent a visible colour.
-		OwnerColorKnown:  true,
-		Model:            renderName,
-		Heading:          opts.Heading,
-		Pitch:            opts.Pitch,
-		Bank:             opts.Bank,
-		X:                numeric.Fixed(anchorX << 16),
-		Z:                numeric.Fixed(anchorZ << 16),
-		BMCode:           !opts.Structure,
-		ZBuffer:          opts.KeyPlane,
-		NoShadow:         true,
-		Cloaked:          opts.Cloaked,
-		BuildRemaining:   opts.BuildRemaining,
-		Y:                numeric.Fixed(int64(opts.WorldHeight) << 16),
-		UnderwaterExempt: opts.UnderwaterExempt,
-		Digger:           opts.Digger,
-	}
-	view.Pieces = append(view.Pieces, opts.PiecePoses...)
-	for _, name := range opts.HiddenPieces {
-		if name = strings.TrimSpace(name); name != "" {
-			view.Pieces = append(view.Pieces, frame.PieceView{Name: name, Hidden: true})
-		}
-	}
+	var x, z numeric.Fixed
+	c.cam, x, z = previewCamera(opts)
+	view := previewUnitView(opts, renderName, x, z)
 	wasRecordingGeometry := c.recordModelGeometry
 	c.recordModelGeometry = true
 	defer func() { c.recordModelGeometry = wasRecordingGeometry }()
@@ -230,12 +193,25 @@ func (r *ModelPreviewRenderer) recordModel(opts ModelPreviewOptions, geometryOnl
 		defer func() { c.modelOrientation = previousOrientation }()
 		draw, ok := c.unitDrawFor(view)
 		if ok {
-			geometry, projected, err := c.projectedPreviewGeometry(draw, unitTeamColor(view), *projection, int32(opts.Width/2), int32(opts.Height/2))
+			anchorX, anchorY := int32(opts.Width/2), int32(opts.Height/2)
+			geometry, projected, err := c.projectedPreviewGeometry(draw, unitTeamColor(view), *projection, anchorX, anchorY)
 			if err != nil {
 				return ModelPreviewRecord{}, err
 			}
 			if geometry != nil {
 				c.list.RecordModel(drawlist.Model{Geometry: geometry})
+				if opts.Attachment != nil {
+					// The attachment's ordinary packet follows the parent's, so
+					// list consumers bound both; only Projected composes them.
+					attached, payload, err := c.projectedPreviewAttachment(draw, view, opts.Attachment, *projection, anchorX, anchorY)
+					if err != nil {
+						return ModelPreviewRecord{}, err
+					}
+					if attached != nil {
+						c.list.RecordModel(drawlist.Model{Geometry: attached})
+					}
+					projected.Attachment = payload
+				}
 				return ModelPreviewRecord{List: c.list.Clone(), Background: opts.Background, Palette: r.palette, Projected: projected}, nil
 			}
 		}
@@ -267,6 +243,69 @@ func (r *ModelPreviewRenderer) recordModel(opts ModelPreviewOptions, geometryOnl
 	return ModelPreviewRecord{
 		Image: out, List: c.list.Clone(), Background: opts.Background, Palette: r.palette,
 	}, nil
+}
+
+// previewRenderName is the production loader's logical model name. The loader
+// accepts either a bare model name or a complete logical path; the command's
+// documented "armcom.3do" shorthand becomes a complete path first. An empty
+// result means no model was named.
+func previewRenderName(model string) string {
+	name := strings.TrimSpace(model)
+	if strings.HasSuffix(strings.ToLower(name), ".3do") && !strings.ContainsAny(name, `/\`) {
+		return "objects3d/" + name
+	}
+	return name
+}
+
+// previewCamera returns the isolated camera and the world position at which
+// modelAnchor lands on the image centre. Scale magnifies the ordinary
+// orthographic game-camera projection without changing its angle or shear
+// [03 §2.5][R-REN-03A §1].
+func previewCamera(opts ModelPreviewOptions) (*camera.Camera, numeric.Fixed, numeric.Fixed) {
+	scale := camera.ViewScale(opts.Scale * 2).Norm()
+	anchorX := int64(scale.Inverse(int32(opts.Width / 2)))
+	anchorZ := int64(scale.Inverse(int32(opts.Height/2))) + int64(opts.WorldHeight>>1)
+	cam := &camera.Camera{
+		ViewW: int32(opts.Width), ViewH: int32(opts.Height),
+		MapW: int32(opts.Width), MapH: int32(opts.Height), Scale: scale,
+	}
+	return cam, numeric.Fixed(anchorX << 16), numeric.Fixed(anchorZ << 16)
+}
+
+// previewUnitView supplies the committed presentation lanes a live unit
+// would otherwise receive from a frame.
+func previewUnitView(opts ModelPreviewOptions, renderName string, x, z numeric.Fixed) frame.UnitView {
+	view := frame.UnitView{
+		Slot:       1,
+		InstanceID: 1,
+		Owner:      opts.Owner,
+		OwnerColor: opts.Owner,
+		// A preview has an explicit colour-byte input even when it is outside
+		// the LOGOS entry. The resolver will leave those team faces empty;
+		// rejecting or wrapping it would invent a visible colour.
+		OwnerColorKnown:  true,
+		Model:            renderName,
+		Heading:          opts.Heading,
+		Pitch:            opts.Pitch,
+		Bank:             opts.Bank,
+		X:                x,
+		Z:                z,
+		BMCode:           !opts.Structure,
+		ZBuffer:          opts.KeyPlane,
+		NoShadow:         true,
+		Cloaked:          opts.Cloaked,
+		BuildRemaining:   opts.BuildRemaining,
+		Y:                numeric.Fixed(int64(opts.WorldHeight) << 16),
+		UnderwaterExempt: opts.UnderwaterExempt,
+		Digger:           opts.Digger,
+	}
+	view.Pieces = append(view.Pieces, opts.PiecePoses...)
+	for _, name := range opts.HiddenPieces {
+		if name = strings.TrimSpace(name); name != "" {
+			view.Pieces = append(view.Pieces, frame.PieceView{Name: name, Hidden: true})
+		}
+	}
+	return view
 }
 
 // ARMSOLAROpenPreviewPose is the geometry-only open-dish recipe used for

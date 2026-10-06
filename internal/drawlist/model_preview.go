@@ -23,4 +23,34 @@ type ModelPreviewFace struct {
 // ordinary model packet and never participates in battle recording or replay.
 type ModelPreviewGeometry struct {
 	Faces []ModelPreviewFace
+	// Attachment is a second model composed into the same output-pixel and
+	// depth frame, such as a factory's product on its pad, or nil for an
+	// isolated model (DESIGN_GPU_RENDERER §22.5).
+	Attachment *ModelPreviewAttachment
+}
+
+// ModelPreviewAttachment is the attached model's admitted faces in recorded
+// order. Positions share the parent faces' frame, so the two models occlude
+// each other by depth. On these faces Face.Vertices[i].Key is not the
+// parent-relative legacy key: it is the attachment's own nanoframe height key,
+// the whole height above the attachment origin plus the key bias, unwrapped,
+// as a carried child's own packet keys it [03 R-P0-19-N].
+//
+// Reveal is the attachment's nanoframe reveal and Outline its outline
+// endpoint pixels; both are absent when the attachment is complete.
+type ModelPreviewAttachment struct {
+	Faces   []ModelPreviewFace
+	Reveal  *ModelReveal
+	Outline []ModelPreviewOutlinePixel
+}
+
+// ModelPreviewOutlinePixel is one nanoframe outline endpoint: a whole output
+// pixel at column X, row Y in the palette index Color [03 R-COMP-01 §3].
+// Depth holds the outlined face's depth plane at the pixel's corners, in the
+// order (X,Y), (X+1,Y), (X+1,Y+1), (X,Y+1), in the frame of
+// ModelPreviewPosition.Depth.
+type ModelPreviewOutlinePixel struct {
+	X, Y  int32
+	Color uint8
+	Depth [4]float64
 }

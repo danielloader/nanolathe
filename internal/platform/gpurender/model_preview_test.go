@@ -8,10 +8,11 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
+	presentationrender "github.com/nanolathe-gg/nanolathe/internal/render"
 )
 
 func TestModelPreviewShadersCompile(t *testing.T) {
-	for _, source := range []string{modelPreviewShaderSource(), modelPreviewResolveSource} {
+	for _, source := range []string{modelPreviewShaderSource(), modelPreviewResolveSource, modelPreviewComposeShaderSource(), modelPreviewMergeSource} {
 		if _, err := compileShader(source); err != nil {
 			t.Fatal(err)
 		}
@@ -133,6 +134,131 @@ func checkModelPreviewDevicePixels() error {
 	}
 	if at(10, 30) != 40 || at(50, 30) != 80 {
 		return fmt.Errorf("preview texture hole/skin: got %d/%d, want 40/80", at(10, 30), at(50, 30))
+	}
+	return checkModelPreviewAttachmentDevicePixels()
+}
+
+// previewKeyedFace is an attachment face whose corners all carry one
+// nanoframe key, at the given depths.
+func previewKeyedFace(index byte, key int32, depth float64, corners ...[2]float64) drawlist.ModelPreviewFace {
+	var positions []drawlist.ModelPreviewPosition
+	for _, c := range corners {
+		positions = append(positions, drawlist.ModelPreviewPosition{X: c[0], Y: c[1], Depth: depth})
+	}
+	f := previewFixtureFace(index, positions...)
+	for i := range f.Face.Vertices {
+		f.Face.Vertices[i].Key = key
+	}
+	return f
+}
+
+func previewOutlinePixel(x, y int32, color uint8, depth float64) drawlist.ModelPreviewOutlinePixel {
+	return drawlist.ModelPreviewOutlinePixel{X: x, Y: y, Color: color, Depth: [4]float64{depth, depth, depth, depth}}
+}
+
+// These authored fixtures lock the composed viewer record on the device:
+// per-sample geometric occlusion between parent and attachment with the
+// attachment winning ties, the battle's reveal verdicts on the attachment's
+// own top surface (an erased texel shows the parent, never the attachment's
+// far side), wrapped keys through both key lanes, outline pixels tested by
+// depth, and the remaining-fraction boundaries [03 R-P0-19-N]
+// [03 R-COMP-01 §3]. The no-attachment path is checked above.
+func checkModelPreviewAttachmentDevicePixels() error {
+	pal := fixturePalette()
+	r, err := NewChecked(&pal, 64, 64)
+	if err != nil {
+		return err
+	}
+	defer r.ResetSources()
+	dst := newRendererImage(64, 64)
+	defer dst.Deallocate()
+	pixels := make([]byte, 64*64*4)
+	draw := func(parent []drawlist.ModelPreviewFace, a *drawlist.ModelPreviewAttachment) error {
+		dst.Fill(color.RGBA{7, 7, 7, 255})
+		if err := r.DrawModelPreview(dst, &drawlist.ModelPreviewGeometry{Faces: parent, Attachment: a}); err != nil {
+			return err
+		}
+		dst.ReadPixels(pixels)
+		return nil
+	}
+	at := func(x, y int) byte { return pixels[4*(y*64+x)] }
+	expect := func(scene string, want map[[2]int]byte) error {
+		for p, v := range want {
+			if got := at(p[0], p[1]); got != v {
+				return fmt.Errorf("preview attachment %s at %v: got %d, want %d", scene, p, got, v)
+			}
+		}
+		return nil
+	}
+	square := [][2]float64{{4, 4}, {60, 4}, {60, 60}, {4, 60}}
+	sloped := func(index byte, slope, offset float64) drawlist.ModelPreviewFace {
+		var positions []drawlist.ModelPreviewPosition
+		for _, c := range square {
+			positions = append(positions, drawlist.ModelPreviewPosition{X: c[0], Y: c[1], Depth: slope*c[0] + offset})
+		}
+		return previewFixtureFace(index, positions...)
+	}
+	// Crossing planes: each model occludes the other on its own side.
+	parent := sloped(80, .5, -16)
+	if err := draw([]drawlist.ModelPreviewFace{parent}, &drawlist.ModelPreviewAttachment{Faces: []drawlist.ModelPreviewFace{sloped(200, -.5, 16)}}); err != nil {
+		return err
+	}
+	if err := expect("crossing", map[[2]int]byte{{16, 32}: 200, {24, 10}: 200, {40, 32}: 80, {56, 50}: 80}); err != nil {
+		return err
+	}
+	// A coincident attachment wins, as a carried child wins key ties.
+	if err := draw([]drawlist.ModelPreviewFace{sloped(80, 0, 5)}, &drawlist.ModelPreviewAttachment{Faces: []drawlist.ModelPreviewFace{sloped(200, 0, 5)}}); err != nil {
+		return err
+	}
+	if err := expect("tie", map[[2]int]byte{{16, 32}: 200, {48, 48}: 200}); err != nil {
+		return err
+	}
+	// Reveal verdicts on the attachment's own top surface.
+	reveal := &drawlist.ModelReveal{Line: 100, Floor: 96, Below: -2, Band: 60, Above: -1}
+	back := previewKeyedFace(170, 256+97, 10, square...)                                           // quad lanes; wraps into the band
+	front := previewKeyedFace(150, 50, 20, [2]float64{4, 4}, [2]float64{30, 4}, [2]float64{4, 60}) // vertex lane; below: erase
+	kept := previewKeyedFace(210, 150, 30, [2]float64{40, 4}, [2]float64{60, 4}, [2]float64{60, 20}, [2]float64{40, 20})
+	high := previewFixtureFace(90,
+		drawlist.ModelPreviewPosition{X: 4, Y: 44, Depth: 50}, drawlist.ModelPreviewPosition{X: 16, Y: 44, Depth: 50},
+		drawlist.ModelPreviewPosition{X: 16, Y: 60, Depth: 50}, drawlist.ModelPreviewPosition{X: 4, Y: 60, Depth: 50})
+	base := sloped(80, 0, 0)
+	if err := draw([]drawlist.ModelPreviewFace{high, base}, &drawlist.ModelPreviewAttachment{
+		Faces:  []drawlist.ModelPreviewFace{front, kept, back},
+		Reveal: reveal,
+		Outline: []drawlist.ModelPreviewOutlinePixel{
+			previewOutlinePixel(20, 50, 165, 40), // in front of everything
+			previewOutlinePixel(50, 10, 165, 25), // behind the kept face
+			previewOutlinePixel(8, 52, 165, 40),  // behind the parent's high face
+		},
+	}); err != nil {
+		return err
+	}
+	if err := expect("reveal", map[[2]int]byte{
+		{8, 10}: 80, {12, 20}: 80, // erased top surface: the parent, not the band behind
+		{50, 50}: 60, {36, 30}: 60, // the band verdict, unshaded
+		{50, 14}: 210,                             // keep
+		{20, 50}: 165, {50, 10}: 210, {8, 52}: 90, // outline depth tests
+	}); err != nil {
+		return err
+	}
+	// Remaining 1 erases this low body and leaves the outline; a vanishing
+	// fraction keeps it whole.
+	band, outline := presentationrender.NanoframePulse(3, 40)
+	for _, tt := range []struct {
+		remaining float32
+		want      byte
+	}{{1, 80}, {1e-6, 170}} {
+		v := presentationrender.BuildNanoframeReveal(tt.remaining, band, outline)
+		if err := draw([]drawlist.ModelPreviewFace{base}, &drawlist.ModelPreviewAttachment{
+			Faces:   []drawlist.ModelPreviewFace{previewKeyedFace(170, 55, 10, square...)},
+			Reveal:  &drawlist.ModelReveal{Line: v.Line, Floor: v.Floor, Below: v.Below, Band: v.Band, Above: v.Above},
+			Outline: []drawlist.ModelPreviewOutlinePixel{previewOutlinePixel(30, 30, outline, 12)},
+		}); err != nil {
+			return err
+		}
+		if err := expect(fmt.Sprint("remaining ", tt.remaining), map[[2]int]byte{{12, 12}: tt.want, {50, 40}: tt.want, {30, 30}: outline}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

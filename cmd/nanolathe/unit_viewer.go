@@ -69,8 +69,10 @@ func (g *gameShell) openUnitViewerPreview(in *input.State) bool {
 }
 
 type unitViewerLoad struct {
-	entries []unitViewerEntry
-	err     error
+	entries  []unitViewerEntry
+	tree     unitViewerTree
+	features map[string]*content.FeatureDef
+	err      error
 }
 
 type toolsScreen struct {
@@ -88,6 +90,9 @@ type toolsScreen struct {
 	widgetHeld             bool
 	action                 string
 	weapon                 int
+	severity               int  // index into unitViewerSeverities
+	power                  int8 // explicit On/Off choice: 0 none, +1 on, -1 off
+	features               map[string]*content.FeatureDef
 	last                   time.Time
 	loading                chan unitViewerLoad
 	loadErr                error
@@ -103,6 +108,16 @@ type toolsScreen struct {
 	spinning, dragging     bool
 	dragX, dragY           float64
 	model                  unitViewerModel
+	tree                   unitViewerTree
+	histBack, histForward  []*content.UnitDef
+	workCache              map[unitViewerWorkKey]unitViewerWork // lookup only
+	pics                   unitViewerPictures
+	picsPending            int // pictures the last Draw requested that were still decoding
+	infoTab                int
+	infoRows               []unitViewerRow
+	altHeld                bool
+	pointerX, pointerY     float64 // logical pointer, for link hover
+	linkPress              *content.UnitDef
 }
 
 func (s *toolsScreen) Active() bool { return s != nil && s.open }
@@ -119,6 +134,7 @@ func (s *toolsScreen) show(g *gameShell) {
 	}
 	s.last = time.Time{}
 	s.action, s.weapon, s.animationPaused = "Idle", 1, false
+	s.severity, s.power = 0, 0
 	s.initializeRetail(g)
 	s.query, s.top = "", 0
 	s.searchFocus, s.selectAll, s.spinning = true, false, true
@@ -138,7 +154,12 @@ func (s *toolsScreen) openViewer() {
 	s.loading = ch
 	go func() {
 		cat, err := cs.nlPreviewCatalog()
-		ch <- unitViewerLoad{entries: unitViewerEntries(cat), err: err}
+		entries := unitViewerEntries(cat)
+		var features map[string]*content.FeatureDef
+		if cat != nil {
+			features = cat.Features
+		}
+		ch <- unitViewerLoad{entries: entries, tree: unitViewerBuildTree(cat, entries), features: features, err: err}
 	}()
 }
 
@@ -149,7 +170,9 @@ func (s *toolsScreen) pollLoad() {
 	select {
 	case result := <-s.loading:
 		s.loading = nil
-		s.entries, s.loadErr = result.entries, result.err
+		s.entries, s.tree, s.loadErr = result.entries, result.tree, result.err
+		s.features = result.features
+		s.model.features = s.features
 		s.filter()
 	default:
 	}
@@ -164,7 +187,12 @@ func (s *toolsScreen) release() {
 		s.loading = nil
 	}
 	s.model.release()
-	s.entries, s.filtered, s.selected, s.cs = nil, nil, nil, nil
+	// The picture worker reads the content's archives; join it before the
+	// host may unmount them.
+	s.pics.release()
+	s.entries, s.filtered, s.selected, s.cs, s.features = nil, nil, nil, nil, nil
+	s.tree, s.histBack, s.histForward, s.workCache = unitViewerTree{}, nil, nil, nil
+	s.infoRows, s.linkPress = nil, nil
 	s.loadErr, s.open, s.closing = nil, false, false
 	s.shell, s.panel, s.art = nil, nil, nil
 	s.fonts, s.uiClock = screenkit.Fonts{}, 0
@@ -191,9 +219,12 @@ func (s *toolsScreen) filter() {
 			return
 		}
 	}
-	s.selectUnit(nil)
+	// The search's first match replaces an excluded selection, which Back
+	// can still return to; no match clears the preview.
 	if len(s.filtered) > 0 {
-		s.selectUnit(s.filtered[0].Def)
+		s.visit(s.filtered[0].Def)
+	} else {
+		s.selectUnit(nil)
 	}
 }
 
@@ -203,7 +234,9 @@ func (s *toolsScreen) selectUnit(def *content.UnitDef) {
 	}
 	s.selected = def
 	s.model.selectUnit()
+	s.model.features = s.features
 	s.action, s.weapon, s.animationPaused = "Idle", 1, false
+	s.severity, s.power = 0, 0
 	s.refreshInfo()
 	s.refreshControls()
 	s.resetView()
@@ -239,7 +272,7 @@ func (s *toolsScreen) moveSelection(delta int) {
 		return
 	}
 	i := max(0, min(len(s.filtered)-1, s.selectionIndex()+delta))
-	s.selectUnit(s.filtered[i].Def)
+	s.visit(s.filtered[i].Def)
 	s.revealSelection()
 }
 
@@ -253,6 +286,7 @@ func (s *toolsScreen) Update() {
 	s.pollLoad()
 	in := screenkit.ReadInput()
 	shortcut := ebiten.IsKeyPressed(ebiten.KeyControl) || ebiten.IsKeyPressed(ebiten.KeyMeta)
+	s.altHeld = ebiten.IsKeyPressed(ebiten.KeyAlt)
 	s.updateInput(in, ebiten.AppendInputChars(nil), shortcut, dt)
 }
 
@@ -294,6 +328,14 @@ func (s *toolsScreen) updateInput(in screenkit.Input, typed []rune, shortcut boo
 	}
 	if s.searchFocus && shortcut && in.KeyPressed(ebiten.KeyA) {
 		s.selectAll = true
+	}
+	s.pointerX, s.pointerY = in.X, in.Y
+	// History keys never reach the editor or the orbit: Alt+Left/Right always,
+	// and Backspace while the search is not being edited.
+	historyBack := (s.altHeld && in.KeyPressed(ebiten.KeyArrowLeft)) || (!s.searchFocus && in.KeyPressed(ebiten.KeyBackspace))
+	historyForward := s.altHeld && in.KeyPressed(ebiten.KeyArrowRight)
+	if in.Pressed {
+		s.linkPress = s.infoLinkAt(in.X, in.Y)
 	}
 	if in.Pressed && s.viewRect.Contains(in.X, in.Y) {
 		s.dragging, s.searchFocus = true, false
@@ -350,8 +392,11 @@ func (s *toolsScreen) updateInput(in screenkit.Input, typed []rune, shortcut boo
 		from ebiten.Key
 		to   input.Key
 	}{{ebiten.KeyBackspace, input.KeyBackspace}, {ebiten.KeyDelete, input.KeyDelete}, {ebiten.KeyHome, input.KeyHome}, {ebiten.KeyEnd, input.KeyEnd}, {ebiten.KeyArrowLeft, input.KeyLeft}, {ebiten.KeyArrowRight, input.KeyRight}} {
-		if !s.searchFocus && (pair.from == ebiten.KeyArrowLeft || pair.from == ebiten.KeyArrowRight) {
-			continue // Orbit shortcuts must not also move native widget focus.
+		if (!s.searchFocus || s.altHeld) && (pair.from == ebiten.KeyArrowLeft || pair.from == ebiten.KeyArrowRight) {
+			continue // Orbit and history shortcuts must not also move native widget focus.
+		}
+		if !s.searchFocus && pair.from == ebiten.KeyBackspace {
+			continue // Backspace outside the search is History back.
 		}
 		if in.KeyPressed(pair.from) {
 			s.tokens = append(s.tokens, input.Token{Kind: input.TokenEdit, Key: pair.to})
@@ -364,10 +409,10 @@ func (s *toolsScreen) updateInput(in screenkit.Input, typed []rune, shortcut boo
 		if in.KeyPressed(ebiten.KeyR) {
 			s.resetView()
 		}
-		if in.KeyPressed(ebiten.KeyArrowLeft) {
+		if !s.altHeld && in.KeyPressed(ebiten.KeyArrowLeft) {
 			s.yaw -= 2048
 		}
-		if in.KeyPressed(ebiten.KeyArrowRight) {
+		if !s.altHeld && in.KeyPressed(ebiten.KeyArrowRight) {
 			s.yaw += 2048
 		}
 		if in.KeyPressed(ebiten.KeyEqual) {
@@ -381,6 +426,21 @@ func (s *toolsScreen) updateInput(in screenkit.Input, typed []rune, shortcut boo
 	s.serviceWidgets(in.X, in.Y, in.Down, in.Pressed, in.Released, dt)
 	if wasViewer != s.viewer || s.closing {
 		return
+	}
+	if in.Released {
+		// A build-tree link follows a press and release on the same entry,
+		// measured in the same rows the column paints.
+		if link := s.infoLinkAt(in.X, in.Y); link != nil && link == s.linkPress {
+			s.navigate(link)
+			s.refreshControls()
+		}
+		s.linkPress = nil
+	}
+	switch {
+	case historyBack:
+		s.goBack()
+	case historyForward:
+		s.goForward()
 	}
 	if s.spinning && !s.dragging {
 		s.yaw += dt * 65536 / 18

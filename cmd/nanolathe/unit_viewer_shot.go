@@ -3,10 +3,79 @@ package main
 import (
 	"fmt"
 	"image"
+	"strconv"
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
+
+func unitViewerShotSyntax() error {
+	return fmt.Errorf("nanolathe: unit viewer capture: logical path <command line>, providers searched [--shot-unit-viewer], expected <unit ID>[/stats|/weapons|/build][/action=<idle|move|fly|land|aim|fire|build|stop|hit|death|wreck|on|off>][/ticks=N][/severity=N][/weapon=N]")
+}
+
+// unitViewerShotPlan is a capture's scripted action: the buttons a user
+// would press, then a fixed number of preview ticks run without a clock.
+type unitViewerShotPlan struct {
+	action           string
+	ticks            int
+	severity, weapon int
+}
+
+func (p *unitViewerShotPlan) set(key, value string) bool {
+	n, err := strconv.Atoi(value)
+	switch key {
+	case "action":
+		switch value {
+		case "idle", "move", "fly", "land", "aim", "fire", "build", "stop", "hit", "death", "wreck", "on", "off":
+			p.action = value
+			return true
+		}
+	case "ticks":
+		p.ticks = n
+		return err == nil && n >= 0 && n <= 3600
+	case "severity":
+		p.severity = n
+		return err == nil && n >= 1 && n <= len(unitViewerSeverities)
+	case "weapon":
+		p.weapon = n
+		return err == nil && n >= 1 && n <= 3
+	}
+	return false
+}
+
+// apply loads the selected model, presses the plan's buttons and advances the
+// preview. A land or stop capture first flies or builds for the default time.
+func (p unitViewerShotPlan) apply(s *toolsScreen) error {
+	if !s.model.ensureLoaded(s.cs, s.selected) {
+		return s.model.err
+	}
+	if p.severity > 0 {
+		s.severity = p.severity - 1
+	}
+	if p.weapon > 0 {
+		s.weapon = p.weapon
+	}
+	ticks := p.ticks
+	if ticks == 0 {
+		ticks = map[string]int{"idle": 90, "on": 90, "off": 90, "move": 60, "fly": 180, "land": 240, "aim": 60, "fire": 60, "build": 120, "stop": 90, "hit": 12, "death": 1, "wreck": 0}[p.action]
+	}
+	press := map[string]string{"idle": "IDLE", "move": "MOVE", "fly": "MOVE", "land": "MOVE", "aim": "AIM", "fire": "FIRE", "build": "BUILD", "stop": "BUILD", "hit": "HIT", "death": "DEATH", "wreck": "WRECK", "on": "IDLE", "off": "IDLE"}[p.action]
+	s.activateTool(press)
+	switch p.action {
+	case "land", "stop":
+		s.model.advance(180)
+		s.activateTool(press)
+	case "on", "off":
+		// Idle presents the creation state; the toggle then drives the edge
+		// machine only when the bit differs from what the capture asks for.
+		if s.model.anim.activated() != (p.action == "on") {
+			s.activateTool("POWER")
+		}
+	}
+	s.model.advance(ticks)
+	s.refreshControls()
+	return nil
+}
 
 // This uses the shipped screen and geometry path, including clipping at the
 // requested window size. It creates no session and writes no preferences.
@@ -22,24 +91,51 @@ func runUnitViewerShot(opts Options, cs *contentSet) error {
 	s := &toolsScreen{}
 	s.show(&gameShell{cs: cs})
 	defer s.release()
+	var plan unitViewerShotPlan
 	if opts.ShotUnitViewer != "@tools" {
+		// "<unit ID>[/<tab>][/action=<name>][/ticks=N][/severity=N][/weapon=N]"
+		// captures a tab and, optionally, an action after N preview ticks.
+		parts := strings.Split(opts.ShotUnitViewer, "/")
+		unit, t := parts[0], unitViewerTabStats
+		tabs := map[string]int{"": unitViewerTabStats, "stats": unitViewerTabStats, "weapons": unitViewerTabWeapons, "build": unitViewerTabBuild}
+		for _, part := range parts[1:] {
+			key, value, isOption := strings.Cut(strings.ToLower(part), "=")
+			if !isOption {
+				tab, ok := tabs[key]
+				if !ok {
+					return unitViewerShotSyntax()
+				}
+				t = tab
+				continue
+			}
+			if !plan.set(key, value) {
+				return unitViewerShotSyntax()
+			}
+		}
 		cat, err := cs.nlPreviewCatalog()
 		if err != nil {
 			return err
 		}
-		s.viewer, s.entries = true, unitViewerEntries(cat)
+		s.viewer, s.entries, s.infoTab = true, unitViewerEntries(cat), t
+		s.tree = unitViewerBuildTree(cat, s.entries)
+		s.features = cat.Features
 		s.buildPanel()
 		s.filter()
 		found := false
 		for _, entry := range s.entries {
-			if strings.EqualFold(entry.Key, opts.ShotUnitViewer) || strings.EqualFold(entry.Def.UnitName, opts.ShotUnitViewer) {
+			if strings.EqualFold(entry.Key, unit) || strings.EqualFold(entry.Def.UnitName, unit) {
 				s.selectUnit(entry.Def)
 				found = true
 				break
 			}
 		}
 		if !found {
-			return fmt.Errorf("nanolathe: unit viewer capture: logical path units/%s, providers searched [compiled catalog], expected unit ID", opts.ShotUnitViewer)
+			return fmt.Errorf("nanolathe: unit viewer capture: logical path units/%s, providers searched [compiled catalog], expected unit ID", unit)
+		}
+	}
+	if plan.action != "" {
+		if err := plan.apply(s); err != nil {
+			return err
 		}
 	}
 	g := &unitViewerShotGame{s: s, w: w, h: h, out: opts.Shot}
@@ -52,12 +148,17 @@ func runUnitViewerShot(opts Options, cs *contentSet) error {
 }
 
 type unitViewerShotGame struct {
-	s    *toolsScreen
-	w, h int
-	out  string
-	done bool
-	err  error
+	s      *toolsScreen
+	w, h   int
+	out    string
+	done   bool
+	err    error
+	frames int
 }
+
+// unitViewerShotPictureFrames bounds how long a capture waits for the
+// picture worker; a still-decoding picture is captured as its placeholder.
+const unitViewerShotPictureFrames = 600
 
 func (g *unitViewerShotGame) Update() error {
 	if g.done {
@@ -75,6 +176,10 @@ func (g *unitViewerShotGame) Draw(dst *ebiten.Image) {
 	// those measured rows, exactly as a keyboard selection does.
 	g.s.revealSelection()
 	g.s.Draw(dst)
+	// Pictures decode on the loader's worker; later frames upload them.
+	if g.frames++; g.s.picsPending > 0 && g.frames < unitViewerShotPictureFrames {
+		return
+	}
 	img := image.NewRGBA(image.Rect(0, 0, g.w, g.h))
 	dst.ReadPixels(img.Pix)
 	g.err = encodeShotPNG(g.out, img)

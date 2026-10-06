@@ -121,15 +121,16 @@ func TestUnitViewerSettingsButtonsRespectUnavailableActions(t *testing.T) {
 		s.serviceWidgets(x, y, true, true, false, 0)
 		s.serviceWidgets(x, y, false, false, true, 0)
 	}
-	click("WALK")
+	click("MOVE")
 	if s.action != "Idle" {
 		t.Fatal("unavailable animation button accepted a click")
 	}
 	// This is an authored API fixture; no model or VM is created by input.
 	s.selected.Script = &cob.Program{Scripts: map[string]int{"StartMoving": 0}}
+	s.selected.BMCode = 1
 	s.refreshControls()
-	click("WALK")
-	if s.action != "Walk" || !s.spinning {
+	click("MOVE")
+	if s.action != "Move" || !s.spinning {
 		t.Fatal("available animation button did not change action independently of rotation")
 	}
 	click("PAUSE")

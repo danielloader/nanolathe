@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/nanolathe-gg/nanolathe/internal/cob"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
@@ -15,10 +16,15 @@ import (
 type unitViewerAction string
 
 const (
-	unitViewerIdle    unitViewerAction = "Idle"
-	unitViewerWalking unitViewerAction = "Walk"
-	unitViewerAiming  unitViewerAction = "Aim"
-	unitViewerFiring  unitViewerAction = "Fire"
+	unitViewerIdle     unitViewerAction = "Idle"
+	unitViewerMoving   unitViewerAction = "Move"
+	unitViewerFlying   unitViewerAction = "Fly"
+	unitViewerAiming   unitViewerAction = "Aim"
+	unitViewerFiring   unitViewerAction = "Fire"
+	unitViewerBuilding unitViewerAction = "Build"
+	unitViewerHit      unitViewerAction = "Hit"
+	unitViewerDeath    unitViewerAction = "Death"
+	unitViewerWreck    unitViewerAction = "Wreck"
 
 	// These are bounded host preview preferences, not battle rules
 	// (DESIGN_DEVELOPER_TOOLS §7). COB keeps its own 30 Hz arithmetic [04 §4.6].
@@ -28,7 +34,35 @@ const (
 	unitViewerAimTimeout   = 10 * unitViewerTickRate
 	unitViewerAimHeading   = uint16(65536 / 8)  // 45 degrees
 	unitViewerAimPitch     = uint16(65536 / 24) // about 15 degrees
+
+	// Explicit preview inputs for map state and work targets. None is a retail
+	// value; each stands in for something a battle would supply
+	// (DESIGN_DEVELOPER_TOOLS §7).
+	//
+	// The work target lies 45 degrees off the builder's facing, the same
+	// preview heading Aim uses; it is the relative bearing the slot-form
+	// StartBuilding carries [04 R-CB-01 §3].
+	unitViewerBuildHeading = unitViewerAimHeading
+	// One wind re-roll is published before the first preview tick: heading 45
+	// degrees and speed 1050, the midpoint of the canonical fallback range
+	// 100..2000 a map without wind keys uses [05 R-PROD-01 §3].
+	unitViewerWindHeading = uint16(65536 / 8)
+	unitViewerWindSpeed   = int32(1050)
+	// Every footprint cell under an extractor holds metal byte 127, the middle
+	// of the byte range; the sum is (127 + 1) per covered cell [04 R-CB-01 §5].
+	unitViewerMetalByte = 127
+	// A hit arrives from straight ahead: direction byte 0x80 [06 §9.1], which
+	// leaves the unit at half of its maximum damage.
+	unitViewerHitDirection = uint8(0x80)
+	// Build-stance and landing waits stop with a visible status.
+	unitViewerStanceTimeout = 10 * unitViewerTickRate
+	unitViewerFlightLimit   = 60 * unitViewerTickRate
 )
+
+// unitViewerSeverities are the Death and Wreck preview severities: quarters
+// of the established 1..100 clamp [06 §12.1]. They are inputs, not predictions
+// of what any weapon would do.
+var unitViewerSeverities = [...]int32{25, 50, 75, 100}
 
 // Availability describes authored entry points, not a promise that a callback
 // will return. A Fire preview needs the selected weapon's complete aim/fire
@@ -38,19 +72,71 @@ func unitViewerAnimationAvailable(def *content.UnitDef, action unitViewerAction,
 		return false
 	}
 	switch action {
-	case unitViewerIdle:
-		return unitViewerHasCallback(def, "Create")
-	case unitViewerWalking:
-		return unitViewerHasCallback(def, "StartMoving")
+	case unitViewerIdle, unitViewerDeath:
+		return true
+	case unitViewerMoving:
+		return !def.CanFly && unitViewerHasAny(def, "StartMoving", "MoveRate1", "MoveRate2", "MoveRate3")
+	case unitViewerFlying:
+		// The flight integrator divides by MaxVelocity without a guard; retail
+		// faults on zero [04 §10.1], so the preview refuses it.
+		return def.CanFly && def.MaxVelocity > 0
 	case unitViewerAiming, unitViewerFiring:
 		if content.IsWeaponInactive(unitViewerWeapon(def, weapon)) {
 			return false
 		}
 		return unitViewerHasCallback(def, unitViewerWeaponCallback("Aim", weapon)) &&
 			(action != unitViewerFiring || unitViewerHasCallback(def, unitViewerWeaponCallback("Fire", weapon)))
+	case unitViewerBuilding:
+		if !def.Builder {
+			return false
+		}
+		if unitViewerFactory(def) {
+			return unitViewerHasAny(def, "Activate", "StartBuilding", "QueryBuildInfo", "QueryNanoPiece")
+		}
+		return unitViewerHasAny(def, "StartBuilding", "QueryNanoPiece")
+	case unitViewerHit:
+		return unitViewerHasAny(def, "HitByWeapon", "TakeDamage")
+	case unitViewerWreck:
+		return strings.TrimSpace(def.Corpse) != ""
 	default:
 		return false
 	}
+}
+
+// unitViewerActionShown hides actions that do not apply to the unit's class;
+// unitViewerAnimationAvailable then disables those whose callbacks are absent.
+func unitViewerActionShown(def *content.UnitDef, action unitViewerAction) bool {
+	if def == nil || def.Script == nil {
+		return action == unitViewerIdle
+	}
+	switch action {
+	case unitViewerMoving:
+		return def.BMCode != 0 && !def.CanFly
+	case unitViewerFlying:
+		return def.CanFly
+	case unitViewerAiming, unitViewerFiring:
+		for weapon := 1; weapon <= 3; weapon++ {
+			if !content.IsWeaponInactive(unitViewerWeapon(def, weapon)) {
+				return true
+			}
+		}
+		return false
+	case unitViewerBuilding:
+		return def.Builder
+	default:
+		return true
+	}
+}
+
+// unitViewerFactory is the building-class test the factory production state
+// machine makes: the runtime status bit set from authored bmcode
+// [05 "Factory production lifecycle"].
+func unitViewerFactory(def *content.UnitDef) bool { return def != nil && def.BMCode == 0 }
+
+// unitViewerHasPower reports an activation toggle: a definition with an
+// Activate or Deactivate callback for the edge machine to start [04 R-UNIT-06 §2].
+func unitViewerHasPower(def *content.UnitDef) bool {
+	return unitViewerHasAny(def, "Activate", "Deactivate")
 }
 
 func unitViewerHasCallback(def *content.UnitDef, name string) bool {
@@ -59,6 +145,15 @@ func unitViewerHasCallback(def *content.UnitDef, name string) bool {
 	}
 	_, ok := def.Script.Scripts[name]
 	return ok
+}
+
+func unitViewerHasAny(def *content.UnitDef, names ...string) bool {
+	for _, name := range names {
+		if unitViewerHasCallback(def, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func unitViewerWeapon(def *content.UnitDef, weapon int) *content.WeaponDef {
@@ -76,23 +171,40 @@ func unitViewerWeaponCallback(prefix string, weapon int) string {
 }
 
 func unitViewerUnavailableReason(def *content.UnitDef, action unitViewerAction, weapon int) string {
-	name := "Create"
 	switch action {
-	case unitViewerIdle:
-	case unitViewerWalking:
-		name = "StartMoving"
+	case unitViewerIdle, unitViewerDeath:
+		return "no script"
+	case unitViewerMoving:
+		if def != nil && def.CanFly {
+			return "an aircraft moves by flying"
+		}
+		return "no StartMoving or MoveRate callback"
+	case unitViewerFlying:
+		if def == nil || !def.CanFly {
+			return "not an aircraft"
+		}
+		return "maxvelocity is zero"
 	case unitViewerAiming, unitViewerFiring:
 		if content.IsWeaponInactive(unitViewerWeapon(def, weapon)) {
 			return fmt.Sprintf("weapon %d is inactive or missing", weapon)
 		}
-		name = unitViewerWeaponCallback("Aim", weapon)
+		name := unitViewerWeaponCallback("Aim", weapon)
 		if action == unitViewerFiring && unitViewerHasCallback(def, name) {
 			name = unitViewerWeaponCallback("Fire", weapon)
 		}
+		return "no " + name + " callback"
+	case unitViewerBuilding:
+		if def == nil || !def.Builder {
+			return "not a builder"
+		}
+		return "no construction callbacks"
+	case unitViewerHit:
+		return "no HitByWeapon or TakeDamage callback"
+	case unitViewerWreck:
+		return "no corpse authored"
 	default:
 		return "unknown animation"
 	}
-	return "no " + name + " callback"
 }
 
 func (m *unitViewerModel) setAnimation(action unitViewerAction, weapon int) {
@@ -106,14 +218,19 @@ func (m *unitViewerModel) setAnimation(action unitViewerAction, weapon int) {
 	// aim or fire preview (DESIGN_DEVELOPER_TOOLS §7).
 	m.action, m.weapon = action, weapon
 	if m.geometry != nil {
-		m.anim = newUnitViewerAnimation(m.def, m.geometry, action, weapon)
+		m.anim = newUnitViewerAnimation(m.def, m.geometry, m.options())
 		m.poses, m.poseNote = m.anim.poses(), m.anim.note
 	}
 	m.key = unitViewerModelKey{}
 }
 
-// Fit once from Create, before a requested action can move the limbs. Changing
-// actions preserves that fit; the existing atlas bound still limits each draw.
+func (m *unitViewerModel) options() unitViewerAnimationOptions {
+	return unitViewerAnimationOptions{action: m.action, weapon: m.weapon, severity: m.severity, power: m.power, features: m.features}
+}
+
+// Fit once from the creation pose, before a requested action can move the
+// limbs. Changing actions preserves that fit; the existing atlas bound still
+// limits each draw.
 func (m *unitViewerModel) loadAnimation(def *content.UnitDef, mdl *model.Model) {
 	m.def, m.geometry = def, mdl
 	if m.action == "" {
@@ -122,15 +239,15 @@ func (m *unitViewerModel) loadAnimation(def *content.UnitDef, mdl *model.Model) 
 	if m.weapon == 0 {
 		m.weapon = 1
 	}
-	m.anim = newUnitViewerAnimation(def, mdl, unitViewerIdle, 1)
+	m.anim = newUnitViewerAnimation(def, mdl, unitViewerAnimationOptions{action: unitViewerIdle, weapon: 1, features: m.features})
 	m.poses, m.poseNote = m.anim.poses(), m.anim.note
 	states := make([]model.PieceState, len(mdl.Pieces))
 	for _, pose := range m.poses {
 		states[pose.Index] = model.PieceState{RotX: pose.RotX, RotY: pose.RotY, RotZ: pose.RotZ, Trans: [3]numeric.Fixed{pose.Tx, pose.Ty, pose.Tz}, Hidden: pose.Hidden}
 	}
 	m.fitCreatePose(states)
-	if m.action != unitViewerIdle || m.weapon != 1 {
-		m.anim = newUnitViewerAnimation(def, mdl, m.action, m.weapon)
+	if opts := m.options(); opts.action != unitViewerIdle || opts.weapon != 1 || opts.severity != 0 || opts.power != 0 {
+		m.anim = newUnitViewerAnimation(def, mdl, opts)
 		m.poses, m.poseNote = m.anim.poses(), m.anim.note
 	}
 }
@@ -139,9 +256,28 @@ func (m *unitViewerModel) updateAnimation(dt float64) {
 	if m.anim == nil || !m.anim.update(dt) {
 		return
 	}
+	m.refreshPose()
+}
+
+// refreshPose republishes the current pose after a tick or a toggle. A
+// stationary camera must still redraw a changed pose.
+func (m *unitViewerModel) refreshPose() {
+	if m.anim == nil {
+		return
+	}
 	m.poses, m.poseNote = m.anim.poses(), m.anim.note
-	// A stationary camera must still redraw a changed pose.
 	m.key = unitViewerModelKey{}
+}
+
+// unitViewerAnimationOptions carries the viewer's selections into a fresh
+// preview. power is the explicit On/Off choice: 0 keeps the creation state,
+// +1 and -1 raise or lower the activation bit after creation.
+type unitViewerAnimationOptions struct {
+	action   unitViewerAction
+	weapon   int
+	severity int32
+	power    int8
+	features map[string]*content.FeatureDef
 }
 
 type unitViewerAnimation struct {
@@ -149,6 +285,8 @@ type unitViewerAnimation struct {
 	def         *content.UnitDef
 	action      unitViewerAction
 	weapon      int
+	severity    int32
+	features    map[string]*content.FeatureDef
 	note        string
 	carry       float64
 	ticks       uint64
@@ -160,24 +298,95 @@ type unitViewerAnimation struct {
 	aimPending  bool
 	aimReturned bool
 	aimReady    bool
+	windPending bool
+	move        unitViewerMover
+	build       unitViewerBuild
+	fly         *unitViewerFlight
+	death       unitViewerDeathState
 	stopped     bool
 	invalid     bool
 }
 
-func newUnitViewerAnimation(def *content.UnitDef, mdl *model.Model, action unitViewerAction, weapon int) *unitViewerAnimation {
-	a := &unitViewerAnimation{def: def, action: action, weapon: weapon}
+func newUnitViewerAnimation(def *content.UnitDef, mdl *model.Model, opts unitViewerAnimationOptions) *unitViewerAnimation {
+	action, weapon := opts.action, opts.weapon
+	if action == "" {
+		action = unitViewerIdle
+	}
+	if weapon == 0 {
+		weapon = 1
+	}
+	a := &unitViewerAnimation{def: def, action: action, weapon: weapon, severity: opts.severity, features: opts.features}
+	if a.severity < 1 || a.severity > 100 {
+		a.severity = unitViewerSeverities[0]
+	}
+	a.build.nano, a.build.pad = -1, -1
 	a.script = newUnitViewerScript(def, mdl)
 	if a.script == nil {
 		a.stopped, a.note = true, "Authored pose / no script"
 		return a
 	}
-	if !a.script.create() {
-		a.failScript()
+	if !a.createCompletedUnit(opts.power) {
 		return a
 	}
 	if !unitViewerAnimationAvailable(def, action, weapon) {
 		a.stopped, a.note = true, fmt.Sprintf("%s unavailable / %s", action, unitViewerUnavailableReason(def, action, weapon))
 		return a
+	}
+	a.note = "Idle / completed unit"
+	switch {
+	case def.ExtractsMetal > 0:
+		a.note = fmt.Sprintf("Idle / extractor SetSpeed %d (preview metal)", int16(unitViewerExtractorSum(def)))
+	case def.WindGenerator > 0:
+		a.note = fmt.Sprintf("Idle / wind %d at 45 deg (preview)", unitViewerWindSpeed)
+	}
+	switch action {
+	case unitViewerMoving:
+		a.note = "Move / accelerating"
+	case unitViewerFlying:
+		a.fly = newUnitViewerFlight(def)
+		a.fly.order = unitViewerFlightTakeoff
+		a.note = "Fly / taking off"
+	case unitViewerAiming, unitViewerFiring:
+		// The loop is a preview policy: retry only after this interval, then
+		// await a fresh aim. It is not a prediction of battle firing cadence.
+		a.reload = uint64(max(1, unitViewerWeapon(def, weapon).ReloadTime))
+		a.startAim()
+	case unitViewerBuilding:
+		a.build.factory = unitViewerFactory(def)
+		a.build.request = 1
+		a.note = "Build / starting"
+	case unitViewerHit:
+		a.hit()
+	case unitViewerDeath:
+		a.note = "Death / pending"
+	case unitViewerWreck:
+		// The wreck is what the same Death leaves behind: one preview tick
+		// runs the creation drain and then the local Killed query.
+		a.tick()
+	}
+	if !a.invalid && len(a.script.vm.Diagnostics()) != 0 {
+		a.failScript()
+	}
+	return a
+}
+
+// createCompletedUnit presents a finished unit as the battle creates one
+// [04 R-CB-01 §4]: Create with its immediate drain; per weapon slot the
+// synchronous Query* then AimFrom* (Query* when AimFrom leaves -1); the
+// deferred SetMaxReloadTime; the creation-time extractor SetSpeed; and, last,
+// the already-built activation of `activatewhenbuilt` through the edge
+// machine [04 R-SPEC-01 §12][05 R-SHARE-01 §8]. The deferred starts first run
+// in the first preview tick's drain. A wind generator's SetDirection and
+// SetSpeed follow on that tick's general unit update.
+func (a *unitViewerAnimation) createCompletedUnit(power int8) bool {
+	if !a.script.create() {
+		a.failScript()
+		return false
+	}
+	def, b := a.def, a.script.bridge
+	for slot := cob.WeaponPrimary; slot <= cob.WeaponTertiary; slot++ {
+		b.QueryWeapon(slot)
+		b.AimPiece(slot)
 	}
 	// Authored restore threads can use the longest base reload. Its standard
 	// callback follows Create and remains deferred [04 R-CB-01 §2].
@@ -188,32 +397,36 @@ func newUnitViewerAnimation(def *content.UnitDef, mdl *model.Model, action unitV
 				reload = max(reload, w.ReloadTime)
 			}
 		}
-		if !a.script.bridge.SetMaxReloadTime(reload).Started {
+		if !b.SetMaxReloadTime(reload).Started {
 			a.stop("reload callback unavailable")
-			return a
+			return false
 		}
 	}
-	switch action {
-	case unitViewerIdle:
-		a.note = "Idle preview"
-	case unitViewerWalking:
-		if !a.script.bridge.StartMoving().Started {
-			a.stop("movement callback unavailable")
-		} else {
-			a.note = "Walking preview"
-		}
-	case unitViewerAiming, unitViewerFiring:
-		// The loop is a preview policy: retry only after this interval, then
-		// await a fresh aim. It is not a prediction of battle firing cadence.
-		a.reload = uint64(max(1, unitViewerWeapon(def, weapon).ReloadTime))
-		a.startAim()
+	if def.ExtractsMetal > 0 {
+		b.SetSpeedFootprint(unitViewerExtractorSum(def))
 	}
+	if def.ActivateWhenBuilt {
+		a.script.setEdge(unitViewerActivated, true)
+	}
+	// An explicit On/Off choice is applied after creation, through the same
+	// edge machine an Activate or Deactivate order uses.
+	if power != 0 {
+		a.script.setEdge(unitViewerActivated, power > 0)
+	}
+	a.windPending = def.WindGenerator > 0
 	if len(a.script.vm.Diagnostics()) != 0 {
 		a.failScript()
-	} else if a.script.interrupted != "" {
-		a.stop(a.script.interrupted + " ended without a return")
+		return false
 	}
-	return a
+	return true
+}
+
+// unitViewerExtractorSum is the creation-time footprint accumulator for the
+// preview's uniform metal byte: (byte + 1) per covered cell, wrapping in 16
+// bits [04 R-CB-01 §5][05 R-PROD-01 §6].
+func unitViewerExtractorSum(def *content.UnitDef) int32 {
+	cells := int64(max(0, def.FootprintX)) * int64(max(0, def.FootprintZ))
+	return int32(uint16(cells * (unitViewerMetalByte + 1)))
 }
 
 func (a *unitViewerAnimation) poses() []frame.PieceView {
@@ -238,17 +451,28 @@ func (a *unitViewerAnimation) update(dt float64) bool {
 	return steps != 0
 }
 
+// tick is one preview unit visit in the established callback order: the
+// general unit update, the weapon update, the normal drain, order and
+// construction work, movement, then slot-end death handling [04 §5.4].
 func (a *unitViewerAnimation) tick() {
 	a.ticks++
+	b := a.script.bridge
+	if a.windPending {
+		// The wind pair is a per-change producer, issued once per re-roll
+		// [04 R-CB-01 §5]; the preview publishes one re-roll.
+		a.windPending = false
+		b.SetDirection(unitViewerWindHeading)
+		b.SetSpeed(unitViewerWindSpeed)
+	}
 	if a.action == unitViewerFiring && !a.aimPending {
 		if a.aimReady {
 			// Root Fire precedes optional RockUnit [04 R-CB-01 §2]. There
 			// are no projectile, burst, sound, resource or effect producers.
-			if !a.script.bridge.Fire(cob.WeaponSlot(a.weapon - 1)).Started {
+			if !b.Fire(cob.WeaponSlot(a.weapon - 1)).Started {
 				a.stop("fire callback unavailable")
 				return
 			}
-			if unitViewerHasCallback(a.def, "RockUnit") && !a.script.bridge.RockUnit(int16(unitViewerAimHeading)).Started {
+			if unitViewerHasCallback(a.def, "RockUnit") && !b.RockUnit(int16(unitViewerAimHeading)).Started {
 				a.stop("recoil callback unavailable")
 				return
 			}
@@ -261,13 +485,9 @@ func (a *unitViewerAnimation) tick() {
 	if a.stopped {
 		return
 	}
-	a.script.bridge.Drain(1)
+	b.Drain(1)
 	if len(a.script.vm.Diagnostics()) != 0 {
 		a.failScript()
-		return
-	}
-	if a.script.interrupted != "" {
-		a.stop(a.script.interrupted + " ended without a return")
 		return
 	}
 	if a.aimPending {
@@ -284,6 +504,19 @@ func (a *unitViewerAnimation) tick() {
 		case a.ticks-a.aimStarted >= unitViewerAimTimeout:
 			a.stop("aim exceeded 10-second preview limit")
 		}
+	}
+	if a.stopped {
+		return
+	}
+	a.buildStep()
+	a.flightOrders()
+	a.moveStep()
+	a.flightStep()
+	if (a.action == unitViewerDeath || a.action == unitViewerWreck) && !a.death.done && !a.stopped {
+		a.kill()
+	}
+	if !a.invalid && len(a.script.vm.Diagnostics()) != 0 {
+		a.failScript()
 	}
 }
 
@@ -311,9 +544,42 @@ func (a *unitViewerAnimation) failScript() {
 	a.stopped, a.invalid, a.note = true, true, "Authored pose / script unavailable"
 }
 
-// This interpreter owns only detached pose/flag state. Full health, complete
-// construction, unbound zero reads and random low bounds are explicit preview
-// inputs, not a claim about gameplay (DESIGN_DEVELOPER_TOOLS §7).
+// activated reports the live activation bit of the preview's state byte.
+func (a *unitViewerAnimation) activated() bool {
+	return a != nil && a.script != nil && a.script.state&unitViewerActivated != 0
+}
+
+// setActivation drives the activation edge machine as an Activate or
+// Deactivate order does: Activate on the rising edge, Deactivate on the
+// falling edge, nothing when the bit is unchanged [04 R-UNIT-06 §2].
+func (a *unitViewerAnimation) setActivation(on bool) {
+	if a == nil || a.script == nil || a.invalid {
+		return
+	}
+	a.script.setEdge(unitViewerActivated, on)
+	if len(a.script.vm.Diagnostics()) != 0 {
+		a.failScript()
+	}
+}
+
+// The detached unit-state bits the engine ports read and write [04 §4.4]
+// [04 §4.7]: the first state byte carries activation, armor and building; the
+// second carries the build stance, busy, yard and bugger-off flags.
+const (
+	unitViewerActivated uint8 = 1 << 0
+	unitViewerArmored   uint8 = 1 << 1
+	unitViewerBuildBit  uint8 = 1 << 3
+
+	unitViewerStance    uint8 = 1 << 0
+	unitViewerBusy      uint8 = 1 << 1
+	unitViewerYardOpen  uint8 = 1 << 2
+	unitViewerBuggerOff uint8 = 1 << 3
+)
+
+// This interpreter owns only detached pose, flag and unit-state words. Full
+// health, complete construction, an empty yard, unbound zero reads and random
+// low bounds are explicit preview inputs, not a claim about gameplay
+// (DESIGN_DEVELOPER_TOOLS §7).
 type unitViewerScript struct {
 	vm          *cob.VM
 	bridge      *cob.CallbackBridge
@@ -321,6 +587,9 @@ type unitViewerScript struct {
 	modelFlags  []uint8
 	pose        []frame.PieceView
 	interrupted string
+	state       uint8 // activated, armored, building [04 R-UNIT-06 §2]
+	stance      uint8 // in-build stance, busy, yard open, bugger off [04 §4.7]
+	health      int32 // port 4 reading
 }
 
 func newUnitViewerScript(def *content.UnitDef, mdl *model.Model) *unitViewerScript {
@@ -331,12 +600,14 @@ func newUnitViewerScript(def *content.UnitDef, mdl *model.Model) *unitViewerScri
 		vm:         cob.NewPresentationVM(def.Script, unitViewerScriptBudget),
 		modelFlags: units.BuildRenderPieceFlags(mdl),
 		pose:       make([]frame.PieceView, len(mdl.Pieces)),
+		health:     100,
 	}
 	s.bridge = cob.NewCallbackBridge(s.vm)
-	// Signal and malformed termination are both non-returning callbacks. Do
-	// not present either as a successful preview [04 §4.2][04 §4.3].
+	// A Create that ends by signal or malformed termination is a non-returning
+	// creation; the preview falls back rather than present it [04 §4.2][04 §4.3].
+	// Other callbacks may be signalled by later ones as authored behavior.
 	s.bridge.SetLifecycleSink(func(e cob.LifecycleEvent) {
-		if e.Phase == "finish-abnormal" && s.interrupted == "" {
+		if e.Phase == "finish-abnormal" && e.Name == "Create" && s.interrupted == "" {
 			s.interrupted = e.Name
 		}
 	})
@@ -366,9 +637,73 @@ func newUnitViewerScript(def *content.UnitDef, mdl *model.Model) *unitViewerScri
 		}
 		return true
 	})
-	s.vm.BindPortBinding(cob.Port(4), cob.PortBinding{Read: func([4]int32) int32 { return 100 }})
+	bit := func(word *uint8, mask uint8) func([4]int32) int32 {
+		return func([4]int32) int32 {
+			if *word&mask != 0 {
+				return 1
+			}
+			return 0
+		}
+	}
+	set := func(word *uint8, mask uint8) func(int32) {
+		return func(v int32) {
+			if v&1 != 0 {
+				*word |= mask
+			} else {
+				*word &^= mask
+			}
+		}
+	}
+	// Ports 1 and 20 drive the shared edge machine; 5, 6, 18 and 19 write the
+	// stance byte. The yard admission always passes because no unit or feature
+	// stands in the preview's yard [04 §4.7].
+	s.vm.BindPortBinding(cob.Port(1), cob.PortBinding{Read: bit(&s.state, unitViewerActivated), Write: func(v int32) { s.setEdge(unitViewerActivated, v&1 != 0) }})
+	s.vm.BindPortBinding(cob.Port(4), cob.PortBinding{Read: func([4]int32) int32 { return s.health }})
+	s.vm.BindPortBinding(cob.Port(5), cob.PortBinding{Read: bit(&s.stance, unitViewerStance), Write: set(&s.stance, unitViewerStance)})
+	s.vm.BindPortBinding(cob.Port(6), cob.PortBinding{Read: bit(&s.stance, unitViewerBusy), Write: set(&s.stance, unitViewerBusy)})
 	s.vm.BindPortBinding(cob.Port(17), cob.PortBinding{Read: func([4]int32) int32 { return 0 }})
+	s.vm.BindPortBinding(cob.Port(18), cob.PortBinding{Read: bit(&s.stance, unitViewerYardOpen), Write: set(&s.stance, unitViewerYardOpen)})
+	s.vm.BindPortBinding(cob.Port(19), cob.PortBinding{Read: bit(&s.stance, unitViewerBuggerOff), Write: set(&s.stance, unitViewerBuggerOff)})
+	s.vm.BindPortBinding(cob.Port(20), cob.PortBinding{Read: bit(&s.state, unitViewerArmored), Write: func(v int32) { s.setEdge(unitViewerArmored, v&1 != 0) }})
 	return s
+}
+
+// setEdge is the activation/production edge machine: write the byte first,
+// then start the deferred callbacks of each actual edge in the established
+// order — rising activation, falling activation, rising building, falling
+// building [04 R-UNIT-06 §2]. Armor has no callback. Engine notifications,
+// the interface dirty bit and network events have no preview consumer.
+func (s *unitViewerScript) setEdge(mask uint8, on bool) {
+	old := s.state
+	if on {
+		s.state |= mask
+	} else {
+		s.state &^= mask
+	}
+	rise, fall := s.state&^old, old&^s.state
+	if rise&unitViewerActivated != 0 {
+		s.bridge.Activate()
+	}
+	if fall&unitViewerActivated != 0 {
+		s.bridge.Deactivate()
+	}
+	if rise&unitViewerBuildBit != 0 {
+		s.bridge.StartBuilding()
+	}
+	if fall&unitViewerBuildBit != 0 {
+		s.bridge.StopBuilding()
+	}
+}
+
+// modelPiece maps a script piece index to the model's piece index, or -1.
+func (s *unitViewerScript) modelPiece(piece int32) int {
+	if s == nil || piece < 0 || int(piece) >= len(s.pieceMap) {
+		return -1
+	}
+	if idx := s.pieceMap[piece]; idx >= 0 && idx < len(s.pose) {
+		return idx
+	}
+	return -1
 }
 
 func (s *unitViewerScript) create() bool {

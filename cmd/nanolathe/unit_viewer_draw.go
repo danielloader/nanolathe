@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
 )
@@ -16,6 +17,9 @@ import (
 func (s *toolsScreen) Draw(dst *ebiten.Image) {
 	s.layout(float64(dst.Bounds().Dx()), float64(dst.Bounds().Dy()))
 	s.preparePaint()
+	if s.viewer && s.cs != nil {
+		s.pics.bind(s.cs.fs)
+	}
 	s.drawBackground(dst)
 	if s.panel == nil {
 		return
@@ -25,7 +29,7 @@ func (s *toolsScreen) Draw(dst *ebiten.Image) {
 	if s.viewer {
 		s.drawViewer(dst)
 	} else {
-		s.label(dst, "Your loaded content, up close.", screenkit.Rect{X: 320, Y: 256, W: 560, H: 58}, screenkit.Style{Size: 38, Top: nlGoldTop, Bottom: nlGoldBottom, Align: 1}, true)
+		s.label(dst, "Your loaded content, up close.", screenkit.Rect{X: 220, Y: 256, W: 760, H: 58}, screenkit.Style{Size: 38, Top: nlGoldTop, Bottom: nlGoldBottom, Align: 1}, true)
 		s.label(dst, "Explore units, compare statistics and play their animations.", screenkit.Rect{X: 310, Y: 336, W: 580, H: 28}, screenkit.Style{Size: 14, Top: nlBody, Align: 1}, false)
 	}
 	for i, g := range s.panel.Window.Gadgets {
@@ -35,7 +39,11 @@ func (s *toolsScreen) Draw(dst *ebiten.Image) {
 		r := unitViewerRect(s.panel.Window.PlacedRect(i))
 		switch g.Kind {
 		case gui.KindButton:
-			s.drawButton(dst, i, g, r)
+			if strings.HasPrefix(g.Name, "TAB") {
+				s.drawTab(dst, i, g, r)
+			} else {
+				s.drawButton(dst, i, g, r)
+			}
 		case gui.KindTextBox:
 			s.drawSearch(dst, i, r)
 		case gui.KindListBox:
@@ -48,6 +56,8 @@ func (s *toolsScreen) Draw(dst *ebiten.Image) {
 			s.drawScrollbar(dst, i, r)
 		}
 	}
+	// Decoding continues on the loader's worker; nothing here waits for it.
+	s.picsPending = s.pics.endFrame()
 }
 
 func (s *toolsScreen) drawBackground(dst *ebiten.Image) {
@@ -61,7 +71,7 @@ func (s *toolsScreen) drawBackground(dst *ebiten.Image) {
 	if s.viewer {
 		// Quiet side surfaces leave the selected model as the hero. There is
 		// one original riveted frame around the stage, no nested list bevels.
-		for _, r := range []screenkit.Rect{{X: 20, Y: 94, W: 258, H: 622}, {X: 924, Y: 94, W: 256, H: 622}} {
+		for _, r := range []screenkit.Rect{{X: 20, Y: 94, W: 258, H: 622}, {X: 850, Y: 94, W: 330, H: 622}} {
 			screenkit.Fill(dst, s.deviceRect(r), color.RGBA{5, 9, 6, 100})
 		}
 	}
@@ -85,10 +95,11 @@ func (s *toolsScreen) drawViewer(dst *ebiten.Image) {
 	kicker := screenkit.Style{Size: 14, Tracking: 0.12, Top: nlKicker, Upper: true}
 	s.label(dst, "Unit library", screenkit.Rect{X: 32, Y: 108, W: 234, H: 24}, kicker, true)
 	s.label(dst, fmt.Sprintf("%d / %d units", len(s.filtered), len(s.entries)), screenkit.Rect{X: 34, Y: 191, W: 230, H: 16}, screenkit.Style{Size: 10, Top: nlDim}, false)
-	s.label(dst, "Unit data", screenkit.Rect{X: 946, Y: 108, W: 210, H: 24}, kicker, true)
+	s.label(dst, "Unit data", screenkit.Rect{X: 862, Y: 108, W: 210, H: 24}, kicker, true)
+	screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: 862, Y: 175, W: 306, H: 1}), color.RGBA{123, 119, 86, 100})
 	if s.selected != nil {
-		s.label(dst, unitViewerName(s.selected), screenkit.Rect{X: 306, Y: 105, W: 596, H: 51}, screenkit.Style{Size: 40, Top: nlGoldTop, Bottom: nlGoldBottom, Shadow: 0.06, Upper: true}, true)
-		s.label(dst, strings.ToUpper(s.selected.UnitName), screenkit.Rect{X: 308, Y: 157, W: 590, H: 19}, screenkit.Style{Size: 11, Tracking: 0.08, Top: nlGreenText}, true)
+		s.label(dst, unitViewerName(s.selected), screenkit.Rect{X: 306, Y: 105, W: 528, H: 51}, screenkit.Style{Size: 40, Top: nlGoldTop, Bottom: nlGoldBottom, Shadow: 0.06, Upper: true}, true)
+		s.label(dst, strings.ToUpper(s.selected.UnitName), screenkit.Rect{X: 308, Y: 157, W: 524, H: 19}, screenkit.Style{Size: 11, Tracking: 0.08, Top: nlGreenText}, true)
 	}
 	stage := s.deviceRect(s.viewRect)
 	screenkit.Fill(dst, stage, color.RGBA{10, 14, 12, 255})
@@ -107,11 +118,21 @@ func (s *toolsScreen) drawViewer(dst *ebiten.Image) {
 	if s.model.poseNote != "" {
 		status = s.model.poseNote
 	}
+	if s.model.anim.wreckFeature() != nil && s.model.wreck.err != nil && s.model.wreck.feature == s.model.anim.wreckFeature() {
+		status = "Wreck / model unavailable: " + s.model.wreck.err.Error()
+	}
+	if s.model.anim != nil && unitViewerHasPower(s.selected) && !s.model.anim.invalid {
+		if s.model.anim.activated() {
+			status += " / on"
+		} else {
+			status += " / off"
+		}
+	}
 	if s.animationPaused {
 		status += " (paused)"
 	}
-	s.label(dst, status, screenkit.Rect{X: 312, Y: 611, W: 500, H: 24}, screenkit.Style{Size: 12, Top: nlDim}, false)
-	s.label(dst, fmt.Sprintf("%.0f%%", 100*s.zoom), screenkit.Rect{X: 828, Y: 611, W: 68, H: 24}, screenkit.Style{Size: 12, Top: nlKicker, Align: 2}, false)
+	s.label(dst, status, screenkit.Rect{X: 312, Y: 611, W: 448, H: 24}, screenkit.Style{Size: 12, Top: nlDim}, false)
+	s.label(dst, fmt.Sprintf("%.0f%%", 100*s.zoom), screenkit.Rect{X: 766, Y: 611, W: 68, H: 24}, screenkit.Style{Size: 12, Top: nlKicker, Align: 2}, false)
 	message := ""
 	switch {
 	case s.loadErr != nil:
@@ -124,16 +145,16 @@ func (s *toolsScreen) drawViewer(dst *ebiten.Image) {
 		message = "Model unavailable\r" + s.model.err.Error()
 	}
 	if message != "" {
-		for i, line := range retailWrapLines(message, unitViewerTextWidth, 508) {
+		for i, line := range retailWrapLines(message, unitViewerTextWidth, 468) {
 			if i >= 10 {
 				break
 			}
-			s.label(dst, line, screenkit.Rect{X: 348, Y: 300 + float64(i)*26, W: 508, H: 25}, screenkit.Style{Size: unitViewerBodySize, Top: nlBody, Align: 1}, false)
+			s.label(dst, line, screenkit.Rect{X: 336, Y: 300 + float64(i)*26, W: 468, H: 25}, screenkit.Style{Size: unitViewerBodySize, Top: nlBody, Align: 1}, false)
 		}
 	}
 	s.label(dst, "Arrows / page keys select", screenkit.Rect{X: 32, Y: 734, W: 260, H: 16}, screenkit.Style{Size: 10, Top: nlDim}, false)
-	s.label(dst, "Drag to rotate  /  Wheel to zoom", screenkit.Rect{X: 306, Y: 734, W: 570, H: 16}, screenkit.Style{Size: 10, Top: nlDim}, false)
-	s.label(dst, "Base values / before mutators", screenkit.Rect{X: 936, Y: 734, W: 232, H: 16}, screenkit.Style{Size: 10, Top: nlDim}, false)
+	s.label(dst, "Drag to rotate  /  Wheel to zoom  /  Alt+Left or Backspace: previous unit", screenkit.Rect{X: 306, Y: 734, W: 528, H: 16}, screenkit.Style{Size: 10, Top: nlDim}, false)
+	s.label(dst, "Base values / before mutators", screenkit.Rect{X: 862, Y: 734, W: 306, H: 16}, screenkit.Style{Size: 10, Top: nlDim}, false)
 }
 
 func (s *toolsScreen) drawButton(dst *ebiten.Image, index int, g gui.Gadget, r screenkit.Rect) {
@@ -162,10 +183,7 @@ func (s *toolsScreen) drawButton(dst *ebiten.Image, index int, g gui.Gadget, r s
 		screenkit.Poly(dst, []float64{x, y + dy, x - device.W*0.2, y - dy, x + device.W*0.2, y - dy}, nlBody)
 		return
 	}
-	selected := s.selected != nil && !disabled && strings.EqualFold(g.Name, s.action)
-	if g.Name == "SPIN" && s.spinning {
-		selected = true
-	}
+	selected := g.Name == "SPIN" && s.spinning || s.selected != nil && !disabled && s.buttonSelected(g.Name)
 	if selected {
 		screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: r.X + 7, Y: r.Y + r.H - 5, W: r.W - 14, H: 2}), nlGreenText)
 	}
@@ -173,7 +191,13 @@ func (s *toolsScreen) drawButton(dst *ebiten.Image, index int, g gui.Gadget, r s
 	if disabled {
 		c = color.RGBA{118, 121, 101, 255}
 	}
-	st := screenkit.Style{Size: 14, Tracking: 0.06, Top: c, Upper: true, Align: 1}
+	// Compact controls shrink their caption a little, as long library names
+	// do, rather than clip it.
+	st := unitViewerCaptionStyle(14)
+	st.Top = c
+	for st.Size > 12 && unitViewerMeasure(p.TextAt(index), st, true) > r.W-12 {
+		st.Size -= 0.5
+	}
 	caption := screenkit.Rect{X: r.X + 6, Y: r.Y + (r.H-st.Size)/2, W: r.W - 12, H: st.Size + 5}
 	// The settings captions keep a dark outline over the original metal.
 	outline := st
@@ -184,6 +208,11 @@ func (s *toolsScreen) drawButton(dst *ebiten.Image, index int, g gui.Gadget, r s
 		s.label(dst, p.TextAt(index), run, outline, true)
 	}
 	s.label(dst, p.TextAt(index), caption, st, true)
+}
+
+// unitViewerCaptionStyle is the settings screen's button caption.
+func unitViewerCaptionStyle(size float64) screenkit.Style {
+	return screenkit.Style{Size: size, Tracking: 0.06, Top: nlCream, Upper: true, Align: 1}
 }
 
 func (s *toolsScreen) drawSearch(dst *ebiten.Image, index int, r screenkit.Rect) {
@@ -219,7 +248,7 @@ func (s *toolsScreen) drawLibrary(dst *ebiten.Image, index int, g gui.Gadget, r 
 	if target == nil {
 		return
 	}
-	for i := top; i < len(rows); i++ {
+	for i := top; i < len(rows) && i < len(s.filtered); i++ {
 		y := r.Y + 2 + float64(i-top)*float64(g.ItemHeight)
 		if y+unitViewerTextMetric > r.Y+r.H {
 			break
@@ -232,16 +261,69 @@ func (s *toolsScreen) drawLibrary(dst *ebiten.Image, index int, g gui.Gadget, r 
 			screenkit.Fill(target, s.deviceRect(screenkit.Rect{X: row.X, Y: row.Y, W: 3, H: row.H}), nlGreenText)
 			c = nlCream
 		}
-		s.label(target, name, screenkit.Rect{X: row.X + 10, Y: y + 7, W: row.W - 20, H: 21}, screenkit.Style{Size: 15, Top: c, Upper: true}, true)
-		s.label(target, id, screenkit.Rect{X: row.X + 10, Y: y + 29, W: row.W - 20, H: 16}, screenkit.Style{Size: 10, Top: nlDim}, false)
+		s.drawPicture(target, s.filtered[i].Def, screenkit.Rect{X: row.X + 8, Y: y + 2, W: 48, H: 48})
+		// Long names shrink a little, then take two lines above the ID.
+		text := screenkit.Rect{X: row.X + 64, Y: y + 8, W: row.W - 70, H: 21}
+		st := screenkit.Style{Size: 15, Top: c, Upper: true}
+		for st.Size > 13 && unitViewerMeasure(name, st, true) > text.W {
+			st.Size -= 0.5
+		}
+		idY := y + 30
+		lines := []string{name}
+		if unitViewerMeasure(name, st, true) > text.W {
+			measure := func(s string) int { return int(math.Ceil(unitViewerMeasure(s, st, true))) }
+			if wrapped := retailWrapLines(name, measure, int(text.W)); len(wrapped) > 1 {
+				lines, text.Y, idY = []string{wrapped[0], strings.Join(wrapped[1:], " ")}, y+3, y+37
+			}
+		}
+		for j, line := range lines {
+			s.label(target, line, screenkit.Rect{X: text.X, Y: text.Y + float64(j)*16, W: text.W, H: 18}, st, true)
+		}
+		s.label(target, id, screenkit.Rect{X: text.X, Y: idY, W: text.W, H: 14}, screenkit.Style{Size: 10, Top: nlDim}, false)
 	}
 	if s.panel.Focused() == index {
 		screenkit.Outline(target, s.deviceRect(r), max(1, s.scale), color.RGBA{102, 101, 71, 200})
 	}
 }
 
+// drawPicture draws a unit's build picture, or a neutral empty frame while it
+// decodes or when the content has none. No substitute art is drawn.
+func (s *toolsScreen) drawPicture(dst *ebiten.Image, def *content.UnitDef, r screenkit.Rect) {
+	device := s.deviceRect(r)
+	screenkit.Fill(dst, device, color.RGBA{8, 13, 10, 230})
+	if img := s.pics.image(def); img != nil {
+		screenkit.Image(dst, img, device, 1, false)
+	}
+	screenkit.Outline(dst, device, max(1, s.scale*0.75), color.RGBA{70, 76, 60, 220})
+}
+
+func (s *toolsScreen) drawTab(dst *ebiten.Image, index int, g gui.Gadget, r screenkit.Rect) {
+	active := unitViewerTabs[g.Name] == s.infoTab
+	st := screenkit.Style{Size: 14, Tracking: 0.12, Upper: true, Align: 1, Shadow: 0.1, Top: color.RGBA{183, 174, 140, 255}}
+	switch {
+	case active:
+		st.Top = nlCream
+	case s.panel.Hovered() == index:
+		st.Top = color.RGBA{238, 232, 210, 255}
+	}
+	text := s.panel.TextAt(index)
+	s.label(dst, text, screenkit.Rect{X: r.X, Y: r.Y + 5, W: r.W, H: 20}, st, true)
+	if active {
+		// The settings screen's active-page underline and glow.
+		tw := unitViewerMeasure(text, st, true)
+		bar := screenkit.Rect{X: r.X + (r.W-tw)/2, Y: r.Y + r.H - 6, W: tw, H: 3}
+		screenkit.Glow(dst, s.deviceRect(bar.Inset(-6)), color.RGBA{61, 255, 92, 50})
+		screenkit.VGradient(dst, s.deviceRect(bar), color.RGBA{184, 255, 194, 255}, color.RGBA{21, 168, 43, 255})
+	}
+	if s.panel.Focused() == index {
+		screenkit.Outline(dst, s.deviceRect(r), max(1, s.scale), nlKicker)
+	}
+}
+
+// drawInfo paints the typed rows at the native list's row origin and height,
+// the same geometry infoLinkAt measures.
 func (s *toolsScreen) drawInfo(dst *ebiten.Image, index int, g gui.Gadget, r screenkit.Rect) {
-	rows, _, top, ok := s.panel.ListValuesAt(index)
+	_, _, top, ok := s.panel.ListValuesAt(index)
 	if !ok {
 		return
 	}
@@ -249,26 +331,95 @@ func (s *toolsScreen) drawInfo(dst *ebiten.Image, index int, g gui.Gadget, r scr
 	if target == nil {
 		return
 	}
-	width := r.W - 2*unitViewerTextInset
-	for i := top; i < len(rows); i++ {
-		y := r.Y + 2 + float64(i-top)*float64(g.ItemHeight)
+	h := float64(g.ItemHeight)
+	x0, w := r.X+unitViewerTextInset, r.W-2*unitViewerTextInset
+	valueRight := x0 + w - unitViewerUnitWidth
+	hover := s.infoLinkAt(s.pointerX, s.pointerY)
+	start := top
+	if start > 0 && start < len(s.infoRows) && s.infoRows[start].Kind == unitViewerRowLinkTail {
+		start-- // keep a link's picture when only its second row is in view
+	}
+	body := screenkit.Style{Size: unitViewerBodySize, Top: nlBody}
+	for i := start; i < len(s.infoRows); i++ {
+		y := r.Y + 2 + float64(i-top)*h
 		if y+unitViewerTextMetric > r.Y+r.H {
 			break
 		}
-		label, value, pair := strings.Cut(rows[i], "\t")
-		c := nlBody
-		if pair || strings.HasSuffix(label, ":") {
-			c = nlDim
+		row := s.infoRows[i]
+		if row.Card {
+			screenkit.Fill(target, s.deviceRect(screenkit.Rect{X: r.X + 2, Y: y, W: r.W - 4, H: h}), color.RGBA{255, 255, 255, 7})
+			screenkit.Fill(target, s.deviceRect(screenkit.Rect{X: r.X + 2, Y: y, W: 2, H: h}), alphaC(nlKicker, 0.55))
 		}
-		line := screenkit.Rect{X: r.X + unitViewerTextInset, Y: y, W: width, H: unitViewerTextMetric + 2}
-		s.label(target, label, line, screenkit.Style{Size: unitViewerBodySize, Top: c}, false)
-		if pair {
-			s.label(target, value, line, screenkit.Style{Size: unitViewerBodySize, Top: nlBody, Align: 2}, false)
+		line := screenkit.Rect{X: x0, Y: y, W: w, H: unitViewerTextMetric + 2}
+		switch row.Kind {
+		case unitViewerRowHeading:
+			s.label(target, row.Label, screenkit.Rect{X: x0, Y: y + 1, W: w, H: 18}, screenkit.Style{Size: 14, Tracking: 0.1, Top: nlGoldTop, Bottom: nlGoldBottom, Upper: true}, true)
+			s.label(target, row.Value, screenkit.Rect{X: x0, Y: y + 4, W: w, H: 14}, screenkit.Style{Size: 10, Tracking: 0.08, Top: nlDim, Upper: true, Align: 2}, false)
+			screenkit.Fill(target, s.deviceRect(screenkit.Rect{X: x0, Y: y + h - 1, W: w, H: 1}), color.RGBA{123, 119, 86, 110})
+		case unitViewerRowText:
+			s.label(target, row.Label, line, body, false)
+		case unitViewerRowNote:
+			s.label(target, row.Label, screenkit.Rect{X: x0, Y: y + 1, W: w, H: 16}, screenkit.Style{Size: unitViewerNoteSize, Top: nlDim}, false)
+		case unitViewerRowPair:
+			s.label(target, row.Label, line, screenkit.Style{Size: unitViewerBodySize, Top: nlDim}, false)
+			right := valueRight
+			if row.Wide {
+				right = x0 + w
+			}
+			s.label(target, row.Value, screenkit.Rect{X: x0, Y: y, W: right - x0, H: line.H}, screenkit.Style{Size: unitViewerBodySize, Top: nlBody, Align: 2}, false)
+			s.label(target, row.Unit, screenkit.Rect{X: valueRight + 5, Y: y + 3, W: unitViewerUnitWidth - 5, H: 15}, screenkit.Style{Size: unitViewerUnitSize, Top: nlDim}, false)
+		case unitViewerRowCard:
+			s.label(target, row.Value, screenkit.Rect{X: x0, Y: y + 4, W: w, H: 14}, screenkit.Style{Size: 10, Tracking: 0.08, Top: nlKicker, Upper: true, Align: 2}, false)
+			slot := unitViewerMeasure(row.Value, screenkit.Style{Size: 10, Tracking: 0.08, Upper: true}, false)
+			st := screenkit.Style{Size: 15, Top: nlCream}
+			for st.Size > 12 && unitViewerMeasure(row.Label, st, true) > w-slot-8 {
+				st.Size -= 0.5
+			}
+			s.label(target, row.Label, screenkit.Rect{X: x0, Y: y + 1 + (15-st.Size)/2, W: w - slot - 8, H: 19}, st, true)
+		case unitViewerRowTags:
+			x := x0
+			for _, tag := range row.Tags {
+				cw := unitViewerTagWidth(tag)
+				chip := screenkit.Rect{X: x, Y: y + 3, W: cw, H: h - 6}
+				screenkit.Fill(target, s.deviceRect(chip), color.RGBA{24, 36, 26, 220})
+				screenkit.Outline(target, s.deviceRect(chip), max(1, s.scale*0.75), color.RGBA{86, 102, 74, 255})
+				s.label(target, tag, screenkit.Rect{X: x, Y: y + 4, W: cw, H: 14}, screenkit.Style{Size: unitViewerTagSize, Tracking: 0.04, Top: nlBody, Upper: true, Align: 1}, false)
+				x += cw + unitViewerTagGap
+			}
+		case unitViewerRowLink:
+			s.drawInfoLink(target, row, screenkit.Rect{X: r.X + 2, Y: y, W: r.W - 4, H: 2*h - 2}, x0, w, row.Link == hover)
 		}
 	}
 	if s.panel.Focused() == index {
 		screenkit.Outline(target, s.deviceRect(r), max(1, s.scale), color.RGBA{102, 101, 71, 200})
 	}
+}
+
+// drawInfoLink paints one two-row build-tree entry: picture and name, then
+// the unit ID, an optional Modern marker and the work time.
+func (s *toolsScreen) drawInfoLink(dst *ebiten.Image, row unitViewerRow, entry screenkit.Rect, x0, w float64, hover bool) {
+	if hover {
+		fill := color.RGBA{255, 255, 255, 12}
+		if s.linkPress == row.Link {
+			fill = color.RGBA{34, 63, 30, 185}
+		}
+		screenkit.Fill(dst, s.deviceRect(entry), fill)
+	}
+	s.drawPicture(dst, row.Link, screenkit.Rect{X: x0, Y: entry.Y + 2, W: 34, H: 34})
+	tx := x0 + 44
+	s.label(dst, unitViewerName(row.Link), screenkit.Rect{X: tx, Y: entry.Y + 1, W: x0 + w - tx, H: 18}, screenkit.Style{Size: unitViewerBodySize, Top: nlCream}, false)
+	detail := screenkit.Style{Size: 13, Top: nlGreenText, Align: 2}
+	right := x0 + w - unitViewerMeasure(row.Value, detail, false) - 8
+	s.label(dst, row.Value, screenkit.Rect{X: tx, Y: entry.Y + 18, W: x0 + w - tx, H: 17}, detail, false)
+	if row.Modern {
+		const tag = "Modern"
+		cw := unitViewerTagWidth(tag)
+		chip := screenkit.Rect{X: right - cw, Y: entry.Y + 21, W: cw, H: 15}
+		screenkit.Outline(dst, s.deviceRect(chip), max(1, s.scale*0.75), alphaC(nlKicker, 0.8))
+		s.label(dst, tag, screenkit.Rect{X: chip.X, Y: chip.Y + 1, W: cw, H: 13}, screenkit.Style{Size: unitViewerTagSize, Tracking: 0.04, Top: nlKicker, Upper: true, Align: 1}, false)
+		right = chip.X - 6
+	}
+	s.label(dst, strings.ToUpper(row.Link.UnitName), screenkit.Rect{X: tx, Y: entry.Y + 21, W: right - tx, H: 14}, screenkit.Style{Size: 10, Tracking: 0.04, Top: nlDim}, false)
 }
 
 func (s *toolsScreen) drawScrollbar(dst *ebiten.Image, index int, r screenkit.Rect) {

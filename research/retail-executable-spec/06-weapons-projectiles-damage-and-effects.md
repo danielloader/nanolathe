@@ -6496,6 +6496,12 @@ body and are not restated here.
 - The roll word of non-meteor projectile records, read by the model render
   types and written by no creator · `[R-WFX-01 §4]` · writer census of the
   record's first orientation word.
+- **Unknown:** whether a dropped weapon whose authored `burst` exceeds one
+  releases more than one bomb. The dropped creator leaves the root's remaining
+  burst count at zero, yet the burst-clone dispatcher has a dropped arm ·
+  §4.3, §6.4 · static trace of that arm and of every path that reaches it with
+  a dropped root. No stock dropped weapon authors a burst; the unit viewer
+  withholds its nominal DPS for such weapons until this is settled.
 
 ### Collision and damage
 

@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
+	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
@@ -32,24 +34,38 @@ func (s *toolsScreen) buildPanel() {
 	} else {
 		i := add(gui.KindTextBox, "SEARCH", s.query, 32, 146, 234, 38)
 		w.Gadgets[i].MaxChars = 127
-		i = add(gui.KindListBox, "UNITS", "", 32, 208, 210, 500)
-		w.Gadgets[i].ItemHeight = 52
+		// Library rows hold a 48-pixel build picture beside the name; stock
+		// pictures are 64x64, so this keeps them legible at every scale.
+		i = add(gui.KindListBox, "UNITS", "", 32, 208, 210, 504)
+		w.Gadgets[i].ItemHeight = 56
 		w.Gadgets[i].Assoc = 1
-		i = add(gui.KindScrollBar, "UNITSCROLL", "", 248, 208, 18, 500)
+		i = add(gui.KindScrollBar, "UNITSCROLL", "", 248, 208, 18, 504)
 		w.Gadgets[i].Assoc, w.Gadgets[i].Attribs = 1, 0
-		i = add(gui.KindListBox, "INFO", "", 936, 144, 210, 564)
-		w.Gadgets[i].ItemHeight = 24
+		button("HISTBACK", "<", 1084, 102, 40)
+		button("HISTFWD", ">", 1128, 102, 40)
+		for _, tab := range []struct {
+			name, text string
+			x, w       int32
+		}{{"TABSTATS", "Stats", 862, 96}, {"TABWEAPONS", "Weapons", 962, 104}, {"TABBUILD", "Build", 1070, 98}} {
+			i = add(gui.KindButton, tab.name, tab.text, tab.x, 142, tab.w, 32)
+			w.Gadgets[i].Attribs = 0x20
+		}
+		i = add(gui.KindListBox, "INFO", "", 862, 184, 284, 520)
+		w.Gadgets[i].ItemHeight = 20
 		w.Gadgets[i].Assoc, w.Gadgets[i].Attribs = 2, 0x101
-		i = add(gui.KindScrollBar, "INFOSCROLL", "", 1150, 144, 18, 564)
+		i = add(gui.KindScrollBar, "INFOSCROLL", "", 1150, 184, 18, 520)
 		w.Gadgets[i].Assoc, w.Gadgets[i].Attribs = 2, 0
-		button("IDLE", "Idle", 312, 642, 92)
-		button("WALK", "Walk", 414, 642, 92)
-		button("AIM", "Aim", 516, 642, 92)
-		button("FIRE", "Fire", 618, 642, 92)
-		button("PAUSE", "Pause", 788, 642, 108)
-		button("SPIN", "Rotate: on", 312, 688, 154)
-		button("RESET", "Reset view", 478, 688, 142)
-		button("WEAPON", "Weapon 1", 754, 688, 142)
+		// The action row holds only the actions that apply to the selected
+		// unit; refreshControls places them left to right at their caption
+		// widths. The control row below is fixed.
+		for _, a := range unitViewerActionButtons {
+			button(a.name, a.labels[0], 306, unitViewerActionRowY, 60)
+		}
+		button("PAUSE", "Pause", 306, unitViewerControlRowY, 66)
+		button("SPIN", "Rotate: on", 378, unitViewerControlRowY, 112)
+		button("RESET", "Reset view", 496, unitViewerControlRowY, 108)
+		button("WEAPON", "Weapon 1", 610, unitViewerControlRowY, 96)
+		button("SEVERITY", "Severity 25", 712, unitViewerControlRowY, 122)
 		button("BACK", "Back", 1040, 26, 128)
 		// The ordinary slider builder synthesizes associated arrow buttons.
 		// Settings-sized controls keep their hit targets and painted extents
@@ -61,9 +77,9 @@ func (s *toolsScreen) buildPanel() {
 				w.Gadgets = append(w.Gadgets, arrows...)
 			}
 		}
-		s.listRect = screenkit.Rect{X: 32, Y: 208, W: 234, H: 500}
-		s.infoRect = screenkit.Rect{X: 936, Y: 144, W: 232, H: 564}
-		s.viewRect = screenkit.Rect{X: 306, Y: 180, W: 596, H: 418}
+		s.listRect = screenkit.Rect{X: 32, Y: 208, W: 234, H: 504}
+		s.infoRect = screenkit.Rect{X: 862, Y: 184, W: 306, H: 520}
+		s.viewRect = screenkit.Rect{X: 306, Y: 180, W: 528, H: 418}
 	}
 	s.panel = ui.NewPanel(w)
 	s.shell.frontend.Open(modeMenuSingle, s.panel, false)
@@ -93,26 +109,52 @@ func (s *toolsScreen) refreshLists() {
 	s.refreshInfo()
 }
 
+// refreshInfo rebuilds the selected tab's typed rows. The native list holds
+// one plain row per typed row, so its scrolling, scrollbar and hit rows use
+// the very rows drawInfo paints.
 func (s *toolsScreen) refreshInfo() {
 	if s.panel == nil || !s.viewer {
 		return
 	}
-	var rows []string
-	if s.selected != nil {
-		measure := unitViewerTextWidth
-		width := int(s.panel.Window.Gadgets[s.panel.Index("INFO")].Rect.W) - 2*unitViewerTextInset
-		rows = append(rows, retailWrapLines(s.selected.Description, measure, width)...)
-		rows = append(rows, "")
-		for _, stat := range unitViewerStats(s.selected) {
-			if measure(stat.Label)+measure(stat.Value)+12 <= width {
-				rows = append(rows, stat.Label+"\t"+stat.Value)
-			} else {
-				rows = append(rows, stat.Label+":")
-				rows = append(rows, retailWrapLines(stat.Value, measure, width)...)
-			}
-		}
+	index := s.panel.Index("INFO")
+	width := float64(s.panel.Window.Gadgets[index].Rect.W) - 2*unitViewerTextInset
+	switch s.infoTab {
+	case unitViewerTabWeapons:
+		s.infoRows = unitViewerWeaponRows(s.selected, width)
+	case unitViewerTabBuild:
+		s.infoRows = s.buildRows(s.selected, width)
+	default:
+		s.infoRows = unitViewerStatsRows(s.selected, width)
 	}
-	s.panel.FillTextListAt(s.panel.Index("INFO"), rows, nil, unitViewerTextMetric)
+	items := make([]string, len(s.infoRows))
+	for i, row := range s.infoRows {
+		items[i] = row.Label
+	}
+	s.panel.FillTextListAt(index, items, nil, unitViewerTextMetric)
+}
+
+// infoLinkAt is the build-tree entry under a logical point, using the list's
+// own row origin and height.
+func (s *toolsScreen) infoLinkAt(x, y float64) *content.UnitDef {
+	if s.panel == nil || !s.viewer {
+		return nil
+	}
+	index := s.panel.Index("INFO")
+	if index < 0 || !s.panel.ActiveAt(index) {
+		return nil
+	}
+	g := s.panel.Window.Gadgets[index]
+	r := unitViewerRect(s.panel.Window.PlacedRect(index))
+	_, _, top, ok := s.panel.ListValuesAt(index)
+	if !ok || g.ItemHeight <= 0 || x < r.X || x >= r.X+r.W || y < r.Y+2 {
+		return nil
+	}
+	row := top + int((y-r.Y-2)/float64(g.ItemHeight))
+	rowY := r.Y + 2 + float64(row-top)*float64(g.ItemHeight)
+	if row < 0 || row >= len(s.infoRows) || rowY+unitViewerTextMetric > r.Y+r.H {
+		return nil
+	}
+	return s.infoRows[row].Link
 }
 
 func (s *toolsScreen) serviceWidgets(inX, inY float64, down, pressed, released bool, dt float64) {
@@ -149,7 +191,7 @@ func (s *toolsScreen) serviceWidgets(inX, inY float64, down, pressed, released b
 			if index == p.Index("UNITS") {
 				i := p.ListAt(index).Selected()
 				if i >= 0 && i < len(s.filtered) {
-					s.selectUnit(s.filtered[i].Def)
+					s.visit(s.filtered[i].Def)
 				}
 			}
 		},
@@ -180,24 +222,114 @@ func (s *toolsScreen) activateTool(name string) {
 		s.resetView()
 	case "PAUSE":
 		s.animationPaused = !s.animationPaused
-	case "IDLE":
-		s.chooseAnimation("Idle")
-	case "WALK":
-		s.chooseAnimation("Walk")
-	case "AIM":
-		s.chooseAnimation("Aim")
-	case "FIRE":
-		s.chooseAnimation("Fire")
+	case "IDLE", "AIM", "FIRE", "HIT", "DEATH", "WRECK":
+		s.chooseAnimation(string(unitViewerButtonAction(name, s.selected)))
+	case "MOVE":
+		// An aircraft's button takes off and lands within one preview, as
+		// the battle's air orders do; choosing it from another action starts
+		// a fresh takeoff.
+		if a := s.model.anim; s.action == string(unitViewerFlying) && a != nil && a.fly != nil && !a.stopped {
+			a.toggleFlight()
+			s.model.refreshPose()
+		} else {
+			s.chooseAnimation(string(unitViewerButtonAction(name, s.selected)))
+		}
+	case "BUILD":
+		// Build stops and restarts the same construction order.
+		if a := s.model.anim; s.action == string(unitViewerBuilding) && a != nil && !a.stopped {
+			a.toggleBuild()
+			s.model.refreshPose()
+		} else {
+			s.chooseAnimation(string(unitViewerBuilding))
+		}
+	case "POWER":
+		// On/Off records an explicit choice that later actions apply after
+		// creation, and drives the live edge machine now.
+		on := !s.model.anim.activated()
+		s.power = -1
+		if on {
+			s.power = 1
+		}
+		s.model.power = s.power
+		if a := s.model.anim; a != nil {
+			a.setActivation(on)
+			s.model.refreshPose()
+		}
 	case "WEAPON":
 		s.weapon = s.weapon%3 + 1
 		s.model.setAnimation(unitViewerAction(s.action), s.weapon)
+	case "SEVERITY":
+		s.severity = (s.severity + 1) % len(unitViewerSeverities)
+		s.model.severity = unitViewerSeverities[s.severity]
+		if s.action == string(unitViewerDeath) || s.action == string(unitViewerWreck) {
+			s.model.setAnimation(unitViewerAction(s.action), s.weapon)
+		}
+	case "HISTBACK":
+		s.goBack()
+	case "HISTFWD":
+		s.goForward()
+	case "TABSTATS", "TABWEAPONS", "TABBUILD":
+		s.infoTab = unitViewerTabs[name]
+		s.refreshInfo()
 	}
 	s.refreshControls()
 }
 
 func (s *toolsScreen) chooseAnimation(action string) {
 	s.action, s.animationPaused = action, false
+	s.model.severity, s.model.power = unitViewerSeverities[s.severity], s.power
 	s.model.setAnimation(unitViewerAction(action), s.weapon)
+}
+
+// unitViewerActionButtons is the action row in display order. labels[0] is
+// the caption; the row is sized for every caption a button can show.
+var unitViewerActionButtons = []struct {
+	name   string
+	labels []string
+}{
+	{"IDLE", []string{"Idle"}},
+	{"MOVE", []string{"Move", "Fly", "Land"}},
+	{"AIM", []string{"Aim"}},
+	{"FIRE", []string{"Fire"}},
+	{"BUILD", []string{"Build", "Stop"}},
+	{"HIT", []string{"Hit"}},
+	{"DEATH", []string{"Death"}},
+	{"WRECK", []string{"Wreck"}},
+	{"POWER", []string{"On/Off"}},
+}
+
+const (
+	unitViewerActionRowY  = 642
+	unitViewerControlRowY = 688
+	unitViewerRowLeft     = 306
+	unitViewerRowWidth    = 528
+)
+
+// unitViewerButtonAction is the action a row button selects for the unit:
+// the movement button flies an aircraft.
+func unitViewerButtonAction(name string, def *content.UnitDef) unitViewerAction {
+	switch name {
+	case "MOVE":
+		if def != nil && def.CanFly {
+			return unitViewerFlying
+		}
+		return unitViewerMoving
+	case "POWER":
+		return ""
+	}
+	return unitViewerAction(strings.ToUpper(name[:1]) + strings.ToLower(name[1:]))
+}
+
+func (s *toolsScreen) buttonSelected(name string) bool {
+	switch name {
+	case "SPIN":
+		return s.spinning
+	case "POWER":
+		return s.model.anim.activated()
+	case "MOVE":
+		return s.action == string(unitViewerMoving) || s.action == string(unitViewerFlying)
+	}
+	return strings.EqualFold(name, s.action)
 }
 
 func (s *toolsScreen) refreshControls() {
@@ -215,12 +347,78 @@ func (s *toolsScreen) refreshControls() {
 	}
 	s.panel.SetText("PAUSE", pause)
 	s.panel.SetText("WEAPON", fmt.Sprintf("Weapon %d", s.weapon))
-	for _, a := range []struct{ name, action string }{{"IDLE", "Idle"}, {"WALK", "Walk"}, {"AIM", "Aim"}, {"FIRE", "Fire"}} {
-		i := s.panel.Index(a.name)
-		s.panel.Window.Gadgets[i].GrayedOut = 0
-		if !unitViewerAnimationAvailable(s.selected, unitViewerAction(a.action), s.weapon) {
-			s.panel.Window.Gadgets[i].GrayedOut = 1
+	s.panel.SetText("SEVERITY", fmt.Sprintf("Severity %d", unitViewerSeverities[s.severity]))
+	grey := func(name string, off bool) {
+		s.panel.Window.Gadgets[s.panel.Index(name)].GrayedOut = 0
+		if off {
+			s.panel.Window.Gadgets[s.panel.Index(name)].GrayedOut = 1
 		}
+	}
+	grey("HISTBACK", len(s.histBack) == 0)
+	grey("HISTFWD", len(s.histForward) == 0)
+	def := s.selected
+	grey("WEAPON", !unitViewerActionShown(def, unitViewerAiming))
+	grey("SEVERITY", def == nil || def.Script == nil)
+	move, build := "Move", "Build"
+	if def != nil && def.CanFly {
+		move = "Fly"
+		if s.action == string(unitViewerFlying) && s.model.anim.airborne() {
+			move = "Land"
+		}
+	}
+	if s.action == string(unitViewerBuilding) && s.model.anim.buildEngaged() {
+		build = "Stop"
+	}
+	s.panel.SetText("MOVE", move)
+	s.panel.SetText("BUILD", build)
+	// Lay the applicable actions out left to right at their caption widths,
+	// tightening the padding when a full row would overflow.
+	type slot struct {
+		index int
+		width float64
+	}
+	var row []slot
+	total := 0.0
+	for _, b := range unitViewerActionButtons {
+		i := s.panel.Index(b.name)
+		action := unitViewerButtonAction(b.name, def)
+		shown := def != nil && def.Script != nil && unitViewerActionShown(def, action)
+		if b.name == "POWER" {
+			shown = unitViewerHasPower(def)
+		}
+		s.panel.SetActiveAt(i, shown)
+		if !shown {
+			continue
+		}
+		available := b.name == "POWER" || unitViewerAnimationAvailable(def, action, s.weapon)
+		grey(b.name, !available)
+		width := 0.0
+		for _, label := range b.labels {
+			width = max(width, unitViewerMeasure(label, unitViewerCaptionStyle(13), true))
+		}
+		row = append(row, slot{i, width})
+		total += width
+	}
+	if len(row) == 0 {
+		return
+	}
+	gap, widest := 6.0, 0.0
+	for _, r := range row {
+		widest = max(widest, r.width)
+	}
+	// Equal buttons when the row has room for them; otherwise each takes its
+	// caption width with the padding that fits.
+	uniform := (widest+18)*float64(len(row))+gap*float64(len(row)-1) <= unitViewerRowWidth
+	pad := min(18, (unitViewerRowWidth-total-gap*float64(len(row)-1))/float64(len(row)))
+	x := float64(unitViewerRowLeft)
+	for _, r := range row {
+		w := math.Round(r.width + max(4, pad))
+		if uniform {
+			w = math.Round(widest + 18)
+		}
+		g := &s.panel.Window.Gadgets[r.index]
+		g.Rect.X, g.Rect.W = int32(x), int32(w)
+		x += w + gap
 	}
 }
 

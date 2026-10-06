@@ -100,52 +100,82 @@ func TestUnitViewerSearchMatchesNameAndIDTokensWithoutReordering(t *testing.T) {
 	}
 }
 
+// unitViewerPairs collects the label/value/unit rows in order.
+func unitViewerPairs(rows []unitViewerRow) []unitViewerStat {
+	var out []unitViewerStat
+	for _, r := range rows {
+		if r.Kind == unitViewerRowPair {
+			out = append(out, unitViewerStat{r.Label, strings.TrimSpace(r.Value + " " + r.Unit)})
+		}
+	}
+	return out
+}
+
+type unitViewerStat struct{ Label, Value string }
+
 // The viewer adopts the established cost truncation and mobile display scales
 // of [07 R-HUD-03 §8], while sensor and weapon ranges retain world units. A
-// compiled reload is ticks / 30 [02 "Weapon record"], not guessed shot timing.
+// compiled reload is ticks / 30 [02 "Weapon record"], not guessed shot timing;
+// the blast radius is the halved authored diameter [06 §9.3].
 func TestUnitViewerStatsUseCompiledValuesAndSkipInactiveWeapons(t *testing.T) {
 	weapon := &content.WeaponDef{
 		DefinitionHeader: content.DefinitionHeader{CanonicalKey: "beam"},
-		ID:               7, Range: 301, ReloadTime: 31,
+		ID:               7, Range: 301, ReloadTime: 30, AreaOfEffect: 49, DamageDefault: 40, Burst: 3, BurstRate: 3,
+		WeaponVelocity: 65536, Turret: true,
+		Damage: map[string]int32{"ARMCOM": 40, "CORCOM": 10, "corfast": 10, "armpw": 70},
 	}
 	def := &content.UnitDef{
 		MaxDamage: 900, BuildCostMetal: 123.75, BuildCostEnergy: 987.5, BuildTime: 4321,
 		BMCode: 1, MaxVelocity: 1 << 16, Acceleration: 1 << 14, TurnRate: 600,
-		SightDistance: 455, RadarDistance: 1200,
+		SightDistance: 455, RadarDistance: 1200, EnergyUse: -20,
 		Weapon1Def: &content.WeaponDef{ID: 0, Name: "Inactive sentinel", Range: 999},
 		Weapon3Def: weapon,
 	}
 	before, weaponBefore := *def, *weapon
-	got := unitViewerStats(def)
+	got := unitViewerPairs(unitViewerStatsRows(def, 264))
 	want := []unitViewerStat{
-		{"Health", "900"}, {"Metal cost", "123"}, {"Energy cost", "987"}, {"Build work", "4321"},
+		{"Health", "900"}, {"Energy cost", "987"}, {"Metal cost", "123"}, {"Build work", "4321"}, {"Energy use", "-20 /s"},
 		{"Speed", "12.0 m/s"}, {"Acceleration", "3.00 m/s/s"}, {"Turn rate", "99 deg/s"},
-		{"Sight range", "455 world units"}, {"Radar range", "1200 world units"},
-		{"Weapon 3", "beam"}, {"W3 range", "301 world units"}, {"W3 base reload", "1.03 s"},
+		{"Sight", "455 wu"}, {"Radar", "1200 wu"},
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("stats = %+v, want %+v", got, want)
 	}
+	weapons := unitViewerWeaponRows(def, 264)
+	got = unitViewerPairs(weapons)
+	want = []unitViewerStat{
+		{"Damage", "40"}, {"vs ARMPW", "70"}, {"vs 2 units", "10"}, {"Base reload", "1.00 s"},
+		{"Burst", "3 shots"}, {"Burst interval", "0.10 s"}, {"Range", "301 wu"}, {"Blast radius", "24 wu"},
+		{"Velocity", "30 wu/s"}, {"Nominal DPS", "120.0"},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("weapon card = %+v, want %+v", got, want)
+	}
+	if weapons[1].Kind != unitViewerRowCard || weapons[1].Label != "beam" || weapons[1].Value != "Weapon 3" {
+		t.Fatalf("weapon card title = %+v", weapons[1])
+	}
 	if !reflect.DeepEqual(*def, before) || !reflect.DeepEqual(*weapon, weaponBefore) {
 		t.Fatal("stat formatting mutated the unit or linked weapon")
 	}
-	// All three active slots fit the sidebar's eighteen-row limit without
-	// collapsing identical weapons or inventing aggregate damage figures.
-	def.Weapon1Def, def.Weapon2Def = weapon, weapon
-	if got := unitViewerStats(def); len(got) > 18 || !slices.Contains(got, unitViewerStat{"Weapon 2", "beam"}) {
-		t.Fatalf("three-weapon stats = %+v", got)
+	// Manual and stockpiled launches have no reload cadence to divide by.
+	weapon.CommandFire = true
+	if slices.ContainsFunc(unitViewerPairs(unitViewerWeaponRows(def, 264)), func(s unitViewerStat) bool { return s.Label == "Nominal DPS" }) {
+		t.Fatal("command-fire weapon shows a nominal DPS")
 	}
-	def.BMCode, def.Weapon1Def, def.Weapon2Def, def.Weapon3Def = 0, nil, nil, nil
-	for _, stat := range unitViewerStats(def) {
-		if stat.Label == "Speed" || stat.Label == "Acceleration" || stat.Label == "Turn rate" || strings.HasPrefix(stat.Label, "Weapon") {
-			t.Fatalf("unarmed building retained a mobile or weapon row: %+v", stat)
+	def.BMCode, def.Weapon3Def, def.EnergyUse = 0, nil, 0
+	for _, stat := range unitViewerPairs(unitViewerStatsRows(def, 264)) {
+		if stat.Label == "Speed" || stat.Label == "Acceleration" || stat.Label == "Turn rate" || stat.Value == "0" {
+			t.Fatalf("building retained a mobile or zero row: %+v", stat)
 		}
 	}
+	if got := unitViewerWeaponRows(def, 264); !slices.ContainsFunc(got, func(r unitViewerRow) bool { return r.Label == "No active weapons." }) {
+		t.Fatal("unarmed definition did not say so")
+	}
 	def.DiscoveryOnly = true
-	if got := unitViewerStats(def); !slices.Equal(got, []unitViewerStat{{"Stats", "Unavailable"}}) {
+	if got := unitViewerPairs(unitViewerStatsRows(def, 264)); len(got) != 0 {
 		t.Fatalf("unparsed gameplay fields presented as stats: %+v", got)
 	}
-	if got := unitViewerStats(nil); len(got) != 0 {
+	if got := unitViewerStatsRows(nil, 264); len(got) != 0 {
 		t.Fatalf("nil definition stats = %+v", got)
 	}
 }

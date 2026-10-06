@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
@@ -11,6 +12,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/model"
+	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/gpurender"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/vfs"
@@ -35,10 +37,30 @@ type unitViewerModel struct {
 	anim     *unitViewerAnimation
 	action   unitViewerAction
 	weapon   int
+	severity int32
+	power    int8
+	// features is the immutable catalog's feature table, through which the
+	// Wreck view resolves corpses [06 §12.2].
+	features map[string]*content.FeatureDef
+	wreck    unitViewerWreckModel
+	palette  *palette.Tables // the last record's palette, for an empty stage
+}
+
+// unitViewerWreckModel caches the corpse feature model the Wreck view draws,
+// with its own fixed fit. err reports a missing or undrawable model; nothing
+// is substituted for it (DESIGN_DEVELOPER_TOOLS §7).
+type unitViewerWreckModel struct {
+	feature  *content.FeatureDef
+	geometry *model.Model
+	radius   float64
+	pivot    [3]numeric.Fixed
+	fitRoot  model.PieceState
+	err      error
 }
 
 type unitViewerModelKey struct {
 	def        *content.UnitDef
+	feature    *content.FeatureDef
 	yaw, pitch uint16
 	zoom       float64
 	w, h       int
@@ -49,7 +71,8 @@ func (m *unitViewerModel) selectUnit() {
 	m.pivot, m.fitRoot = [3]numeric.Fixed{}, model.PieceState{}
 	m.poses, m.poseNote = nil, ""
 	m.def, m.geometry, m.anim = nil, nil, nil
-	m.action, m.weapon = unitViewerIdle, 1
+	m.action, m.weapon, m.severity, m.power = unitViewerIdle, 1, 0, 0
+	m.wreck = unitViewerWreckModel{}
 }
 
 func (m *unitViewerModel) release() {
@@ -63,8 +86,8 @@ func (m *unitViewerModel) draw(cs *contentSet, def *content.UnitDef, yaw, pitch,
 	if def == nil || cs == nil || m.err != nil {
 		return nil
 	}
-	key := unitViewerModelKey{def, uint16(int64(yaw)), uint16(int64(pitch)), zoom, w, h}
-	if m.image != nil && m.key == key {
+	key := unitViewerModelKey{def, m.anim.wreckFeature(), uint16(int64(yaw)), uint16(int64(pitch)), zoom, w, h}
+	if m.key == key && (m.image != nil || key.feature != nil) {
 		return m.image
 	}
 	if m.preview == nil {
@@ -81,13 +104,36 @@ func (m *unitViewerModel) draw(cs *contentSet, def *content.UnitDef, yaw, pitch,
 			return nil
 		}
 		m.loadAnimation(def, mdl)
+		key.feature = m.anim.wreckFeature()
 	}
 	heading, tilt, bank := unitViewerOrientation(key.yaw, key.pitch)
-	record, w, h, err := m.record(def, heading, tilt, bank, zoom, w, h)
-	if err != nil {
+	var record client.ModelPreviewRecord
+	var err error
+	if m.anim == nil || m.anim.action != unitViewerWreck {
+		if unitViewerAllHidden(m.poses) {
+			// A death that exploded every piece leaves nothing to draw; the
+			// stage keeps its backdrop and the status says why.
+			return m.drawEmpty(cs, key, w, h)
+		}
+	}
+	if m.anim != nil && m.anim.action == unitViewerWreck {
+		// The Wreck view draws the corpse feature's own model. A missing
+		// corpse or model leaves the stage empty and the status says why.
+		if key.feature == nil || !m.loadWreck(cs, key.feature) {
+			m.image, m.key = nil, key
+			return nil
+		}
+		record, w, h, err = m.recordWreck(heading, tilt, bank, zoom, w, h)
+		if err != nil {
+			m.wreck.err = err
+			m.image, m.key = nil, key
+			return nil
+		}
+	} else if record, w, h, err = m.record(def, heading, tilt, bank, zoom, w, h); err != nil {
 		m.err = err
 		return nil
 	}
+	m.palette = record.Palette
 	if m.gpu == nil {
 		m.gpu, m.err = gpurender.NewChecked(record.Palette, w, h)
 		if m.err != nil {
@@ -110,17 +156,115 @@ func (m *unitViewerModel) draw(cs *contentSet, def *content.UnitDef, yaw, pitch,
 	return m.image
 }
 
+func unitViewerAllHidden(poses []frame.PieceView) bool {
+	if len(poses) == 0 {
+		return false
+	}
+	for _, p := range poses {
+		if !p.Hidden {
+			return false
+		}
+	}
+	return true
+}
+
+// drawEmpty draws the stage backdrop alone.
+func (m *unitViewerModel) drawEmpty(cs *contentSet, key unitViewerModelKey, w, h int) *ebiten.Image {
+	if m.palette == nil {
+		if m.palette, m.err = palette.Load(cs.unmappedMount); m.err != nil {
+			return nil
+		}
+	}
+	if m.gpu == nil {
+		if m.gpu, m.err = gpurender.NewChecked(m.palette, w, h); m.err != nil {
+			return nil
+		}
+	}
+	var list drawlist.List
+	list.RecordClear()
+	unitViewerBackdrop(&list, m.palette, w, h)
+	if m.image = m.gpu.Execute(&list, w, h); m.image != nil {
+		m.key = key
+	}
+	return m.image
+}
+
+// ensureLoaded loads the unit's model and creation fit outside Draw, for a
+// capture that scripts actions before its first frame.
+func (m *unitViewerModel) ensureLoaded(cs *contentSet, def *content.UnitDef) bool {
+	if def == nil || cs == nil || m.err != nil {
+		return false
+	}
+	if m.radius == 0 {
+		mdl, err := model.Load(cs.unmappedMount, vfs.ResourcePath("objects3d", def.ObjectName, "3do"))
+		if err != nil {
+			m.err = err
+			return false
+		}
+		m.loadAnimation(def, mdl)
+	}
+	return true
+}
+
+// advance runs preview ticks without a host clock, within the per-update
+// bound, for a reproducible capture.
+func (m *unitViewerModel) advance(ticks int) {
+	for range ticks {
+		m.updateAnimation(1.0 / unitViewerTickRate)
+	}
+}
+
+// loadWreck loads and fits the corpse feature's 3DO through the same model
+// path as units. A sprite feature or an unloadable model is reported, never
+// replaced (DESIGN_DEVELOPER_TOOLS §7).
+func (m *unitViewerModel) loadWreck(cs *contentSet, feature *content.FeatureDef) bool {
+	if m.wreck.feature == feature {
+		return m.wreck.err == nil && m.wreck.geometry != nil
+	}
+	m.wreck = unitViewerWreckModel{feature: feature}
+	object := strings.TrimSpace(feature.Object)
+	if object == "" {
+		m.wreck.err = fmt.Errorf("feature %s has no 3D object", feature.CanonicalKey)
+		return false
+	}
+	mdl, err := model.Load(cs.unmappedMount, vfs.ResourcePath("objects3d", object, "3do"))
+	if err != nil {
+		m.wreck.err = err
+		return false
+	}
+	m.wreck.geometry = mdl
+	m.wreck.pivot, m.wreck.fitRoot, m.wreck.radius = unitViewerFit(mdl, nil)
+	return true
+}
+
 func (m *unitViewerModel) record(def *content.UnitDef, heading, pitch, bank uint16, zoom float64, w, h int) (client.ModelPreviewRecord, int, int, error) {
 	opts := client.ModelPreviewOptions{
 		Model: vfs.ResourcePath("objects3d", def.ObjectName, "3do"), Width: w, Height: h,
 		Heading: heading, Pitch: pitch, Bank: bank,
 		Structure: def.BMCode == 0, KeyPlane: def.ZBuffer, PiecePoses: m.poses,
 	}
+	return m.recordProjected(opts, m.radius, m.orientedPivot(heading, pitch, bank), zoom)
+}
+
+// recordWreck draws the corpse as the battle draws a 3DO feature: through
+// the structure path with the height plane, in its authored pose
+// [03 R-REN-03A §2].
+func (m *unitViewerModel) recordWreck(heading, pitch, bank uint16, zoom float64, w, h int) (client.ModelPreviewRecord, int, int, error) {
+	opts := client.ModelPreviewOptions{
+		Model: vfs.ResourcePath("objects3d", strings.TrimSpace(m.wreck.feature.Object), "3do"), Width: w, Height: h,
+		Heading: heading, Pitch: pitch, Bank: bank, Structure: true, KeyPlane: true,
+	}
+	pivot := unitViewerOrientedPivot(m.wreck.geometry, m.wreck.fitRoot, m.wreck.pivot, heading, pitch, bank)
+	return m.recordProjected(opts, m.wreck.radius, pivot, zoom)
+}
+
+func (m *unitViewerModel) recordProjected(opts client.ModelPreviewOptions, radius float64, pivot [3]numeric.Fixed, zoom float64) (client.ModelPreviewRecord, int, int, error) {
+	w, h := opts.Width, opts.Height
 	// 2*sqrt(1.25) bounds the diameter under the half-height projection
 	// [03 §2.5]. Both fit and pivot stay fixed while animations move the body.
 	projection := client.ModelPreviewProjection{
-		PixelsPerUnit: 0.94 * float64(min(w, h)) / (2 * math.Sqrt(1.25) * m.radius) * zoom,
-		Pivot:         m.orientedPivot(heading, pitch, bank),
+		PixelsPerUnit: 0.94 * float64(min(w, h)) / (2 * math.Sqrt(1.25) * radius) * zoom,
+		Pivot:         pivot,
 	}
 	record, err := m.preview.RecordProjectedGeometry(opts, projection)
 	if err != nil {
@@ -231,28 +375,35 @@ func unitViewerRadius(m *model.Model, states []model.PieceState) float64 {
 // leaves every child's creation pose in the fit; the root's frozen state is
 // reapplied with each view's angles, independently of later animation.
 func (m *unitViewerModel) fitCreatePose(states []model.PieceState) {
-	root := m.geometry.Root
+	m.pivot, m.fitRoot, m.radius = unitViewerFit(m.geometry, states)
+}
+
+func unitViewerFit(mdl *model.Model, states []model.PieceState) (pivot [3]numeric.Fixed, fitRoot model.PieceState, radius float64) {
+	root := mdl.Root
 	neutral := slices.Clone(states)
-	if len(neutral) < len(m.geometry.Pieces) {
-		neutral = append(neutral, make([]model.PieceState, len(m.geometry.Pieces)-len(neutral))...)
+	if len(neutral) < len(mdl.Pieces) {
+		neutral = append(neutral, make([]model.PieceState, len(mdl.Pieces)-len(neutral))...)
 	}
-	m.fitRoot = neutral[root]
+	fitRoot = neutral[root]
 	neutral[root].RotX, neutral[root].RotY, neutral[root].RotZ = 0, 0, 0
 	neutral[root].Trans = [3]numeric.Fixed{}
-	lo, hi, found := unitViewerBounds(m.geometry, neutral)
-	m.pivot = [3]numeric.Fixed{}
+	lo, hi, found := unitViewerBounds(mdl, neutral)
 	if found {
-		for axis := range m.pivot {
-			m.pivot[axis] = numeric.Fixed(math.Round((lo[axis]+hi[axis])*32768)) - m.geometry.Pieces[root].Translate[axis]
+		for axis := range pivot {
+			pivot[axis] = numeric.Fixed(math.Round((lo[axis]+hi[axis])*32768)) - mdl.Pieces[root].Translate[axis]
 		}
 	}
-	m.radius = unitViewerRadius(m.geometry, neutral)
+	return pivot, fitRoot, unitViewerRadius(mdl, neutral)
 }
 
 func (m *unitViewerModel) orientedPivot(heading, pitch, bank uint16) [3]numeric.Fixed {
-	root := m.geometry.Root
+	return unitViewerOrientedPivot(m.geometry, m.fitRoot, m.pivot, heading, pitch, bank)
+}
+
+func unitViewerOrientedPivot(mdl *model.Model, fitRoot model.PieceState, pivot [3]numeric.Fixed, heading, pitch, bank uint16) [3]numeric.Fixed {
+	root := mdl.Root
 	states := make([]model.PieceState, root+1)
-	states[root] = m.fitRoot
+	states[root] = fitRoot
 	model.FoldRootAngles(states, root, heading, pitch, bank)
-	return model.Compose(m.geometry, states, root).Apply(m.pivot)
+	return model.Compose(mdl, states, root).Apply(pivot)
 }

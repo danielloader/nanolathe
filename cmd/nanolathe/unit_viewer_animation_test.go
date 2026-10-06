@@ -68,6 +68,10 @@ func unitViewerAnimationFixture(scripts ...viewerScriptFixture) (*content.UnitDe
 	return &content.UnitDef{Script: prog, Weapon1Def: &content.WeaponDef{ID: 1, ReloadTime: 3}}, mdl
 }
 
+func unitViewerPlay(def *content.UnitDef, mdl *model.Model, action unitViewerAction, weapon int) *unitViewerAnimation {
+	return newUnitViewerAnimation(def, mdl, unitViewerAnimationOptions{action: action, weapon: weapon})
+}
+
 func unitViewerAdvance(a *unitViewerAnimation, ticks int) {
 	for i := 0; i < ticks; i++ {
 		a.update(1.0 / unitViewerTickRate)
@@ -82,7 +86,7 @@ func TestUnitViewerAnimationIdleClockAndIsolation(t *testing.T) {
 		viewerPush, 100, viewerSleep, viewerHide, 2, viewerReturn,
 	}})
 	sourceCode := append([]uint32(nil), def.Script.Code...)
-	a := newUnitViewerAnimation(def, mdl, unitViewerIdle, 1)
+	a := unitViewerPlay(def, mdl, unitViewerIdle, 1)
 	p := a.poses()
 	if a.stopped || p[0].Tx != 100 || p[0].Ty != 7 || p[0].Tz != 0 || p[2].Hidden {
 		t.Fatalf("Create preview inputs or zero-time pose: %+v, %s", p, a.note)
@@ -99,7 +103,7 @@ func TestUnitViewerAnimationIdleClockAndIsolation(t *testing.T) {
 			t.Fatal("invalid elapsed time advanced playback or retained unbounded catch-up")
 		}
 	}
-	b := newUnitViewerAnimation(def, mdl, unitViewerIdle, 1)
+	b := unitViewerPlay(def, mdl, unitViewerIdle, 1)
 	if b.poses()[2].Hidden || !reflect.DeepEqual(sourceCode, def.Script.Code) || mdl.Pieces[0].Translate != [3]numeric.Fixed{} {
 		t.Fatal("preview mutated its immutable script/model or another playback instance")
 	}
@@ -110,26 +114,33 @@ func TestUnitViewerAnimationWalkingRequestCacheAndSelectionReset(t *testing.T) {
 		viewerScriptFixture{"Create", []uint32{viewerHide, 2, viewerReturn}},
 		viewerScriptFixture{"StartMoving", []uint32{viewerPush, 90, viewerPush, 12, viewerTurn, 1, 1, viewerWaitTurn, 1, 1, viewerReturn}},
 	)
+	def.BMCode, def.MaxVelocity, def.Acceleration, def.MoveRate1, def.MoveRate2 = 1, 2<<16, 1<<16, 4<<16, 4<<16
 	m := &unitViewerModel{}
-	m.setAnimation(unitViewerWalking, 1)
+	m.setAnimation(unitViewerMoving, 1)
 	if m.anim != nil {
 		t.Fatal("pre-load action allocated playback without a model")
 	}
 	m.loadAnimation(def, mdl)
-	if m.anim.action != unitViewerWalking || m.poses[1].RotY != 0 || !m.poses[2].Hidden {
+	if m.anim.action != unitViewerMoving || m.poses[1].RotY != 0 || !m.poses[2].Hidden {
 		t.Fatal("pre-load request was lost, Create was skipped, or StartMoving advanced time")
 	}
 	radius := m.radius
 	m.key = unitViewerModelKey{def: def, yaw: 123}
+	// StartMoving is the movement step's wake start on the first tick; its
+	// turn advances on the next drain [04 §5.2][04 §5.4].
 	m.updateAnimation(1.0 / unitViewerTickRate)
-	if m.poses[1].RotY != 3 || m.key.def != nil || m.radius != radius {
-		t.Fatal("walking did not animate, invalidate a stationary camera, or preserve fit")
+	if m.poses[1].RotY != 0 || m.key.def != nil || m.radius != radius {
+		t.Fatal("movement advanced before its tier change, kept a stale camera, or changed the fit")
+	}
+	m.updateAnimation(1.0 / unitViewerTickRate)
+	if m.poses[1].RotY != 3 {
+		t.Fatal("walking did not animate after StartMoving")
 	}
 	m.updateAnimation(3.0 / unitViewerTickRate)
 	if m.poses[1].RotY != 12 {
 		t.Fatalf("authored turn did not reach its target: %d", m.poses[1].RotY)
 	}
-	m.setAnimation(unitViewerWalking, 1)
+	m.setAnimation(unitViewerMoving, 1)
 	if m.poses[1].RotY != 0 || m.anim.ticks != 0 || m.radius != radius {
 		t.Fatal("selecting the same action did not restart playback with the same fit")
 	}
@@ -165,7 +176,7 @@ func TestUnitViewerAnimationFireWaitsForSelectedAimAndBaseReload(t *testing.T) {
 	// The reload callback scans all definitions, including the inactive one
 	// [04 R-CB-01 §2]. Fire uses only the selected active slot's base reload.
 	def.Weapon3Def = &content.WeaponDef{ID: 0, ReloadTime: 90}
-	a := newUnitViewerAnimation(def, mdl, unitViewerFiring, 2)
+	a := unitViewerPlay(def, mdl, unitViewerFiring, 2)
 	unitViewerAdvance(a, 3)
 	p := a.poses()
 	if a.stopped || !a.aimReady || p[0].Tx != 0 || p[0].Tz != 3000 || !p[2].Hidden || p[1].RotY != unitViewerAimHeading || p[1].RotX != unitViewerAimPitch {
@@ -190,7 +201,7 @@ func TestUnitViewerAnimationFireWaitsForSelectedAimAndBaseReload(t *testing.T) {
 	}
 	// Aim alone uses the same callback and continues its authored threads,
 	// while never dispatching Fire.
-	a = newUnitViewerAnimation(def, mdl, unitViewerAiming, 2)
+	a = unitViewerPlay(def, mdl, unitViewerAiming, 2)
 	unitViewerAdvance(a, 20)
 	if a.stopped || !a.aimReady || a.poses()[0].Tx != 0 || !a.poses()[2].Hidden {
 		t.Fatalf("aim-only playback fired or stopped: %s", a.note)
@@ -203,12 +214,12 @@ func TestUnitViewerAnimationAvailabilityAndFailedAim(t *testing.T) {
 		viewerScriptFixture{"AimPrimary", []uint32{viewerPush, 0, viewerReturn}},
 		viewerScriptFixture{"FirePrimary", []uint32{viewerHide, 2, viewerReturn}},
 	)
-	for _, action := range []unitViewerAction{unitViewerIdle, unitViewerWalking, unitViewerAiming, unitViewerFiring} {
+	for _, action := range []unitViewerAction{unitViewerIdle, unitViewerMoving, unitViewerFlying, unitViewerAiming, unitViewerFiring, unitViewerBuilding, unitViewerHit, unitViewerDeath, unitViewerWreck} {
 		if unitViewerAnimationAvailable(nil, action, 1) || unitViewerAnimationAvailable(&content.UnitDef{}, action, 1) {
 			t.Fatal("missing script advertised an animation")
 		}
 	}
-	if !unitViewerAnimationAvailable(def, unitViewerFiring, 1) || unitViewerAnimationAvailable(def, unitViewerWalking, 1) ||
+	if !unitViewerAnimationAvailable(def, unitViewerFiring, 1) || unitViewerAnimationAvailable(def, unitViewerMoving, 1) ||
 		unitViewerAnimationAvailable(def, unitViewerAiming, 0) || unitViewerAnimationAvailable(def, unitViewerAiming, 4) || unitViewerAnimationAvailable(def, unitViewerFiring, 2) {
 		t.Fatal("callback/weapon availability was inferred instead of checked")
 	}
@@ -228,7 +239,7 @@ func TestUnitViewerAnimationAvailabilityAndFailedAim(t *testing.T) {
 				viewerScriptFixture{"AimPrimary", tc.code},
 				viewerScriptFixture{"FirePrimary", []uint32{viewerHide, 2, viewerReturn}},
 			)
-			a := newUnitViewerAnimation(def, mdl, unitViewerFiring, 1)
+			a := unitViewerPlay(def, mdl, unitViewerFiring, 1)
 			unitViewerAdvance(a, unitViewerAimTimeout+1)
 			if !a.stopped || !strings.Contains(a.note, tc.want) || a.poses()[2].Hidden {
 				t.Fatalf("failed aim authorized Fire or lacked a status: %s", a.note)
@@ -239,7 +250,7 @@ func TestUnitViewerAnimationAvailabilityAndFailedAim(t *testing.T) {
 	if unitViewerAnimationAvailable(def, unitViewerFiring, 1) {
 		t.Fatal("Fire advertised a missing Aim callback as implemented")
 	}
-	a := newUnitViewerAnimation(def, mdl, unitViewerFiring, 1)
+	a := unitViewerPlay(def, mdl, unitViewerFiring, 1)
 	if !a.stopped || !strings.Contains(a.note, "unavailable") {
 		t.Fatalf("missing aim not reported: %s", a.note)
 	}
@@ -250,7 +261,9 @@ func TestUnitViewerAnimationInstructionLimitAfterCreate(t *testing.T) {
 		viewerScriptFixture{"Create", []uint32{viewerReturn}},
 		viewerScriptFixture{"StartMoving", []uint32{viewerPush, 0, viewerSleep, 0x10064000, 4}},
 	)
-	a := newUnitViewerAnimation(def, mdl, unitViewerWalking, 1)
+	def.MaxVelocity, def.Acceleration = 1<<16, 1<<16
+	a := unitViewerPlay(def, mdl, unitViewerMoving, 1)
+	unitViewerAdvance(a, 1)
 	if a.stopped {
 		t.Fatalf("valid initial sleep rejected: %s", a.note)
 	}

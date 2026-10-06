@@ -362,7 +362,11 @@ active indicators. `screenkit` draws at device resolution. A detached
 `ui.Panel` retains editor, list, scrollbar, button and keyboard-focus behavior;
 input measurement uses the same typefaces and sizes as the painted controls.
 The catalog, model and scrollable unit data retain distinct regions with
-consistent spacing. The selected animation has a visible active indicator;
+consistent spacing. Library rows carry each unit's build picture. The unit
+data column has Stats, Weapons and Build tabs drawn as the settings screen's
+text tabs; its rows have gold section headings, dimmed labels, right-aligned
+values and a dimmed unit column, and every row is one native list row so
+wheel, scrollbar, painting and hit testing share one geometry. The selected animation has a visible active indicator;
 unsupported callbacks keep disabled controls. A subdued drafting grid and
 circular guide decorate the model bay; they remain fixed to the display and
 represent neither terrain nor a battle shadow. No GUI artwork is copied into
@@ -392,6 +396,16 @@ Esc or Back returns directly to the main menu. Closing consumes held keys
 and buttons until release. These constants are viewer preferences, not retail
 gameplay arithmetic.
 
+Clicking a Build-tab entry (a press and release on the same entry) selects
+that unit. Every selection — library click, keys, search or link — records
+the unit it replaces. The `<` control, Alt+Left, or Backspace while the search
+is not being edited returns to the previous unit; `>` and Alt+Right go
+forward again. Alt+arrows never turn the model or reach the editor. The
+history keeps 64 units and is discarded on close. A unit reached through a
+link or the history that the current search excludes clears the search, so
+the library always shows the staged unit. The selected tab persists across
+selections, so the build tree can be walked.
+
 The turntable applies yaw before display-space tilt, converted to the model
 renderer's existing body orientation order [03 §2.4], C21. This keeps its vertical
 axis upright throughout a turn instead of making the unit wobble as it rotates.
@@ -406,39 +420,166 @@ it does not change the underlying menu panel.
 `frontendScreens` routes it and the settings screen through the existing
 `ebitenapp.FullScreen` boundary (DESIGN_INTERFACE_HUD_INPUT §3.17), which
 suppresses input to the underlying menu. Catalog compilation runs in a host
-worker; closing joins it before the content can unmount. GPU resources and
-model caches belong to this screen and are released on close. No unit
+worker; closing joins it before the content can unmount. The same worker
+derives the build tree once per catalog load. GPU resources and model caches
+belong to this screen and are released on close.
+
+**Build pictures.** Library rows and build-tree entries show
+`unitpics/<unit name>.pcx` from the running content through the settings
+screen's asynchronous picture loader (DESIGN_INTERFACE_HUD_INPUT §3.17),
+wrapped with an already-resolved empty plan so none of that screen's card
+planning runs. Only visible rows request pictures; the loader's worker decodes
+them and Draw uploads the decoded pixels without waiting. A picture still
+decoding, or absent from the content, shows a neutral empty frame; no
+substitute art is drawn. Closing halts and joins the picture worker, waiting
+for the file in hand, and deallocates the uploaded images before the content
+can unmount. No unit
 allocator, simulation clock or authoritative RNG is used.
 
 **User-authorized animation preview policy.** Each selected action owns a fresh
-isolated presentation VM and first runs authored `Create`. Idle advances its
-remaining threads; Walk invokes authored `StartMoving`. Aim uses the selected
-active weapon's `AimPrimary`, `AimSecondary` or `AimTertiary` with a fixed heading
-of 45 degrees and pitch of approximately 15 degrees. Fire requires both matching
-Aim and Fire callbacks. It waits for an explicit nonzero Aim return, invokes
-Fire followed by authored `RockUnit` when present, waits at least the selected
-weapon's compiled base reload interval, then starts a fresh aim. The minimum
-repeat interval is one preview tick; this timing is viewer policy, not predicted
-battle cadence. Aim alone runs once and allows authored restore threads to
-continue. Pause stops animation independently of rotation; choosing an action
-again restarts it, and changing the selected unit restores Idle and weapon 1.
+isolated presentation VM and first presents a completed unit as the battle's
+already-built creation makes one [04 R-CB-01 §4]: authored `Create` with its
+immediate drain; for each of the three weapon slots the synchronous `Query*`,
+then `AimFrom*` with a second `Query*` when AimFrom leaves its −1 seed; the
+deferred `SetMaxReloadTime` carrying the longest compiled reload across all
+three definition pointers [04 R-CB-01 §2]; the creation-time extractor
+`SetSpeed` when `extractsmetal` is positive [04 R-CB-01 §5]; and last the
+already-built activation of an `activatewhenbuilt` definition through the edge
+machine [04 R-SPEC-01 §12][05 R-SHARE-01 §8]. The deferred starts first run in
+the first preview tick's drain. On that tick's general update a wind generator
+receives `SetDirection`, then `SetSpeed` with the speed shifted left by four,
+once, as one wind re-roll would issue them [04 R-CB-01 §5]. Every preview tick
+follows the established unit-visit order: general update, weapon update, normal
+drain, order and construction work, movement, then slot-end death handling
+[04 §5.4].
+
+The action row shows the actions that apply to the selected unit's class and
+disables those whose callbacks are absent; the buttons share one width when the
+row has room and otherwise take their caption widths:
+
+- **Idle** is the completed unit at rest.
+- **Move** (mobile ground units) runs the ground speed word along a straight,
+  level route to a distant goal: each tick adds `Acceleration` up to
+  `MaxVelocity`, the level pitch-table cap [04 R-MOV-01 §4], and the
+  movement-rate classifier issues `StartMoving` then `MoveRateN` on leaving tier
+  0 and `MoveRateN` on later tier changes, each with its wake barrier
+  [04 §5.2][04 R-MOV-01 §6].
+- **Fly** (`canfly`) runs the battle's flight integrator
+  (`movement.IntegrateFlight`) over the preview's flat world. The first order
+  visit is `VTOL_Move`'s takeoff preamble: activation rises (`Activate`, the
+  takeoff hook), mover mode 2, and a climb marker at half the cruise altitude
+  [04 R-AIR-01 §6][04 R-AIR-02]. When the climb arrives the next visit installs
+  a cruise goal straight ahead; the classifier issues whatever tier changes the
+  integrated speed produces, so an aircraft whose `MoveRate1` lies below its
+  `MaxVelocity` reaches `MoveRate2` in flight. The cruise is held once the tier
+  equals `MaxVelocity`'s and the climb has ended, or after 60 seconds. While
+  airborne the button reads **Land**: `VTOL_LandIfCan`'s preamble, then
+  `EndTransport` with its wake when authored, a landing marker on the ground
+  below and the falling activation edge (`Deactivate`, the landing hook); at
+  arrival the mover-mode setter grounds the aircraft and the classifier issues
+  `StopMoving` [04 R-AIR-01 §3][04 R-AIR-01 §6]. The preview position is always
+  landable, so the landing search and its random bearing are not taken. A zero
+  `MaxVelocity` disables Fly: retail's integrator faults on it [04 §10.1].
+- **Aim** uses the selected active weapon's `AimPrimary`, `AimSecondary` or
+  `AimTertiary` with a fixed heading of 45 degrees and pitch of approximately 15
+  degrees. **Fire** requires both matching Aim and Fire callbacks. It waits for
+  an explicit nonzero Aim return, invokes Fire followed by authored `RockUnit`
+  when present, waits at least the selected weapon's compiled base reload
+  interval, then starts a fresh aim. The minimum repeat interval is one preview
+  tick; this timing is viewer policy, not predicted battle cadence. Aim alone
+  runs once and allows authored restore threads to continue.
+- **Build** (builders) takes the mobile work handlers' path when `bmcode` is 1:
+  the slot-form `StartBuilding` carrying the relative bearing to the work target
+  [04 R-CB-01 §3], then the script-owned build-stance wait, then one synchronous
+  `QueryNanoPiece` on each tick that carries accepted work
+  [05 R-P0-06 §1][05 R-P0-06 §2]; an aircraft builder polls the stance and
+  discards the verdict. A `bmcode` 0 builder takes the factory production state
+  machine: raise activation, wait for the stance, query `QueryBuildInfo` for the
+  pad, raise the building edge (`StartBuilding`, edge form), then the same
+  per-step nano query [05 "Factory production lifecycle"]. Every work step is
+  admitted. While engaged the button reads **Stop**: the mobile path issues the
+  slot-form `StopBuilding` with four zero cells [04 R-CB-01 §2], and the factory
+  lowers the building edge and then activation, as a completed final product
+  does. Build restarts the same order.
+- **Hit** issues the normal-kind damage pair: the health falls first, then
+  `HitByWeapon` with cos and sin of the direction at radius 400 through the
+  shared table and the independent `TakeDamage` with the clamped post-hit
+  percentage [04 R-CB-01 §2][04 §5.1].
+- **Death** runs slot-end death handling's synchronous local `Killed` query on
+  the first tick through the battle's own query helper, seeding cell 0 with the
+  selected severity; a script with no `Killed` body takes the battle's
+  sanctioned substitute depth 1 [04 R-CB-01 §7][04 R-CB-01 §9]. The battle then
+  tears the script down, so playback stops: pieces the script exploded stay
+  hidden, other pieces keep their pose, and no debris, explosion or effect is
+  drawn because no sink is connected. A death that explodes every piece leaves
+  the stage empty. The status reports the returned corpse depth.
+- **Wreck** performs the same death and draws the feature its depth selects:
+  depth 1 is the authored `Corpse`, and each further step follows `featuredead`,
+  so depth 2 is the heap [06 §12.2]. The feature resolves through the immutable
+  catalog's feature table and its 3DO loads through the unit model path; it is
+  drawn as the battle draws a 3DO feature, through the structure path with the
+  height plane and its own fixed fit [03 R-REN-03A §2]. The status names the
+  feature and its reclaim metal. Depth 0, a broken chain, a sprite-only feature
+  or an unloadable model is reported in the status with an empty stage; nothing
+  is substituted.
+- **On/Off** (definitions with `Activate` or `Deactivate`) drives the
+  activation edge machine as an order does: `Activate` on the rising edge,
+  `Deactivate` on the falling edge, nothing when the bit is unchanged
+  [04 R-UNIT-06 §2]. It acts on the current preview at once and records an
+  explicit choice that each later action applies after the creation sequence.
+  Fly and factory Build raise and lower the same bit as the battle does; the
+  button's indicator and the status show the live state.
+
+The control row keeps Pause, which stops animation independently of rotation,
+Rotate, Reset view, Weapon and **Severity**, which cycles the Death and Wreck
+severities and replays either. Choosing an action again restarts it, except
+Fly and Build, whose buttons land or stop and resume within the same preview.
+Changing the selected unit restores Idle, weapon 1, the first severity and the
+creation activation state.
+
+These explicit preview inputs stand in for battle and map state; none is a
+retail value:
+
+| Input | Preview value |
+|---|---|
+| Aim heading and pitch | 45 degrees; about 15 degrees |
+| Build work target | 45 degrees off the builder's facing (the `StartBuilding` bearing) |
+| Wind | one re-roll before the first tick: heading 45 degrees, speed 1050, the midpoint of the canonical fallback range 100–2000 [05 R-PROD-01 §3] |
+| Extractor footprint | every covered cell holds metal byte 127, so `SetSpeed` carries footprint cells × 128 |
+| Hit | direction byte `0x80`, from straight ahead [06 §9.1]; post-hit health half of `maxdamage` |
+| Death severity | 25, 50, 75 or 100 |
+| World | flat ground at height 0 with no air sector grid, an empty yard whose admission always passes, a straight level route; the cruise goal lies 30,000 world units ahead |
+
+Engine ports read and write a detached copy of the unit's state: activation and
+armor drive the edge machine, the in-build stance, busy, yard-open and
+bugger-off flags read back what the script wrote, and health reads 100 until a
+hit (then the post-hit percentage) or a death (then 0) [04 §4.4][04 §4.7].
+Build percent left reads 0; other unbound reads return zero and random requests
+return their low bound without drawing. No world, allocator, authoritative RNG,
+projectile, resource, sound, debris or effect sink is connected, and no medium
+band is classified, so `setSFXoccupy` is never issued. The VM retains the
+existing detached model flags.
+
+For the later product and nanospray unit the animation exposes three read-only
+accessors: `building()` reports a construction order that has reached its stance
+and carries work; `nanoPiece()` is the model piece index of the latest
+`QueryNanoPiece` answer, mapped from the script piece through the strict name
+link, or −1 while no work step runs; and `padPiece()` is the factory's
+`QueryBuildInfo` piece as a model index, or −1 for a mobile builder, a factory
+that is not building or an answer that names no model piece. This round adds no
+product model and no spray drawing.
 
 The preview runs at 30 Hz with at most five ticks per host update, dropping
 excess elapsed time. Each thread retains the existing 4,096-instruction
-execution bound. An aim that has not completed after 300 preview ticks stops
-playback with a visible status; zero returns and interrupted callbacks never
-authorize firing. Missing callbacks disable their controls.
-
-Authored `SetMaxReloadTime`, when present, receives the longest compiled reload
-across all three definition pointers through the existing deferred callback
-after Create [04 R-CB-01 §2]. The VM retains the existing detached model flags,
-full-health and complete-construction context. Other unbound reads return zero;
-random requests return their low bound without drawing. No world, allocator,
-authoritative RNG, projectile, resource, sound or effect sink is connected.
-Diagnostics and instruction exhaustion fall back to labeled authored geometry.
-The fit radius is calculated from the zero-time Create pose and retained across
-playback and action changes. These inputs are an explicit Nanolathe preview
-context, not historical game behavior.
+execution bound. An aim that has not completed after 300 preview ticks, a build
+stance not reached in 300 ticks, and a landing that has not arrived in 60
+seconds each stop playback with a visible status; zero returns and interrupted
+aims never authorize firing. A `Create` that ends without a return,
+diagnostics and instruction exhaustion fall back to labeled authored geometry;
+other callbacks may be signalled by later ones as authored behavior. The fit
+radius is calculated from the creation pose and retained across playback and
+action changes. These inputs are an explicit Nanolathe preview context, not
+historical game behavior.
 
 `ModelPreviewRenderer.RecordProjectedGeometry` resolves the 3DO, piece
 transforms, textures, team-color bank and palette using the same source as
@@ -450,7 +591,10 @@ selection plates, undrawable primitives and attachment-only points. No terrain,
 waterline or battle shadow is claimed. The viewer uses its isolated GPU model path under
 either battle renderer preference, without changing that preference. A missing
 model reports an error while its catalog entry and available statistics remain
-browsable.
+browsable. `ModelPreviewOptions.Attachment` composes a second model, such as a
+factory's product under construction on its `QueryBuildInfo` pad, into the same
+projected record, and `PiecePlacement` and `ProjectedPieces` place it and
+report piece points (DESIGN_GPU_RENDERER §22.5).
 
 **User-authorized smooth preview projection.** The viewer supplies
 `ModelPreviewProjection{PixelsPerUnit, Pivot}` to the isolated projected-geometry
@@ -502,26 +646,105 @@ the scale. Each projected call also samples the supplied orientation without
 retaining the battle cache's small-angle threshold. No gameplay rule or new
 renderer preference selects this projection.
 
-Information comes only from the compiled definition: authored description,
-health, costs, build work, movement, sensor ranges and each active linked
-weapon's name, range and base reload. Costs and movement reuse the established
-unit-info conversions [07 R-HUD-03 §8]. Build work is not elapsed construction
-time [05 "Construction arithmetic"], and base reload is compiled ticks divided
-by 30, not predicted firing cadence [02 "Weapon record"]. Statistics are
-explicitly base values before mutators. Discovery-only records whose gameplay
-fields were not parsed show unavailable statistics [02 R-CAT-01 §5].
+Information comes only from the compiled definition, and every figure is a
+base value before mutators. Rows that are zero or do not apply are omitted.
+The Stats tab groups Overview (description, side, health, footprint and the
+authored capability flags as tags), Economy, Mobility (mobile units only) and
+Sensors. Costs and the mobile statistics reuse the established unit-info
+conversions [07 R-HUD-03 §8]. Build work is authored `buildtime`, not elapsed
+construction time [05 "Construction arithmetic"]. Energy and metal make and
+use carry "/s" because the authored value is added once per settlement pass
+and settlement runs every thirty ticks [05 "Authoritative settlement order"];
+extraction, wind, tidal, storage and cloak values are shown as authored.
+Ranges stay in world units (wu) [02 "Unit record"]. Discovery-only records
+whose gameplay fields were not parsed say their statistics are unavailable
+[02 R-CAT-01 §5].
+
+The Weapons tab has one card per active weapon: display name, default damage,
+the per-unit `DAMAGE` overrides whose first-match value differs (grouped by
+value with their authored unit names) [06 §9.2], base reload, burst and burst
+interval when burst exceeds one, range, blast radius and edge effectiveness,
+velocity, energy and metal per shot, and the retail weapon flags as short
+tags. The record already holds ticks and 16.16 world units per tick
+[02 "Weapon record"]; the card shows seconds and world units per second. The
+blast radius is the halved authored `areaofeffect` [06 §9.3]. `toairweapon`
+reads "air targets only" because automatic acquisition admits only airborne
+targets [06 §3.1]; inert community target keys are not shown as abilities.
+"Death explosions" gives `explodeas` and `selfdestructas` the same damage,
+radius and edge rows. Base reload is compiled ticks divided by 30, not
+predicted firing cadence [06 §4.2]; the tab says so.
+
+**Nominal DPS** is a labelled presentation figure: default damage ×
+max(burst, 1) ÷ base reload, since an authored burst of N releases N pellets
+and zero releases the root projectile [06 §4.3]. Its footnote states the
+formula and that it ignores aiming, travel, damage overrides and falloff.
+It is omitted for command-fire, stockpile and paralyzer weapons, zero damage
+or reload, a negative burst, and a dropped weapon whose burst exceeds one:
+the dropped creator writes no burst count, yet the burst-clone dispatcher has
+a dropped arm [06 §6.4], so that pellet count is a `TODO(question)` at
+`unitViewerNominalDPS`. No stock dropped weapon authors a burst.
+
+The Build tab lists **Builds** (a builder's products) and **Built by** (every
+builder whose list contains the unit), each entry with its build picture,
+name and ID, in library order. The catalog worker derives both once per load
+from the immutable `BuildMenus`: only `builder` definitions have a build list
+[04 R-ORD-02 §1], builders are visited in sorted library order rather than map
+order, names resolve through the catalog lookup a build button uses, and a
+record hidden by a duplicate name is left out and says so [02 R-CAT-01 §§4–5].
+The viewer is mode-independent. It shows the retail `Buttons` list and adds,
+with a small Modern tag and a footnote, any entry that only `AuthoredButtons`
+supplies (DESIGN_ECONOMY_CONSTRUCTION "Modern authored build membership"). The
+lists are CANBUILD and download membership; an installed GUI page's buttons
+can differ [07 R-HUD-03 §6].
+
+Each Build-tab entry shows the unhindered construction work time at normal
+speed. `construction.WorkTicks` repeats the shared step from a fresh frame
+with the builder's integer worker quantum until the stored single-precision
+fraction is zero [05 R-WORK-01 §1]; the step count is divided by 30. One step
+per tick is established for unhindered mobile, factory and assist work, which
+retry one tick after accepted work [05 R-P0-06 §1][05 "Factory production
+lifecycle"]. The figure assumes every step is admitted. It excludes travel,
+the factory's script-owned opening wait, the mobile build-stance wait,
+placement and allocation retries, and resource stalls, and the tab says so.
+A zero quantum reads "no work", a non-positive buildtime "n/a", and a stalled
+fraction or more than a day of game time "over 24 h"; none becomes a guessed
+number. Times truncate to the shown precision. The estimates are memoized by
+quantum and buildtime for the open screen.
 
 **Verification.** Focused tests cover identity-preserving search and selection,
-definition immutability, stat conversion, input ownership and release, zoom
+definition immutability, stat and weapon conversion, omitted zero rows, the
+nominal-DPS exclusions, the build tree's Modern tag, lookup and non-builder
+rules, work-time labels from `construction.WorkTicks` (whose own tests lock a
+hand-checked step count, a single-precision carry and the refusals), link
+clicks measured in painted rows, history keys that leave search editing and
+the orbit alone, the picture worker's join on release, input ownership and release, zoom
 bounds, main-menu-only preview entry, isolated animation inputs, bounded
 playback, callback return and reload ordering, pose-cache invalidation, stable
 pivot placement, fractional projected positions/depth, retained record ownership,
-independent supersample coordinates and unchanged ordinary preview calls.
+independent supersample coordinates and unchanged ordinary preview calls. The
+action contracts are locked by authored fixtures: the completed-unit callback
+order and its preview arguments, the slot-form `StartBuilding` bearing and the
+stance gate before any nano query, the factory's activation, pad, building-edge
+and stop order, the Hit arguments, the `Killed` severity seed with the corpse
+chain and the substitute depth, the movement-rate tiers along the speed ramp,
+the flight takeoff and landing hooks, and the action row's availability.
 Real-device fixtures cover separated sloped planes, stable near-coincident
 surfaces through a turn, shared-edge coverage, negative/large depth, byte
 carries and texture holes. Visually inspect factory pads and roof/wall edges
 through full orbits and animation poses. Capture the actual screen with
-`--shot /tmp/viewer.png --shot-unit-viewer armcom --shot-size 1440x900`.
+`--shot /tmp/viewer.png --shot-unit-viewer armcom --shot-size 1440x900`;
+`armlab/build` or `armthund/weapons` selects a tab, and a capture waits up to
+600 frames for visible pictures to decode. `/action=<name>` presses an action
+before the capture and runs a fixed number of preview ticks without a clock
+(`/ticks=N`, `/severity=N` and `/weapon=N` adjust it): `armrad/action=off`,
+`armlab/action=build`, `armthund/action=land` or `armpw/action=wreck`. The
+action round was checked on ARMRAD on and off, ARMSOLAR on, off and hit, ARMWIN
+and ARMMEX idle, ARMCK and ARMCOM building, ARMLAB building and stopped,
+ARMFIG and ARMTHUND flying, ARMTHUND landed, and ARMPW death at severities 25 and
+100 and its wreck, at 1440x900 and 1024x640. Check a commander, a factory's
+Builds, a unit's Built-by times, an aircraft with a bomb, a multi-weapon
+unit, a building and a picture-less record (stock ARMSCORP) at 1440x900 and
+1024x640.
 `--shot-unit-viewer @tools` retains the unused tools-menu prototype for capture.
 Captures create no battle and write no preferences. Review narrow and wide
 windows, buildings, mobile units and aircraft, plus search and drag states

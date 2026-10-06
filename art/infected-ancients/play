@@ -1,0 +1,17 @@
+#!/bin/sh
+# Pack the original Infected Ancients content and start a Survival battle with it.
+# Build outputs, settings and saves stay in the ignored local/ directory.
+set -eu
+repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+retail=${NANOLATHE_RETAIL_ASSETS:-"$HOME/TotalAnnihilation"}
+local="$repo/art/infected-ancients/local"
+mkdir -p "$local/content" "$local/saves"
+cd "$repo"
+go run ./art/infected-ancients/pack -out "$local/content/infected-ancients.ufo"
+cp art/infected-ancients/nanolathe-mod.json "$local/content/nanolathe-mod.json"
+go build -o "$local/nanolathe" ./cmd/nanolathe
+export NANOLATHE_SETTINGS="$local/settings.json"
+exec "$local/nanolathe" --root "$retail" --root "$local/content" --mod none --mod-config "$local/content/nanolathe-mod.json" \
+ --save-dir "$local/saves" --map "painted desert" --survival \
+ --survival-buddies 2 --survival-no-air --survival-no-naval --survival-pace normal \
+ --gameplay modern --ai-player all=modern --seed 7 --renderer modern --zoom 2 "$@"

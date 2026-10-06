@@ -735,6 +735,98 @@ COB and combat pipeline and compares the new policy with disabled repositioning
 and Strict. Run both repository gates, the simulation-cost benchmark and the
 focused path benchmark. No renderer changes are involved.
 
+### Modern infection
+
+**Nanolathe Modern policy (user-authorized 2026-10-05).** Original infected
+attackers may take over mobile units with a short sustained reverse-nanolathe
+spray. This is an authored Nanolathe mechanic, not retail behavior. The
+prototype selects it through `orders.Rules.Infection`, which answers for a
+unit definition. Catalog compilation records the exact, case-insensitive,
+whitespace-delimited category token `NANOLATHE_INFECTOR` once as the derived
+`UnitDef.NanolatheInfector`; Modern grants the policy to such a `BMCode=1`,
+`CanMove` definition without re-tokenizing per query. Strict 3.1, Community
+and unbound fixtures return the disabled policy. The category is ordinary
+catalog content and participates in existing content identity; the derived
+flag adds no identity bytes of its own, so stock hashes are unchanged. There
+is no second registry or per-instance infection capability.
+
+**Baseline and boundary.** Ordinary capture retains its authored `cancapture`
+admission, target immunity, cost/health/veterancy timer, movement restart and
+script stance wait [04 R-ORD-01 §5][05 R-WORK-01 §6]. An infector needs neither
+`Builder` nor `CanCapture`. A targeted Attack resolves to Capture for an
+eligible victim, while an immune victim keeps the ordinary attack path.
+Explicit Capture also accepts the infector. Eligibility requires a living,
+completed, non-dying hostile mobile victim (`BMCode=1` and `CanMove`), excluding
+commanders, buildings and every authored `Builder` (including modded, air, hover
+and naval constructors). This uses capability, never a unit-name list, and is
+rechecked by the Capture order throughout its approach and spray. A unit with
+a carrier (transport cargo, or a unit docked on a pad) is not a victim either:
+the replacement transfer has no carried form, so loading during an attempt
+ends it untransferred. Constructor
+immunity applies only to infection; ordinary damage and Attack fallback remain
+available. Ordinary capture capability is not infection
+immunity. Air, hover, naval and ground units share this test; all must satisfy
+the same three-dimensional centre distance of at most 96 world units.
+Unsigned coordinate differences are bounded before squaring, and each square
+is subtracted from the squared radius to avoid accumulation overflow.
+
+**Work and lifetime.** The prototype requires 60 uninterrupted ticks in reach
+after `StartBuilding` has established `INBUILDSTANCE`. The existing movement
+adapter pursues the victim's footprint, refreshing when its target cell
+changes both outside and inside infection range. The hunter retains its goal
+while spraying, including when its first target is already in range. Refresh
+preserves the stance and timer; it does not repeat `StartBuilding`. A moving
+victim inside the sphere does not reset progress. Leaving reach stops the
+spray, resets progress and resumes pursuit. Losing build stance also resets
+progress. A suspended queue that misses a tick also restarts the interval;
+elapsed time without spray is not work. Target death, lost hostility or an
+allocation-serial mismatch cancels the record. The existing reverse capture emitter sends one segment
+every two ticks, starting at the beginning of the interval. It retains the
+ordinary capture reveal stamp, COB nano-piece geometry, and authoritative
+strip particle/CRT consumption. The order adds no simulation RNG draws and
+charges no metal or energy. Presentation admission never controls progress.
+Pursuit failure cancels only outside infection range. The mouth retains its
+initial script aim during a moving spray; the actual nano emitter and target
+endpoints follow their live positions. Turning appearance is a visual review
+requirement, not a reason to restart the sustained interval.
+Starting infection takes every enabled weapon slot from autonomy and clears
+existing weapon targets, even when Community work-fire behavior is enabled.
+The ordinary record destructor returns those slots when the order ends.
+Already admitted projectiles retain their ordinary lifetime and damage.
+
+Infection occupies Capture's high phase values; the two first parameter words
+hold the target allocation serial and the third holds the spray's start tick.
+The unused Capture cached-coordinate pair retains the last checked tick.
+The discriminator survives a rule rebind, so switching to Strict or Community
+cancels an active infection instead of interpreting its words as ordinary
+capture progress. There is no state outside the order and its ordinary queue
+binding. The existing order save fields carry these words; any restored
+target with a different allocation identity cancels safely rather than
+transferring another unit. A save does not grant infection to a disabled set.
+
+**Completion.** The existing work adapter invokes the ordinary replacement
+transfer [05 R-WORK-01 §15]. Capacity or per-definition refusal ends the attempt
+without changing the victim. Success retains the host definition, health,
+orientation and enabled stockpiled ammunition, with ordinary capture cleanup;
+it does not create alternate host definitions or grant the takeover ability
+to a host lacking the category. Session completion, visibility and capture
+notifications remain owned by the existing adapter. Survival's director
+adoption, wave membership and owner-based infected appearance are owned by
+[DESIGN_SURVIVAL](DESIGN_SURVIVAL.md#modern-infection-hunters).
+
+**Verification.** `content/infector_test.go` locks token compilation and the
+derived flag's absence from definition identity; `infection_test.go` locks
+mode selection, eligible target classes, targeted Attack fallback, inclusive 3D
+and fractional reach, overflowing coordinate rejection, the full 60-tick
+interval, motion within reach, interruption and restart, stance waiting,
+allocation identity and alliance invalidation, transfer refusal, and active
+rule switching. Strict assertions preserve both random streams, resources,
+victim ownership and the absence of infection emission/transfer calls.
+Session checks own replacement cleanup and director adoption; visual review
+must inspect the authored emitter and owner-texture transition with both
+renderers. Landing also runs the simulation-cost benchmark and repository
+verification gates.
+
 ### Modern AI move retention
 
 **Nanolathe Modern policy (user-authorized 2026-09-25).** The user approved

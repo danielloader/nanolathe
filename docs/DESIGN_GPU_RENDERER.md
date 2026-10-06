@@ -7308,3 +7308,145 @@ enabled; wireframe keeps its existing rings. Pulse and Wire map the current
 outline colour through the selected owner's frame list. Full uses frame-list
 entry zero for its static host outline. Unknown or out-of-range owner colours
 keep the corresponding stock colour in every path.
+
+## 38. Unit model skins
+
+**Nanolathe presentation feature (user-authorized 2026-10-04).** An immutable
+palette-indexed bank may replace unit-face textures by their original
+case-insensitive texture names. Static GAF replacements and prepared infection
+composition are two ways to prepare that bank. This is a host presentation choice in every
+rule set, including Strict 3.1. It changes no unit definition, model identity,
+mesh, hierarchy, COB, weapon, statistic, ownership, or simulation state. It
+implements no infection or capture mechanic. Retail model binding and phase-7
+ownership remain as established in [03 R-CRD-005 §1]; ordinary raster and team
+selection remain [03 R-REN-03A §5] and [03 R-RAST-01 §3].
+
+`Client.LoadModelSkin(name, logicalGAFPath)` reads the current model VFS and
+installs a validated bank outside `textures/`, for example
+`skins/infected.gaf`. Each named entry must be one nonempty indexed leaf frame;
+empty banks, duplicate names, composite frames, animated entries and explicit
+overrides of resolved team or animated textures fail before installation.
+Missing replacement names keep the base texture. Unresolved original names
+remain unresolved. The material walk independently guards static originals, so
+a static bank prepared for different content cannot replace a team or animated frame.
+Pixels keep the ordinary model mapper's indexed semantics; GAF sprite alpha is
+not a separate unit transparency mechanism.
+
+`ModelTextureRegistry.PrepareModelSkin` performs the same validation during
+detached battle preparation. Its immutable `ModelSkin` can be shared, and
+`Client.InstallPreparedModelSkin` binds it without I/O or failure after the
+corresponding model registry is installed. The convenience loader installs only
+after successful validation, so a failed reload preserves the previous bank.
+
+**Prepared infection composition (user-authorized 2026-10-05).**
+`ModelTextureRegistry.PrepareInfectedModelSkin(name, palette, overlay, overrides)`
+combines original sparse RGBA infection art with the active registry's resolved
+unit textures and the active `palette.Base`. This supports arbitrary mod names
+and mod replacements of familiar names. It visits the catalog's loaded unit
+models, resolves their non-team textures with the ordinary precedence, and
+prepares every source frame, including animated entries. It never assumes a
+retail texture catalog. An optional explicitly supplied static bank takes
+priority for its named textures; its team/animation restrictions remain intact.
+No static override is implied by the generic preparation API.
+
+Composition samples only a 64×64 straight-alpha tile of the art. Art of any
+other size is box-filtered into that tile first; art exactly 64×64 is taken as
+an already reduced tile and read without resampling. The engine ships the
+reduction of its 1254×1254 original as the 10 KB `infection-overlay-tile.png`,
+so battle preparation neither embeds nor decodes the full-size source. A test
+compared composites from both before the source left the tree and found them
+identical.
+
+This is original presentation tuning: an 18% warm substrate stain and an RGBA
+blend capped at 75% locally, modulated by source brightness and reduced on
+highlights, keep panel recesses and recognizable substrate. Coverage-aware box
+filtering retains broad infection marks on tiny textures. Half-tile crops
+enlarge the masses, and a coverage curve expands partially covered pixels while
+retaining clear gaps. This makes diseased patches readable at ordinary unit
+distance. Strengthening the original art's rose/olive chroma before blending
+prevents palette quantization from collapsing those marks back onto gray ramps.
+A stable texture-name hash varies the overlay placement without any random
+stream. Palette quantization is cached by RGB value during preparation. A
+256-entry flat-colour remap gives units whose
+models have no textures a stronger 30% warm/rose stain, retaining source
+brightness while surviving palette steps. Missing-texture diagnostic colours
+retain their ordinary value, and remapped flat/textured pixels still take the
+ordinary SHD path. Team textures remain untouched.
+
+The generated lookup is keyed by texture name and selected original frame
+pointer. The material walk first performs ordinary cached/live/direct frame
+selection, then substitutes prepared pixels; source frame identity remains
+available to renderer traces. Source entries, frame durations, phase-7 cursor
+registration and advancement never change. Preparation copies pixel and
+transparency planes, preserves composite header/offset/child/alternate-blitter
+metadata, and places the overlay in one coordinate space for a composite's
+plain raster and children. Malformed decoded geometry, child counts, or cycles
+fail with texture/frame context before returning a bank. Nil/empty palettes,
+empty names, and absent, empty or wholly transparent overlays fail similarly.
+Preparation neither installs nor changes an existing bank, and old recorded
+commands retain their immutable frames. Drawing performs only prepared lookups;
+there is no draw-time synthesis or additional allocation for transformed pixels.
+
+`SetOwnerModelSkin(owner, name)` supplies a default for the unit's current
+committed owner. `SetUnitModelSkin(instanceID, name)` overrides that default;
+its identity is exactly `frame.UnitView.InstanceID`, never a reusable pool
+slot, and zero is rejected. Both setters reject unknown names without changing
+the previous selection. Empty clears the relevant mapping: clearing an
+instance override exposes its current owner's default. Two instances of one
+shared model can therefore select different banks, and an ownership change
+selects the new owner's default on the next draw. No state is added to frame
+publication or authoritative units.
+
+The primitive material walk applies the selected bank after base texture
+resolution. The shared per-model texture-reference table remains an immutable
+base table. Classic composition, native geometry packets, cached and live
+lanes, direct drawing, construction and attached units all receive the same
+selected frame pointers. Each retained body records the selected immutable
+bank identity beside its existing memoization inputs. Changing a mapping,
+reloading its bank or clearing skins rebuilds affected cached pixels/faces;
+modern retained geometry receives its ordinary new raster revision. Existing
+recorded commands keep their old immutable frames. Original team/animation
+bindings and phase-7 cursors are never changed or registered by skin drawing.
+
+Load, install, selection and clear operations belong to the presentation owner
+between joined frames, never concurrently with recording or its workers.
+Workers share only immutable banks and read-only selection maps during a frame.
+The setters advance the paused-world presentation revision so paused recordings
+also refresh. `ClearModelSkins`, `SetModelFS`, a changed model-registry binding,
+and `Client.Close` clear the banks and selections. Reinstalling the same
+registry retains them. Hosts bind model content first, then install their
+prepared banks and selections. Instance mappings remain until explicitly
+cleared or battle teardown; departed identities cannot select recycled slots.
+
+Focused `TestModelSkin*` tests cover shared-model isolation, warm texture and
+body caches, ownership changes, owner defaults and instance overrides, bank
+reload/failure/clear, content boundaries, protected bindings and missing-name
+fallback, classic pixels, modern geometry and cached/live/direct routes.
+`TestModelSkinInfection*` additionally checks active mod pixels and palettes,
+animated timing and source trace identity, flat SHD and diagnostic preservation,
+composite structure, transactional failures and concurrent preparation. The
+opt-in `TestModelSkinRetailProbe` accepts `NANOLATHE_INFECTION_OVERLAY` for an
+original RGBA PNG (and optionally `NANOLATHE_INFECTED_SKIN` for named overrides).
+It compares healthy/infected peers across walkers, tanks, aircraft and ships,
+and writes native-size and nearest-enlarged captures to `NANOLATHE_SHOT_DIR`.
+The probe compiles active unit definitions for model aliases and shading/key-plane
+flags, and uses the normal COB piece linker and Create pose. A separate retail
+palette check locks a visible warm shift across dark, middle and light neutral
+flat colours. The prepared draw contract also checks zero allocations with warm
+presentation scratch.
+
+### Infection spray
+
+The Modern infection capture policy publishes `NanoInfected` on its ordinary
+reverse-nanolathe emitter. This is emission-time presentation metadata, like
+owner colour: it does not change geometry, lifetime, admission or either RNG
+stream. A completed capture's owner-based model skin takes effect in the first
+committed replacement frame. No duplicate unit/model definition is needed.
+
+Both renderers receive a shared rose/burgundy/olive particle ramp, quantized once
+against the active palette when `Client.SetPalette` installs it. This infection
+ramp takes priority over the optional team-colour nanolathe preference; ordinary
+construction/capture retains its existing preference. Rebinding a mod palette
+rebuilds the ramp. The session tests compare identical tagged/untagged particle
+states and RNG positions, and client tests verify palette rebinding and the
+ordinary-spray bypass.

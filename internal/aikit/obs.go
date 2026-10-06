@@ -111,6 +111,9 @@ type Contact struct {
 	HPPct   int32 // 0..100 when seen, 100 for a blip
 	Visible bool
 	Built   bool
+	// InfectionThreat is copied only for sighted contacts, from their bound
+	// orders capability on the simulation thread; brains never read live units.
+	InfectionThreat bool
 }
 
 // AllyUnit is a unit of an allied player in the owner's sight: its own line

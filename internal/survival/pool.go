@@ -1,6 +1,7 @@
 package survival
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
@@ -36,7 +37,7 @@ func (d Domain) String() string {
 }
 
 // maxTierDepth bounds the tier walk for a malformed or cyclic build tree.
-const maxTierDepth = 16
+const maxTierDepth = content.SurvivalMaxTier
 
 // Unit is one wave-pool entry.
 type Unit struct {
@@ -178,25 +179,48 @@ func mobile(def *content.UnitDef) bool {
 // with a positive metal cost and at least one weapon that can hurt a base —
 // not an interceptor and not anti-air only. Anti-nukes and pure anti-air
 // units would spend a wave's budget on nothing.
-func eligible(def *content.UnitDef) bool {
-	if !mobile(def) || def.Builder || def.Commander || def.BuildCostMetal <= 0 {
-		return false
+func eligible(def *content.UnitDef) bool { return content.SurvivalUnitEligible(def) }
+
+// BuildScenarioPool selects an authored roster when present, otherwise keeping
+// the existing build-tree pool exactly (DESIGN_SURVIVAL §5.1).
+func BuildScenarioPool(cat *content.Catalog, products Products) (Pool, error) {
+	if cat == nil || cat.SurvivalRoster == nil {
+		return BuildPool(cat, products), nil
 	}
-	for _, w := range [3]*content.WeaponDef{def.Weapon1Def, def.Weapon2Def, def.Weapon3Def} {
-		if w != nil && w.ID != 0 && !w.Interceptor && !w.ToAirWeapon {
-			return true
+	if err := cat.ValidateSurvivalRoster(); err != nil {
+		return Pool{}, err
+	}
+	tiers := make(map[string]int, len(cat.SurvivalRoster.Units))
+	if cat.SurvivalRoster.IncludeBuildTree {
+		tiers = Tiers(cat, products)
+	}
+	// Explicit entries add otherwise unreachable original units, or override a
+	// discovered tier. Price and sort the combined pool once (DESIGN_SURVIVAL §5.1).
+	for _, e := range cat.SurvivalRoster.Units {
+		tiers[e.Unit] = e.Tier
+	}
+	pool := buildPool(cat, tiers)
+	// Every mode must be able to open with an ordinary attacker: Modern plans
+	// authored infectors only as support picks, so a combined opening of
+	// infectors alone would plan empty waves (DESIGN_SURVIVAL §5.1).
+	for _, u := range pool.Units {
+		if u.Tier == 1 && !u.Def.NanolatheInfector && (u.Domain == Ground || u.Domain == Amphibious || u.Domain == Hover) {
+			return pool, nil
 		}
 	}
-	return false
+	return Pool{}, fmt.Errorf("nanolathe: survival roster has no ordinary tier-1 attacker: logical path %s, providers searched [survival roster, bound build tree], expected a tier-1 ground, hover or amphibious unit that is not an authored infector", content.SurvivalRosterPath)
 }
 
 // BuildPool derives the wave pool from the catalog (DESIGN_SURVIVAL §5).
 func BuildPool(cat *content.Catalog, products Products) Pool {
+	return buildPool(cat, Tiers(cat, products))
+}
+
+func buildPool(cat *content.Catalog, tiers map[string]int) Pool {
 	var pool Pool
 	if cat == nil {
 		return pool
 	}
-	tiers := Tiers(cat, products)
 	for _, key := range cat.SortedUnitKeys() {
 		t, ok := tiers[key]
 		if !ok || t < 1 {

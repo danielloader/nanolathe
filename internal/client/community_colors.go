@@ -157,6 +157,9 @@ func (c *Client) communityStreamColor(owner uint8, known bool, stock, sample uin
 // renderer receives the shared fill. A mapped byte stays fixed for the
 // particle's lifetime (community patch engine behavior §5.12).
 func (c *Client) nanoParticleColor(v frame.StripView) (uint8, bool) {
+	if c != nil && c.pal != nil && v.Family == frame.StripFamilyNano && v.NanoInfected {
+		return c.infectionNanoRamp[(uint32(v.ColorSample)+v.ColorSequence)%uint32(len(c.infectionNanoRamp))], true
+	}
 	if v.Family != frame.StripFamilyNano || !c.communityColors.options.TeamColorNanolathe || !v.NanoOwnerColorKnown || v.NanoOwnerColor >= communityPlayerColors {
 		return v.Fill, false
 	}

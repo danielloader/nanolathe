@@ -219,6 +219,7 @@ type stripObject struct {
 	// Captured owner metadata is shared by both host colour policies.
 	nanoOwnerColor      uint8
 	nanoOwnerColorKnown bool
+	nanoInfected        bool // presentation-only identity, captured at emission
 	// Shared per-colour cursor freezes creation order, independent of redraws.
 	nanoColorCursor *uint32
 
@@ -1471,6 +1472,7 @@ func (s *Session) appendStripViews(tick uint32, out []frame.StripView) []frame.S
 				view := frame.StripView{
 					NanoOwnerColor:      o.nanoOwnerColor,
 					NanoOwnerColorKnown: o.nanoOwnerColorKnown,
+					NanoInfected:        o.nanoInfected,
 					ColorSequence:       p.colorSequence,
 					ColorSample:         p.colorSample,
 					Strip:               int8(strip),

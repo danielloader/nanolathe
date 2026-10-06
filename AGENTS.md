@@ -154,7 +154,12 @@ Current policies: [terrain admission](docs/DESIGN_WEAPONS_PROJECTILES.md#231-mod
 [routes through friends](docs/DESIGN_MOVEMENT_PATH.md#modern-routes-through-friends), and
 [wave air targets](docs/DESIGN_SESSIONS_AI_SAVE.md#modern-wave-air-targets), and
 [Modern AI move retention](docs/DESIGN_UNITS_ORDERS_COB.md#modern-ai-move-retention), and
-[repair-pad queue](docs/DESIGN_MOVEMENT_PATH.md#modern-repair-pad-queue).
+[repair-pad queue](docs/DESIGN_MOVEMENT_PATH.md#modern-repair-pad-queue), and
+[infection](docs/DESIGN_UNITS_ORDERS_COB.md#modern-infection) (user-authorized
+2026-10-05) with its
+[Survival infection hunters and infector waves](docs/DESIGN_SURVIVAL.md#modern-infection-hunters),
+[infector target preference](docs/DESIGN_WEAPONS_PROJECTILES.md#modern-infector-target-preference)
+and [Modern AI infector focus](docs/DESIGN_SESSIONS_AI_SAVE.md#modern-ai-infector-focus).
 Retired from Modern by its traffic policy, and kept only as the pathfinding
 laboratory's baseline (`movement.OverlapRules`): re-route staggering, allied
 pass-through, jam release and pocket release. Do not restore them as parity

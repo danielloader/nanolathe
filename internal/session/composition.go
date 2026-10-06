@@ -551,13 +551,22 @@ func (s *Session) appendStripNanoForEvent(e frame.Event) {
 	if known {
 		ownerColor = []uint8{color}
 	}
+	var emitter *stripObject
 	switch {
 	case e.NanolatheBoxAtSource && e.NanolatheTargetBoxKnown:
-		s.appendStripNanoEmitterFromBox(e.NanolatheTargetMin, e.NanolatheTargetMax, dst, ownerColor...)
+		emitter = s.appendStripNanoEmitterFromBox(e.NanolatheTargetMin, e.NanolatheTargetMax, dst, ownerColor...)
 	case e.NanolatheTargetBoxKnown:
-		s.appendStripNanoEmitterBox(src, e.NanolatheTargetMin, e.NanolatheTargetMax, ownerColor...)
+		emitter = s.appendStripNanoEmitterBox(src, e.NanolatheTargetMin, e.NanolatheTargetMax, ownerColor...)
 	default:
-		s.appendStripNanoEmitter(src, dst, ownerColor...)
+		emitter = s.appendStripNanoEmitter(src, dst, ownerColor...)
+	}
+	// The published colour tag cannot alter emitter admission or CRT draws.
+	if emitter != nil && e.Mode == uint8(frame.NanolatheCapture) && s.Units != nil {
+		if b := s.orderBinding(); b != nil && b.Rules != nil {
+			if source := s.Units.Unit(e.Source); source != nil {
+				emitter.nanoInfected = b.Rules.Infection(source.Def).DurationTicks != 0
+			}
+		}
 	}
 }
 
@@ -1231,7 +1240,7 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 			// (owner differs, alive set, death latch clear) refuses silently,
 			// so this seam does not branch on TransferOwnership's bool beyond
 			// deciding whether the replacement's completion posture runs.
-			Capture: func(captor *units.Unit, n *orders.Node, _ uint32) bool {
+			Capture: func(captor *units.Unit, n *orders.Node, tick uint32) bool {
 				if s.Build == nil || n == nil || worldQueries.LookupUnit == nil || captor == nil {
 					return false
 				}
@@ -1251,6 +1260,7 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 				// publish [05 R-WORK-01 §1] — the same call Assist and
 				// Resurrect make above for their own products.
 				s.CompleteUnit(repl.Handle)
+				s.survivalAdoptCaptured(captor, repl, tick)
 				// The old record is destroyed inside TransferOwnership
 				// (cause 4, null attacker [06 §12.1]) but the phase-2 slot
 				// finalizer that unpublishes it, retires its AI-group entry
@@ -1428,6 +1438,9 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 					EffectID: 6, Mode: 1, Team: builder.Owner,
 					Producer: frame.ProducerBeam, PaletteRow: 6,
 					NanolatheGeometryKnown: true, NanolatheActiveUntil: activeUntil,
+				}
+				if name == "Capture" && s.orderRules().Infection(builder.Def).DurationTicks != 0 {
+					e.Mode = uint8(frame.NanolatheCapture)
 				}
 				var boxMin, boxMax [3]numeric.Fixed
 				if reversed {
@@ -2714,6 +2727,7 @@ func (s *Session) bindDamageReaction() {
 	if s == nil || s.Combat == nil {
 		return
 	}
+	s.Combat.InfectionThreat = orders.InfectionThreat
 	s.Combat.DangerNotice = s.noticeModernDanger
 	s.Combat.ImpactNotice = s.noticeModernImpact
 	s.Combat.DamageActivity = func(victim, attacker *units.Unit, tick uint32) {

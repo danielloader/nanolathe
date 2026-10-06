@@ -94,7 +94,7 @@ func (c *Client) composeCarrier(v frame.UnitView, sx, sy int32, children []frame
 		return false
 	}
 	if carrier.direct {
-		live, drawn := c.composeDirectLiveModel(carrier.draw, unitTeamColor(v), unitPresentationID(v), modelCursorUnit, carrier.directLane)
+		live, drawn := c.composeDirectLiveModel(carrier.draw, unitTeamColor(v), unitPresentationID(v), modelCursorUnit, carrier.directLane, c.selectedModelSkin(v.InstanceID, v.Owner))
 		if drawn {
 			c.finishModel(live, nil)
 		}
@@ -114,7 +114,7 @@ func (c *Client) composeCarrier(v frame.UnitView, sx, sy int32, children []frame
 		// [R-REN-03A §4].
 		c.finishModel(carrier, nil)
 		id := unitPresentationID(v)
-		if live, ok := c.composeDirectLiveModel(carrier.draw, unitTeamColor(v), id, modelCursorUnit, presentationrender.PieceLaneLive); ok {
+		if live, ok := c.composeDirectLiveModel(carrier.draw, unitTeamColor(v), id, modelCursorUnit, presentationrender.PieceLaneLive, c.selectedModelSkin(v.InstanceID, v.Owner)); ok {
 			c.emitModel(pendingModelCommit{m: live, blit: live.image, body: true, trace: true})
 		}
 		for i := range children {
@@ -251,7 +251,7 @@ func (c *Client) composeUnitModelState(v frame.UnitView, child, finalPasses bool
 	// intentionally use it without publication revisions, so they take the
 	// non-retained all-piece adapter rather than pretending to be a live unit.
 	if id == 0 || !c.modelScratch.active {
-		m, ok := c.composeModelLane(draw, v.Owner, unitTeamColor(v), id, modelCursorUnit, reveal, outline, presentationrender.PieceLaneAll, false)
+		m, ok := c.composeModelLane(draw, v.Owner, unitTeamColor(v), id, modelCursorUnit, reveal, outline, presentationrender.PieceLaneAll, false, c.selectedModelSkin(v.InstanceID, v.Owner))
 		if ok && finalPasses {
 			c.finalizeModelImage(m.image, draw, v.Owner, modelCursorUnit)
 		}
@@ -262,7 +262,7 @@ func (c *Client) composeUnitModelState(v frame.UnitView, child, finalPasses bool
 	required := draw.Structure || draw.KeyPlane
 	orient := c.orientationCache(id)
 	if c.cachedBodyMustRebuild(body, v, draw, orient) || missing && required || draw.KeyPlane && body != nil && body.image != nil && body.image.height == nil {
-		cached, built := c.composeModelLane(draw, v.Owner, unitTeamColor(v), id, modelCursorUnit, nil, 0, presentationrender.PieceLaneCached, false)
+		cached, built := c.composeModelLane(draw, v.Owner, unitTeamColor(v), id, modelCursorUnit, nil, 0, presentationrender.PieceLaneCached, false, c.selectedModelSkin(v.InstanceID, v.Owner))
 		if !built {
 			return composedModel{}, false
 		}
@@ -303,7 +303,7 @@ func (c *Client) composeUnitModelState(v frame.UnitView, child, finalPasses bool
 	// structure under construction keeps every piece in its cached lane and
 	// skips this second pass [03 R-REN-03A §4].
 	if !(draw.Structure && draw.UnderConstruction) {
-		base = c.stageLivePieces(base, draw, unitTeamColor(v), id)
+		base = c.stageLivePieces(base, draw, unitTeamColor(v), id, c.selectedModelSkin(v.InstanceID, v.Owner))
 
 	}
 	if child {
@@ -319,8 +319,8 @@ func (c *Client) composeUnitModelState(v frame.UnitView, child, finalPasses bool
 // texel equal to the image key still writes color and height, erasing a cached
 // color behind it; it must not be treated as a keyed child blit
 // [03 R-REN-03A §4/§5].
-func (c *Client) stageLivePieces(base *modelTarget, draw *presentationrender.UnitDraw, selector teamColor, id uint64) *modelTarget {
-	polys := c.collectDrawPolysLane(draw, selector, id, modelCursorUnit, presentationrender.PieceLaneLive)
+func (c *Client) stageLivePieces(base *modelTarget, draw *presentationrender.UnitDraw, selector teamColor, id uint64, skins ...*ModelSkin) *modelTarget {
+	polys := c.collectDrawPolysLane(draw, selector, id, modelCursorUnit, presentationrender.PieceLaneLive, skins...)
 	if len(polys) == 0 {
 		return base
 	}

@@ -56,6 +56,9 @@ type StripView struct {
 	// Presentation metadata for Community stream colours (GPU design §37.1).
 	NanoOwnerColor      uint8
 	NanoOwnerColorKnown bool
+	// NanoInfected selects the original infection spray palette (GPU design §38).
+	// It does not change particle geometry, lifetime, or random draws.
+	NanoInfected bool
 	// Strip is the barrier this record draws at, 0..9 [03 §1].
 	Strip int8
 	// Family selects the per-family draw [03 R-FX-01 §3].

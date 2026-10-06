@@ -100,6 +100,7 @@ type Client struct {
 	pausedLayer         pausedRecordLayer
 	communityHUD        CommunityHUDOptions
 	communityColors     communityColorState
+	infectionNanoRamp   [7]uint8
 
 	// debugDeviceCapture is a host-owned, on-demand diagnostics bridge. It is
 	// invoked only after the frame recorder has joined, outside simulation.
@@ -276,10 +277,13 @@ type Client struct {
 	// with the battle HUD [07 R-HUD-03 §14.4][07 R-HUD-04 §4].
 	messageLogos *formats.GAFEntry
 
-	modelFS   *vfs.FS
-	models    map[string]*unitModel
-	texIndex  map[string]texRef
-	logoIndex map[string]texRef
+	modelFS         *vfs.FS
+	models          map[string]*unitModel
+	texIndex        map[string]texRef
+	logoIndex       map[string]texRef
+	modelSkins      map[string]*ModelSkin
+	ownerModelSkins map[uint8]string
+	unitModelSkins  map[uint64]string
 
 	// communityPreviewModels is the lazy PreviewObject3D cache. A nil value is
 	// a negative cache entry; the ordinary art diagnostic list records the
@@ -744,6 +748,7 @@ func (c *Client) SetPalette(p *palette.Tables) {
 		c.pausedWorldRevision++
 	}
 	c.pal = p
+	c.infectionNanoRamp = infectionNanoColors(p)
 	if p != nil {
 		c.rebuildDisplayPalette()
 		c.ResolveUnitStyle()
@@ -891,6 +896,7 @@ func (c *Client) Close() {
 	}
 	c.recordPool.close()
 	c.recordPool = nil
+	c.ClearModelSkins()
 }
 
 // IsFocused reports the platform window focus sampled at the client edge.
@@ -1018,6 +1024,7 @@ func (c *Client) SetModelFS(fs *vfs.FS, teamLogos ...string) {
 	if c != nil {
 		c.pausedWorldRevision++
 	}
+	c.ClearModelSkins()
 	c.modelFS = fs
 	// The hover hull reads root-piece vertices from the same presentation model
 	// cache the draw path uses [07 R-REV-01 §1]. PickSnapshotUnit is handed a
@@ -1077,6 +1084,7 @@ func (c *Client) SetModelTextureRegistry(registry *ModelTextureRegistry) {
 		return
 	}
 	if c.modelTextures != registry {
+		c.ClearModelSkins()
 		// A registry boundary is a battle boundary. Unit slots are reusable, so
 		// no retained body or orientation reference may cross it.
 		c.modelOrientation = map[uint64]*presentationrender.OrientationCache{}

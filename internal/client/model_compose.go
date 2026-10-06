@@ -164,26 +164,26 @@ func teamTextureFrame(ref texRef, selector teamColor) *formats.GAFFrame {
 // The selector is deliberately distinct from owner: model geometry does not
 // need ownership, and keeping the values separate prevents a player slot from
 // becoming a colour.
-func (c *Client) collectDrawPolys(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8) []screenPoly {
-	return c.collectDrawPolysLane(draw, selector, id, kind, presentationrender.PieceLaneAll)
+func (c *Client) collectDrawPolys(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, skins ...*ModelSkin) []screenPoly {
+	return c.collectDrawPolysLane(draw, selector, id, kind, presentationrender.PieceLaneAll, skins...)
 }
 
 // collectDrawPolysLane resolves only the requested cached/live body lane.
 // The direct live path chooses its own target and projection; this helper only
 // preserves the published piece order and material resolution [03 R-REN-03A §4].
-func (c *Client) collectDrawPolysLane(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, lane presentationrender.PieceLane) []screenPoly {
-	return c.collectDrawPolysLaneProjected(draw, selector, id, kind, lane, false)
+func (c *Client) collectDrawPolysLane(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, lane presentationrender.PieceLane, skins ...*ModelSkin) []screenPoly {
+	return c.collectDrawPolysLaneProjected(draw, selector, id, kind, lane, false, skins...)
 }
 
 // collectDrawPolysLaneProjected keeps the cache-lane material walk shared while
 // selecting either the local cached projection or direct live projection.
-func (c *Client) collectDrawPolysLaneProjected(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, lane presentationrender.PieceLane, direct bool) []screenPoly {
-	return c.collectDrawPolysProjection(draw, selector, id, kind, lane, direct, nil)
+func (c *Client) collectDrawPolysLaneProjected(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, lane presentationrender.PieceLane, direct bool, skins ...*ModelSkin) []screenPoly {
+	return c.collectDrawPolysProjection(draw, selector, id, kind, lane, direct, nil, skins...)
 }
 
 // The optional preview projector changes only final screen coordinates. The
 // material walk, height keys and shading remain shared with ordinary models.
-func (c *Client) collectDrawPolysProjection(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, lane presentationrender.PieceLane, direct bool, preview *modelPreviewProjector) []screenPoly {
+func (c *Client) collectDrawPolysProjection(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, lane presentationrender.PieceLane, direct bool, preview *modelPreviewProjector, skins ...*ModelSkin) []screenPoly {
 	if c == nil || c.cam == nil || draw == nil || draw.Model == nil {
 		return nil
 	}
@@ -202,6 +202,11 @@ func (c *Client) collectDrawPolysProjection(draw *presentationrender.UnitDraw, s
 	var refs *modelTexRefs
 	if kind == modelCursorUnit || kind == modelCursorFeature {
 		refs = c.modelTexRefs(draw.Model)
+	}
+
+	var skin *ModelSkin
+	if kind == modelCursorUnit && len(skins) != 0 {
+		skin = skins[0]
 	}
 
 	// Retail walks the piece list last-to-first. Because the height-key test
@@ -234,6 +239,8 @@ func (c *Client) collectDrawPolysProjection(draw *presentationrender.UnitDraw, s
 			color := uint8(pr.ColorIndex & 0xff)
 			if pr.TextureName != "" && !textured {
 				color = 0xd1 // unresolved authored texture is the established flat miss [03 §2.4.1]
+			} else if mode == modelPrimitiveFlat && skin != nil && skin.flat != nil {
+				color = skin.flat[color]
 			}
 			var texFrame *formats.GAFFrame
 			if mode == modelPrimitiveTexture {
@@ -311,6 +318,17 @@ func (c *Client) collectDrawPolysProjection(draw *presentationrender.UnitDraw, s
 				}
 			}
 			sourceFrame := texFrame // Keep authored animation identity across storage views.
+			// Prepared skins replace pixels only after the ordinary selector has
+			// chosen its source. Trace identity and phase-7 ownership stay intact
+			// (DESIGN_GPU_RENDERER §38).
+			if skin != nil && texFrame != nil && ref.kind != texTeam {
+				key := c.modelNameKey(pr.TextureName)
+				if replacement := skin.frames[key]; ref.kind == texStatic && replacement != nil {
+					texFrame = replacement
+				} else if replacement := skin.generated[key][sourceFrame]; replacement != nil {
+					texFrame = replacement
+				}
+			}
 			if kind == modelCursorProjectile && texFrame != nil {
 				var ok bool
 				texFrame, ok = texFrame.DirectRaster()
@@ -641,8 +659,8 @@ type composedModel struct {
 // composeDirectLiveModel rasterizes one live lane onto a native framebuffer
 // target. It has no key plane; the shared exclusive fill limits leave the
 // final framebuffer row and column untouched [03 R-RAST-01 §1/§2].
-func (c *Client) composeDirectLiveModel(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, lane presentationrender.PieceLane) (composedModel, bool) {
-	polys := c.collectDrawPolysLaneProjected(draw, selector, id, kind, lane, true)
+func (c *Client) composeDirectLiveModel(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, lane presentationrender.PieceLane, skins ...*ModelSkin) (composedModel, bool) {
+	polys := c.collectDrawPolysLaneProjected(draw, selector, id, kind, lane, true, skins...)
 	if len(polys) == 0 {
 		return composedModel{}, false
 	}
@@ -769,13 +787,13 @@ func (c *Client) composeModel(draw *presentationrender.UnitDraw, owner uint8, se
 // subset; otherwise a live door could escape the cached body's staging box
 // [03 R-REN-03A §1][03 R-REN-03A §4]. finalPasses applies waterline and Digger
 // only to the per-frame subject image, never the retained body source.
-func (c *Client) composeModelLane(draw *presentationrender.UnitDraw, owner uint8, selector teamColor, id uint64, kind uint8, reveal *presentationrender.NanoframeReveal, outline uint8, lane presentationrender.PieceLane, finalPasses bool) (composedModel, bool) {
+func (c *Client) composeModelLane(draw *presentationrender.UnitDraw, owner uint8, selector teamColor, id uint64, kind uint8, reveal *presentationrender.NanoframeReveal, outline uint8, lane presentationrender.PieceLane, finalPasses bool, skins ...*ModelSkin) (composedModel, bool) {
 	width, height, originX, originY, visible := c.projectedModelExtent(draw, presentationrender.PieceLaneAll, false)
 	if !visible {
 		return composedModel{}, false
 	}
 	anchorX, anchorY := c.modelAnchor(draw)
-	polys := c.collectDrawPolysLane(draw, selector, id, kind, lane)
+	polys := c.collectDrawPolysLane(draw, selector, id, kind, lane, skins...)
 	if len(polys) == 0 && reveal == nil && lane == presentationrender.PieceLaneAll {
 		return composedModel{}, false
 	}

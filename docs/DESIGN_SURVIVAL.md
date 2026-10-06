@@ -42,7 +42,9 @@ combat, the computer player, the HUD. It adds only four things:
 **Out of scope.** Co-op (later, when multiplayer exists: a buddy row becomes
 a human slot and nothing in the director changes). Saving (D2). Campaign
 integration. Scripted or authored wave lists; waves are generated from the
-catalog so every content mod works without Survival data.
+catalog so every content mod works without Survival data. An optional authored
+attacker roster selects eligible units and tiers (§5.1); it does not script
+wave composition or add a faction build tree.
 
 ## 2. Maintainer decisions (2026-09-23)
 
@@ -237,6 +239,126 @@ energy-to-metal ratio over the wave pool, computed once per battle from the
 catalog. Deriving `R` keeps mods with different cost scales balanced without
 a table.
 
+### 5.1 Optional authored attacker roster
+
+**Nanolathe scenario content policy, user-authorized 2026-10-04.** Original
+alien units and infected ARM/CORE attackers may form a building-free Survival
+roster without constructing a new faction or build tree. This extends the
+scenario content of §3 in every gameplay mode, including Strict 3.1. It does
+not add a `RuleSet` seam or change the underlying rules, RNG streams, resource
+settlement, allocator, movement, weapons or orders.
+
+A mounted content pack may provide `gamedata/survival_roster.tdf`:
+
+```tdf
+[SURVIVAL]
+{
+    AttackerSkin=skins/infected.gaf;
+    IncludeBuildTree=1;
+    [UNITS]
+    {
+        iacrawl=1;
+        iaspitter=1;
+        iasiege=3;
+    }
+}
+```
+
+The optional `AttackerSkin` is a relative logical GAF path, or empty. The
+required `UNITS` assignments map unit keys to canonical decimal integers
+1–16 (no signs or leading zeros), the existing tier-walk depth bound. Keys are case-insensitive ASCII
+letters, digits, underscores or hyphens, at most 31 bytes. Compilation rejects
+unknown properties/sections, duplicate canonical keys, invalid tiers, missing
+units, and units failing §5's existing eligibility predicate. A roster must
+include a tier-1 ground, amphibious or hover unit so its opening pool remains
+usable when both air and naval options are disabled. That opening unit must
+also be ordinary, not an authored `NANOLATHE_INFECTOR`: Modern plans infectors
+only as support picks (§6.7), so an infector-only opening would plan empty
+waves that score as cleared. This is content validation, identical in every
+mode. An exclusive roster is checked when the catalog compiles; with
+`IncludeBuildTree=1` the combined pool is checked at Survival entry, where the
+bound build tree is known, and failure refuses the battle there. The usual map
+entry and reachability checks still determine whether a particular unit can
+enter.
+
+Compilation stores immutable `Catalog.SurvivalRoster` entries in canonical
+unit-key order. A battle clone copies the roster and its entries. At Survival
+entry `survival.BuildScenarioPool` chooses this roster exclusively by default.
+**Nanolathe scenario content policy, user-authorized 2026-10-05:** optional
+`IncludeBuildTree=1` instead starts with the active catalog's bound build-tree
+walk, then adds the explicit entries; a repeated unit takes its explicit tier.
+Only literal `0` or `1` is accepted, and absence equals `0`. The combined pool
+is sorted and priced once, with no duplicate units or additional RNG draws.
+The infected pack uses this option and names only its three original aliens,
+so an installed mod contributes its own eligible combat roster without stock
+ARM/CORE dependencies. Unarmed units, builders, commanders and pure anti-air
+remain excluded by §5; air and naval units retain the ordinary map, option,
+tier and entry restrictions. The existing domain classification, median cost
+ratio, budgets, tier unlocks, weighted planning and spawn checks then apply
+unchanged.
+No unit becomes a build product, builder or commander through this file.
+Invalid rosters fail catalog loading and are rechecked at Survival entry; they
+never silently fall back to ordinary attackers. The optional skin is read by
+presentation and bound to `Session.SurvivalAttacker()`'s actual owner, not its
+colour. The director never reads the skin path or its pixels.
+
+With no file, `Catalog.SurvivalRoster` is nil, the old build-tree pool path is
+used, and no roster bytes enter either catalog or simulation identity. With
+a roster, its canonical unit/tier pairs and build-tree inclusion mode enter the
+existing simulation-content manifest as one catalog entry (absent/zero retains
+the original identity); no wire schema or lobby selector is added.
+Online peers therefore require the same roster as part of their existing
+content digest agreement. The skin path contributes only to `Catalog.Hash`,
+not the simulation-content digest. A non-Survival session never consumes the
+roster or binds its skin; loading the content pack still identifies its
+roster in the catalog digest even for such a session.
+
+The original aliens leave native reclaimable corpse features on ordinary
+lethal death: Crawler 40, Spitter 105, and Siege 450 metal, half their authored
+build-metal costs. These are original content values in every gameplay mode,
+not an extra kill reward. The normal constructor reclaim path and storage
+limits settle the payout; corpse destruction can remove the salvage.
+
+### 5.2 Infected attacker appearance
+
+**Nanolathe presentation policy, user-authorized 2026-10-05.** Every Survival
+attacker receives an infected appearance, with or without an authored roster,
+in every gameplay mode. This includes attackers selected from an installed
+mod's normal build tree. The director, roster eligibility, unit definitions,
+ownership and simulation-content digest are unchanged. Ordinary skirmish and
+campaign presentation remain unchanged.
+
+At detached battle preparation, the host composites an embedded, original
+transparent infection overlay with the active registry's resolved unit textures
+and quantizes the results to the active palette. Preparation follows content
+overlay precedence, so a mod's replacement pixels and texture names form the
+substrate. Generated frames are immutable and shared by instances. Drawing
+selects them by the actual attacker owner; it performs no image synthesis or
+file reads. Team markings retain their authored owner selection, and animated
+textures retain their ordinary frame timing and phase-7 cursors. Flat-color
+faces receive the prepared palette tint. Healthy peers keep their original
+materials even when they share the same model.
+
+An explicit roster `AttackerSkin` remains an intentional named replacement
+bank and takes priority over generated static pixels. Missing bank entries
+receive the generated treatment. A pack author combining such a bank with a
+mod is deliberately overriding those named surfaces; omit the bank to preserve
+every mod surface as the substrate. Missing or invalid explicitly requested
+banks still fail before battle adoption. No stock replacement bank is applied
+automatically to a mod.
+
+The hovered, directly visible attacker's display name is `Infected <NAME>`.
+The host derives the prefix from committed ownership and the same prepared
+attacker appearance; capture therefore updates both on the first published
+frame. Definitions, build cards and healthy instances retain their authored
+names. Radar/sonar-only contacts still show the ordinary unidentified caption.
+This is presentation in every Survival mode, not a unit rename or saved field.
+
+Only the original transparent overlay ships with the engine. Retail/mod source
+pixels and generated composites are local, with no web request or AI generation
+during loading or play. The compositor and cache contracts are owned by
+[DESIGN_GPU_RENDERER §38](DESIGN_GPU_RENDERER.md#38-unit-model-skins).
+
 ## 6. The wave director
 
 ### 6.1 States
@@ -366,6 +488,77 @@ created at the nearest cell of its base region to the entry point, within
 - **Warning.** At Warning, a priority announcement names the wave, its
   directions (compass words) and any air or naval theme; the countdown voice
   cues play for the last five seconds. On Active, a second announcement.
+
+#### Modern infection hunters
+
+User-authorized 2026-10-05: the authored `NANOLATHE_INFECTOR` category selects
+[Modern infection](DESIGN_UNITS_ORDERS_COB.md#modern-infection) through the bound
+`orders.Rules`. Strict and Community retain ordinary patrols and capture rules.
+**Nanolathe Modern scenario balance (user-authorized 2026-10-05):** takeover
+units are support threats. Planning excludes every unit with a nonzero bound
+`orders.Rules.Infection` policy from ordinary signatures and fill. Starting at
+10 minutes (18,000 simulation ticks, independent of pace), a wave of at least
+four units may replace exactly one ordinary pick with an infector. It must
+fit that pick's cost, unlocked tier, domain and reachable entry. Choose in
+canonical pool order, then existing group/pick order; no extra random draw.
+If no replacement fits, omit the infector. At least three ordinary escorts
+remain, the planned budget is unchanged, and actual spending cannot increase.
+
+At most two living, non-dying attacker infectors may already be on the map:
+when two are present, add none. This counts survivors from earlier waves and
+captured infectors, across all unit definitions. Recheck at spawn because
+ownership or the bound mode can change during the warning. The grace period
+and one-per-wave limit are also rechecked; earlier infector picks consume the
+wave attempt even if they failed placement or died. The existing spawn cursor
+provides that history, including for a Strict wave rebound to Modern. This is
+an admission limit, not a removal or immunity rule; external spawns/captures can exceed it. Converted
+ordinary hosts do not count. Strict/Community's zero infection policy bypasses
+this adjustment entirely, preserving the old planner and RNG behavior. No
+resources are charged, no counters persist, and no other session changes.
+These are initial conservative playtest limits, not retail behavior.
+
+An infector prefers the nearest eligible survivor mobile, ties in pool order;
+commanders, buildings, unfinished units, units with a carrier (transport cargo
+or pad-docked) and every authored `Builder` are immune,
+including modded and airborne constructors. This changes only infection
+admission; ordinary attacks still damage constructors. Vertical separation must
+fit the policy's reach, so a ground hunter does not chase a high aircraft it
+cannot spray. A ground hunter also considers only victims on its own static
+region (§6.6): its movement class's footprint anchor, placed at the victim, must
+lie on the hunter's region or beside one of its cells. Ships and hovercraft
+offshore therefore never pin it to the shore; an aircraft hunter is not
+filtered. When an attempt ends with its victim still eligible (no route,
+reach lost, or a refused transfer), the hunter shuns that victim until it
+leaves the recorded cell or 300 ticks pass, so the director does not re-issue
+the same failing hunt each sweep. While the attacker is at its unit limit no
+hunt starts, because the transfer would be refused; infectors fight with their
+weapons. If no candidate qualifies, it receives the ordinary structure-first
+patrol. This adds no director RNG draws. Moving victims are tracked by the
+ordinary targeted work order, rather than a new autonomous controller. Each
+hunt query walks the live units once; the director admits at most two
+infectors, so this stays a few walks per retarget sweep.
+
+Modern automatic combat targeting and Modern AI local squad focus prefer a
+directly visible, active infector within their existing engagement limits;
+[the combat policy](DESIGN_WEAPONS_PROJECTILES.md#modern-infector-target-preference) and
+[the AI policy](DESIGN_SESSIONS_AI_SAVE.md#modern-ai-infector-focus) own their
+scores and safety gates. This does not override explicit player orders, give
+sight of hidden enemies or add map-wide pursuit.
+
+Successful infection uses the existing replacement capture path and completion
+posture, retaining the victim's definition, weapons, health and ordinary capture
+copy semantics. The director immediately adopts the new attacker, sets roam/fire
+at will, and sends it an ordinary combat patrol. Only definitions explicitly
+authored as infectors can take over another unit. All attacker-owned hosts use
+§5.2's dynamic skin, including replacements on their first published frame.
+Adopted hosts count among the active wave's living units, without increasing its
+budget or rewards. Ordinary loss accounting records the survivor's lost unit;
+no capture bonus or resource charge is added. Capacity refusal leaves the victim
+unchanged. A captured transport's passengers follow ordinary capture teardown;
+they are not copied to the replacement. These are Nanolathe Modern scenario policy, not retail
+claims. Tests lock target immunity, Strict bypass, host adoption, retained
+capability boundaries, capacity refusal, the water-only and shoreline region
+filter, the shun and its expiry, and the unit-limit pause.
 
 ### 6.8 Determinism
 
@@ -524,6 +717,15 @@ choices for play-testing, recorded here so they change in one place.
 - **Tiers.** On the retail catalog: a kbot-lab combat unit is tier 1, an
   advanced-lab combat unit tier 2, and no pool unit is a builder or a
   commander. Relationships, not a census.
+- **Authored roster.** Parser/catalog tests reject malformed or ineligible
+  content and lock clone isolation and content identity. Pure pool tests lock
+  exclusive admission, sorted order, authored tiers, unchanged integer cost
+  arithmetic, and absent-profile plan/RNG equivalence. Session tests exercise
+  Strict and Modern, actual attacker-owner binding, failure before director
+  publication, no-profile pool equivalence and non-Survival isolation.
+  Run `tools/check ./internal/content ./internal/survival ./internal/session
+  ./internal/docs` during iteration; whole-tree fast/retail gates and the
+  applicable simulation benchmark remain the landing owner's gates.
 - **Director determinism.** Two headless Survival runs with one seed produce
   identical wave plans and results; a different seed produces a different
   first plan.

@@ -92,7 +92,8 @@ func TestSimulationManifestOrderAndLimits(t *testing.T) {
 // "canonical" fields reach the unit digest through writeUnitCanonical,
 // "hash" fields through a weapon or feature's compiled Hash (preparation never
 // changes them), "explicit" fields are encoded by the family encoder, "cob" is
-// the COB family's, and "diagnostic" fields are provenance, never identity.
+// the COB family's, "diagnostic" fields are provenance, never identity, and
+// "derived" fields are pure functions of canonical fields already digested.
 func TestSimulationDigestClassifiesEveryDefinitionField(t *testing.T) {
 	check := func(t *testing.T, v any, classes map[string][]string) map[string]string {
 		t.Helper()
@@ -142,6 +143,9 @@ func TestSimulationDigestClassifiesEveryDefinitionField(t *testing.T) {
 			"Rotations", "VeterancyThresholds", "VeterancyAccuracyBuffRate", "TransportedExplodeAs", "TransportedSelfDestructAs", "PreviewPieces", "PreviewPiecesS", "PreviewPiecesE", "PreviewPiecesN", "PreviewPiecesW", "PreviewFaceOpponent", "PreviewObject3D"},
 		"cob":        {"Script"},
 		"diagnostic": {"DiscoveryProvenance", "ScriptProvenance"},
+		// Derived only from the canonical Category string, which already
+		// reaches both identities; recording it again would move stock hashes.
+		"derived": {"NanolatheInfector"},
 	})
 	check(t, WeaponDef{}, map[string][]string{
 		"hash": {"DefinitionHeader", "extensionKeys", "Name", "WeaponVelocity", "StartVelocity", "WeaponAcceleration", "WeaponTimer", "BurstRate", "Duration", "RandomDecay", "SmokeDelay", "FlightTime", "HoldTime", "ShakeDuration", "TurnRate", "MinBarrelAngle",

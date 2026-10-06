@@ -951,6 +951,10 @@ func captureHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Code 
 	if u == nil || n == nil {
 		return 7
 	}
+	policy := unitInfection(u)
+	if n.Phase >= infectionApproach || policy.DurationTicks != 0 {
+		return infectionCapture(u, n, policy, satisfied, tick)
+	}
 	target := lookupTarget(u, n.Target)
 	if n.Target == 0 || target == nil || satisfied&pendTargetGone != 0 {
 		workStatus(u, statusCant, "Capture failed")

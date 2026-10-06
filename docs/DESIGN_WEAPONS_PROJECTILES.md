@@ -571,6 +571,8 @@ matter; future movement, enemy resources, reload progress and script readiness
 are not forecast. The scoring constants and 256-unit neighborhood are prototype
 tuning, not historical constants.
 
+A visible active infector then adds 12000
+([Modern infector target preference](#modern-infector-target-preference)).
 Add 100 for a preferred category. If reliable incoming damage plus this weapon's
 shot exceeds 120% of remaining health, multiply the score by four fifths. That
 is a **soft overage preference**, never a requirement to reach 120%, and never a
@@ -717,6 +719,31 @@ rule sets. The existing acquisition draw-vector tests remain unchanged.
 Repository integration and retail-content gates plus simulation-cost and
 classic/modern live battle benchmarks apply; Modern fingerprints and battle
 census may intentionally change, while Strict fingerprints must not.
+
+#### Modern infector target preference
+
+**Nanolathe Modern policy (user-authorized 2026-10-05).** After ordinary target
+admission and incoming-lethal-fire exclusion, direct sight of a live, completed,
+unstunned unit whose bound `orders.Rules.Infection` enables takeover adds 12000
+to its threat score, before the preferred-category and overage adjustments
+above. The query reads the catalog's compiled infector flag, so a candidate
+costs a flag test rather than a category scan. This is initial Nanolathe
+Modern tuning for a dangerous support unit; it grants no range, pursuit,
+visibility or damage exception.
+`combat.Service.InfectionThreat` is a composition callback into that existing
+orders policy, not another policy registry. It reads the current binding at
+query time, so mode changes disable the bonus immediately. Ordinary captured
+hosts do not qualify, nor do radar-only secondary contacts. Strict, Community
+and unbound combat rules never ask for this bonus. Constructor immunity is
+owned by [Modern infection](DESIGN_UNITS_ORDERS_COB.md#modern-infection).
+Category, overage, deterministic ties and the existing 25% retention margin
+apply after the bonus; manual targets and Hold Fire retain their gates.
+The preference adds no RNG draws, resource effects or saved state.
+`infection_threat_test.go` in combat locks human/computer acquisition, direct
+sight, range and damage admission, retained targets, deterministic ties, manual
+bindings, Hold Fire and disabled-mode RNG equivalence. The session and AI
+observation tests lock live rebinding, inactive infectors and ordinary hosts;
+local squad tests retain sight, reach, air/defense safety and switching cooldown.
 
 ### 2.4 Aiming
 

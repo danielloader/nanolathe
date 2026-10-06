@@ -3,6 +3,7 @@ package aikit
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/ai"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
+	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
@@ -684,14 +685,15 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 		if !hostile[u.Owner] {
 			continue
 		}
-		visible := h.persona.Omniscient || (m.UnitVisible != nil && m.UnitVisible(me, u))
+		sighted := m.UnitVisible != nil && m.UnitVisible(me, u)
+		visible := h.persona.Omniscient || sighted
 		x, z := fixedToWorld(int64(u.X)), fixedToWorld(int64(u.Z))
 		if visible {
 			pct := int32(100)
 			if u.MaxHealth > 0 {
 				pct = u.Health * 100 / u.MaxHealth
 			}
-			o.Enemy = append(o.Enemy, Contact{H: u.Handle, Gen: ob.identify(u), Info: table.Of(u.Def), Owner: u.Owner, X: x, Z: z, HPPct: pct, Visible: true, Built: u.Remaining == 0})
+			o.Enemy = append(o.Enemy, Contact{H: u.Handle, Gen: ob.identify(u), Info: table.Of(u.Def), Owner: u.Owner, X: x, Z: z, HPPct: pct, Visible: true, Built: u.Remaining == 0, InfectionThreat: sighted && orders.InfectionThreat(u)})
 			continue
 		}
 		if ob.blip(u, sea) {

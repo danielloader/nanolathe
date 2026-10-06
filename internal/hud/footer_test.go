@@ -307,3 +307,26 @@ func TestFooterIgnoresSelectionWithoutHover(t *testing.T) {
 		t.Errorf("hovered UNITNAME = %q/%v, want the definition's leading name", name.Text, ok)
 	}
 }
+
+// Scenario names obey the ordinary direct-visibility and gadget precedence gates.
+func TestFooterInfectedNameVisibility(t *testing.T) {
+	cat := footerCatalog()
+	f := &frame.Frame{Units: []frame.UnitView{{Slot: 7, Owner: 2, DefName: "testsolar", Health: 100, MaxHealth: 100}}}
+	hover := FooterHover{Gadget: NoGadget, Unit: 7, UnitNamePrefix: "Infected "}
+	got := BuildFooter(f, cat, 2, hover, false)
+	if name, _ := footerTextAt(got, AnchorUnitName); name.Text != "Infected Test Collector" {
+		t.Fatalf("infected name = %q", name.Text)
+	}
+	got = BuildFooter(f, cat, 0, hover, false)
+	if name, _ := footerTextAt(got, AnchorUnitName); name.Text != RadarContactPrefix+UnidentifiedObject {
+		t.Fatalf("hidden contact leaked name: %q", name.Text)
+	}
+	hover.Gadget, hover.GadgetName = 3, "testsolar"
+	got = BuildFooter(f, cat, 2, hover, false)
+	if name, _ := footerTextAt(got, AnchorName); name.Text != "Test Collector  M:135 E:1200" {
+		t.Fatalf("scenario prefix altered product card: %q", name.Text)
+	}
+	if cat.Units["testsolar"].Name != "Test Collector" {
+		t.Fatal("scenario label mutated shared definition")
+	}
+}

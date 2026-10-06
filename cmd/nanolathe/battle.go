@@ -143,6 +143,9 @@ type battleSession struct {
 	// owns loaded-model primitive cursors and remains the session's phase-7
 	// service even when no client is attached [03 R-CRD-005 §1].
 	modelTextures *client.ModelTextureRegistry
+	// Prepared before adoption; installed only for a roster-selected Survival battle.
+	attackerSkin      *client.ModelSkin
+	attackerSkinOwner uint8
 
 	// postBattle is created once, at the first committed terminal ResultView.
 	// It owns the frozen result presentation sequence; the live Session is not
@@ -677,6 +680,9 @@ func composeBattleEntryDetachedWithModels(sess *session.Session, cat *content.Ca
 			return nil, fmt.Errorf("nanolathe: battle composition failed: model textures: %w", err)
 		}
 	}
+	if err := b.prepareAttackerSkin(pal); err != nil {
+		return nil, err
+	}
 	sess.SetPhase7Service(b.modelTextures)
 	sess.SetFragmentMaterialResolver(b.modelTextures.FreezeFragmentMaterial)
 	if sess.Features != nil {
@@ -748,6 +754,7 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 	// message span before old source handles can be reused [08 R-ENTRY-01 §3].
 	cl.MessageRing().Clear()
 	cl.SetModelTextureRegistry(b.modelTextures)
+	b.installAttackerSkin(cl)
 	// The session executor owns one message-ring retirement per host pump;
 	// the client remains the sole presentation owner of the ring itself
 	// [01 R-PLAT-02 §§7,8][I6]. Binding this callback leaves unrelated optional
@@ -912,6 +919,7 @@ func (b *battleSession) teardown(cl *client.Client) {
 		cl.SetHoverScripts(nil)
 		cl.SetStrategicBlipArt(nil)
 		cl.SetStrategicTeamArt(nil)
+		cl.ClearModelSkins()
 		cl.SetModelTextureRegistry(nil)
 		cl.SetMessageLogos(nil)
 		cl.SetUIStage(nil)

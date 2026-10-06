@@ -227,7 +227,7 @@ func (c *Client) drawUnitModel(v frame.UnitView, sx, sy int32) bool {
 	}
 	id := unitPresentationID(v)
 	if m.direct {
-		live, ok := c.composeDirectLiveModel(m.draw, unitTeamColor(v), id, modelCursorUnit, m.directLane)
+		live, ok := c.composeDirectLiveModel(m.draw, unitTeamColor(v), id, modelCursorUnit, m.directLane, c.selectedModelSkin(v.InstanceID, v.Owner))
 		if !ok {
 			return false
 		}
@@ -241,7 +241,7 @@ func (c *Client) drawUnitModel(v frame.UnitView, sx, sy int32) bool {
 		// The cached body commits first; every live piece then draws directly
 		// in reverse piece order, without a key plane [03 R-REN-03A §4].
 		c.finishModel(m, nil)
-		live, liveOK := c.composeDirectLiveModel(m.draw, unitTeamColor(v), id, modelCursorUnit, presentationrender.PieceLaneLive)
+		live, liveOK := c.composeDirectLiveModel(m.draw, unitTeamColor(v), id, modelCursorUnit, presentationrender.PieceLaneLive, c.selectedModelSkin(v.InstanceID, v.Owner))
 		if liveOK {
 			c.emitModel(pendingModelCommit{m: live, blit: live.image, body: true, trace: true})
 		}

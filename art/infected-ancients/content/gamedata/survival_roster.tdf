@@ -1,0 +1,10 @@
+[SURVIVAL]
+{
+  IncludeBuildTree=1;
+  [UNITS]
+  {
+    iacrawl=1;
+    iaspitter=1;
+    iasiege=3;
+  }
+}

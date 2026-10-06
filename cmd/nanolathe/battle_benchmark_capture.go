@@ -234,7 +234,7 @@ func stageCaptureBenchmark(opts Options, s *session.Session) (*captureBenchmarkS
 
 func captureBenchmarkSimpleOrder(name string) bool {
 	switch name {
-	case "Patrol", "QPatrol", "Move_Ground", "QMove", "VTOL_Patrol", "VTOL_Move", "Attack_Chase", "AirStrike", "AirToAir", "AirToGround", "AirToGroundHover", "Guard_NoMove", "Follow_Ground":
+	case "Capture", "Patrol", "QPatrol", "Move_Ground", "QMove", "VTOL_Patrol", "VTOL_Move", "Attack_Chase", "AirStrike", "AirToAir", "AirToGround", "AirToGroundHover", "Guard_NoMove", "Follow_Ground":
 		return true
 	}
 	return false

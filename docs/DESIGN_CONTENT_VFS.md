@@ -170,13 +170,34 @@ executable's own `[02 R-CAT-01 §5]`:
 
 | Type | What it is |
 |---|---|
-| `Catalog` | The compiled result: `Units`, `Weapons`, `Features`, `Movement`, `Sides`, `Sounds`, `Maps`, `Categories`, `LOS`, `Meteor`, `Sight`, `AIProfiles`, `Aliases`/`AliasOrder`, `BuildMenus`, `DownloadPlacements`, `Warnings`, `Manifest`, `Hash` |
+| `Catalog` | The compiled result: `Units`, `Weapons`, `Features`, `Movement`, `Sides`, `Sounds`, `Maps`, `Categories`, `LOS`, `Meteor`, `Sight`, `AIProfiles`, `Aliases`/`AliasOrder`, `BuildMenus`, `DownloadPlacements`, `SurvivalRoster`, `Warnings`, `Manifest`, `Hash` |
 | `UnitDef`, `WeaponDef`, `FeatureDef`, `MovementClass`, `SideDef`, `SoundCategory`, `SoundAlias`, `MapHeader`, `AIProfile`, `LOSTables`, `MeteorDefaults`, `SightShapes` | The immutable definitions. Each carries `DefinitionHeader` as its first field |
 | `DefinitionHeader` | `CanonicalKey`, `Provenance`, `Hash` — identity, origin, content digest |
 | `Provenance` | The content-side view of where a definition's bytes came from: logical path, provider ID, mount order |
 | `CategoryRegistry`, `CategoryMask` | The sorted case-insensitive category token registry and the membership bitsets built from it `[02 R-P0-03]` |
 | `BuildMenuPage`, `DownloadMenuPlacement` | The authored and generated build pages |
 | `AssetID`, `AssetSequence` | Typed presentation asset identities and frame-sequence metadata used by texture playback |
+
+The optional `gamedata/survival_roster.tdf` compiles after unit weapons link,
+into `Catalog.SurvivalRoster` (`*SurvivalRoster`, nil when absent). This is
+user-authorized Nanolathe scenario content dated 2026-10-04, independent of
+rules and available under Strict as well as Modern; its schema, admission and
+runtime boundary are owned by [DESIGN_SURVIVAL §5.1](DESIGN_SURVIVAL.md#51-optional-authored-attacker-roster).
+`SurvivalRosterEntry` contains a canonical `Unit` key and integer `Tier`;
+`SurvivalRoster` contains the sorted `Units` slice and presentation-only
+`AttackerSkin` logical GAF path. Loading rejects malformed schema and duplicate,
+missing or ineligible units and requires a tier-1 pool that remains usable
+with both optional travel domains disabled. It never alters side data, build
+menus or unit definitions. Catalog clones copy the roster and its slice.
+
+Absent roster content emits no additional catalog or simulation identity bytes,
+keeping the existing baseline. Present roster unit/tier pairs join the existing
+simulation catalog-family manifest, so online content agreement detects roster
+differences without a wire-schema change. The skin path enters `Catalog.Hash`
+but is excluded from simulation identity. Capture compilation reads the file
+through the same snapshot filesystem as other definitions, retaining its
+source bytes for immutable content reconstruction. Presentation alone resolves
+the GAF; loading roster metadata does not decode or require skin pixels.
 
 Community-authored FBI and weapon keys are also compiled into typed metadata in
 every gameplay mode; this stage does not activate their behavior

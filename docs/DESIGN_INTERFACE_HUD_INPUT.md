@@ -760,7 +760,10 @@ damage bar, logo, metal and energy rates, kills line and secondary field
 `[07 R-HUD-03 §1]` `[07 R-HUD-03 §2]` `[07 R-HUD-03 §3]`. The output is a value
 — texts, bars and logos with a `FooterColor` that records whether the byte is
 raw or logical — so the composer performs the palette lookup and this package
-performs none.
+performs none. Survival may supply `FooterHover.UnitNamePrefix` from committed
+attacker ownership; it is applied only after direct visibility admits the unit
+name. Build cards and unidentified contacts ignore it. See
+[DESIGN_SURVIVAL §5.2](DESIGN_SURVIVAL.md#52-infected-attacker-appearance).
 
 **The minimap** (`minimap.go`). The compiled-in radar canvas the camera layout
 letterboxes inside is `camera.LayoutMinimap`, with `camera.Minimap.HitTest` as

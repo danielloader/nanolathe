@@ -556,6 +556,12 @@ func resolveName(code int, actor *units.Unit, target *units.Unit, pos *ResolvePo
 		}
 		return ""
 	case 13:
+		if unitInfection(actor).DurationTicks != 0 {
+			if InfectionTarget(actor, target) {
+				return "Capture"
+			}
+			return ""
+		}
 		// "Code 13 — capture. `cancapture`, a target, and the target's owner
 		// differing from mine → `Capture`. **Correction to §3.4's row 13:** it
 		// says 'target hostile and differently owned'; hostility is **not**
@@ -912,6 +918,9 @@ func slotZeroIsAntiAir(u *units.Unit) bool {
 // the canonical resolver shared by UI, AI, mission, and network producers
 // [04 R-ORD-02 §1].
 func resolveAttackAt(actor *units.Unit, target *units.Unit, pos *ResolvePos) string {
+	if InfectionTarget(actor, target) {
+		return "Capture"
+	}
 	if !canAttack(actor) {
 		return ""
 	}

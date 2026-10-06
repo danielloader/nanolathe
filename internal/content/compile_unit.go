@@ -143,6 +143,12 @@ type UnitDef struct {
 	// UnitMask is this definition's own single-ID membership value. Consumers
 	// can intersect it with linked target masks without re-tokenizing strings.
 	UnitMask CategoryMask
+	// NanolatheInfector is derived once from Category: an exact,
+	// case-insensitive, whitespace-delimited NANOLATHE_INFECTOR token. Rules
+	// read this immutable answer instead of re-tokenizing per query. Category
+	// already carries the authored bytes into both catalog identities, so the
+	// derived flag adds none (DESIGN_UNITS_ORDERS_COB "Modern infection").
+	NanolatheInfector bool
 
 	// Economy [02 "Unit record"].
 	BuildCostEnergy float32 // integer parsed, single-float store, default 0 [02 R-KEYS-01 §5]
@@ -767,6 +773,7 @@ func compileUnitSection(section *formats.Section, logicalPath string, language s
 		Side:                      side,
 		ObjectName:                objectName,
 		Category:                  category,
+		NanolatheInfector:         CategoryHasToken(category, NanolatheInfectorCategory),
 		SoundCategory:             soundCategory,
 		Corpse:                    corpse,
 		MovementClass:             movementClass,

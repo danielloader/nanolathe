@@ -421,6 +421,12 @@ func (*ModernRules) SelectTarget(s *Service, q *TargetQuery) (pool.Handle, bool)
 			continue
 		}
 		score := s.threatScore(q, target)
+		// A visible active takeover capability is an additional local threat.
+		// Keep category, incoming-fire and retention policy below unchanged.
+		// Radar-only secondary contacts disclose no capability for this bonus.
+		if visible && s.InfectionThreat != nil && s.InfectionThreat(target) {
+			score += 12000
+		}
 		preferred := IsPreferredCategory(c.Category, q.Acquisition.BadMask)
 		if q.Acquisition.MaskResolved && c.CategoryMaskResolved {
 			preferred = IsPreferredCategoryMask(c.CategoryMask, q.Acquisition.BadTargetMask)

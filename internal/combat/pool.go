@@ -230,6 +230,9 @@ type Service struct {
 	// docs/DESIGN_WEAPONS_PROJECTILES.md §2.3.1 and §2.6.1. A nil field is
 	// Strict 3.1, so a fixture built without rules keeps the retail path.
 	Rules Rules
+	// InfectionThreat observes the existing bound orders capability. Only Modern
+	// selection asks, after direct sight and ordinary attack admission.
+	InfectionThreat func(*units.Unit) bool `json:"-"`
 	// VisitOffMapFiled walks the movement owner's canonical off-map bucket in
 	// head-first (descending filing-sequence) order. It advances from the link
 	// observed after yield returns, stops when yield returns false, and allocates

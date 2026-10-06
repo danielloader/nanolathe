@@ -1052,6 +1052,12 @@ func (a *Army) focusFire(b *core.Board, s *squad) bool {
 			}
 			p *= 8
 		}
+		// Only a currently observed, active takeover capability gets the
+		// Modern local-focus preference. Reach and defense safety above, and
+		// current-focus hysteresis below, remain the ordinary squad policy.
+		if c.InfectionThreat {
+			p *= 4
+		}
 		if c.H == s.focus && c.Gen == s.focusG {
 			curAlive = true
 			p = p * 3 / 2 // stickiness: switching costs an action and aim time

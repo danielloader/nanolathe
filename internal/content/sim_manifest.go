@@ -203,6 +203,18 @@ func catalogEntries(c *Catalog) []SimulationInput {
 	add := func(key string, ordinal uint32, digest [32]byte) {
 		out = append(out, SimulationInput{Family: SimulationFamilyCatalog, Presence: SimulationInputPresent, Key: key, Ordinal: ordinal, SemanticDigest: digest})
 	}
+	if c.SurvivalRoster != nil {
+		domain := "nanolathe/sim-content/catalog/survival-roster/1"
+		if c.SurvivalRoster.IncludeBuildTree {
+			domain = "nanolathe/sim-content/catalog/survival-roster-with-build-tree/1"
+		}
+		d := newSemanticDigest(domain)
+		for _, e := range c.SurvivalRoster.Units {
+			d.text(e.Unit)
+			d.s64(int64(e.Tier))
+		}
+		add("survival-roster", 0, d.sum())
+	}
 	limits := newSemanticDigest("nanolathe/sim-content/catalog/limits/1")
 	limits.s64(int64(c.Limits.Units))
 	limits.s64(int64(c.Limits.Weapons))

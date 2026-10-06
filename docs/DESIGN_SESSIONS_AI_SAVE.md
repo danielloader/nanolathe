@@ -2256,6 +2256,24 @@ asynchronous hosts are compared by arena runs
 ([MODERN_AI_RESEARCH §6](MODERN_AI_RESEARCH.md#6-results-2026-09-23)); an
 automated lock is owed.
 
+#### Modern AI infector focus
+
+**Nanolathe Modern policy, user-authorized 2026-10-05.**
+Local squad focus multiplies a visible active infector's existing damage/value
+per health score by four, before the current-target 3/2 preference. The
+observation copies live, completed, unstunned takeover capability from the
+target's bound `orders.Rules.Infection` on the simulation thread; no live state
+reaches background thinking. Ordinary captured hosts, Strict/Community/unbound
+infection policies and unseen contacts supply no preference. Existing squad
+range plus 150, air suitability, static-defense refusal, commander gate,
+canonical first-equal tie and 45-tick switching cooldown remain. No strategic
+objective or map-wide pursuit bonus, new RNG draw, resource charge or saved
+state is added. Tests preserve immunity, visibility and the disabled-policy
+bypass alongside the local preference. The observation asks the
+definition-level policy, which reads the catalog's compiled infector flag
+([Modern infection](DESIGN_UNITS_ORDERS_COB.md#modern-infection)), so it
+tokenizes nothing per contact.
+
 ## 6. Research map
 
 | Behaviour | Owning research |

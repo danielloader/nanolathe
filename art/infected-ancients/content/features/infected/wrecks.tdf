@@ -1,0 +1,49 @@
+// Original content tuning: half authored unit metal; not a retail rule.
+[iacrawl_wreck]
+{
+ Description=Ancient relic remains;
+ Object=iacrawl_wreck;
+ FootprintX=2;
+ FootprintZ=2;
+ Height=4;
+ Damage=550;
+ Metal=40;
+ Energy=0;
+ Blocking=0;
+ Reclaimable=1;
+ Autoreclaimable=1;
+ Indestructible=0;
+ Flamable=0;
+}
+[iaspitter_wreck]
+{
+ Description=Ancient relic remains;
+ Object=iaspitter_wreck;
+ FootprintX=3;
+ FootprintZ=3;
+ Height=7;
+ Damage=1100;
+ Metal=105;
+ Energy=0;
+ Blocking=0;
+ Reclaimable=1;
+ Autoreclaimable=1;
+ Indestructible=0;
+ Flamable=0;
+}
+[iasiege_wreck]
+{
+ Description=Ancient relic remains;
+ Object=iasiege_wreck;
+ FootprintX=3;
+ FootprintZ=3;
+ Height=12;
+ Damage=4800;
+ Metal=450;
+ Energy=0;
+ Blocking=0;
+ Reclaimable=1;
+ Autoreclaimable=1;
+ Indestructible=0;
+ Flamable=0;
+}

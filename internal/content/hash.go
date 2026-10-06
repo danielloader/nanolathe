@@ -20,6 +20,15 @@ func catalogHash(c *Catalog) string {
 		return ""
 	}
 	h := sha256.New()
+	if c.SurvivalRoster != nil {
+		fmt.Fprintf(h, "survival-roster skin=%q\n", c.SurvivalRoster.AttackerSkin)
+		if c.SurvivalRoster.IncludeBuildTree {
+			fmt.Fprintln(h, "survival-include-build-tree")
+		}
+		for _, e := range c.SurvivalRoster.Units {
+			fmt.Fprintf(h, "survival-unit %s tier=%d\n", e.Unit, e.Tier)
+		}
+	}
 
 	// Every record contributes in immutable ID order, including duplicate names.
 	// Unique-name catalogs retain their existing byte stream [02 §5] C12.

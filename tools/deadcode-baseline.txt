@@ -32,6 +32,7 @@ github.com/nanolathe-gg/nanolathe/internal/content ApplyMovementFootprints
 github.com/nanolathe-gg/nanolathe/internal/content CompileCategories
 github.com/nanolathe-gg/nanolathe/internal/content CompileMaps
 github.com/nanolathe-gg/nanolathe/internal/content CompileUnits
+github.com/nanolathe-gg/nanolathe/internal/content CompileWeaponsWithDuplicates
 github.com/nanolathe-gg/nanolathe/internal/content canonicalUnitMap
 github.com/nanolathe-gg/nanolathe/internal/docs Citation.String
 github.com/nanolathe-gg/nanolathe/internal/docs CitingFiles
@@ -169,5 +170,3 @@ github.com/nanolathe-gg/nanolathe/internal/units BindCOBWithPorts
 github.com/nanolathe-gg/nanolathe/internal/units NewSliced
 github.com/nanolathe-gg/nanolathe/internal/units RetailUnitBase
 github.com/nanolathe-gg/nanolathe/internal/units RetailUnitReferences
-github.com/nanolathe-gg/nanolathe/vfs WriteArchive
-github.com/nanolathe-gg/nanolathe/vfs zlibChunks

@@ -243,6 +243,7 @@ func (b *battleSession) footerHover(f *frame.Frame) hud.FooterHover {
 		return out
 	}
 	out.Unit = b.footerHoverUnit
+	out.UnitNamePrefix = b.infectedHoverPrefix(f, out.Unit)
 	out.Feature = b.footerHoverFeature
 	out.Visible = func(v *frame.UnitView) bool {
 		return v != nil && client.SnapshotVisible(f, *v, f.ViewingPlayer)
@@ -250,6 +251,18 @@ func (b *battleSession) footerHover(f *frame.Frame) hud.FooterHover {
 	out.Gadget, out.GadgetName = b.hud.hoveredGadgetSource()
 	out.StockpilePercent = footerStockpilePercent(f, b.cat, out.Unit)
 	return out
+}
+
+// infectedHoverPrefix follows the same committed ownership as the runtime skin.
+// The HUD applies it only after its direct-visibility check (DESIGN_SURVIVAL §5.2).
+func (b *battleSession) infectedHoverPrefix(f *frame.Frame, handle pool.Handle) string {
+	if b == nil || b.attackerSkin == nil {
+		return ""
+	}
+	if view := hud.FooterUnit(f, handle); view != nil && view.Owner == b.attackerSkinOwner {
+		return "Infected "
+	}
+	return ""
 }
 
 // footerStockpilePercent is the build-page percentage of a stockpiling

@@ -694,7 +694,7 @@ var float64ScopeAllowances = map[string]float64Allowance{
 	"internal/construction/reclaim.go func UnitReclaimPulse": {2, "I2 unit-reclaim pulse divide [05 R-WORK-01 §4]"},
 
 	"internal/survival/pool.go func *Pool.Cost":               {2, "I2 exact float32 widening into defined signed-64 cost conversion (DESIGN_SURVIVAL §5)"},
-	"internal/survival/pool.go func BuildPool":                {2, "I2 exact float32 widening into defined signed-64 ratio conversion (DESIGN_SURVIVAL §5)"},
+	"internal/survival/pool.go func buildPool":                {2, "I2 exact float32 widening into defined signed-64 ratio conversion (DESIGN_SURVIVAL §5)"},
 	"internal/session/survival.go func *Session.stepSurvival": {1, "I2 exact float32 widening into defined signed-64 reward text conversion (DESIGN_SURVIVAL §6.9)"},
 
 	"internal/sim/numeric/angletable.go var angleSinCos":          {4, "I2 immutable binary64 angle table constructed with the existing angle expression (DESIGN_MULTIPLAYER §16.1 M1-C3)"},

@@ -1,0 +1,8 @@
+{
+  "schema": 2,
+  "id": "infected-ancients",
+  "name": "Infected Ancients",
+  "version": "0.1.0",
+  "summary": "Original building-free Survival attackers for the Infected Survival mode.",
+  "requires": []
+}

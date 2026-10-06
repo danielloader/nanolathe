@@ -300,7 +300,7 @@ func (c *Client) shadowGeometryAt(draw *presentationrender.UnitDraw, anchorX, an
 	return g
 }
 
-func (c *Client) prepareModelGeometry(draw *presentationrender.UnitDraw, owner uint8, selector teamColor, id uint64, kind uint8, reveal *presentationrender.NanoframeReveal, outline uint8) *drawlist.ModelGeometry {
+func (c *Client) prepareModelGeometry(draw *presentationrender.UnitDraw, owner uint8, selector teamColor, id uint64, kind uint8, reveal *presentationrender.NanoframeReveal, outline uint8, skins ...*ModelSkin) *drawlist.ModelGeometry {
 	if kind == modelCursorFeature {
 		if g, retained := c.featureGeometry(draw, selector, id); retained {
 			return g
@@ -311,7 +311,7 @@ func (c *Client) prepareModelGeometry(draw *presentationrender.UnitDraw, owner u
 		return nil
 	}
 	anchorX, anchorY, hx, hy := c.modelPlacement(draw)
-	polys := c.collectDrawPolys(draw, selector, id, kind)
+	polys := c.collectDrawPolys(draw, selector, id, kind, skins...)
 	if len(polys) == 0 && reveal == nil {
 		return nil
 	}
@@ -416,7 +416,7 @@ func (c *Client) unitGeometryPair(v frame.UnitView, forceKeyPlane bool) (arrival
 	reveal, outline := c.unitNanoframeReveal(v)
 	if id == 0 || !c.modelScratch.active {
 		draw.Materialize(presentationrender.PieceLaneAll)
-		g := c.prepareModelGeometry(draw, v.Owner, unitTeamColor(v), id, modelCursorUnit, reveal, outline)
+		g := c.prepareModelGeometry(draw, v.Owner, unitTeamColor(v), id, modelCursorUnit, reveal, outline, c.selectedModelSkin(v.InstanceID, v.Owner))
 		if g != nil {
 			g.Cloaked = v.Cloaked || c.developer.Mode != 0
 		}
@@ -441,11 +441,11 @@ func (c *Client) unitGeometryPair(v frame.UnitView, forceKeyPlane bool) (arrival
 	if rebuild {
 		w, h, ox, oy, visible := c.projectedModelExtent(draw, presentationrender.PieceLaneAll, false)
 		if !visible {
-			return c.directUnitGeometry(draw, unitTeamColor(v), id, presentationrender.PieceLaneAll), nil
+			return c.directUnitGeometry(draw, unitTeamColor(v), id, presentationrender.PieceLaneAll, c.selectedModelSkin(v.InstanceID, v.Owner)), nil
 		}
-		cached := c.collectDrawPolysLane(draw, unitTeamColor(v), id, modelCursorUnit, presentationrender.PieceLaneCached)
+		cached := c.collectDrawPolysLane(draw, unitTeamColor(v), id, modelCursorUnit, presentationrender.PieceLaneCached, c.selectedModelSkin(v.InstanceID, v.Owner))
 		if len(cached) == 0 && !draw.KeyPlane {
-			return c.directUnitGeometry(draw, unitTeamColor(v), id, presentationrender.PieceLaneAll), nil
+			return c.directUnitGeometry(draw, unitTeamColor(v), id, presentationrender.PieceLaneAll, c.selectedModelSkin(v.InstanceID, v.Owner)), nil
 		}
 		ax, ay := c.modelAnchor(draw)
 		// The half-pixel offset follows the subject's position frame by frame
@@ -466,7 +466,7 @@ func (c *Client) unitGeometryPair(v frame.UnitView, forceKeyPlane bool) (arrival
 		body = c.cachedBody(id)
 	}
 	if missing || body == nil || body.geometry == nil {
-		return c.directUnitGeometry(draw, unitTeamColor(v), id, presentationrender.PieceLaneAll), nil
+		return c.directUnitGeometry(draw, unitTeamColor(v), id, presentationrender.PieceLaneAll, c.selectedModelSkin(v.InstanceID, v.Owner)), nil
 	}
 	if !draw.HasFaces() {
 		return nil, nil
@@ -481,7 +481,7 @@ func (c *Client) unitGeometryPair(v frame.UnitView, forceKeyPlane bool) (arrival
 	// which walks the same primitives, so it is not collected for that branch.
 	var live []screenPoly
 	if !draw.UnderConstruction && body.geometry.KeyPlane {
-		live = c.collectDrawPolysLane(draw, unitTeamColor(v), id, modelCursorUnit, presentationrender.PieceLaneLive)
+		live = c.collectDrawPolysLane(draw, unitTeamColor(v), id, modelCursorUnit, presentationrender.PieceLaneLive, c.selectedModelSkin(v.InstanceID, v.Owner))
 	}
 	w, h, ox, oy, _ := c.projectedModelExtent(draw, presentationrender.PieceLaneLive, false)
 	w, h, ox, oy = retainedModelExtent(&body.store, body.geometry, w, h, ox, oy)
@@ -529,7 +529,7 @@ func (c *Client) unitGeometryPair(v frame.UnitView, forceKeyPlane bool) (arrival
 	if ss := g.Supersample; ss != nil {
 		ss.LiveFaces = nil
 	}
-	return g, c.directUnitGeometry(draw, unitTeamColor(v), id, presentationrender.PieceLaneLive)
+	return g, c.directUnitGeometry(draw, unitTeamColor(v), id, presentationrender.PieceLaneLive, c.selectedModelSkin(v.InstanceID, v.Owner))
 }
 
 // materializeUnitDraw builds the piece geometry unitGeometryPair will read
@@ -691,8 +691,8 @@ func copyModelFaces(dst []drawlist.ModelFace, vertices []drawlist.ModelVertex, s
 	return dst, vertices
 }
 
-func (c *Client) directUnitGeometry(draw *presentationrender.UnitDraw, selector teamColor, id uint64, lane presentationrender.PieceLane) *drawlist.ModelGeometry {
-	return c.directModelGeometry(draw, selector, id, modelCursorUnit, lane)
+func (c *Client) directUnitGeometry(draw *presentationrender.UnitDraw, selector teamColor, id uint64, lane presentationrender.PieceLane, skins ...*ModelSkin) *drawlist.ModelGeometry {
+	return c.directModelGeometry(draw, selector, id, modelCursorUnit, lane, skins...)
 }
 
 // directModelGeometry records the standalone direct projection. Its corners
@@ -701,8 +701,8 @@ func (c *Client) directUnitGeometry(draw *presentationrender.UnitDraw, selector 
 // origin the box pixel of screen (0,0), and its anchor screen (0,0). The box
 // used to be the whole record extent, which reserved a framebuffer-sized slot
 // per direct subject and could not be doubled at all.
-func (c *Client) directModelGeometry(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, lane presentationrender.PieceLane) *drawlist.ModelGeometry {
-	polys := c.collectDrawPolysLaneProjected(draw, selector, id, kind, lane, true)
+func (c *Client) directModelGeometry(draw *presentationrender.UnitDraw, selector teamColor, id uint64, kind uint8, lane presentationrender.PieceLane, skins ...*ModelSkin) *drawlist.ModelGeometry {
+	polys := c.collectDrawPolysLaneProjected(draw, selector, id, kind, lane, true, skins...)
 	if len(polys) == 0 {
 		return nil
 	}

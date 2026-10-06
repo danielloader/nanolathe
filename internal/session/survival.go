@@ -112,6 +112,15 @@ func (c SkirmishConfig) survivalAttacker() int {
 // IsSurvival reports whether the session is a Survival battle.
 func (s *Session) IsSurvival() bool { return s != nil && s.Survival != nil }
 
+// SurvivalAttacker returns the actual attacker owner for presentation binding.
+// Colours may be selected independently, so callers must bind skins by owner.
+func (s *Session) SurvivalAttacker() (int, bool) {
+	if !s.IsSurvival() {
+		return 0, false
+	}
+	return int(s.Survival.attacker), true
+}
+
 // isSurvivalAttacker reports whether owner is the Survival attacker slot. The
 // attacker is not a player in the result (DESIGN_SURVIVAL §8).
 func (s *Session) isSurvivalAttacker(owner int) bool {
@@ -142,7 +151,20 @@ type survivalUnit struct {
 	h      pool.Handle
 	wave   int
 	target pool.Handle
+	// infecting marks target as an issued Modern infection victim. When the
+	// attempt ends with the victim still eligible, the victim is shunned:
+	// skipped until it leaves the recorded cell or shunUntil passes
+	// (DESIGN_SURVIVAL "Modern infection hunters").
+	infecting            bool
+	shun                 pool.Handle
+	shunSerial           uint64
+	shunCellX, shunCellZ int32
+	shunUntil            uint32
 }
+
+// survivalShunTicks bounds how long an infector skips a victim whose attempt
+// ended without a capture: ten seconds, a few retarget sweeps.
+const survivalShunTicks = 300
 
 // SurvivalStats are one player's Survival counters (DESIGN_SURVIVAL §8).
 type SurvivalStats struct {
@@ -233,7 +255,7 @@ func (s *Session) SurvivalReport(tick uint32) *SurvivalReport {
 
 // initSurvival builds the director after services are bound and before
 // commanders are placed. It derives the wave pool from the bound
-// construction rules' build products.
+// construction rules' build products, unless content authors a scenario roster.
 func (s *Session) initSurvival(cfg SkirmishConfig) error {
 	attacker := cfg.survivalAttacker()
 	if attacker < 0 {
@@ -243,13 +265,17 @@ func (s *Session) initSurvival(cfg SkirmishConfig) error {
 	if s.Build != nil {
 		rules = s.Build.Rules
 	}
+	wavePool, err := survival.BuildScenarioPool(s.Catalog, func(menu *content.BuildMenuPage) []string {
+		return construction.BuildProducts(rules, menu)
+	})
+	if err != nil {
+		return err
+	}
 	st := &survivalState{
 		attacker: uint8(attacker),
 		tuning:   survival.DefaultTuning(cfg.Survival.Pace),
 		opts:     survival.Options{NoAir: cfg.Survival.NoAir, NoNaval: cfg.Survival.NoNaval},
-		pool: survival.BuildPool(s.Catalog, func(menu *content.BuildMenuPage) []string {
-			return construction.BuildProducts(rules, menu)
-		}),
+		pool:     wavePool,
 	}
 	if len(st.pool.Units) == 0 {
 		return fmt.Errorf("nanolathe: survival wave pool is empty: logical path %s, providers searched [catalog build menus], expected at least one armed mobile unit reachable from a commander", cfg.MapName)
@@ -632,7 +658,7 @@ func (s *Session) stepSurvival(tick uint32) {
 func (s *Session) survivalBeginWarning(tick uint32) {
 	st := s.Survival
 	st.wave++
-	st.plan = survival.Plan(st.wave, tick, &st.pool, st.tuning, st.opts, s.survivalEntry(), s.SimRNG())
+	st.plan = s.survivalPlanWave(tick, s.survivalEntry())
 	st.phase = survivalWarning
 	st.phaseEnd = tick + st.tuning.WarningTime
 	rec := SurvivalWaveRecord{Number: st.wave, Tick: tick, Budget: st.plan.Budget}
@@ -767,6 +793,9 @@ func (s *Session) survivalSpawn(tick uint32) {
 		}
 		pu := st.pool.Units[g.Picks[st.nextP]]
 		st.nextP++
+		if s.survivalInfector(pu.Def) && !s.survivalInfectorSpawnAllowed(tick) {
+			continue // recheck after warning: captures or the bound rules may have changed
+		}
 		made++
 		ex, ez := s.survivalEntryCell(g.Angle)
 		var c *survivalClass
@@ -819,6 +848,7 @@ func (s *Session) survivalWaveDead() bool {
 // nearest human-team unit, structures first (DESIGN_SURVIVAL §6.7).
 func (s *Session) survivalRetarget(tick uint32) {
 	st := s.Survival
+	capture := orders.Lookup("Capture")
 	kept := st.units[:0]
 	for _, su := range st.units {
 		u := s.Units.Unit(su.h)
@@ -827,8 +857,23 @@ func (s *Session) survivalRetarget(tick uint32) {
 		}
 		t := s.Units.Unit(su.target)
 		q := orders.BindQueueBinding(u, s.orderBinding())
-		if t == nil || !t.Alive || !q.HasIssuedWork() {
-			s.survivalSend(&su, u, tick)
+		var infect *units.Unit
+		if head := q.Head(); head == nil || head.ID != capture {
+			if su.infecting {
+				// The attempt ended. A victim that is still eligible was not
+				// captured: unreachable, out of reach or refused. Do not send
+				// the hunter straight back to it.
+				if t != nil && orders.InfectionTarget(u, t) {
+					su.shun, su.shunSerial, su.shunUntil = t.Handle, t.AllocationSerial, tick+survivalShunTicks
+					su.shunCellX, su.shunCellZ = int32(t.X>>20), int32(t.Z>>20)
+				}
+				su.infecting = false
+			}
+			// A fallback patrol may become an infection hunt when a mobile appears.
+			infect = s.survivalInfectionTarget(u, &su, tick)
+		}
+		if t == nil || !t.Alive || !q.HasIssuedWork() || infect != nil {
+			s.survivalSendTo(&su, u, tick, infect)
 		}
 		kept = append(kept, su)
 	}
@@ -850,7 +895,17 @@ func (s *Session) orderBinding() *orders.QueueBinding {
 // issued work or its target has died; observing it in a play-test settles
 // whether that pass is doing the work.
 func (s *Session) survivalSend(su *survivalUnit, u *units.Unit, tick uint32) {
-	target := s.survivalTarget(u)
+	s.survivalSendTo(su, u, tick, s.survivalInfectionTarget(u, su, tick))
+}
+
+// survivalSendTo issues an infection order to infect when it is non-nil, and
+// otherwise the ordinary structure-first patrol.
+func (s *Session) survivalSendTo(su *survivalUnit, u *units.Unit, tick uint32, infect *units.Unit) {
+	target, infection := infect, infect != nil
+	su.infecting = false
+	if target == nil {
+		target = s.survivalTarget(u)
+	}
 	if target == nil {
 		su.target = 0
 		return
@@ -860,13 +915,117 @@ func (s *Session) survivalSend(su *survivalUnit, u *units.Unit, tick uint32) {
 	if q == nil {
 		return
 	}
-	id := orders.Resolve(9, u, nil, &orders.ResolvePos{X: target.X, Y: target.Y, Z: target.Z})
+	var id orders.ID
+	var targetHandle pool.Handle
+	if infection {
+		id = orders.Resolve(13, u, target, nil)
+		targetHandle = target.Handle
+	} else {
+		id = orders.Resolve(9, u, nil, &orders.ResolvePos{X: target.X, Y: target.Y, Z: target.Z})
+	}
 	if id == 0 {
 		return
 	}
 	q.PurgeUnprotected()
 	q.DropLeadingAutoOps()
-	q.Push(id, orders.NewNodeForOrder(id, 0, target.X, target.Y, target.Z, tick, u.Handle, false))
+	q.Push(id, orders.NewNodeForOrder(id, targetHandle, target.X, target.Y, target.Z, tick, u.Handle, false))
+	su.infecting = infection
+}
+
+// survivalInfectionTarget gives authored Modern infectors a mobile victim.
+// It preserves the director's pool-order ties and survivor-side scope. A target
+// beyond vertical spray reach is not a useful ground chase, and a ground
+// hunter only chases victims standing on its own static region, so ships and
+// hovercraft offshore do not pin it to the shore. su's shunned victim is
+// skipped (DESIGN_SURVIVAL "Modern infection hunters"). su may be nil.
+//
+// The walk covers every live unit once per call. Calls are bounded by the
+// infectors alive (at most two admitted by the director) per retarget sweep.
+func (s *Session) survivalInfectionTarget(u *units.Unit, su *survivalUnit, tick uint32) *units.Unit {
+	b := s.orderBinding()
+	if b == nil || b.Rules == nil || u == nil {
+		return nil
+	}
+	policy := b.Rules.Infection(u.Def)
+	if policy.DurationTicks == 0 {
+		return nil
+	}
+	// A transfer the allocator must refuse is not worth a hunt; the hunter
+	// fights with its weapon instead.
+	if limit := s.Units.UnitLimit(); limit > 0 && s.Units.LiveCountForPlayer(int(u.Owner)) >= limit {
+		return nil
+	}
+	// Newly spawned wave units have not visited the per-unit binder yet.
+	orders.BindQueueBinding(u, b)
+	st := s.Survival
+	class, home := s.survivalHuntRegion(u)
+	var best *units.Unit
+	var bestD int64
+	st.walk = s.Units.AppendLiveSliced(st.walk[:0])
+	for _, v := range st.walk {
+		if v == nil || !st.onTeam(v.Owner) || !orders.InfectionTarget(u, v) {
+			continue
+		}
+		dy := v.Y - u.Y
+		if dy > policy.Range || dy < -policy.Range {
+			continue
+		}
+		if su != nil && v.Handle == su.shun && v.AllocationSerial == su.shunSerial && int32(tick-su.shunUntil) < 0 &&
+			int32(v.X>>20) == su.shunCellX && int32(v.Z>>20) == su.shunCellZ {
+			continue
+		}
+		if home != 0 {
+			ax, az := survivalAnchor(class.profile, v.X, v.Z)
+			if survivalRegionAround(class, ax, az, home) == 0 {
+				continue
+			}
+		}
+		dx, dz := int64(v.X-u.X)>>16, int64(v.Z-u.Z)>>16
+		d := dx*dx + dz*dz
+		if best == nil || d < bestD {
+			best, bestD = v, d
+		}
+	}
+	return best
+}
+
+// survivalAdoptCaptured puts the unchanged host definition under the same
+// director as spawned attackers. Only the authored captor gets infection
+// capability; owner-based presentation supplies the host's skin (§6.7).
+func (s *Session) survivalAdoptCaptured(captor, host *units.Unit, tick uint32) {
+	st := s.Survival
+	b := s.orderBinding()
+	if st == nil || captor == nil || host == nil || captor.Owner != st.attacker || host.Owner != st.attacker || b == nil || b.Rules == nil || b.Rules.Infection(captor.Def).DurationTicks == 0 {
+		return
+	}
+	// A capture allocation may reuse a dead attacker's slot before the next
+	// director sweep. Replace any stale row instead of treating the handle as
+	// proof this new instance has already received orders.
+	kept := st.units[:0]
+	for _, su := range st.units {
+		if su.h != host.Handle {
+			kept = append(kept, su)
+		}
+	}
+	st.units = kept
+	host.Flags = host.Flags&^(units.StandingFieldMask<<units.StandingMoveShift) | 2<<units.StandingMoveShift
+	host.Flags = host.Flags&^(units.StandingFieldMask<<units.StandingFireShift) | 2<<units.StandingFireShift
+	su := survivalUnit{h: host.Handle, wave: st.wave}
+	s.survivalSend(&su, host, tick)
+	st.units = append(st.units, su)
+	if st.phase == survivalActive {
+		found := false
+		for _, h := range st.waveUnits {
+			if h == host.Handle {
+				found = true
+				break
+			}
+		}
+		if !found {
+			st.waveUnits = append(st.waveUnits, host.Handle)
+		}
+	}
+	delete(st.removed, host.Handle)
 }
 
 // survivalTarget is the nearest living unit of the human team to u,

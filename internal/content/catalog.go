@@ -139,6 +139,9 @@ type Catalog struct {
 	// explicit because a generated page can be sparse.
 	DownloadPlacements []DownloadMenuPlacement
 
+	// SurvivalRoster optionally selects scenario attackers (DESIGN_SURVIVAL §5.1).
+	SurvivalRoster *SurvivalRoster
+
 	// Aliases holds the gamedata/allsound.tdf alias registrations (cap 255,
 	// 32-byte names) [02 "Sound aliases"]. Phase 13's audio path resolves
 	// sound names through them; they live here so no downstream package
@@ -354,6 +357,11 @@ func CompileWithOptions(fs vfs.FSOps, opts Options) (*Catalog, error) {
 	warnings = append(warnings, fillUnitRecordScripts(fs, records)...)
 	report.Report(FamilyModels, 100)
 
+	survivalRoster, err := CompileSurvivalRoster(fs)
+	if err != nil {
+		return nil, err
+	}
+
 	// Manifest: vfs.ManifestHash() for identity [PLAN 02].
 	manifest, _ := manifestHashFor(fs)
 
@@ -377,10 +385,14 @@ func CompileWithOptions(fs vfs.FSOps, opts Options) (*Catalog, error) {
 		AliasOrder:         aliasOrder,
 		BuildMenus:         buildMenus,
 		DownloadPlacements: downloadPlacements,
+		SurvivalRoster:     survivalRoster,
 		Warnings:           warnings,
 		Manifest:           manifest,
 		sortedModels:       sortedModels,
 		modelIndex:         modelIndex,
+	}
+	if err := c.ValidateSurvivalRoster(); err != nil {
+		return nil, err
 	}
 	// Stable weapon index: one record per slot [02 §5 R-CONTENT-02].
 	c.weaponByID, c.weaponDuplicates = buildWeaponIndex(weapons, weaponDuplicates)
@@ -737,7 +749,7 @@ func (c *Catalog) Validate() error {
 	}
 	// translate.tdf is optional — missing yields identity map, byte-exact [02 §3] C7 — so no check.
 	// GAMEDATA.TDF does not exist in a real install [SPEC_CONFLICTS SC2] — must not be required.
-	return nil
+	return c.ValidateSurvivalRoster()
 }
 
 // Clone returns a deep copy for per-match isolation [PLAN 02].
@@ -752,6 +764,11 @@ func (c *Catalog) Clone() *Catalog {
 	out := &Catalog{
 		Manifest: c.Manifest,
 		Hash:     c.Hash,
+	}
+	if c.SurvivalRoster != nil {
+		cp := *c.SurvivalRoster
+		cp.Units = slices.Clone(cp.Units)
+		out.SurvivalRoster = &cp
 	}
 	if c.Categories != nil {
 		out.Categories = cloneCategoryRegistry(c.Categories)

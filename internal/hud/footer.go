@@ -148,6 +148,9 @@ type FooterHover struct {
 	// view or over the minimap and otherwise keeps its previous value, so a
 	// unit hovered on the way to the panel stays in the footer.
 	Unit pool.Handle
+	// UnitNamePrefix is a scenario presentation label, applied only after
+	// direct visibility admits the unit name (DESIGN_SURVIVAL §5.2).
+	UnitNamePrefix string
 	// Visible is the viewing player's direct-visibility predicate
 	// [03 R-VIS-01 §4]. The composer supplies it because the projection from
 	// world position to the committed mask is its own; a nil predicate admits
@@ -289,7 +292,7 @@ func unitReadout(out *Footer, f *frame.Frame, cat *content.Catalog, viewer uint8
 	// player's lobby name only in a multiplayer session (kind 3), which is out
 	// of Nanolathe's scope [07 R-HUD-03 §2][08 R-OOS-01].
 	if def != nil && def.Name != "" {
-		out.Texts = append(out.Texts, FooterText{Anchor: AnchorUnitName, Text: def.Name, Color: rawColor(FooterTextColor), Centered: true})
+		out.Texts = append(out.Texts, FooterText{Anchor: AnchorUnitName, Text: hover.UnitNamePrefix + def.Name, Color: rawColor(FooterTextColor), Centered: true})
 	}
 	// The bar is drawn for an own unit or a definition that does not author
 	// hidedamage; allies see no bar either [07 R-HUD-03 §2][04 R-SPEC-01 §6].

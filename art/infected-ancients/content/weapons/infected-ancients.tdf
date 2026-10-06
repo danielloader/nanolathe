@@ -1,0 +1,71 @@
+// Original prototype balance, not a retail behavior claim.
+[ia_bile]
+{
+  ID=240;
+  explosiongaf=fx;
+  explosionart=explode5;
+  soundstart=armsml2;
+  soundhit=lasrhit1;
+  name=ia_bile;
+  weapontimer=1;
+  rendertype=4;
+  color=2;
+  turret=1;
+  lineofsight=1;
+  ballistic=0;
+  range=100;
+  reloadtime=0.7;
+  weaponvelocity=400;
+  areaofeffect=12;
+  edgeeffectiveness=0.25;
+  tolerance=4000;
+  accuracy=0;
+  [DAMAGE]
+  { default=42; }
+}
+[ia_spit]
+{
+  ID=241;
+  explosiongaf=fx;
+  explosionart=explode5;
+  soundstart=armsml2;
+  soundhit=lasrhit1;
+  name=ia_spit;
+  rendertype=4;
+  color=2;
+  turret=1;
+  lineofsight=0;
+  ballistic=1;
+  range=420;
+  reloadtime=2.2;
+  weaponvelocity=340;
+  areaofeffect=48;
+  edgeeffectiveness=0.25;
+  tolerance=4000;
+  accuracy=0;
+  [DAMAGE]
+  { default=110; }
+}
+[ia_siege]
+{
+  ID=242;
+  explosiongaf=fx;
+  explosionart=explode5;
+  soundstart=armsml2;
+  soundhit=lasrhit1;
+  name=ia_siege;
+  rendertype=4;
+  color=2;
+  turret=1;
+  lineofsight=0;
+  ballistic=1;
+  range=700;
+  reloadtime=4.5;
+  weaponvelocity=430;
+  areaofeffect=120;
+  edgeeffectiveness=0.25;
+  tolerance=4000;
+  accuracy=0;
+  [DAMAGE]
+  { default=420; }
+}

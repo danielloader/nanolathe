@@ -1172,7 +1172,10 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 	// ORed in here, which pinned the rail open as well as the panel.
 	spaceHeld := in != nil && in.Kbd != nil && in.Kbd.KeyHeld(input.KeySpace)
 	editorFocused := b.isTalkGUIActive() || b.hud != nil && b.hud.editorFocused()
-	b.battleState().AdvancePanelNow(spaceHeld, editorFocused)
+	if b.millisSource == nil {
+		b.millisSource = newMonotonicMillisSource()
+	}
+	b.battleState().AdvancePanelWithClock(b.millisSource, spaceHeld, editorFocused)
 	// End-mission presentation takes ownership of the frame once the
 	// authoritative result is latched. The authored result panel owns any
 	// release-inside gesture; no battle hotkey or world command leaks through

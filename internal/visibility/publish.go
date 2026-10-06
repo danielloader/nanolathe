@@ -200,13 +200,11 @@ func (s *Service) walkTerrainRay(cx, cz int32, heightByte uint8, radius int32, v
 		retainedNum, retainedDen := int32(-1), int32(0)
 		for _, step := range spoke {
 			gx, gz := cx+step.dx, cz+step.dz
-			// Unsigned bounds BEFORE any terrain read [C5]. A spoke that leaves
-			// the map ends there — it does not resume on the far side.
-			// (The attested pseudocode `continue`s; on monotone radial
-			// spokes every later step is also out of bounds, so break is
-			// equivalent and cheaper.)
+			// Skip out-of-map points before any terrain read [03 R-VIS-01 §3].
+			// Later authored points can re-enter; their original ordinal remains
+			// the denominator even when intervening points were skipped.
 			if uint32(gx) >= uint32(s.W) || uint32(gz) >= uint32(s.H) {
-				break
+				continue
 			}
 			lo, hi := s.terrain.LOSHeightWord(gx, gz)
 			candidateDiff := int32(lo) - int32(heightByte)

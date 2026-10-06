@@ -110,8 +110,13 @@ negative restored value, blocks admission; decrement wraps in that same signed
 16-bit word `[06 §3.3]` `[06 §4.2]`.
 
 `StepWeaponsForUnit` is the authoritative per-unit entry point the session's
-slot visit calls. It completes each slot's target resolution, Aim dispatch and
-firing decision before visiting the next slot, so an earlier slot's Fire/Rock
+slot visit calls. An allocated shooter still receives this visit after its
+death latch is set; finalization belongs to the end of the session's unit visit
+`[04 R-COB-02 §2]`. A retained allocated target also reaches its synchronous
+`SweetSpot` query while death-latched `[06 R-WPN-04 §1]`. These consumer gates
+do not relax the separate acquisition filters. The service completes each
+slot's target resolution, Aim dispatch and firing decision before visiting the
+next slot, so an earlier slot's Fire/Rock
 starts precede a later slot's query or Aim preparation. The session owns the
 one normal drain after all three slots [04 R-MOV-03 §1]. A missing script or an
 exhausted thread pool never authorizes a shot `[06 §3.3]` `[06 §3.4]`.
@@ -791,6 +796,9 @@ zero and 2000 while it is moving — a movement state, never a unit class
 bound is computed from the shooter's own health, maximum health and credited
 kills; nothing about the target enters it, and it steers ballistic trajectories
 only `[06 R-WPN-03 §4]` `[06 R-WPN-05 §5]` `[06 R-WPN-01 §3]`.
+The arithmetic reads signed low-word current health and the full unsigned
+maximum-health word. High-bit maxima remain admitted; only zero faults. The
+same domain is preserved by reload computation `[06 §4.2]`.
 `BallisticSolve` is the trajectory solver: the discriminant, the two candidate
 angles, and the conversion into the 16-bit angle word. It is handed
 `target − source` deltas by every caller and negates the vertical one itself,
@@ -1355,6 +1363,10 @@ The three floating inputs are stored as `float32`, then converted at working
 precision with signed-64 low-word truncation `[01 R-DET-01 §1]`.
 Meteor geometry draws from the **CRT** stream, not the simulation stream, and
 the census is four draws per storm and two per hit `[06 R-WPN-01 §6]` [I4].
+The geometry helpers retain the scheduler's signed cell and fixed-point
+widths while widening only its random scaling products `[06 §6.5]`. Focused
+regressions cover authored large radii and coordinate wrap; they do not assert
+stock-content occurrence of those extremes.
 Records spawned through the null-shooter path carry the neutral side byte so
 their explosions credit nobody, and that side still passes the damage gate
 `[06 R-DMG-01 §9]`.
@@ -1448,12 +1460,18 @@ debits both or neither; the per-shot debit re-tests metal after debiting energy
 `[06 §4.2]` `[06 R-WPN-01 §7]`. A stockpile launch decrements ammunition and
 performs no per-launch debit.
 
-**C7 — the reload expression, truncated in this order** `[06 §4.2]` [I3]:
-`tier = min(floor(kills / 5), 5)`;
-`veteranReload = floor((100 − 6·tier) × authoredReload / 100)`;
-`healthFactor = 120 − floor(20 × health / maxHealth)`;
-`storedReload = floor(healthFactor × veteranReload / 100)`.
-The kill division is unsigned. A stockpile launch does not write reload.
+**C7 — reload preserves the consumer widths and order** `[06 §4.2]` [I3].
+`computeStoredReloadAtLevel` receives the bound rule's veteran level and the
+zero-extended reload word. It sign-extends current health from its low word,
+divides the health product by the full unsigned maximum-health word, and wraps
+the final product before signed truncating division. The caller narrows the
+result into the signed-16 countdown. Only zero maximum health faults; a
+high-bit maximum remains a valid divisor. A stockpile launch does not write
+reload. `TestReloadHealthArithmeticWidths` locks the unsigned divisor,
+sign extension and wrapped product; `TestAllocatedDeathLatchPreservesWeaponVisit`
+checks callbacks, RNG, debit and reload through the production consumer in
+Strict and Modern, including the authored high-bit maximum boundary. The
+unit-initialization narrowing itself remains owned by `internal/units`.
 
 **C8 — a burst is N pellets plus one anchor.** Only the ordinary, ballistic
 and vertical creators copy the authored burst count. The dropped and meteor
@@ -1856,6 +1874,13 @@ projectile reuse follows the explicit reservation and creator writes.
 
 Open items the contracts above carry:
 
+* **SweetSpot's retained instance geometry.** Retail scans mutable instance
+  points, but the complete aim-time materialization chronology is unresolved
+  `[06 R-WPN-04 §1]` `[04 R-COB-04 §3]`. The current immutable model scan and
+  model/piece cache remain deterministic placeholders, not established retail
+  equivalence. Trace the materializers, synchronous callbacks and offscreen
+  timing before changing either; any policy needed to make retained history
+  independent of rendering must preserve the authoritative publication boundary.
 * **An out-of-range movement-state operand reaching the reload formula.** The
   health half of the reload plan's original question is closed — health is a
   signed 16-bit field, the heal kind clamps unsigned to the definition's 32-bit

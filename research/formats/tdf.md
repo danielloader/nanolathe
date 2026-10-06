@@ -248,11 +248,14 @@ the F1 help screen (the `|` separates key from description).
 **TRANSLATE.TDF** — one section per English string, keys are language names
 (`German=`, `French=`, `piglatin=`…).
 
-**LOS.TDF — Established:** `[TABLEINFO] numtables` selects `TABLE0` through
-`TABLE<numtables-1>`. Each table's `numlines` selects `line0` onward; a line
-stores a point count followed by that many coordinate pairs. `[03 R-VIS-01 §3]`
-owns quadrant expansion, table selection and the ray walk. The declared count,
-not the number of shipped sections, bounds selection.
+**LOS.TDF — Established:** `[TABLEINFO] numtables` selects `TABLE1` through
+`TABLE<numtables>`. Each table's `numlines` selects `line1` through
+`line<numlines>`; missing named lines stay empty and extra lines are ignored.
+A line stores a point count followed by that many coordinate pairs, with
+commas and ASCII spaces acting independently as token separators.
+`[03 R-VIS-01 §3]` owns count and coordinate narrowing, quadrant expansion,
+table selection and the ray walk. The declared count, not the number of
+shipped sections, bounds selection.
 
 **CATEGORY.TDF** — category names with `description=`; informational only
 (categories used in FBI files do not need to appear here).
@@ -535,8 +538,11 @@ the available definitions, not merely button color `[08 R-ENTRY-01 §2]`.
 Owned by `[02 §4]` and `[02 R-MALF-01 §4]`; the byte-level facts:
 
 - Comments are blanked to spaces first, length preserved: `//` to the end of
-  the line (newline kept), `/* … */` inclusive, an unterminated `/*` to the
-  end of the text.
+  the line (newline kept) and `/* … */` inclusive. **Established:** an
+  unterminated block retains its last body character before the text
+  terminator, with the opener and preceding body blanked; a trailing opener
+  alone is fully blanked. The retained character is parsed normally, so a
+  trailing `}` can close an otherwise unfinished section [02 §4].
 - The parser then walks the text: `[` needs a `]` somewhere after it and,
   after whitespace, a `{`; `}` closes the section (a `}` at the top level
   **ends the parse** and the rest of the file is ignored); anything else

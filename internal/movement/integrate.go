@@ -386,7 +386,9 @@ func (p *pathProvider) Poll(player int) (path.Request, path.PollResult) {
 		return path.Request{}, path.PollNoUnit
 	}
 	if !p.started[player] {
-		p.cursor[player] = start - 1
+		// The constructor seeds the actual first slot; each poll advances before
+		// inspecting it, including the entry prime [04 R-PATH-01 §6].
+		p.cursor[player] = start
 		p.started[player] = true
 	}
 	p.cursor[player]++
@@ -535,7 +537,7 @@ func (p *pathProvider) IdleRun(player int, limit int32) int32 {
 	}
 	c := p.cursor[player]
 	if !p.started[player] {
-		c = start - 1
+		c = start
 	}
 	if c < start-1 {
 		// A cursor below the slice (never the case for a slice that has not
@@ -600,7 +602,7 @@ func (p *pathProvider) SkipIdle(player int, n int32) {
 		return
 	}
 	if !p.started[player] {
-		p.cursor[player] = start - 1
+		p.cursor[player] = start
 		p.started[player] = true
 	}
 	c := p.cursor[player]
@@ -1003,7 +1005,13 @@ func (s *System) BindWorld(w *units.World) {
 	if s == nil {
 		return
 	}
+	if s.world != nil && s.world != w {
+		s.world.ClearAttachmentObserver(s)
+	}
 	s.world = w
+	if w != nil {
+		w.SetAttachmentObserver(s)
+	}
 	// The pool's capacity is fixed for the battle and every handle it can hand
 	// out is below it, so sizing the per-handle tables here is what lets every
 	// read index without a bounds test of its own [I5].
@@ -1017,7 +1025,7 @@ func (s *System) BindWorld(w *units.World) {
 		s.pathProvider.world = w
 		if changedWorld {
 			// A newly bound unit pool defines the physical cursor boundaries. The
-			// next poll starts at each slice's first slot [04 R-PATH-01 §6]. A
+			// cursor seeds each slice's first slot before advancing [04 R-PATH-01 §6]. A
 			// same-world bind is an ordinary per-tick composition refresh and must
 			// retain the scheduler's persistent physical cursor.
 			s.pathProvider.started = [10]bool{}
@@ -2121,8 +2129,8 @@ func (s *System) EnsureUnit(u *units.Unit) {
 	setHandleRow(&s.Collisions, h, coll)
 	// A record no stamp has filed is in no sector bucket, so the clear's
 	// overlap scan has to be told about it separately [04 R-COLL-01 §4A].
-	// The stamp below files most of them immediately; the modes that write no
-	// cell keep the entry until their first commit that stamps.
+	// The ordinary stamp below files every mode, even one with no cell plane.
+	// Only an incomplete host binding can leave an entry pending.
 	s.noteUnfiledFiling(h)
 	if s.Grid != nil {
 		// Every successful stamp writes the occupant-age clock first, and unit
@@ -2133,6 +2141,7 @@ func (s *System) EnsureUnit(u *units.Unit) {
 		// here too and then never advances again, but that is no longer what
 		// makes it block the search: with no mover it takes the occupant-age
 		// gate's null arm unconditionally [04 R-PATH-01 §14].
+		s.Grid.fileUnit(coll.ID, anchor, footX, footZ)
 		stamped := false
 		if coll.Building {
 			stamped = s.stampBuildingGrid(anchor, footX, footZ, coll.Yard, coll.YardOpen, coll.ID)

@@ -201,6 +201,15 @@ type ModelCacheKey struct {
 // Reusable reports whether the key identifies a retained body at all.
 func (k ModelCacheKey) Reusable() bool { return k.Body != 0 }
 
+// ModelCachedSeed describes the immutable image before frame-local staging.
+// Positive dimensions select the cached-plane seed contract [03 R-REN-03A §4].
+// Origin is in native recording pixels, before rebasing into the current box.
+// A zero value leaves direct, keyless and standalone adapters unchanged.
+type ModelCachedSeed struct {
+	Width, Height    int32
+	OriginX, OriginY int32
+}
+
 // ModelGeometry is the immutable, subject-local geometry input for the modern
 // model path. Recorded slices remain valid until the next recording pass;
 // Clone owns independent slices for retained consumers. Origin is the image
@@ -215,6 +224,8 @@ func (k ModelCacheKey) Reusable() bool { return k.Body != 0 }
 // consumer report the reason without consulting a CPU image [03 R-REN-03A
 // §4, §6–§8].
 type ModelGeometry struct {
+	CachedSeed ModelCachedSeed
+
 	// Cloaked selects the final body blend, never a retained-raster input
 	// [03 R-RAST-01 §7]. A staged carrier owns its combined body blend.
 	Cloaked bool

@@ -632,10 +632,20 @@ func (c *Client) uiShadeRectRaw(pal *palette.Tables, x, y, w, h, level int) {
 			if px < 0 || px >= c.width {
 				continue
 			}
+			pixel := c.indexed[base+px]
+			sampleRow := row
+			if pixel >= 128 && row > 0 {
+				// The rectangle writer sign-extends the destination index:
+				// high indices address the preceding row [03 R-COMP-02 §5].
+				sampleRow--
+			}
+			// TODO(question): high indices at row zero read before retail's
+			// table. Establish the preceding data and reachable fade levels;
+			// retain our bounded row-zero lookup until that contract is known.
 			if useShade {
-				c.indexed[base+px] = pal.ShadeLookup(row, c.indexed[base+px])
+				c.indexed[base+px] = pal.ShadeLookup(sampleRow, pixel)
 			} else {
-				c.indexed[base+px] = pal.LightLookup(row, c.indexed[base+px])
+				c.indexed[base+px] = pal.LightLookup(sampleRow, pixel)
 			}
 		}
 	}

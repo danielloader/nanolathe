@@ -151,7 +151,7 @@ func TestInputInterfaceOptionCrossesCommandBoundary(t *testing.T) {
 	}
 }
 
-func TestInputPagingWrapAndPendingCueIdentity(t *testing.T) {
+func TestInputPagingWrapAndAcceptedCueRequests(t *testing.T) {
 	b, cl, _ := paletteCallbackFactory(t, []gui.Gadget{{Kind: gui.KindButton, Name: "ARMNEXT", Active: 1, QuickKey: 'n'}}, nil, 0, 3)
 	spy := paletteCallbackCues(t, b, cueNextBuildMenu)
 	_ = cl
@@ -172,9 +172,12 @@ func TestInputPagingWrapAndPendingCueIdentity(t *testing.T) {
 	}
 	before := len(spy.aliases)
 	b.switchBuildPage(9)
-	b.switchBuildPage(3)
 	if page() != 2 || len(spy.aliases) != before {
-		t.Fatal("invalid or unchanged page emitted a change or cue")
+		t.Fatal("invalid page emitted a change or cue")
+	}
+	b.switchBuildPage(3)
+	if page() != 2 || len(spy.aliases) != before+1 {
+		t.Fatal("accepted unchanged page did not request its cue")
 	}
 }
 

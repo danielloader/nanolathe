@@ -139,8 +139,9 @@ func (h *retailBattleHUD) sidebarGadgetVerdict(window *gui.Window, gad gui.Gadge
 			return commandButtonVerdict{hidden: h.sidebarPaging.state.Count < 2}, true
 		}
 	}
-	// A product slot greys only when its installed name resolves to no
-	// definition, exactly as on an authored page [07 R-HUD-03 §6]. CANBUILD
+	// The expanded view resolves each product slot by its installed name.
+	// This host policy also applies to the final source child, which the
+	// authored-page resolution pass skips [07 R-HUD-03 §6]. CANBUILD
 	// membership is not a button-state input: stock CORCS installs CORSY and
 	// CORLLT on its first page without listing either, and both stay live
 	// [07 §9].

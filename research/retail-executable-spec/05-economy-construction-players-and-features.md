@@ -1186,8 +1186,20 @@ return 0.0;
 The first test is inequality against zero, not a sign test, so a definition
 authoring a **negative** `energyuse` short-circuits and its generator terms are
 never reached by this query — while the settlement, which tests the sign, pays
-them anyway. Both callers are computer-player code; doc 08 owns what they do
-with the answer.
+them anyway. The zero test is ordered: a stored NaN `energyuse` also falls
+through, rather than returning that NaN. The two strictly-positive generator
+tests reject NaN. All three authored fields and both environment scalars are
+loaded from single-precision stores. The selected generator product and its
+negation retain the established 53-bit working precision through the return;
+there is no single-precision store at this helper boundary. Its callers keep
+their own subsequent stores and conversions. Both callers are computer-player
+code; doc 08 owns what they do with the answer.
+
+**Unknown — exceptional query-result production.** A selected product can be
+unordered for exceptional operand combinations, but the comparison contract
+alone does not establish a complete authored-content and environment path to
+those operands. Direct-state NaN fixtures establish consumer behavior only;
+integer build-cost loading does not establish NaN cost admission.
 
 #### The activated bit's writers, and what `onoffable` gates [R-PROD-01 §2]
 
@@ -1576,11 +1588,12 @@ accumulator = (uint16)( accumulator + cell.metalByte + 1 )
 ```
 
 The accumulator is **sixteen bits** and wraps modulo 65536. Practical bound:
-each cell adds at most 256, so wrapping needs Σ(byte + 1) ≥ 32768 — 128 covered
-cells at metal byte 255, or 32768 covered cells at metal byte 0, which is a
-182×182-cell footprint. No shipped definition comes close; the wrap is a stated
-edge, not an observed one, and it is stated because the next step reads the
-accumulator **signed**.
+each cell adds at most 256, so the signed-negative range is first reached at
+Σ(byte + 1) = 32768 — 128 covered cells at metal byte 255, or 32768 covered
+cells at metal byte 0. Actual wrap to zero occurs at 65536, twice that sum.
+No shipped definition comes close to the sign boundary; these are stated
+arithmetic edges, not observed stock-content cases. The distinction matters
+because the next step reads the accumulator **signed**.
 
 **Established — the rate, and its evaluation order.** The rate is stored on the
 unit as:
@@ -2634,9 +2647,10 @@ contacts come from the sensor phase's status bits.
 destination slot, amount as single precision, debit flag)`. Either slot equal
 to `10` (the "no slot" sentinel) returns without effect. When the debit flag
 is set and the source's live stock of that resource is strictly less than the
-amount, the amount becomes the live stock. An amount exactly equal to `0.0`
-(after the clamp) returns without effect; a negative amount is not rejected
-(see the edge below).
+amount, the amount becomes the live stock. After that clamp, an amount equal
+to `0.0` **or unordered (NaN)** returns without effect: neither ledger is
+touched and no sharing message is emitted. A negative ordered amount is not
+rejected (see the edge below).
 
 **Established — debit.** When the debit flag is set the source's storage
 object is asked to pay: if `amount <= live stock` (inclusive, single
@@ -2644,9 +2658,16 @@ precision) the live stock is reduced by the amount and the source's
 mirror-bucket "requested this pass" slot for that resource is increased by
 it, and the helper returns success; otherwise nothing is paid and it returns
 failure. **The transfer helper ignores that result** and credits regardless.
-With the clamp above, a debit-flag caller can never reach the failure branch
-(after the clamp `amount <= stock` holds), and callers without the flag never
-debit.
+With ordered operands the clamp makes `amount <= stock` hold; callers without
+the flag never debit. A **NaN source stock with an ordered nonzero amount**
+is the exception: the cap does not replace the amount, the direct-payment
+comparison refuses the debit, and the transfer still credits the recipient
+and reaches its message producer. Neither the source stock nor its requested
+accumulator is written on that refused debit. This differs from a NaN amount,
+which returns at the preceding gate. These helper outcomes are **Established**;
+whether ordinary sharing producers can supply those exceptional combinations
+is **Unknown**, pending a trace from exceptional settlement stock through the
+automatic-sharing selection and the SHARE control read-back.
 
 **Established — credit and the recipient discount.** The credit is written to
 the destination's **mirror-bucket production slot** for that resource
@@ -2678,9 +2699,10 @@ refuses unless the session is networked, the source is local, and the
 destination is a remote peer, so in a single-player battle the emission is a
 no-op ([R-SHARE-01 §4]).
 
-**Established — the negative-amount edge.** A negative amount passes every
-gate: the clamp only lowers a too-large positive amount, the zero test is an
-exact compare, the debit test `amount <= stock` is true, so the source's stock
+**Established — the negative-amount edge.** With nonnegative ordered source
+stock, a negative amount passes every gate: it does not exceed the stock,
+the zero/unordered test passes, and the debit test `amount <= stock` is true,
+so the source's stock
 *increases* by the magnitude and the destination's production slot *decreases*
 by it. Whether the SHARE screen's slider read-back can produce a negative
 value is **Unknown** (decider: static trace of the slider's range against the
@@ -5988,9 +6010,15 @@ sequences (`seqnameburn`, `seqnameburnshad`, `seqnamedie`, `seqnamedieshad`,
 `seqnamereclamate`, `seqnamereclamateshad`) that resolves, the parser writes
 zero into the sequence's loop byte. `seqname`/`seqnameshad` keep the GAF loop
 byte. A `seqname*` value that is an empty string stores 0 (treated as absent).
-What the bank lookup returns for a name that is **not** in the bank is
-**Unknown** (decider: static trace of the sequence lookup's miss path); the
-shipped corpus has no such case (asset census under "Feature burning").
+For a nonempty name, the lookup scans the bank's entries in order using a
+case-insensitive comparison and returns the first match. It returns 0 when
+the bank handle is absent, the bank has no entries, or the name is missing.
+The parser stores that absent result and skips the event loop-byte write;
+it does not substitute another sequence. Thus a missing burn sequence prevents
+ignition, while a missing death or reclaim sequence selects the immediate
+replacement path (§5, §9). This is **Established** for the lookup and its
+feature-parser callers; it does not define recovery from malformed bank
+contents or from a failure before the bank lookup is reached.
 
 **Established — the rest cursors.** When `animating=1` and `seqname` resolved,
 the parser initialises a per-**definition** animation cursor from `seqname`
@@ -6236,11 +6264,12 @@ fringe over every covered cell.
 1. If the cell holds `0xFFFE`, walk back to the anchor.
 2. If the (anchor) word is `≥ 0xFFFB` — empty, void, or any other sentinel —
    return 0.
-3. If `honor == 0` and the definition is indestructible, return 0. Every
-   caller in the executable passes `honor == 0`; the honoring variant is
-   never used, so **an indestructible feature is never removed by any path**.
-   The honor test reads the **indestructible** flag (bit 9) and nothing else;
-   `autoreclaimable` (bit 8) plays no part in teardown (§6).
+3. If `honor == 0` and the definition is indestructible, return 0. Ordinary
+   placement, replacement, burn completion and resurrection callers pass 0.
+   Separate force-removal callers pass 1, bypassing this check; their
+   availability is bounded below. The test reads the **indestructible** flag
+   (bit 9) and nothing else; `autoreclaimable` (bit 8) plays no part in teardown
+   (§6).
 4. If the anchor's instance bit is set: for a 3D definition release the model
    instance; then move the slot from whichever list holds it to the **head**
    of the free list (LIFO).
@@ -6255,6 +6284,18 @@ fringe over every covered cell.
 The accumulated-damage word of an instance-less anchor is not cleared here;
 the next stamp on that cell overwrites it (§3 step 5), so damage never leaks
 to a successor.
+
+**Established — developer force removal.** The registered `BurnAll` command
+walks all terrain cells in row-major order, calling teardown with the override
+set for each real feature word or fringe word. `BurnOne` applies the override
+to the current pointed cell after a real-feature test. They remove directly,
+without requesting death, burn or reclaim animations or successors. The
+whole-map walk leaves void and other reserved markers alone; clearing an
+anchor also clears its fringes before the walk reaches them. Battle TALK
+reaches these handlers with developer access, subject to its watcher gate;
+the cheat option alone does not grant that access. [07 R-CAM-01 §6] owns the
+registration and dispatch contract. This availability does not give ordinary
+placement or replacement an indestructibility bypass.
 
 #### The geothermal steam producer [R-ECO-02 §3]
 
@@ -6393,7 +6434,7 @@ reclaim"):
 |---|---|---|
 | `reclaimable` | `0` | command-gated; only when `1` can a builder enter the reclaim state |
 | `autoreclaimable` | `1` | read only by the area-reclaim candidate scan ([R-FEAT-01 §6]); it is not a teardown or stamp guard, so a colliding stamp clears the feature whatever its value |
-| `indestructible` | `0` | weapon-damage and teardown guard; when `1` damage is ignored and teardown returns without clearing |
+| `indestructible` | `0` | weapon-damage and ordinary teardown guard; when `1` damage is ignored and teardown without the force override returns without clearing (§4) |
 | `blocking` | `0` | pathway/yard map predicate; when `1` the footprint is treated as blocked for generic placement |
 | `geothermal` | `0` | footprint-class flag; a `YardMap 'G'` requirement is satisfied only by a covered cell holding this flag (yard-map bit 7, `[04 §6.4]`) |
 
@@ -7363,10 +7404,10 @@ body and are not restated here.
   authoritative totals versus presentation-only cached values · doc 07 ·
   static trace. The live-stock and pass-counter HUD readers are partially
   enumerated.
-- What the GAF bank lookup returns for a `seqname*` value naming an entry
-  absent from the bank (zero, which the code treats as "no sequence", or a
-  fault) · "Catalog construction", [R-FEAT-01 §1] · static trace of the
-  sequence lookup's miss path; the shipped corpus has no such case.
+- Whether ordinary sharing producers can pass a NaN amount or an ordered
+  nonzero amount with NaN source stock; the helpers' distinct outcomes are
+  established · [R-SHARE-01 §2] · static trace from exceptional settlement
+  stock through automatic-sharing selection and SHARE control read-back.
 - What the stamp does with a TNT feature word that is below the format's
   reserved band but at or above the compiled table count; no stock map was
   checked for one · "Placement", [R-FEAT-01 §17] · static trace of the

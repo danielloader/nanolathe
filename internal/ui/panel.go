@@ -559,8 +559,11 @@ func (p *Panel) ReleaseAction(x, y int32) Action {
 				p.SetFocus(target)
 				return Action{Kind: ActionActivate, Gadget: candidate.Name, Index: target}
 			}
+			if candidate.Kind == gui.KindScrollBar && (candidate.Attribs&0x10 != 0 || candidate.GrayedOut != 0) {
+				return Action{Kind: ActionNone, Index: -1}
+			}
 			p.SetFocus(target)
-			return Action{Kind: ActionNone, Index: -1}
+			return Action{Kind: ActionActivate, Gadget: candidate.Name, Index: target}
 		}
 	}
 	return Action{Kind: ActionActivate, Gadget: gadget.Name, Index: idx}
@@ -778,6 +781,9 @@ func (p *Panel) DecayFlash() {
 // not here, which is how HELPTEXT shows help for a greyed button
 // [07 R-WGT-01 §13]. Use Fires or PressTest for the press-time answer.
 func (p *Panel) HitTest(x, y int32) int {
+	// TODO(question): settle loader/service acceptance and focus for a first
+	// record that is not a window; retail's top-level rectangle doubles its
+	// position. Retain index-zero exclusion meanwhile [07 R-WGT-01 §1].
 	if p == nil || p.Window == nil {
 		return -1
 	}

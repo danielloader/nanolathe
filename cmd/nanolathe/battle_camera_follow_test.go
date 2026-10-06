@@ -132,6 +132,7 @@ func TestFollowedUnitScreenPositionSettlesToAConstantOffset(t *testing.T) {
 // [04 R-MOV-03 §1][07 R-CAM-01 §12]
 func TestBigBrotherFollowsEveryControllerTick(t *testing.T) {
 	b := newTestBattle(testCatalogON05(), testWorldON05(80, 80))
+	configureFollowCycleOwner(b)
 	b.sess.State = session.StateBattle
 	first := placeUnit(b, "armcons", numeric.Fixed(400<<16), numeric.Fixed(500<<16))
 	second := placeUnit(b, "armfav", numeric.Fixed(900<<16), numeric.Fixed(800<<16))

@@ -107,6 +107,7 @@ func AttachCargoMode(w *units.World, carrierHandle, cargoHandle pool.Handle, pie
 	cargo.Attachment.AttachPiece = int(int8(uint8(piece)))
 	// Cargo is linked at the head, not appended [04 R-COB-03 §5].
 	carrier.Attachment.Cargo = append([]pool.Handle{cargoHandle}, carrier.Attachment.Cargo...)
+	w.NotifyAttachmentChanged(cargo)
 	writeRequestedMoverMode(cargo, mode)
 	return true
 }
@@ -223,6 +224,7 @@ func DetachCargoMode(w *units.World, cargoHandle pool.Handle, mode int) (pool.Ha
 	}
 	cargo.Attachment.Carrier = 0
 	cargo.Attachment.AttachPiece = -1
+	w.NotifyAttachmentChanged(cargo)
 	writeRequestedMoverMode(cargo, mode)
 	return carrierHandle, true
 }
@@ -261,7 +263,9 @@ func (s *System) syncCarriedUnit(w *units.World, cargo *units.Unit) {
 	}
 	carrier := w.Unit(cargo.Attachment.Carrier)
 	if carrier == nil {
-		// Orphaned attachment: clear
+		// TODO(question): an orphan has no established detach/rehead history.
+		// Keep the existing host link cleanup without inventing a sector target
+		// [04 R-COLL-01 §11].
 		cargo.Attachment.Carrier = 0
 		cargo.Attachment.AttachPiece = -1
 		return
@@ -363,7 +367,10 @@ func (s *System) syncCarriedUnit(w *units.World, cargo *units.Unit) {
 		collCargo.VZ = carrierVZ
 		collCargo.Speed = carrierSpeed
 		collCargo.Dirty = true
-		newAnchor := collCargo.ProposedAnchor(cargo.Move.Mode)
+		// The locator has already supplied the committed hang position. The
+		// carried setter does not add the carrier velocity again [04 R-COLL-01 §1].
+		bx, bz := collCargo.HalfBias()
+		newAnchor := QuantizedAnchor(collCargo.X, collCargo.Z, bx, bz)
 		stampedPlane, stamps := planeForMode(cargo.Move.Mode)
 		stampMismatch := collCargo.HasStamp && (!stamps || collCargo.StampedPlane != stampedPlane)
 		if newAnchor != collCargo.OldAnchor || collCargo.CachedMode != cargo.Move.Mode || stampMismatch {
@@ -726,6 +733,29 @@ func (s *System) ScriptDropCargo(w *units.World, carrierHandle, cargoHandle pool
 	if _, ok := DetachCargoMode(w, cargoHandle, 1); !ok {
 		return false
 	}
-	s.syncMoverStamp(cargo)
+	// The accepted drop only relinks and requests mode 1; the next ordinary
+	// mover commit owns any stamp [04 R-COB-03 §5][04 R-AIR-01 §10].
 	return true
+}
+
+// AttachmentChanged projects the accepted relationship into the top-level
+// buckets. It deliberately precedes the requested-mode write and never
+// stamps, quantizes XYZ, or initializes a missing mover [04 R-COLL-01 §11].
+func (s *System) AttachmentChanged(u *units.Unit) {
+	if s == nil || s.Grid == nil || u == nil {
+		return
+	}
+	g := s.Grid
+	if u.Attachment.Carrier != 0 {
+		g.unlinkSector(int(u.Handle))
+		return
+	}
+	coll := handleRow(s.Collisions, u.Handle)
+	if coll == nil || !coll.Filing.Filed {
+		// TODO(question): establish the absent-filing initialization history.
+		// Leave this incomplete host context unlinked; current XYZ is not a
+		// substitute for the retained stamp reference [04 R-COLL-01 §11].
+		return
+	}
+	g.reheadFiling(int(u.Handle), &coll.Filing)
 }

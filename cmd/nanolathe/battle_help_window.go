@@ -66,7 +66,8 @@ func battleHelpPage(fs vfs.FSOps, page int) []battleHelpLine {
 }
 
 // splitBattleHelpLine applies the filler's two cases: a value whose first byte
-// is `|` becomes a single-space key column with the rest as the description,
+// is `|` becomes a single-space key column; the description starts at byte 2,
+// because the key rewrite also overwrites the next byte with its terminator.
 // and any other value is cut at its first `|` past that byte
 // [07 R-FE-01 §7][fmt tdf "HELP.TDF"].
 func splitBattleHelpLine(value string) battleHelpLine {
@@ -74,7 +75,7 @@ func splitBattleHelpLine(value string) battleHelpLine {
 		return battleHelpLine{}
 	}
 	if strings.HasPrefix(value, "|") {
-		return battleHelpLine{Key: helpBlankKey, Description: value[1:]}
+		return battleHelpLine{Key: helpBlankKey, Description: value[min(2, len(value)):]}
 	}
 	if cut := strings.Index(value[1:], "|"); cut >= 0 {
 		return battleHelpLine{Key: value[:cut+1], Description: value[cut+2:]}

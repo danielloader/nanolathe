@@ -221,7 +221,7 @@ func TestLoadBoxPreservesValidPrefixBits(t *testing.T) {
 	binary.LittleEndian.PutUint16(want[20:22], 7)
 	binary.LittleEndian.PutUint16(want[22:24], 4)
 	binary.LittleEndian.PutUint16(want[24:26], 0xff85) // int16(-123)
-	// Preserve the lag bit and opaque upper bits; bit 2 agrees with 7 != 4.
+	// Preserve the lag bit and opaque upper bits; bit 2 agrees with active below requested.
 	binary.LittleEndian.PutUint16(want[26:28], 0xA006)
 
 	var got State
@@ -294,5 +294,68 @@ func TestSlowestSpeedIsATenthNotPause(t *testing.T) {
 	}
 	if total != 30 || first != 10 {
 		t.Fatalf("speed 1 ran %d ticks in 300 scaled units, first at unit %d; want 30, first at 10", total, first)
+	}
+}
+
+// [01 §4.3]: this is a budget-entry sample, not a derived save-time flag.
+func TestPendingSpeedSampleSurvivesHysteresisPauseAndSave(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		active, requested int32
+		slew              int16
+		now               int32
+		wantActive        int32
+		wantFlag          uint16
+	}{
+		{"catch up", 9, 10, -100, 0, 10, 4},
+		{"slow down", 10, 10, 10, 6, 9, 0},
+		{"above request", 10, 9, 0, 0, 10, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := State{Active: tc.active, Requested: tc.requested, slew: tc.slew}
+			s.AdvanceSP(tc.now)
+			if s.Active != tc.wantActive || s.flags&4 != tc.wantFlag {
+				t.Fatalf("active=%d pending-speed=%d, want %d/%d", s.Active, s.flags&4, tc.wantActive, tc.wantFlag)
+			}
+			s.Paused = true
+			s.AdvanceSP(tc.now + 1)
+			box := s.SaveBox()
+			if binary.LittleEndian.Uint16(box[26:])&5 != tc.wantFlag|1 {
+				t.Fatal("pause or saving changed pending-speed sample")
+			}
+			var restored State
+			if err := restored.LoadBoxChecked(box); err != nil || restored.SaveBox() != box {
+				t.Fatalf("sampled flags failed round trip: %v", err)
+			}
+		})
+	}
+}
+
+// Restored extreme counters wrap before the signed threshold test [01 §4.3].
+func TestRestoredSlewWrap(t *testing.T) {
+	for _, capped := range []bool{false, true} {
+		s := State{Requested: 10, Active: 9, slew: -32768}
+		var raw int32
+		want := int16(32767)
+		if capped {
+			s.slew, raw, want = 32767, 6, -32768
+		}
+		box := s.SaveBox()
+		var restored State
+		if err := restored.LoadBoxChecked(box); err != nil {
+			t.Fatal(err)
+		}
+		restored.applyHysteresis(raw)
+		if restored.slew != want || restored.Active != 9 {
+			t.Fatalf("capped=%v: slew=%d active=%d", capped, restored.slew, restored.Active)
+		}
+	}
+}
+
+// Multiplayer still evaluates the budget while paused [01 §4.3].
+func TestPausedMPRefreshesPendingSpeedWithoutHysteresis(t *testing.T) {
+	s := State{Requested: 10, Active: 9, Paused: true, slew: -100}
+	if got := s.AdvanceMP(0); got != 0 || s.flags&5 != 5 || s.slew != -100 || s.Active != 9 {
+		t.Fatalf("paused MP lost budget-entry sample or ran hysteresis: %+v, ticks=%d", s, got)
 	}
 }

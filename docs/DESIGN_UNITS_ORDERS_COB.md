@@ -115,6 +115,11 @@ is still visible to every later phase of the same tick `[04 §2.4]`.
 byte rather than casting it, because the two enumerations do not share their
 numbering `[06 §12.1]` `[08 R-SAVE-02 §6]`.
 
+Completed creation seeds current health from the signed low 16 bits of the
+definition's maximum damage; the maximum retains its full 32-bit value.
+Nanoframes still start at zero health. This distinction is visible to creation
+callbacks through the health port `[04 §4.4]`.
+
 **The sweep** (`sweep.go`). `VisitActiveSlots` is the one deterministic
 traversal: players 0..9 ascending, then slots ascending inside each player's
 slice, with the alive flag read at the moment the slot is reached — so a unit
@@ -227,12 +232,24 @@ If a callback removes the retained predecessor itself, the exceptional
 the reachability of that case needs the callback census identified in doc 04's
 Missing and unknown list. It is not a retail head-restart rule.
 
+Full cancellation also unlinks before cleanup and follows the live primary
+chain, then drains the live rear chain. Cancellation-created records on the
+chain being drained receive cleanup rather than disappearing with a final
+slice clear. The primary above-nine result uses this same purge as code seven;
+the rear default retains its single-record behavior [04 §3.3]. Injected result
+and callback fixtures lock these consumer contracts; they do not establish a
+shipped above-nine handler or widen the current `Code` representation.
+
 **The queued-order toggle.** `CancelFrontMost` is the removal half of retail's
 Shift-click duplicate test: it walks the primary segment front to back, unlinks
 the first whole matching node — no count decrement — and reports that one went,
 in which case the producer issues nothing `[07 R-P0-11 §6]`. The match itself is
 the session's, which supplies the resolved order identity, the optional target
-and a whole-cell inclusive per-axis tolerance.
+and a whole-cell inclusive per-axis tolerance. Its biased difference and
+comparison use the raw 32-bit coordinate word [04 R-MOV-03 §6]. Removal
+unlinks before cancellation cleanup, retaining the removed record's successor
+state. Boundary fixtures establish these consumers; ordinary projection or
+saved-goal reachability across the signed boundary remains Unknown in doc 04.
 
 **The pump** (`pump.go`). `Pump` runs the primary walk, then the secondary walk;
 the two are adjacent calls with no test between them, and a blocked front head
@@ -941,7 +958,10 @@ Modern adds these branches at the existing guard maintenance cadence:
 * After combat support and direct ward assistance, mobile builders scan for
   nearby work, unless the ward is a factory with production queued (see
   "A factory ward" below). Repair requires energy at least one fifth of
-  storage, as in repair patrol. Candidates use the patrol visitor's friendship, grounded state, damage/build
+  storage, retaining the guard policy's single-precision comparison. Retail
+  patrol uses the separately specified working-precision comparison; its
+  precision correction does not change this Modern policy. Candidates use the
+  patrol visitor's friendship, grounded state, damage/build
   progress and active-reclaim exclusions, with the guard policy's inclusive
   whole-position sight-radius comparison `[04 R-ORD-01 §4]` `[04 R-ORD-02 §4]`. The first
   candidate in unit-slot order that resolves command 8 receives the ordinary
@@ -1281,9 +1301,18 @@ index `[04 §4.3]`.
 
 **C13 — threads.** Eight thread records per unit; the lowest clear thread-mask
 bit is selected and the scan order is fixed. Each record carries 32 physical
-window words shared by authored stack/local operations and save/restore. A `sleep 0` still costs
-one tick: the sleep occupies its truncated tick count plus one guard decrement
-`[01 §6.1]` `[04 §4.2]` `[04 §4.6]`.
+window words shared by authored stack/local operations and save/restore. Sleep
+wraps its duration product to signed 32 bits before division, then yields the
+issuing interpreter entry. Later entries subtract their delta before testing
+the timer; a delta-zero wake pass can resume a nonpositive timer in the same
+tick. Move and turn waits likewise yield even when their speed is already
+zero, then resume at a later guard `[04 §4.2]` `[04 §4.6]`.
+
+The translation lane preserves the script speed's sign and uses signed stored-width
+arrival arithmetic `[04 §4.6]`. It must not normalize the speed into a magnitude
+or widen the arrival comparison. Authored COB regressions cover negative speeds,
+wrapped translations, inclusive arrival, delta scaling and the later wait guard.
+Shipped-script occurrence of the edge cases remains the research section's Unknown.
 
 **C14 — retail's undefined behavior is reproduced, not defended.** An unknown
 pop addressing mode pops nothing and advances; divide has no zero and no
@@ -1684,6 +1713,30 @@ these boundaries. Accepted ground and completed-target air assistance preserve
 the patrol's gate/deadline. Automatic assistance starts with only a target
 reference; the ordinary work handler supplies its approach goal. The return
 move keeps the actor's exact departure position [04 R-STANCE-01 §4].
+
+The patrol resource helpers follow the stored-input and working-precision
+boundaries in [04 R-ORD-01 §4, §7], including inclusive and unordered admission.
+They are separate from Modern guard assistance's existing single-precision
+gate. Feature sampling preserves raw fixed-point coordinates, odd-diameter
+halves, Z-before-X traversal and tournament tie order. Ground patrol alone has
+the healthy-stores early hold; an aircraft that reaches feature pairing runs
+its tournaments before the reclaim decision. Community assist-only still stops
+before feature pairing, and reclaim-only resumes each handler at its own retail
+entry ([community-patch-engine.md CP-CON-3](../research/extensions/community-patch-engine.md)).
+`repair_patrol_audit_test.go` locks authored resource boundaries, RNG and queue
+effects, fixed-point traversal, and the unchanged Modern guard threshold;
+`community_builder_options_test.go` preserves the option boundaries.
+
+Two existing host fallbacks remain explicit. The sampler retains its
+terrain-height fallback for the copied Y, with `TODO(question)` because retail's
+unwritten temporary and observations before marker update remain unresolved
+[04 R-ORD-01 §4]. It also rejects negative diameters and retains the finite
+sample bound derived from diameter on each axis. Normal traversal uses retail
+signed-coordinate comparisons and wrapping arithmetic, but the host bound ends
+pathological overflow histories that can loop forever in retail. This is the
+existing host safety boundary, not a claim of parity for those histories;
+the code TODO and research Unknown retain that limit. The boundary regression
+also checks that the bound does not omit the ordinary last sample.
 
 **Unresolved patrol resumption ([issue 83](https://github.com/nanolathe-gg/nanolathe/issues/83)).**
 An unreachable automatic-assist target can remain eligible after `HelpBuild`

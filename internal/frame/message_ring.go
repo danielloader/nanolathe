@@ -120,7 +120,7 @@ func (r *MessageRing) Append(text string, class uint8, source pool.Handle, speak
 // Retiring changes only the display index. The old record remains available to
 // the ring's record-level operations until a later poster replaces its slot.
 func (r *MessageRing) RetireOne(currentTick uint32) bool {
-	if r == nil || r.TextLines == 0 || r.Display == r.Producer {
+	if r == nil || r.Display == r.Producer {
 		return false
 	}
 	line := r.Entries[r.Display]

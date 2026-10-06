@@ -109,6 +109,9 @@ func (g *gameShell) buildRetailMessageWindow(authored *gui.Window, message strin
 		ownArt = g.assets.message.art
 	}
 	g.installRetailWindowButtonArt(built, ownArt)
+	// The first authored paint precedes message sizing; the rebuilt paint
+	// below keeps any label X that this visit resolves [07 R-WGT-01 §7].
+	g.initializeRetailLabels(built)
 
 	// Every retail call site but one passes `autoWidth` — the panel is sized to
 	// its widest line plus 20 and the wrap width only bounds the lines
@@ -136,8 +139,15 @@ func (g *gameShell) buildRetailMessageWindow(authored *gui.Window, message strin
 
 	for i := range built.Gadgets {
 		gad := &built.Gadgets[i]
-		if gad.Kind == gui.KindLabel && gui.GadgetName(gad.Name) == "TEXT" {
+		if gad.Kind == gui.KindLabel {
 			gad.Rect.W = width
+			// The widening pass replaces every label's attributes; the final
+			// build makes empty-link labels inert again [07 R-FE-01 §9]
+			// [07 R-WGT-01 §7]. Authored names do not filter this pass.
+			gad.Attribs = 2
+			if gad.Link == "" || gad.Link[0] == 0 {
+				gad.Attribs |= gui.AttribInert
+			}
 		}
 	}
 	if i := built.GadgetIndex("OK"); i >= 0 {
@@ -145,6 +155,7 @@ func (g *gameShell) buildRetailMessageWindow(authored *gui.Window, message strin
 		gad.Rect.X = width - gad.Rect.W - 15
 		gad.Rect.Y = height - gad.Rect.H - 15
 	}
+	g.initializeRetailLabels(built)
 	return built
 }
 

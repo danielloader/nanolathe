@@ -88,7 +88,7 @@ func TestClassifyUsesEstablishedNetEnergyBranchOrder(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := classify(tc.def, tc.wind, tc.tide); got != tc.want {
+			if got := classify(tc.def, tc.wind, tc.tide); got != float64(tc.want) {
 				t.Fatalf("classify = %g, want %g [05 R-PROD-01 §1]", got, tc.want)
 			}
 		})

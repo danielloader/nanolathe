@@ -399,11 +399,11 @@ func TestPumpResultCodeTables(t *testing.T) {
 				t.Fatalf("code9 non-last: draw delta %d, want 0", d)
 			}
 		})
-		t.Run("code above 9 expires the single record and returns", func(t *testing.T) {
+		t.Run("code above 9 drains both segments and returns", func(t *testing.T) {
 			sim := injectTestSim(t)
 			q, u := &Queue{binding: &QueueBinding{SimRNG: sim}}, newTestUnit()
 			p := newProbe()
-			p.install(t, moveID, func(n *Node) Code { return 12 }) // [04 §3.3] expiry helper and return, no draw, no cancel-all
+			p.install(t, moveID, func(n *Node) Code { return 12 }) // [04 §3.3] full purge and return, no result-arm draw
 			q.Push(moveID, Node{Param1: 1})
 			q.Push(moveID, Node{Param1: 2})
 			q.secondary = []*Node{secNode(buildID, 10, 0)}
@@ -411,14 +411,11 @@ func TestPumpResultCodeTables(t *testing.T) {
 			a := q.primary[0]
 			before := sim.Draws()
 			q.Pump(u, probeTick)
-			if len(q.primary) != 1 || q.primary[0].Param1 != 2 {
-				t.Fatalf("code>9: head not removed, len %d", len(q.primary))
+			if len(q.primary) != 0 || len(q.secondary) != 0 {
+				t.Fatalf("code>9: expected both segments drained, got %d/%d", len(q.primary), len(q.secondary))
 			}
 			if p.callsFor(2) != 0 {
-				t.Fatalf("code>9: successor dispatched, want walk stopped after expiry helper")
-			}
-			if len(q.secondary) != 1 {
-				t.Fatalf("code>9: secondary touched, want single-node expiry only")
+				t.Fatal("code>9: successor dispatched instead of purged")
 			}
 			if a.Flags&FlagTombstone != 0 {
 				t.Fatalf("code>9: primary head must not be tombstoned [04 §3.3]")

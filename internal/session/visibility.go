@@ -219,7 +219,9 @@ func publishVisibilityForAll(s *Session) {
 //
 // The observer records are built with the CURRENT raster, exactly as the
 // per-tick sweep builds them, and the session's diagnostic stamps are replaced
-// with what was actually stamped [03 R-VIS-01 §2].
+// with the supplied observer coordinates. The service retains the ray tile
+// pair for its cleared-byte low-height throttle; supplying a record does not
+// guarantee that it publishes after the refill [03 R-VIS-01 §1–§2].
 func rebuildVisibilityForEntry(s *Session) {
 	if s == nil || s.Vis == nil {
 		return

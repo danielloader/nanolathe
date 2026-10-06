@@ -108,6 +108,29 @@ func TestAccuracySpreadBound(t *testing.T) {
 	}
 }
 
+// The full maximum-health word is an unsigned divisor. Completed custom
+// content can pair its high bit with positive low-word health [06 §4.2].
+func TestAccuracySpreadMaximumHealthWord(t *testing.T) {
+	for _, tc := range []struct {
+		health, maximum int32
+		want            uint16
+	}{
+		{100, -2147483548, 2048},
+		{65536 + 100, 100, 0}, // current health discards its high word
+		{65535, 100, 44012},   // low-word health is sign extended before shifting
+	} {
+		if got := AccuracySpreadBound(0, tc.health, tc.maximum, 0); got != tc.want {
+			t.Fatalf("health %d maximum %d: spread = %d, want %d [06 R-WPN-03 §4]", tc.health, tc.maximum, got, tc.want)
+		}
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("zero maximum health must still fault")
+		}
+	}()
+	AccuracySpreadBound(0, 100, 0, 0)
+}
+
 // turretSpreadWeapon is a turret weapon that always solves and always admits,
 // so the only thing gating its shot is what a case sets up.
 func turretSpreadWeapon(id int32, accuracy int32) *content.WeaponDef {

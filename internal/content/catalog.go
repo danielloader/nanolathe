@@ -150,6 +150,10 @@ type Catalog struct {
 	// AliasOrder preserves gamedata/allsound.tdf section order for runtime
 	// registration identity [03 §8.3].
 	AliasOrder []*SoundAlias
+	// WeaponSoundPaths preserves every section's nonempty start/hit/water
+	// admissions, including overwritten and ID-less records [03 §8.3].
+	// Presentation-only, immutable after compilation and excluded from Hash.
+	WeaponSoundPaths []string
 
 	// Warnings collects non-fatal load diagnostics verbatim, e.g. the
 	// downloadable enforcement's "Hey!  Somebody forgot to set
@@ -224,12 +228,13 @@ func CompileWithOptions(fs vfs.FSOps, opts Options) (*Catalog, error) {
 	// by extension already (units *.fbi, weapons *.tdf — the family is exactly
 	// Weapons/*.tdf; gamedata/weapons.tdf is never read [02 §5 R-CONTENT-02] —
 	// features recursive features/<group>/*.tdf, etc.).
-	weapons, weaponDuplicates, err := CompileWeaponsWithDuplicates(fs, limits)
+	weaponResult, err := compileWeapons(fs, limits)
 	if err != nil {
 		// Weapons are required for linking but not directly part of Validate's
 		// fatal trio; propagate error so whole-install compile is error-free.
 		return nil, err
 	}
+	weapons, weaponDuplicates := weaponResult.weapons, weaponResult.duplicates
 	report.Report(FamilyWeapons, 100)
 	unitResult, err := compileUnitsWithLanguage(fs, "")
 	if err != nil {
@@ -383,6 +388,7 @@ func CompileWithOptions(fs vfs.FSOps, opts Options) (*Catalog, error) {
 		AIProfiles:         aiProfiles,
 		Aliases:            aliases,
 		AliasOrder:         aliasOrder,
+		WeaponSoundPaths:   weaponResult.soundPaths,
 		BuildMenus:         buildMenus,
 		DownloadPlacements: downloadPlacements,
 		SurvivalRoster:     survivalRoster,
@@ -907,6 +913,7 @@ func (c *Catalog) Clone() *Catalog {
 			}
 		}
 	}
+	out.WeaponSoundPaths = append([]string(nil), c.WeaponSoundPaths...)
 	// BuildMenus deep copy [02 "Build-menu catalog keys"]
 	if c.BuildMenus != nil {
 		out.BuildMenus = make(map[string]*BuildMenuPage, len(c.BuildMenus))
@@ -1560,8 +1567,8 @@ func fillUnitRecordScripts(fs vfs.FSOps, records []*UnitDef) []string {
 
 // fillUnitRecordBuildPages compiles every definition's build-menu page-count byte from
 // the authored page windows, which is step 5 of the catalog compiler's per-
-// record work [02 R-CAT-01 §5]: with `<n>` the unit name, `guis/<n>0.GUI`
-// existing sets the page-zero bit, then `guis/<n>1.GUI`, `guis/<n>2.GUI`, …
+// record work [02 R-CAT-01 §5]: with `<n>` the unit name minus its final
+// dotted suffix, `guis/<n>0.GUI` existing sets the page-zero bit, then `guis/<n>1.GUI`, `guis/<n>2.GUI`, …
 // are probed until the first missing one, and the byte becomes the index of
 // that first missing page when at least one numbered page existed, else 1 when
 // page 0 exists, else 0.
@@ -1578,20 +1585,23 @@ func fillUnitRecordBuildPages(fs vfs.FSOps, records []*UnitDef) {
 	}
 	for _, u := range records {
 		name := CanonicalKey(u.UnitName)
+		if dot := strings.LastIndexByte(name, '.'); dot >= 0 {
+			name = name[:dot]
+		}
 		u.HasPageZeroGUI = exists(name + "0")
-		numbered := 0
-		// The page number lives in three status-word bits, so page 7 is the
-		// last addressable one [07 §9]; a further authored page could not be
-		// selected and is not counted.
-		for page := 1; page <= 7; page++ {
-			if !exists(name + strconv.Itoa(page)) {
+		numbered := int32(0)
+		seenNumbered := false
+		// Discovery is not limited by the separate selected-page field.
+		// Only the final count is narrowed to a byte [02 R-CAT-01 §5].
+		for page := int32(1); ; page++ {
+			if !exists(name + strconv.FormatInt(int64(page), 10)) {
 				break
 			}
-			numbered = page
+			numbered, seenNumbered = page, true
 		}
 		switch {
-		case numbered > 0:
-			u.BuildPageCount = int32(numbered) + 1
+		case seenNumbered:
+			u.BuildPageCount = int32(uint8(numbered + 1))
 		case u.HasPageZeroGUI:
 			u.BuildPageCount = 1
 		default:

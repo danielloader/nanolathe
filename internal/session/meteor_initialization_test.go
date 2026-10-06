@@ -64,6 +64,18 @@ func TestInitMeteorCompleteSchemaBypassesInvalidDefault(t *testing.T) {
 	}
 }
 
+// The ordinary authored schema admits the large-radius arithmetic vector;
+// this is not a claim about shipped map parameters [06 §6.5].
+func TestInitMeteorRetainsAuthoredLargeRadius(t *testing.T) {
+	s := meteorInitSession(t, "", "MeteorWeapon=custom; MeteorRadius=300001; MeteorDensity=2; MeteorDuration=3; MeteorInterval=4;", validMeteorDefault())
+	if err := s.initMeteor(); err != nil {
+		t.Fatal(err)
+	}
+	if s.Meteor.Radius != 300001 || !s.Meteor.Enabled {
+		t.Fatalf("authored radius replaced: %+v", s.Meteor)
+	}
+}
+
 func TestInitMeteorZeroReplacesWholeRecord(t *testing.T) {
 	s := meteorInitSession(t, "", "MeteorWeapon=custom; MeteorRadius=7; MeteorDensity=3; MeteorDuration=4; MeteorInterval=0;", validMeteorDefault())
 	if err := s.initMeteor(); err != nil {

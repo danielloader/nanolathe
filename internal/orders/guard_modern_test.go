@@ -42,6 +42,18 @@ func TestModernGuardPadSelectionKeepsGuardAndSuccessor(t *testing.T) {
 				}
 				return nil
 			}
+			// Consumer fixture: the production binding uses movement's shared
+			// release and synchronous index observer.
+			b.Movement.DetachTakeoff = func(u *units.Unit) bool {
+				if !tc.want || u != f.guard || u.Attachment.Carrier != carrier.Handle {
+					t.Fatal("unexpected detach callback")
+				}
+				u.Attachment.Carrier = 0
+				u.Attachment.AttachPiece = -1
+				carrier.Attachment.Cargo = nil
+				u.Move.Mode = (u.Move.Mode &^ 3) | 2
+				return true
+			}
 			queries := 0
 			b.Movement.AirBases = func(uint8) []pool.Handle {
 				queries++

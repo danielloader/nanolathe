@@ -168,7 +168,7 @@ func TestShowRetailMessageBuildsRuntimeLabels(t *testing.T) {
 		if want := 20 + int32(i)*step; l.Rect.Y != want {
 			t.Fatalf("label %d y=%d, want %d", i, l.Rect.Y, want)
 		}
-		if l.Rect.X != 0 || l.Rect.H != 15 || l.Attribs != 2 {
+		if l.Rect.X != 0 || l.Rect.H != 15 || l.Attribs != 2|gui.AttribInert {
 			t.Fatalf("label %d geometry=%+v attribs=%d", i, l.Rect, l.Attribs)
 		}
 		if l.Rect.W != modal.Window.Rect.W {

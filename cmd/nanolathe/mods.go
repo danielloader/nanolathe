@@ -888,6 +888,7 @@ func (g *gameShell) loadModsPanel(kind modsWindowKind) (*ui.Panel, *retailPanelA
 	buildModsWindow(window, kind)
 	g.installRetailWindowButtonArt(window, nil)
 	g.installRetailListScrollbars(window, nil)
+	g.initializeRetailLabels(window)
 	panel := ui.NewPanel(window)
 	if panel == nil {
 		return nil, nil, fmt.Errorf("nanolathe: mods screen: panel construction failed")

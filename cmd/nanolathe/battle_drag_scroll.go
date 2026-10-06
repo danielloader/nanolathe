@@ -7,9 +7,10 @@ func (b *battleSession) beginDragScroll(x, y int32, cl *client.Client) {
 		return
 	}
 	b.dragScroll.Begin(b.cam)
-	if b.deferFollowInput {
-		b.pendingFollowInput = b.cam.ClearFollow
-	}
+	// Entry already clears tracking before the sub-ticks. Do not schedule a
+	// later ClearFollow, which would also cancel the preserved glide. A new
+	// hotkey handled after this pointer pass can still install its own request.
+	b.pendingFollowInput = nil
 	b.dragScrollLastX, b.dragScrollLastY = x, y
 	b.dragScrollActive = true
 	cl.SetPointerCaptured(true)

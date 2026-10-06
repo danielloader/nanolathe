@@ -504,6 +504,13 @@ anchor cell, independently of its center-sampled instance height; body and
 shadow share that anchor. 3DO feature models retain their instance position
 `[03 §5.1.4]` `[03 R-RAST-01 §6]`.
 
+The shared `waterlineThreshold` helper tests positive depth before narrowing
+its height-key threshold to an unsigned byte `[03 R-REN-03A §8]`
+`[03 R-WATER-01 §2]`. Software body erase/tint, mobile silhouette clipping,
+and recorded geometry consume that same wrapped threshold. Zero after wrapping
+is an active inclusive key-zero cutoff, not the dry-state sentinel. Digger's
+constant silhouette cutoff and the later body Digger pass remain separate.
+
 A unit is not blitted from a sprite. It is composed into its own indexed image
 with a per-pixel **height key**, and that image is blitted. The split across
 `model_*.go` follows the stages:
@@ -553,6 +560,19 @@ with a per-pixel **height key**, and that image is blitted. The split across
   composition image has a key plane, its cargo is composed into a union box and
   resolved per pixel against one height plane, which is why a transport hull can
   stand in front of the unit it carries `[03 R-REN-03A §4]`.
+  Classic cached composition chooses the union of the current parent geometry,
+  retained image, and cargo before seeding either plane. Equal dimensions copy
+  both planes raw; resized seeds copy color and key independently through the
+  image's transparent-index gate. Parent reveal/live drawing follows that one
+  seed, then child composition and the final waterline/Digger passes. A second
+  filtered copy of the completed parent would erase live key-one contributions.
+  The standalone all-piece preview adapter retains its existing finished-image
+  copy, and keyless presentation retains painter order. Enhanced ordinary keyed cached packets retain the original source dimensions
+  and origin in an immutable seed descriptor. Its cold and retained GPU paths
+  resolve cached winners separately from resized seed admission, before live
+  drawing and child merges (`DESIGN_GPU_RENDERER` §22). Standalone/direct
+  packets have no descriptor and retain their adapter policy. Shadow source
+  and current cached-pose bounds remain separate comparison gaps.
   Classic staging computes child displacement at native raster scale before
   the final view-scaled group blit (`DESIGN_GPU_RENDERER` §14.2), so zoom applies
   once. A temporary image view changes only that staging anchor; cached child
@@ -620,6 +640,48 @@ The CD-check dialog explicitly restores visibility earlier
 
 ### 2.6 `internal/audio` and `internal/audiobackend`
 
+The sound registry retains the retail zero-based identities: 255 registrations
+use IDs 0 through 254, duplicates keep their first ID, and overflow returns
+ID 0, which resolves the first real sample. Only the missing-name sentinel
+silences an unresolved identity; zero is not a reserved silent slot
+`[03 §8.3]`. Authored registry and service fixtures lock first registration,
+duplicate lookup, capacity and overflow playback without an audio device.
+Registration probes a static alias once. A failed probe keeps its slot but
+ordinary playback and duplicate registration never reopen the source path;
+independent direct-path loads do not repair the alias `[03 §8.3]`. Successful
+samples retain the existing session cache lifetime. Explicit decoded-sample
+supply through `SampleCache.Put`/`Registry.SetCache` remains a host API, separate
+from implicit filesystem retries.
+
+Weapon sounds use anonymous path registration, separate from named cue lookup
+`[03 §8.3]`. `Registry.RegisterAnonymousPath` shares the named registry's
+capacity, first-entry overflow result and failed-probe lifetime. It compares
+the authored path's first 32 bytes case-insensitively against every prior
+registration's authored path, before probing the complete supplied path. The
+comparison key is separate from resolved provenance and host path metadata.
+Each identity retains its sample; anonymous registrations never collide through
+an empty cache name. Named cache injection remains the existing explicit host
+API, and anonymous reuse of a named identity sees that identity's sample.
+
+`Service.BindCatalog` registers named `AliasOrder` before the entire ordered
+`WeaponSoundPaths` history and retains a private path-to-identity binding.
+Rebinding reuses the registry, including failed results, under the existing
+shell service lifetime. Committed audio events keep authored text plus
+`AudioAnonymous`, set by weapon start/hit emission only; the snapshot copies
+both. Runtime alias IDs never enter authoritative events. Anonymous playback
+uses only the private binding and remains silent if absent; it never registers
+or opens a path during playback. Other cues retain their named lookup, category
+arbitration, and random draw behavior. Fixtures lock path/name conflicts,
+bounded path collisions, full initial probes, shared capacity, overwritten
+weapon admissions, rebinding, and committed source identity.
+
+The host safely bounds registration and lookup names to 32 bytes. This is not
+a claim about retail lookup of a full field without a terminator: its producer
+length and surrounding termination remain an owning research question
+`[03 §8.3]`. Retained host path metadata keeps its existing bound and is not
+used as a playback retry candidate; anonymous identity uses its separate
+authored-path key.
+
 `Service` is the single audio owner: `Queue` (eight slots), `Registry` (the
 alias table), `SampleCache`, the music controller, the positional viewport, and
 one private CRT copy. `internal/audiobackend.Backend` is the PCM device behind
@@ -645,6 +707,38 @@ The host pump services timers and only dispatches successful completion after
 both decoded EOF and device drain; pause and decode/device errors do not
 advance tracks. Errors retain logical path/provider provenance and are drained
 by the presentation host once.
+The controller retains the researched idle stop polarity and zero-track play
+entry ordering `[03 R-AUD-01 §4]`. Sequential playback submits its incremented
+track before resetting an over-count next track to one; successful submission
+then applies the common volume/status tail. The file backend keeps its existing
+failure policy: a failed open records the error and leaves status idle, without
+the retail tail restoring playing status or synthesizing completion. The next
+track still receives the controller's post-submission reset. This is host error
+handling, not a claim about a native device's response to an invalid request.
+
+**Play All past the last track (host policy).** The file backend has no track
+after the last file, so it rejects the over-count submission that follows the
+last track. No completion follows a rejection, Play All has no other tick
+caller during ordinary play, and the device response itself is Unknown
+`[03 R-AUD-01 §4]`; the failure policy above would therefore leave the
+soundtrack silent for the rest of the battle. Instead, when the backend rejects
+that over-count submission, the sequential arm plays the wrapped track, one, in
+the same step: Play All loops `1..count` without a media error. The retail order is unchanged: submit `next + 1`, then reset an
+over-count next to one. Only the sequential arm's over-count rejection takes
+this path. A rejected in-range track, including a rejected wrapped track one,
+records its error and leaves status idle. A backend or modeled controller that
+accepts the over-count request keeps its media, and the next admitted
+completion submits track two. Repeat, Random, Custom, Stop/Idle and explicit
+`Play` requests are unaffected. The open question is marked `TODO(question)`
+in `playSequential`.
+Explicit public nonzero `Play` requests keep the existing host range clamp;
+the sequential controller's internal submission bypasses that clamp.
+The play primitive queries media before track equality and deduplicates against
+the retained next track, including its post-submission reset; `CurTrack` remains
+host playback metadata rather than the identity used for that predicate.
+Without a media adapter, a private modeled playback flag tracks successful
+play, pause, resume, stop and end separately from controller status. Controller
+status writes before a query therefore cannot fabricate a playing-device reply.
 
 The copied GOG soundtrack is recognized by `2.mp3..17.mp3`: logical tracks
 1..16 use those files in physical order, with seven Battle then nine Building
@@ -693,6 +787,27 @@ start/stop lifetime. The stream opener has no ordinary MODE play gate
 `[03 R-AUD-01 §1]` `[03 R-AUD-01 §2]` `[03 R-AUD-02 §1]`. Ebitengine player
 gain stands in for the retail system wave-output mixer; no host-wide volume
 setting is changed.
+
+Delayed streams retain stable, reusable timer slots and the identity of the
+most recently registered slot. A new start replaces the shared path/volume,
+services already-due slots, then records a new registration. Each callback
+cancels only the recorded slot before opening the current path; the service
+reloads an older slot that remains armed. `StopStream` likewise cancels only
+the recorded slot, so an older lost registration can restart narration later
+`[03 R-AUD-02 §1]`. The private host timer storage remains growable; it does
+not invent an independent ten-stream cap in place of the shared CD/stream
+competition that remains T23. Due times use the existing supplied presentation
+clock, and a late service reloads from that service time without catch-up.
+Process `Close` releases this host timer storage because no further callbacks
+belong to the closed service.
+
+The stream source is loaded and decoded before the current stream is stopped.
+A missing or undecodable replacement preserves current playback; a valid
+replacement stops it before submitting the new sample. Portable output failure
+keeps the existing host error behavior: a failed `PlayStream` does not mark the
+new stream playing. This is separate from a claim about native device failure.
+Single-request cancellation, overlapping callbacks, free-slot reuse, delayed
+service, missing replacement, and valid replacement have device-free fixtures.
 
 Opening a briefing initializes the narration toggle to stage 1 and resets
 that visit's presentation clock before arming its delayed stream. The
@@ -892,7 +1007,37 @@ are C1 and C3 of §3.1.
   colour-map entry 14 over the copied radar surface; sensor circles use entry 10
   for radar and sonar and entry 12 for jam `[03 R-MM-01 §1]` `[03 R-MM-01 §2]`,
   and the blip and ring gates are `[03 R-MM-01 §3]`. The 126-pixel letterbox
-  and the click lens are `internal/camera`'s.
+  and the click lens are `internal/camera`'s. The picture builder reduces
+  fixed two-by-two source blocks through the row-first ALP operation of
+  `[03 §3.7]`. Baked pixels retain their declared row stride; their dimensions
+  do not drive a ratio resize or a crop. Generated terrain uses the same
+  reducer with its existing double-size temporary source.
+
+  FINAL completes each committed unit's regular blip, hover art, individual
+  sensor circles and weapon slots before drawing the next unit. Hover art
+  uses contact admission without the regular blip's blink term. The HUD keeps
+  separate art queues and nil regular-art entries for additional weapon slots,
+  preserving their per-owner order `[03 §3.9]`. Every nonzero authored sensor
+  distance gets its own circle, including a scaled zero or negative radius;
+  weapon radii follow the same consumer boundary `[03 §3.10]`. Extreme trig
+  and clipping overflow remain unverified; this does not extend the coordinate
+  arithmetic contract. The shared regular-blip predicate, Modern radar-dot
+  preference, strategic identification and Community megamap remain separate.
+
+  **Host source validation and fallback.** A baked source must contain its
+  complete declared rectangle and cover twice the fitted picture width and
+  height (`render.BakedRadarSourceFits`); the builder returns no picture for one
+  that does not. The battle HUD tests the authored minimap first and treats an
+  unusable one as absent: the radar takes the generated terrain picture, the
+  same path as a map whose present flag is clear, and the existing HUD asset
+  warning names the map and the stored and required sizes. An undersized
+  authored minimap therefore never stops battle entry. The source is neither
+  stretched nor partly reduced. This is host policy, not a claim about retail's
+  unsafe reads from undersized sources, which remain Unknown `[03 §3.7]`. A
+  source that fits keeps the fixed two-by-two reduction unchanged. Only a
+  battle whose generated picture is also invalid, which needs malformed
+  terrain, keeps the entry-time content error. Display scaling, letterbox bars
+  and the PICTURE/MAPPED/FINAL lifetimes remain separate from source reduction.
 * **C6 Selection membership.** Drag endpoints convert to presentation
   coordinates by subtracting the camera and adding the view-pane origin (128,
   32); each axis is sorted independently and both boundaries tested
@@ -963,6 +1108,15 @@ document carries them.
   sight. Geothermal steam skips that gate `[03 R-FX-01 §3]`
   `[03 R-FX-02 §3]`. Explosion art and calculated flashes also skip coverage
   admission and remain beneath the fog composite `[06 R-WFX-01 §2]`.
+  Strip timing stays in the session phase-11 sweep. Strip-5 flame and the
+  strips-5/9 smoke puffer compare their spawn windows as signed words and
+  their current-tick due gates as unsigned words `[03 R-STRIP-01 §3]`.
+  Flame segment expiry is signed; smoke's empty-container expiry stays
+  unsigned and strict. Geothermal steam has only its unsigned due gate and
+  never expires through the container verdict. Producer-and-sweep tests lock
+  the smoke boundary cases and their CRT admission alongside the flame tests.
+  This does not establish full tick-wrap equivalence: the host still reserves
+  zero for an unarmed spawn gate and an unset expiry.
 * **C2.1 Nanolathe publication.** Strip-6 emitter records own their particles
   and advance them during the phase-11 strip sweep. Publication copies every
   live particle into `Frame.Strips`; the client paints those copies as raw
@@ -1133,22 +1287,34 @@ document carries them.
 * **C7 Beams.** `color2 == 0` draws one stroke; otherwise two, the secondary
   outer and the primary inner. No anti-aliasing and no distance-based width
   `[03 §5.4]`.
-* **C8 GAF cursors.** A retail frame reference carries an `int32` duration in
-  **whole ticks**, not milliseconds. The playback cursor is index, countdown and
-  loop flag; a single-tick step advances when the countdown is below 2, wrapping
-  to 0 or clearing; a delta step with a negative `int16` can cross several
-  frames. A frame with hold `h` is shown for `max(h, 1)` advances. Every GAF
-  entry in every retail file carries 1 in its loop word, and the weapon parser
-  **clears** it for explosion art, which is what makes an impact play once
-  instead of flashing forever `[03 §4.4]` `[06 R-WFX-01 §1]` `[fmt gaf]` [I13].
+* **C8 GAF cursors.** The file carries a 32-bit authored duration. Simulation
+  stepping tests the remaining duration before decrementing and advances below
+  two. Elapsed-delta playback instead advances only at zero or below after the
+  adjustment, accumulating selected holds until the remainder is positive or
+  the sequence terminates `[03 §4.4]`. The existing Go API takes a negative
+  `int16` adjustment for positive elapsed time; the client adapter supplies
+  that sign. Thus holds ten/ten retain frame zero after nine elapsed units and
+  select frame one after the tenth. Single-frame delta playback stays fixed.
+  **Pending:** the Go cursor still uses a wider countdown and holds than the
+  native low-16 bind/reload and wrapped arithmetic. Producer admission and safe
+  handling of nonprogressing narrowed-hold loops must be closed before that
+  change; current guards and the adapter's long-interval splitting are not
+  claims of native width equivalence. The separate `Step` single-frame bypass
+  also awaits caller closure: native tick stepping reloads or detaches that
+  frame, while its delta step bypasses it. Neither follow-up is implemented by
+  the delta-threshold correction. Every GAF entry in the surveyed retail files
+  carries one in its loop word; explosion binding clears it so impact art plays
+  once `[06 R-WFX-01 §1]` `[fmt gaf]` [I13].
 * **C9 Consumer-specific GAF dispatch.** The ordinary compositor expands ordered
   children and applies each alternate selector; tinted and nonzero-mode glyph
   composites expand every child through ALP. Glyph leaves retain the authored
   raw/RLE distinction and their own mode/key rule `[03 R-FONT-01 §6]`.
   Classic gray/dither walks all children in order with the raw gate before each
   recursion, without clipping to the parent canvas `[03 R-COMP-01 §2]`.
-  Presentation resampling preserves that dispatch selector. The modern raw
-  glyph uses the existing destination-light stream and its approved LHT colour
+  Full-cell and masked fog checkers write the even phase of final destination
+  coordinates plus camera parity, retaining the phase across clipped edges
+  `[03 §3.3]`. Presentation resampling preserves that dispatch selector. The
+  modern raw glyph uses the existing destination-light stream and its approved LHT colour
   approximation; compressed glyphs retain the source-remap stream. Unsafe raw
   glyph source rows are suppressed as host safety policy, not clamped.
   Modern fog retains the atlas for ordinary stock frames. A selected composite
@@ -1323,9 +1489,11 @@ the published offset to the camera.
   validation uses an authored projectile fixture.
 * **The mobile and Digger shadow branches.** Retail selects one of three shadow
   branches: a Digger's buried-clip silhouette, a mobile unit's waterline-clip
-  silhouette, and a structure's re-rasterized, punched, cached shadow. Only the
-  structure branch's rasterize/punch/tint technique exists; it stands in for the
-  other two, with the vehicle-shadow gate still applied to them
+  silhouette, and a structure's re-rasterized, punched, cached shadow.
+  All three techniques are implemented: Digger and mobile subjects flatten
+  their own silhouette image and apply their distinct key cutoffs, while
+  structures use the separate projected and punched image. Vehicle-shadow
+  admission remains specific to the first two branches
   `[03 R-REN-03D §1]` `[03 R-REN-03D §6]`.
 * **Music and CD/MCI.** File-backed music plays through the portable desktop
   audio backend (§2.6). Native CD drives and per-disc registry history remain
@@ -1393,6 +1561,17 @@ the published offset to the camera.
   `[03 §5.3]` `[03 R-REN-03D §1]`.
 
 ## 5. Divergences
+
+The comparison audit records three explicit unresolved presentation
+placeholders: type-3 projectile models retain recorded angles with the usual
+model-facing adjustment ([03 §5.4], [06 R-WFX-01 §4]); structure shadow punches
+retain per-pixel destination clipping until reachable row spill is established
+([03 R-REN-03D §5]); and fade rectangles retain bounded unsigned row-zero
+lookup for high palette indices, because retail would read before the table
+([03 R-COMP-02 §5]). Defined in-table fade accesses use retail's signed byte,
+including the preceding row for high indices. These are retained deterministic
+fallbacks, not new claims of retail equivalence; the owning research names the
+missing evidence. Enhanced's RGB fade remains its separate presentation policy.
 
 * **Completed units crossing factory yards retain per-pixel composition.**
   Retail detaches a product at completion `[04 R-FAC-02 §3]`. Nanolathe’s

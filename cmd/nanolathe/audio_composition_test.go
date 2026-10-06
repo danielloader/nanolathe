@@ -220,6 +220,7 @@ func authorTestSoundCategory(cat *content.Catalog, unitName string) {
 		cat.Sounds = map[string]*content.SoundCategory{}
 	}
 	cat.Sounds[key] = sc
+	cat.SoundCategoryOrder = append(cat.SoundCategoryOrder, sc)
 	if def, ok := cat.Unit(unitName); ok && def != nil {
 		def.SoundCategory = category
 	}

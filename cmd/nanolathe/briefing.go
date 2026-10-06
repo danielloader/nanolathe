@@ -18,7 +18,6 @@ const (
 	BriefingActionNone BriefingAction = iota
 	BriefingActionStart
 	BriefingActionPrev
-	BriefingActionShutup
 	BriefingActionMore
 )
 
@@ -183,7 +182,7 @@ func NewCampaignBriefingController(m *mission.Mission, localSide int, crt briefi
 		b.planet, b.planetIdx = ResolveBriefingPlanet("", localSide)
 	}
 	// MSNBRIEF opens with SHUTUP at stage 1, even if optional narration
-	// media is absent. This is the toggle state, not playback status [07 R-FE-01 §4].
+	// media is absent. This reports the widget stage, not playback status [07 R-FE-01 §4].
 	b.narrationOn = true
 	b.entryWind()
 	return b
@@ -313,7 +312,7 @@ func (b *campaignBriefingController) changeWind() {
 }
 
 // Dispatch handles a typed semantic control. Start emits a shared battle
-// request; Prev and SHUTUP stop/close presentation; MORE pages authored text.
+// request; Prev stops/closes presentation; MORE pages authored text.
 func (b *campaignBriefingController) Dispatch(action BriefingAction) (BriefingBattleEvent, error) {
 	if b == nil || b.state != BriefingOpen {
 		return BriefingBattleEvent{}, nil
@@ -333,13 +332,6 @@ func (b *campaignBriefingController) Dispatch(action BriefingAction) (BriefingBa
 	case BriefingActionPrev:
 		b.state, b.narrationOn = BriefingClosed, false
 		return BriefingBattleEvent{Audio: b.stopAudio()}, nil
-	case BriefingActionShutup:
-		if b.narrationOn {
-			b.narrationOn = false
-			return BriefingBattleEvent{Audio: b.stopAudio()}, nil
-		}
-		b.narrationOn = true
-		return BriefingBattleEvent{Audio: b.startAudio()}, nil
 	case BriefingActionMore:
 		// The pager advances its counter and re-lays the region; a page start
 		// the text does not reach wraps back to page 0 [07 R-HUD-03 §10].
@@ -352,6 +344,20 @@ func (b *campaignBriefingController) Dispatch(action BriefingAction) (BriefingBa
 	return BriefingBattleEvent{}, nil
 }
 
+// DispatchNarrationStage consumes the named button's post-service stage. Every
+// nonzero result requests narration, including a change between nonzero stages
+// [07 R-FE-01 §4]. The live-battle briefing uses only this controller's pager.
+func (b *campaignBriefingController) DispatchNarrationStage(stage int) []BriefingAudioEffect {
+	if b == nil || b.state != BriefingOpen {
+		return nil
+	}
+	b.narrationOn = stage != 0
+	if !b.narrationOn {
+		return []BriefingAudioEffect{{Kind: BriefingAudioStop, Path: b.narrationPath}}
+	}
+	return b.startAudio()
+}
+
 func (b *campaignBriefingController) startAudio() []BriefingAudioEffect {
 	if b == nil || b.narrationPath == "" {
 		return nil
@@ -360,9 +366,11 @@ func (b *campaignBriefingController) startAudio() []BriefingAudioEffect {
 }
 
 func (b *campaignBriefingController) stopAudio() []BriefingAudioEffect {
-	if b == nil || b.narrationPath == "" {
+	if b == nil {
 		return nil
 	}
+	// Leaving the briefing stops any current stream, even when this mission
+	// supplies no narration key [07 R-FE-01 §4].
 	return []BriefingAudioEffect{{Kind: BriefingAudioStop, Path: b.narrationPath}}
 }
 

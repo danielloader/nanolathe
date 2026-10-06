@@ -68,11 +68,12 @@ type Controller struct {
 	nextTrack    int // next to play (0 means none)
 	// requestedTrack is the CD object's *requested track*, a field of its own
 	// alongside current/next [03 R-AUD-01 §4 "the CD object"]. Only Repeat
-	// reads it: the MUSIC screen's `TRACKMODE` copies the selected track into
-	// it when the stage is `Repeat`, and the tick's mode-3 arm defaults it to
-	// track 1 when it is still 0. `PlayTrack` writes *next*, never this.
+	// reads it: retail's MUSIC screen restores its selection from this value when
+	// entering Repeat, and the tick defaults it to track 1 when playback needs
+	// updating and it is still 0. `PlayTrack` writes *next*, never this.
 	requestedTrack int
 	status         StatusMode
+	modeledPlaying bool // device-free media state, independent of controller status writes
 	playMode       PlayMode
 	desiredCat     int        // for mode 4: 0..4, Building|Battle|Victory|Defeat|Unused [03 R-AUD-01 §4]
 	trackCategory  [100]uint8 // (i%4)+1 cycle, retail builds 100 entries
@@ -202,6 +203,25 @@ func (c *Controller) NextTrack() int {
 	return c.nextTrack
 }
 
+// SelectTrack is the MUSIC transport selector [07 R-FE-01 §6]. Stopped and
+// paused controllers change their logical next track without starting media;
+// a playing controller submits through the ordinary play primitive. Its
+// resulting next track, not the argument, is the screen's new selection.
+func (c *Controller) SelectTrack(track int) int {
+	if c == nil || c.numTracks == 0 {
+		return 0
+	}
+	if track > c.numTracks {
+		track %= c.numTracks
+	}
+	if c.status == StatusPlaying {
+		c.playTrack(track)
+		return c.nextTrack
+	}
+	c.nextTrack = track
+	return track
+}
+
 // RequestedTrack returns the CD object's requested track, which only Repeat
 // reads [03 R-AUD-01 §4].
 func (c *Controller) RequestedTrack() int {
@@ -211,10 +231,10 @@ func (c *Controller) RequestedTrack() int {
 	return c.requestedTrack
 }
 
-// SetRequestedTrack is the MUSIC screen's `TRACKMODE` arm: selecting `Repeat`
-// copies the selected track into the requested track [03 R-AUD-01 §4]. A zero
-// selection ("NO DISC") is copied as authored; the tick's Repeat arm is what
-// defaults it to track 1.
+// SetRequestedTrack retains the track Repeat will consume. Retail's MUSIC screen
+// refresh writes its selection here; entering Repeat first restores that
+// selection from RequestedTrack [03 R-AUD-01 §4]. The tick defaults a retained
+// zero to track 1 when playback needs updating.
 func (c *Controller) SetRequestedTrack(track int) {
 	if c == nil || track < 0 {
 		return
@@ -300,7 +320,7 @@ func (c *Controller) pollPlaying() bool {
 	if c.playbackPoll != nil {
 		return c.playbackPoll()
 	}
-	return c.IsPlaying()
+	return c.modeledPlaying
 }
 
 // NotifySuccessfulCompletion handles only a successful playback notification.
@@ -314,10 +334,30 @@ func (c *Controller) NotifySuccessfulCompletion() {
 	c.tickFromMedia()
 }
 
+// UpdateNow runs an explicit music update with a fresh device query wherever
+// the tick requires one [03 R-AUD-01 §4]. It does not service presentation
+// timers; page callbacks and the host timer pump remain separate callers.
+func (c *Controller) UpdateNow() {
+	if c != nil {
+		c.tickFromMedia()
+	}
+}
+
 // Tick's early exits do not query the device [03 R-AUD-01 §4].
 func (c *Controller) tickFromMedia() {
 	if c.numTracks == 0 || c.desiredCat == 4 || c.status == StatusPaused {
 		c.Tick(false)
+		return
+	}
+	if c.playMode == ModeIdle && c.desiredCat != 2 && c.desiredCat != 3 {
+		if c.status == StatusIdle {
+			return
+		}
+		// Idle clears status before the device query [03 R-AUD-01 §4].
+		c.status = StatusIdle
+		if c.pollPlaying() {
+			c.Stop()
+		}
 		return
 	}
 	c.Tick(c.pollPlaying())
@@ -455,6 +495,12 @@ func (c *Controller) Open(numTracks int) bool {
 	if c == nil {
 		return false
 	}
+	if !c.initialized {
+		c.requestedTrack = 1 // Fresh successful open, separately from next [07 R-FE-01 §6].
+	}
+	// TODO(question): repeated Open and Close/reopen still use the host's
+	// existing reset policy. Retail's already-open call does nothing; a full
+	// lifecycle caller audit must settle the host mapping before changing it.
 	c.stopMedia()
 	c.initialized = true
 	c.fadeStep = 0
@@ -517,6 +563,7 @@ func (c *Controller) Pause(paused bool) {
 				c.player.Pause()
 			}
 			c.status = StatusPaused
+			c.modeledPlaying = false
 		}
 	} else {
 		if c.status == StatusPaused {
@@ -525,6 +572,7 @@ func (c *Controller) Pause(paused bool) {
 				c.player.Play()
 			}
 			c.status = StatusPlaying
+			c.modeledPlaying = true
 		}
 	}
 }
@@ -603,65 +651,113 @@ func (c *Controller) IsPlaying() bool { return c != nil && c.status == StatusPla
 
 // Play attempts to play a specific track 1..numTracks. It deduplicates if
 // already playing same track. If music
-// disabled it returns true (no-op). If track==0 it stops. Volume and MCI
-// strings are presentation-only here.
+// disabled it returns true (no-op). Zero arms playing status and runs the
+// ordinary tick [03 R-AUD-01 §4]. Nonzero public requests retain the host's
+// range clamp; the sequential controller submits its exact next track itself.
 func (c *Controller) Play(track int) bool {
 	if c == nil {
 		return false
 	}
-	if !c.musicEnabled {
-		return true
+	if track != 0 && c.numTracks > 0 {
+		track = max(1, min(track, c.numTracks))
 	}
+	return c.playTrack(track)
+}
+
+// playTrack submits a controller-selected track without pre-wrapping it. A
+// backend open failure is recorded for the host pump and leaves status idle.
+func (c *Controller) playTrack(track int) bool {
+	played, err := c.submitTrack(track)
+	if err != nil {
+		c.mediaError = err
+	}
+	return played
+}
+
+// submitTrack is the play primitive. It returns the backend's open failure
+// without recording it, so the sequential arm can apply its over-count host
+// policy; every other caller records the failure through playTrack.
+func (c *Controller) submitTrack(track int) (bool, error) {
+	if !c.musicEnabled {
+		return true, nil
+	}
+	c.status = StatusPlaying
 	if track == 0 {
-		c.Stop()
-		return true
+		c.tickFromMedia()
+		return true, nil
 	}
 	if c.numTracks == 0 {
-		return false
+		c.status = StatusIdle
+		return false, nil
 	}
-	if track < 1 {
-		track = 1
+	// The query precedes equality, and sequential wrap changes the retained
+	// next field used here even if media keeps playing [03 R-AUD-01 §4].
+	if c.pollPlaying() && track == c.nextTrack {
+		return true, nil // dedup
 	}
-	if track > c.numTracks {
-		track = c.numTracks
-	}
-	if c.status == StatusPlaying && track == c.curTrack && c.pollPlaying() {
-		return true // dedup
-	}
+	c.nextTrack = track
 	c.stopMedia()
 	if c.openTrack != nil {
 		player, err := c.openTrack(track)
 		if err != nil {
-			c.mediaError = err
 			c.status = StatusIdle
-			return false
+			return false, err
 		}
 		c.player = player
 	}
 	c.curTrack = track
 	c.nextTrack = track
 	c.status = StatusPlaying
+	c.modeledPlaying = true
 	c.position = 0
 	c.applyVolume()
 	if c.player != nil {
 		c.player.Play()
 	}
-	return true
+	return true, nil
 }
 
-// playSequential implements mode 1: next++ wrap.
+// playSequential submits next+1 before resetting an over-count next to one
+// [03 R-AUD-01 §4]; that order is retail's.
+//
+// Nanolathe host policy (not a retail claim): when the backend rejects the
+// over-count submission that follows the last track, the host submits the
+// wrapped track, one, in the same step and records no media error. The file
+// backend has no track past the last file; no completion follows its
+// rejection and Play All has no other tick caller during ordinary play, so
+// without this the soundtrack would stay silent. A rejected in-range track
+// keeps the ordinary idle/error policy, and a backend that accepts the
+// over-count request is left to its own media.
+//
+// TODO(question): a retail CD device's or packaged adapter's response to the
+// over-count play request (reject it, keep the current media, or play on to the
+// disc's end and later notify completion) is unknown [03 R-AUD-01 §4]. A manual
+// observation of Play All past the last track on a native drive and on the
+// packaged MP3 adapter would settle what the host should model.
 func (c *Controller) playSequential() {
 	if c.numTracks == 0 {
 		return
 	}
-	nxt := c.nextTrack
-	if nxt < 0 {
-		nxt = 0
+	nxt := 1
+	if c.nextTrack >= 1 {
+		nxt = c.nextTrack + 1
 	}
-	// The transition pre-advances next, then wraps to track one.
-	nxt = nxt%c.numTracks + 1
 	c.nextTrack = nxt
-	c.Play(nxt)
+	played, err := c.submitTrack(nxt)
+	if c.nextTrack > c.numTracks {
+		c.nextTrack = 1
+	}
+	if err != nil {
+		if nxt > c.numTracks {
+			played = c.playTrack(c.nextTrack)
+		} else {
+			c.mediaError = err
+		}
+	}
+	if played {
+		c.applyVolume()
+		c.status = StatusPlaying
+	}
 }
 
 // playRandom implements mode 2: rand%numTracks+1.
@@ -781,9 +877,11 @@ func (c *Controller) Tick(isPlaying bool) {
 	}
 	// Handle the mode transition only after a not-playing poll.
 	if c.playMode == ModeIdle {
-		// if status !=0 and not playing -> stop and reset
-		if c.status != StatusIdle && !isPlaying {
-			c.Stop()
+		if c.status != StatusIdle {
+			c.status = StatusIdle
+			if isPlaying {
+				c.Stop()
+			}
 		}
 		return
 	}
@@ -820,11 +918,13 @@ func (c *Controller) NotifyTrackEnd() {
 	}
 	if c.status == StatusPlaying {
 		c.status = StatusIdle
+		c.modeledPlaying = false
 		// keep curTrack for sequential increment logic; next already advanced in sequential case
 	}
 }
 
 func (c *Controller) stopMedia() {
+	c.modeledPlaying = false
 	if c.player != nil {
 		if err := c.player.Err(); err != nil && c.mediaError == nil {
 			c.mediaError = err

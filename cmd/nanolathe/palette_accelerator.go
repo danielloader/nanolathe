@@ -244,6 +244,9 @@ func (h *retailBattleHUD) activatePaletteGadget(b *battleSession, ctx paletteAct
 	page, count := b.buildPageNavigationState(ctx.frame)
 	next := hud.NextPageButton(page, count)
 	prev := hud.PrevPageButton(page, count)
+	if state, authored := b.authoredPageState(ctx.frame); authored {
+		next, prev = state.NextButton(count), state.PrevButton(count)
+	}
 	if strings.Contains(upperName, "NEXTPAGE") || strings.Contains(upperName, "NEXT") && strings.Contains(upperName, "PAGE") || strings.Contains(upperName, "PAGEDOWN") {
 		if !rightClick {
 			_ = b.dispatchBuildPageCued(next)

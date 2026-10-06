@@ -235,10 +235,14 @@ same byte refcount; the mode bit selects only the shape.
 * *Terrain-ray*: `g = clamp(q, 0, numtables − 1)` into the declared `LOS.TDF`
   tables, reading record `g − 1` because the table accessor is one-based — and
   the loader filled record `d` from the section it names `TABLE d + 1`, so
-  group `g` walks `TABLE g` `[03 R-COMP-02 §1]`. Each authored line is a spoke of
-  absolute offsets from the observer, expanded by four 90-degree rotations; step
-  distances count from one; the origin cell is admitted unconditionally; each
-  step bounds-checks unsigned *before* any terrain read; admission is the strict
+  group `g` walks `TABLE g` `[03 R-COMP-02 §1]`. The compiler fills declared
+  line slots by name, retaining empty holes and keeping additional authored
+  lines as unreachable catalog metadata. It accepts independent comma and
+  ASCII-space separators. The raster cache applies the signed-word quadrant
+  transforms from `[03 R-VIS-01 §3]`; step distances count authored ordinals
+  from one. The origin cell is admitted unconditionally; each step bounds-checks
+  unsigned *before* any terrain read, skipping an outside point while allowing
+  later points to re-enter; admission is the strict
   cross-multiplied horizon test against a retained pair that starts at `(−1, 0)`,
   gated by the LOS word's low byte, with the high byte deciding whether the
   retained horizon advances `[03 §3.2]` `[03 R-VIS-01 §3]`.
@@ -265,13 +269,21 @@ without attempting a retirement through the new raster `[03 R-VIS-01 §1]`
 either `RefreshMode` or a republication sweep. Retail invokes it with the full
 argument at three sites — battle entry, every commander respawn, and watch-mode
 entry — and it always refills both stores: step 1 the whole word grid from mode
-bit 0, step 2 each eligible slot's byte grid from mode bit 1, step 3 a direct
-unthrottled stamp of every active unit in record order, step 4 the minimap/fog
-invalidation `[08 R-ENTRY-01 §7]` `[08 R-SKIR-01 §3]`. Step 2's eligibility is
+bit 0, step 2 each eligible slot's byte grid from mode bit 1, step 3 visits
+every supplied active unit in record order, step 4 the minimap/fog invalidation
+`[08 R-ENTRY-01 §7]` `[08 R-SKIR-01 §3]`. Step 2's eligibility is
 the live record / controller in {1,2,3} / side ≠ 10 test; a slot that fails it
 keeps its stale bytes, so the service takes the per-slot vector from the caller
-rather than filling all ten. Step 3 is gated on mode bit 1: with current
-coverage disabled no unit is visited and every saved observer record survives
+rather than filling all ten. Step 3 shares the live-command helpers: Circular
+mode directly stamps, while True mode retains the saved tile pair, clears the
+saved byte and applies the ordinary refresh throttle. An unchanged tile with
+emitter byte at most five therefore remains unpublished after the refill;
+height six or a changed tile publishes `[03 R-VIS-01 §1]`. The refilled grids
+already disposed of old coverage, so a skipped retained record cannot later
+retire an old contribution. Presentation invalidation remains batched over the
+whole rebuild. The next footprint map keeps only supplied observers, as before,
+but carries their saved records into the shared helpers. Step 3 is gated on
+mode bit 1: with current coverage disabled no unit is visited and every saved observer record survives
 untouched, which is safe because retirement and the byte half of publication are
 gated on the same bit `[03 R-VIS-01 §1]`. `RebuildAll` remains the restore
 seam's narrower wipe — it holds no player table, and the seam installs the saved
@@ -531,11 +543,13 @@ destruction with no restore step `[05 "Geothermal requirement"]`.
 schema's surface-metal scalar on a canonical map, or from the legacy attribute
 record on a legacy one, and is then raised under indestructible metal-bearing
 features by the deposit pass — the only writer after the seed. An extractor
-samples `Σ(cell byte + 1) × extractsmetal` over its footprint **once at
-placement**, stores the rate, and never resamples; off-map cells of a partly
-off-map rectangle contribute nothing while the in-bounds cells still accumulate;
-the sixteen-bit accumulator is also handed to the unit's script. A feature's own
-metal field is a reclaim reward, not extractor yield. Sampling before the schema
+sums `cell byte + 1` over its footprint **once at creation**, wraps that sum
+to sixteen bits, and interprets it signed for the stored extraction rate.
+`SampleMetalWithFootprintSum` returns the same raw accumulator for the script
+callback. Off-map cells contribute nothing while in-bounds cells still
+accumulate; later movement never resamples. Authored tests cover the signed
+boundary, full wrap and a partial off-map rectangle `[05 R-PROD-01 §6-A]`.
+A feature's own metal field is a reclaim reward, not extractor yield. Sampling before the schema
 seed is an error, not a plausible zero `[05 "Terrain metal extraction"]`
 `[05 R-PROD-01 §6]` `[05 R-FEAT-01 §7]`.
 
@@ -557,7 +571,7 @@ distance to the observer's signed 16-bit word, preserving zero and negative
 values for both live units and temporary death sight `[03 R-VIS-01 §2]`. Both
 start from `q = floor(radius/32)` by signed floor division. Sprite-mask forms `idx = clamp(q − 5, 0, 9)` into the ten
 authored visibility-mask frames; terrain-ray forms `g = clamp(q, 0,
-numtables − 1)` into the **declared** table count and then reads record
+numtables − 1)` into the **declared count narrowed to a signed word** and then reads record
 `g − 1`. Both conventions are one-based and cancel: the loader sizes its list
 to `numtables` and fills zero-based slot `d` from the section it *names*
 `TABLE d + 1`, so record `g − 1` is `TABLE g`. A sight distance in
@@ -567,13 +581,19 @@ range, so the last loaded table `TABLE numtables` is unreachable, and group 0
 reads a record whose content is Unknown — an empty line list there is the
 sanctioned divergence `[03 §3.2]` `[03 R-COMP-02 §1]` (SC9). A declared slot
 whose section is absent keeps its empty line list; it never pulls a
-higher-numbered table down into it. Nothing in the compile or the raster is
-bounded by a table count: the retail loader sizes its table list to the declared
-`numtables`, its line list to the declared `numlines` and its point list to the
-pairs a line spells `[03 R-COMP-02 §1]`, so a content set that authors ninety
-tables of radius up to ninety is read exactly the way the nine-table retail file
-is. The only host bound is the battle-table read cap, which a content profile
-raises (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
+higher-numbered table down into it. Within each table, `Lines` holds the
+one-based named slots selected by the signed-word `NumLines`, including nil
+holes; unused authored lines follow as metadata. Each consumed line is parsed
+from the consumer's bounded value `[03 R-VIS-01 §3]`; if shortened, its full
+authored integer list also follows the slots as metadata. `buildSpokes` consumes only
+the declared slots. Source integers remain available to the catalog hash,
+while coordinates, negation and point counts narrow at the raster-cache
+boundary `[03 R-VIS-01 §3]`. No stock census limits table sizes: a content set
+that authors ninety tables remains supported. The battle-table read cap is
+selected by content profile (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
+Malformed allocation counts and incomplete coordinate lists have no established
+retail safety contract; the host keeps empty spokes for nonpositive counts or
+incomplete pairs. This does not claim malformed-input equivalence.
 
 **C3** Sprite-mask publication clips start-inclusive/end-exclusive, skips
 negative origins to `max(0, −origin)`, compares bounds unsigned so a signed
@@ -592,9 +612,15 @@ is `retainedNumerator × stepDistance < candidateDifference × retainedDistance`
 strictly, so an exact tie never admits. The candidate difference comes from the
 LOS word's low byte; the high byte is then tested with the identical comparison
 and only then does the retained pair advance. Authored quadrant offsets are
-absolute positions from the observer, expanded by four rotations, with axis
-spokes duplicated where the table carries both orientations `[03 §3.2]`
+absolute positions from the observer, expanded in the four quadrant blocks
+specified by research, with signed-word negation and axis duplicates preserved.
+An out-of-map point leaves the horizon unchanged and does not terminate the
+spoke; later points retain their original ordinal `[03 §3.2]`
 `[03 R-VIS-01 §3]` `[03 R-P0-18-B §1]`.
+`compile_los_lines_test.go` locks named holes, extra-line metadata and token
+separators, the line-value byte boundary and positive table-count narrowing;
+`los_contract_test.go` locks asymmetric quadrants, coordinate width, the narrowed
+clamp and re-entry with the original horizon ordinal.
 
 **C6** Refresh throttle: terrain-ray recomputes only when the coverage tile X or
 Y changed or the observer height byte moved by more than five; sprite-mask
@@ -674,7 +700,11 @@ The minimap's sensor circles are drawn by presentation `[03 §3.4]`
 **C12** The sensor phase runs **only when more than one player is active**; in a
 one-player session the status bits keep whatever construction gave them. The
 radius visitor searches the larger of the two authored distances, unbonused,
-while the elevation bonus enters the squared radar radius only; the two contact
+while the elevation bonus enters the squared radar radius only. The callback
+squares the complete promoted sum at signed 32-bit width; it does not pass
+through the visitor's raw-fixed-point radius conversion again. Authored
+boundary tests cover both the signed-word crossing and signed-square overflow
+`[03 R-VIS-01 §4]`. The two contact
 comparisons are strict and the visitor's own distance test is inclusive. It
 subtracts signed raw 16.16 coordinate words, takes each square's high 32 bits,
 and adds those two terms at signed 32-bit width; it does not truncate each axis

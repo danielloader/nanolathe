@@ -7,10 +7,22 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
 )
 
-// A construction child must finish its reveal before joining its carrier:
-// transparent child pixels never contribute a staging key [03 R-REN-03A §4].
-// Only these groups take the extra composition passes (GPU design §22.4).
+// Construction children finish reveal before joining their carrier. Cached
+// seeds also need independent winner resolution before the union's admission.
+// Their transparent-pixel policies remain distinct (GPU design §22).
 func modelGroupNeedsMerge(g *drawlist.ModelGeometry) bool {
+	if modelHasSeed(g) {
+		return true
+	}
+	for _, child := range g.Children {
+		if mergeableChild(child.Geometry) && modelHasSeed(child.Geometry) {
+			return true
+		}
+	}
+	return modelGroupHasReveal(g)
+}
+
+func modelGroupHasReveal(g *drawlist.ModelGeometry) bool {
 	for _, child := range g.Children {
 		c := child.Geometry
 		if mergeableChild(c) && (c.Reveal != nil || (c.Supersample != nil && c.Supersample.Reveal != nil)) {
@@ -23,6 +35,8 @@ func modelGroupNeedsMerge(g *drawlist.ModelGeometry) bool {
 type modelGroupMerge struct {
 	parent, child modelDirectRegion
 	key           bool
+	preserveHoles bool
+	delta         int32
 }
 
 // The merges run in waves (GPU design §22.4 "Construction-child composition").
@@ -56,6 +70,8 @@ type modelGroupSlot struct {
 	px, py, cx, cy        int
 	parentPage, childPage int32
 	key                   bool
+	preserveHoles         bool
+	delta                 int32
 }
 
 type modelGroupMergeLane struct {
@@ -127,7 +143,7 @@ func (m *modelGroupMergeLane) planWaves() {
 			w: box.Dx() * 2, h: box.Dy() * 2,
 			px: int(parent.x) + 2*(box.Min.X-parent.bounds.Min.X), py: int(parent.y) + 2*(box.Min.Y-parent.bounds.Min.Y),
 			cx: int(child.x) + 2*(box.Min.X-child.bounds.Min.X), cy: int(child.y) + 2*(box.Min.Y-child.bounds.Min.Y),
-			parentPage: parent.page, childPage: child.page, key: merge.key,
+			parentPage: parent.page, childPage: child.page, key: merge.key, preserveHoles: merge.preserveHoles, delta: merge.delta,
 		}
 		oversized := s.w > modelGroupScratchW || s.h > modelGroupScratchH
 		if x+s.w > modelGroupScratchW {
@@ -211,9 +227,14 @@ func (r *Renderer) drawModelGroupWave(a *deviceAcct, wave []modelGroupSlot) {
 			// The fragment reads the parent's and the child's texels at its
 			// own offset within the slot.
 			base := uint32(len(m.verts))
+			holes := float32(0)
+			if s.preserveHoles {
+				holes = 1
+			}
 			for _, c := range [4][2]int{{0, 0}, {s.w, 0}, {s.w, s.h}, {0, s.h}} {
 				m.verts = append(m.verts, ebiten.Vertex{
 					DstX: float32(s.sx + c[0]), DstY: float32(s.sy + c[1]),
+					ColorR: holes, ColorG: float32(s.delta),
 					Custom0: float32(s.px - s.sx), Custom1: float32(s.py - s.sy),
 					Custom2: float32(s.cx - s.sx), Custom3: float32(s.cy - s.sy),
 				})
@@ -284,6 +305,13 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
  priorKey := imageSrc1AtFromSrc0Pos(parent)
  childColour := imageSrc2AtFromSrc0Pos(child)
  childKey := imageSrc3AtFromSrc0Pos(child)
+ if color.g != 0.0 { childKey.r = clamp(floor(childKey.r*255.0+0.5) + color.g, 0.0, 255.0)/255.0 }
+ // Ordinary groups retain their shared-key hole policy: an erased higher
+ // child hides prior colour, while a transparent tie leaves it unchanged.
+ if color.r > 0.5 && childKey.a > 0.0 && priorKey.r < childKey.r {
+  if KeyOutput > 0.5 { return childKey }
+  return childColour
+ }
  // The finished child, rather than its unconditionally rasterized key,
  // controls staging admission [03 R-REN-03A §4].
  if childColour.a > 0.0 && priorKey.r <= childKey.r {

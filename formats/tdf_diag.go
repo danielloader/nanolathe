@@ -86,11 +86,10 @@ func WithTDFContext(fs vfs.FSOps, err error, logical string) error {
 // character offset so downstream offsets see text of unchanged length
 // [02 §4][P1-12]. Newlines inside block comments are preserved so reported line
 // numbers stay meaningful; retail only guarantees offsets, and keeping the
-// newline preserves both. This is the verbatim comment-blanking contract
-// that preserves offsets for duplicate-section handling [P1-12].
+// newline preserves both. This diagnostic policy does not change token spacing.
 //
-// Rules: `//` blanks to end of line; `/* */` blanks the span; an unterminated
-// `/*` blanks everything through end of file. Comments cannot appear inside a
+// Rules: `//` blanks to end of line; `/* */` blanks the span. An unterminated
+// block retains its final body character for the grammar [02 §4]. Comments cannot appear inside a
 // value, and trailing comments after `;` are blanked too — both fall out of
 // blanking before the grammar runs.
 func blankComments(src []byte) []byte {
@@ -107,6 +106,11 @@ func blankComments(src []byte) []byte {
 			}
 		case '*':
 			end := len(out)
+			// The retail unfinished-block walk leaves its final body byte.
+			// An opener alone has no body; both delimiter bytes are blanked.
+			if i+2 < end {
+				end--
+			}
 			for j := i + 2; j+1 < len(out); j++ {
 				if out[j] == '*' && out[j+1] == '/' {
 					end = j + 2

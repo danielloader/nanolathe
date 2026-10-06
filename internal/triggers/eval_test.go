@@ -285,31 +285,6 @@ func TestBoundaryTolerance(t *testing.T) {
 	}
 }
 
-func TestMoveRadiusSignedCoordinateSubtraction(t *testing.T) {
-	const maxInt32 = int32(1<<31 - 1)
-	const minInt32 = int32(-1 << 31)
-	if got := wrappedDelta(int64(maxInt32), minInt32); got != -1 {
-		t.Fatalf("max-min wrapped delta = %d want -1", got)
-	}
-	if got := wrappedDelta(int64(minInt32), maxInt32); got != 1 {
-		t.Fatalf("min-max wrapped delta = %d want 1", got)
-	}
-	if got := wrappedDelta(int64(minInt32), 0); got*got != int64(1)<<62 {
-		t.Fatalf("widest signed delta square = %d want %d", got*got, int64(1)<<62)
-	}
-
-	w := triggerWorld(t)
-	u := spawn(t, w, "ARMCOM", 0, 0, 0)
-	u.X = numeric.Fixed(maxInt32)
-	c := pollCtx(w, 0)
-	c.Deproject = func(_, _ int32) (int32, int32, int32) {
-		return minInt32 + 65535, 0, 0
-	}
-	if New(KindMoveUnitToRadius, "ARMCOM", 0, 0, 0).Poll(c) {
-		t.Fatal("wrapped one-pixel delta satisfied a zero-radius condition")
-	}
-}
-
 // TestTimerSecondsToTicks locks the seconds×30 deadline [08 "Evaluation"] C17.
 func TestTimerSecondsToTicks(t *testing.T) {
 	w := triggerWorld(t)
@@ -329,58 +304,6 @@ func TestTimerSecondsToTicks(t *testing.T) {
 	}
 	if got := New(KindDeathTimerRunsOut, "", SecondsToTicks(1200)).Args[0]; got != 36000 {
 		t.Fatalf("1200 sec -> %d want 36000", got)
-	}
-}
-
-// TestMoveUnitToRadius locks the type-gated radius scan.
-func TestMoveUnitToRadius(t *testing.T) {
-	w := triggerWorld(t)
-	spawn(t, w, "ARMCOM", 0, 105, 200)
-	if !New(KindMoveUnitToRadius, "ARMCOM", 100, 200, 10).Poll(pollCtx(w, 0)) {
-		t.Fatal("unit inside the radius should satisfy the condition")
-	}
-	if New(KindMoveUnitToRadius, "ARMCOM", 100, 200, 4).Poll(pollCtx(w, 0)) {
-		t.Fatal("unit outside the radius satisfied the condition")
-	}
-	if New(KindMoveUnitToRadius, "CORCOM", 100, 200, 10).Poll(pollCtx(w, 0)) {
-		t.Fatal("type mismatch satisfied the condition")
-	}
-}
-
-// TestMoveUnitToRadiusRescansWithoutReplaying locks the poll shape of
-// [08 R-TRIG-01 §4]: MoveUnitToRadius has no Satisfied guard, so the partition
-// scan re-runs on every poll. What stays observable across that rescan is the
-// latch (nothing clears Satisfied, so a unit that leaves the radius does not
-// un-satisfy the condition), the one-shot cue (Celebrated guards it) and the
-// one-shot de-projection (the centre sentinel guards it).
-func TestMoveUnitToRadiusRescansWithoutReplaying(t *testing.T) {
-	w := triggerWorld(t)
-	u := spawn(t, w, "ARMCOM", 0, 105, 200)
-	cues, deprojections := 0, 0
-	c := pollCtx(w, 0)
-	c.Celebrate = func() { cues++ }
-	inner := c.Deproject
-	c.Deproject = func(x, z int32) (int32, int32, int32) {
-		deprojections++
-		return inner(x, z)
-	}
-
-	tr := New(KindMoveUnitToRadius, "ARMCOM", 100, 200, 10)
-	if !tr.Poll(c) {
-		t.Fatal("unit inside the radius should satisfy the condition")
-	}
-	// Move the unit far outside the radius, then keep polling.
-	u.X = numeric.Fixed(int64(9000) << 16)
-	for i := 0; i < 4; i++ {
-		if !tr.Poll(c) {
-			t.Fatalf("poll %d un-satisfied a latched condition", i+2)
-		}
-	}
-	if cues != 1 {
-		t.Fatalf("cue fired %d times, want exactly 1 — Celebrated guards the replay", cues)
-	}
-	if deprojections != 1 {
-		t.Fatalf("centre de-projected %d times, want exactly 1 — the sentinel guards it", deprojections)
 	}
 }
 

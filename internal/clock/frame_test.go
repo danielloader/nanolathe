@@ -30,7 +30,9 @@ func TestScaledNowBoundariesAndWrap(t *testing.T) {
 		{name: "first", ms: 34, want: 1},
 		{name: "before second", ms: 999, want: 29},
 		{name: "one second", ms: 1000, want: 30},
-		{name: "maximum source", ms: ^uint32(0), want: 128849018},
+		{name: "before product wrap", ms: 143165576, want: 4294967},
+		{name: "product wrap", ms: 143165577, want: 0},
+		{name: "maximum source", ms: ^uint32(0), want: 4294967},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -67,28 +67,28 @@ func TestGAFFogChildrenRetainOperationOrderAndRawGate(t *testing.T) {
 	f.Subframes[1].AlternateBlitter = 1
 	for _, mode := range []fogBlitMode{fogBlitGray, fogBlitPatterned} {
 		c := &Client{width: 3, height: 1, indexed: []byte{4, 4, 4}, pal: pal}
-		c.blitFogGAF(f, 1, 0, mode)
+		c.blitFogGAF(f, 2, 0, mode)
 		want := byte(6)
 		if mode == fogBlitPatterned {
 			want = 0
 		}
-		if c.indexed[1] != want {
+		if c.indexed[2] != want {
 			t.Fatalf("mode %v pixels %v, want both children under own operation", mode, c.indexed)
 		}
 		f.Subframes[1].Compressed = 1
-		c.indexed[1] = 4
-		c.blitFogGAF(f, 1, 0, mode)
+		c.indexed[2] = 4
+		c.blitFogGAF(f, 2, 0, mode)
 		want = 5
 		if mode == fogBlitPatterned {
 			want = 0
 		}
-		if c.indexed[1] != want {
+		if c.indexed[2] != want {
 			t.Fatal("compressed child bypassed raw gate")
 		}
 		f.Compressed = 1
-		c.indexed[1] = 4
-		c.blitFogGAF(f, 1, 0, mode)
-		if c.indexed[1] != 4 {
+		c.indexed[2] = 4
+		c.blitFogGAF(f, 2, 0, mode)
+		if c.indexed[2] != 4 {
 			t.Fatal("compressed parent recursed before raw gate")
 		}
 		f.Compressed = 0

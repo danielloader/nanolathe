@@ -210,6 +210,12 @@ func (h *retailBattleHUD) drawGUIWindowState(c *client.Client, window *gui.Windo
 		} else if !dynamic {
 			text = gad.Text
 		}
+		if gad.Kind == gui.KindLabel {
+			oldX := gad.Rect.X
+			h.resolveModalLabel(window, i, text)
+			gad = window.Gadgets[i]
+			r.X += gad.Rect.X - oldX
+		}
 		if text == "" && !(gad.Kind == gui.KindTextBox && panel != nil && panel.EditorCaptured() && panel.EditorIndex() == i) {
 			continue
 		}
@@ -273,6 +279,40 @@ func (h *retailBattleHUD) drawGUIWindowState(c *client.Client, window *gui.Windo
 			flash = panel.FlashRow(i)
 		}
 		h.drawBattleButtonCaption(c, clip, gad, r, text, selected, textWidth, metric, flash)
+	}
+}
+
+func (h *retailBattleHUD) resolveModalLabel(window *gui.Window, index int, text string) {
+	if h == nil || window == nil || index <= 0 || index >= len(window.Gadgets) {
+		return
+	}
+	gad := window.Gadgets[index]
+	if gad.Kind != gui.KindLabel || gad.Rect.X != -1 {
+		return
+	}
+	if text == "" {
+		resolveLabelX(window, index, 0)
+		return
+	}
+	selected := window.Font(h.fs, gad.FontNumber)
+	if selected == nil {
+		selected = h.guiFont
+	}
+	if measure, _, ok := retailLabelFaceMetrics(h.modalFontSmall, selected); ok {
+		resolveLabelX(window, index, measure(text))
+	}
+}
+
+// initializeModalLabels applies the initial paint's position writes with the
+// battle font context, before modal callers replace captions [07 R-WGT-01 §7].
+func (h *retailBattleHUD) initializeModalLabels(window *gui.Window) {
+	if window == nil {
+		return
+	}
+	for i, gad := range window.Gadgets {
+		if gad.Active != 0 {
+			h.resolveModalLabel(window, i, gad.Text)
+		}
 	}
 }
 
@@ -351,6 +391,9 @@ func (h *retailBattleHUD) drawBattleButtonCaption(c *client.Client, clip gui.Rec
 	}
 	prefix, letter, suffix := text[:key], text[key:key+1], text[key+1:]
 	draw(prefix, x, color)
+	// TODO(question): settle admission of a keyed later build caption;
+	// retail measures the first stored caption in that branch. Retain selected
+	// prefix spacing until its exceptional writer paths are known [07 R-WGT-01 §3].
 	x += measure(prefix)
 	keyColor := color
 	if build {

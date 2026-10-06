@@ -156,32 +156,22 @@ func aimRequirement(w *content.WeaponDef) (needLatch, needResult bool) {
 // Order is exact per [06 §4.2]:
 //
 //	tier           = selected bounded level (Strict is min(unsigned kills/5, 5))
-//	veteranReload  = floor((100-6*tier)*authoredReload/100)    // trunc toward zero [01 §8]
-//	healthFactor   = 120 - floor(20*health/maxHealth)          // signed trunc toward zero [01 §8]
-//	storedReload   = floor(healthFactor*veteranReload/100)     // trunc toward zero [01 §8]
+//	veteranReload  = ((100-6*tier)*authoredReload)/100
+//	healthQuotient = uint32(20*int32(int16(health)))/uint32(maxHealth)
+//	healthFactor   = int32(120-healthQuotient)
+//	storedReload   = (healthFactor*veteranReload)/100
 //
-// Stockpile launch does not write reload [06 §4.2] C7 — caller must skip the store path for stockpile weapons.
-// Malformed states (zero maxHealth, negative health, overflow) are explicit unknowns per [06 §4.2] PLAN_09 Explicit unknowns.
+// Products wrap at 32 bits; signed divisions truncate toward zero. The caller
+// narrows the result to the slot's signed-16 countdown. Stockpile launches skip
+// this computation [06 §4.2].
 func computeStoredReloadAtLevel(health, maxHealth, tier, authoredReload int32) int32 {
-	// veteranReload = floor((100-6*tier)*authoredReload/100) trunc toward zero [01 §8] I3 [06 §4.2]
-	veteranReload := int32((int64(100-6*tier) * int64(authoredReload)) / 100) // trunc toward zero [01 §8]
-
-	// healthFactor = 120 - floor(20*health/maxHealth) [06 §4.2] C7
-	// Zero maxHealth raises DIV fault after pool reservation not rolled back [P1-07 §2.7][GAP T5] I11.
-	// Stock MaxDamage is always >0, so fault is malformed-only; we reproduce as panic like retail #DE.
+	veteranReload := (100 - 6*tier) * authoredReload / 100
+	// The zero fault follows projectile reservation. A high-bit maximum is
+	// instead a valid large unsigned divisor [06 §4.2].
 	if maxHealth == 0 {
 		panic("combat: zero maxHealth divide fault in reload healthFactor [P1-07 §2.7][GAP T5]") // retail #DE [P1-07 §2.7]
 	}
-	if maxHealth < 0 {
-		// Negative max wraps as large unsigned; treat as fault path same as zero for determinism
-		panic("combat: negative maxHealth divide fault [P1-07 §2.7]")
-	}
-	// For ordinary positive health values, floor vs trunc agree; use trunc toward zero per I3 [01 §8].
-	// Negative health is preserved modular via 16-bit wrap in damage path; for reload the signed
-	// health is used directly and trunc toward zero is the retail IDIV [P1-07 §2.7].
-	healthFactor := int32(120 - (int64(20)*int64(health))/int64(maxHealth)) // trunc toward zero [01 §8] [06 §4.2] [P1-07 §2.7]
-
-	// storedReload = floor(healthFactor*veteranReload/100) trunc toward zero [01 §8] [06 §4.2]
-	stored := int32((int64(healthFactor) * int64(veteranReload)) / 100) // trunc toward zero [01 §8]
-	return stored                                                       // [06 §4.2] C7
+	healthQuotient := uint32(20*int32(int16(health))) / uint32(maxHealth)
+	healthFactor := int32(120 - healthQuotient)
+	return (healthFactor * veteranReload) / 100
 }

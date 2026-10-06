@@ -36,7 +36,8 @@ import (
 //     draws a face's texel only where its own key is not below the stored one:
 //     retail's `stored ≤ incoming` admission [03 R-REN-03A §2], faces in
 //     recorded order so a tie goes to the later-drawn face as retail's does.
-//     Both passes draw one vertex batch, and a four-corner face's key is the
+//     Cached seed and later live passes share one vertex batch (model_seed.go).
+//     A four-corner face's key is the
 //     span writer's two-chain mapping in both, so the passes never disagree
 //     about a texel's key.
 //
@@ -149,6 +150,7 @@ type modelDirectRegion struct {
 // texture and table bindings, and its span. The page's key plane and the
 // parameter image are bound when the run is drawn.
 type modelDirectRun struct {
+	seedPhase        modelSeedPhase
 	imgs             [2]*ebiten.Image
 	page             int32
 	vOff, vLen, iOff int32
@@ -215,14 +217,15 @@ type modelDirectLane struct {
 	// keyed bodies, claimOrder the order the pool claims jobs in when a test
 	// sets one, place the pre-check's tuning and placeMode how the last frame
 	// was placed (model_place_pool.go).
-	packets    []modelPlacePacket
-	jobs       []modelPlaceJob
-	slots      frameArena[modelTextureSlot]
-	placeKeys  map[modelBodyKey]struct{}
-	claimOrder []int32
-	place      modelPlaceTuning
-	placeMode  modelPlaceMode
-	opts       ebiten.DrawTrianglesShaderOptions
+	packets     []modelPlacePacket
+	jobs        []modelPlaceJob
+	slots       frameArena[modelTextureSlot]
+	placeKeys   map[modelBodyKey]struct{}
+	claimOrder  []int32
+	place       modelPlaceTuning
+	placeMode   modelPlaceMode
+	opts        ebiten.DrawTrianglesShaderOptions
+	seedUniform [1]float32
 
 	// retain holds the packed vertices of subjects whose cached lane the
 	// recorder proved unchanged (model_retain.go).
@@ -390,6 +393,9 @@ func (d *modelPlaceCtx) subjectVerdicts(reveal *drawlist.ModelReveal, g *drawlis
 	}
 	putQuadLane(packed[12:], int(g.WaterlineKey), digger)
 	putQuadLane(packed[16:], int(g.DiggerKey), hasReveal)
+	if modelHasSeed(g) {
+		delta = modelSeedDelta(delta)
+	}
 	if delta < -modelQuadKeyBias || delta >= modelQuadKeyBias {
 		// A delta the lane cannot carry: no stock child is anywhere near it,
 		// and the child's own verdicts then read the shifted key rather than
@@ -519,57 +525,64 @@ func (r *Renderer) drawModelPages(fill *ebiten.Image) {
 	if params == nil {
 		params = fill
 	}
+	if d.opts.Uniforms == nil {
+		d.opts.Uniforms = map[string]any{"SeedPhase": d.seedUniform[:]}
+	}
 	for p := range d.pages {
 		pg := &d.pages[p]
 		if pg.usedRows == 0 {
 			continue
 		}
 		used := image.Rect(0, 0, modelDirectAtlasW, int(pg.usedRows))
-		// The key plane: every face's key under a max blend, so a texel holds
-		// the highest key drawn there. The runs are the colour batch's own —
-		// the key shader reads positions, the key lane and, for a mapped face,
-		// the parameter image — so the vertices are built once. Shadow faces
-		// write keys nobody reads; their regions are their own.
-		a.beginPass(pg.key)
-		pg.key.SubImage(used).(*ebiten.Image).Clear()
-		d.opts.Images = [4]*ebiten.Image{fill, fill, fill, params}
-		d.opts.Blend = ebiten.Blend{
-			BlendFactorSourceRGB: ebiten.BlendFactorOne, BlendFactorSourceAlpha: ebiten.BlendFactorOne,
-			BlendFactorDestinationRGB: ebiten.BlendFactorOne, BlendFactorDestinationAlpha: ebiten.BlendFactorOne,
-			BlendOperationRGB: ebiten.BlendOperationMax, BlendOperationAlpha: ebiten.BlendOperationMax,
-		}
-		for i := range d.runs {
-			run := &d.runs[i]
-			if run.iLen == 0 || int(run.page) != p {
+		// The first pair resolves cached winners and their seed/reveal. The
+		// second preserves those colours and keys while admitting outline/live.
+		// Unseeded packets stay entirely in the first pair.
+		for phase := 0; phase < 2; phase++ {
+			late := phase == 1
+			if late && !d.hasSeedLiveRuns(int32(p)) {
 				continue
 			}
-			a.submitted(int(run.vLen), int(run.iLen))
-			pg.key.DrawTrianglesShader32(a.spans.span(pg.key, d.verts, int(run.vOff), int(run.vLen)), d.idx[run.iOff:run.iOff+run.iLen], d.keyShader, &d.opts)
-		}
-		// The colour plane: faces that pass the key test, at their texel, with
-		// the reveal and clipping verdicts applied; shadow silhouettes in their
-		// index.
-		a.beginPass(pg.colour)
-		pg.colour.SubImage(used).(*ebiten.Image).Clear()
-		// Every colour fragment is opaque or discarded, so a copy blend stores
-		// exactly what source-over did, and keeps the submerged marker's alpha
-		// exact where two faces tie on the key (§26.5).
-		d.opts.Blend = ebiten.BlendCopy
-		for i := range d.runs {
-			run := &d.runs[i]
-			if run.iLen == 0 || int(run.page) != p {
-				continue
+			a.beginPass(pg.key)
+			if !late {
+				pg.key.SubImage(used).(*ebiten.Image).Clear()
 			}
-			d.opts.Images = [4]*ebiten.Image{run.imgs[0], run.imgs[1], pg.key, params}
-			for j := range 2 {
-				if d.opts.Images[j] == nil {
-					d.opts.Images[j] = fill
+			d.opts.Images = [4]*ebiten.Image{fill, fill, fill, params}
+			d.opts.Blend = ebiten.Blend{
+				BlendFactorSourceRGB: ebiten.BlendFactorOne, BlendFactorSourceAlpha: ebiten.BlendFactorOne,
+				BlendFactorDestinationRGB: ebiten.BlendFactorOne, BlendFactorDestinationAlpha: ebiten.BlendFactorOne,
+				BlendOperationRGB: ebiten.BlendOperationMax, BlendOperationAlpha: ebiten.BlendOperationMax,
+			}
+			for i := range d.runs {
+				run := &d.runs[i]
+				if run.iLen == 0 || int(run.page) != p || (run.seedPhase == modelSeedLive) != late {
+					continue
 				}
+				d.seedUniform[0] = float32(run.seedPhase)
+				a.submitted(int(run.vLen), int(run.iLen))
+				pg.key.DrawTrianglesShader32(a.spans.span(pg.key, d.verts, int(run.vOff), int(run.vLen)), d.idx[run.iOff:run.iOff+run.iLen], d.keyShader, &d.opts)
 			}
-			a.submitted(int(run.vLen), int(run.iLen))
-			pg.colour.DrawTrianglesShader32(a.spans.span(pg.colour, d.verts, int(run.vOff), int(run.vLen)), d.idx[run.iOff:run.iOff+run.iLen], d.colourShader, &d.opts)
+			a.beginPass(pg.colour)
+			if !late {
+				pg.colour.SubImage(used).(*ebiten.Image).Clear()
+			}
+			d.opts.Blend = ebiten.BlendCopy
+			for i := range d.runs {
+				run := &d.runs[i]
+				if run.iLen == 0 || int(run.page) != p || (run.seedPhase == modelSeedLive) != late {
+					continue
+				}
+				d.seedUniform[0] = float32(run.seedPhase)
+				d.opts.Images = [4]*ebiten.Image{run.imgs[0], run.imgs[1], pg.key, params}
+				for j := range 2 {
+					if d.opts.Images[j] == nil {
+						d.opts.Images[j] = fill
+					}
+				}
+				a.submitted(int(run.vLen), int(run.iLen))
+				pg.colour.DrawTrianglesShader32(a.spans.span(pg.colour, d.verts, int(run.vOff), int(run.vLen)), d.idx[run.iOff:run.iOff+run.iLen], d.colourShader, &d.opts)
+			}
+			a.stats.DirectPasses += 2
 		}
-		a.stats.DirectPasses += 2
 	}
 	r.mergeModelGroupsInto(a)
 }
@@ -822,6 +835,7 @@ func (r *Renderer) allocSubjectJob(g *drawlist.ModelGeometry) (modelPlaceJob, bo
 	p0 := int32(len(d.packets))
 	d.packets = append(d.packets, modelPlacePacket{g: g, region: region})
 	separate := modelGroupNeedsMerge(g)
+	preserveHoles := !modelGroupHasReveal(g)
 	mergeStart := len(d.groups.merges)
 	needsKey := g.ReflectWater || (g.Shadow != nil && g.Shadow.Silhouette)
 	for _, child := range g.Children {
@@ -834,7 +848,7 @@ func (r *Renderer) allocSubjectJob(g *drawlist.ModelGeometry) (modelPlaceJob, bo
 		p := modelPlacePacket{g: cg, region: region, keyDelta: child.KeyDelta, group: g}
 		if separate {
 			p.region = d.regions[cg]
-			d.groups.merges = append(d.groups.merges, modelGroupMerge{parent: region, child: p.region, key: true})
+			d.groups.merges = append(d.groups.merges, modelGroupMerge{parent: region, child: p.region, key: true, preserveHoles: preserveHoles, delta: modelSeedChildDelta(cg, child.KeyDelta)})
 			p.groupReflection = region
 		}
 		needsKey = needsKey || cg.ReflectWater
@@ -1053,11 +1067,11 @@ func modelFaceTexFor(f *drawlist.ModelFace, slot modelTextureSlot) modelFaceTex 
 func (d *modelPlaceCtx) colourRun(imgs [2]*ebiten.Image, need int) *modelDirectRun {
 	if n := len(d.runs); n > d.runBase {
 		run := &d.runs[n-1]
-		if run.imgs[0] == imgs[0] && run.imgs[1] == imgs[1] && run.page == d.runPage && int(run.vLen)+need <= schedRunVertexLimit {
+		if run.imgs[0] == imgs[0] && run.imgs[1] == imgs[1] && run.page == d.runPage && run.seedPhase == d.seedPhase && int(run.vLen)+need <= schedRunVertexLimit {
 			return run
 		}
 	}
-	d.runs = append(d.runs, modelDirectRun{imgs: imgs, page: d.runPage, vOff: int32(len(d.verts)), iOff: int32(len(d.idx))})
+	d.runs = append(d.runs, modelDirectRun{imgs: imgs, page: d.runPage, seedPhase: d.seedPhase, vOff: int32(len(d.verts)), iOff: int32(len(d.idx))})
 	return &d.runs[len(d.runs)-1]
 }
 
@@ -1641,6 +1655,8 @@ func modelDirectKeyShaderSource() string {
 
 package main
 ` + modelQuadMapperSource + modelOutlineSource + modelDirectMappedSource() + `
+var SeedPhase float
+
 func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 	mode := int(custom.x + 0.5)
 	if mode >= ` + fmt.Sprint(modelDirectLive) + ` {
@@ -1663,7 +1679,12 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 		key = ring
 	}
 	key = key - floor(key/256.0)*256.0
-	return vec4(key/255.0, 0.0, 0.0, 1.0)
+	original := 0.0
+ if SeedPhase == 1.0 || SeedPhase == 2.0 {
+  original = key
+  if SeedPhase == 2.0 && key == 1.0 { key = 0.0 }
+ }
+ return vec4(key/255.0, original/255.0, 0.0, 1.0)
 }
 `
 }
@@ -1682,6 +1703,8 @@ func modelDirectColourShaderSource() string {
 	return `//kage:unit pixels
 
 package main
+
+var SeedPhase float
 
 const palRow = ` + fmt.Sprint(tableRowPAL) + `.0
 const blueRow = ` + fmt.Sprint(tableRowBlue) + `.0
@@ -1749,7 +1772,12 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 			// An endpoint is tested once for its whole pixel.
 			at = block
 		}
-		stored := floor(imageSrc2AtFromSrc0Pos(imageSrc0Origin()+at+vec2(0.5, 0.5)).r*255.0 + 0.5)
+		storedPixel := imageSrc2AtFromSrc0Pos(imageSrc0Origin()+at+vec2(0.5, 0.5))
+  stored := floor(storedPixel.r*255.0 + 0.5)
+  if SeedPhase == 1.0 || SeedPhase == 2.0 {
+   // Cached winner selection precedes the independently seeded key.
+   stored = floor(storedPixel.g*255.0 + 0.5)
+  }
 		if key < stored {
 			discard()
 			return vec4(0.0)
@@ -1798,7 +1826,12 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 		vkey := floor(imageSrc2AtFromSrc0Pos(imageSrc0Origin()+block+vec2(0.5, 0.5)).r*255.0 + 0.5)
 		// The subject's own verdicts read its own key: a carried child's
 		// lane carries the group delta, which is taken back off here.
-		own := vkey - (modelQuadU16(g.r, g.g) - 32768.0)
+		delta := modelQuadU16(g.r, g.g) - 32768.0
+  own := vkey - delta
+  if SeedPhase > 0.5 {
+   own = vkey
+   vkey = clamp(vkey + delta, 0.0, 255.0)
+  }
 		hasReveal := modelQuadU16(f.b, f.a)
 		if !live && hasReveal > 0.5 {
 			// The nanoframe reveal: below the floor, in the band, or at and
@@ -1837,7 +1870,10 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 		}
 	}
 	if idx == 1.0 {
-		discard()
+  // A winning live write replaces the seeded colour, including with the
+  // composition transparent index. Cached transparent winners started clear.
+  if SeedPhase == 3.0 { return vec4(0.0) }
+  discard()
 		return vec4(0.0)
 	}
 	albedo := palAt(idx)

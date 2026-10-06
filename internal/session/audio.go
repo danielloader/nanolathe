@@ -217,10 +217,10 @@ func (s *Session) PositionalAttenuation(pos [3]numeric.Fixed) int32 {
 // and drained by the presentation edge; authoritative callbacks never touch
 // the backend [03 §8.3] [I6].
 func (s *Session) EmitPositional(alias string, pos [3]numeric.Fixed) (audio.Pan, int32, bool) {
-	return s.emitPositional(alias, pos, false)
+	return s.emitPositional(alias, pos, false, false)
 }
 
-func (s *Session) emitPositional(alias string, pos [3]numeric.Fixed, isWater bool) (audio.Pan, int32, bool) {
+func (s *Session) emitPositional(alias string, pos [3]numeric.Fixed, isWater, anonymous bool) (audio.Pan, int32, bool) {
 	if s == nil || s.Audio == nil || strings.TrimSpace(alias) == "" || !s.IsAudibleAt(pos) {
 		return audio.Pan{}, 0, false
 	}
@@ -240,26 +240,26 @@ func (s *Session) emitPositional(alias string, pos [3]numeric.Fixed, isWater boo
 	if s.Clock != nil {
 		tick = s.Clock.GlobalTick
 	}
-	ok := s.publication.events.EmitAudio(frame.Event{Tick: tick, Sound: alias, AudioWater: isWater, AudioAudible: true, X: pos[0], Y: pos[1], Z: pos[2]})
+	ok := s.publication.events.EmitAudio(frame.Event{Tick: tick, Sound: alias, AudioAnonymous: anonymous, AudioWater: isWater, AudioAudible: true, X: pos[0], Y: pos[1], Z: pos[2]})
 	return pan, volume, ok
 }
 
 // EmitWeaponStart is the weapon fire path [06 §13.2][03 §8.3]: projectile
 // creation queues hit/water sound synchronously with start sound via
-// presentation sink. This helper provides the same gating for weapon aliases
+// presentation sink. This helper provides the same gating for weapon paths
 // without requiring combat to import audio directly: session owns the port.
 func (s *Session) EmitWeaponStart(alias string, pos [3]numeric.Fixed) (audio.Pan, int32, bool) {
-	return s.emitPositional(alias, pos, false)
+	return s.emitPositional(alias, pos, false, true)
 }
 
 // EmitWeaponHit emits a hit or water sound for projectile impact ordering
-// [06 §13.2][GAP T21] shake→hit/water→smoke→GAF→damage. Caller chooses alias
+// [06 §13.2][GAP T21] shake→hit/water→smoke→GAF→damage. Caller chooses the path
 // based on terrain/water gate before calling; gating and pan are applied here.
 func (s *Session) EmitWeaponHit(alias string, pos [3]numeric.Fixed, isWater bool) (audio.Pan, int32, bool) {
 	if isWater && alias == "" {
 		return audio.Pan{}, 0, false
 	}
-	return s.emitPositional(alias, pos, isWater)
+	return s.emitPositional(alias, pos, isWater, true)
 }
 
 // PlayBriefing plays the mission briefing sound if present; otherwise it

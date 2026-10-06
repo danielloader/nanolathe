@@ -709,7 +709,7 @@ func (s classicSink) Fog(fg drawlist.Fog) {
 		case render.FogKindPatterned:
 			// hi==15 dithered checker uses parity (camX+camZ)&1 [03 §3.3].
 			// Retail writes literal palette index 0 (black) at checker
-			// positions (x+y+parity)&1==1 and leaves the rest untouched
+			// positions (x+y+parity)&1==0 and leaves the rest untouched
 			// [R-RR16-A §2].
 			parity := int32(0)
 			if c.cam != nil {

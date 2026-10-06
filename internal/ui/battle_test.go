@@ -127,8 +127,8 @@ func TestBattleStateOwnsPanelSlideAndUsesOneOffset(t *testing.T) {
 	// An early host timestamp is ignored, including the offset itself.
 	before := s.PanelOffset
 	s.AdvancePanel(105, true, false)
-	if s.PanelOffset != before || s.PanelTarget != PanelParked {
-		t.Fatalf("early panel step offset=%d target=%d, want unchanged/%d", s.PanelOffset, s.PanelTarget, PanelParked)
+	if s.PanelOffset != before || s.PanelTarget != PanelVisible {
+		t.Fatalf("early panel step offset=%d target=%d, want unchanged/%d", s.PanelOffset, s.PanelTarget, PanelVisible)
 	}
 }
 
@@ -160,7 +160,7 @@ func TestBattleStatePanelConvergesInBothDirections(t *testing.T) {
 					t.Fatalf("moved away from parked target: %d -> %d", previous, s.PanelOffset)
 				}
 				previous = s.PanelOffset
-				now += PanelThrottleMs
+				now += PanelThrottleMs + 1
 			}
 			if s.PanelOffset != tc.wantTarget {
 				t.Fatalf("did not converge: offset=%d target=%d", s.PanelOffset, tc.wantTarget)
@@ -173,20 +173,24 @@ func TestBattleStatePanelMinimumTailAndThrottle(t *testing.T) {
 	s := NewBattleState(0x04)
 	s.PanelOffset = -1
 	s.PanelTarget = PanelVisible
-	s.PanelLastThrottle = 1000
+	s.PanelDeadline = 1015
 	s.AdvancePanel(1010, false, false)
-	if s.PanelOffset != -1 || s.PanelLastThrottle != 1000 {
-		t.Fatalf("early panel step changed offset=%d throttle=%d", s.PanelOffset, s.PanelLastThrottle)
+	if s.PanelOffset != -1 || s.PanelDeadline != 1015 {
+		t.Fatalf("early panel step changed offset=%d deadline=%d", s.PanelOffset, s.PanelDeadline)
 	}
 	s.AdvancePanel(1015, false, false)
-	if s.PanelOffset != PanelVisible || s.PanelLastThrottle != 1015 {
-		t.Fatalf("minimum positive tail offset=%d throttle=%d, want 0/1015", s.PanelOffset, s.PanelLastThrottle)
+	if s.PanelOffset != -1 || s.PanelDeadline != 1015 {
+		t.Fatal("equal deadline admitted a step")
+	}
+	s.AdvancePanel(1016, false, false)
+	if s.PanelOffset != PanelVisible || s.PanelDeadline != 1031 {
+		t.Fatalf("minimum positive tail offset=%d deadline=%d, want 0/1031", s.PanelOffset, s.PanelDeadline)
 	}
 
 	s.PanelOffset = -30
 	s.PanelTarget = PanelParked
-	s.PanelLastThrottle = 2000
-	s.AdvancePanel(2015, true, false)
+	s.PanelDeadline = 2015
+	s.AdvancePanel(2016, true, false)
 	if s.PanelOffset != PanelParked {
 		t.Fatalf("minimum negative tail offset=%d, want %d", s.PanelOffset, PanelParked)
 	}
@@ -208,7 +212,7 @@ func TestBattleStatePanelCueSequence(t *testing.T) {
 			now := uint32(15)
 			for i := 0; i < 100 && len(cues) < 2; i++ {
 				s.AdvancePanel(now, tc.spaceHeld, false)
-				now += PanelThrottleMs
+				now += PanelThrottleMs + 1
 			}
 			if len(cues) != 2 || cues[0] != "Panel" || cues[1] != "Options" {
 				t.Fatalf("cue sequence=%v, want [Panel Options]", cues)
@@ -295,14 +299,14 @@ func TestBattleStatePanelEaseSequenceTruncatesTowardZero(t *testing.T) {
 			s.PanelOffset = tc.start
 			now := uint32(1000)
 			for i, want := range tc.want {
-				now += PanelThrottleMs
+				now += PanelThrottleMs + 1
 				s.AdvancePanel(now, tc.spaceHeld, false)
 				if s.PanelOffset != want {
 					t.Fatalf("step %d offset=%d, want %d (sequence so far %v)", i+1, s.PanelOffset, want, tc.want[:i+1])
 				}
 			}
 			// The detent is terminal: further accepted steps do not overshoot.
-			now += PanelThrottleMs
+			now += PanelThrottleMs + 1
 			s.AdvancePanel(now, tc.spaceHeld, false)
 			if s.PanelOffset != tc.want[len(tc.want)-1] {
 				t.Fatalf("offset left its detent: %d", s.PanelOffset)
@@ -311,34 +315,78 @@ func TestBattleStatePanelEaseSequenceTruncatesTowardZero(t *testing.T) {
 	}
 }
 
-// TestAdvancePanelNowStepsOnceFromTheHostClock covers the wall-clock entry
-// point itself. It is presentation, so it may read the host clock [I6]; one
-// call from a cold throttle is always accepted and takes exactly the
-// remaining/3 step, and it applies the Space/editor polarity of [07 §6]
-// through the same SetPanelTarget the explicit-timestamp form uses.
-func TestAdvancePanelNowStepsOnceFromTheHostClock(t *testing.T) {
-	s := NewBattleState(0x04)
-	s.PanelOffset = PanelParked
-	s.AdvancePanelNow(false, false)
-	if s.PanelTarget != PanelVisible {
-		t.Fatalf("released Space target=%d, want %d", s.PanelTarget, PanelVisible)
-	}
-	if s.PanelOffset != -21 {
-		t.Fatalf("first host-clock step offset=%d, want -21", s.PanelOffset)
-	}
-	if s.PanelLastThrottle == 0 {
-		t.Fatal("host-clock step did not stamp the throttle")
-	}
+// The source exposes both reads, including a clock advance during admission.
+// Rejected visits do not sample a next deadline or change the input target.
+type panelClockFunc func() uint32
 
-	// Space held with no text editor focused reverses the target; a text editor
-	// with the focus takes Space for itself and the slide returns to 0.
-	s.AdvancePanelNow(true, false)
-	if s.PanelTarget != PanelParked {
-		t.Fatalf("held Space target=%d, want %d", s.PanelTarget, PanelParked)
+func (f panelClockFunc) Millis32() uint32 { return f() }
+
+func TestPanelClockReadsAndRestingDeadline(t *testing.T) {
+	s := NewBattleState(0x04)
+	s.PanelDeadline = 100
+	reads := 0
+	source := panelClockFunc(func() uint32 {
+		reads++
+		if reads == 1 {
+			return 101
+		}
+		if s.PanelDeadline != 100 || s.PanelTarget != PanelVisible {
+			t.Fatal("deadline or input changed before second sample")
+		}
+		return 107
+	})
+	s.AdvancePanelWithClock(source, false, false)
+	if reads != 2 || s.PanelDeadline != 122 || s.PanelOffset != PanelVisible {
+		t.Fatalf("resting visit reads=%d deadline=%d offset=%d", reads, s.PanelDeadline, s.PanelOffset)
 	}
-	s.AdvancePanelNow(true, true)
-	if s.PanelTarget != PanelVisible {
-		t.Fatalf("held Space with an editor focused target=%d, want %d", s.PanelTarget, PanelVisible)
+	reads = 0
+	source = panelClockFunc(func() uint32 { reads++; return 122 })
+	s.AdvancePanelWithClock(source, true, false)
+	if reads != 1 || s.PanelDeadline != 122 || s.PanelTarget != PanelVisible {
+		t.Fatalf("equal visit reads=%d deadline=%d target=%d", reads, s.PanelDeadline, s.PanelTarget)
+	}
+	reads = 0
+	var cues []string
+	s.SetPanelCue(func(cue string) {
+		if reads != 2 || s.PanelDeadline != 138 || s.PanelTarget != PanelParked {
+			t.Fatal("cue preceded fresh deadline/input commit")
+		}
+		cues = append(cues, cue)
+	})
+	source = panelClockFunc(func() uint32 { reads++; return 123 })
+	s.AdvancePanelWithClock(source, true, false)
+	if reads != 2 || s.PanelOffset != -10 || len(cues) != 1 || cues[0] != "Panel" {
+		t.Fatalf("admitted visit reads=%d offset=%d cues=%v", reads, s.PanelOffset, cues)
+	}
+}
+
+func TestPanelClockSignedComparisonAndDeadlineWrap(t *testing.T) {
+	for _, tc := range []struct {
+		name                                string
+		deadline, now, second, wantDeadline uint32
+		wantReads                           int
+	}{
+		{"negative against zero", 0, 0x80000000, 99, 0, 1},
+		{"positive after negative", 0xfffffff0, 1, 2, 17, 2},
+		{"signed boundary rejects", 0x7fffffff, 0x80000000, 99, 0x7fffffff, 1},
+		{"deadline addition wraps", 0xffffffe0, 0xfffffff0, 0xfffffff8, 7, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewBattleState(0x04)
+			s.PanelDeadline = tc.deadline
+			reads := 0
+			source := panelClockFunc(func() uint32 {
+				reads++
+				if reads == 1 {
+					return tc.now
+				}
+				return tc.second
+			})
+			s.AdvancePanelWithClock(source, false, false)
+			if reads != tc.wantReads || s.PanelDeadline != tc.wantDeadline {
+				t.Fatalf("reads=%d deadline=%d, want %d/%d", reads, s.PanelDeadline, tc.wantReads, tc.wantDeadline)
+			}
+		})
 	}
 }
 

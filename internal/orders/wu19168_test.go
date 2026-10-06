@@ -151,6 +151,17 @@ func TestAirWorkPreambleDropCommitsAirborneMode(t *testing.T) {
 	carrier.Attachment.Cargo = []pool.Handle{u.Handle}
 	u.Move.Mode = 0 // attached/parked [04 R-MOV-01 §8]
 
+	// Consumer-only fixture: production composes movement's shared detach.
+	q.binding.Movement = &MovementGoalAdapter{DetachTakeoff: func(child *units.Unit) bool {
+		if child != u || child.Attachment.Carrier != carrier.Handle {
+			t.Fatal("unexpected detach callback")
+		}
+		child.Attachment.Carrier = 0
+		child.Attachment.AttachPiece = -1
+		carrier.Attachment.Cargo = nil
+		child.Move.Mode = 2
+		return true
+	}}
 	n := &Node{Owner: u.Handle}
 	if code := airWorkPreamble(u, n, "Building"); code != 1 {
 		t.Fatalf("preamble returned %d, want advance (1) [04 R-ORD-01 §7]", code)

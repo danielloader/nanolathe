@@ -49,14 +49,15 @@ type selectorMissionMode interface {
 	GetMissionGateFlag() int32
 }
 
-// ScoreInputs carries the economy inputs for the C6 formula in float32 [08 "Established AI-facing data and rooted planner"] [PLAN 11 C6] [INVARIANTS I2].
+// ScoreInputs carries stored economy values and transient working-precision
+// net-query results [08 R-P0-05 §3][INVARIANTS I2].
 type ScoreInputs struct {
 	CurEnergy  float32
 	CapEnergy  float32
 	CurMetal   float32
 	CapMetal   float32
-	NetEnergy  float32
-	NetMetal   float32
+	NetEnergy  float64
+	NetMetal   float64
 	ProdEnergy float32
 	ProdMetal  float32
 }
@@ -82,8 +83,8 @@ func ScoreInputsFromEconomy(econ *economy.Service, player uint8) ScoreInputs {
 	prodM := p.AIProduction[economy.Metal]
 	consE := p.AIConsumption[economy.Energy]
 	consM := p.AIConsumption[economy.Metal]
-	netE := prodE - consE
-	netM := prodM - consM
+	netE := float64(prodE) - float64(consE)
+	netM := float64(prodM) - float64(consM)
 	return ScoreInputs{
 		CurEnergy:  curE,
 		CapEnergy:  capE,
@@ -122,12 +123,12 @@ func energyRaw(in ScoreInputs) int32 {
 		scaled = 0 // max(0, ·) in floating point, before the truncation
 	}
 	raw := numeric.TruncateFloat64ToLow32(scaled) // trunc toward zero [01 §8] [INVARIANTS I3]
-	if in.NetEnergy < 1 {
+	if !(in.NetEnergy >= 1) {                     // below or unordered [08 R-P0-05 §3]
 		raw += 20
 	}
-	if in.ProdEnergy < 50 {
+	if !(in.ProdEnergy >= 50) {
 		raw += 100
-	} else if in.ProdEnergy < 200 {
+	} else if !(in.ProdEnergy >= 200) {
 		raw += 10
 	}
 	return raw
@@ -150,12 +151,12 @@ func metalRaw(in ScoreInputs) int32 {
 		scaled = 0
 	}
 	raw := numeric.TruncateFloat64ToLow32(scaled)
-	if in.NetMetal < 1 {
+	if !(in.NetMetal >= 1) { // below or unordered [08 R-P0-05 §3]
 		raw += 20
 	}
-	if in.ProdMetal < 3 {
+	if !(in.ProdMetal >= 3) {
 		raw += 100
-	} else if in.ProdMetal < 5 {
+	} else if !(in.ProdMetal >= 5) {
 		raw += 20
 	}
 	return raw
@@ -189,10 +190,8 @@ func ComputeMix(in ScoreInputs) (metalMix, energyMix, otherMix int32) {
 	return mMix, eMix, oMix
 }
 
-// ComputeScore computes the C6 score exactly as the plan block quotes [PLAN 11 C6] [08] with truncation as written.
-// Resource inputs are float32 temporaries carrying the file-level platform-residual
-// x87 marker's uncertainty [INVARIANTS I2]; the final trunc is integer division truncating
-// toward zero [01 §8] [INVARIANTS I3].
+// ComputeScore combines the pressure mix and signed class coefficients, then
+// divides toward zero [08 R-P0-05 §4][INVARIANTS I3].
 func ComputeScore(in ScoreInputs, cv ClassVector, weight int32) int32 {
 	// Clamp weight [0,100] per [08] [PLAN 11 C4]
 	if weight < 0 {
@@ -330,11 +329,11 @@ func SelectWithCandidates(m Selector, builder *units.Unit, econ *economy.Service
 			continue
 		}
 		// C5: currentEnergy <50 gate [08] [PLAN 11 C5]
-		if curEnergy < 50 {
+		if !(curEnergy >= 50) { // unordered stock also rejects [08 R-P0-05 §3]
 			continue
 		}
 		// C5: currentMetal <25 gate [08] [PLAN 11 C5]
-		if curMetal < 25 {
+		if !(curMetal >= 25) {
 			continue
 		}
 		// C5: profile limit (count < limit or -1) [08] [PLAN 11 C5]

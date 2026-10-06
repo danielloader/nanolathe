@@ -118,3 +118,33 @@ func TestWaterlineArmSelection(t *testing.T) {
 		t.Fatal("a 3DO feature is always tinted, never cut [R-RAST-01 §6]")
 	}
 }
+
+// Threshold narrowing follows the positive-depth gate. A zero low byte still
+// selects key zero; the Digger bias participates before narrowing [03 R-REN-03A §8].
+func TestWaterlineThresholdByteBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		sea       int64
+		y         numeric.Fixed
+		digger    bool
+		want      uint8
+		submerged bool
+	}{
+		{name: "last byte", sea: 205, want: 255, submerged: true},
+		{name: "wrapped zero", sea: 206, want: 0, submerged: true},
+		{name: "wrapped one", sea: 207, want: 1, submerged: true},
+		{name: "negative fraction floors before sum", sea: 205, y: -1, want: 0, submerged: true},
+		{name: "digger last byte", sea: 130, digger: true, want: 255, submerged: true},
+		{name: "digger wrapped zero", sea: 131, digger: true, want: 0, submerged: true},
+		{name: "digger wrapped one", sea: 132, digger: true, want: 1, submerged: true},
+		{name: "dry zero depth", sea: 0, want: 0},
+		{name: "dry negative depth", sea: 0, y: numeric.FixedFromInt(1), want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, submerged := waterlineThreshold(numeric.FixedFromInt(tc.sea), tc.y, tc.digger)
+			if got != tc.want || submerged != tc.submerged {
+				t.Fatalf("threshold=%d active=%v, want %d/%v", got, submerged, tc.want, tc.submerged)
+			}
+		})
+	}
+}

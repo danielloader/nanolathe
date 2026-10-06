@@ -275,7 +275,10 @@ func (s *Service) SensorTick(tick uint32, playerCount int, units []SensorUnit) {
 		}
 		search2 := radiusSquared(search)
 		radarRadius := e.RadarDistance + 2*worldHigh(e.Y)
-		radar2 := radiusSquared(radarRadius)
+		// The callback squares the complete promoted sum, retaining signed32
+		// wrap; shifting it back to raw 16.16 would narrow it again. The
+		// visitor above still uses its unbonused radius [03 R-VIS-01 §4].
+		radar2 := radarRadius * radarRadius
 		sonar2 := radiusSquared(e.SonarDistance)
 		candidates := s.sensorCandidates(e, search)
 		if candidates == nil || len(candidates) == len(units) {

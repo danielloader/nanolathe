@@ -45,7 +45,7 @@ type WidgetHooks struct {
 	Surface              func(index int)
 }
 
-// ServiceResult reports the first fired gadget and the pass residue.
+// ServiceResult reports the surviving fired gadget and the pass residue.
 type ServiceResult struct {
 	Fired          bool
 	FiredIndex     int
@@ -94,10 +94,20 @@ func (p *Panel) ServiceFrame(frame WidgetFrame, hooks WidgetHooks) ServiceResult
 	}
 	finalX, finalY := p.pointerX, p.pointerY
 	p.hover = -1
+	matrixFired, matrixStageIndex := false, -1
 	finish := func() ServiceResult {
 		p.pointerX, p.pointerY = finalX, finalY
 		result.HoverIndex = p.hover
 		p.updateHelpText()
+		if matrixFired && result.Fired {
+			// The matrix records a pending result; focus follows the result
+			// that survives the first gadget visit [07 R-WGT-01 §§1-2].
+			p.clearCapture()
+			p.SetFocus(result.FiredIndex)
+		}
+		if result.Fired && result.FiredIndex == matrixStageIndex {
+			result.StageAdvanced = true
+		}
 		return result
 	}
 	// Retail takes the keyboard token before visiting any gadget. The matrix is
@@ -112,12 +122,20 @@ func (p *Panel) ServiceFrame(frame WidgetFrame, hooks WidgetHooks) ServiceResult
 		if frame.KeyNavigation {
 			matrixConsumed = p.serviceKeyboardToken(frame.Tokens[0], frame, hooks, &result)
 		}
-		if result.Fired {
-			return finish()
+		matrixFired = result.Fired
+		if result.StageAdvanced {
+			matrixStageIndex = result.FiredIndex
+			result.StageAdvanced = false
 		}
 	}
 	for i, g := range p.Window.Gadgets {
-		if i == 0 || !p.ActiveAt(i) {
+		if i == 0 {
+			continue
+		}
+		if !p.ActiveAt(i) {
+			if result.Fired {
+				return finish()
+			}
 			continue
 		}
 		if frame.TimerAdvanced {
@@ -154,9 +172,8 @@ func (p *Panel) ServiceFrame(frame WidgetFrame, hooks WidgetHooks) ServiceResult
 			if result.Fired {
 				return finish()
 			}
-			// A linked-label key can transfer focus without firing. Retire its
-			// token, then keep visiting later gadgets; only a fired result ends
-			// the indexed service pass [07 R-WGT-01 §1][07 R-WGT-01 §7].
+			// A rejected link target consumes the label's token but clears
+			// its result, leaving later visits live [07 R-WGT-01 §7].
 			continue
 		}
 		handled := false
@@ -186,6 +203,11 @@ func (p *Panel) ServiceFrame(frame WidgetFrame, hooks WidgetHooks) ServiceResult
 			if p.serviceHeld(frame, hooks, &result) {
 				return finish()
 			}
+		}
+		// This also tests a result supplied before the walk by the matrix;
+		// record 1 receives its ordinary visit first [07 R-WGT-01 §1].
+		if result.Fired {
+			return finish()
 		}
 	}
 	return finish()
@@ -716,12 +738,17 @@ func (p *Panel) serviceLinkOrFire(idx int, button uint8, result *ServiceResult) 
 	g := p.Window.Gadgets[idx]
 	if g.Kind == gui.KindLabel && g.Link != "" {
 		target := p.Index(g.Link)
-		if target < 0 || !p.ActiveAt(target) {
+		if target < 0 {
+			return p.fire(idx, button, result)
+		}
+		if !p.ActiveAt(target) {
+			clearFiredResult(result)
 			return false
 		}
 		tg := p.Window.Gadgets[target]
 		if tg.Kind == gui.KindButton {
 			if tg.GrayedOut&1 != 0 {
+				clearFiredResult(result)
 				return false
 			}
 			if tg.Stages > 0 {
@@ -731,12 +758,21 @@ func (p *Panel) serviceLinkOrFire(idx int, button uint8, result *ServiceResult) 
 			return p.fire(target, button, result)
 		}
 		if tg.Kind == gui.KindScrollBar && (tg.Attribs&0x10 != 0 || tg.GrayedOut != 0) {
+			clearFiredResult(result)
 			return false
 		}
+		p.clearCapture()
 		p.SetFocus(target)
-		return false
+		return p.fire(target, button, result)
 	}
 	return p.fire(idx, button, result)
+}
+
+// Rejected link targets clear even a result left by the matrix; an absent
+// target instead fires the label itself [07 R-WGT-01 §7].
+func clearFiredResult(result *ServiceResult) {
+	result.Fired, result.FiredIndex, result.FiredButton = false, -1, 0
+	result.StageAdvanced = false
 }
 func (p *Panel) cycleButton(idx int) {
 	g := p.Window.Gadgets[idx]

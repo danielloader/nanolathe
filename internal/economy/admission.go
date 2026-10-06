@@ -82,17 +82,12 @@ func (s *Service) preparePassAggregates(p int, w *units.World) [2]resourceTotals
 
 // settleOneResource applies the two-stage settlement for one resource kind to player p per [05 "Two-stage settlement algorithm"] C8 C9.
 // Energy and metal are settled independently with no combined shortage ratio.
-// Steps per resource in float32:
-//
-//	pool = opening + production
-//	debtRatio = min(1, pool/Σdebt) with zero debt fully funded
-//	remainingPool = pool − Σdebt×debtRatio
-//	acceptRatio = min(1, remainingPool/Σaccepted) with zero accepted fully funded
-//	newCarry = oldCarry×(1−debtRatio)+accepted×(1−acceptRatio) uniformly, no remainder distribution.
-//	closingStock = remainingPool − Σaccepted×acceptRatio.
-//
-// The pool and ratios are narrowed at their live-field stores; carry
-// apply-back follows the working-precision operand order [R-ECO-01 §5].
+// The stage comparisons and subtraction amounts are owned by settlePure;
+// zero debt is fully funded only when the pool is nonnegative. Pool and ratio
+// stores narrow to single precision. Apply-back forms accepted minus its
+// funded amount, then carry minus its funded amount, and adds those terms
+// at working precision before the final store [R-ECO-01 §5]. Factoring these
+// remainders or applying rounded ratios to the stage totals changes arithmetic.
 func (s *Service) settleOneResource(p int, res Res, w *units.World, totals resourceTotals) {
 	if s == nil || p < 0 || p >= len(s.Players) {
 		return

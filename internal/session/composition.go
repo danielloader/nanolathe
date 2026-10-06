@@ -1068,6 +1068,13 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 	}
 	movementGoals := &orders.MovementGoalAdapter{}
 	if s.Movement != nil {
+		movementGoals.DetachTakeoff = func(u *units.Unit) bool {
+			if u == nil {
+				return false
+			}
+			_, ok := movement.DetachTakeoff(s.Units, u.Handle)
+			return ok
+		}
 		movementGoals.Ready = func() bool { return s.Movement != nil }
 		movementGoals.RunAir = s.Movement.AirLegRunner()
 		// The target registry's third list, held and rebuilt by the movement
@@ -1994,6 +2001,7 @@ func createAndBindServices(s *Session) error {
 	// movement-owned post-move correction [04 R-MOV-01 §5]. Bound here, like
 	// the extraction sampler above, before any battle-entry allocation.
 	s.Units.SetCreationPose(s.Movement)
+	s.Movement.BindWorld(s.Units)
 	// Bind movement classes explicitly [02 "Movement class record"]
 	s.Movement.SetClasses(s.Catalog.Movement)
 	s.Movement.Damage = s.acceptDamage

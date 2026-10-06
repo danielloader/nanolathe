@@ -193,15 +193,16 @@ ratios (`The Pass` wide, `Great Divide` tall, and `The Bayou`/`Crystal
 Cracked`/`Polar Range`, all 640×640 cells — square in cells but not in
 `PlayRight`/`PlayBottom`, since `-32` and `-128` differ): in every case the
 formula's predicted last used row/column lands on exactly the same pixel
-where the file's `0x64` fill begins. A reader that resamples the full stored
-bitmap without first cropping to this sub-rectangle stretches the real image
-and pulls the fill color into the visible output — on a markedly non-square
-map this reads as the image being shifted toward one corner with a solid
-band of the fill color filling the rest, which is what a play-test report
-described as a "blue stripe" on a tall map (`0x64` maps to a blue palette
-entry in the stock install). See `[03 §3.7]` for how the cropped
-sub-rectangle then re-enters the same generic ALP resize used for every
-other picture-build path.
+where the file's `0x64` fill begins. This is a property of those authored
+images, not an instruction to crop and rescale before display. **Established
+consumer behavior:** the in-battle picture builder retains the stored row
+stride and applies the fixed 2×2 ALP reducer of `[03 §3.7]`. The destination
+lens therefore selects a top-left rectangle twice its width and height, which
+can leave an odd last terrain row or column unused. The earlier claim that
+retail explicitly repacks this measured sub-rectangle and then applies a
+generic ratio-based resize was incorrect. Read the stored dimensions to locate
+pixels; do not search for a universal padding-color sentinel. The separate
+front-end map-preview resize is not established by this in-battle path.
 
 ## How the engine loads it
 

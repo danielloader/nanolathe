@@ -115,8 +115,16 @@ func compileSideSection(section *formats.Section, ordinal int, prov Provenance, 
 	energyColor := section.IntValue("energycolor", 0)
 	metalColor := section.IntValue("metalcolor", 0)
 
-	// [GAP T14] Missing side font is fatal — same modal/fatal diagnostic channel as missing anchor.
-	// A missing side font is a data error, not a silent fallback.
+	// Retain each loader's authored byte boundary [02 §6].
+	name = boundedString(name, 29)
+	namePrefix = boundedString(namePrefix, 3)
+	commander = boundedString(commander, 31)
+	font = boundedString(font, 255)
+
+	// TODO(question): an absent font key skips the retail load and retains
+	// prior state; trace startup/reload first readers before replacing this
+	// existing deterministic host rejection [02 §6]. Present missing media
+	// remains fatal at the HUD's asset load.
 	if !hasFont || trimTDFSemantic(font) == "" {
 		return nil, fmt.Errorf("content: side SIDE%d: missing font is fatal [GAP T14]", ordinal)
 	}
@@ -169,7 +177,8 @@ func compileSideSection(section *formats.Section, ordinal int, prov Provenance, 
 
 // CompileSides compiles sides from gamedata/sidedata.tdf [02 §6 "SIDE and battle interface data"] C8.
 // Discovery is SIDE0..N stop at first gap, plus optional [GENERAL] baseheight integer default 480.
-// Each side must have 30 mandatory anchors stored verbatim; missing font is fatal [GAP T14].
+// Each side has 30 mandatory anchors stored verbatim. Absent font keys retain
+// the existing host rejection while their retail lifetime is unresolved [02 §6].
 // It returns a slice indexed by SIDE ordinal — index = SIDE ordinal [PLAN 02 Public API].
 func CompileSides(fs vfs.FSOps) ([]*SideDef, error) {
 	if fs == nil {

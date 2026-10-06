@@ -79,7 +79,7 @@ func TestBlitFogGAFModes(t *testing.T) {
 		{"black", fogBlitBlack, func(int, int) byte { return 0 }},
 		{"gray", fogBlitGray, func(int, int) byte { return 255 - 40 }},
 		{"patterned", fogBlitPatterned, func(x, y int) byte {
-			if (x+y)&1 == 1 {
+			if (x+y)&1 == 0 {
 				return 0
 			}
 			return 40
@@ -187,6 +187,52 @@ func TestFogScrollClipsWithoutMovingArt(t *testing.T) {
 						}
 					}
 				})
+			}
+		}
+	}
+}
+
+// Both fog writers retain the even destination phase across clipping and key
+// holes [03 §3.3]. Asymmetric rows distinguish a phase reversal from a mask shift.
+func TestFogCheckerClippedMaskPhase(t *testing.T) {
+	for _, parity := range []int32{0, 1} {
+		for _, left := range []int{-3, 3} {
+			for _, masked := range []bool{false, true} {
+				c, err := New(Options{Width: 64, Height: 64})
+				if err != nil {
+					t.Fatal(err)
+				}
+				c.cam = &camera.Camera{X: parity}
+				for i := range c.indexed {
+					c.indexed[i] = byte(80 + i%31)
+				}
+				f := fogMaskFrame(9, 7, 0, 0)
+				for i := range f.Transparent {
+					f.Transparent[i] = false
+					f.Pixels[i] = 0
+				}
+				for _, i := range []int{1, 2*9 + 4, 5*9 + 6} {
+					f.Transparent[i], f.Pixels[i] = true, 9
+				}
+				const top = 1
+				if masked {
+					c.blitFogGAF(f, left, top, fogBlitPatterned)
+				} else {
+					fogFillRewritten(c, []render.FogOp{{Kind: render.FogKindPatterned, ScreenX0: int32(left), ScreenY0: top, ScreenX1: int32(left + 9), ScreenY1: top + 7}}, parity)
+				}
+				for y := 0; y < c.height; y++ {
+					for x := 0; x < c.width; x++ {
+						at := y*c.width + x
+						want := byte(80 + at%31)
+						sx, sy := x-left, y-top
+						if sx >= 0 && sx < 9 && sy >= 0 && sy < 7 && (int32(x+y)+parity)&1 == 0 && (!masked || !f.Transparent[sy*9+sx]) {
+							want = 0
+						}
+						if c.indexed[at] != want {
+							t.Fatalf("parity=%d left=%d masked=%t pixel(%d,%d)=%d want %d", parity, left, masked, x, y, c.indexed[at], want)
+						}
+					}
+				}
 			}
 		}
 	}

@@ -236,19 +236,29 @@ func TestPatrolWorkFiltersPreserveBranchDraws(t *testing.T) {
 			}
 		})
 
-		t.Run(name+" reclaim only keeps storage gate", func(t *testing.T) {
+		t.Run(name+" reclaim only keeps its retail entry", func(t *testing.T) {
 			u, n, sim, unitScans, featureScans := communityPatrolFixture(t, air, PatrolReclaimOnly)
 			QueueOfUnit(u).Binding().Resources = func(uint8) (ResourceView, bool) {
 				return ResourceView{Stock: [2]float32{50, 50}, Capacity: [2]float32{100, 100}}, true
 			}
-			if code := handler(u, n, 0, 100); code != 2 {
-				t.Fatalf("healthy reclaim-only visit returned %d, want hold at the stock gate", code)
+			// CP-CON-3 resumes ground patrol at its storage gate, but aircraft
+			// directly at feature pairing. Air has no healthy-stores early hold
+			// [04 R-ORD-01 §4, §7].
+			wantCode, wantDraws := Code(2), uint64(0)
+			if air {
+				wantCode, wantDraws = 3, 3
 			}
-			if *unitScans != 0 || *featureScans != 0 {
-				t.Fatalf("healthy reclaim-only visit ran repair/feature scans = %d/%d, want 0/0", *unitScans, *featureScans)
+			if code := handler(u, n, 0, 100); code != wantCode {
+				t.Fatalf("healthy reclaim-only visit returned %d, want %d", code, wantCode)
 			}
-			if got := sim.Draws(); got != 0 {
-				t.Fatalf("healthy reclaim-only visit drew %d values, want none", got)
+			if *unitScans != 0 || (*featureScans != 0) != air {
+				t.Fatalf("healthy reclaim-only repair/feature scans = %d/%d, air=%v", *unitScans, *featureScans, air)
+			}
+			if got := sim.Draws(); got != wantDraws {
+				t.Fatalf("healthy reclaim-only visit drew %d values, want %d", got, wantDraws)
+			}
+			if air && (QueueOfUnit(u).Head() == nil || DescriptorFor(QueueOfUnit(u).Head().ID).Name != "VTOL_Reclaim") {
+				t.Fatal("healthy reclaim-only aircraft did not spawn feature work")
 			}
 		})
 

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"math"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
@@ -8,6 +9,44 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
+
+// Stored-coordinate boundary fixtures lock the consumer's raw-word window
+// [04 R-MOV-03 §6]. They do not establish that normal pointer projection or
+// saved goals produce coordinates across the signed boundary.
+func TestQueuedWorldOrderRawCoordinateWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		stored, issued numeric.Fixed
+		want           bool
+	}{
+		{"positive edge", 0, queuedPointTolerance, true},
+		{"negative edge", 0, -queuedPointTolerance, true},
+		{"above edge", 0, queuedPointTolerance + 1, false},
+		{"below edge", 0, -queuedPointTolerance - 1, false},
+		{"positive wrap", math.MaxInt32, math.MinInt32, true},
+		{"negative wrap", math.MinInt32, math.MaxInt32, true},
+		{"half word apart", 0, math.MinInt32, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cat := &content.Catalog{Units: map[string]*content.UnitDef{}}
+			def := &content.UnitDef{UnitName: "toggle", CanMove: true, MaxDamage: 10}
+			def.CanonicalKey = "toggle"
+			cat.Units[def.CanonicalKey] = def
+			w := newSessionFixtureWorld(8, cat)
+			h, err := w.Create(def, 0, 0, 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			u := w.Unit(h)
+			q := orders.QueueForUnit(u)
+			kind := orders.Lookup("Move_Ground")
+			q.Push(kind, orders.Node{Owner: h, GoalX: tc.stored, GoalZ: tc.stored})
+			if got := removeQueuedWorldOrder(u, kind, 0, tc.issued, tc.issued); got != tc.want {
+				t.Fatalf("match=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
 
 // The queued-order duplicate toggle is not the build placement's private rule:
 // [07 R-P0-11 §6] gives it to the one producer EVERY world order the interface

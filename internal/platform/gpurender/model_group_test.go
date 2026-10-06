@@ -86,6 +86,58 @@ func checkModelGroupReflectionPixels() error {
 			return fmt.Errorf("construction reflection at %d alpha=%d want=%d", sample.x, got, sample.want)
 		}
 	}
+	for _, tc := range []struct {
+		name                          string
+		phase                         modelSeedPhase
+		face, original, stored, group byte
+		delta                         int32
+		want                          byte
+	}{
+		{"resized cached winner", modelSeedResized, 1, 1, 0, 10, 10, 255},
+		{"rejected cached zero", modelSeedResized, 0, 1, 0, 10, 10, 0},
+		{"raw cached winner", modelSeedRaw, 1, 1, 1, 11, 10, 255},
+		{"live ignores original cached key", modelSeedLive, 1, 70, 1, 11, 10, 255},
+		{"shifted group occludes", modelSeedLive, 1, 70, 1, 12, 10, 0},
+		{"negative shift saturates", modelSeedLive, 10, 0, 10, 0, -20, 255},
+		{"positive shift saturates", modelSeedLive, 250, 0, 250, 255, 20, 255},
+		{"positive reduction endpoint", modelSeedLive, 0, 0, 0, 255, 255, 255},
+		{"positive reduction one beyond", modelSeedLive, 0, 0, 0, 255, 256, 255},
+		{"positive signed word boundary", modelSeedLive, 0, 0, 0, 255, 32768, 255},
+		{"positive full height difference", modelSeedLive, 0, 0, 0, 255, 65535, 255},
+		{"negative comparison equality", modelSeedLive, 255, 0, 255, 1, -254, 255},
+		{"negative reduction endpoint", modelSeedLive, 255, 0, 255, 1, -255, 0},
+		{"negative reduction one beyond", modelSeedLive, 255, 0, 255, 1, -256, 0},
+		{"negative signed word boundary", modelSeedLive, 255, 0, 255, 1, -32768, 0},
+		{"negative full height difference", modelSeedLive, 255, 0, 255, 1, -65535, 0},
+	} {
+		for y := 0; y < 16; y++ {
+			for x := 0; x < 16; x++ {
+				own.SetRGBA(x, y, color.RGBA{100, 100, 100, 255})
+				keys.SetRGBA(x, y, color.RGBA{tc.stored, tc.original, 0, 255})
+			}
+		}
+		for y := 0; y < 32; y++ {
+			for x := 0; x < 32; x++ {
+				group.SetRGBA(x, y, color.RGBA{tc.group, 0, 0, 255})
+			}
+		}
+		src.WritePixels(own.Pix)
+		ownKey.WritePixels(keys.Pix)
+		groupKey.WritePixels(group.Pix)
+		for i := range v {
+			v[i].Custom1 = float32(tc.face)
+			v[i].Custom3 = modelSeedReflectionMode(tc.phase, tc.delta, true)
+		}
+		dst.Clear()
+		dst.DrawTrianglesShader(v[:], []uint16{0, 1, 2, 0, 2, 3}, shader, &ebiten.DrawTrianglesShaderOptions{
+			Images:   [4]*ebiten.Image{src, ownKey, groupKey},
+			Uniforms: map[string]any{"Metadata": float32(0), "RecordScale": float32(1), "Surface": []float32{0, 0, 1, 0}},
+		})
+		dst.ReadPixels(pix)
+		if got := pix[(12+6)*4+3]; got != tc.want {
+			return fmt.Errorf("seed reflection %s alpha=%d want%d", tc.name, got, tc.want)
+		}
+	}
 	return nil
 }
 

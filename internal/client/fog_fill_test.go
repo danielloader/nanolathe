@@ -57,7 +57,7 @@ func fogFillReference(c *Client, ops []render.FogOp, parity int32) {
 			for py := y0; py < y1; py++ {
 				base := int(py)*w + int(x0)
 				for px := x0; px < x1; px++ {
-					if (px+py+parity)&1 != 1 {
+					if (px+py+parity)&1 != 0 {
 						continue
 					}
 					c.indexed[base+int(px-x0)] = render.FogDarkPaletteIndex
@@ -158,7 +158,7 @@ func newFogFillClient(t *testing.T) *Client {
 
 // TestFogPatternedPhaseFollowsScreenColumn pins the checker to absolute screen
 // coordinates rather than to the offset inside the clipped rectangle. Retail
-// selects (x+y+parity)&1 == 1 in screen space, so two adjacent fog cells share
+// selects (x+y+parity)&1 == 0 in screen space, so two adjacent fog cells share
 // one continuous checker; deriving the phase from the row slice's own index
 // would restart it at every cell boundary and print visible seams.
 func TestFogPatternedPhaseFollowsScreenColumn(t *testing.T) {
@@ -174,7 +174,7 @@ func TestFogPatternedPhaseFollowsScreenColumn(t *testing.T) {
 	fogFillRewritten(c, ops, 0)
 	for px := 0; px < 10; px++ {
 		want := uint8(200)
-		if (px+0+0)&1 == 1 {
+		if (px+0+0)&1 == 0 {
 			want = render.FogDarkPaletteIndex
 		}
 		if got := c.indexed[px]; got != want {

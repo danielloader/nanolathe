@@ -133,7 +133,7 @@ func TestMainMenuVersionFromContentProfile(t *testing.T) {
 // `gx + trunc(w/2) - trunc(tw/2)` — two truncations, which differ from one
 // when w is even and tw odd — and anything else, DebugString's attribute
 // word 80 included, is `gx`. Right wins over centre, and an authored x of -1
-// centres on the panel [03 R-FONT-01 §6].
+// is resolved in the live record before alignment [03 R-FONT-01 §6].
 func TestRetailLabelPenX(t *testing.T) {
 	r := gui.Rect{X: 100, W: 50}
 	for _, tc := range []struct {
@@ -153,8 +153,8 @@ func TestRetailLabelPenX(t *testing.T) {
 		}
 	}
 	window := &gui.Window{Rect: gui.Rect{X: 40, W: 200}}
-	if got := retailLabelPenX(window, gui.Gadget{Rect: gui.Rect{RawX: -1}}, r, 20); got != 130 {
-		t.Errorf("authored x -1: pen x %d, want the panel-centred 130", got)
+	if got := retailLabelPenX(window, gui.Gadget{Rect: gui.Rect{RawX: -1}}, r, 20); got != 100 {
+		t.Errorf("resolved x: pen x %d, want placed 100 regardless of authored sentinel", got)
 	}
 }
 

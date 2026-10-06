@@ -65,15 +65,19 @@ type Summary struct {
 	LineOfSight     int32
 	LineOfSightType int32
 
-	BetweenMissions int32  // =1 on saves written outside a live battle [08 "Summary"]
-	Description     string // when caller supplies non-null [08 "Summary"]
-	GameID          string // "Game ID" [08 "Summary"]
-	GameTime        int32  // globalTick presentation metadata [08 "Summary"]; authoritative tick is Players/GameTime 28-byte box.
+	BetweenMissions int32 // =1 on saves written outside a live battle [08 "Summary"]
+	// HasBetweenMissions records scalar presence on read, including a zero or
+	// non-integer payload. Writer inputs still select their ordinary form with
+	// BetweenMissions; presence is a reader contract [08 "Summary"].
+	HasBetweenMissions bool
+	Description        string // when caller supplies non-null [08 "Summary"]
+	GameID             string // "Game ID" [08 "Summary"]
+	GameTime           int32  // globalTick presentation metadata [08 "Summary"]; authoritative tick is Players/GameTime 28-byte box.
 
 	RadarImage []byte // Radar Image binary box, live-battle saves only [08 "Summary"]
 
 	IsMultiplayer bool // derived: Gametype==2
-	IsBattle      bool // true if live-battle save (RadarImage present or BetweenMissions==0)
+	IsBattle      bool // presentation: RadarImage present or BetweenMissions scalar absent
 }
 
 func boundedSummaryString(s string) string {
@@ -287,6 +291,7 @@ func ReadSummary(bank *Bank) (Summary, bool) {
 	} else {
 		s.LineOfSightType = 1
 	}
+	s.HasBetweenMissions = ac.HasScalar("BetweenMissions")
 	if v, ok := ac.Int("BetweenMissions"); ok {
 		s.BetweenMissions = v
 	}
@@ -303,7 +308,7 @@ func ReadSummary(bank *Bank) (Summary, bool) {
 		s.RadarImage = append([]byte(nil), data...)
 		s.IsBattle = true
 	} else {
-		s.IsBattle = s.BetweenMissions == 0
+		s.IsBattle = !s.HasBetweenMissions
 	}
 	return s, true
 }

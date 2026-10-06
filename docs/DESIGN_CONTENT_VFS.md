@@ -57,6 +57,12 @@ size of the install. `FS.MountGameDirectories(roots)` adds an outer root
 priority: every later root wins over every earlier root. A one-root list
 retains the existing priorities and manifest identity.
 
+Authored page discovery uses the unit name with its final dotted suffix
+removed, probes successive nonempty GUI files through the first gap, and
+narrows the resulting count once to a byte [02 R-CAT-01 §5]. The selected
+page's separate three-bit field does not limit this loader pass. This keeps
+page-count metadata faithful even when some counted pages cannot be selected.
+
 | Type | What it is |
 |---|---|
 | `FS` | The overlay. Holds mounts in search order — priority descending, then mount order descending — so a lookup walks the slice directly with no per-open sort |
@@ -393,11 +399,12 @@ header probe on a multi-megabyte record costs one chunk.
 
 ### 3.2 The authored-text grammar (C9–C12)
 
-**C9 — comment blanking preserves offsets.** `//` to end of line, `/* */`, and
-an unterminated `/*` to EOF are overwritten with ASCII spaces, character for
-character, so every reported offset is a true offset into the source
-`[02 §4]`. Newlines inside block comments are preserved as well, which keeps
-reported line numbers meaningful; retail guarantees only the offsets.
+**C9 — comment blanking preserves offsets.** Line and closed block comments
+are overwritten with ASCII spaces. An unterminated block retains its final
+body character, which the grammar still consumes `[02 §4]`. Source length and
+byte offsets remain unchanged. As a host diagnostic policy, block-comment
+line feeds are preserved so reported line numbers stay meaningful; retail
+blanks those line feeds as well.
 
 **C10 — duplicate keys.** Keys are compared case-insensitively and the
 resolved vector is sorted. An identical duplicate replaces (last wins); case
@@ -506,12 +513,18 @@ the water fields, which is why the earlier gated-clamp divergence was wrong
 **C7 — names and translation.** A unit's display name is language-prefixed
 with fallback: the configured language's key, then the bare key `[02 §3]`. A
 missing `gamedata/translate.tdf` yields a byte-exact identity mapping and is
-not fatal.
+not fatal. Translation values retain the first 254 bytes before either lookup
+uses them [02 "Translation table"]. Oversized source-key residue remains an
+explicit research gap; it does not justify truncating normal keys.
 
 **C8 — sides.** `SIDE0..N` are read up to the first gap. All thirty interface
 anchors are mandatory and are stored **verbatim** as `x1,y1,x2,y2` corners,
 not normalized, so a rectangle with `x2 < x1` survives to the consumer that
-has to deal with it. A missing side font is fatal `[02 §6]`.
+has to deal with it. Side name, prefix, commander and font values retain their
+loader byte limits `[02 §6]`. Failed loads for present font keys are fatal.
+The existing host rejection of absent or empty font keys is retained while
+retail's absent-key lifetime remains unresolved; it is not evidence that the
+retail loader rejects absence.
 
 **C9 — cross-reference failure policy.** A feature successor that resolves to
 nothing is fatal with the verbatim message (§4). The other misses have their
@@ -564,6 +577,18 @@ across categories; they are compiled in here from `[03 §8.3]` and consumed by
 the audio queue. Aliases from `gamedata/allsound.tdf` register in file order,
 capped at 255, with 32-byte names `[02 R-CAT-01 §6]`.
 
+Weapon sound admission is retained separately as
+`Catalog.WeaponSoundPaths`: every nonempty start, hit and water path from each
+accepted weapon section, in discovery/section/field order, including sections
+later overwritten by ID and ID-less sections. The compiler preserves the
+existing SC3 discovery policy. `CompileWeaponsWithDuplicates` keeps its public
+signature; a private richer result supplies this immutable presentation history
+to catalog compilation. `Catalog.Clone` copies its slice. Like the weapon
+sound strings, this presentation-only history adds no catalog hash bytes.
+Audio binds this history after named `AliasOrder` entries, before any weapon
+playback; it must not reconstruct admission from the surviving weapon map
+`[03 §8.3]`. Missing/empty sound values add no registration.
+
 The categories are also retained in `gamedata/sound.tdf` section order as
 `Catalog.SoundCategoryOrder`, because a unit's `soundcategory` is an **ordinal**
 whenever its text names no category: an absent key is index 0, and a present
@@ -574,11 +599,14 @@ in the reference install). There is no placeholder record and a miss is never
 silence; eleven stock definitions take this path
 `[02 §5 "Cross-reference failure policy"]` `[02 R-CAT-01 §5]`.
 `Catalog.ResolveSoundCategory` is the one implementation, and the session's
-audio resolver is its only caller. Retail stores the converted ordinal
-unbounded and `[03 §8.3]` indexes the record table with it, so an ordinal above
-the loaded count reads past the categories; what it then plays is an open
-question marked at the resolver, and until it is settled such an ordinal
-resolves to no category here. Like `AliasOrder`, the order is a presentation-
+audio resolver is its only caller. It reads at most 99 authored bytes and scans
+`SoundCategoryOrder` for the first matching retained `Name` (at most 63 bytes),
+using the established ASCII comparison. The name map is not this lookup's
+source: duplicate and shortened names can differ from its keys. The chosen or
+parsed ordinal narrows to unsigned 16 bits before indexing. Retail does not
+check that retained ordinal against the category count; the portable resolver
+returns no category for an invalid retained ordinal until its observable
+outcome is established. Like `AliasOrder`, the order is a presentation-
 side sequencing of definitions the hash already covers by name, so it adds no
 bytes to `Catalog.Hash` (C12).
 
@@ -1003,18 +1031,27 @@ battle-table reads, `gamedata/los.tdf` and `gamedata/meteor.tdf`, so a content
 set that raises one raises both. Neither cap changes how a byte is parsed, and
 a cap a profile leaves unset is the retail cap rather than an unbounded read.
 
-*What the LOS compile now accepts, and what it still refuses.* It accepts any
-declared table count, any line count and any point count a file spells: the
-retail loader sizes all three of its nested lists from the file
-`[03 R-COMP-02 §1]`, so there is no slot count to exceed, and the compiled
-slot-fill rule (slot `d` holds the section named `TABLE d+1`, undeclared
-sections retained as residue) is unchanged at ninety tables. TA: Escalation and
-ProTA both ship a ninety-table file of radius up to ninety and compile under
-their profiles' 8 MiB cap. It still refuses a file the cap refuses, and — above
+*What the LOS compile now accepts, and what it still refuses.* Table and line
+counts select named slots after signed-word narrowing; point counts and
+coordinates retain their established consumer widths. A consumed line uses
+only the value prefix copied by the retail loader `[03 R-VIS-01 §3]`. Raising
+`los_bytes` changes none of these conversions. The compiler preserves full
+authored integers as hash metadata, including an unshortened line after the
+consumed slots when needed. Neither unused sections nor this metadata add
+runtime rays. Negative allocation counts and incomplete coordinate lists have
+no established retail safety contract; the host's empty-spoke guard is not a
+claim of malformed-input equivalence.
+
+Ninety declared tables remain supported: the positive count fits the consumer
+width and is not a stock-size ceiling. TA: Escalation and ProTA's ninety-table
+files compile under their profiles' 8 MiB cap; that admission does not establish
+that every long line is fully consumed. The read-cap fixture uses complete
+compact lines and comment padding to test file admission independently of line
+consumption. The compiler still refuses a file the cap refuses, and — above
 16 MiB, whatever the cap says — a file the TDF parser's own document bound
-refuses, since the battle tables are parsed under the default TDF limits. It
-does not raise sensor ranges or footprints: those are authored record fields
-admitted by their own families, not by this cap.
+refuses, since battle tables use the default TDF limits. The cap does not raise
+sensor ranges or footprints; those are authored record fields admitted by their
+own families.
 
 *What a raised domain does and does not change.* The domain decides how many
 definitions are admitted and how wide a membership mask is; it never changes

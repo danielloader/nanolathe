@@ -1,6 +1,7 @@
 package movement
 
 import (
+	"math"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
@@ -112,5 +113,33 @@ func TestModeCommitTransportAdmissionUsesCommittedMirror(t *testing.T) {
 		if got.Allowed != tc.allowed || (!tc.allowed && got.Reason != "moving") {
 			t.Fatalf("mode/mirror=%d/%d admission=%+v", tc.mode, tc.mirror, got)
 		}
+	}
+}
+
+// Direct scalar fixtures test the established transport consumer [04 §10.2],
+// not a claim that stock construction generates NaN or a complete saved battle
+// preserves it through to a load command.
+func TestTransportAdmissionConstructionScalar(t *testing.T) {
+	s, w, carrier, candidate, _, _ := transportFixture(t)
+	for _, tc := range []struct {
+		name    string
+		bits    uint32
+		allowed bool
+	}{
+		{"zero", 0, true},
+		{"negative zero", 0x80000000, true},
+		{"positive", 0x3f000000, false},
+		{"negative", 0xbf000000, false},
+		{"positive infinity", 0x7f800000, false},
+		{"negative infinity", 0xff800000, false},
+		{"unordered", 0x7fc00001, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate.Remaining = math.Float32frombits(tc.bits)
+			got := s.CanTransport(carrier.Handle, candidate.Handle, w)
+			if got.Allowed != tc.allowed || (!got.Allowed && got.Reason != "under construction") {
+				t.Fatalf("construction scalar admission=%+v, want allowed=%v", got, tc.allowed)
+			}
+		})
 	}
 }

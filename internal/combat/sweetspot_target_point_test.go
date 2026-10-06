@@ -38,18 +38,18 @@ func sweetSpotFixture(piece int32, pieces []model.Piece) *units.Unit {
 
 func fi(v int64) numeric.Fixed { return numeric.FixedFromInt(v) }
 
-// TestUnitTargetPointIsSweetSpotVertexBoxCentre locks the live-unit outcome of
-// the target-point resolver [06 R-WPN-04 §1]: the target's position plus the
-// centre of the `SweetSpot` piece's own vertex bounding box, seeded at the
-// piece origin, with no hierarchy, no piece state and no output Z negation.
+// TestUnitTargetPointIsSweetSpotVertexBoxCentre locks the current immutable
+// geometry placeholder. Zero-seeded bounds and no output Z negation are retail
+// arithmetic; ignoring hierarchy and piece state is not established parity
+// while retained-point chronology remains open [06 R-WPN-04 §1].
 func TestUnitTargetPointIsSweetSpotVertexBoxCentre(t *testing.T) {
 	body := model.Piece{Name: "body", Parent: 0,
-		// A parent offset that must NOT enter the answer [06 R-WPN-04 §1].
+		// The immutable-geometry placeholder excludes this parent offset.
 		Translate: [3]numeric.Fixed{fi(50), fi(50), fi(50)},
 		Vertices:  [][3]numeric.Fixed{{fi(-2), fi(0), fi(-4)}, {fi(6), fi(10), fi(8)}},
 	}
 	u := sweetSpotFixture(1, []model.Piece{{Name: "base", Parent: -1, Children: []int{1}}, body})
-	// The script moved the piece, and that must not enter either.
+	// The same placeholder excludes the script's current piece translation.
 	u.ScriptState.VM.Pieces[1].Trans = [3]numeric.Fixed{fi(9), fi(9), fi(9)}
 	got := UnitTargetPoint(u)
 	want := Vec3{X: u.X.Add(fi(2)), Y: u.Y.Add(fi(5)), Z: u.Z.Add(fi(2))}

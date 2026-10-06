@@ -196,19 +196,28 @@ func scanFeatureLists(u *units.Unit, diameter int32) (energy, metal []FeatureVie
 	if b == nil || b.World == nil || b.World.LookupFeature == nil || u == nil || diameter < 0 {
 		return nil, nil
 	}
-	half := diameter / 2
-	cx := int32(u.X.Raw() >> 16)
-	cz := int32(u.Z.Raw() >> 16)
-	for xoff := -half; xoff <= half; xoff += 48 {
-		for zoff := -half; zoff <= half; zoff += 48 {
-			x := numeric.Fixed(int64(cx+xoff) << 16)
-			z := numeric.Fixed(int64(cz+zoff) << 16)
+	// Halve the raw diameter, retaining odd whole-unit halves and the centre's
+	// fractional part. List indices depend on Z-outer/X-inner traversal
+	// [04 R-ORD-01 §4]. All coordinate operations wrap at the retail word.
+	half := (diameter << 16) / 2
+	cx, cz := int32(u.X.Raw()), int32(u.Z.Raw())
+	xEnd, zEnd := cx+half, cz+half
+	// TODO(question): retail's wrapped increment can loop forever at an extreme
+	// signed endpoint. Retain the existing diameter-derived host work bound;
+	// overflow histories need their own outcome contract [04 R-ORD-01 §4].
+	limit := diameter/48 + 1
+	for zi, rawZ := int32(0), cz-half; zi < limit && rawZ <= zEnd; zi, rawZ = zi+1, rawZ+(48<<16) {
+		for xi, rawX := int32(0), cx-half; xi < limit && rawX <= xEnd; xi, rawX = xi+1, rawX+(48<<16) {
+			x, z := numeric.Fixed(rawX), numeric.Fixed(rawZ)
 			feature, ok := b.LookupFeature(world.WorldToCell(x), world.WorldToCell(z))
 			if !ok || !feature.Reclaimable || !feature.Autoreclaimable {
 				continue
 			}
 			feature.X = x
 			feature.Z = z
+			// TODO(question): retail copies an unwritten sample Y. Keep the existing
+			// terrain-height fallback until caller history and pre-update readers
+			// settle the retained value; this is not retail evidence [04 R-ORD-01 §4].
 			if b.World.TerrainHeight != nil {
 				if y, heightOK := b.World.TerrainHeight(x, z); heightOK {
 					feature.Y = y
@@ -233,12 +242,20 @@ func playerResources(u *units.Unit) (ResourceView, bool) {
 	return b.Resources(u.Owner)
 }
 
+// resourceAtLeastTwenty retains Modern guard assistance's single-precision
+// comparison; that approved policy is separate from the retail patrol gates.
 func resourceAtLeastTwenty(stock, capacity float32) bool {
 	return stock >= capacity/5
 }
 
+// Patrol comparisons keep working precision through the comparison, and an
+// unordered result takes the healthy/fits arm [04 R-ORD-01 §4, §7].
+func patrolResourceAtLeastTwenty(stock, capacity float32) bool {
+	return !(float64(stock) < float64(capacity)*0.2)
+}
+
 func resourceFits(stock, capacity float32, value int32) bool {
-	return stock+float32(value) <= capacity
+	return !(float64(stock)+float64(float32(value)) > float64(capacity))
 }
 
 // chooseReclaimFeature is the patrol decision tree. Feature lists are built
@@ -258,8 +275,8 @@ func chooseReclaimFeature(u *units.Unit, diameter int32) (FeatureView, bool) {
 	if len(metalList) > 0 {
 		metal, hasMetal = pickFeatureTournament(u, metalList, true)
 	}
-	energyLow := !resourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1])
-	metalLow := !resourceAtLeastTwenty(resources.Stock[0], resources.Capacity[0])
+	energyLow := !patrolResourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1])
+	metalLow := !patrolResourceAtLeastTwenty(resources.Stock[0], resources.Capacity[0])
 	if hasMetal && metalLow {
 		return metal, true
 	}

@@ -9,7 +9,6 @@ package orders
 
 import (
 	"fmt"
-	"slices"
 
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
@@ -163,35 +162,30 @@ func (q *Queue) recordDiagnostic(msg string) {
 	q.diagnostics = append(q.diagnostics, msg)
 }
 
-// cancelAll frees every record on both segments [04 §3.3] result code 7 and
-// [05 "Queue pumping and result codes"]. Non-head primary records and every
-// secondary record are tombstoned, which is what suppresses their
-// weapon-target-clear notification [05 "Queue subtraction"].
+// cancelAll drains the live primary chain before the rear chain. Records are
+// unlinked before cleanup, which may append more work to the chain being
+// drained [04 §3.3][04 R-MOV-03 §6].
 func (q *Queue) cancelAll() {
-	// Cancellation can remove a construction record from inside its cleanup.
-	// Snapshot the traversal so that splice cannot skip the following record
-	// or visit a shifted tail twice [04 R-MOV-03 §6][04 R-ORDER-02 §2].
-	primary := slices.Clone(q.primary)
-	for i, n := range primary {
-		if !slices.Contains(q.primary, n) {
-			continue // an earlier cancel notice already removed and cleaned it
-		}
-		if i != 0 {
+	var head *Node
+	if len(q.primary) != 0 {
+		head = q.primary[0]
+	}
+	for len(q.primary) != 0 {
+		n := q.primary[0]
+		hadSuccessor := len(q.primary) > 1
+		q.primary = q.primary[1:]
+		if n != head {
 			n.Flags |= FlagTombstone
 		}
-		q.cleanupNode(n)
-		q.spliceOutPrimary(n)
+		q.cleanupDetached(n, hadSuccessor)
 	}
-	for _, n := range slices.Clone(q.secondary) {
-		if !slices.Contains(q.secondary, n) {
-			continue
-		}
+	for len(q.secondary) != 0 {
+		n := q.secondary[0]
+		hadSuccessor := len(q.secondary) > 1
+		q.secondary = q.secondary[1:]
 		n.Flags |= FlagTombstone
-		q.cleanupNode(n)
-		q.spliceOutSecondary(n)
+		q.cleanupDetached(n, hadSuccessor)
 	}
-	q.primary = nil
-	q.secondary = nil // via the pair-removal helper [05]
 }
 
 // ownerUnit resolves a record's owning unit through the queue's binding
@@ -704,14 +698,14 @@ func (q *Queue) CancelFrontMost(match func(Node) bool) bool {
 			continue
 		}
 		n := q.primary[i]
+		hadSuccessor := i+1 < len(q.primary)
 		if i != 0 {
 			n.Flags |= FlagTombstone // [04 §3.3]
 		}
-		q.cleanupNode(n) // [05 "Queue subtraction"]
-		// By identity after the cleanup, never by the index taken before it:
-		// the cleanup's cancel notification re-enters the queue (see
-		// spliceOutPrimary).
+		// The duplicate-toggle consumer removes the record before notifying
+		// its handler, retaining its successor for cleanup [04 R-MOV-03 §6].
 		q.spliceOutPrimary(n)
+		q.cleanupDetached(n, hadSuccessor)
 		q.releaseMarkerOnRemoval() // the marker has no removal-side writer [04 §3.3]
 		return true
 	}

@@ -244,16 +244,15 @@ const (
 	cuePreviousScreen = "Previous"    // `CANCEL`, as everywhere else
 )
 
-// playSelectionCue is the selection refresh's cue [07 §9]: "one selected unit
-// takes the single-unit presentation path and multiple units take the
-// multiple-unit path; any change … plays `SelectMultipleUnits` or the single
-// select cue." The single select cue is the unit's own category voice, slot 1
-// of the static table [03 §8.3], so it goes through the eight-slot queue with
-// that slot's priority and cooldown; the multiple-unit cue is a flat interface
-// alias. A change that leaves nothing selected reaches neither path.
+// playSelectionCue submits the acknowledgement chosen by its gesture caller
+// [07 §9]. A point gesture supplies its unit only when it ends selected; a
+// rectangle supplies the resulting eligible selection, even if unchanged.
+// One unit requests its category voice on slot 1 [03 §8.3]; multiple units
+// request the flat interface alias, and an empty result requests nothing.
+// Queue admission, cooldown and playback remain the audio service's concern.
 //
-// This runs on the presentation side, at the click that produced the selection
-// command, and touches no simulation state [I6].
+// This runs on the presentation side after the local selection mutation and
+// touches no simulation state [I6].
 func playSelectionCue(sess *session.Session, handles []pool.Handle) {
 	if sess == nil || sess.Audio == nil {
 		return
@@ -274,12 +273,9 @@ func playSelectionCue(sess *session.Session, handles []pool.Handle) {
 	}
 }
 
-// dispatchBuildPageCued is the page-switch routine's cue seam. "Switching sets
-// battle-interface dirty bit `0x10` and plays the `nextbuildmenu` cue"
-// [07 §9 "Page encoding is closed"], and the routine validates the
-// selected-builder identity and the page-count guard first — so a refused
-// switch is silent. Pending page commands participate in the old-page
-// identity so repeated input before publication only cues actual transitions.
+// dispatchBuildPageCued requests the authored page cue after identity/count
+// admission, including a request for the already-shown page [07 R-HUD-03 §6].
+// Adaptive sidebar pages keep their separate change-only host policy.
 func (b *battleSession) dispatchBuildPageCued(page int) error {
 	f, ok := b.currentSnapshot()
 	// Adaptive rows navigate locally; the command below remains an authored
@@ -291,9 +287,6 @@ func (b *battleSession) dispatchBuildPageCued(page int) error {
 			}
 			return nil
 		}
-	}
-	if ok && b.effectiveBuildPage(f) == page {
-		return nil
 	}
 	err := b.DispatchBuildPage(page)
 	if err == nil {

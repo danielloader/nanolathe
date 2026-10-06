@@ -191,7 +191,7 @@ func checkFogOrderedDevicePixels() error {
 				want = [4]byte{140, 140, 140, 255}
 			case x >= 24 && x < 36 && y >= 4 && y < 16 && !(x == 24 && y == 4):
 				want = [4]byte{60, 60, 60, 255}
-			case x >= 24 && x < 36 && y >= 24 && y < 36 && (x+y)&1 != 0:
+			case x >= 24 && x < 36 && y >= 24 && y < 36 && (x+y)&1 == 0:
 				want = [4]byte{0, 0, 0, 255}
 			}
 			at := (y*w + x) * 4

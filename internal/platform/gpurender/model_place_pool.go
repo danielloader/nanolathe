@@ -259,7 +259,7 @@ func (r *Renderer) placeParallel(jobs, packets int) {
 			run := c.runs[k]
 			if k == job.r0 && len(d.runs) > 0 {
 				last := &d.runs[len(d.runs)-1]
-				if last.imgs == run.imgs && last.page == run.page {
+				if last.imgs == run.imgs && last.page == run.page && last.seedPhase == run.seedPhase {
 					job.joined, job.delta = true, v-last.vOff
 					last.vLen += run.vLen
 					last.iLen += run.iLen

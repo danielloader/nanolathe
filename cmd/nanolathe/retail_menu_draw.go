@@ -257,6 +257,12 @@ func (g *gameShell) drawRetailTextState(c *client.Client, p *ui.Panel, index int
 		return
 	}
 	text := retailGadgetText(p, index, gad)
+	if gad.Kind == gui.KindLabel && p.Window != nil && index > 0 && index < len(p.Window.Gadgets) {
+		oldX := gad.Rect.X
+		g.resolveRetailLabel(p.Window, index, text)
+		gad = p.Window.Gadgets[index]
+		r.X += gad.Rect.X - oldX
+	}
 	if text == "" && !(gad.Kind == gui.KindTextBox && p.EditorCaptured() && p.EditorIndex() == index) {
 		return
 	}
@@ -345,6 +351,59 @@ func (g *gameShell) drawRetailTextState(c *client.Client, p *ui.Panel, index int
 	g.drawRetailStringSelected(c, text, x, y, maxWidth, color, shade, selected)
 }
 
+// resolveLabelX retains the label painter's position write in the live record.
+// Caption changes do not restore the sentinel, but a narrowed result of -1
+// remains eligible on the next paint [07 R-WGT-01 §7][03 R-FONT-01 §6].
+func resolveLabelX(window *gui.Window, index, textWidth int) {
+	if window == nil || index <= 0 || index >= len(window.Gadgets) {
+		return
+	}
+	gad := &window.Gadgets[index]
+	if gad.Kind == gui.KindLabel && gad.Rect.X == -1 {
+		gad.Rect.X = int32(int16((int(window.Rect.W) - textWidth) / 2))
+	}
+}
+
+func (g *gameShell) resolveRetailLabel(window *gui.Window, index int, text string) {
+	if window == nil || index <= 0 || index >= len(window.Gadgets) {
+		return
+	}
+	gad := window.Gadgets[index]
+	if gad.Kind != gui.KindLabel || gad.Rect.X != -1 {
+		return
+	}
+	if text == "" {
+		resolveLabelX(window, index, 0)
+		return
+	}
+	var selected *formats.FNT
+	if g != nil {
+		selected = g.font
+		if g.cs != nil {
+			if font := window.Font(g.cs.fs, gad.FontNumber); font != nil {
+				selected = font
+			}
+		}
+	}
+	if measure, _, ok := retailLabelFaceMetrics(g.retailGAFLabelFont(), selected); ok {
+		resolveLabelX(window, index, measure(text))
+	}
+}
+
+// initializeRetailLabels performs the position writes of the opener's initial
+// paint before the caller replaces captions. Hidden labels wait until painted
+// [07 R-WGT-01 §7].
+func (g *gameShell) initializeRetailLabels(window *gui.Window) {
+	if window == nil {
+		return
+	}
+	for i, gad := range window.Gadgets {
+		if gad.Active != 0 {
+			g.resolveRetailLabel(window, i, gad.Text)
+		}
+	}
+}
+
 // retailGadgetText selects staged captions from the current-stage byte. The
 // down-state word only controls an armed frame, so a released selection keeps
 // both its art and its caption [07 R-WGT-01 §3].
@@ -429,16 +488,13 @@ func (g *gameShell) drawRetailLabelFNT(c *client.Client, p *ui.Panel, gad gui.Ga
 }
 
 // retailLabelPenX places a label's pen the way both label-painter branches do
-// [03 R-FONT-01 §6]: an authored x of -1 centres the text on the panel width,
-// then attribute bit 4 (right) puts the pen at `gx + w - tw`, else bit 2
+// [03 R-FONT-01 §6]: after the stored X has been resolved, attribute bit 4
+// (right) puts the pen at `gx + w - tw`, else bit 2
 // (centre) at `gx + trunc(w/2) - trunc(tw/2)` — two separate truncations —
 // else at `gx`. There is no inset; the button painter's three-pixel insets
 // are not the label's.
-func retailLabelPenX(window *gui.Window, gad gui.Gadget, r gui.Rect, textWidth int) int {
+func retailLabelPenX(_ *gui.Window, gad gui.Gadget, r gui.Rect, textWidth int) int {
 	gx, w := int(r.X), int(r.W)
-	if gad.Rect.RawX == -1 && window != nil {
-		gx = int(window.Rect.X) + (int(window.Rect.W)-textWidth)/2
-	}
 	switch {
 	case gad.Attribs&4 != 0:
 		return gx + w - textWidth

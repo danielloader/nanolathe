@@ -75,23 +75,22 @@ func lagThrottleFactor(lag uint32) float64 {
 	return f
 }
 
-// updateFlags recomputes the locally-owned pause and pending-speed bits while
-// preserving the lag bit and all other flags. Lag is owned by the multiplayer
-// dispatcher, so the clock must not erase a valid serialized value it does not
-// model [08 "Scheduler and random state in saves"].
-func (s *State) updateFlags() {
-	preserved := s.flags &^ uint16(0x05)
-	var f uint16
+// updatePauseFlag copies the public pause state while preserving the sampled
+// pending-speed bit and the dispatcher-owned lag flag [01 §4.3].
+func (s *State) updatePauseFlag() {
+	s.flags &^= 1
 	if s.Paused {
-		f |= 1
+		s.flags |= 1
 	}
-	// Bit 1 is the lag-throttle flag. It is not clock-owned while network
-	// progress is supplied by the multiplayer dispatcher; preserve it.
-	f |= s.flags & 2
-	if clampSpeed(s.Requested) != clampSpeed(s.Active) {
-		f |= 4
+}
+
+// samplePendingSpeed runs before hysteresis, only when the budget is evaluated.
+// SaveBox must preserve this sample even if Active subsequently changes [01 §4.3].
+func (s *State) samplePendingSpeed() {
+	s.flags &^= 4
+	if s.Active < s.Requested {
+		s.flags |= 4
 	}
-	s.flags = preserved | f
 }
 
 // applyHysteresis updates the speed-slew counter and may step Active
@@ -100,9 +99,7 @@ func (s *State) updateFlags() {
 func (s *State) applyHysteresis(trunc int32) {
 	isCapped := trunc >= 6 // raw trunc before clamp [01 §4.3]
 	if isCapped {
-		if s.slew < 32767 {
-			s.slew++
-		}
+		s.slew++
 		if s.slew > 10 {
 			if s.Active > 1 {
 				s.Active--
@@ -113,9 +110,7 @@ func (s *State) applyHysteresis(trunc int32) {
 			s.slew = 0
 		}
 	} else {
-		if s.slew > -32768 {
-			s.slew--
-		}
+		s.slew--
 		if s.slew < -100 { // >100 normal observations [01 §4.3]
 			// Normal observations only raise active speed toward the request.
 			// The retail branch is intentionally not symmetric: an active
@@ -163,13 +158,14 @@ func (s *State) AdvanceSP(scaledNow int32) int {
 	if s.Paused {
 		// SP pause: do not evaluate budget at all; wall-clock seen on next
 		// unpaused call becomes the burst. Return 0 and keep carry/anchor.
-		s.updateFlags()
+		s.updatePauseFlag()
 		s.pending = 0
 		return 0
 	}
 	// Clamp speeds 1..20 [01 §4.3] C3. Preserve caller-visible values clamped.
 	s.Requested = clampSpeed(s.Requested)
 	s.Active = clampSpeed(s.Active)
+	s.samplePendingSpeed()
 
 	delta := scaledNow - s.ScaledAnchor // signed delta; wrap becomes negative C2
 	eff := s.effectiveSpeedLocked()     // active *0.1 [01 §4.2]
@@ -184,7 +180,7 @@ func (s *State) AdvanceSP(scaledNow int32) int {
 	s.ScaledAnchor = scaledNow
 	s.Delta = delta
 	s.pending = int32(ticks)
-	s.updateFlags()
+	s.updatePauseFlag()
 	return ticks
 }
 
@@ -197,6 +193,7 @@ func (s *State) AdvanceMP(scaledNow int32) int {
 	// Clamp speeds defensively.
 	s.Requested = clampSpeed(s.Requested)
 	s.Active = clampSpeed(s.Active)
+	s.samplePendingSpeed()
 
 	delta := scaledNow - s.ScaledAnchor
 	eff := s.effectiveSpeedLocked()
@@ -214,7 +211,7 @@ func (s *State) AdvanceMP(scaledNow int32) int {
 	s.Delta = delta
 	s.pending = int32(ticks)
 
-	s.updateFlags()
+	s.updatePauseFlag()
 
 	if s.Paused {
 		// Discard integer while keeping carry [01 §4.3].
@@ -228,8 +225,8 @@ func (s *State) AdvanceMP(scaledNow int32) int {
 // layout used by the Players/GameTime box [08 "Scheduler and random state in saves"],
 // [01 §7.3]. RNG state is not saved (C14).
 func (s *State) SaveBox() [28]byte {
-	// Ensure flags reflect current paused/mismatch bits before snapshot.
-	s.updateFlags()
+	// Synchronize the public pause field; preserve the last budget flag sample.
+	s.updatePauseFlag()
 	// Ensure speeds are within saveable i16 range.
 	req := int16(clampSpeed(s.Requested))
 	act := int16(clampSpeed(s.Active))
@@ -329,8 +326,8 @@ func (s *State) BeginSubTick() uint32 {
 }
 
 // ScaledNow converts a GetTickCount millisecond value to the engine's
-// scaled timebase floor(tickCount *30/1000) [01 §4.1]. Kept here so the
-// conversion stays in one place and no other package invents its own.
+// scaled timebase, wrapping the 32-bit product before division [01 §4.1].
+// Kept here so the conversion stays in one place.
 func ScaledNow(tickCount uint32) int32 {
-	return int32((uint64(tickCount) * 30) / 1000)
+	return int32((tickCount * 30) / 1000)
 }

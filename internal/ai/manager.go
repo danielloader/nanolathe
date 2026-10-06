@@ -858,7 +858,7 @@ func (m *Manager) nextDeadline(k TaskKind, tick uint32) uint32 {
 
 // doConstruction is the construction-and-positioning task body. It reschedules
 // first (the caller has already written tick+90), reads the strategic centre
-// once into a local, and then runs the two independent passes over the task's
+// once into a local, and then runs the two passes over the task's
 // group vector in vector order: pass one places buildings, pass two
 // repositions builders. A member can be acted on by both passes in the same
 // invocation [08 R-AI-01 §3].
@@ -881,6 +881,10 @@ func (m *Manager) doConstruction(tick uint32, w *units.World, econ *economy.Serv
 	// The build-capable count is the strategic refresh's product, never
 	// recomputed here [08 R-AI-01 §3][08 R-P0-05 §5].
 	buildCapable := m.Strategic.BuildCapable
+	// TODO(question): retail copies an unwritten placement-output Y into the
+	// shared centre on capture-capable attempts, even failed ones. Keep the
+	// original strategic Y as a deterministic placeholder until caller-stack
+	// provenance or an explicit host policy settles it [08 R-AI-01 §3].
 	m.constructionPlacePass(tick, w, econ, centreX, centreZ, buildCapable)
 	m.constructionRepositionPass(tick, w, centreX, centreY, centreZ, buildCapable)
 }
@@ -991,6 +995,10 @@ func (m *Manager) constructionPlacePass(tick uint32, w *units.World, econ *econo
 		m.Factory = u
 		res := PlaceCandidate(m, cand.DefKey, m.Terrain)
 		placed := res.Valid
+		// TODO(question): retail runs this cap even after placement fails,
+		// reading unwritten or retained output coordinates. Only test valid
+		// results here until their provenance or an explicit deterministic
+		// host policy is settled [08 R-AI-01 §3][08 R-AI-03 §5].
 		if placed && u.Def.CanCapture && !withinConstructionCap(m.Terrain, res.WorldX, res.WorldZ, centreX, centreZ) {
 			// The cap vetoes the placement without resetting anything; the
 			// radius is already zero by then [08 R-AI-01 §3][08 R-AI-03 §5].

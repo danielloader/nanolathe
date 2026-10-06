@@ -392,28 +392,51 @@ func (b *battleSession) cycleFollowTargetFrom(previous bool, current pool.Handle
 	if b == nil || b.cam == nil {
 		return
 	}
-	sel := b.selectedHandlesInSlotOrder()
-	if len(sel) == 0 {
-		b.cam.SetTracked(0)
+	f, ok := b.currentSnapshot()
+	if !ok {
 		return
 	}
-	idx := -1
-	for i, h := range sel {
-		if h == current {
-			idx = i
-			break
+	owner := int(b.sess.LocalOwner)
+	if owner < 0 || owner >= len(f.Players) {
+		return
+	}
+	first := int(f.Players[owner].UnitSlotStart)
+	last := first + int(f.Strip.UnitLimit) - 1
+	if first == 0 || f.Strip.UnitLimit <= 0 || last > int(^pool.Handle(0)) {
+		return
+	}
+	// The anchor is the tracked slot, even after deselection. Null or an
+	// out-of-owner slot normalizes to the first actual record, which is
+	// tested only after wrapping [07 R-CAM-01 §12]. Bounds are published
+	// from the allocator's player permutation, not inferred from owner ID.
+	anchor := int(current)
+	if anchor < first || anchor > last {
+		anchor = first
+	}
+	var next, wrap pool.Handle
+	for _, h := range b.selectedHandlesInSlotOrder() {
+		slot := int(h)
+		if slot < first || slot > last {
+			continue
+		}
+		if previous {
+			if h > wrap {
+				wrap = h
+			}
+			if slot < anchor && h > next {
+				next = h
+			}
+		} else {
+			if wrap == 0 || h < wrap {
+				wrap = h
+			}
+			if slot > anchor && (next == 0 || h < next) {
+				next = h
+			}
 		}
 	}
-	var next pool.Handle
-	switch {
-	case idx < 0 && previous:
-		next = sel[len(sel)-1]
-	case idx < 0:
-		next = sel[0]
-	case previous:
-		next = sel[(idx+len(sel)-1)%len(sel)]
-	default:
-		next = sel[(idx+1)%len(sel)]
+	if next == 0 {
+		next = wrap
 	}
 	b.cam.SetTracked(next)
 }

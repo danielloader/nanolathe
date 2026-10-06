@@ -501,6 +501,12 @@ func (c *Client) unitGeometryPair(v frame.UnitView, forceKeyPlane bool) (arrival
 	// and takes a new revision then; between those, the faces are the same
 	// and the reveal band rides the verdict entry.
 	g.Cache = body.cacheKey(hx, hy)
+	if g.KeyPlane {
+		g.CachedSeed = drawlist.ModelCachedSeed{
+			Width: body.geometry.Width, Height: body.geometry.Height,
+			OriginX: body.geometry.OriginX, OriginY: body.geometry.OriginY,
+		}
+	}
 	// Cloak and developer modes [03 §3.12] change the final image blit, not the retained raster or its key
 	// [03 R-RAST-01 §7]. Direct live packets below keep their opaque fill.
 	g.Cloaked = v.Cloaked || c.developer.Mode != 0

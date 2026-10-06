@@ -581,8 +581,15 @@ func TestResourceShortcutIgnoresHiddenConstructionProducts(t *testing.T) {
 	first := b.hud.windows["armcons1"]
 	last := first.Gadgets[len(first.Gadgets)-1]
 	first.Gadgets = first.Gadgets[:len(first.Gadgets)-1]
-	last.Name, last.GrayedOut = "ADVANCED", 1 // the numbered opener resolves this bit
-	b.hud.windows["armcons2"] = &gui.Window{Name: "guis/armcons2.gui", Gadgets: []gui.Gadget{last}}
+	last.Name, last.GrayedOut = "ADVANCED", 1
+	// Numbered-page resolution excludes the final child [07 R-HUD-03 §6].
+	// Keep this later-page product inside the visited range so the fixture
+	// tests available human products across pages.
+	b.hud.windows["armcons2"] = &gui.Window{Name: "guis/armcons2.gui", Gadgets: []gui.Gadget{
+		{Kind: gui.KindPanel, Name: "HEADER", Active: 1},
+		last,
+		{Kind: gui.KindLabel, Name: "TAIL", Active: 1},
+	}}
 	b.cat.Units["armcons"].BuildPageCount = 3
 
 	x, y := o5ScreenWorld(b.cam, numeric.FixedFromInt(366), 0, numeric.FixedFromInt(366))

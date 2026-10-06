@@ -251,11 +251,9 @@ type overlapCandidate struct {
 	sx, sz int32
 }
 
-// SectorFiling is a unit's place in retail's sector-bucket structure: the
-// sector record the stamp filed it under (or the off-map record) and the link
-// sequence of its most recent relink [04 R-COLL-01 §4A][04 R-COLL-01 §11].
-// The zero value is unfiled — retail's null record reference — so a fresh
-// collision record's first stamp always inserts.
+// SectorFiling retains the last ordinary stamp's sector reference, separately
+// from sectorLink.linked. Cargo keeps this reference while absent from every
+// top-level bucket. Seq records only actual head insertions [04 R-COLL-01 §11].
 type SectorFiling struct {
 	Filed  bool
 	OffMap bool
@@ -354,6 +352,13 @@ type OverlapFilings interface {
 	// OverlapFiling returns the unit's filing, or nil for an identity with
 	// no collision record.
 	OverlapFiling(id int) *SectorFiling
+}
+
+// OverlapAttachments exposes the unit owner's existing relationship lists.
+// The borrowed cargo slice is read in list order; it is not a second index
+// [04 R-COLL-01 §4A, §11]. Bindings without it have no attached candidates.
+type OverlapAttachments interface {
+	OverlapAttachment(id int) (carrier int, cargo []pool.Handle)
 }
 
 // AttachOverlap binds the overlap protocol's unit window and the owner
@@ -869,11 +874,23 @@ func (g *OccupancyGrid) StampPlane(plane Plane, anchor Cell, fx, fz int16, id in
 	if fz < 0 {
 		fz = 1
 	}
-	// Empty mobile rectangles retain sector filing but visit no cell below
-	// [04 R-P0-08-C].
-	// The sector relink runs on every stamp call ahead of everything else,
-	// the off-map filing included [04 R-COLL-01 §4A][04 R-COLL-01 §11].
+	// Ordinary stamps select a reference even when no cell can be written.
 	g.fileUnit(id, anchor, fx, fz)
+	return g.stampPlaneCells(plane, anchor, fx, fz, id)
+}
+
+// stampPlaneCells is shared by ordinary stamp and restamp. The latter must
+// preserve the retained reference and list position [04 R-COLL-01 §4A, §11].
+func (g *OccupancyGrid) stampPlaneCells(plane Plane, anchor Cell, fx, fz int16, id int) bool {
+	if g == nil {
+		return false
+	}
+	if fx < 0 {
+		fx = 1
+	}
+	if fz < 0 {
+		fz = 1
+	}
 	if !g.RectOnMap(anchor, fx, fz) {
 		return false // off-map bucket: no cell is written [04 R-COLL-01 §4]
 	}
@@ -928,8 +945,9 @@ func (g *OccupancyGrid) StampPlane(plane Plane, anchor Cell, fx, fz int16, id in
 // the two words [04 R-COLL-01 §11] names: the record the committed position
 // selects (the off-map record when the cell rectangle fails the bounds test)
 // and the link sequence of the relink. A unit whose record is unchanged keeps
-// its place; one that changed takes the next sequence. The restamp never
-// relinks, which the scan guard covers: a restamp only runs inside the scan.
+// its place; an uncarried one that changed takes the next sequence. Restamps
+// use the cell-only writer; the scan guard also prevents fixture callbacks
+// from turning a restamp into a relink.
 func (g *OccupancyGrid) fileUnit(id int, anchor Cell, fx, fz int16) {
 	if g.inOverlapScan || g.overlap == nil {
 		return
@@ -947,16 +965,28 @@ func (g *OccupancyGrid) fileUnit(id int, anchor Cell, fx, fz int16) {
 	if f.Filed && f.OffMap == !onMap && (!onMap || (f.SX == sx && f.SZ == sz)) {
 		return
 	}
+	// A stamp updates a carried unit's reference without linking it. Retain
+	// its last insertion sequence until an actual detach [04 R-COLL-01 §11].
+	*f = SectorFiling{Filed: true, OffMap: !onMap, SX: sx, SZ: sz, Seq: f.Seq}
+	if attachments, ok := g.overlap.(OverlapAttachments); ok {
+		if carrier, _ := attachments.OverlapAttachment(id); carrier != 0 {
+			g.unlinkSector(id)
+			return
+		}
+	}
+	g.reheadFiling(id, f)
+}
+
+// reheadFiling inserts into the retained record, never a record recomputed
+// from current XYZ. Detach calls this even without a cell/mode/sector change
+// [04 R-COLL-01 §11].
+func (g *OccupancyGrid) reheadFiling(id int, f *SectorFiling) {
 	g.linkSeq++
-	*f = SectorFiling{Filed: true, OffMap: !onMap, SX: sx, SZ: sz, Seq: g.linkSeq}
-	// Step 4 in the grid's own bucket index: unlink from the old record,
-	// head-insert into the new. The off-map record is not in the sector array,
-	// so its separate bucket remains outside the overlap sweep
-	// [04 R-COLL-01 §4A].
-	if onMap {
-		g.linkSector(id, sx, sz)
-	} else {
+	f.Seq = g.linkSeq
+	if f.OffMap {
 		g.linkOffMap(id)
+	} else {
+		g.linkSector(id, f.SX, f.SZ)
 	}
 }
 
@@ -1052,41 +1082,10 @@ func (g *OccupancyGrid) releaseOverlap(id int, anchor Cell, fx, fz int16) {
 	g.overlapScan(id, anchor, fx, fz)
 }
 
-// overlapScan is the clear's sector-bucket scan [04 R-COLL-01 §4]: "every live
-// unit (and every unit on a live unit's cargo list) filed in a sector bucket
-// touching the rectangle whose own rectangle intersects it is passed to the
-// restamp". The rectangle is the clearing unit's own at its cached pair; the
-// rectangle the clear was called with is the fallback for an identity the
-// binding does not know.
-//
-// A carried unit is on the cargo list retail also walks; its mover mode is 0,
-// which stamps and clears nothing, so passing it to the restamp writes no cell
-// either way [04 R-COLL-01 §4].
-//
-// The sweep is the sector one [04 R-COLL-01 §4A]: sector column ascending in
-// the outer loop, sector row ascending in the inner, over the rectangle's
-// sector span grown by one sector on every side, skipping a sector index
-// outside the grid. A unit filed in the off-map sector record is never reached,
-// because that record is not in the grid array — so an intruder whose own
-// rectangle has left the map keeps its intruder bit instead of having it
-// cleared by a restamp that would write no cell anyway.
-//
-// Within one sector the order is the bucket's, read from its head: reverse
-// order of each unit's most recent relink [04 R-COLL-01 §11]. Every stamp site
-// calls StampPlane, which relinks through fileUnit; the filing lives on the
-// collision record, so ForgetUnit drops it with the record; and the cargo
-// detach push is mirrored by CommitSuccess at the first post-carry commit.
-//
-// This walks the buckets themselves rather than gathering every live unit and
-// sorting it into the sweep. The two produce the same sequence — that is what
-// the randomized equivalence test in this package asserts — because a bucket's
-// head-first order IS its members' link sequence descending, and the sweep
-// visits the records in the same column-major order the sort imposed. What it
-// removes is a walk of every live unit per clear: with a few hundred movers the
-// gather rejected some three orders of magnitude more candidates than it kept.
-// The one population the buckets cannot carry is a unit no stamp has filed —
-// retail has none, because a unit is linked at creation — so the binding names
-// those separately.
+// overlapScan walks top-level sector heads, testing each parent and then its
+// cargo independently in list order [04 R-COLL-01 §4A, §11]. A child's retained
+// reference does not select its reachability. Restamp consumes flags and does
+// not relink, so collecting into the reusable buffer preserves the walk order.
 func (g *OccupancyGrid) overlapScan(clearing int, anchor Cell, fx, fz int16) {
 	if g == nil || g.overlap == nil || g.inOverlapScan {
 		return
@@ -1112,6 +1111,7 @@ func (g *OccupancyGrid) overlapScan(clearing int, anchor Cell, fx, fz int16) {
 	defer func() { g.inOverlapScan = false }()
 
 	positions, _ := g.overlap.(OverlapPositions)
+	attachments, _ := g.overlap.(OverlapAttachments)
 	g.scan = g.scan[:0]
 	g.unfiled = g.unfiled[:0]
 	// The candidates that are in no bucket because no stamp has filed them.
@@ -1119,11 +1119,16 @@ func (g *OccupancyGrid) overlapScan(clearing int, anchor Cell, fx, fz int16) {
 	// here from the pair a stamp would have filed them under, which is what the
 	// gather-and-sort form of this scan did for them.
 	g.overlap.VisitUnfiledOverlapCandidates(func(id int) {
-		if id == clearing || id <= 0 {
+		if id <= 0 {
 			return
 		}
+		if attachments != nil {
+			if carrier, _ := attachments.OverlapAttachment(id); carrier != 0 {
+				return
+			}
+		}
 		a, cfx, cfz, ok := g.overlap.OverlapRect(id)
-		if !ok || !rectsIntersect(anchor, fx, fz, a, cfx, cfz) {
+		if !ok {
 			return
 		}
 		sx, sz, filed := g.unitSector(id, a, cfx, cfz, positions)
@@ -1132,6 +1137,21 @@ func (g *OccupancyGrid) overlapScan(clearing int, anchor Cell, fx, fz int16) {
 		}
 		g.unfiled = append(g.unfiled, overlapCandidate{id: id, sx: sx, sz: sz})
 	})
+	appendIntersecting := func(id int, sx, sz int32) {
+		a, cfx, cfz, ok := g.overlap.OverlapRect(id)
+		if id > 0 && ok && rectsIntersect(anchor, fx, fz, a, cfx, cfz) {
+			g.scan = append(g.scan, overlapCandidate{id: id, sx: sx, sz: sz})
+		}
+	}
+	appendFamily := func(id int, sx, sz int32) {
+		appendIntersecting(id, sx, sz)
+		if attachments != nil {
+			_, cargo := attachments.OverlapAttachment(id)
+			for _, h := range cargo {
+				appendIntersecting(int(h), sx, sz)
+			}
+		}
+	}
 	// Column-major over the span: sector column in the outer loop, sector row
 	// in the inner, each record read from its head [04 R-COLL-01 §4A]. Every
 	// candidate is gathered before the first restamp, which is what makes the
@@ -1147,21 +1167,14 @@ func (g *OccupancyGrid) overlapScan(clearing int, anchor Cell, fx, fz int16) {
 				if l := g.links[id]; l.sx != sx || l.sz != sz {
 					continue
 				}
-				if id == clearing || id <= 0 {
-					continue
-				}
-				a, cfx, cfz, ok := g.overlap.OverlapRect(id)
-				if !ok || !rectsIntersect(anchor, fx, fz, a, cfx, cfz) {
-					continue
-				}
-				g.scan = append(g.scan, overlapCandidate{id: id, sx: sx, sz: sz})
+				appendFamily(id, sx, sz)
 			}
 			// A record's unfiled candidates follow its bucket: an unfiled unit
 			// carries no link sequence, so it sorted after every filed one of
 			// the same record.
 			for _, c := range g.unfiled {
 				if c.sx == sx && c.sz == sz {
-					g.scan = append(g.scan, c)
+					appendFamily(c.id, c.sx, c.sz)
 				}
 			}
 		}
@@ -1179,8 +1192,8 @@ func (g *OccupancyGrid) overlapScan(clearing int, anchor Cell, fx, fz int16) {
 // the units filed there, and the clear's scan visits only the records in the
 // rectangle's span. This index is that structure. It is maintained at exactly
 // the points the filing is written — the stamp's relink through fileUnit, the
-// cargo detach mirror, and unit finalisation — so a bucket's membership and the
-// filings agree by construction.
+// synchronous cargo detach, and unit finalisation. Carried units retain a
+// filing reference without a top-level link.
 
 // sectorRecord maps a sector index onto its slot in the head array. Every
 // index the array does not address shares the one slot at the end; the sweep
@@ -1850,18 +1863,6 @@ func (s *CollisionState) CommitSuccess(proposedAnchor Cell, proposedMode uint8, 
 			grid.Clear(s.OldAnchor, s.FootPrintX, s.FootPrintZ, s.ID)
 		}
 	}
-	// A carried unit's mirror is 0 (the carried-position setter's mode). Its
-	// first commit that stamps again is where retail's detach push lands: the
-	// released cargo is head-inserted into the record its carried stamps kept
-	// current, so it becomes the most recent entry of that sector even when
-	// the sector did not change [04 R-COLL-01 §11] item 2. Unfiling here makes
-	// the stamp below relink unconditionally. (A cargo released onto the very
-	// cell and mode it was picked up from takes the same-cell fast path and
-	// never reaches this branch; it keeps its old place.)
-	if s.CachedMode == 0 && proposedMode&0x3 != 0 {
-		s.Filing = SectorFiling{}
-		grid.unlinkSector(s.ID)
-	}
 	s.X = proposedX
 	s.Y = proposedY
 	s.Z = proposedZ
@@ -1870,6 +1871,7 @@ func (s *CollisionState) CommitSuccess(proposedAnchor Cell, proposedMode uint8, 
 	s.OldAnchor = proposedAnchor
 	s.Mode = proposedMode & 0x3
 	if grid != nil {
+		grid.fileUnit(s.ID, proposedAnchor, s.FootPrintX, s.FootPrintZ)
 		if plane, stamps := planeForMode(proposedMode); stamps {
 			grid.StampPlane(plane, proposedAnchor, s.FootPrintX, s.FootPrintZ, s.ID)
 			s.StampedAnchor = proposedAnchor
@@ -2130,7 +2132,7 @@ func (s *System) RestampFootprint(id int) {
 			for dx := int32(0); dx < int32(fx); dx++ {
 				c := Cell{X: coll.CachedAnchor.X + dx, Z: coll.CachedAnchor.Z + dz}
 				if coll.Yard[int(dz)*int(fx)+int(dx)].Selects(coll.YardOpen) {
-					s.Grid.StampPlane(PlaneGround, c, 1, 1, coll.ID)
+					s.Grid.stampPlaneCells(PlaneGround, c, 1, 1, coll.ID)
 					continue
 				}
 				s.Grid.ReleaseCellIfSelf(PlaneGround, c, coll.ID)
@@ -2141,17 +2143,28 @@ func (s *System) RestampFootprint(id int) {
 		coll.HasStamp = s.Grid.RectOnMap(coll.CachedAnchor, fx, fz)
 		return
 	}
+	// TODO(question): establish a reachable cached-mode-0/3 intruder history
+	// before changing this host plane dispatch [04 R-COLL-01 §11].
 	plane, stamps := planeForMode(coll.CachedMode)
 	if !stamps {
 		return
 	}
-	s.Grid.StampPlane(plane, coll.CachedAnchor, fx, fz, coll.ID)
+	s.Grid.stampPlaneCells(plane, coll.CachedAnchor, fx, fz, coll.ID)
 	// The restamp is at the cached pair, which is where every writer stamps
 	// [04 R-COLL-01 §4], so that pair is now where this identity's occupancy
 	// is and the next clear must subtract exactly it.
 	coll.StampedAnchor = coll.CachedAnchor
 	coll.StampedPlane = plane
 	coll.HasStamp = s.Grid.RectOnMap(coll.CachedAnchor, fx, fz)
+}
+
+// OverlapAttachment reads the live relationship owner, preserving cargo-list
+// order even when a parent rectangle misses the query [04 R-COLL-01 §4A].
+func (s *System) OverlapAttachment(id int) (int, []pool.Handle) {
+	if u := s.overlapUnit(id); u != nil {
+		return int(u.Attachment.Carrier), u.Attachment.Cargo
+	}
+	return 0, nil
 }
 
 // overlapUnit resolves an occupancy identity to its live unit. An identity the

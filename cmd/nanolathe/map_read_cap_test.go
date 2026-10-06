@@ -15,11 +15,14 @@ import (
 func authoredTNTWithMinimap() []byte {
 	data := authoredTNTWithoutMinimap(false)
 	offset := len(data)
-	data = append(data, make([]byte, 8+4*4)...)
+	// The radar consumes fixed two-by-two blocks, so author a complete
+	// source for its maximum 126-pixel edge [03 §3.7].
+	const side = 252
+	data = append(data, make([]byte, 8+side*side)...)
 	binary.LittleEndian.PutUint32(data[0x28:], uint32(offset))
 	binary.LittleEndian.PutUint32(data[0x2c:], 1)
-	binary.LittleEndian.PutUint32(data[offset:], 4)
-	binary.LittleEndian.PutUint32(data[offset+4:], 4)
+	binary.LittleEndian.PutUint32(data[offset:], side)
+	binary.LittleEndian.PutUint32(data[offset+4:], side)
 	for i := offset + 8; i < len(data); i++ {
 		data[i] = 91 // distinct from the terrain tiles' palette index 37
 	}

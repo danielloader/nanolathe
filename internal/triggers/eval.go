@@ -29,6 +29,11 @@ type PollContext struct {
 	// Deproject converts authored projected map pixels to 16.16 world
 	// coordinates on the first MoveUnitToRadius poll [08 R-TRIG-01 §5].
 	Deproject func(x, z int32) (worldX, worldY, worldZ int32)
+	// VisitRadiusUnits visits the retained top-level spatial chains with the
+	// stored signed 32-bit centre and radius [08 R-TRIG-01 §5]. The callback
+	// continues after completion. A nil seam is an incomplete host context:
+	// it supplies no candidates and preserves the condition's existing latch.
+	VisitRadiusUnits func(x, z, radius int32, visit func(*units.Unit))
 	// IsCommander resolves the unit owner's side commander name through the
 	// authoritative side table [08 R-TRIG-01 §3].
 	IsCommander func(*units.Unit) bool
@@ -140,12 +145,6 @@ func withinBoundary(cell, threshold int32) bool {
 	return d < 3
 }
 
-// wrappedDelta performs the authoritative signed 32-bit coordinate
-// subtraction before widening for the 64-bit square [08 R-TRIG-01 §5].
-func wrappedDelta(position int64, center int32) int64 {
-	return int64(int32(position) - center)
-}
-
 // Poll dispatches the tick slot. The caller owns the local-player 30-tick
 // cadence; Poll owns only the condition body [08 R-TRIG-01 §2, §4].
 func (t *Trigger) Poll(c PollContext) bool {
@@ -226,6 +225,9 @@ func (t *Trigger) Poll(c PollContext) bool {
 		// replay because Celebrated guards it, so the rescan has no observable
 		// effect — this poll is written the way retail runs it rather than
 		// short-circuited on Completed.
+		if c.VisitRadiusUnits == nil {
+			return t.Completed // incomplete host context; never substitute a pool walk.
+		}
 		if !t.CenterReady {
 			if c.Deproject == nil {
 				return false
@@ -233,23 +235,14 @@ func (t *Trigger) Poll(c PollContext) bool {
 			t.CenterX, t.CenterY, t.CenterZ = c.Deproject(t.Args[0], t.Args[1])
 			t.CenterReady = true
 		}
-		// The constructed record stores radius<<16 in a signed 32-bit word.
-		// A wrapped-negative radius produces an empty partition range.
-		radius := int64(int32(uint32(t.Args[2]) << 16))
-		if radius < 0 {
-			return false
-		}
-		radiusSquared := (radius * radius) >> 32
-		forEachOccupied(c.World, func(u *units.Unit) bool {
-			if u.Owner != 0 || !t.matchesType(u, true) || !eligibleMissionUnit(c, u) {
-				return true
-			}
-			dx := wrappedDelta(u.X.Raw(), t.CenterX)
-			dz := wrappedDelta(u.Z.Raw(), t.CenterZ)
-			if ((dx*dx)>>32)+((dz*dz)>>32) <= radiusSquared {
+		// Partition membership and every geometric narrowing belong to the
+		// shared spatial query, including negative stored radii and cargo
+		// exclusion. A whole-pool fallback changes this predicate
+		// [08 R-TRIG-01 §5].
+		c.VisitRadiusUnits(t.CenterX, t.CenterZ, int32(uint32(t.Args[2])<<16), func(u *units.Unit) {
+			if u != nil && u.Owner == 0 && t.matchesType(u, true) && eligibleMissionUnit(c, u) {
 				t.complete(c, true)
 			}
-			return true // retail continues through the remaining partition tiles.
 		})
 		return t.Completed
 

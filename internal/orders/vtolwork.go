@@ -44,7 +44,6 @@ package orders
 
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/combat"
-	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
@@ -101,47 +100,20 @@ func health16(u *units.Unit) uint32 {
 	return uint32(uint16(u.Health))
 }
 
-// dropFromCarrier is the preamble's "when the unit is carried, drop it from its
-// carrier through the attach commit of [R-COB-03 §5] with the third value 2"
-// [04 R-ORD-01 §7]. It severs both ends of the link that internal/orders owns —
-// the carried unit's carrier reference and the carrier's cargo list, in list
-// order (I1) — and writes the third value.
-//
-// The third value is not an opaque byte: [R-COB-03 §5]'s closure of 2026-09-01
-// identifies the two-bit field it lands in as the cargo's COMMITTED MOVER-MODE
-// pair — 0 attached/parked, 1 grounded, 2 airborne ([04 R-AIR-01 §3],
-// [04 R-MOV-01 §8]) — which is the field this file already writes at the
-// preamble's takeoff arm and the field `VTOL_Unload`'s release writes 1 into
-// ([04 R-AIR-01 §10]). So "third value 2" means the dropped unit is committed
-// airborne by the drop itself. A marker here used to say the value had nowhere
-// to go, on the premise that this build has no field for it; the field is
-// `Move.Mode`'s low pair and has existed all along.
-//
-// This is also why the preamble's takeoff arm does not fire afterwards: it runs
-// "only when the mover is grounded (mode 1)", and a unit that was carried is
-// now 2, not 1. An aircraft released from a transport to work is already
-// airborne and takes no takeoff marker — which is the row as written, not an
-// omission.
-func dropFromCarrier(u *units.Unit) {
+// dropFromCarrier delegates the accepted release to the movement owner so the
+// retained sector is reheaded before the request-mode write [04 R-COLL-01 §11].
+func dropFromCarrier(u *units.Unit) bool {
 	if u == nil || u.Attachment.Carrier == 0 {
-		return
+		return true
 	}
-	carrier := lookupTarget(u, u.Attachment.Carrier)
-	u.Attachment.Carrier = 0
-	u.Attachment.AttachPiece = -1
-	// The third value's low two bits, written into the committed mover-mode
-	// pair and leaving the rest of the mode byte alone [R-COB-03 §5].
-	u.Move.Mode = (u.Move.Mode &^ 0x3) | 2
-	if carrier == nil {
-		return
-	}
-	kept := make([]pool.Handle, 0, len(carrier.Attachment.Cargo))
-	for _, h := range carrier.Attachment.Cargo {
-		if h != u.Handle {
-			kept = append(kept, h)
+	if q := QueueOfUnit(u); q != nil {
+		if b := q.Binding(); b != nil && b.Movement != nil && b.Movement.DetachTakeoff != nil {
+			return b.Movement.DetachTakeoff(u)
 		}
 	}
-	carrier.Attachment.Cargo = kept
+	// An incomplete host binding cannot perform a spatial mutation. The
+	// production adapter owns this operation; there is no local substitute.
+	return false
 }
 
 // airWorkPreamble is phase 0 of all five twins [04 R-ORD-01 §7]:
@@ -166,7 +138,9 @@ func airWorkPreamble(u *units.Unit, n *Node, stateText string) Code {
 	}
 	captionClearText(u, n, stateText) // caption clear, with the row's state text
 	releaseSlot(u, slotAll)           // k = 3 is slots 0, 1, 2 in order [04 R-ORD-01 §1]
-	dropFromCarrier(u)
+	if !dropFromCarrier(u) {
+		return 7
+	}
 	u.SetActivationEdge(true) // edge bit 0 [04 R-UNIT-06 §2]
 	if moverMode(u) == 1 {
 		u.Move.Mode = (u.Move.Mode &^ 0x3) | 2 // grounded -> airborne [04 R-MOV-01 §8]
@@ -612,7 +586,7 @@ func vtolRepairPatrolHandler(u *units.Unit, n *Node, satisfied uint32, tick uint
 					}
 				}
 			}
-			if resources, ok := playerResources(u); ok && resourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1]) {
+			if resources, ok := playerResources(u); ok && patrolResourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1]) {
 				candidates := scanRepairCandidates(u, u.Def.SightDistance)
 				// Admission follows the bounded pick. The visitor keeps submerged
 				// targets, but an inadmissible winner falls through to feature
@@ -650,9 +624,8 @@ func vtolRepairPatrolHandler(u *units.Unit, n *Node, satisfied uint32, tick uint
 		if work == PatrolAssistOnly {
 			return 2 // the Community option exits at the feature-reclaim boundary
 		}
-		if resources, ok := playerResources(u); ok && resourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1]) && resourceAtLeastTwenty(resources.Stock[0], resources.Capacity[0]) {
-			return 2
-		}
+		// Air patrol has no ground-style both-stores hold: reached feature
+		// tournaments run even with healthy stocks [04 R-ORD-01 §7][I4].
 		if feature, ok := chooseReclaimFeature(u, 240); ok && spawnPatrolReclaim(u, feature, true, tick) {
 			n.DynamicGate = 0
 			return 3 // wait while the spawned VTOL reclaim runs at the head

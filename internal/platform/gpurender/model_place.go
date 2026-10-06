@@ -62,7 +62,11 @@ type modelPlaceCtx struct {
 	reflectActive   *drawlist.ModelGeometry
 	reflectRegion   modelDirectRegion
 	reflected       []modelFaceReflection
-	// keyDelta is the group child delta added to the keys being appended.
+	// Seeded children keep their original keys through cached resolution;
+	// seedGroupDelta belongs to the later merge/reflection admission. Other
+	// packets apply keyDelta directly while appending corners.
+	seedPhase                               modelSeedPhase
+	seedGroupDelta                          int32
 	keyDelta                                int32
 	lightSources                            subjectLights
 	lightX, lightY, lightScale, lightHeight float32
@@ -366,6 +370,11 @@ func (r *Renderer) appendPlaced(d *modelPlaceCtx, p *modelPlacePacket) {
 		mode = modelDirectShadow
 	}
 	d.keyDelta = p.keyDelta
+	d.seedPhase = modelSeedForPacket(p)
+	d.seedGroupDelta = p.keyDelta
+	if d.seedPhase != modelSeedNone {
+		d.keyDelta = 0
+	}
 	d.lightSources = subjectLights{}
 	if !shadow && !d.soloPass {
 		// A solo image's colour is never read, so it carries no light, and the
@@ -398,6 +407,9 @@ func (r *Renderer) appendPlaced(d *modelPlaceCtx, p *modelPlacePacket) {
 	default:
 		r.appendCachedLane(d, p, mode, entry)
 	}
+	if d.seedPhase != modelSeedNone {
+		d.seedPhase = modelSeedLive
+	}
 	d.texPage = p.texLive
 	if !shadow && len(g.Outline) != 0 {
 		// The outline endpoints are one native pixel each, from the native
@@ -409,7 +421,7 @@ func (r *Renderer) appendPlaced(d *modelPlaceCtx, p *modelPlacePacket) {
 		r.appendOutline(d, g, p.nox, p.noy, entry)
 	}
 	r.appendDirectLane(d, p.raster.LiveFaces, p.liveSlots, p.raster, p.ox, p.oy, p.scale, mode|modelDirectLive, entry)
-	d.keyDelta = 0
+	d.keyDelta, d.seedPhase = 0, modelSeedNone
 	d.soloPass, d.groupReflection, d.reflectActive = false, modelDirectRegion{}, nil
 	if !d.worker {
 		r.reflections.active = nil
@@ -425,7 +437,7 @@ func (d *modelPlaceCtx) reflectFace(r *Renderer, f *drawlist.ModelFace, ox, oy, 
 		return
 	}
 	d.reflected = append(d.reflected, modelFaceReflection{f: f, ox: ox, oy: oy, scale: s, cx: cx, cy: cy, fat: float32(modelDirectFatten), quad: quad, page: page,
-		g: d.reflectActive, region: d.reflectRegion, group: d.groupReflection, keyDelta: d.keyDelta})
+		g: d.reflectActive, region: d.reflectRegion, group: d.groupReflection, keyDelta: d.keyDelta, seedPhase: d.seedPhase, seedGroupDelta: d.seedGroupDelta})
 }
 
 // modelSlotBoundsEmpty reports whether modelSlotBounds(g) is empty without

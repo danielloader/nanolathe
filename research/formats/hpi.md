@@ -307,8 +307,9 @@ byte-level checklist a reader needs to accept exactly what retail accepts.
   chunk the stored length must read back exactly, else the read returns
   all-ones with no message; then the `SQSH` header is checked in this
   order: marker (`SQUASHERR_BADHEADER`), method byte `> 3`
-  (`SQUASHERR_BADUNPACKTYPE` — 0 and 3 pass and later fail as
-  `BADUNPACKSIZE`), byte-sum checksum over `compressed` payload bytes
+  (`SQUASHERR_BADUNPACKTYPE` — 0 and 3 pass without invoking a decoder;
+  their later size comparison uses retained input state and normally fails
+  as `BADUNPACKSIZE`, but accidental equality is not excluded), byte-sum checksum over `compressed` payload bytes
   (`SQUASHERR_BADCHECKSUM`), decode, produced length ≠ `decompressed`
   (`SQUASHERR_BADUNPACKSIZE`). Any nonzero code is fatal (process exit).
 - **No output bound:** the LZ77 decoder stops only at a match with position

@@ -163,9 +163,11 @@ func LoadWithTranslation(fs vfs.FSOps, name string, captions CaptionTranslator) 
 			g.Rect.H = rawH
 			x, y := rawX, rawY
 			// Position sentinels -1 centres, -2 anchors to far edge [02 §6][07 §4].
-			if x == -1 {
+			// Labels retain their local X until their painter resolves -1 from
+			// the current caption, after any page translation [07 R-WGT-01 §7].
+			if x == -1 && kind != KindLabel {
 				x = (logicalWidth - rawW) / 2
-			} else if x == -2 {
+			} else if x == -2 && kind != KindLabel {
 				x = logicalWidth - rawW
 			}
 			if y == -1 {

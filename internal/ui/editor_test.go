@@ -76,7 +76,7 @@ func TestSetFocusAndLabelLinkSetUpTextEditor(t *testing.T) {
 	}
 	p.SetFocus(2)
 	p.SetPressed(2)
-	if action := p.ReleaseAction(31, 1); action.Kind != ActionNone || !p.EditorCaptured() || p.Focused() != 1 {
+	if action := p.ReleaseAction(31, 1); action.Kind != ActionActivate || action.Index != 1 || !p.EditorCaptured() || p.Focused() != 1 {
 		t.Fatalf("label link action/capture/focus=%+v/%t/%d", action, p.EditorCaptured(), p.Focused())
 	}
 }

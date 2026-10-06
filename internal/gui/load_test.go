@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,6 +10,27 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/testsupport"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
+
+func TestLabelXRemainsLocalUntilInitialPaint(t *testing.T) {
+	root := t.TempDir()
+	data := `[GADGET0]{[COMMON]{id=0;name=ROOT;width=200;height=100;}}
+[GADGET1]{[COMMON]{id=5;name=LABEL;xpos=65535;width=80;active=1;}text=caption;}
+[GADGET2]{[COMMON]{id=5;name=NEGATIVE;xpos=-2;width=80;active=1;}}
+[GADGET3]{[COMMON]{id=1;name=BUTTON;xpos=-1;width=80;active=1;}}`
+	if err := os.WriteFile(filepath.Join(root, "labels.gui"), []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+	w, err := LoadWithTranslation(testFS(t, root), "labels.gui", captionTranslator{"caption": "translated"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Gadgets[1].Rect.X != -1 || w.Gadgets[1].Rect.RawX != -1 || w.Gadgets[1].Text != "translated" {
+		t.Fatalf("label lost narrowed local sentinel or translated text: %+v", w.Gadgets[1])
+	}
+	if w.Gadgets[2].Rect.X != -2 || w.Gadgets[3].Rect.X != 280 {
+		t.Fatal("label coordinate preservation changed generic button placement")
+	}
+}
 
 type captionTranslator map[string]string
 

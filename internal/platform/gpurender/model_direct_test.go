@@ -295,6 +295,9 @@ func directSubject(ax, ay, w, h int32, faces ...drawlist.ModelFace) *drawlist.Mo
 //   - Coverage: a face covers its last column and row whole and nothing
 //     past its right or bottom edge [03 R-RAST-01 §1].
 func checkModelDirectDevicePixels() error {
+	if err := checkModelSeedDevicePixels(); err != nil {
+		return err
+	}
 	if err := checkModelDirectDevicePixelsOn(false); err != nil {
 		return err
 	}

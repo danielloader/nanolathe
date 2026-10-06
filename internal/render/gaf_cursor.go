@@ -112,14 +112,11 @@ func ResolveCursorFrame(cursor *Cursor) (*formats.GAFFrame, bool) {
 }
 
 // Cursor is a playback cursor over a GAF sequence [03 §4.4] (C8) (I13).
-// Retail identity is 12 bytes: current index, countdown, loop flag, and entry
-// pointer [03 §4.4]; Go uses named fields (I13). It does not free sequence
-// storage on termination [03 §4.4].
-// Retail GAF frame references have 8-byte identity with an int32 duration in
-// whole ticks — not milliseconds [03 §4.4] (C8).
+// It retains index, countdown, loop flag and a non-owning entry reference;
+// termination does not free sequence storage [03 §4.4].
 type Cursor struct {
 	Idx       int   // current frame index [03 §4.4]
-	Countdown int32 // ticks remaining for current frame; countdown <2 advances [03 §4.4]
+	Countdown int32 // remaining duration; Step and StepDelta use distinct thresholds [03 §4.4]
 	Loop      bool  // loop-or-hold flag [03 §4.4]
 
 	entry  *formats.GAFEntry // non-owning view over shared sequence data [03 §4.4]
@@ -217,7 +214,7 @@ func (c *Cursor) Clear() {
 // Step single-steps the cursor by one simulation tick [03 §4.4] (C8).
 // Countdown <2 advances to the next frame, wrapping to zero for looping
 // sequences or clearing the entry pointer for non-looping sequences, and loads
-// the new frame's duration [03 §4.4]. Single-frame entries never advance [03 §4.4].
+// the new frame's duration [03 §4.4].
 func (c *Cursor) Step() {
 	if c == nil || !c.active || c.entry == nil {
 		return
@@ -230,7 +227,9 @@ func (c *Cursor) Step() {
 		return
 	}
 	if n == 1 {
-		// single-frame entries never advance [03 §4.4]
+		// TODO(question): Close the production callers of this one-frame bypass
+		// before removing it; the native tick step reloads or detaches, while
+		// only its elapsed-delta step bypasses one-frame entries [03 §4.4].
 		if c.Countdown >= 2 {
 			c.Countdown--
 		}
@@ -266,9 +265,10 @@ func (c *Cursor) Step() {
 	c.Countdown--
 }
 
-// StepDelta subtracts a signed 16-bit tick delta and can cross multiple frames
-// in one call while accumulating each newly selected frame's duration [03 §4.4] (C8).
-// Negative deltas can cross multiple frames [PLAN_13 C8].
+// StepDelta adds the API's signed duration adjustment; the client passes a
+// negative value for elapsed time. At zero or below it advances, accumulating
+// each selected frame's duration, until a positive remainder or termination
+// [03 §4.4]. This differs from Step's pre-decrement threshold.
 // Single-frame entries never advance [03 §4.4].
 func (c *Cursor) StepDelta(d int16) {
 	if c == nil || !c.active || c.entry == nil {
@@ -282,10 +282,13 @@ func (c *Cursor) StepDelta(d int16) {
 		// single-frame entries never advance [03 §4.4]
 		return
 	}
-	// subtract signed 16-bit delta; negative d reduces countdown and can cross frames [03 §4.4][PLAN_13 C8]
+	// TODO(question): Close producer admission and safe handling of malformed
+	// nonprogressing loops before adopting native low-16 bind/reload and wrapped
+	// countdown arithmetic [03 §4.4]. The current int32 storage and duration
+	// guards are not a claim of native width equivalence.
 	c.Countdown += int32(d)
 	// Can cross multiple frames while accumulating each newly selected frame's duration [03 §4.4]
-	for c.Countdown < 2 && c.active && c.entry != nil {
+	for c.Countdown <= 0 && c.active && c.entry != nil {
 		next := c.Idx + 1
 		if next >= n || next >= len(c.entry.Frames) {
 			if c.Loop {
@@ -330,18 +333,8 @@ func CursorHotspot(f *formats.GAFFrame, x, y int) (int, int) {
 	return x - int(f.XOffset), y - int(f.YOffset)
 }
 
-// There is one cursor driver and one subframe lifetime, so there is no second
-// family to describe. This file previously ended with an open-question marker,
-// "cursor subframe lifetime and animation speed for families not shown to use
-// the authored countdown cursor remain unknown"; the premise is false. Every
-// interface cursor sequence is stepped by the same wall-clock delta path — a
-// 30-unit-per-second scaled delta fed to the multi-frame countdown stepper
-// above — and a subframe's lifetime is that frame's own authored 32-bit
-// duration expressed in those scaled units, exactly as this cursor's Bind and
-// StepDelta already implement it [03 §4.4]. Model-texture players are the only
-// sequences on a different driver (the per-tick phase-7 walker), and they are
-// not cursors [03 §4.4 "CRD-005 closure"]. The twenty-two cursor slots are one
-// homogeneous family of GAF entries [07 §8], and re-selecting the shape already
-// shown does not restart its animation, because the index writer diffs before
-// it swaps [07 §8] — that swap rule, not a second lifetime rule, is what makes
-// two cursor families look like they animate differently.
+// Interface cursor sequences use a scaled wall-clock delta; registered model
+// textures use the simulation-tick walker [03 §4.4]. Re-selecting the shape
+// already shown does not restart it, because the index writer checks for a
+// change before swapping [07 §8]. Duration-width and malformed-loop handling
+// remain the explicit follow-up above.

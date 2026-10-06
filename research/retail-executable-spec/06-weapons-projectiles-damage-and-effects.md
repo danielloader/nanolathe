@@ -1058,7 +1058,12 @@ substitute — the one the plus root assembles inline and the one the minus root
 loads — carry the same low value. A port that computes either bound from its
 own `π` therefore sits about `8e-16` radians above retail's, which can matter
 only for an accepted angle landing inside that window on the **inclusive**
-upper edge; no other step of the solve is sensitive to it.
+upper edge. The output conversion also uses a stored reciprocal,
+`0.318309886183791`, after multiplying the accepted angle by 32768.0. Replacing
+that second multiplication with division by a host `pi` changes the arithmetic
+at some truncation boundaries. **Unknown:** a reachable authored firing vector
+that distinguishes those output conversions; direct angle-conversion examples
+alone do not establish a gameplay difference.
 
 **Unknown:** whether `sqrt(r) / V` can exceed one on
 malformed input and, if so, what the runtime's `acos` returns and how the
@@ -1883,8 +1888,12 @@ encoded target (§1.2), in this order:
   `StartBuilding` in the shooter's script and discards the result: a lookup
   with no dispatch and no observable effect, recorded so that a clone does not
   look for a missing callback.)
-* **Live unit target:** the point is the `SweetSpot` transform below, then the
-  pre-fire lead of §3.3 when its five gates pass. Success.
+* **Allocated unit target:** when the referenced record still has a nonzero
+  definition index, the point is the `SweetSpot` transform below, then the
+  pre-fire lead of §3.3 when its five gates pass. Success. This resolver does
+  not test the alive flag or death latch. In particular, an allocated target
+  with its death latch set is not cleared here. This differs from autonomous
+  acquisition, whose candidate filters are specified separately in §3.2.
 
 **Established — failed resolution resets only the request latch.** After any
 resolver failure, the caller clears the Aim-request latch, including when the
@@ -1894,34 +1903,52 @@ it as described above. This per-visit reset allows a later target to request
 another Aim after the old script was cancelled; it is not a timeout or a
 readiness grant [04 R-CB-01 §3].
 
-**Established — `SweetSpot`'s piece-to-world transform is the piece's vertex
-bounding-box centre, untransformed.** `SweetSpot` is dispatched synchronously
-on the **target's** script with cell 0 seeded zero (`[R-WPN-03 §6]`); the
-returned piece index selects a piece of the target's loaded model, and the
-resolver computes, over that piece's own vertex list (`[fmt 3do]`, in the
-model's 16.16 units as loaded):
+**Established — `SweetSpot` reads the instance piece's retained point list.**
+`SweetSpot` is dispatched synchronously on the **target's** script with cell 0
+seeded zero ([R-WPN-03 §6]); the returned piece index selects a piece of the
+target's model instance. The resolver computes over that instance piece's
+mutable point list, in 16.16:
 
-```
-minX = minY = minZ = 0 ; maxX = maxY = maxZ = 0     ; seeded at the piece origin, NOT the first vertex
-for each vertex v of the piece:  min = min(min, v) ; max = max(max, v)   (per axis, signed)
-point = target.position + (max + min) / 2           ; per axis, signed truncating halving
+```text
+minX = minY = minZ = 0 ; maxX = maxY = maxZ = 0
+for each retained point v: min = min(min, v) ; max = max(max, v)  # per axis, signed
+point = target.position + (max + min) / 2                       # signed truncating halving
 ```
 
-Three consequences, each Established from that shape: (1) the box always
-contains the piece origin, so a piece whose geometry lies wholly on one side
-of its origin gets a centre pulled toward the origin; (2) neither the piece's
-offset from its parent nor the current COB piece state (turn, move, hide)
-enters — the offset is the piece's *own* vertex cloud about its *own* origin,
-added to the unit's world position — so a script that returns a turret piece
-aims at the unit position plus that piece's local geometry centre, not at the
-turret's animated world position, and the muzzle-side piece transform of §3.4
-(which does apply the hierarchy and piece state, and negates Z once on output,
-`[03 R-RAST-01 §8]`) is **not** reused here — the model-space triple is added
-to the position as-is, with **no** Z negation, so a piece whose box is offset
-along Z lands mirrored against where the model pass draws it; (3) a piece with
-no vertices yields the unit position exactly. A piece index
-outside the model's piece table reads past it; shipped scripts return indices
-of their own model.
+**Established — this list is distinct from pristine model geometry.** Instance
+construction copies the loaded vertices into it; materialization resets it from
+the loaded vertices and rotates/translates it in place. It is the retained list
+also described for fragment copying in [04 R-COB-04 §3]. The target-point helper
+does not itself apply a hierarchy transform, and the immediate SweetSpot query
+wrapper does not refresh the list before reading it. This does not establish
+that parent offsets or COB transforms never affect the answer: those may
+already be present in the retained points.
+
+Three consequences of the established arithmetic remain: the bounds include
+zero on every axis (including a zero maximum for wholly negative points);
+the resulting triple is added to the unit position with **no** output Z
+negation; and an empty point list yields the unit position exactly. The
+muzzle-side piece locator of §3.4 is not reused. An out-of-range piece index
+reads past the table; shipped scripts return indices of their own model.
+
+**Unknown — which retained revision each aiming visit observes.** Close the
+complete materializer/caller and SweetSpot callback writer census, including
+offscreen targets, pending piece transforms and presentation timing, before
+claiming either pristine or freshly transformed geometry is equivalent.
+The instance-list reader is established; its full update chronology is not.
+
+**Established — bounded materialization paths.** World composition and shadow
+preparation can reach the instance materializer. The script effect-emission
+path can also reach it after a viewing-player visibility gate. Materialization
+can reset mutable points from loaded geometry, then apply the hierarchy's
+rotations and translations; its root orientation cache refresh uses a wrapped
+signed-angle difference with an absolute threshold strictly greater than seven.
+These are update opportunities, not proof that one runs before every target
+query. The remaining decider is the complete callback/host writer chain and
+which refreshes are skipped between a piece mutation and the target query,
+including offscreen and skipped-presentation cases [04 R-COB-04 §3].
+Any deterministic implementation policy for presentation-dependent history
+belongs in the design, not in a claim that retail always reads immutable data.
 
 ## 4. Firing callbacks, costs, reload, and bursts
 
@@ -2063,8 +2090,36 @@ uses signed-16 wrapping. The decrement still happens when a prior visit is out
 of range or waiting on Aim. Stockpile launch does not
 write reload. The zero-maximum-health contract is closed in §9.1 (healing clamps
 to zero without dividing; the TakeDamage percentage and this health term perform
-unguarded unsigned divisions and must be guarded as an error path). Negative
-health and overflow outside ordinary state remain malformed-state unknowns.
+unguarded unsigned divisions and must be guarded as an error path).
+
+**Established — reload arithmetic widths.** Current health is read as a
+signed 16-bit value, its multiplication by 20 is a wrapping 32-bit product,
+and the quotient is an unsigned 32-bit division by the full maximum-health
+word. The subtraction from 120 and the final multiplication by veteran reload
+wrap to 32 bits; the final division by 100 interprets that product as signed
+and truncates toward zero before the signed-16 store. There is no positivity
+check on the maximum-health word. Its high bit does not cause a division fault;
+only a zero divisor does.
+
+**Established — authored high-bit maximum health reaches these consumers.**
+The unit-definition integer getter accepts a signed decimal value and the
+maximum-health loader retains the complete 32-bit result without clamping.
+Completed-unit initialization copies its low 16 bits into current health while
+retaining the complete definition value as maximum health. For example,
+authored `maxdamage=-2147483548` initializes current health to 100 and supplies
+unsigned divisor 2147483748. With zero kills and reload word 100, the health
+quotient is zero and the stored reload is 120. This is a custom-content
+boundary, not a claim about stock units. The ordinary weapon visit does not
+reject a unit for this maximum-health value. Other systems' treatment of such
+content is outside this consumer contract.
+
+**Established — negative-health arithmetic is defined at this consumer.**
+With current-health word −1, maximum health 1, zero kills and reload word
+65535, the unsigned quotient is 4294967276; the wrapping health factor is 140,
+the final signed quotient is 91749, and the stored signed-16 reload is 26213.
+This arithmetic vector establishes the consumer, not a claim that every
+negative-health state survives the surrounding death lifecycle. The unit-visit
+ordering and death-latch admission are owned by [04 R-COB-02 §2].
 
 ### 4.3 Burst state
 
@@ -2261,6 +2316,14 @@ if (bound != 0) {                                           ; 16-bit zero test
   **without advancing**. A bound of exactly 1 therefore passes the nonzero
   test, adds zero to both angles, and consumes no draw. Both draws use the same
   bound; the yaw draw is taken first.
+* **Maximum-health domain.** The divisor is the full unsigned 32-bit word,
+  with no positive-signed-value gate; only zero causes the divide fault.
+  The loader and completed-unit initialization path in §4.2 can supply a
+  high-bit maximum while current health is positive. For its example
+  (`currentHealth = 100`, maximum-health word 2147483748), accuracy zero and
+  zero kills produce health term zero and spread bound 2048. The usual
+  full-health description below assumes current health and maximum health
+  represent the same positive value; it does not override these widths.
 * **The kill divisor** is applied as a **signed 32-bit** division of the
   16-bit-masked bound by the divisor; both operands are nonnegative, so the
   quotient is the same as an unsigned one.
@@ -2954,6 +3017,25 @@ if (active && currentTick >= nextHit) {
 if (currentTick >= stormEnd) active = 0
 ```
 
+**Established — geometry widths:** The random scaling products for map
+width, map depth and radius are signed 64-bit products, divided before
+narrowing. Target and origin cell coordinates are stored as signed 16-bit
+values; the origin additions wrap at that width. The velocity calculation
+sign-extends those stored coordinates, subtracts, and retains the signed low
+32 bits of the left shift before dividing by 90. Spawn coordinates likewise
+retain the low 32 bits of the shifted origin minus the sine-table offset.
+The radius quotient is shifted into a signed 32-bit fixed-point magnitude
+before the sine helpers; it is not a wide fixed-point radius.
+
+An authored nonzero radius of 300001 is admitted by the ordinary parameter
+loader. A radius draw of 7584 yields 69433 before conversion to fixed point;
+wrapping the product before division instead yields −61638. Their fixed-point
+magnitudes still differ by one whole unit after narrowing, so the later shift
+does not generally erase that error. This is an authored-input counterexample,
+not evidence that shipped meteor parameters reach the boundary. Coordinate
+wrap examples establish the arithmetic domain without asserting that ordinary
+maps cross it.
+
 All divisions are signed and truncate. `<< 20` is the cell-to-16.16 conversion
 (16 world units per cell). The spawn height of **1350 world units is not a
 literal**: it is `15 × 90`, the descent speed times the fixed 90-tick flight,
@@ -2961,7 +3043,7 @@ which is why vertical arrival coincides exactly with the horizontal
 interpolation and impact lands exactly 90 ticks after spawn. Per-hit spacing of
 `trunc(30 / density)` collapses to zero at a density of 31 or more, attempting a
 spawn on every storm tick. The origin Z offset spans −15..−6, so the origin is
-**always 6 to 15 cells north of the target**; the origin X offset spans
+**6 to 15 cells north of the target before signed-coordinate wrap**; the origin X offset spans
 −15..+14.
 
 **Established fact:** Every meteor geometry draw comes from the C-runtime random
@@ -6201,6 +6283,14 @@ producer) or `smoke 2` (selector 1); the particle's last frame is
 `min(frameCount − 1, frameCap)` when `frameCap` is nonzero; `frameHold` 0
 means 7.
 
+**Established boundary qualification:** the effect descriptions below give
+the usual particle counts away from the signed tick boundary. The smoke
+container compares its next spawn to the lifetime deadline as signed 32-bit
+values, then tests current-tick admission unsigned. A zero-lifetime emitter
+can therefore spawn again across that boundary, and a dust window can refuse
+its scheduled puff; [03 R-STRIP-01 §3] owns those finite counterexamples.
+Complete lifecycle behavior at zero-deadline wrap remains **Unknown** there.
+
 | Producer | Args after the point | Effect |
 |---|---|---|
 | trail puff (§7.3), timer-expiry puff (§7.3), `endsmoke` at impact (§13.2), COB `emit-sfx` `0x101` white smoke (`[04 §4.4]`) | `(0, 1, 0, 0, 0)` | one particle at spawn, all 12 frames of `smoke 1`, hold 7; the emitter's lifetime is 0 so its spawn window closes immediately and it dies when the particle expires |
@@ -6305,6 +6395,12 @@ body and are not restated here.
 
 ### Catalog and targeting
 
+- **Unknown:** the retained instance-point revision consumed by each SweetSpot
+  target query · [R-WPN-04 §1], [04 R-COB-04 §3] · complete materializer/caller
+  and synchronous callback writer census, including offscreen and skipped-draw
+  timing. Neither immutable nor freshly composed points are established as
+  universal equivalents.
+
 - **Unknown:** the complete free-writer set for fields read by autonomous
   retention through a stale raw unit target. The raw resolver performs no
   liveness check, but Nanolathe's compact freed record currently preserves
@@ -6366,6 +6462,10 @@ body and are not restated here.
 
 ### Projectile families
 
+- **Unknown:** a reachable authored firing vector distinguishing the stored
+  reciprocal in ballistic angle serialization from division by a host `pi` ·
+  §3.3 · derive a complete solver input whose accepted angle crosses an output
+  truncation boundary; an isolated angle-conversion example is insufficient.
 - Malformed network pitch and velocity inputs to the ballistic creator, and
   exceptional floating-point inputs beyond the enumerated integer cases · §6.1
   · static trace.

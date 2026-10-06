@@ -441,6 +441,16 @@ func TestRebuildRadarHoverRingFollowsPointer(t *testing.T) {
 	if got, _ := final.At(112, 63); got != 23 {
 		t.Fatalf("null-handle contact pixel = %d, want ordinary blip 23", got)
 	}
+	// Blink suppression hides only regular art. The hover queue must still
+	// supply its frame even when there is no corresponding regular callback.
+	cur.Tick++
+	cur.Radar.BlinkPhase = 0
+	cur.Radar.Contacts[0].BlinkSuppress = 1
+	final = h.rebuildRadar(b, cur, camera.Minimap{W: 126, H: 126})
+	if got, _ := final.At(32, 63); got != 47 {
+		t.Fatalf("blink-suppressed hovered contact = %d, want hover47", got)
+	}
+	cur.Radar.Contacts[0].BlinkSuppress = 0
 	// With nothing hovered the ring disappears entirely; the null handle must
 	// not match the null hover word.
 	b.footerHoverUnit = 0
@@ -455,7 +465,7 @@ func TestRebuildRadarHoverRingFollowsPointer(t *testing.T) {
 		}
 	}
 	// A hovered unit that the contact gate does not admit draws no ring: the
-	// ring still obeys the blip's own admission [03 §3.9].
+	// ring still obeys contact visibility admission [03 §3.9].
 	b.footerHoverUnit = 9
 	b.radarOptions = 0
 	cur.Tick++
@@ -466,5 +476,44 @@ func TestRebuildRadarHoverRingFollowsPointer(t *testing.T) {
 	}
 	if got, _ := final.At(80, 63); got != 1 {
 		t.Fatalf("unadmitted hovered contact drew %d, want mapped background 1", got)
+	}
+}
+
+// Additional slot records keep nil regular-art placeholders between their
+// owner's callbacks and the next unit. Missing art must consume its own index
+// without borrowing the next unit's authored frame [03 §3.9].
+func TestRebuildRadarSlotAndArtQueuesKeepContactOrder(t *testing.T) {
+	entry := func(colors ...byte) *formats.GAFEntry {
+		e := &formats.GAFEntry{}
+		for _, color := range colors {
+			e.Frames = append(e.Frames, formats.GAFFrameRef{Frame: &formats.GAFFrame{Width: 1, Height: 1, Pixels: []byte{color}, Transparent: []bool{false}}})
+		}
+		return e
+	}
+	h := &retailBattleHUD{
+		radar:        render.NewMinimapService(render.MinimapServiceConfig{Picture: &render.RadarSurface{W: 126, H: 126, Pitch: 128, Bits: make([]byte, 126*126)}, MapW: 1, MapH: 1, LocalSlot: 1}),
+		radarBlipGAF: entry(23, 41), radarHoverGAF: entry(57),
+	}
+	b := &battleSession{sess: &session.Session{World: &world.Terrain{PlayRight: 126, PlayBottom: 126}}, radarOptions: radarAllContactsOption, footerHoverUnit: 5}
+	cur := &frame.Frame{Tick: 1, ViewingPlayer: 1, Visibility: frame.VisibilityView{W: 1, H: 1, Valid: true, MappingSource: 1, MappingVersion: 1, WordVisible: []uint16{2}, Visible: []uint8{1}}, Radar: frame.RadarView{BlinkPhase: 1, Contacts: []frame.RadarContactView{
+		{Kind: frame.RadarContactUnit, Handle: 5, Owner: 1, Visible: true, X: numeric.Fixed(32 << 16), Z: numeric.Fixed(63 << 16), Status: 0x10, PaletteKnown: true, Rings: []frame.RadarRingView{{Enabled: true, Range: 8}, {Enabled: true, Range: 0}, {Enabled: true, Range: 12}}},
+		{Kind: frame.RadarContactUnit, Handle: 6, Owner: 1, Visible: true, X: numeric.Fixed(32 << 16), Z: numeric.Fixed(63 << 16), PaletteKnown: true, Palette: 1},
+		{Kind: frame.RadarContactUnit, Handle: 7, Owner: 1, Visible: true, X: numeric.Fixed(80 << 16), Z: numeric.Fixed(63 << 16)},
+		{Kind: frame.RadarContactUnit, Handle: 8, Owner: 1, Visible: true, X: numeric.Fixed(90 << 16), Z: numeric.Fixed(63 << 16), PaletteKnown: true},
+	}}}
+	final := h.rebuildRadar(b, cur, camera.Minimap{W: 126, H: 126})
+	if final == nil {
+		t.Fatal("missing radar surface")
+	}
+	for _, want := range []struct {
+		x     int
+		color byte
+	}{{32, 41}, {40, h.paletteIndex(15)}, {44, h.paletteIndex(15)}, {80, 0}, {90, 23}} {
+		if got, _ := final.At(want.x, 63); got != want.color {
+			t.Fatalf("pixel(%d,63)=%d, want %d", want.x, got, want.color)
+		}
+	}
+	if len(h.radarRegularArt) != 6 || h.radarRegularArt[1] != nil || h.radarRegularArt[2] != nil || h.radarRegularArt[4] != nil {
+		t.Fatalf("regular art queue lost slot/missing-art holes: %v", h.radarRegularArt)
 	}
 }

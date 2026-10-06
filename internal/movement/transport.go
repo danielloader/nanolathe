@@ -191,7 +191,9 @@ func (s *System) legVTOLPickup(u *units.Unit, n *orders.Node, satisfied uint32, 
 			// its high half.
 			bridge.DeferredWake("BeginTransport", []int32{target.Def.ModelTopFixed}, nil)
 		}
-		m := s.newFollowUnitMarker(u, n.Target)
+		// The no-piece index follows the cargo origin while retaining exact
+		// heading matching for lowering [04 R-AIR-01 §9].
+		m := s.newFollowPieceMarker(u, n.Target, airNoPiece)
 		m.setAltitudeOffset(s.transportHangOffset(u, int32(n.Param1)))
 		s.installAirGoal(u, n, m)
 		n.DynamicGate = transportGateHang
@@ -290,24 +292,10 @@ func (s *System) transportFootprintX(target *units.Unit) int16 {
 	return 0
 }
 
-// transportHangOffset is the load phase-3 altitude offset [04 R-AIR-01 §9]:
-//
-//	the transform it evaluates is the piece-hierarchy evaluator WITHOUT the
-//	unit-origin addition, so the value is the attach piece's Y in the CARRIER's
-//	own model frame, not a world Y; and the marker it builds is a follow-unit
-//	marker on the cargo, installed as the CARRIER's movement goal, so the
-//	negated offset lowers the carrier until its attach piece meets the cargo.
-//	The value used is the signed 16-bit integer part of that model-frame Y,
-//	negated.
-//
-// The model frame is the unrotated one, so the carrier's own heading, pitch and
-// bank are deliberately not applied. A negative piece index is the root-piece
-// fallback and hangs nothing.
-//
-// This is the one locator caller that never forms a world point: it reads the
-// Y word alone, so the locator's Z negation [03 R-RAST-01 §8] never reaches
-// it and the second negation below is the section's own hang-altitude sign,
-// not the model/world mirror.
+// transportHangOffset samples the carrier-relative piece Y once for pickup's
+// lowering marker [04 R-AIR-01 §9]. The locator omits the carrier origin but
+// retains its bank, heading and pitch; the marker stores the negated signed
+// integer part. Subsequent pose changes do not resample this offset.
 func (s *System) transportHangOffset(u *units.Unit, piece int32) int16 {
 	if piece < 0 {
 		return 0
@@ -316,7 +304,7 @@ func (s *System) transportHangOffset(u *units.Unit, piece int32) int16 {
 	if binding == nil {
 		return 0
 	}
-	origin, ok := binding.ComposePiece(int(piece), 0, 0, 0)
+	origin, ok := binding.ComposePiece(int(piece), u.Move.Heading, u.Move.Pitch, u.Move.Bank)
 	if !ok {
 		return 0
 	}

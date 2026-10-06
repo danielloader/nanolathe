@@ -61,6 +61,10 @@ func LoadTranslationTable(fs vfs.FSOps, language string) (*TranslationTable, err
 		if !ok || value == "" {
 			continue // absent or empty language key contributes nothing [02 "Translation table"]
 		}
+		value = boundedString(value, 254) // stored language-value prefix [02 "Translation table"]
+		// TODO(question): source names of 255+ bytes have an unterminated
+		// retail temporary; retain the authored key as a deterministic host
+		// placeholder until caller-history/string construction is established.
 		source := sec.OriginalName
 		if i, dup := index[source]; dup {
 			t.entries[i].translation = value // repeated section name keeps the last translation [02 "Translation table"]
@@ -112,8 +116,8 @@ func (t *TranslationTable) Source(translated string) (string, bool) {
 }
 
 // asciiEqualFold preserves high bytes until retail's code-page comparison is
-// traced. Translation forward lookup stays byte-exact; this is only its
-// documented reverse case-insensitive comparison.
+// traced. Translation forward lookup stays byte-exact; reverse translation
+// and sound-category lookup use their documented case-insensitive comparison.
 // TODO(question): trace retail's active code-page comparison for bytes >= 0x80.
 func asciiEqualFold(a, b string) bool {
 	if len(a) != len(b) {

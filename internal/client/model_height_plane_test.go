@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
+	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	presentationrender "github.com/nanolathe-gg/nanolathe/internal/render"
 )
 
@@ -252,5 +253,58 @@ func presentationRevealKeep() presentationrender.NanoframeReveal {
 		Below: presentationrender.NanoframeKeep,
 		Band:  presentationrender.NanoframeKeep,
 		Above: presentationrender.NanoframeKeep,
+	}
+}
+
+// Keyless composition textures use raw texels for either shading selection;
+// their width-128 final pass uses stride 64 without wrapping U. Direct
+// framebuffer targets keep their source stride [03 R-RAST-01 §1 step 6].
+func TestModelTextureCompositionStrideAndShading(t *testing.T) {
+	for _, tc := range []struct {
+		name                       string
+		width                      int
+		keyed, shaded, framebuffer bool
+		want                       byte
+	}{
+		{"keyless-unshaded", 128, false, false, false, 31},
+		{"keyless-shaded", 128, false, true, false, 31},
+		{"keyed-unshaded", 128, true, false, false, 47},
+		{"keyed-shaded", 128, true, true, false, 147},
+		{"keyless-other-width", 129, false, false, false, 47},
+		{"keyless-other-width-shaded", 129, false, true, false, 47},
+		{"framebuffer", 128, false, false, true, 47},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, traced := range []bool{false, true} {
+				c := heightPlaneClient()
+				c.pal = &palette.Tables{}
+				for row := range c.pal.Shade {
+					for i := range c.pal.Shade[row] {
+						c.pal.Shade[row][i] = byte(i + 100)
+					}
+				}
+				p := heightPlaneFace(70)
+				p.useSHD = tc.shaded
+				for i := range p.x {
+					p.attr[spanU][i], p.attr[spanV][i] = 96, 1
+				}
+				frame := &formats.GAFFrame{Width: uint16(tc.width), Height: 2, Pixels: make([]byte, tc.width*2)}
+				frame.Pixels[64+96], frame.Pixels[tc.width+96] = 31, 47
+				target := newModelTarget(c.width, c.height)
+				target.framebuffer = tc.framebuffer
+				if !tc.keyed {
+					target.height = nil
+				}
+				if traced {
+					target.trace = newRendererTrace(c.width * c.height)
+					target.winner = target.trace.winner
+					target.trace.width, target.trace.height = c.width, c.height
+				}
+				c.blitTexturedPolyTarget(target, &p, frame)
+				if got := target.color[c.width+1]; got != tc.want {
+					t.Fatalf("traced=%v: sample=%d, want %d", traced, got, tc.want)
+				}
+			}
+		})
 	}
 }

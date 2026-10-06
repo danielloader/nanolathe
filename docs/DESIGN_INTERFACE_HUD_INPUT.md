@@ -280,13 +280,17 @@ input or draw.
 **The Ctrl-right drag-scroll primitive** (`drag_scroll.go`).
 `camera.DragScroll.Begin(*Camera)` captures `trunc(origin / 16)` and clears the
 tracked follow and its pending host sample once, because pointer dispatch
-precedes phase 10. `Step(*Camera, dx, dy)` writes each origin as
+precedes phase 10. Entry preserves the desired origin and unfinished glide,
+so runnable sub-ticks in that frame can continue it; paused and zero-tick
+frames do not move it. `Step(*Camera, dx, dy)` writes each origin as
 `(trunc(delta / 4) + anchor) × 16`, clamps it, copies current into desired, and
-updates the anchor; it does not clear follow during later steps. Entry also
-refreshes the pending host sample so neither a tracked target nor an earlier
-glide can resume after capture in the same sub-tick batch. Its battle
-adapter supplies successive pointer deltas. The camera primitive quantizes the
-retail beam origin through `BattleViewOrigin`, never framebuffer `X`/`Z`,
+updates the anchor and pending host sample; it does not clear follow during
+later steps. The first later step therefore uses the entry-captured anchor,
+regardless of intervening glide movement. Its battle adapter supplies
+successive pointer deltas and does not defer a second glide cancellation.
+A later hotkey retains its ordinary post-batch request ownership. The camera
+primitive quantizes the retail beam origin through `BattleViewOrigin`, never
+framebuffer `X`/`Z`,
 because the two coordinate frames differ by the viewport inset `[07 R-CAM-01 §11]` `[03 §4.1]`.
 
 Small signed displacements are discarded on each input service; there is no
@@ -320,6 +324,15 @@ jump family's table; `StoreBookmark`/`RecallBookmark` are Ctrl+F5..F8 and
 F5..F8 `[07 R-CAM-01 §12]` `[07 R-CAM-01 §14]`. The `n` and F3 glide
 writers preserve the tracked object; its next follow pass can replace the
 desired origin written by the glide `[07 R-CAM-01 §12]`.
+
+The `t`/`T` input adapter scans selected slots relative to the tracked slot,
+even when that unit has been deselected. Its inclusive owner range comes
+from the committed player row's `UnitSlotStart` and strip `UnitLimit`, so
+player permutation does not change the owner boundary. Null or out-of-range
+tracking starts at the first actual slot; forward search starts strictly
+after it and reaches it only on wrap. Backward search wraps from that first
+slot to the range's end. An empty selection yields null; an absent snapshot
+or range leaves tracking untouched `[07 R-CAM-01 §12]` `[I6]`.
 
 **Shake and its return** (`follow.go`). `Camera.Shake` finishes each completed
 sub-tick's camera pass after the follow step: it adds that sub-tick's share of
@@ -366,7 +379,11 @@ and button bit, freezes held samples outside the window, runs the gated key
 matrix before the gadget walk and services a captured editor at its own
 indexed visit when the matrix leaves its token available, updates
 hover/`HELPTEXT`, invokes each reached
-surface hook, and returns after the first fired record. `WidgetHooks.Change`
+surface hook, and tests the surviving fired result after each record. A
+matrix result still allows record 1's ordinary visit; a hidden record 1
+stops the walk without advancing to the next active control. A pointer result
+can replace the pending matrix result, while a rejected label link clears it.
+Focus follows the surviving result. `WidgetHooks.Change`
 is synchronous, while the screen consumes `ServiceResult.FiredIndex` only
 after the pass returns. `WidgetHooks.ArtFrames` returns the resolved button
 entry's frame count after named, common and fallback lookup; it is the modulo
@@ -671,15 +688,24 @@ disagree, and neither slides off the terrain when the camera scrolls or zooms
 mid-drag. The drag's membership writes are not here:
 `client.SnapshotUnitHandlesInBand` walks the committed frame and the
 session's `HumanSelectionReplace`/`Toggle`/`Clear` commands own the modifier
-truth table, which is the one path a shipped build takes `[07 §9]`.
+truth table, which is the one path a shipped build takes `[07 §9]`. Selection
+commands apply to local interface state immediately in offline and online
+battles (DESIGN_MULTIPLAYER §7.3). The ordinary viewport and minimap point
+selectors request the clicked unit's voice only if it remains selected;
+a rectangle chooses its cue from the resulting eligible selection, including
+units outside the box `[07 §9]`. These are requests to the existing audio
+service, whose playback admission and throttling remain independent.
 `AssignGroup`, `RecallGroup` and `TypeFilterPasses` are the control groups and
 the `CTRL_F` filter.
 `EncodePageBits`/`DecodePage`/`IsPaged`/`RememberedPage` are the page bits 23–25
 with bit 22 marking paged. `RoutesToPage` and `DigitToPage` are the digit gate,
 which `battleSession.routeDigit` drives — the group arm takes the digit itself. `BuildProductsFor`, `ProductsForPage`,
 `BuilderPageCount` and the button/key variants `NextPageButton`/`PrevPageButton`
-and `NextPageKey`/`PrevPageKey` are the page cycle; `RetailBuildButtonsPerPage = 6` is the authored full-page size, and
-no runtime path may infer a different grid `[07 R-HUD-03 §6]`.
+and `NextPageKey`/`PrevPageKey` are the index page cycle; `RetailBuildButtonsPerPage = 6` is the authored full-page size, and
+no runtime path may infer a different grid `[07 R-HUD-03 §6]`. Authored builder pages page through
+`PageState` instead: retail's `.`/`,` key, NEXT/PREV and BUILD operations on the page-shown bit and the
+three-bit field, modulo eight, so a builder with nine or more pages follows retail's field arithmetic
+`[07 R-HUD-03 §6]`. The adaptive sidebar keeps the index cycle for its own page ranges.
 
 The authored GUI's named mobile-product buttons enqueue counted production
 for the selected owned unit without requiring its definition's `Builder`
@@ -1013,6 +1039,60 @@ merged pages (`SOUNDS`, `MUSIC`, `SPEEDS` — whose root button is captioned
 `INTERFACE` — and `VISUALS`), the display-mode list, the per-page `RESTORE` and
 `UNDO`, the entry snapshot `CANCEL` restores, and the slider arithmetic
 `[07 R-FE-01 §6]` `[03 R-AUD-01 §2]` `[03 R-AUD-01 §4]` `[07 R-CAM-01 §7]`.
+The interface page retains `UNITCHAT`'s byte-sized setting independently of
+the button's current stage. Its `SCREEN` entry conversion preserves the
+stored reciprocal and the resulting callback read-back, including a seeded
+knob one position beyond ordinary pointer travel. The visual pages seed
+their sliders without running value callbacks, so opening them does not
+quantise stored gamma or display size. Explicit slider changes still commit
+through the existing callbacks. `retail_options_audit_test.go` locks these
+boundaries with authored controls; other page behavior and host display
+choices remain separate `[07 R-FE-01 §6]`.
+The sound page likewise keeps `SPEECH`'s live stage separate from its stored
+byte-sized level: reopening derives the stage from storage. Its cue request
+precedes the setting write, while `MODE` requests its cue after applying the
+new audio gates and control state. Sound-page Restore and Undo request their
+cues after reopening. These are request-order contracts; the host's cue gain
+policy and actual playback remain separate `[07 R-FE-01 §6]`.
+Entering Repeat, or opening its page while Repeat is selected, restores the
+screen selection from the controller's retained request without starting
+playback. Both input adapters poll the displayed track after widget service
+and before dispatching an action, including passes with no action. They use
+the controller's logical next track, which remains meaningful while stopped,
+and a narrow track-detail refresh that preserves already-advanced control
+stages. That refresh writes the selected track back as the request in Repeat
+`[07 R-FE-01 §6]`. The ordinary music tick still owns subsequent playback.
+For a missing or wrong-kind `TRACKNUM`, the host skips polling: retail's
+uninitialized text has no established stable value, so this is an explicit
+host fallback. `retail_music_options_audit_test.go` locks entry, both adapters,
+edited text, disabled music and stage-preserving refresh with authored pages.
+The controller now exposes `SelectTrack` for stopped/paused selection and
+playing-track submission, plus `UpdateNow` for an explicit update using the
+existing fresh device query without servicing timers. A fresh `Open` seeds
+the retained request while preserving its separate next-track boundary
+`[07 R-FE-01 §6]`. `music_options_lifecycle_test.go` locks these controller
+contracts and the production service's one-time initialization. Repeated
+`Open` and `Close`/reopen retain the existing host policy; their mapping to
+retail's already-open no-op needs a complete lifecycle caller audit before
+changing it. The frontend transport now adopts the selector's result and
+refreshes only track details; Play performs no detail refresh. The options
+root retains its selection across ordinary close/reopen, independently of
+next and requested track, while the existing new-shell content reload starts
+fresh. Its entry snapshot includes the requested track and restores it only
+within the controller's accepted upper bound.
+Music-page departure runs once: a fresh-query update in battle or stop/reset
+in the front end. Root actions depart before their cue and action; Undo and
+Restore apply their state first, then depart and rebuild. Cancel restores its
+snapshot after departure. Restore changes the stored Custom/enable preferences
+without applying the controller mode or enable setter. Undo and Cancel apply
+the saved mode, conditionally update before restoring the enable preference
+and request, and also avoid the enable setter `[07 R-FE-01 §6]`.
+`retail_music_lifecycle_audit_test.go` exercises authored roots and pages through
+both production input adapters, including query-time state, selection before
+the next poll and distinct stored/live mode and enable values. These immediate
+callback contracts make no promise about subsequent audible playback.
+`retail_sound_options_audit_test.go` exercises these boundaries through
+authored page loads and widget callbacks, including cue-time output state.
 Rebuilding a merged page restores the selected category's down-state in the
 replacement panel, including the Nanolathe category, while releasing the old
 pointer capture. Direct opens and per-page reopens therefore show the same
@@ -1058,6 +1138,19 @@ current content set, including an absent optional background. Replacing the
 content set invalidates both entries. The cache changes no authored pixels or
 briefing state; it removes archive reads and PCX decoding from each draw.
 `TestBriefingBackgroundCacheTracksContentAndSide` locks the source boundary.
+
+The campaign briefing adapter passes the named `SHUTUP` button's resulting
+stage to `DispatchNarrationStage`: zero requests a stop, and every nonzero
+stage requests narration when its mission key exists. `NarrationOn` reports
+that stage decision, not audible playback. An authored three-stage button can
+therefore request another start directly from its opening stage; the audio
+owner handles delayed requests [07 R-FE-01 §4][03 R-AUD-02 §1]. The in-battle
+briefing reuses only the pager and does not dispatch narration.
+The same adapter requests `BigButton` before Start validation and requests
+`Options`, the narration action, then `SmallButton` for `SHUTUP`. Prev stops
+the stream before requesting `Previous`. Successful Start and Prev stop any
+current stream even without a narration key; a failed Start leaves it running
+[07 R-FE-01 §4]. Existing menu gain and audio admission remain host-owned.
 
 `briefing_render.go` paints wind and gravity from the panorama's custom path,
 using the hidden `SOLARSYSTEM` gadget's rectangle and selected FNT. It uses
@@ -1124,6 +1217,31 @@ where the selected FNT is reached only on the null-slot fallback
 page's build count therefore stays `hattfont12` although every product button
 selects `armbutt`/`corbutt`; `MSNBRIEF`'s `MOREBAR` caption is `smlfont` and
 its paged lines carry the text region's `localSide + 1` `[08 R-CAMP-01 §2]`.
+
+Label X belongs to the mutable window record. The GUI loader preserves its
+negative local value; options-page placement translates it before initial
+painting. The frontend and battle builders perform the initial label-position
+writes before their callers replace captions, including an empty caption.
+Later painters test the current X and retain the signed-16 result in that
+record, so changing `MapName`, hover help or a modal title does not repeat
+centering from `RawX`. A result still equal to the sentinel is tested again on
+the next paint. Ordinary alignment and the window origin are applied after
+that stored position is resolved [07 R-WGT-01 §7] [03 R-FONT-01 §6].
+The message-box builder also preserves positions across its authored paint
+and resized rebuild. Its resize pass gives every label the final panel width
+and centre attribute, then restores the final builder's inert bit for labels
+with empty links [07 R-FE-01 §9], [07 R-WGT-01 §7].
+
+**Pending caption fitting.** Shell and battle button painters currently draw
+their selected caption without the stored-text shortening required by
+[07 R-FE-02 §5]. The ordinary unique single-caption case is established:
+resolved artwork width 26 with three ten-pixel glyphs must retain only two
+caption bytes after its first paint, even if the rectangle later widens.
+Staged-caption termination and duplicate-name lookup are now established in
+the owning research section. Their adaptation and the ordinary fitting fix
+are deferred until a concrete stock-content example establishes practical
+impact. Widths below six and invalid-text memory behavior remain unknown.
+No stock occurrence is claimed.
 
 ### 2.7 `cmd/nanolathe` — the battle session
 
@@ -1317,6 +1435,22 @@ three readouts are written on one line at `yBottom + off + 10` — `Game Time` a
 The formats are literal: `%s : %02d:%02d:%02d`, `%s : %d  (Max %d)` with two
 spaces, and `%s %s` with no colon after the speed key. The strip is drawn only
 while the offset is non-zero `[07 R-HUD-04 §4]` `[07 §6]`.
+
+The host update passes the battle's existing `clock.MillisSource` to
+`BattleState.AdvancePanelWithClock`. This is the process-relative monotonic
+source used by the battle, not low Unix milliseconds. The service follows
+the signed strict-deadline admission and separate admitted-visit sample of
+`[07 §6]`; it refreshes the deadline before updating the Space/editor target,
+even at a resting detent. `AdvancePanel` is an equal-sample convenience for
+deterministic callers. Painting never reads this clock. Tests expose both
+source reads and retain the established easing and cue-request sequences.
+
+**Host boundary.** The deadline remains owned by each battle's UI state and
+starts at zero with that state. Complete retail deadline retention through
+every reset/rebuild is still unresolved in `[07 §6]`; no process-global timer
+ownership is inferred. The process-relative host origin is also distinct
+from retail's system-uptime origin. This boundary does not alter the
+simulation clock or its scheduling state.
 
 ### 2.9 Capture tooling
 
@@ -1767,12 +1901,14 @@ slots and inactive records; retain duplicate real entries and separate direction
 shipyard definitions. CANBUILD is neither a source of button identities nor a
 button-state or placement gate: a physical page may name a product that differs
 from CANBUILD (ARMPLAT's ARMCSA, CORCS's CORSY and CORLLT), and such a cell greys
-only when its name resolves to no definition [07 R-HUD-03 §6]. Opening a
-numbered page above zero replaces the authored low grey bit with that resolution
-result after
-download placement, preserving the higher bits, before either sidebar copies
-the records. Custom page zero retains its authored enabledness. Do not reconstruct this list from membership or infer
-relationships from unit-name suffixes. Arbitrary building rotation is deferred.
+only when its name resolves to no definition in the expanded view. Opening a
+numbered source page above zero applies the retail product-resolution pass
+before either sidebar copies its records. It visits the header and children
+before the final loaded child, replacing their low grey bit after download
+placement while preserving higher bits `[07 R-HUD-03 §6]`. The final child
+keeps its incoming state, including any earlier download clearing. Custom
+page zero retains its authored enabledness. Do not reconstruct this list from
+membership or infer relationships from unit-name suffixes. Arbitrary building rotation is deferred.
 
 Each list entry is one logical cell containing one or more product buttons.
 The host lays cells out in two columns of 64-by-64 squares in the 128-pixel rail
@@ -2107,6 +2243,11 @@ back transition — returns to that root rather than to the battle
 composition root records the session kind on the state when the options window
 opens, and `Activate("MISSION")` selects the child from it, so the routing is
 testable without any asset.
+The same owner requests `Options` for each child's recognised page control
+and `OK`, before reporting a page action or closing the child. Unknown names
+and cleanup without a fired gadget make no request. The audio service retains
+its own playback gates; a request is not proof of audible output
+`[07 R-FE-01 §7]` `[03 R-AUD-01 §2]`.
 
 `battle_info_window.go` owns the shared half — the parsed records, the
 retained widget state, the indexed pointer service and the painter — and the
@@ -2257,9 +2398,13 @@ over defaults, with no schema version bump.
 
 `BattleState.PlacementArmed` requires both MOBILEBUILD and a selected product.
 Changing to another latch clears placement state. The same gate controls the
-ghost, cursor and build dispatch. Page input projects pending commands for the
-same builder through `Session.PendingBuildPage`, so multiple keys before a
-tick preserve page order and cue only actual changes. Palette painting and
+ghost, cursor and build dispatch. Page input updates local interface state
+immediately, so multiple keys before a tick preserve page order. Authored-page
+next/previous requests cue even without a live page owner; accepted digit-page
+requests cue even when that page is already shown, while rejected digit
+requests are silent `[07 R-HUD-03 §6]`. These are sound-service requests,
+subject to playback admission. Expanded-sidebar navigation keeps its host
+policy of cueing only actual local page changes (§3.3). Palette painting and
 activation share hidden/grey product and arrow decisions, and hit rectangles
 end at the authored last pixel. Feature commands read mapping memory at the
 projected pointer, independently of current feature visibility.
@@ -2389,8 +2534,10 @@ same callback path as a pointer release. The production viewer services the
 original token ring and published pointer together in one indexed GUI pass,
 then carries its pointer-ownership verdict into the controller. A claimed
 token prevents residual shortcut dispatch for that pass; held modifiers and
-unclaimed pointer work remain available. A focus-only linked-label shortcut
-consumes its token and continues later gadget visits. Ctrl-composed quickkeys
+unclaimed pointer work remain available. A linked-label shortcut consumes its
+token before resolving its target. An admitted target fires after focus setup,
+including a non-button; an absent target fires the label itself. A rejected
+target clears the result and permits later gadget visits. Ctrl-composed quickkeys
 retain their own authored byte identities, including through a battle child's
 function-key suppression filter. UNITINFO ownership is captured at
 frame entry, so closing it cannot service the underlying palette again in

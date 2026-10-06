@@ -161,7 +161,7 @@ func TestPathProviderIdleRunStopsAtStagedSlot(t *testing.T) {
 			c := p.cursor[1]
 			if !p.started[1] {
 				start, _, _ := p.world.SliceForPlayer(1)
-				c = start - 1
+				c = start
 			}
 			start, end, _ := p.world.SliceForPlayer(1)
 			if nextSlot(c, start, end) == int(h) {
@@ -172,6 +172,34 @@ func TestPathProviderIdleRunStopsAtStagedSlot(t *testing.T) {
 		}
 		if run != polls {
 			t.Fatalf("lead %d: IdleRun = %d, the staged slot is %d polls away", lead, run, polls)
+		}
+	}
+}
+
+// The constructor's cursor is already on the first allocatable slot. These
+// expectations distinguish that seed from a cursor preceding the slice, even
+// if Poll and its batching optimization accidentally share the same error
+// [04 R-PATH-01 §6].
+func TestPathProviderInitialCursorBeforeAdvance(t *testing.T) {
+	for _, length := range []int{1, 4} {
+		for _, stagedOffset := range []int{0, length - 1} {
+			s := NewSystem(syntheticTerrainForIntegrate(), wiringProfile, NewOccupancyGrid())
+			w := newMovementFixtureWorld(length)
+			s.BindWorld(w)
+			start, _, _ := w.SliceForPlayer(0)
+			p := s.pathProvider
+			p.Submit(path.Request{Unit: pool.Handle(start + stagedOffset), Player: 0})
+			wantIdle := int32(stagedOffset - 1)
+			if stagedOffset == 0 {
+				wantIdle = int32(length - 1)
+			}
+			if got := p.IdleRun(0, 100); got != wantIdle {
+				t.Fatalf("length=%d offset=%d initial idle run=%d, want %d", length, stagedOffset, got, wantIdle)
+			}
+			p.SkipIdle(0, wantIdle)
+			if _, result := p.Poll(0); result != path.PollNoUnit || p.cursor[0] != start+stagedOffset {
+				t.Fatalf("length=%d offset=%d selected cursor=%d result=%d", length, stagedOffset, p.cursor[0], result)
+			}
 		}
 	}
 }

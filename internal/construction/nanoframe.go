@@ -221,6 +221,9 @@ func (s *Service) freeNeverExistedProduct(prod *units.Unit) {
 	handle := prod.Handle
 	s.ReleasePlacement(handle)
 	s.ClearBuilderLink(handle)
+	if s.Movement != nil {
+		s.Movement.ForgetUnit(handle)
+	}
 	if s.World != nil && s.World.Unit(handle) == prod {
 		s.World.FreeNeverCreated(handle)
 		return

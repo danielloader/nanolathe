@@ -643,9 +643,10 @@ func (s *Strategic) hasBuildOptions(ck string) bool {
 // class routine. Its semantic name remains unknown; the exact branch order,
 // definition inputs, signs, and live battle inputs are established [05
 // R-PROD-01 §1][08 R-P0-05 §5]. Positive results consume energy and
-// negative results produce it. The float32 return is the recovered helper
-// boundary consumed by the class-vector arithmetic.
-func classify(def *content.UnitDef, windScalar, tidalStrength float32) float32 {
+// negative results produce it. Definition and environment inputs have single
+// stores, but the selected product and negation retain working precision
+// through the return [05 R-PROD-01 §1][I2].
+func classify(def *content.UnitDef, windScalar, tidalStrength float32) float64 {
 	if def == nil {
 		return 0
 	}
@@ -656,19 +657,19 @@ func classify(def *content.UnitDef, windScalar, tidalStrength float32) float32 {
 	energyUse := float32(def.EnergyUse)
 	windGenerator := float32(def.WindGenerator)
 	tidalGenerator := float32(def.TidalGenerator)
-	if energyUse != 0 {
-		return energyUse
+	if energyUse != 0 && energyUse == energyUse {
+		return float64(energyUse)
 	}
 	if windGenerator > 0 {
-		return -(windScalar * windGenerator)
+		return -float64(float64(windScalar) * float64(windGenerator))
 	}
 	if tidalGenerator > 0 {
-		return -(tidalStrength * tidalGenerator)
+		return -float64(float64(tidalStrength) * float64(tidalGenerator))
 	}
 	return 0
 }
 
-func (s *Strategic) classify(def *content.UnitDef) float32 {
+func (s *Strategic) classify(def *content.UnitDef) float64 {
 	var windScalar, tidalStrength float32
 	if s != nil && s.energyEnvironment != nil {
 		windScalar, tidalStrength = s.energyEnvironment()
@@ -676,16 +677,9 @@ func (s *Strategic) classify(def *content.UnitDef) float32 {
 	return classify(def, windScalar, tidalStrength)
 }
 
-// ftol truncates toward zero as required by the retail conversion contract
-// [01 §8; P0-01 §4; I3].
-// Narrow to float32 at CALL boundaries is done by caller passing float32.
-func ftol(v float32) int32 {
-	return numeric.TruncateFloat32ToLow32(v)
-}
-
 // ftol64 is the same runtime truncation for the sums retail accumulates at its
 // 53-bit working precision with no intervening single-precision store — the
-// class routine's first pass [08 "Arithmetic and clamping"; 01 §8; I2; I3].
+// class routine [08 R-P0-05 §5; 01 §8; I2; I3].
 func ftol64(v float64) int32 {
 	return numeric.TruncateFloat64ToLow32(v)
 }
@@ -708,8 +702,8 @@ func clamp100(v int32) int32 {
 // "Established AI-facing data and rooted planner"]. Retail arithmetic uses
 // the constants and narrowing boundaries recorded in [P0-01 §4]: zero,
 // -0.01, -0.002, 30, -0.0025, 5, 100, and -0.02.
-// Every float→int via __ftol trunc toward zero with narrow to float32 at each CALL (FSTP) [P0-01 §4].
-// Clamps to [-100,100] before i8 store. Zero RNG inside routine [P0-01 §5].
+// Float-to-integer conversions truncate toward zero; intermediate stores and
+// each coefficient's distinct clamp follow [08 R-P0-05 §5]. No RNG is drawn here.
 // The working precision in force between the truncation points is Established
 // and is 53-bit, so the sums retail accumulates without a single-precision
 // store are float64 here and the two it narrows keep their single-precision
@@ -758,16 +752,27 @@ func (s *Strategic) recomputeClassVectors() {
 		if v, ok := s.Counts[ck]; ok {
 			count = v
 		}
+		// All three extractor gates consume the definition's single-precision
+		// store and reject unordered values [08 R-P0-05 §5]. Keep the wider
+		// authored catalog unchanged.
+		extractsMetal := float32(0)
+		if def != nil {
+			extractsMetal = float32(def.ExtractsMetal)
+		}
+		isExtractor := extractsMetal != 0 && extractsMetal == extractsMetal
 		// First coefficient (single vector) [P0-01 §3].
 		acc0 := int32(1)
-		if def != nil && def.ExtractsMetal != 0 { // exact float zero test [P0-01 §2.2]
+		if isExtractor {
 			acc0 = 11
 		}
 		if def != nil && def.MakesMetal != 0 { // [P0-01 §2.2; R-P0-05]
 			acc0 += 10
 		}
 		fval := s.classify(def)
-		if fval < 0 {
+		// Both bonus comparisons admit negative or unordered query results
+		// [08 R-P0-05 §5]; the query producer owns its own input gates.
+		producesEnergy := fval < 0 || fval != fval
+		if producesEnergy {
 			acc0 += 10
 		}
 		// Costs already carry the definition single-float store [02 R-KEYS-01 §5].
@@ -842,7 +847,9 @@ func (s *Strategic) recomputeClassVectors() {
 				// thirty) and is not read by this routine — an earlier "reload
 				// divided by 100" reading is retracted [08 "Class routine weapon
 				// reads"].
-				dmg := int32(wp.DamageDefault)
+				// This consumer zero-extends the stored damage word before
+				// division; preserve the authored catalog value [08 R-P0-05 §5].
+				dmg := int32(uint16(wp.DamageDefault))
 				rnge := int32(wp.Range)
 				wSum = wSum + dmg/40 + 5 + rnge/100
 			}
@@ -861,10 +868,10 @@ func (s *Strategic) recomputeClassVectors() {
 		if def != nil && def.Builder && count < 3 { // [P0-01 §2.2; R-P0-05]
 			acc1 += 30
 		}
-		if fval < 0 {
+		if producesEnergy {
 			acc1 += 50
 		}
-		if def != nil && def.ExtractsMetal != 0 {
+		if isExtractor {
 			acc1 += 50
 		}
 		if def != nil && def.MakesMetal != 0 { // [P0-01 §2.2; R-P0-05]
@@ -889,15 +896,9 @@ func (s *Strategic) recomputeClassVectors() {
 		// so exactly thirty selects the literal thirty. Both edges are
 		// immaterial because the two arms agree there.
 		//
-		// Retail folds this addition at the same 53-bit working precision as
-		// the first pass, with the truncation as its only boundary
-		// [08 "Arithmetic and clamping"]. The sweep that settled the first pass
-		// compared both forms here too, over every definition and every state,
-		// and found no stored byte that differs: authored `energymake` values
-		// are integral or far from a boundary, so the single-precision and
-		// working-precision sums truncate alike. The form below therefore
-		// matches retail for the shipped catalog; it is the contract, not the
-		// arithmetic width, that this comment records.
+		// This addition retains 53-bit working precision until truncation.
+		// Authored fractional energy can distinguish it from a single-precision
+		// sum even when shipped definitions agree [08 R-P0-05 §5].
 		energyMake := float32(0)
 		if def != nil {
 			energyMake = float32(def.EnergyMake)
@@ -908,7 +909,7 @@ func (s *Strategic) recomputeClassVectors() {
 		} else if !(energyMake < 30) {
 			energyMake = 30
 		}
-		val := ftol(float32(acc1) + energyMake)
+		val := ftol64(float64(acc1) + float64(energyMake))
 		// The count and MinWaterDepth multipliers apply to the TRUNCATED sum
 		// above, not to the raw integer accumulator [08 R-P0-05 §5].
 		if count == 0 {
@@ -957,16 +958,11 @@ func (s *Strategic) recomputeClassVectors() {
 		// [0, 100], applied in floating point BEFORE the single truncation, and
 		// both comparisons are strict so each bound value survives. Retail
 		// narrows only the cost product to single precision; the five-times
-		// net-energy term and the difference stay at working precision. The
-		// sweep behind the first pass's note compared both widths here over
-		// every definition and every state and found no stored byte that
-		// differs, so the single-precision form below is retail's result for
-		// the shipped catalog [08 "Arithmetic and clamping"].
-		// Both products carry the explicit conversion the first pass explains:
-		// no host may fuse them into the difference [I1].
-		fE := float32(costEnergy * float32(-0.0025))
-		g := float32(fval * float32(5.0))
-		diff := fE - g
+		// net-energy term and the difference stay at working precision.
+		// Explicit product conversions prevent host-dependent fusion [I1].
+		fE := float32(float64(costEnergy) * float64(float32(-0.0025)))
+		g := float64(fval * float64(float32(5)))
+		diff := float64(fE) - g
 		// NaN takes retail's upper arm: its unordered compare sets the bit the
 		// ">100" branch selects, so a NaN coefficient becomes 100, not 0.
 		if diff > 100 || diff != diff {
@@ -974,7 +970,7 @@ func (s *Strategic) recomputeClassVectors() {
 		} else if diff < 0 {
 			diff = 0
 		}
-		cv.C2 = int8(ftol(diff))
+		cv.C2 = int8(ftol64(diff))
 
 		// Metal-mix coefficient `baseML` [08 R-P0-05 §5]: the `makesmetal` term
 		// is PLUS 25 and the clamp is [0, 100] in floating point before the
@@ -982,25 +978,24 @@ func (s *Strategic) recomputeClassVectors() {
 		// never be negative, and an extractor scores 100 - 0.02*cost clamped
 		// into [0, 100].
 		baseVal := int32(0)
-		if def != nil && def.ExtractsMetal != 0 {
+		if isExtractor {
 			baseVal = 100
 		}
 		metalAdj := int32(0)
 		if def != nil && def.MakesMetal != 0 { // [P0-01 §2.2; R-P0-05]
 			metalAdj = 25 // [08 R-P0-05 §5]
 		}
-		// Retail narrows this sum to single precision through one store and
-		// then adds the integer base at working precision; the same sweep found
-		// the two widths agree on every stored byte here
-		// [08 "Arithmetic and clamping"].
-		adjf := float32(costMetal*float32(-0.02)) + float32(metalAdj)
-		sumf := float32(baseVal) + adjf
+		// Narrow only the combined cost-and-maker term. The cost product and
+		// final base addition retain working precision [08 R-P0-05 §5].
+		metalProduct := float64(float64(costMetal) * float64(float32(-0.02)))
+		adjf := float32(metalProduct + float64(metalAdj))
+		sumf := float64(baseVal) + float64(adjf)
 		if sumf > 100 || sumf != sumf {
 			sumf = 100
 		} else if sumf < 0 {
 			sumf = 0
 		}
-		val3 := ftol(sumf)
+		val3 := ftol64(sumf)
 		cv.C1 = int8(val3)
 
 		s.ClassVectors[ck] = cv

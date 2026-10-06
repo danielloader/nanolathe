@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"math"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
@@ -31,6 +32,34 @@ func TestScoreInputsReadSettledRuntimeAggregates(t *testing.T) {
 	want := ScoreInputs{CurEnergy: 900, CapEnergy: 1000, CurMetal: 400, CapMetal: 500, ProdEnergy: 12, ProdMetal: 2, NetEnergy: 9, NetMetal: 1}
 	if in != want {
 		t.Fatalf("score inputs = %+v, want settled runtime fields %+v", in, want)
+	}
+}
+
+// Direct aggregate inputs distinguish query precision and consumer polarity;
+// they do not establish a stock producer for these edge values [08 R-P0-05 §3].
+func TestScoreNetQueryKeepsWorkingPrecision(t *testing.T) {
+	svc := testEcon(1, 1000, 1000, 300, 500, 1, 10, 1.0/(1<<26), 0)
+	in := ScoreInputsFromEconomy(svc, 1)
+	if !(in.NetEnergy < 1) || float32(in.NetEnergy) != 1 {
+		t.Fatalf("net query=%v, want below one but single-rounded to one", in.NetEnergy)
+	}
+	if got := ComputeScore(in, ClassVector{C2: 100}, 100); got != 70 {
+		t.Fatalf("energy score=%d, want 70", got)
+	}
+	svc.Players[1].AIConsumption[economy.Energy] = 0
+	if got := ComputeScore(ScoreInputsFromEconomy(svc, 1), ClassVector{C2: 100}, 100); got != 50 {
+		t.Fatalf("exact-one net score=%d, want 50", got)
+	}
+}
+
+func TestScoreUnorderedProductionTakesFirstBonus(t *testing.T) {
+	svc := testEcon(1, 1000, 1000, 300, 500, float32(math.NaN()), 10, 0, 0)
+	if got := ComputeScore(ScoreInputsFromEconomy(svc, 1), ClassVector{C2: 100}, 100); got != 70 {
+		t.Fatalf("unordered energy production score=%d, want 70", got)
+	}
+	svc = testEcon(1, 1000, 1000, 500, 500, 300, float32(math.NaN()), 0, 0)
+	if got := ComputeScore(ScoreInputsFromEconomy(svc, 1), ClassVector{C1: 100}, 100); got != 100 {
+		t.Fatalf("unordered metal production score=%d, want 100", got)
 	}
 }
 

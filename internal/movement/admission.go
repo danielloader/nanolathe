@@ -27,7 +27,7 @@ type AdmissionResult struct {
 //  6. candidate committed mover mode is active locomotion (mode 2, moving)
 //  7. ground carrier (canfly clear) with candidate MinWaterDepth >=0
 //  8. candidate Y + modelTop at or below sea level ×65536 (submerged)
-//  9. candidate landed-float field not exactly 0.0 (still under construction)
+//  9. candidate construction scalar is ordered and nonzero
 //
 // The result of the pair is the same either way — both arms reject — so the
 // order is observable only through the reported Reason, which a reimplementation
@@ -167,16 +167,10 @@ func (s *System) CanTransport(carrierHandle, candidateHandle pool.Handle, w *uni
 	if sum <= seaLevelFixed {
 		return AdmissionResult{Allowed: false, Reason: "submerged"}
 	}
-	// 9) candidate landed-float field not exactly 0.0 (still under construction) [04 §10.2]
-	// Nanolathe stores Remaining 1→0 float32 [04 §2.3]; mirror as landed-float non-zero when Remaining !=0.
-	//
-	// Retail compares the float against zero and continues only on the equal
-	// condition, which an UNORDERED result also raises: a NaN in that field would
-	// be admitted, not rejected, where this ordered `!= 0` refuses it. Remaining
-	// is written only by the construction settlement as a value in 1→0, so no
-	// path in this build can put a NaN there; the difference is recorded because
-	// it is the one input on which the two forms disagree [04 R-AIR-01 §12].
-	if candidate.Remaining != 0 {
+	// Zero and unordered construction scalars pass this consumer [04 §10.2].
+	// Save restoration also writes the scalar; ordinary NaN production and
+	// survival through a full restore-to-command history remain Unknown there.
+	if candidate.Remaining < 0 || candidate.Remaining > 0 {
 		return AdmissionResult{Allowed: false, Reason: "under construction"}
 	}
 	return AdmissionResult{Allowed: true, Reason: ""}

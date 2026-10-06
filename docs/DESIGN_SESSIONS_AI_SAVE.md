@@ -353,12 +353,22 @@ scratch field that previously supplied the writer's active byte.
 **The trigger adapter.** The session supplies the trigger evaluator its
 world-facing callbacks: the stamped footprint anchor a boundary condition
 reads, the projection that turns authored map pixels into world coordinates on
-the first radius poll, the commander-identity predicate, and the unpositioned
-`Victory Condition` cue, which is admitted as a committed frame event so it
-crosses the publication boundary like every other cue `[08 R-TRIG-01 §3]`
+the first radius poll, the shared movement radius query, the commander-identity
+predicate, and the unpositioned `Victory Condition` cue, which is admitted as a
+committed frame event so it crosses the publication boundary like every other cue `[08 R-TRIG-01 §3]`
 `[08 R-TRIG-01 §5]` `[08 R-TRIG-01 §8]` [I6].
 
 ### 2.2 `internal/mission` — campaigns, missions, placement, `InitialMission`
+
+**Pending campaign discovery boundary.** The current catalog loader returns
+an error for a read failure and continues after a successfully parsed empty
+file. The retail enumerator instead retains the admitted prefix and spends
+its remaining attempts retrying an empty or unreadable current file, without
+advancing to later names [08 R-CAMP-01 §1]. The frontend currently suppresses
+campaign availability on a discovery error. Reconcile catalog enumeration
+and frontend admission together; do not substitute a claim that retail simply
+skips every unreadable entry. Transient reads and short-read contents remain
+outside the established bounded contract.
 
 `Campaign` and `Stub` are the discovery products: a `camps/*.tdf` file and the
 contiguous run of `MISSION0..N` sections that stops at the first gap.
@@ -428,14 +438,23 @@ identity per kind without reproducing the packed layout [I13]
 type is expected `[08 "Victory and defeat triggers"]`.
 
 `PollContext` is the session-supplied surface: the tick, the unit world, the
-mission-armed flag, and the four callbacks named in §2.1. `Poll` is a pure
-predicate that mutates only its own completed flag; `Notify` drives the three
-notification slots — removal, capture, creation — and reads the pre-transfer
-owner only at the capture slot `[08 R-TRIG-01 §4]` `[08 R-TRIG-01 §7]`.
+mission-armed flag, and the callbacks named in §2.1. `Poll` updates the
+condition's completion, celebration and one-time centre conversion as its kind
+requires; `Notify` drives the three notification slots — removal, capture,
+creation — and reads the pre-transfer owner only at the capture slot `[08 R-TRIG-01 §4]` `[08 R-TRIG-01 §7]`.
 `Evaluate` owns the queue combination and nothing else: it re-injects the
 defaults at poll time, evaluates victory as an AND stopping at the first false
 and, only when victory is false, defeat as an OR stopping at the first true.
 The caller owns the kind gate, the cadence and the latch `[08 R-TRIG-01 §6]`.
+
+For radius conditions, `PollContext.VisitRadiusUnits` routes through movement's
+existing `VisitUnitsInRadius`; it owns the stored-width geometry and retained
+sector membership `[08 R-TRIG-01 §5]`. The session adapter excludes attached
+units because the shared host index retains cargo for overlap consumers. It
+continues the query after a hit and leaves `AllUnitsKilled`'s owner-slice cargo
+eligibility unchanged. A missing query callback is an incomplete host context:
+no candidates are supplied, the existing completion latch is retained, and no
+whole-pool fallback runs. This is host handling, not a retail missing-query path.
 
 `RetailTriggerAccount` is the save form — the per-trigger integer box the bank
 carries — with a matching restore that writes the completed flags back into an
@@ -520,11 +539,49 @@ multiply-then-add in the routine wraps its product in an explicit conversion:
 the Go specification permits fusing them into one rounding, and some backends
 do, which would make the same source round differently per host [I1].
 
+The remaining class coefficients follow the store boundaries in
+`[08 R-P0-05 §5]`: the other-mix energy addition, the energy coefficient's
+net-energy product and difference, and the metal coefficient's products and
+sums retain working precision except at the named intermediate single stores.
+`TestClassCoefficientWorkingPrecision` locks valid authored fractional energy
+counterexamples and separately labels fractional metal-cost cases as arithmetic
+fixtures; the retail integer cost loader does not establish their reachability.
+These corrections preserve refresh RNG order and the Modern AI selection.
+All three extractor predicates narrow the catalog value at the consumer and
+use ordered nonzero comparison; the two net-energy bonuses admit negative or
+unordered query results. Authored archive fixtures lock tiny signed extraction
+values that store as zero, while explicitly labeled direct-input fixtures
+exercise unordered arithmetic without claiming a retail NaN producer.
+The net-energy query also retains its selected product at working precision
+through the return, with ordered input gates `[05 R-PROD-01 §1]`.
+`TestClassTidalQueryRetainsWorkingProduct` compiles an authored fractional
+tidal generator and map scalar to distinguish the coefficient boundary and
+checks that refresh still consumes only its outer RNG gate.
+
+The Classic class-vector weapon score narrows `DamageDefault` at the consumer
+according to `[08 R-P0-05 §5]`; the catalog retains the authored integer.
+`TestWeaponScoreConsumesUnsignedDamageWord` locks wrapping, ordinary damage,
+the inactive weapon sentinel, and refresh RNG effects. These authored boundary
+cases establish the correction without claiming a stock-content impact. They
+do not change which players use the Modern AI controller.
+
 `ClassVector`, `ScoreInputs`, `ComputeMix` and `ComputeScore` are the candidate
 score as a pure function, testable before it is wired to anything.
+`ScoreInputs` preserves the working-precision net-query results until the
+below-one comparison; the source economy aggregates remain single precision.
+Stock rejection and pressure bonuses retain their unordered comparison arms
+`[08 R-P0-05 §3]`. Direct aggregate fixtures expose those boundaries, including
+the unchanged RNG stream when an unordered stock rejects selection; no
+nonfinite producer or stock-match incidence is inferred.
 `MetalSpot`, `PlacementRegion` and `PlacementResult` are the placement root's
 inputs and its typed answer, including the reason code a rejection carries
 `[08 R-AI-03 §1]` `[08 R-AI-03 §2]` `[08 R-AI-03 §5]`.
+
+Both Classic placement helpers share `retailOriginCell`, which keeps the
+footprint bias in the signed coordinate word before converting to a cell
+`[08 R-AI-03 §3]`. Its direct arithmetic boundary tests distinguish wrapping
+from a widened intermediate; they do not claim a stock-content producer for
+the extreme inputs. The helper consumes no RNG and does not select an AI mode.
 
 The classifier sweep is in `groups.go`. Its input status bits are the
 building-class and armed bits the allocator writes once from the definition;
@@ -883,8 +940,12 @@ that changes the state word does not also run the new state's operation
 
 **C3 — the save preflight.** Only gametype 1 (campaign) and 2
 (skirmish/multiplayer) are accepted; every other value is rejected. The route
-is selected strictly on the between-missions flag being one — every other value
-is a battle restoration. Preflight inspects no bulk account, seeds no stream
+uses scalar presence, independently of type or value: kind 1 with the marker
+selects campaign briefing; kind 2 with the marker selects fresh entry; absence
+selects battle restoration. A binary box is not a scalar marker. The kind-2
+fresh-entry setup dependency is still unresolved, so loading that form reports
+an explicit error instead of restoring saved battle state or entering briefing.
+Preflight inspects no bulk account, seeds no stream
 and constructs no session `[08 "Session states"]`
 `[08 "Save-file organization"]` `[08 R-SAVE-02 §11]`.
 
@@ -930,10 +991,10 @@ allocator with its two simulation draws. A missing start position is fatal with
 the verbatim diagnostic; there is no jitter fallback on this path
 `[08 "Placement and battle entry"]` `[08 R-ENTRY-01 §5]` `[08 R-ENTRY-02 §1]`.
 
-**C10 — the two load routes.** A between-missions save yields campaign
+**C10 — load routes.** A campaign save with the between-missions scalar yields campaign
 continuation metadata — campaign path, campaign and mission name, mission
 index, difficulty, side and the 25-byte mark array, reset to all-unplayed when
-the source is not exactly 25 bytes. Every other save yields a staged battle:
+the source is not exactly 25 bytes. A save without that scalar yields a staged battle:
 detached staging first, then core restoration, then the battle-entry tail —
 the graphical user interface, the per-player phase primed once on the restored
 world at the restored tick, no second resource grant, then the metal-spot
@@ -1272,12 +1333,13 @@ records; a true destroy-all-units predicate emits `Victory Condition` only
 once for that record `[08 "Default triggers"]` `[08 R-TRIG-01 §6]`
 `[08 R-TRIG-01 §8]`.
 
-**C17 — evaluators are pure polls.** A poll mutates only its own completed
-flag. The counted kill condition decrements a countdown and completes at zero
-or below; the boundary conditions compare the signed world coordinate read from
-the unit's stamped footprint anchor against the threshold and are satisfied
-when the absolute difference is **below three** world units; timer conditions
-compare the tick count against seconds × 30 `[08 "Evaluation"]`
+**C17 — polls and notifications have distinct effects.** Polls can update their
+condition's completion, emit its one-shot cue and convert its radius centre.
+The counted kill condition decrements on removal notification and completes at
+zero or below. Boundary conditions compare the signed stamped footprint cell
+against the stored cell threshold and accept an absolute difference **below
+three cells**; timer conditions compare the tick count against seconds × 30
+`[08 "Evaluation"]`
 `[08 R-TRIG-01 §3]` `[08 R-TRIG-01 §4]`.
 
 **C18 — the `StartPos` counter advances only when it is taken.** The placement
@@ -1503,6 +1565,16 @@ writes its own height into the shared strategic-centre local, not into the
 per-member target copy, and the write survives to every later member of the same
 pass — where it can flip the three-way distance branch and with it the pass's
 random-draw count `[08 R-AI-01 §3]`.
+
+**The pass-one height carry remains an implementation gap.** Retail also
+copies the placement output's unwritten height into this shared centre before
+testing placement success. The numerical value is unresolved, as are the X/Z
+reads in its failed-placement cap. Nanolathe currently retains the original
+strategic height between passes and tests the cap only for valid results;
+these are deterministic placeholders, not established retail outcomes.
+Caller-stack provenance or an explicit host policy must settle them before
+changing the distance branches and their RNG effects `[08 R-AI-01 §3]`
+`[08 R-AI-03 §5]`.
 
 ### 3.4 Not implemented
 

@@ -268,7 +268,7 @@ func repairPatrolHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) 
 		n.DynamicGate |= gateMoveOutcomes // ORed: the 60-tick deadline survives
 		work := rulesOfUnit(u).PatrolWork(PatrolWorkRequest{Builder: u})
 		if work != PatrolReclaimOnly {
-			if resources, ok := playerResources(u); ok && resourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1]) {
+			if resources, ok := playerResources(u); ok && patrolResourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1]) {
 				candidates := scanRepairCandidates(u, u.Def.SightDistance)
 				// Ground repair repeats the diplomacy check after the pick; when the
 				// candidate remains nonhostile it resolves command code 8 (assist
@@ -297,7 +297,7 @@ func repairPatrolHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) 
 		if work == PatrolAssistOnly {
 			return 2 // the Community option exits at the feature-reclaim boundary
 		}
-		if resources, ok := playerResources(u); ok && resourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1]) && resourceAtLeastTwenty(resources.Stock[0], resources.Capacity[0]) {
+		if resources, ok := playerResources(u); ok && patrolResourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1]) && patrolResourceAtLeastTwenty(resources.Stock[0], resources.Capacity[0]) {
 			return 2 // both stores are healthy: keep patrolling
 		}
 		if feature, ok := chooseReclaimFeature(u, u.Def.SightDistance); ok && spawnPatrolReclaim(u, feature, false, tick) {

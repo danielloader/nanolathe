@@ -4,7 +4,7 @@ package cob
 // callback mode D/I/Q, wake semantics, argument cells, receiver, return
 // consumption) and [R-COB-02 §2] (same-tick callback integration trace: the
 // six-step visit order, defer-vs-immediate execution, the wake-flush barriers,
-// slot-order execution, and the sleep-0 one-tick minimum).
+// slot-order execution, and sleep-0 yielding until a later interpreter entry).
 //
 // All fixtures are authored COB via the package's makeCOB helpers and run
 // through the real CallbackBridge. Probe scripts report their argument cells
@@ -82,7 +82,7 @@ func markConst(ev, v int32) []uint32 {
 // buildTraceProg authors the full vertical-slice fixture COB. Every probe
 // script reports its cells and returns; AimPrimary returns 1 (the grant
 // value); Killed assigns its variant cell 3; Sleeper0 observes the sleep-0
-// one-tick minimum.
+// yield before a later interpreter entry.
 func buildTraceProg(t *testing.T) *Program {
 	t.Helper()
 	var code []uint32
@@ -451,8 +451,8 @@ func TestSameTickTraceFixture(t *testing.T) {
 		t.Fatalf("drains after visit 1 = %d want 5 (1 creation + 1 normal + 3 immediates; queries add none)", got)
 	}
 
-	// Visit 2 — a sleep-0 thread observes the one-tick minimum: it yields in
-	// the drain that issues the sleep and cannot complete in that same visit
+	// Visit 2 — a sleep-0 thread yields the interpreter entry issuing sleep
+	// and cannot complete in that same entry
 	// [R-COB-02 §2] fixture note (d). The next drain of ANY delta wakes it —
 	// including the delta-0 wake pass of the StopMoving barrier below, which
 	// wakes any thread whose timer is already at or below zero [04 §4.6].
@@ -460,7 +460,7 @@ func TestSameTickTraceFixture(t *testing.T) {
 	b.Drain(1)
 	for _, m := range rec.marks {
 		if m == rec.want(evSlept, 0) {
-			t.Fatalf("sleep 0 completed in its own visit: %v", rec.marks)
+			t.Fatalf("sleep 0 completed in its issuing entry: %v", rec.marks)
 		}
 	}
 	// Step 5 of visit 2 — StopMoving is D+wake; its all-slot delta-0 wake

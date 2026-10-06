@@ -2,6 +2,8 @@ package session
 
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/triggers"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
@@ -49,6 +51,17 @@ func (s *Session) missionTriggerContext(tick uint32) triggers.PollContext {
 		}
 		wx, wy, wz := s.World.CursorToWorldMapPixels(x, z)
 		return int32(wx.Raw()), int32(wy.Raw()), int32(wz.Raw())
+	}
+	c.VisitRadiusUnits = func(x, z, radius int32, visit func(*units.Unit)) {
+		s.Movement.VisitUnitsInRadius(numeric.Fixed(x), numeric.Fixed(z), numeric.Fixed(radius), func(_ pool.Handle, u *units.Unit) bool {
+			// The shared host index retains cargo for overlap consumers. Retail's
+			// radius scan visits top-level units only [08 R-TRIG-01 §5]. Keep
+			// this projection separate from AllUnitsKilled's carrier eligibility.
+			if u.Attachment.Carrier == 0 {
+				visit(u)
+			}
+			return false // the radius condition never stops its scan [08 R-TRIG-01 §5].
+		})
 	}
 	c.Celebrate = func() {
 		if s.publication == nil || s.publication.events == nil {

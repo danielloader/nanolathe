@@ -287,25 +287,26 @@ func TestCtrlDSelfDestructsSelection(t *testing.T) {
 func TestFollowCameraCyclesSelection(t *testing.T) {
 	b := newTestBattle(testCatalogON05(), testWorldON05(40, 40))
 	b.sess.LocalOwner = 0
+	configureFollowCycleOwner(b)
 	first := placeUnit(b, "armcons", numeric.Fixed(200*65536), numeric.Fixed(120*65536))
 	second := placeUnit(b, "armsolar", numeric.Fixed(280*65536), numeric.Fixed(180*65536))
 	replaceSelectionForTest(t, b, first, second)
 
 	pressKeys(b, input.KeyT)
+	if b.cam.Tracked() != second.Handle {
+		t.Fatalf("`t` tracked %d, want the next selected slot after the first allocated record %d", b.cam.Tracked(), second.Handle)
+	}
+	pressKeys(b, input.KeyT)
 	if b.cam.Tracked() != first.Handle {
-		t.Fatalf("`t` tracked %d, want the first selected unit %d", b.cam.Tracked(), first.Handle)
+		t.Fatalf("`t` did not wrap to the first selected unit")
 	}
 	pressKeys(b, input.KeyT)
 	if b.cam.Tracked() != second.Handle {
 		t.Fatalf("`t` did not advance to the second selected unit")
 	}
-	pressKeys(b, input.KeyT)
-	if b.cam.Tracked() != first.Handle {
-		t.Fatalf("`t` did not wrap back to the first selected unit")
-	}
 	// Shift takes the other arm: the previous selected unit.
 	pressKeys(b, input.KeyShift, input.KeyT)
-	if b.cam.Tracked() != second.Handle {
+	if b.cam.Tracked() != first.Handle {
 		t.Fatalf("`T` went forwards, want the previous selected unit")
 	}
 	// Nothing selected nulls the tracked object.

@@ -943,14 +943,13 @@ func AirBelowThreeQuarters(u *units.Unit) bool {
 //	min = max = 0 ; per vertex: min = min(min, v), max = max(max, v)
 //	point = target.position + (max + min) / 2      (per axis, signed, truncating)
 //
-// Three things this deliberately does NOT do, each Established
-// [06 R-WPN-04 §1]: it applies neither the piece's parent offset nor its
-// current script state (turn, move, hide) — the offset is the piece's own
-// vertex cloud about its own origin; it does not go through the piece locator,
-// so the model-space triple is added AS-IS, with no `(x, y, −z)` output
-// negation; and a piece with no vertices yields the unit position exactly.
-// The muzzle-side transform of [06 §3.4], which walks the hierarchy and
-// negates Z once on output, is a different routine and is not reused here.
+// TODO(question): retail scans the instance's retained mutable points, whose
+// complete aim-time materialization order remains unresolved [06 R-WPN-04 §1].
+// Keep loaded geometry as the existing deterministic placeholder until that
+// chronology and any required host policy are settled. Parent offsets and COB
+// state can already be present in retail's retained points; their absence here
+// is not an established retail contract. The zero seed, truncating midpoint,
+// position addition without Z negation and empty-list answer are established.
 //
 // Aiming at the bare unit position instead — which this build used to do —
 // put every shot at the target's ground point: a Peewee's pellets went for a
@@ -997,7 +996,9 @@ type boxCentreEntry struct {
 // service. Every weapon slot with a unit target asks for the point every tick,
 // and the vertex scan was a measurable share of weapon service; the memo
 // returns exactly what pieceVertexBoxCentre computes for the same model and
-// piece, and UnitTargetPoint stays the definition the tests lock.
+// piece, and UnitTargetPoint stays the definition the tests lock. This cache
+// shares the immutable-geometry placeholder above; it is not evidence that
+// retail centres are independent of instance or materialization revision.
 func (s *Service) unitTargetPoint(target *units.Unit) Vec3 {
 	if s == nil || target == nil {
 		return UnitTargetPoint(target)
@@ -1034,8 +1035,9 @@ func (s *Service) unitTargetPoint(target *units.Unit) Vec3 {
 // seeded at the origin, halved per axis with truncation toward zero. The COB
 // piece index is mapped to the model piece through the binder's piece map,
 // exactly as the locator maps it — both index the same piece table [03 §2.4]
-// [04 §4.1]. The vertices are the model's as loaded, which already carry the
-// load-time half-turn of [03 §2.4]; no further sign change is applied.
+// [04 §4.1]. The vertices here are the model's as loaded, the deterministic
+// placeholder described on UnitTargetPoint. They already carry the load-time
+// half-turn of [03 §2.4]; no further sign change is applied.
 func pieceVertexBoxCentre(b *cob.Binding, cobPiece int32) ([3]numeric.Fixed, bool) {
 	if b == nil || b.Model == nil || cobPiece < 0 || int(cobPiece) >= len(b.PieceMap) {
 		return [3]numeric.Fixed{}, false

@@ -756,6 +756,14 @@ lag at 3600 and multiply speed by:
 max(0.01, (3600 - min(lag, 3600)) / 2700)
 ```
 
+**Established — reciprocal evaluation:** the division above describes the
+ratio; the executable evaluates it by multiplying the integer difference by
+the stored binary64 value `0.00037037037037037035`, then applies the minimum
+factor and multiplies the active-speed term. Replacing that stored reciprocal
+with division is not an exact floating-point identity. This is the retail
+remote-progress throttle, not Nanolathe's independently specified lockstep
+pacing policy.
+
 The resulting raw budget is:
 
 ```
@@ -811,7 +819,22 @@ on normal (<6) work and increments on capped (>=6) work:
 
 The common setter can set requested and active values together, while the budget
 can subsequently regulate active speed under sustained load. A pending-speed
-flag records active/requested disagreement. In multiplayer, pause and speed
+flag records whether active speed is **below** requested speed, using unsigned
+word comparison. **Established:** the budget samples this flag before changing
+active speed through hysteresis; it is not recomputed after that change. Thus
+the flag can remain set for the budget that catches active speed up to its
+request, or remain clear for the budget that first reduces active speed. A
+paused single-player iteration skips this sample with the whole budget call.
+Saving copies the sampled flag unchanged; it does not normalize it against
+the saved speed pair.
+
+**Established:** each slew-counter increment or decrement wraps as a signed
+16-bit value before the threshold comparison. Normal initialization and
+threshold resets keep it away from the limits. Restored extreme values can
+therefore wrap instead of crossing a threshold; ordinary-play production of
+those extreme saved values is not established.
+
+In multiplayer, pause and speed
 packets are handled by the peer dispatcher; the receive case for the
 pause/speed packet is established: a sub-type byte of zero updates the pause
 bit from the value byte, any other sub-type applies the speed through the
@@ -1290,7 +1313,9 @@ the two index resets and the two drawers.
   the rule [R-PLAT-02 §7] states: when the ring is non-empty (producer ≠
   display) and `postTick + (textscroll + 1) × 30 < currentTick` (unsigned) for
   the line at the display index, the display index advances one slot, wrapping
-  at 30; at most one line per call.
+  at 30; at most one line per call. The age calculation wraps at 32 bits
+  before the unsigned comparison. Retirement does not test `textlines`: a
+  nonempty retained span continues to age when that option is zero.
 - **What indexes it.** The poster ([07 R-HUD-03 §14.4]'s producers — chat,
   order acknowledgements, elimination lines, cheat and save cues) writes at
   the producer index and stamps the current tick; the retire and the two
@@ -1300,8 +1325,9 @@ the two index resets and the two drawers.
   the F12 key clears them in play ([07 R-CAM-01 §2]).
 - **The poster's three gates (Established).** Before anything is written the
   poster returns on an empty text line, and then returns on a zero
-  `textlines` interface option — with `textlines` 0 **no line is ever posted**,
-  so the ring stays empty and the retire has nothing to do. Fullness is tested
+  `textlines` interface option — with `textlines` 0 **no new line is posted**.
+  An initially empty ring stays empty, but changing that option does not erase
+  an existing span or suspend its retirement. Fullness is tested
   as `(producer index + 1) mod textlines == display index`, i.e. **modulo the
   option**, while both index advances wrap at **30**; the two therefore
   disagree for every `textlines` below 30, and the ring behaves as a window of

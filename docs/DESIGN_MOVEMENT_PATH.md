@@ -216,7 +216,11 @@ the table and nothing else.
 player count, unit limit, per-player eligibility and a stable per-player cursor
 poll. The provider advances that cursor through the bound player's fixed unit
 slice one physical slot per poll; holes and units without a route follower
-still consume visits. Staged request data is lookup-only: the selected
+still consume visits. A new pool seeds the cursor at its first allocatable
+slot and advances before inspection; polling and idle batching share that
+initial position. Same-world binding retains the cursor. Production binds
+the world before the battle-entry prime, whose scheduler visits persist into
+the first ordinary tick even when no request is staged. Staged request data is lookup-only: the selected
 follower's wants-repath flag, inclusive 60-tick throttle, committed start and
 goal are read at a positive poll, which stamps the timestamp. Path derives
 neither cursor nor eligibility from staged requests `[04 R-PATH-01 §6]`
@@ -353,17 +357,174 @@ scan visits only the records in the rectangle's own sectors grown by one on
 every side, column-major, each read from its head — which is reverse order of
 each unit's most recent relink `[04 R-COLL-01 §4A]` `[04 R-COLL-01 §11]`. The
 back link is Nanolathe's; retail walks from the head to find a predecessor.
-Membership is maintained at the three points the filing is written — the
-stamp's relink, the cargo detach mirror and unit finalisation — so the buckets
-and the filings agree by construction. Retail links a unit at creation and so
-has no unfiled population; here a collision record exists before its first
-stamp, and the modes that write no cell never take one, so the overlap binding
-names those separately and the sweep places them after each record's bucket. `PlaceUnit` is the direct
+Attached units retain their last-stamp sector reference but have no top-level
+link. Rectangle overlap visits each selected parent followed by its cargo list.
+`VisitUnitsInRadius` (`repair_scan.go`) excludes attached units before invoking
+any visitor: repair patrol and mission radius conditions share the top-level
+population, sector traversal and arithmetic of [04 R-COLL-01 §11] and
+[04 R-ORD-02 §4]. Rectangle overlap and owner-slice queries keep their distinct
+populations. This filter neither changes Modern traffic admission nor the
+Community patrol work options.
+
+**Remaining evidence gaps:** a reachable cached-mode-0/3 intruder restamp and
+an accepted detach without an initialized retained filing remain unresolved
+[04 R-COLL-01 §11]. Their producer histories must be established before
+changing restamp plane dispatch or inventing a missing reference.
+
+`PlaceUnit` is the direct
 position commit — retail's carried-position setter, the commit's success branch
 without the validator — used by the teleport row and by carried motion
 `[04 R-COLL-01 §4]` `[04 R-SPEC-01 §2]`. `ForgetUnit` is the only lifecycle
 cleanup: pool slots are reused by handle, so a new unit landing on a dead one's
 slot must not inherit its footprint, profile, tier or occupancy.
+
+### Canonical attachment filing correction contract
+
+**Implemented attachment-index contract.** The synchronous projection follows
+[04 R-COLL-01 §4, §4A, §11]. It adds no gameplay decision or rule set. Unit attachment lists remain authoritative; movement owns the spatial
+projection and all cell writes.
+
+**State and synchronous boundary.** Keep `SectorFiling` as the last stamp's
+selected sector, including an explicit never-stamped state and the off-map
+record. Keep actual top-level membership in the existing grid link row;
+`Filed` must no longer imply `linked`. A retained reference survives attach,
+transfer and movement while carried. A link sequence changes only on an
+actual head insertion, not on a cargo-only reference update.
+
+The cross-package boundary is one observer on `units.World`, bound
+to its movement system: `AttachmentObserver` exposes
+`AttachmentChanged(*Unit)`, with `World.SetAttachmentObserver` binding its sole
+owner and `World.NotifyAttachmentChanged(*Unit)` notifying that owner.
+`World.ClearAttachmentObserver(expected AttachmentObserver)` clears only the
+expected pointer owner, so teardown cannot remove a replacement binding. No
+second unit registry, per-unit callback or policy lookup is needed. The
+observer reads the already-written carrier relationship. Accepted attach
+unlinks the child from the top-level index without erasing its retained
+reference. Accepted detach head-inserts the child into that retained sector,
+even if the mode, cell and sector are unchanged. Call the observer after the
+cargo-chain and carrier writes, before `writeRequestedMoverMode`; rejected
+requests and an already-detached no-op never call it. Transfer and same-carrier
+reattach retain the cargo list's existing head-insertion behavior and do not
+create a transient world-bucket entry.
+
+Bind the observer before the first battle-entry allocation/attachment in
+session composition, and before recursive save restoration. `BindWorld`
+refreshes the same owner's binding without replaying events or rebuilding
+lists. Replacing a world must detach only this owner's prior binding; a nil
+observer is an explicit uncomposed host context, not a retail lifecycle.
+The observer must not run `EnsureUnit`, fabricate a retained sector from
+current XYZ, clear/stamp cells, draw RNG, call COB or change mover modes.
+An absent collision/filing record is an initialization prerequisite failure;
+its runtime site needs `TODO(question)` rather than a guessed rehead target.
+
+The order-side `dropFromCarrier` in `orders/vtolwork.go`
+uses `DetachTakeoff func(*units.Unit) bool` on the existing
+`MovementGoalAdapter`, composed to movement's shared mode-2 detach. This is a
+mutation of movement state, so it does not belong on `WorldQueryAdapter` or
+on a new rule interface. Keep the preamble's callback/order sequence; do not
+fold its activation, goal or mode tests into the detach callback. An unbound
+adapter cancels the carried work preamble through its existing incomplete-host
+context result; this is host composition handling, not a retail detach rule.
+Production composition binds the callback and has a focused regression.
+
+**Stamp and overlap.** Run sector selection at every actual ordinary stamp
+boundary, including modes with no cell plane and initialization of restored
+movers. Keep footprint bounds, committed-position sector selection and the
+setter's same-cell/same-mode early return in their existing order. A carried
+stamp refreshes only the reference; an uncarried sector change unlinks and
+head-inserts. In particular, same-cell XYZ movement never refreshes it merely
+because XYZ crosses a world-sector boundary. Quantize a carried hang position
+without adding the carrier's copied velocity again [04 R-COLL-01 §1]. The
+old delayed cached-mode transition rehead is removed from `CommitSuccess`.
+COB drop also leaves the stamp to the subsequent mover commit; its accepted
+release only relinks and requests the mode [04 R-COB-03 §5].
+
+The overlap query keeps its column-before-row sector walk. For each top-level
+parent, test the parent's cached rectangle and then each cargo rectangle in
+cargo-list order, independently of whether the parent intersected. The child's
+retained sector does not select its reachability. Do not skip the cargo walk
+when the parent is the clearing unit; the ordinary restamp flag gate handles
+self visits. A small optional attachment view beside `OverlapPositions` and
+`OverlapFilings` can expose the current carrier and borrowed cargo slice from
+`System`; fixtures without attachment state retain their ordinary parent-only
+walk. The existing reusable candidate buffer remains valid because these
+restamp callbacks do not relink. Unfiled-fixture fallback must neither offer
+attached children independently nor duplicate a parent/cargo visit.
+
+Out-of-map stamps retain the separate off-map reference without writing
+cells. A carried child has no off-map top-level link; detach head-inserts into
+that retained record. Ordinary overlap and radius scans exclude the record.
+Community's separately bound `VisitOffMapFiled` consumer retains its existing
+feature gate and synchronous traversal semantics; it reads actual top-level
+membership, never a synthesized list of cargo reference holders. This is an
+index correction, not authority to change its damage policy. Modern traffic
+admission and Community overlap arbitration remain at their existing seams.
+
+**Lifecycle scope.** Factory allocation/completion, pickup, landing transfer,
+unload, COB attach/drop, takeoff and death-cargo detach already reach
+the shared movement helpers; the order preamble above is the additional
+writer. Save restoration also uses `AttachCargoMode` and must preserve its
+recursive allocation order, without replay at publication. Finalization already uses `ForgetUnit`. Never-created allocation rollback
+releases construction placement cells and discards the existing movement record
+and filing before returning the pool slot for reuse. Use the movement cleanup owner, not a detach notification that
+would manufacture recency. Capture replaces the unit and leaves its old record
+to ordinary death cleanup; it does not transfer the cargo list.
+The direct orphan cleanup in carried movement and the units-only unwind need
+explicit boundary tests: a missing carrier is not evidence for a retail
+rehead target. No changes to owner-slice eligibility, mission adapter filters,
+restamp plane dispatch or transport admission belong in this correction.
+
+**Implementation ownership.** The lifecycle crosses these existing owners:
+
+| Files | Responsibility |
+|---|---|
+| `internal/units/attachment.go` (new), `units.go` | Single world-owned observer field, setter and notification; no gameplay logic or index storage. |
+| `internal/movement/collision.go`, `cargo.go`, `integrate.go`, `takeoff.go`, `retail_restore.go`, `forget.go` | Retained filing versus links, synchronous observer, all-mode stamp filing, direct hang quantization, cargo overlap order, initialization/restore/free cleanup. |
+| `internal/orders/binding.go`, `vtolwork.go` | Add the existing adapter's detach callback and remove the direct live relationship writer. |
+| `internal/session/composition.go` | Bind the index observer before allocation and the order detach callback; refresh idempotently. |
+| `internal/construction/nanoframe.go` | Ensure rejected-allocation rollback forgets its movement state before pool reuse. |
+| Focused tests in movement, units, orders, construction and session | Lifecycle boundaries below; update existing index-equivalence fixtures to include actual attachment events. |
+
+`place.go` already guards its same-cell path before `syncMoverStamp` and needs
+no second index implementation. Production save reference restoration already
+uses the shared attachment helper; `session/retail_restore_core.go` needs a
+composed regression, not a second attachment writer. `units/retail_restore.go`
+contains a detached reference installer, which must remain explicitly outside
+live relationship mutation unless a new production caller is introduced.
+The existing `repair_scan.go` carrier filter and mission adapter may remain;
+no consumer eligibility API changes are required.
+
+**Verification.** Independently checked arithmetic/order
+contracts are the setter's wrapped raw-coordinate footprint bias and cached
+mode comparison, and the overlap walk's signed rectangle extents, half-open
+intersection, column-major margin and parent-then-cargo sequence. Tests must
+cover:
+
+- Stationary mode-1 factory completion reheads immediately, before any mover
+  visit; rejected/no-op detach does not. Attach, carrier transfer and
+  same-carrier reattach produce no duplicate links and preserve cargo order.
+- Ordinary mode-0 carried motion changes the retained sector without adding
+  a top-level member; crossing off map and back behaves the same way.
+- The two-cell X = 127 to 129 same-anchor example keeps its old reference;
+  detach uses it. A one-cell hang at X = 127 with velocity +2 quantizes the
+  hang itself, not a future proposal. These are authored consumer-boundary
+  fixtures, not stock-animation assertions.
+- A parent outside the query rectangle but inside the scanned sector span
+  contributes intersecting cargo; a parent outside the span does not. Two
+  mode-1 intruders contesting a released cell lock the first-writer result,
+  with cargo order distinct from handle order and child-sector order.
+- Radius queries remain top-level only, including the production
+  factory/repair regression. Finalization, rollback and immediate handle
+  reuse leave no old links. Rebinding and recursive save attachment neither
+  duplicate links nor repeat head insertions. Existing Strict/Community/
+  Modern policy contracts and the Community off-map consumer still pass.
+
+`TODO(question)`: mode-0/3 restamp reachability remains separate. Restamp reads
+the cached mirror, whereas attach writes requested mode; the carried setter
+clears intruder state before changing the mirror. The remaining decider is a
+complete cached-mode/intruder writer history, including admissible mobile
+YARD_OPEN and save-loader post-load paths [04 R-COLL-01 §4]. Do not implement
+that consumer from an assumed attach-only history.
 
 **The composition root** (`integrate.go`). `System` holds the terrain, the
 compiled class table, the occupancy grid, the scheduler, the per-handle route,
@@ -472,6 +633,18 @@ The bomber break phase clears its primary target without changing control or
 Aim state. These verbs pass through the existing combat adapter
 `[04 R-AIR-01 §8]` `[06 §3.2]`.
 
+Hover attack's first approach reads the current target position while retaining
+its issued goal, so a queued attack follows a ground unit that moved during
+the wait. Strafing and bombing retain their existing cached-goal paths. The
+dogfight facing test extracts each negated component's signed whole part
+before multiplying; on arrival near a sideways target this releases the
+current marker and restarts pursuit instead of installing straight flight. The ordinary
+evasion constructor clears its target, so that inserted record completes
+before its random break leg runs. `air_target_input_test.go` checks the
+queue/executor paths, markers, pursuit counter and bounded RNG use `[04 R-AIR-01 §8]`. Stock Brawler
+and Rapier definitions admit the hover path, and stock fighter definitions
+admit the dogfight path; occurrence frequency in stock battles is unmeasured.
+
 `VTOL_SeekAttack` calls orders' `AutonomousEngage` for a retained target and
 `AutonomousAcquire` for its search phase. Both issue resolved attack records;
 the targeted restart requires the new queue head to exist before it returns.
@@ -489,7 +662,10 @@ copies the piece heading and pitch and the carrier's velocity, takes the
 floater deck-height clamp, and returns before ordinary footprint validation
 while still clearing and stamping through the carried-position setter
 `[04 R-FAC-02 §2]`. `CanTransport` is the nine-reject admission predicate in
-order `[04 §10.2]`. `legVTOLPickup` and `legVTOLUnload` are the two air
+order `[04 §10.2]`. Its final scalar gate accepts zero and unordered values;
+direct boundary fixtures lock that consumer without claiming a naturally
+generated NaN or a complete restore-to-command history. `legVTOLPickup` and
+`legVTOLUnload` are the two air
 transport executors; both are pump-driven legs whose commands are ordinary air
 path markers, and the gates, the interrupt bit, the drop point, the released
 cargo's height, the two climb-aways and the `becarried` re-arm are
@@ -631,9 +807,12 @@ step accumulator, topped up once per call by an equal share
 `stepAllowance / playerCount` in integer division, and charged exactly the setup
 steps and heap pops the search reports. Each slice is limited to 100 heap pops.
 A budget-exhausted slice ends the *iteration*, not the call: the request stays
-latched and keeps taking slices from its own player's accumulator until that
-accumulator goes non-positive. The scheduler runs once per tick, before the
-per-player unit sweeps `[04 §7.3]` `[04 R-PATH-01 §6]` `[04 R-PATH-01 §10]`.
+latched and keeps taking slices while the combined call budget is positive,
+charging its owner's accumulator even below zero. Positive owner credit is
+required only when choosing a new request. Negative balances carry forward
+and receive the next call's equal share. The scheduler runs once per tick,
+before the per-player unit sweeps `[04 §7.3]` `[04 R-PATH-01 §6]`
+`[04 R-PATH-01 §10]`.
 
 The movement provider reads eligibility from the session player record at the
 actual slot index; the participant count remains only the equal-share divisor.
@@ -875,6 +1054,17 @@ attach phase ends the transport. Admission is the nine rejects in order — the
 mover, a candidate in active locomotion, a ground carrier against a candidate
 authoring a non-negative `MinWaterDepth`, and a submerged candidate
 `[04 §10.2]` `[04 R-AIR-01 §9]` `[04 R-AIR-01 §10]` `[04 R-UNIT-06 §3]`.
+
+Pickup lowering installs the no-piece follow-piece marker: it follows the
+cargo origin and requires matching headings. Its altitude offset is sampled
+once from the carrier's oriented piece offset, without adding the carrier
+origin [04 R-AIR-01 §9]. Selected landing pads instead resolve their mapped
+piece hierarchy and target orientation on every goal update through the
+existing COB `ComposePiece` surface. Plain follow and invalid piece indices
+keep the target origin [04 R-AIR-01 §14.1][04 R-REV-02]. These shared geometry
+rules leave Modern pad reservation and admission unchanged. The focused
+transport audit fixtures cover callback/RNG preservation, heading arrival,
+nonidentity piece mapping, live animation and a consumer-only tilted pose.
 
 **Explicit air attacks at a position (Established retail behavior).** Ground
 and feature attack commands resolve to `AirStrike` or `AirToGround` with a

@@ -204,7 +204,7 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 		}
 	}
 	if custom.w > 0.5 {
-		if mod(sp.x+sp.y+custom.z, 2.0) < 0.5 {
+		if mod(sp.x+sp.y+custom.z, 2.0) > 0.5 {
 			discard()
 		}
 		return vec4(imageSrc2AtFromSrc0Pos(imageSrc0Origin() + vec2(%d.5, %d.5)).rgb, 1.0)

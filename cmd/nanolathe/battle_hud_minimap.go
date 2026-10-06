@@ -182,8 +182,8 @@ func (h *retailBattleHUD) rebuildRadar(b *battleSession, cur *frame.Frame, layou
 			// "no unit hovered" value and must not ring the null slot.
 			Hovered: published.Handle != 0 && published.Handle == b.footerHoverUnit,
 			Stealth: published.Stealth,
-			// RangeStatus is the selected-unit circle gate; Stealth stays separate
-			// because it is a blip-blink term, not a circle term [03 §3.9].
+			// RangeStatus is the selected-unit circle gate; the blip's
+			// independent blink term is BlinkSuppress [03 §3.9].
 			RangeStatus: rangeCircles, Status: published.Status,
 			BlinkSuppress: published.BlinkSuppress, Visible: published.Visible,
 			LocalPlayer:  cur.ViewingPlayer,
@@ -194,9 +194,11 @@ func (h *retailBattleHUD) rebuildRadar(b *battleSession, cur *frame.Frame, layou
 		}
 		if radarContactAdmitted(contact, blink) {
 			regularArt = append(regularArt, radarGAFFrame(h.radarBlipGAF, h.radarOwnerFrameIndex(published, radarGAFFrameCount(h.radarBlipGAF))))
-			if contact.Hovered {
-				hoverArt = append(hoverArt, radarGAFFrame(h.radarHoverGAF, 0))
-			}
+		}
+		// Hover art follows contact admission, independently of the regular
+		// blip's blink term. Its callback index has its own queue [03 §3.9].
+		if contact.Hovered && b.radarUnitContactAdmitted(cur, &published) {
+			hoverArt = append(hoverArt, radarGAFFrame(h.radarHoverGAF, 0))
 		}
 		if len(published.Rings) != 0 {
 			ring := published.Rings[0]

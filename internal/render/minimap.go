@@ -54,10 +54,11 @@ func (r *RadarSurface) Set(x, y int, v byte) bool {
 // BuildRadarPicture builds PICTURE from terrain or baked bytes [03 §3.7][03 §3.4][07 §10].
 // playW = Wpix-32, playH = Hpix-128; RadarW/H are letterboxed via camera.LayoutMinimap.
 // baked == nil or len==0 uses 2× supersampled tile sampling and ALP 2×2→1 blending [03 §3.7][fmt tnt][fmt pal].
-// When baked != nil, its top-left used sub-rectangle (see
-// bakedMinimapUsedRect [fmt tnt "Minimap"]) is rescaled through the
-// established picture path [03 §3.7]; the padded remainder of the stored
-// bitmap never enters the resize.
+// A baked source supplies fixed 2×2 blocks at its declared row stride, without
+// cropping or ratio scaling. A source that fails BakedRadarSourceFits returns
+// nil as checked host validation; retail's unsafe undersized-source outcome is
+// unknown. The battle HUD tests the source first and substitutes the generated
+// picture, so an unusable baked minimap never reaches this rejection there.
 // The ALP table is mandatory: there is no nearest-neighbor compatibility path.
 // The letterbox bars are not this function's to fill. No radar surface covers
 // them: PICTURE, MAPPED and FINAL are all allocated at exactly the fitted
@@ -92,13 +93,12 @@ func BuildRadarPicture(t *world.Terrain, playW, playH int32, m camera.Minimap, b
 	pitch := (w + 3) &^ 3 // [03 §3.6][03 §4.1] pitch (w+3)&~3
 	bits := make([]byte, w*h)
 
-	// Baked path: rescale through the established picture path [03 §3.7].
+	// Baked path: retain the stored row stride for fixed-half reduction [03 §3.7].
 	if len(baked) > 0 {
-		if bakedW <= 0 || bakedH <= 0 || bakedW > len(baked)/bakedH {
+		if !BakedRadarSourceFits(m, baked, bakedW, bakedH) {
 			return nil
 		}
-		srcW, srcH, src := bakedMinimapUsedRect(baked, bakedW, bakedH, playW, playH)
-		resizeALP(bits, w, h, src, srcW, srcH, tables)
+		reduceHalfALP(bits, w, h, baked, bakedW, tables)
 		return &RadarSurface{W: w, H: h, Pitch: pitch, Bits: bits}
 	}
 
@@ -173,94 +173,32 @@ func BuildRadarPicture(t *world.Terrain, playW, playH int32, m camera.Minimap, b
 	}
 
 	// Two-level row-first ALP blend [03 §3.7].
-	resizeALP(bits, w, h, temp, tw, th, tables)
+	reduceHalfALP(bits, w, h, temp, tw, tables)
 
 	return &RadarSurface{W: w, H: h, Pitch: pitch, Bits: bits}
 }
 
-// bakedMinimapUsedRect isolates the real terrain image inside a baked TNT
-// minimap, discarding the fill that pads the short axis [fmt tnt "Minimap"].
-//
-// The stored bitmap is `bakedW x bakedH` (252x252 in nearly every retail map,
-// 252x256 on at least one), but on a non-square map only a top-left
-// sub-rectangle holds real pixels: the long play-area axis fills its full
-// stored dimension and the short axis is scaled down by the same ratio, the
-// rest of that axis being fill. This mirrors camera.LayoutMinimap's own
-// long-side fit, with the baked bitmap's own stored dimension standing in for
-// the 126-pixel canvas constant, so no dimension is hard-coded — only the
-// bytes actually read from the file drive it [fmt tnt].
-//
-// Established (2026-09-03) against five shipped maps spanning wide, tall and
-// near-square play areas: a wide map's baked image uses its full stored
-// width with the bottom rows padded, a tall map's baked image uses its full
-// stored height with the right columns padded, and in every case the short
-// axis's used length equals `playShort*bakedLong/playLong` truncated — the
-// exact figure measured in each file's byte-for-byte fill boundary. See
-// [fmt tnt "Minimap"].
-//
-// When playW or playH is unavailable (<=0) the whole stored bitmap is
-// returned unchanged rather than guessed at.
-func bakedMinimapUsedRect(baked []byte, bakedW, bakedH int, playW, playH int32) (usedW, usedH int, pixels []byte) {
-	if playW <= 0 || playH <= 0 {
-		return bakedW, bakedH, baked
-	}
-	usedW, usedH = bakedW, bakedH
-	if playW < playH {
-		usedW = int(int64(playW) * int64(bakedW) / int64(playH)) // TRUNC IDIV, short axis
-		if usedW < 1 {
-			usedW = 1
-		}
-		if usedW > bakedW {
-			usedW = bakedW
-		}
-	} else if playH < playW {
-		usedH = int(int64(playH) * int64(bakedH) / int64(playW)) // TRUNC IDIV, short axis
-		if usedH < 1 {
-			usedH = 1
-		}
-		if usedH > bakedH {
-			usedH = bakedH
-		}
-	}
-	if usedW == bakedW && usedH == bakedH {
-		return bakedW, bakedH, baked
-	}
-	// The used sub-rectangle sits at the top-left, but its rows are not
-	// contiguous in the stored buffer unless usedW == bakedW (the stored row
-	// stride is always bakedW), so a narrower crop must be copied row by row
-	// into a tightly packed buffer before the generic resizer can treat it as
-	// a plain srcW x srcH image.
-	cropped := make([]byte, usedW*usedH)
-	for y := 0; y < usedH; y++ {
-		copy(cropped[y*usedW:(y+1)*usedW], baked[y*bakedW:y*bakedW+usedW])
-	}
-	return usedW, usedH, cropped
+// BakedRadarSourceFits reports whether a baked minimap of bakedW×bakedH stored
+// pixels can feed the fixed 2×2 reducer for the fitted picture m: its declared
+// rectangle must be complete in baked and cover twice the picture in each
+// dimension. Retail performs no such check, and what it reads from an
+// undersized source is Unknown [03 §3.7]; this is host validation only. The
+// height test precedes the division, so a nonpositive height never divides.
+func BakedRadarSourceFits(m camera.Minimap, baked []byte, bakedW, bakedH int) bool {
+	w, h := int(m.W), int(m.H)
+	return w > 0 && h > 0 && bakedW >= 2*w && bakedH >= 2*h && bakedW <= len(baked)/bakedH
 }
 
-// resizeALP applies the established arbitrary-source/destination ALP path.
-// Each destination sample maps to a source cell by truncating the ratio. The
-// adjacent source sample is blended in each axis, then those row blends are
-// blended once more; every intermediate remains a palette index [03 §3.7].
-func resizeALP(dst []byte, dstW, dstH int, src []byte, srcW, srcH int, tables *palette.Tables) {
-	if dstW <= 0 || dstH <= 0 || srcW <= 0 || srcH <= 0 || len(dst) < dstW*dstH || len(src) < srcW*srcH {
-		return
-	}
+// reduceHalfALP reduces fixed 2×2 source blocks with row-first ALP blends.
+// Callers validate the source extent; srcW remains the authored row stride,
+// even when only a top-left prefix supplies the picture [03 §3.7].
+func reduceHalfALP(dst []byte, dstW, dstH int, src []byte, srcW int, tables *palette.Tables) {
 	for y := 0; y < dstH; y++ {
 		for x := 0; x < dstW; x++ {
-			sx, sy := x*srcW/dstW, y*srcH/dstH
-			sx1, sy1 := sx+1, sy+1
-			if sx1 >= srcW {
-				sx1 = srcW - 1
-			}
-			if sy1 >= srcH {
-				sy1 = srcH - 1
-			}
-			p00 := src[sy*srcW+sx]
-			p01 := src[sy*srcW+sx1]
-			p10 := src[sy1*srcW+sx]
-			p11 := src[sy1*srcW+sx1]
-			top := tables.Alpha[int(p00)*256+int(p01)]
-			bottom := tables.Alpha[int(p10)*256+int(p11)]
+			topLeft := 2*y*srcW + 2*x
+			bottomLeft := topLeft + srcW
+			top := tables.Alpha[int(src[topLeft])*256+int(src[topLeft+1])]
+			bottom := tables.Alpha[int(src[bottomLeft])*256+int(src[bottomLeft+1])]
 			dst[y*dstW+x] = tables.Alpha[int(top)*256+int(bottom)]
 		}
 	}
@@ -361,7 +299,7 @@ type MinimapContact struct {
 	// The word is host presentation state, never simulation state, so the
 	// caller resolves it and hands the answer in [07 R-HUD-03 §1][I6].
 	Hovered bool
-	Stealth bool // when true gate on blink [03 §3.9]
+	Stealth bool // definition metadata; BlinkSuppress owns blip blinking [03 §3.9]
 	// RangeStatus is the selected-unit circle gate of [03 §3.9] "Selected-unit
 	// circle gate correction": the selected/range-status bit is set AND the
 	// instance is active or the definition is not on/off-capable. It governs
@@ -441,88 +379,44 @@ func rebuildFinalExactInto(dst, mapped *RadarSurface, m camera.Minimap, playW, p
 	final.W, final.H, final.Pitch = mapped.W, mapped.H, (mapped.W+3)&^3
 	final.Bits = resizeRadarBits(final.Bits, mapped.W*mapped.H)
 	copy(final.Bits, mapped.Bits)
-	// Unit blips precede all circles, and the hover ring is the next layer.
+	// Finish one contact before starting the next: later units can overwrite
+	// earlier units' hover art and circles [03 §3.9]. Only the regular blip
+	// uses the blink term; a hovered admitted contact keeps its hover art.
 	for _, c := range contacts {
-		if !MinimapBlipAdmitted(c, blink) {
+		if !MinimapContactGate(c) {
 			continue
 		}
 		rx, ry := RadarProjection(c.WorldX, c.WorldZ, c.WorldY, playW, playH, m)
 		if blit != nil {
-			blit(final, int(rx), int(ry), c.Palette, false)
-		}
-	}
-	for _, c := range contacts {
-		if !MinimapBlipAdmitted(c, blink) || !c.Hovered {
-			continue
-		}
-		rx, ry := RadarProjection(c.WorldX, c.WorldZ, c.WorldY, playW, playH, m)
-		if blit != nil {
-			blit(final, int(rx), int(ry), c.Palette, true)
-		}
-	}
-
-	// Layer 4 — sensor circles, drawn in this same ascending walk after every
-	// blit, so they overwrite earlier contact pixels [03 §3.9] "Contact
-	// layering and ring-only cases".
-	//
-	// Two gates, and only two. The unit must pass the pass's blip gate, and the
-	// selected-unit circle gate must hold: the selected/range-status bit set,
-	// and the instance active or the definition not on/off-capable [03 §3.9]
-	// "Selected-unit circle gate correction" (Established). The producer folds
-	// the activation term into RangeStatus, so the test here is the bit alone.
-	//
-	// The per-unit blink countdown and the definition stealth flag are NOT
-	// terms of this gate: the same section establishes that a unit whose blip
-	// is suppressed on a non-blink phase still runs its range branches, which
-	// is what "ring-only" names, and that the cloak/hidden bit and `stealth`
-	// are not this callback gate.
-	for _, c := range contacts {
-		if !MinimapContactGate(c) || !c.RangeStatus {
-			continue
-		}
-		rx, ry := RadarProjection(c.WorldX, c.WorldZ, c.WorldY, playW, playH, m)
-		if c.RawDistRadar != 0 || c.RawDistSonar != 0 {
-			d := c.RawDistRadar
-			if c.RawDistSonar > d {
-				d = c.RawDistSonar
+			if MinimapBlipAdmitted(c, blink) {
+				blit(final, int(rx), int(ry), c.Palette, false)
 			}
-			if r := RadarRadius(d, m.W, playW); r > 0 {
-				drawCircle(final, int(rx), int(ry), int(r), radarColor)
+			if c.Hovered {
+				blit(final, int(rx), int(ry), c.Palette, true)
 			}
 		}
-		if c.RawDistJamR != 0 {
-			if r := RadarRadius(c.RawDistJamR, m.W, playW); r > 0 {
-				drawCircle(final, int(rx), int(ry), int(r), jammerColor)
+		// The publisher folds selection and activation into RangeStatus.
+		// Each nonzero authored distance is scaled separately; zero and
+		// negative projected radii still reach the circle helper [03 §3.10].
+		if c.RangeStatus {
+			for _, sensor := range [...]struct {
+				distance int32
+				color    byte
+			}{
+				{c.RawDistRadar, radarColor}, {c.RawDistSonar, radarColor},
+				{c.RawDistJamR, jammerColor}, {c.RawDistJamS, jammerColor},
+			} {
+				if sensor.distance != 0 {
+					r := RadarRadius(sensor.distance, m.W, playW)
+					drawCircle(final, int(rx), int(ry), int(r), sensor.color)
+				}
 			}
 		}
-		if c.RawDistJamS != 0 {
-			if r := RadarRadius(c.RawDistJamS, m.W, playW); r > 0 {
-				drawCircle(final, int(rx), int(ry), int(r), jammerColor)
-			}
-		}
-	}
-
-	// Layer 5 — weapon/interceptor rings, a separate layer after the circles
-	// [03 §3.9].
-	//
-	// The ring loop sits **under the selected bit**, like the circles of layer
-	// 4: within one unit's iteration retail runs the sensor circles and then,
-	// independently of their activation term but still under status bit 4, the
-	// ring loop [03 R-MM-01 §3 "rings are gated on selection"]. A detected
-	// enemy is never ringed. This loop used to run for any admitted contact
-	// carrying the ring flag, which drew enemy weapon rings on the minimap.
-	//
-	// The blink and stealth terms are not part of it either: a unit whose blip
-	// is suppressed on a non-blink phase still runs its range branches, which
-	// is what §3.9 calls the ring-only case — the same reason layer 4 carries
-	// no blink term.
-	for _, c := range contacts {
-		if !MinimapContactGate(c) || c.Status&minimapSelectedStatus == 0 || !c.RingEnabled {
-			continue
-		}
-		rx, ry := RadarProjection(c.WorldX, c.WorldZ, c.WorldY, playW, playH, m)
-		r := RadarRadius(c.RingRange, m.W, playW)
-		if r > 0 {
+		// Weapon slots follow this unit's sensors, independently of its
+		// activation gate. Extra slot records immediately follow their owner
+		// and have nil regular art at the HUD adapter [03 §3.9].
+		if c.Status&minimapSelectedStatus != 0 && c.RingEnabled {
+			r := RadarRadius(c.RingRange, m.W, playW)
 			if c.RingDashed {
 				drawDashedCircle(final, int(rx), int(ry), int(r), ringColor, blink.Phase&1 != 0)
 			} else {
@@ -567,10 +461,11 @@ func RadarRadius(dist int32, radarSize int32, playSize int32) int32 {
 }
 
 // drawCircle joins the 32 authored angular samples with clipped integer lines.
+// A zero radius paints the centre; signed radii use the same trig and clip path.
 // The angular increment is 0x800 (32 segments), and the fixed-point trig table
 // is the shared retail table [03 §3.10][04 §5.1].
 func drawCircle(s *RadarSurface, cx, cy, r int, color byte) {
-	if s == nil || s.Bits == nil || r <= 0 {
+	if s == nil || s.Bits == nil {
 		return
 	}
 	for i := 0; i < 32; i++ {
@@ -622,7 +517,7 @@ func line(s *RadarSurface, x0, y0, x1, y1 int, color byte) {
 // drawDashedCircle emits alternating 32-segment arcs. Phase selects the
 // established segment parity; there are no extra endpoint writes [03 §3.10].
 func drawDashedCircle(s *RadarSurface, cx, cy, r int, color byte, phase bool) {
-	if s == nil || s.Bits == nil || r <= 0 {
+	if s == nil || s.Bits == nil {
 		return
 	}
 	offset := 0

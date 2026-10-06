@@ -331,35 +331,28 @@ func CompileSounds(fs vfs.FSOps) (*SoundData, error) {
 	return &SoundData{Categories: cats, CategoryOrder: catOrder, Aliases: aliases, AliasOrder: aliasOrder}, nil
 }
 
-// ResolveSoundCategory maps a unit definition's authored `soundcategory` text
-// to a compiled category [02 §5 "Cross-reference failure policy"]
-// [02 R-CAT-01 §5]. Established: an absent key resolves to category index 0 —
-// the first section of gamedata/sound.tdf — and a present value is matched
-// case-insensitively against the category names; on a miss the authored text
-// is put through the ordinary C-runtime decimal conversion and the result is
-// used as the ordinal, so non-numeric text (`NONE`, `CORE_KBOT`) is 0 and again
-// selects the first category. There is no muted placeholder record: eleven
-// stock definitions reach this path and speak the first category's lines.
-//
-// An absent key and an authored empty value coincide here: the conversion of
-// empty text is 0, which is also the absent-key index.
+// ResolveSoundCategory follows file order over retained category names, then
+// falls back to decimal conversion. The chosen ordinal narrows to unsigned
+// 16 bits before lookup [02 R-CAT-01 §5]. An absent or non-numeric value selects
+// the first authored category; there is no muted placeholder.
 func (c *Catalog) ResolveSoundCategory(authored string) *SoundCategory {
 	if c == nil {
 		return nil
 	}
-	if key := CanonicalKey(authored); key != "" {
-		if sc, ok := c.Sounds[key]; ok && sc != nil {
-			return sc
+	authored = boundedString(authored, 99)
+	ordinal := uint16(formats.ParseTDFInteger(authored))
+	if authored != "" {
+		for i, category := range c.SoundCategoryOrder {
+			if category != nil && asciiEqualFold(category.Name, authored) {
+				ordinal = uint16(i)
+				break
+			}
 		}
 	}
-	ordinal := formats.ParseTDFInteger(authored)
-	if ordinal < 0 || int(ordinal) >= len(c.SoundCategoryOrder) {
-		// TODO(question): retail stores the converted ordinal unbounded and
-		// [03 §8.3] step 1 indexes the record table with it, so an out-of-range
-		// ordinal reads past the loaded categories; nothing establishes what it
-		// then plays. Settled by tracing the category-record indexing for an
-		// ordinal above the loaded count. Until then an out-of-range ordinal
-		// resolves to no category, which is silent.
+	if int(ordinal) >= len(c.SoundCategoryOrder) {
+		// TODO(question): the retained unsigned ordinal indexes beyond retail's
+		// loaded category table. A reproducible invalid-index playback trace
+		// would settle its outcome; until then return no category [02 R-CAT-01 §5].
 		return nil
 	}
 	return c.SoundCategoryOrder[ordinal]

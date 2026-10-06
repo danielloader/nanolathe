@@ -11,8 +11,8 @@ import (
 )
 
 // Stock dropped weapons fire one root at each authored reload boundary
-// [06 §3.3][06 §4.2], then stop at lethal intake before the later slot-end
-// finalization [06 §9.1][06 §12.1]. This probes those gates with retail scripts
+// [06 §3.3][06 §4.2]. Lethal intake retains a weapon visit until slot-end
+// finalization [04 R-COB-02 §2]. This probes those gates with retail scripts
 // while keeping the point target fixed; it does not prescribe bombs per run.
 func TestRetailBomberCadenceAndDeath(t *testing.T) {
 	s := aiE2ESkirmish(t, "ashap plateau", 7)
@@ -59,8 +59,11 @@ func TestRetailBomberCadenceAndDeath(t *testing.T) {
 		}
 		for tick := uint32(21); tick <= 40; tick++ {
 			sum := s.Combat.StepWeaponsForUnit(u, tick, s.Units, s.Vis, s.World, s.Econ, s.Catalog, s.SimRNG(), s.CrtRNG())
-			if sum.Fired != 0 {
-				t.Fatalf("%s fired after lethal intake at %d", key, tick)
+			if tick == 21 && sum.Fired > 1 {
+				t.Fatalf("%s emitted %d roots in its death-latched visit", key, sum.Fired)
+			}
+			if tick > 21 && sum.Fired != 0 {
+				t.Fatalf("%s fired after allocation finalization at %d", key, tick)
 			}
 			if tick == 21 {
 				s.finalizePhase2Death(h, tick)

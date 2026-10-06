@@ -411,7 +411,7 @@ func (f *fogPass) encodeGrid(region fogRegion, ops []render.FogOp, w, h int32, s
 				f.gridBuf[at+0] = fogCh1GrayFill
 			}
 		case render.FogKindPatterned:
-			// hi==15 dithered: the dark index at (x+y+parity)&1==1
+			// hi==15 dithered: the dark index at (x+y+parity)&1==0
 			// (fogFillChecker) [03 §3.3][R-RR16-A §2].
 			f.gridBuf[at+0] = fogCh1PatFill
 		case render.FogKindGAFCh1:

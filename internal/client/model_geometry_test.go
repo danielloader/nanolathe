@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
+	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	presentationrender "github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
@@ -203,8 +204,8 @@ func TestDirectDebrisProjectionGateAndClassicScale(t *testing.T) {
 	draw.WorldPos[0] = numeric.FixedFromInt(10).Add(1)
 
 	classic, ok := c.composeDirectDebrisModel(draw, teamColor{}, 3)
-	if !ok {
-		t.Fatal("classic direct debris did not compose")
+	if !ok || !classic.raster.framebuffer || classic.raster.height != nil {
+		t.Fatal("classic direct debris lost its keyless framebuffer mapper")
 	}
 	c.finishModel(classic, nil)
 	models := c.list.ModelCommands()
@@ -217,5 +218,41 @@ func TestDirectDebrisProjectionGateAndClassicScale(t *testing.T) {
 	}
 	if c.indexed[44*c.width+44] == 77 {
 		t.Fatal("direct 2x replay scaled framebuffer coordinates twice")
+	}
+}
+
+// A wrapped zero must retain its erase/tint mode in the device packet, rather
+// than becoming an absent pass [03 R-REN-03A §8].
+func TestModelGeometryRecordsActiveZeroWaterline(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		owner, kind uint8
+		want        drawlist.ModelWaterline
+	}{
+		{"own body", 0, modelCursorUnit, drawlist.ModelWaterlineBlue},
+		{"unseen enemy body", 1, modelCursorUnit, drawlist.ModelWaterlineErase},
+		{"feature", 1, modelCursorFeature, drawlist.ModelWaterlineBlue},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := testModelTextureClient()
+			c.buffer = frame.NewBuffer()
+			publishSeaLevel(t, c, 1, 206, 0)
+			c.geometryOnlyModels = true
+			draw := testPrimitiveDraw(presentationrender.PrimitiveDraw{
+				IsColored: 1, ColorIndex: 40, VertexIndices: []uint16{0, 1, 2, 3},
+			}, [][3]numeric.Fixed{fixedVertex(0, 0, 0), fixedVertex(8, 0, 0), fixedVertex(8, 0, -8), fixedVertex(0, 0, -8)})
+			draw.KeyPlane = true
+			if !c.drawModel(draw, tc.owner, teamColor{}, 1, tc.kind, nil, 0) {
+				t.Fatal("model was not recorded")
+			}
+			models := c.list.ModelCommands()
+			if len(models) != 1 || models[0].Geometry == nil {
+				t.Fatal("geometry packet absent")
+			}
+			g := models[0].Geometry
+			if g.Waterline != tc.want || g.WaterlineKey != 0 {
+				t.Fatalf("waterline mode/key=%v/%d, want %v/0", g.Waterline, g.WaterlineKey, tc.want)
+			}
+		})
 	}
 }

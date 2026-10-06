@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -31,6 +32,38 @@ func testAudioFS(t *testing.T, name string) vfs.FSOps {
 	}
 	t.Cleanup(func() { fs.Close() })
 	return fs
+}
+
+// Registration overflow resolves the first real alias, including through the
+// ordinary presentation service; failed sample probes stay silent [03 §8.3].
+func TestServiceAliasOverflowPlaysFirstRegisteredSample(t *testing.T) {
+	s := NewService(testAudioFS(t, "first"))
+	old := GlobalOutput()
+	spy := &outputSpy{}
+	SetGlobalOutput(spy)
+	t.Cleanup(func() { SetGlobalOutput(old) })
+	if !s.PlayUICue("first") || len(spy.plays) != 1 {
+		t.Fatal("first registration did not play")
+	}
+	first := spy.plays[0].sample
+	if s.Registry.Lookup("first") != 0 {
+		t.Fatal("first sample did not occupy slot zero")
+	}
+	if s.PlayUICue("missing") || len(spy.plays) != 1 {
+		t.Fatal("missing sample was not silent")
+	}
+	for s.Registry.Count() < maxAliases {
+		s.Registry.Register(fmt.Sprintf("unavailable%d", s.Registry.Count()))
+	}
+	if !s.PlayUICue("overflow") || len(spy.plays) != 2 || spy.plays[1].sample != first {
+		t.Fatal("full registry did not play the first registered sample")
+	}
+	if s.Registry.Count() != maxAliases || s.Registry.Lookup("overflow") != MissingAlias {
+		t.Fatal("overflow changed registration identity")
+	}
+	if s.PlayUICue("missing") || len(spy.plays) != 2 {
+		t.Fatal("existing failed probe aliased the first sample after overflow")
+	}
 }
 
 func TestServiceInitBindsLaterFSWithoutReplacingStateOrPlayback(t *testing.T) {
@@ -200,8 +233,10 @@ func TestServiceStreamEarlierTimerUsesLaterPath(t *testing.T) {
 		t.Fatalf("earlier timer did not play later path once: plays=%d", len(spy.streamPlays))
 	}
 	s.TickStream(200)
-	if len(spy.streamPlays) != 1 {
-		t.Fatalf("later recorded timer replayed stream: %d", len(spy.streamPlays))
+	// The first callback removed the later recorded slot, leaving its own
+	// period-100 timer armed and reloaded [03 R-AUD-02 §1].
+	if len(spy.streamPlays) != 2 {
+		t.Fatalf("older timer did not reopen the current path: %d", len(spy.streamPlays))
 	}
 }
 

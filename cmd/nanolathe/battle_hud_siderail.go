@@ -331,22 +331,20 @@ func commandPageIsPaged(f *frame.Frame) bool {
 // No click writes the page field: it is seeded at **unit creation**, page 1
 // with the paged bit set when the definition's page-count byte is at least 2
 // and both cleared otherwise [07 R-HUD-04 §4 "First build page"]. The seed
-// lives in internal/units' allocator initializer, which is why the zero-field
-// case this function used to guess about no longer arises for a multi-page
-// builder. The clamp below stays as a bounds guard for a single-page or
-// malformed record, not as a stand-in for the missing producer.
+// lives in internal/units' allocator initializer. A zero field arises for a
+// builder with nine or more pages, where the field operations wrap past seven,
+// and the click then shows that zero field as retail does; below nine pages the
+// bounds guard of hud.PageState.BuildButton covers a single-page or malformed
+// record [07 R-HUD-03 §6].
 func buildButtonPage(f *frame.Frame) int {
 	if f == nil || f.CommandPage.Builder == 0 {
 		return 0
 	}
-	remembered := 0
+	var state hud.PageState
 	if builder, found := snapshotUnitByHandle(f, f.CommandPage.Builder); found {
-		remembered = hud.RememberedPage(builder.Flags)
+		state = hud.PageStateOf(builder.Flags)
 	}
-	if remembered <= 0 || remembered >= int(f.CommandPage.PageCount) {
-		return 1
-	}
-	return remembered
+	return state.BuildButton(int(f.CommandPage.PageCount))
 }
 
 // commandGadgetVerdict resolves one authored gadget against the command-button

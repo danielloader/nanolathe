@@ -4,7 +4,8 @@ import "testing"
 
 func TestModelGeometryCloneOwnsFaceStorage(t *testing.T) {
 	geometry := &ModelGeometry{
-		Eligible: true,
+		Eligible:   true,
+		CachedSeed: ModelCachedSeed{Width: 20, Height: 12, OriginX: 7, OriginY: 3},
 		Faces: []ModelFace{{
 			Color:    7,
 			Vertices: []ModelVertex{{X: 1, Y: 2, Key: -3, U: 4, V: 5, Shade: 6}, {X: 7, Y: 8, Key: 9}},
@@ -19,6 +20,10 @@ func TestModelGeometryCloneOwnsFaceStorage(t *testing.T) {
 	list.RecordModel(Model{Classic: classic, Geometry: geometry})
 	clone := list.Clone()
 
+	geometry.CachedSeed.Width = 99
+	if got := clone.model[0].Geometry.CachedSeed; got != (ModelCachedSeed{Width: 20, Height: 12, OriginX: 7, OriginY: 3}) {
+		t.Fatalf("cloned cached seed = %+v", got)
+	}
 	geometry.Faces[0].Vertices[0].X = 99
 	if got := clone.model[0].Geometry.Faces[0].Vertices[0].X; got != 1 {
 		t.Fatalf("cloned geometry aliases recorded face vertices: X=%d, want 1", got)

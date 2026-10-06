@@ -11,14 +11,16 @@ import (
 )
 
 // RetailLoadRoute is the load branch selected by the Summary account. A
-// BetweenMissions value of one selects campaign continuation; absent or zero
-// selects battle restoration. [08 "battle versus campaign continuations and timing"]
+// BetweenMissions scalar selects campaign continuation for kind 1 and fresh
+// battle entry for kind 2; absence selects restoration. The two presence
+// consumers differ [08 "Battle versus campaign continuations and timing"].
 type RetailLoadRoute uint8
 
 const (
 	RetailLoadRouteInvalid RetailLoadRoute = iota
 	RetailLoadRouteCampaignContinuation
 	RetailLoadRouteBattleRestoration
+	RetailLoadRouteFreshEntry
 )
 
 var (
@@ -30,6 +32,9 @@ var (
 	// without supplying the mounted content and seed dependencies needed to
 	// construct its detached candidate.
 	ErrRetailLoadDependenciesMissing = errors.New("session: retail load dependencies missing")
+	// ErrRetailFreshEntryUnimplemented identifies the marker-present kind-2
+	// route whose retained front-end/player snapshot is not supplied by this API.
+	ErrRetailFreshEntryUnimplemented = errors.New("nanolathe: retail fresh entry is unresolved: logical path save/Summary, providers searched [bank], expected a verified retained entry snapshot")
 )
 
 // RetailCampaignContinuation is the typed state carried from a between-
@@ -72,15 +77,17 @@ func PreflightRetailLoad(bank *save.Bank) (RetailLoadResult, error) {
 	}
 
 	route := RetailLoadRouteBattleRestoration
-	if summary.BetweenMissions == 1 {
-		route = RetailLoadRouteCampaignContinuation
+	if summary.HasBetweenMissions {
+		route = RetailLoadRouteFreshEntry
+		if summary.Gametype == GametypeCampaign {
+			route = RetailLoadRouteCampaignContinuation
+		}
 	}
 	return RetailLoadResult{Summary: summary, Route: route}, nil
 }
 
 // LoadRetailSaveWithDeps prepares a complete detached load result. Branching
-// is strictly on Summary.BetweenMissions == 1: every other value is an
-// in-battle restoration [08 R-SAVE-02 §11].
+// follows the separate dialog and worker presence gates [08 R-SAVE-02 §11].
 func LoadRetailSaveWithDeps(bank *save.Bank, deps RetailLoadDeps) (RetailLoadResult, error) {
 	preflight, err := PreflightRetailLoad(bank)
 	if err != nil {
@@ -88,6 +95,13 @@ func LoadRetailSaveWithDeps(bank *save.Bank, deps RetailLoadDeps) (RetailLoadRes
 	}
 	if deps.FS == nil {
 		return RetailLoadResult{}, ErrRetailLoadDependenciesMissing
+	}
+	if preflight.Route == RetailLoadRouteFreshEntry {
+		// TODO(question): verify retained setup/player/preference producers for
+		// each load origin and supply their detached snapshot. This route skips
+		// saved-state restoration, commander allocation and resource grants
+		// [08 "Battle versus campaign continuations and timing"].
+		return RetailLoadResult{}, ErrRetailFreshEntryUnimplemented
 	}
 	if preflight.Route == RetailLoadRouteCampaignContinuation {
 		continuation, err := resolveRetailContinuation(deps.FS, preflight.Summary)

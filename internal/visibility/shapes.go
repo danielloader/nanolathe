@@ -35,8 +35,8 @@ func (s *Service) SetRayTables(lt *content.LOSTables) {
 
 // rayTableCount is the clamp bound for the terrain-ray group index.
 //
-// It is the DECLARED numtables and nothing else: the reference install declares
-// nine and ships twelve, and the declared value is the one the loader sizes its
+// It is the declared numtables narrowed to a signed word [03 R-VIS-01 §3].
+// The reference install declares nine and ships twelve, and the declared value is the one the loader sizes its
 // table list to, with an empty record wherever a declared slot has no section
 // (docs/SPEC_CONFLICTS.md SC9, [03 R-COMP-02 §1]). Clamping by len(Tables) would
 // reach three tables retail never loads, and would also shrink the bound for
@@ -46,7 +46,7 @@ func (s *Service) rayTableCount() int {
 	if s == nil || s.rayTables == nil {
 		return 0
 	}
-	n := int(s.rayTables.NumTables)
+	n := int(int16(s.rayTables.NumTables))
 	if n < 0 {
 		n = 0
 	}
@@ -91,45 +91,40 @@ func (s *Service) raySpokes(slot int) [][]step {
 	return built
 }
 
-// buildSpokes converts one LOS.TDF table into walkable spokes [03 §3.2].
-//
-// A line is `count, (dx, dz) × count` — offsets from the observer in order of
-// increasing distance, so the i-th pair carries step distance i. The authored
-// offsets are all non-negative and span exactly north through east, one
-// quadrant: TABLE2's four lines are (0,1)(0,2), (0,1)(1,2), (1,1) and
-// (1,0)(2,1).
-//
-// Authored pairs are absolute positions from the observer, and each line is
-// expanded by four 90-degree rotations [03 §3.2]. Axis spokes can therefore
-// occur twice when the source table contains both orientations; publish and
-// unpublish walk the same expanded list, keeping reference counts balanced.
+// buildSpokes converts named declared LOS.TDF lines into four quadrant blocks
+// [03 R-VIS-01 §3]. Coordinates and their negations wrap to signed words before
+// becoming tile offsets. The ordinal, not geometric distance, is the horizon
+// denominator; authored positions need not increase monotonically.
 func buildSpokes(tb content.LOSTable) [][]step {
 	var out [][]step
-	for _, line := range tb.Lines {
-		if len(line) < 3 {
-			continue
-		}
-		count := int(line[0])
-		if count <= 0 || len(line) < 1+2*count {
-			continue
-		}
-		base := make([]step, 0, count)
-		for i := 0; i < count; i++ {
-			base = append(base, step{
-				dx:   line[1+2*i],
-				dz:   line[2+2*i],
-				dist: int32(i + 1), // step distances count from one [C5]
-			})
-		}
-		// Four 90-degree rotations: (dx,dz) -> (dz,-dx) -> (-dx,-dz) -> (-dz,dx).
-		for rot := 0; rot < 4; rot++ {
-			spoke := make([]step, len(base))
-			for i, st := range base {
-				dx, dz := st.dx, st.dz
-				for r := 0; r < rot; r++ {
-					dx, dz = dz, -dx
+	lines := tb.Lines[:min(len(tb.Lines), max(0, int(int16(tb.NumLines))))]
+	for quadrant := 0; quadrant < 4; quadrant++ {
+		for _, line := range lines {
+			if len(line) < 3 {
+				continue
+			}
+			count := int(int16(line[0]))
+			// TODO(question): retail safety for nonpositive counts or incomplete
+			// coordinate lists is unknown. Keep the host's empty-spoke boundary;
+			// allocation/failure-path evidence would settle it [03 R-VIS-01 §3].
+			if count <= 0 || len(line) < 1+2*count {
+				continue
+			}
+			spoke := make([]step, count)
+			for i := range spoke {
+				u, v := int16(line[1+2*i]), int16(line[2+2*i])
+				var dx, dz int16
+				switch quadrant {
+				case 0:
+					dx, dz = u, -v
+				case 1:
+					dx, dz = v, u
+				case 2:
+					dx, dz = -u, v
+				case 3:
+					dx, dz = -v, -u
 				}
-				spoke[i] = step{dx: dx, dz: dz, dist: st.dist}
+				spoke[i] = step{dx: int32(dx), dz: int32(dz), dist: int32(i + 1)}
 			}
 			out = append(out, spoke)
 		}

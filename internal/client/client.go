@@ -998,9 +998,10 @@ func (c *Client) RendererToggleCount() int {
 
 // StepCursorScaledDelta advances the software cursor from the positive
 // scaled wall-clock delta used by the presentation adapter. Cursor playback
-// is not tied to runnable simulation ticks; the underlying cursor consumes a
-// signed 16-bit delta, so large elapsed intervals are split without changing
-// the resulting countdown [03 §4.4][R-CRD-005 §1].
+// is not tied to runnable simulation ticks. Large elapsed intervals are split
+// for the signed-16 adjustment API using the current wide host countdown. This
+// is not a claim of native wrapped-countdown equivalence; width and malformed
+// loop handling remain pending [03 §4.4][R-CRD-005 §1].
 func (c *Client) StepCursorScaledDelta(delta int32) {
 	if c == nil || c.cursors == nil || delta <= 0 {
 		return
@@ -1732,7 +1733,7 @@ func (c *Client) blitFogGAF(frame *formats.GAFFrame, dstX, dstY int, mode fogBli
 		dstOff := dstYPos*w + dstX
 		srcRow := srcY*fw + srcX0
 		for x := 0; x < copyW; x++ {
-			if mode == fogBlitPatterned && ((int32(dstX+x)+int32(dstYPos)+parity)&1) == 0 {
+			if mode == fogBlitPatterned && ((int32(dstX+x)+int32(dstYPos)+parity)&1) != 0 {
 				continue
 			}
 			idx := srcRow + x

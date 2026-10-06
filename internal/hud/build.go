@@ -66,7 +66,114 @@ func BuildProductsFor(cat *content.Catalog, builderKey string) []string {
 //     page does not exist. It is the only producer that can refuse.
 //
 // Each takes and returns a page number rather than a flag word, so the caller
-// keeps the committed page as the one identity it acts on [I6].
+// keeps the committed page as the one identity it acts on [I6]. These index
+// walks serve presentation-local page ranges, such as the adaptive sidebar's
+// (interface design §3.3). Authored builder pages use PageState, whose walks
+// are retail's field operations and differ from these once a builder has nine
+// or more pages or a remembered field sits under the orders state.
+
+// PageState is a builder's authored page state: its page-shown bit and its
+// three-bit page field [07 §9][07 R-HUD-03 §6]. Retail's page producers operate
+// on these two values rather than on the displayed page: all field arithmetic
+// is modulo eight and `count−1` is compared as an ordinary integer, so with nine
+// or more pages no field value equals it.
+type PageState struct {
+	Paged bool
+	Field int // 0..7
+}
+
+// PageStateOf reads a builder's page state from its status word.
+func PageStateOf(flags uint32) PageState {
+	return PageState{Paged: IsPaged(flags), Field: RememberedPage(flags)}
+}
+
+// pageRequest is the absolute page SetBuildPage encodes into a given state: 0
+// clears the page-shown bit and keeps the field, and a positive page sets the
+// bit and stores its low three bits [07 §9]. A shown zero field is requested as
+// page 8, the digit routine's own spelling of it; it arises only with nine or
+// more pages, so the request stays inside the page count.
+func pageRequest(paged bool, field int) int {
+	field &= 7
+	switch {
+	case !paged:
+		return 0
+	case field == 0:
+		return 8
+	default:
+		return field
+	}
+}
+
+// NextKey is the `.` key's field operation [07 R-HUD-03 §6]: a hidden page
+// shows field 1, a shown field equal to count−1 is hidden in place, and any
+// other shown field advances by one modulo eight.
+func (s PageState) NextKey(count int) int {
+	field := s.Field & 7
+	switch {
+	case !s.Paged:
+		return pageRequest(true, 1)
+	case field == count-1:
+		return pageRequest(false, field)
+	default:
+		return pageRequest(true, field+1)
+	}
+}
+
+// PrevKey is the `,` key's field operation [07 R-HUD-03 §6]: a hidden page
+// shows field (count−1) modulo eight, a shown field 1 is hidden in place, and
+// any other shown field steps back by one modulo eight.
+func (s PageState) PrevKey(count int) int {
+	field := s.Field & 7
+	switch {
+	case !s.Paged:
+		return pageRequest(true, count-1)
+	case field == 1:
+		return pageRequest(false, field)
+	default:
+		return pageRequest(true, field-1)
+	}
+}
+
+// NextButton is the NEXT gadget's field operation [07 R-HUD-03 §6]. It does
+// not consult the page-shown bit: a field equal to count−1 becomes 1, any other
+// advances by one modulo eight, and the page is then shown.
+func (s PageState) NextButton(count int) int {
+	field := s.Field & 7
+	if field == count-1 {
+		return pageRequest(true, 1)
+	}
+	return pageRequest(true, field+1)
+}
+
+// PrevButton is the PREV gadget's field operation [07 R-HUD-03 §6]. It does
+// not consult the page-shown bit: field 0 or 1 becomes (count−1) modulo eight,
+// any other steps back by one, and the page is then shown. With exactly nine
+// pages retail therefore stays on the shown zero field, and with ten it stays
+// on page 1; both are the executable's arithmetic, not a host clamp.
+func (s PageState) PrevButton(count int) int {
+	field := s.Field & 7
+	if field < 2 {
+		return pageRequest(true, count-1)
+	}
+	return pageRequest(true, field-1)
+}
+
+// BuildButton is the page a BUILD click shows. The click sets the page-shown
+// bit and writes no field [07 R-HUD-03 §6], so it re-shows the remembered
+// field; with nine or more pages a remembered zero field is shown as such.
+// Below nine pages a zero or out-of-range field does not follow the creation
+// seed of a multi-page builder, and the host keeps its bounds guard of page 1:
+// a one-page builder's shown zero field has no page request inside its count.
+func (s PageState) BuildButton(count int) int {
+	field := s.Field & 7
+	if field == 0 && count > 8 {
+		return pageRequest(true, field)
+	}
+	if field <= 0 || field >= count {
+		return 1
+	}
+	return field
+}
 
 // NextPageKey is the `.` key's move: the next page, wrapping past the last one
 // back to the orders page [07 R-HUD-03 §6].

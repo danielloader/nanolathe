@@ -95,3 +95,39 @@ func TestOptionsChildPageControlsStayOpen(t *testing.T) {
 		}
 	}
 }
+
+// Child callbacks request their cue before a page action or close; admission
+// is by the named fired gadget, not by cleanup alone [07 R-FE-01 §7].
+func TestOptionsChildCuePrecedesAction(t *testing.T) {
+	for _, tc := range []struct {
+		modal  BattleModal
+		name   string
+		action BattleModalAction
+	}{
+		{BattleModalHelp, "Page", BattleModalActionHelpPage},
+		{BattleModalHelp, "OK", BattleModalActionNone},
+		{BattleModalBriefing, "TextRegion", BattleModalActionBriefingPage},
+		{BattleModalBriefing, "MOREBAR", BattleModalActionBriefingPage},
+		{BattleModalBriefing, "OK", BattleModalActionNone},
+		{BattleModalGameOptions, "OK", BattleModalActionNone},
+	} {
+		s := NewProductionBattleState()
+		s.modal = tc.modal
+		calls := 0
+		s.SetPanelCue(func(alias string) {
+			calls++
+			if alias != "Options" || s.Modal() != tc.modal {
+				t.Fatalf("cue %q at modal %d, want Options before leaving %d", alias, s.Modal(), tc.modal)
+			}
+		})
+		if action := s.Activate(tc.name); action != tc.action || calls != 1 {
+			t.Fatalf("%d/%s action=%d cues=%d", tc.modal, tc.name, action, calls)
+		}
+		s.modal = tc.modal
+		s.Activate("")
+		s.Activate("unrecognised")
+		if calls != 1 || s.Modal() != tc.modal {
+			t.Fatalf("unnamed action changed child or requested cue")
+		}
+	}
+}

@@ -292,17 +292,19 @@ func TestPageClampAndEncoding(t *testing.T) {
 	if d != 0 {
 		t.Fatalf("dirty should not be set when no change")
 	}
-	// Clamp overflow beyond 7: page &7 after clamp to 7 max.
+	// A page inside a large count keeps only its low three bits; the writers
+	// never clamp it to seven [07 R-HUD-03 §6].
 	builder.Flags = 0
 	SetBuildPage(builder, 10, 20, nil)
-	if DecodePage(builder.Flags) != 7 {
-		t.Fatalf("page >7 should clamp to 7, got %d", DecodePage(builder.Flags))
+	if !IsPaged(builder.Flags) || RememberedPage(builder.Flags) != 2 {
+		t.Fatalf("page 10 of 20 want shown field 2, got flags %08x", builder.Flags)
 	}
-	// Wrap via digit.
+	// Digit 9 names page 8. With ten pages the digit routine stores field 0 and
+	// leaves the page shown, which displays as page 0 [07 R-HUD-03 §6].
 	builder.Flags = 0
-	SetBuildPage(builder, DigitToPage(9), 10, nil) // digit 9 => page 8 => 8&7=0? Actually ClampPage caps to 7, then Encode wraps? Wait Clamp caps to 7 then Encode page&7 => 7. So digit 9 with large count should be page 8 clamped to 7.
-	if DecodePage(builder.Flags) != 7 {
-		t.Fatalf("digit 9 large count page want 7 got %d", DecodePage(builder.Flags))
+	SetBuildPage(builder, DigitToPage(9), 10, nil)
+	if !IsPaged(builder.Flags) || RememberedPage(builder.Flags) != 0 || DecodePage(builder.Flags) != 0 {
+		t.Fatalf("digit 9 of 10 pages want shown zero field, got flags %08x", builder.Flags)
 	}
 	// Digit 1 with count 1 => page 0 => paged clear.
 	builder.Flags = PagePagedBit | (3 << 23)

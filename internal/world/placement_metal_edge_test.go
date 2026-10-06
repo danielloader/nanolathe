@@ -82,3 +82,36 @@ func TestSampleMetalOverTheMapEdge(t *testing.T) {
 		t.Fatal("sampling an unseeded metal field was allowed")
 	}
 }
+
+// Authored footprints reach the signed boundary and wrap even though shipped
+// units do not. Rate and script sum must use the same accumulator
+// [05 R-PROD-01 §6] [05 R-PROD-01 §6-A].
+func TestSampleMetalSignedAccumulator(t *testing.T) {
+	ter := synth(t, 32, 16, flat(32, 16, 1), nil)
+	if err := ter.ApplySchema(&content.MapHeader{Schemas: []content.MapSchema{{SurfaceMetal: 255}}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name          string
+		x, z          int32
+		width, height int
+		wantSum       uint16
+		wantRate      float32
+	}{
+		{"below sign boundary", 0, 0, 1, 16, 4096, 5120},
+		{"128 cells at sign boundary", 0, 0, 8, 16, 32768, -40960},
+		{"256 cells at wrap", 0, 0, 16, 16, 0, 0},
+		{"after wrap", 0, 0, 17, 16, 4096, 5120},
+		{"off-map cells omitted before sign boundary", -1, 0, 8, 16, 28672, 35840},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rate, sum, err := ter.SampleMetalWithFootprintSum(tc.x, tc.z, tc.width, tc.height, 1.25)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sum != tc.wantSum || rate != tc.wantRate {
+				t.Fatalf("sum=%d rate=%v, want sum=%d rate=%v", sum, rate, tc.wantSum, tc.wantRate)
+			}
+		})
+	}
+}

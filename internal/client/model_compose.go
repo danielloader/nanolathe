@@ -671,6 +671,7 @@ func (c *Client) composeDirectLiveModel(draw *presentationrender.UnitDraw, selec
 	// detail view must not scale the committed image a second time — the direct
 	// debris and fragment targets declare the same (DESIGN_GPU_RENDERER §14.2).
 	target.blit = camera.ViewScaleNative
+	target.framebuffer = true
 	for i := range polys {
 		if polys[i].frame != nil {
 			c.blitTexturedPolyTarget(target, &polys[i], polys[i].frame, id)
@@ -701,6 +702,7 @@ func (c *Client) composeDirectDebrisModel(draw *presentationrender.UnitDraw, sel
 	// Direct polygon coordinates were already in framebuffer space, so Original
 	// detail mode must not scale the committed image a second time.
 	target.blit = camera.ViewScaleNative
+	target.framebuffer = true
 	for i := range polys {
 		if polys[i].frame != nil {
 			c.blitTexturedPolyTarget(target, &polys[i], polys[i].frame, id)
@@ -825,7 +827,9 @@ func (c *Client) composeModelLane(draw *presentationrender.UnitDraw, owner uint8
 	target := c.borrowModelImage(width, height, originX, originY, anchorX, anchorY, keyPlane, 1)
 	raster := target
 	if scale == 2 {
-		raster = c.borrowModelImage(2*width, 2*height, 2*originX, 2*originY, anchorX, anchorY, keyPlane, 2)
+		// Retail's shared doubled scratch always has a key plane, even
+		// when the resolved composition does not [03 R-REN-03A §6].
+		raster = c.borrowModelImage(2*width, 2*height, 2*originX, 2*originY, anchorX, anchorY, true, 2)
 	}
 	c.attachModelTrace(raster, id)
 
@@ -850,13 +854,13 @@ func (c *Client) composeModelLane(draw *presentationrender.UnitDraw, owner uint8
 // waterlinePass is retail's underwater presentation, both arms of it
 // [R-REN-03A §8][R-WATER-01 §2][R-RAST-01 §4].
 //
-// With `t = seaLevel - hi16(unitY)` positive, part of the subject sits below
-// the water surface, and every pixel whose height key is at or below
-// `t + 50 [+75 for a Digger]` is that part. What happens to those pixels is an
-// ownership question, not a geometry one:
+// With `t = seaLevel - hi16(unitY)` positive, the selected pixels have keys at
+// or below the unsigned low byte of `t + 50 [+75 for a Digger]`. Depth is tested
+// before narrowing; a wrapped cutoff can spare higher keys. Ownership decides
+// what happens to the selected pixels:
 //
 //   - a submerged subject the viewer neither owns nor holds on sonar is
-//     ERASED below the surface — an enemy submarine simply is not drawn;
+//     ERASED at the selected keys;
 //   - a subject the viewer owns, or has on sonar, is RECOLOURED through the
 //     BLUE TABLE, which is why your own submarine reads as a blue hull instead
 //     of vanishing, and why a submerged nanoframe goes up blue.

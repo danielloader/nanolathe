@@ -9,7 +9,8 @@ import (
 // VisitUnitsInRadius walks the ordinary spatial sectors intersecting the
 // circle, rows before columns and each bucket from its head. Repair patrol's
 // random index refers to this order, not unit-slot order [04 R-ORD-02 §4].
-// Returning true stops the walk. Off-map and unfiled units are absent.
+// Returning true stops the walk. Off-map, unfiled and attached units are
+// absent: radius scans never descend cargo lists [04 R-COLL-01 §11].
 func (s *System) VisitUnitsInRadius(x, z, radius numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
 	if s == nil || s.Grid == nil || visit == nil {
 		return
@@ -24,7 +25,7 @@ func (s *System) VisitUnitsInRadius(x, z, radius numeric.Fixed, visit func(pool.
 		for sx := loX; sx <= hiX; sx++ {
 			for e := g.bucketHead(sx, sz); e != 0; {
 				id := int(e) - 1
-				if u := s.unitFor(pool.Handle(id)); u != nil && inUnitScanRadius(rx, rz, r, u) && visit(u.Handle, u) {
+				if u := s.unitFor(pool.Handle(id)); u != nil && u.Attachment.Carrier == 0 && inUnitScanRadius(rx, rz, r, u) && visit(u.Handle, u) {
 					return
 				}
 				e = g.links[id].next

@@ -42,6 +42,13 @@ func airReclaimFixture(t *testing.T, mode uint8) (*Service, *units.Unit, *units.
 	q.RemoveHead()
 	sim := rng.NewSimulation(1)
 	q.SetBinding(&orders.QueueBinding{Lookup: s.World.Unit, SimRNG: &sim, Movement: &orders.MovementGoalAdapter{
+		DetachTakeoff: func(u *units.Unit) bool {
+			if u != b || u.Attachment.Carrier == 0 {
+				t.Fatal("unexpected detach callback")
+			}
+			_, ok := movement.DetachTakeoff(s.World, u.Handle)
+			return ok
+		},
 		InstallAir: s.Movement.InstallAirGoal, Release: s.Movement.ReleaseGoalPayload,
 	}})
 	q.Push(orders.Lookup("VTOL_ReclaimUnit"), orders.Node{Owner: b.Handle, Target: target.Handle, Deadline: -1})

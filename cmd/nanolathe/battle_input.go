@@ -440,7 +440,7 @@ func (b *battleSession) handleInput(in *input.State, cl *client.Client) {
 				} else {
 					_ = b.enqueueSelectionCommand(session.HumanCommand{Kind: session.HumanSelectionReplace, Selection: session.HumanSelectionCommand{Handles: []pool.Handle{bh}}})
 				}
-				playSelectionCue(b.sess, []pool.Handle{bh}) // [07 §9]
+				b.playPointSelectionCue(bh)
 			} else if b.interfaceTypeRightClick() {
 				// Type 1's idle empty-left branch deselects regardless of
 				// Shift. Shift only modifies an eligible select or a drag
@@ -470,7 +470,7 @@ func (b *battleSession) handleInput(in *input.State, cl *client.Client) {
 				kind = session.HumanSelectionToggle
 			}
 			_ = b.enqueueSelectionCommand(session.HumanCommand{Kind: kind, Selection: session.HumanSelectionCommand{Handles: handles}})
-			playSelectionCue(b.sess, handles) // [07 §9]
+			b.playRectangleSelectionCue()
 		}
 	}
 	// Type 1's idle right-click order is handled before captures and cancels;
@@ -815,4 +815,29 @@ func idleDragIsClick(s ui.BattleInputState, now uint32) bool {
 	// Stored whole-world endpoints, strict signed deadline and dimensions
 	// [07 R-CAM-01 §14]. The release pointer is used only after admission.
 	return int32(now) < int32(s.DragPressClock+25) && dx > -32 && dx < 32 && dz > -32 && dz < 32
+}
+
+// Selection applies locally before these cue decisions, including online
+// (DESIGN_MULTIPLAYER §7.3). A toggle-off click requests no voice [07 §9].
+func (b *battleSession) playPointSelectionCue(handle pool.Handle) {
+	if f, ok := b.currentSnapshot(); ok && containsHandle(f.Selection.Handles, handle) {
+		playSelectionCue(b.sess, []pool.Handle{handle})
+	}
+}
+
+// Rectangle acknowledgement counts the resulting eligible selection across
+// the owner range, including units outside the box [07 §9]. Sound admission
+// and throttling still belong to the ordinary audio service.
+func (b *battleSession) playRectangleSelectionCue() {
+	f, ok := b.currentSnapshot()
+	if !ok {
+		return
+	}
+	var handles []pool.Handle
+	for _, v := range f.Units {
+		if v.Flags&hud.SelectionFlag != 0 && b.ownSelectableUnit(f, v) {
+			handles = append(handles, v.Slot)
+		}
+	}
+	playSelectionCue(b.sess, handles)
 }

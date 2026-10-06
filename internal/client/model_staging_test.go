@@ -410,3 +410,58 @@ func TestUnitDrawDiggerPrecedesStructureShadowGate(t *testing.T) {
 		})
 	}
 }
+
+func TestStagingCachedKeyOneDependsOnResize(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		childWidth         int
+		wantKey, wantColor uint8
+	}{
+		{"same size raw planes", 4, 1, 10},
+		{"resized keyed planes", 5, 0, 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := stagingBody(4, 4, 100, 100, 10, 1)
+			child := stagingBody(tc.childWidth, 4, 100, 100, 20, 0)
+			stage := stagingImage(body, []stagingChild{{model: composedModel{image: child}}}, newModelImage)
+			if stage.height[0] != tc.wantKey {
+				t.Fatalf("seeded key=%d, want%d", stage.height[0], tc.wantKey)
+			}
+			stage.compositeChild(child, 0)
+			if stage.color[0] != tc.wantColor {
+				t.Fatalf("child overlap color=%d, want%d", stage.color[0], tc.wantColor)
+			}
+			if body.height[0] != 1 || body.color[0] != 10 {
+				t.Fatal("staging mutated its cached source")
+			}
+		})
+	}
+}
+
+// Color transparency must not discard its independent stored key. Conversely,
+// an opaque pixel's key-one byte is skipped only on resize [03 R-REN-03A §4].
+func TestStagingCopiesCachedPlanesIndependently(t *testing.T) {
+	for _, width := range []int{3, 4} {
+		body := stagingBody(3, 1, 100, 100, 10, 1)
+		body.color[0], body.covered[0], body.height[0] = body.transparent, false, 70
+		body.color[2], body.covered[2] = body.transparent, false
+		extent := newModelImage(width, 1, 0, 0, 100, 100, true, 1)
+		stage := stagingImage(body, []stagingChild{{model: composedModel{image: extent}}}, newModelImage)
+		if stage.color[0] != body.transparent || stage.covered[0] || stage.height[0] != 70 {
+			t.Fatalf("width%d transparent color/key=%d/%d covered=%v", width, stage.color[0], stage.height[0], stage.covered[0])
+		}
+		wantKey := uint8(1)
+		if width != body.width {
+			wantKey = 0
+		}
+		if stage.color[1] != 10 || !stage.covered[1] || stage.height[1] != wantKey || stage.height[2] != wantKey {
+			t.Fatalf("width%d independent color=%v key=%v coverage=%v", width, stage.color, stage.height, stage.covered)
+		}
+		// A lower child cannot paint through the transparent color whose key
+		// remains70; its color is independently absent from the final blit.
+		stage.compositeChild(stagingBody(1, 1, 100, 100, 20, 60), 0)
+		if stage.color[0] != body.transparent || stage.height[0] != 70 {
+			t.Fatalf("width%d child painted through retained key70", width)
+		}
+	}
+}

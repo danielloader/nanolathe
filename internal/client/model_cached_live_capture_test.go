@@ -357,3 +357,46 @@ func TestRetainedGeometryIdentityChangesOnEveryStore(t *testing.T) {
 		t.Fatalf("a recreated body reused body serial %d", again.Body)
 	}
 }
+
+// Three independently authored, replayed carriers expose the staging branches:
+// cached key1 survives an equal-sized child, loses to key0 after resize, while
+// a live key1 face drawn after the seed survives the same enlarged child.
+func TestCachedStagingSeedCaptures(t *testing.T) {
+	dir := os.Getenv("NANOLATHE_CAPTURE_DIR")
+	if dir == "" {
+		t.Skip("set NANOLATHE_CAPTURE_DIR to write staging captures")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name                    string
+		live, small, wantParent bool
+	}{
+		{"cached-equal-size", false, true, true},
+		{"cached-resized", false, false, false},
+		{"live-after-seed", true, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, parent, child := cachedStagingKeyOneSubject(t)
+			parent.Pieces[1].DontCache = tc.live
+			if tc.small {
+				c.models["seed-child"] = syntheticModel([]pieceInfo{{name: "base", parent: -1}}, []syntheticTri{
+					makeTriangle(0, "base", [3][3]float64{{0, -50, 0}, {16, -50, 0}, {0, -50, 16}}, 77, 0),
+				}, 0)
+			}
+			c.modelScratch.reset()
+			c.modelScratch.active = true
+			defer func() { c.modelScratch.active = false }()
+			if !c.composeCarrier(parent, 0, 0, []frame.UnitView{child}) {
+				t.Fatal("authored carrier was not recorded")
+			}
+			c.replayForTest()
+			if got := bytes.Count(c.indexed, []byte{99}) > 0; got != tc.wantParent {
+				t.Fatalf("parent key1 visibility=%v, want%v", got, tc.wantParent)
+			}
+			writeCachedLivePNG(t, c, filepath.Join(dir, tc.name+".png"))
+			writeCachedLiveContentZoom(t, c, filepath.Join(dir, tc.name+"-zoom.png"))
+		})
+	}
+}

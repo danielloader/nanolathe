@@ -1009,7 +1009,7 @@ func (v *VM) Signal(mask int32) {
 // Drain advances the VM by delta ticks [04 §4.6][04 R-COB-02 §2] [PLAN_06].
 // It runs due threads within the tick budget in fixed slot order 0..7 [04 §4.2] C13, then one piece-interpolation pass [04 §4.6][04 R-COB-02 §2] C13.
 // Sleep converts its duration using the fixed 30 denominator [04 §4.6]; a wait polls its busy word and wakes on zero [04 §4.6]; immediate move/turn wake same-tick when the issuing slot precedes the waiting slot, otherwise next tick [04 §4.6] slot-order.
-// A sleep occupies its truncated tick count plus one guard decrement, so sleep 0 still costs one tick [04 §4.6]. Signals and wake are handled inside the run.
+// Sleep yields its issuing entry. A later entry subtracts delta before checking the timer; delta 0 can wake a nonpositive timer in the same tick [04 §4.6].
 // Drain is reentrant-safe: an all-slot delta-0 wake drain can be issued from inside a starter and will run due threads with no time advance [04 §4.2][GAP T15][04 §4.6] — the same all-eight-slot delta-0 pass every immediate (wake) start performs [04 R-COB-02 §2].
 func (v *VM) Drain(delta int) {
 	v.DrainCalls++ // RS-08 one-drain invariant [04 §4.2][GAP T15]
@@ -1228,43 +1228,22 @@ func (v *VM) interpolate(delta int) {
 			// when the move was issued (speed/30, truncated); no remainder
 			// carries between ticks [04 §4.6].
 			if anim.moveBusy {
-				// A per-tick step of zero means not busy, so a wait wakes immediately [04 §4.6].
+				// A zero speed lets the wait guard resume on its next interpreter entry [04 §4.6].
 				if anim.moveSpeed == 0 {
 					// Zero per-tick step: no motion, clear busy so wait wakes; dirty still implied for one tick via the issuing handler [04 §4.6].
 					anim.moveBusy = false
 				} else {
-					cur := int64(v.Pieces[p].Trans[axis].Raw())  // [03 §2.4] C21
-					target := int64(anim.moveTarget)             // compiled [fmt cob]
-					step := int64(anim.moveSpeed) * int64(delta) // already perTick = trunc(raw/30) [04 §4.6]
-					diff := target - cur
-					if diff == 0 {
+					// Translation arithmetic wraps before the signed arrival test;
+					// stored speed selects its direction even for negative script
+					// speeds [04 §4.6].
+					next := int32(v.Pieces[p].Trans[axis].Raw()) + anim.moveSpeed*int32(delta)
+					if (anim.moveSpeed > 0 && next >= anim.moveTarget) ||
+						(anim.moveSpeed < 0 && next <= anim.moveTarget) {
+						next = anim.moveTarget
 						anim.moveBusy = false
 						anim.moveSpeed = 0
-					} else {
-						var mag int64
-						if step < 0 {
-							mag = -step
-						} else {
-							mag = step
-						}
-						if diff > 0 {
-							if diff <= mag {
-								v.setPieceTrans(p, axis, fixedFromRaw(target)) // snap on inclusive arrival [04 §4.6]
-								anim.moveBusy = false
-								anim.moveSpeed = 0
-							} else {
-								v.setPieceTrans(p, axis, fixedFromRaw(cur+mag))
-							}
-						} else {
-							if -diff <= mag {
-								v.setPieceTrans(p, axis, fixedFromRaw(target))
-								anim.moveBusy = false
-								anim.moveSpeed = 0
-							} else {
-								v.setPieceTrans(p, axis, fixedFromRaw(cur-mag))
-							}
-						}
 					}
+					v.setPieceTrans(p, axis, fixedFromRaw(int64(next)))
 				}
 			}
 			// Acceleration-ramp block, second of the three, then rotation/spin
@@ -1285,7 +1264,7 @@ func (v *VM) interpolate(delta int) {
 			}
 			anim.turnBusy = !anim.spinActive && anim.turnSpeed != 0
 			if anim.spinActive {
-				// The angle increment is already perTick * delta [04 §4.6]; a per-tick speed truncating to zero still leaves the piece dirty for one tick, and a wait wakes immediately [04 §4.6].
+				// The angle increment is already perTick * delta [04 §4.6]; zero speed still dirties the piece, and the wait guard resumes on its next entry.
 				if anim.turnSpeed != 0 {
 					step := int64(anim.turnSpeed) * int64(delta) // already trunc(speed/30) [04 §4.6]
 					if step != 0 {
@@ -1293,7 +1272,7 @@ func (v *VM) interpolate(delta int) {
 					}
 				}
 				// The spin marker survives stop-spin; only turn or turn-now replaces it [04 §4.6].
-				// A zero-speed spin has no motion, and the per-piece reduction clears dirty next tick; a wait wakes immediately once the polled word reads zero [04 §4.6].
+				// A zero-speed spin has no motion; the per-piece reduction clears dirty and a later wait guard observes the zero speed [04 §4.6].
 			} else if anim.turnBusy {
 				// Turn uses the already-divided per-tick speed [04 §4.6]; a shortest-arc tie at exactly the half-circle boundary keeps the script's sign rather than flipping it [04 §4.6].
 				if anim.turnSpeed == 0 {
@@ -1409,14 +1388,15 @@ func (v *VM) runThread(idx int) {
 			}
 			anim := &v.anims[piece].axes[axis]
 			anim.moveTarget = target
-			// perTick = trunc(speedRaw/30), truncating toward zero [I3], with its sign set toward the target at issuance [04 §4.6].
+			// Keep the signed script speed; negate it only when the target is
+			// below the current translation [04 §4.6].
 			perTick := int32(int64(speed) / int64(v.tickDenom)) // latched denominator [04 §4.6]; trunc toward zero per I3.
-			cur := int64(v.Pieces[piece].Trans[axis].Raw())     // [03 §2.4] C21 via GetPos
-			if cur > int64(target) {
-				perTick = -perTick // flip sign toward target [04 §4.6]
+			cur := int32(v.Pieces[piece].Trans[axis].Raw())     // signed translation returned by the adapter [04 §4.6]
+			if cur > target {
+				perTick = -perTick // signed target comparison, not an absolute speed [04 §4.6]
 			}
 			anim.moveSpeed = perTick     // the axis's move-speed word [04 §4.6]
-			anim.moveBusy = perTick != 0 // a per-tick speed truncating to zero wakes a wait immediately [04 §4.6]
+			anim.moveBusy = perTick != 0 // zero speed releases a wait on its later guard [04 §4.6]
 			v.markAnimationDirty(piece)  // move dirties the piece and global flag, including zero-speed issue [04 §4.6]
 			t.PC += 3
 		case 0x10002000: // turn [04 §4.3][04 §4.6], per-tick arithmetic and shortest-arc sign
@@ -1696,12 +1676,10 @@ func (v *VM) runThread(idx int) {
 			return
 		case 0x10013000: // sleep [04 §4.3][04 §4.6]
 			dur, _ := t.stackPop() // milliseconds [fmt cob]
-			// Convert trunc(denom * ms / 1000) with the latched denominator
-			// (30 from the fixed 30-tick configuration) [04 §4.6]; trunc toward
-			// zero [01 §8] I3, denominator positive, no remainder carry; 33ms→0
-			// ticks, 34ms→1 tick [04 §4.6]. Sleep multiplies, it never divides
-			// by the denominator [04 §4.6].
-			ticks := int32((int64(dur) * int64(v.tickDenom)) / 1000)
+			// Wrap the signed 32-bit product before dividing, then truncate
+			// toward zero. Widening first changes large authored durations
+			// [04 §4.6]. The issuing entry still yields even when ticks <= 0.
+			ticks := (dur * v.tickDenom) / 1000
 			t.Sleep = ticks
 			t.Status = ThreadSleeping
 			t.PC += 1

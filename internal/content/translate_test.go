@@ -159,3 +159,27 @@ func TestTranslationParseFailureNamesWinningArchive(t *testing.T) {
 		t.Fatalf("winning provider lost or shadowed provider substituted: %v", err)
 	}
 }
+
+// Both lookup directions consume the stored byte prefix, not the full authored
+// value [02 "Translation table"]. The short source keys avoid the separate
+// oversized-key residue gap.
+func TestTranslationValueByteBoundary(t *testing.T) {
+	value := strings.Repeat("a", 253) + "é" + "tail"
+	fs := translateFS(t, map[string]string{
+		"gamedata/translate.tdf": "[Alpha]{english=" + value + ";}[Beta]{english=" + value + ";}",
+	})
+	table, err := LoadTranslationTable(fs, "english")
+	if err != nil || table == nil {
+		t.Fatalf("translation table: %v", err)
+	}
+	want := value[:254]
+	if got := table.Translate("Alpha"); got != want {
+		t.Fatalf("stored translation length=%d, want exact 254-byte prefix", len(got))
+	}
+	if got, ok := table.Source(want); !ok || got != "Alpha" {
+		t.Fatalf("reverse stored-prefix lookup=(%q,%v), want first byte-sorted source", got, ok)
+	}
+	if _, ok := table.Source(value); ok {
+		t.Fatal("reverse lookup matched bytes omitted by the value copy")
+	}
+}

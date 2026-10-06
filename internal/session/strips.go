@@ -744,7 +744,13 @@ func (o *stripObject) expireParticles(tick uint32) {
 	write := 0
 	for read := range o.particles {
 		p := o.particles[read]
-		if p.expiry != 0 && tick > p.expiry {
+		expired := tick > p.expiry
+		if o.family == stripFamilyFlame {
+			// Flame advances first, then tests a signed deadline. Other
+			// families retain their own comparison [03 R-STRIP-01 §3].
+			expired = int32(tick) > int32(p.expiry)
+		}
+		if p.expiry != 0 && expired {
 			continue
 		}
 		o.particles[write] = p
@@ -759,16 +765,18 @@ func (o *stripObject) expireParticles(tick uint32) {
 // readyToSpawn is the per-family "is it time to spawn" virtual the update
 // consults before it calls the spawn [R-STRIP-01 §2].
 //
-// nextSpawn == 0 means the producer armed no gate: retail's family
-// constructors always write the first spawn tick, so the zero value is our
-// explicit unarmed sentinel, never a gate at tick 0.
+// nextSpawn == 0 is the host's unarmed sentinel.
+// TODO(question): establish how produced flame and smoke deadlines wrapping to zero
+// should retain armed/expiry state without colliding with the host sentinels;
+// trace the producer lifecycle before claiming full tick-wrap equivalence.
 //
 // The VENT's class — and only that class — reduces the predicate to "the stored
 // next-spawn tick is at or before the global tick", with no window term. That
 // is what makes a vent emit for the whole battle [03 R-FX-01 §3 addendum].
-// The strips-5/9 smoke puffer keeps both terms like every other family, which
-// is what makes a weapon-side container with a zero window spawn its
-// constructor's one puff and then nothing more.
+// The strips-5/9 smoke puffer keeps both terms. Away from the signed tick
+// boundary, a weapon-side container with a zero window spawns only its
+// constructor's puff; crossing that boundary can admit another spawn through
+// the signed window comparison [03 R-STRIP-01 §3].
 func (o *stripObject) readyToSpawn(tick uint32) bool {
 	if o.nextSpawn == 0 || o.nextSpawn > tick {
 		return false
@@ -776,15 +784,18 @@ func (o *stripObject) readyToSpawn(tick uint32) bool {
 	if o.family == stripFamilyVentSteam {
 		return true
 	}
+	if o.family == stripFamilyFlame || o.family == stripFamilySmoke {
+		// The current-tick gate above is unsigned, but these two classes'
+		// window comparisons are signed [03 R-STRIP-01 §3].
+		return int32(o.nextSpawn) <= int32(o.windowEnd)
+	}
 	return o.nextSpawn <= o.windowEnd
 }
 
 // spawnGate may spawn new sub-records: the next-spawn tick is compared
 // against both the object's window end and the global tick [R-STRIP-01 §2].
-// At most one spawn fires per update. nextSpawn == 0 means the producer
-// armed no gate: retail's family constructors always write the first spawn
-// tick, so the zero value is our explicit unarmed sentinel, never a gate at
-// tick 0.
+// At most one spawn fires per update. The unarmed sentinel is described in
+// readyToSpawn.
 func (o *stripObject) spawnGate(tick uint32, crt *rng.CRT) {
 	if crt == nil || !o.readyToSpawn(tick) {
 		return

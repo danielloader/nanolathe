@@ -229,6 +229,7 @@ func (s *System) RestoreOccupancy(h pool.Handle, anchorX, anchorZ int16) error {
 			s.Grid.ClearPlane(c.StampedPlane, c.StampedAnchor, c.FootPrintX, c.FootPrintZ, c.ID)
 			c.HasStamp = false
 		}
+		s.Grid.fileUnit(c.ID, anchor, c.FootPrintX, c.FootPrintZ)
 		if stamps {
 			s.Grid.StampPlane(plane, anchor, c.FootPrintX, c.FootPrintZ, c.ID)
 			c.StampedAnchor, c.StampedPlane = anchor, plane

@@ -1014,8 +1014,10 @@ type EventView struct {
 	NanolatheBoxAtSource bool
 	Sound                string
 	AudioPositional      bool
-	AudioWater           bool
-	AudioAudible         bool
+	// AudioAnonymous identifies an authored weapon path, not a named cue [03 §8.3].
+	AudioAnonymous bool
+	AudioWater     bool
+	AudioAudible   bool
 	// Status events are semantic unit-caption requests. They are consumed by
 	// the presentation edge, never by authoritative simulation [03 §8.3][07
 	// R-HUD-03 §14].

@@ -663,7 +663,13 @@ slots 0..9, the transfer is the lesser of the destination's capacity gap and the
 source's excess over its own threshold scaled by one third for metal and one
 half for energy, and the thresholds are zeroed at battle init and stay distinct
 from capacity `[05 "Allied resource and sensor sharing"]` `[05 R-SHARE-01 §2]`
-`[05 R-SHARE-01 §3]` `[05 R-SHARE-01 §4]`.
+`[05 R-SHARE-01 §3]` `[05 R-SHARE-01 §4]`. The local transfer rejects zero
+or NaN after the source-stock cap. Debit separately requires an ordered
+inclusive comparison; a NaN stock refuses the donor writes but does not
+prevent the recipient's existing contribution/discount path. The focused
+transfer tests cover both resources, ordered counterparts, and full-income
+computer players. These operand contracts do not establish that ordinary
+sharing controls can produce NaN `[05 R-SHARE-01 §2]`.
 
 **C13 — cloak debit.** A direct sequential debit with truncation, taken in unit
 slot order before the pool is formed, so an earlier unit's debit can starve a
@@ -674,8 +680,11 @@ write is unconditional and whose cue notifications are the only conditional part
 **C14 — extraction and storage.** The unit creator samples an extractor's
 stamped footprint once, including creation through resurrection, and stores
 its extraction rate using the accumulator width and conversion in
-`[05 R-PROD-01 §6]`. Later movement never resamples it; makers and extractors
-both stall on strictly positive energy carry.
+`[05 R-PROD-01 §6]`. The world sampler wraps the footprint sum to sixteen
+bits and uses its signed interpretation for the rate; the returned raw bits
+also feed the script callback. Authored boundary tests cover the negative-rate
+boundary and wrap `[05 R-PROD-01 §6-A]`. Later movement never resamples it;
+makers and extractors both stall on strictly positive energy carry.
 Storage capacity is rebuilt from scratch every pass from eligible completed
 units plus the start bonus `[05 "Terrain metal extraction"]`
 `[05 R-PROD-01 §6]` `[05 "Storage capacity"]` `[05 "Completed-unit eligibility"]`

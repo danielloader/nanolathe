@@ -1289,10 +1289,15 @@ read at this revision; the gate is compile-time. Source: `TABugFix.cpp`,
 
 **CP-CON-3 (B). Patrolling builders' reclaim/assist filters.** With
 `PATROLING_CONS_RECLAIM_OR_ASSIST_ENABLE` (all except OTA), a patrolling
-construction unit's per-movement-setting option selects "reclaim only" (jump
-to the storage gates preceding feature reclaim, skipping the build/repair branch) or "assist
-only" (return before the reclaim search); both mobile and VTOL patrol paths
-are patched. Defaults: **Hold Position is Reclaim Only**; Maneuver and Roam
+construction unit's per-movement-setting option selects "reclaim only"
+(skip the build/repair branch) or "assist only" (return before the reclaim
+search); both mobile and VTOL patrol paths are patched. **Established —
+resume boundaries at the pinned revision `dcff5ddeb6bd1030e3f452c0f16e5f005850f62f`:**
+the ground reclaim-only path resumes at its both-stores-healthy hold, whereas
+the aircraft path resumes directly at feature pairing. The patch does not add
+that ground hold to aircraft. This follows the four patrol-filter procedures
+in the MIT-licensed `TABugFix.cpp`, with their retail continuation points
+identified independently in [04 R-ORD-01 §4, §7]. Defaults: **Hold Position is Reclaim Only**; Maneuver and Roam
 are Both (stock), as `tdraw.txt` also states. Source: `TABugFix.cpp`,
 `dialog.cpp`.
 

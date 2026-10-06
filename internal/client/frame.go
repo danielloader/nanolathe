@@ -460,12 +460,12 @@ func (c *Client) fogFillGray(x0, y0, x1, y1 int32) {
 
 // fogFillChecker writes the dark index at the checker positions of
 // [R-RR16-A §2]: screen column x and row y are written when
-// (x + y + parity) & 1 == 1.
+// (x + y + parity) & 1 == 0.
 //
 // The row is stepped two columns at a time from the first column that satisfies
 // that test instead of testing every column. Column x0+i is written when
-// (x0 + i + py + parity) & 1 == 1, so the run starts at i = 0 when
-// (x0 + py + parity) is already odd and at i = 1 otherwise. The phase is taken
+// (x0 + i + py + parity) & 1 == 0, so the run starts at i = 0 when
+// (x0 + py + parity) is already even and at i = 1 otherwise. The phase is taken
 // from the absolute screen column x0, not from the offset inside the row, so
 // abutting fog cells share one continuous checker rather than restarting it at
 // every cell boundary.
@@ -475,7 +475,7 @@ func (c *Client) fogFillChecker(x0, y0, x1, y1, parity int32) {
 		base := int(py) * w
 		row := c.indexed[base+int(x0) : base+int(x1)]
 		first := 0
-		if (x0+py+parity)&1 != 1 {
+		if (x0+py+parity)&1 != 0 {
 			first = 1
 		}
 		for i := first; i < len(row); i += 2 {

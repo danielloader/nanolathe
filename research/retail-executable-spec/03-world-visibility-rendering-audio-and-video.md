@@ -175,6 +175,50 @@ carries the unexplained word set to `0x100` at spawn noted in §5.5.
 
 #### R-STRIP-01 §3 — random draws inside the sweep (CRT stream)
 
+**Established — flame time comparisons are not all unsigned.** The flame
+container's spawn gate compares `nextSpawn` with its window end as signed
+32-bit values, then compares `nextSpawn` with the current tick as unsigned
+32-bit values; both admit equality. A flame segment expires when its expiry
+is strictly less than the current tick under a signed 32-bit comparison, after
+its position and frame advance. The container's own removal verdict remains
+list-empty and still runs before the update. Consequently, crossing the signed
+tick boundary can refuse a spawn or remove a segment earlier than a uniform
+unsigned-time model would. For example, a 30-tick flame window opened twenty
+ticks before that boundary has a positive signed next-spawn value and a
+negative signed window end, so its next spawn is refused. These are timer
+arithmetic contracts; they do not establish that an ordinary battle reaches
+that boundary. Other families must retain their own predicates rather than
+inheriting this signedness merely because their deadlines look similar.
+
+**Established — the smoke puffer has its own mixed comparisons.** The
+strips-5/9 smoke class independently uses a signed 32-bit comparison for
+`nextSpawn ≤ windowEnd` and an unsigned comparison for `nextSpawn ≤ tick`.
+Its removal verdict is different: it removes an empty container only when
+`windowEnd < tick` as unsigned values. The dispatcher checks removal before
+update; a surviving update advances and retires existing puffs before asking
+the spawn gate. Each accepted spawn spends one CRT draw and sets the next
+spawn to the current tick plus the interval. The geothermal class has only
+the unsigned inclusive next-spawn test and a constant-false removal verdict.
+
+The signed comparison can change even the usual one-shot interpretation.
+A zero-lifetime smoke container created at tick `2147483647`, with interval
+one, stores that tick as its window end and `2147483648` as its next spawn.
+At the next tick, the signed window test and unsigned due test both pass,
+so a still-live container spawns again. Conversely, land dust created at tick
+`2147483640` with interval seven and lifetime fifteen stores next spawn
+`2147483647` and window end `2147483655`; the signed window test refuses that
+first scheduled spawn. Both examples use ordinary producer parameters and
+valid frame data, without a zero deadline or an allocation overflow. They
+establish timer arithmetic and CRT admission, not ordinary-duration battle
+reachability.
+
+**Unknown — complete flame and smoke lifetimes across tick wrap.** The
+comparisons above are established, but a complete producer-to-retirement
+trace for deadlines that wrap to zero is still required. That trace must
+distinguish a stored zero produced by timer arithmetic from a container that
+has not armed a spawn gate; the signed-boundary examples alone do not settle
+that lifecycle.
+
 The phase-11 sweep consumes no draws at the dispatcher level, but its objects
 do, all from the CRT presentation stream — this quantifies doc 01 §7.2's
 "object-internal" census row for phase 11: the nano emitters spend thirty
@@ -545,13 +589,15 @@ stamps the feature's footprint rectangle, in the loader's row-major attribute
 order. A TNT-authored `0xFFFE` that no footprint rectangle covers is never
 stamped and ends up `0xFFFF` after load — such cells are not fringe at all, they
 disappear (measured: about 5,283 such cells across the 275-map corpus). Merged
-blobs resolve by last-stamp-wins: a later footprint overwrites an earlier one's
-fringe cells with its own offsets; a row-major left/above later-wins heuristic
-misassigns the seam cells of overlapping blobs. Declaration footprints alone resolve 65.1% of raw fringe; the
-sequential stamp resolves 100% of footprint-covered fringe by construction.
-`TODO(question)` remains only for the dense-pack rule — whether a footprint that
-overlaps a live anchor cell is rejected or silently overwrites — which the
-stamper's occupancy guard decides per consumer.
+blobs resolve through the ordinary teardown-before-stamp service, not by
+assigning fringe cells independently. **Established:** encountering an earlier
+non-indestructible anchor or fringe removes that earlier feature's entire
+stamped footprint before the new footprint is written. Encountering an
+indestructible feature refuses the new stamp; cells already torn down earlier
+in that row-major walk are not restored. A later successful stamp writes its
+own fringe offsets. A nearest-anchor or left/above heuristic cannot reproduce
+this behavior. [05 R-FEAT-01 §3] and [05 R-FEAT-01 §3-A] own the service and its
+allocation-failure boundary.
 
 Void and edge generation runs after the full-map minimum/maximum recompute and
 after feature placement. Right columns `Width-2` and `Width-1` are set to
@@ -1289,8 +1335,21 @@ these holds, and the one-plane image otherwise:
 - the unit's construction fraction is not the completed sentinel (a nanoframe
   always gets a key plane, because [R-P0-19-N]'s reveal reads it).
 
+**Established (loader and creation callers traced):** `Digger` does not force
+this instance flag. The loader stores `ZBuffer` and `Digger` independently, and
+ordinary unit initialization copies only the `ZBuffer` flag into the instance's
+key-plane selection. Initialization also sets the construction fraction
+independently; construction forces two-plane allocation at the image builder
+without setting the instance's `ZBuffer` flag. Thus an ordinary complete
+Digger with `ZBuffer=0` can receive a one-plane cached image, while the same
+definition receives two planes during construction or an explicit child
+composition. The presenter selects its branch from the allocated image's
+actual key-plane presence, not from the Digger flag [R-REN-03D §1].
+
 The engine's feature-backed pseudo-unit sets the same instance bit
-unconditionally, having no FBI to read.
+unconditionally, having no FBI to read. This creation and allocation contract
+does not independently establish every restored-image lifetime or cache rebuild
+at construction completion.
 
 **Established (asset census, base `totala1.hpi`).** All 278 stock
 unit definitions author `ZBuffer`. Exactly two author `0` — `CORFAV` and
@@ -1377,8 +1436,44 @@ painter order. Attached child units are drawn the same way.
 
 **Key plane present.** A **staging image** is prepared whose box is the union
 of the unit's own box and the boxes of all its attached child units, offset by
-each child's world position relative to the parent; the cached image is copied
-or re-blitted into it, both planes. Then:
+each child's world position relative to the parent. The cached image seeds
+both planes, with two distinct copy rules (**Established, direct-static**):
+
+- If the staging width and height equal the cached image's, copy every byte
+  of each plane, including transparent color pixels and their stored keys.
+- Otherwise clear staging color to the image's transparent index and its key
+  plane to zero, then copy each source plane independently through the ordinary
+  color-keyed image blitter at the cached image's offset. Both copies retain
+  the image's transparent index, **1**: color byte 1 leaves background color,
+  and key byte 1 leaves the cleared key zero. The key copy does not test the
+  corresponding color byte. A transparent color pixel can therefore still
+  contribute a nonzero key, while an opaque color pixel with key 1 loses that
+  key on this resized path.
+
+For a bounded authored example, let an opaque cached pixel have key 1 and an
+attached child offer an overlapping opaque pixel with shifted key 0. With an
+unchanged staging size, the parent retains key 1 and rejects that child pixel.
+If the child extends the union on one side, the resized copy leaves key 0 at
+that same parent pixel and the child wins the equality comparison. A larger
+box can therefore change occlusion inside the original box; treating these
+copies as one unconditional color-and-key copy misses that behavior. Key 1
+is an ordinary representable raster result, for example from a flat face at
+model-relative height −49 with the base key 50. This establishes an authored
+counterexample, not its frequency in stock geometry and attachment poses.
+
+**Established, direct-static — the copy acts on completed cached planes.**
+Cached faces have already resolved against each other before this copy. For
+example, an opaque cached face at key 1 can reject a later cached face at
+key 0; resizing then keeps the winning color while replacing its key with
+zero. Changing individual face keys before resolving the cached image would
+instead admit that later face and change the color. Conversely, a live face
+that writes key 1 after the seed retains that key: the resized-copy rule is
+not applied again after live drawing. A later live or attached pixel at key 0
+can therefore distinguish a cached key 1 removed by resizing from a live
+key 1 written afterward. These are separate ordering requirements, even
+where both copies and rasterization ultimately target one staging image.
+
+The staging preparation next applies the parent's construction reveal, then:
 
 1. the **live** pieces are rasterized into the staging image with the key test
    — so an animated door or plate resolves against the cached body per pixel,
@@ -1498,8 +1593,11 @@ There are four span writers, one per (shaded, unshaded) × (textured, flat):
 | shaded | textured quad | `SHD[row*256 + texel]` |
 | shaded | flat polygon | `SHD[row*256 + color]` |
 
-All four apply the §2 key test identically and all four fall through to
-unconditional writes when the key plane is absent. **Established
+All four apply the §2 key test identically. When the key plane is absent,
+all write unconditionally, but the shaded **textured** writer also bypasses
+SHD and writes raw texels. Both keyless texture writers have the width-128
+stride exception in [R-RAST-01 §1 step 6]. The shaded flat writer retains its
+SHD lookup without a key plane. **Established
 (bounded-negative):** none of the four tests the sampled texel against a
 transparent or color-key index — within the model raster path a texture is
 fully opaque. Transparency in the model path is expressed only by the
@@ -1519,6 +1617,9 @@ hold, the renderer does not rasterize into the caller's image. It takes the
 shared scratch image, sets its width, height and both origin components to
 **exactly twice** the caller's, clears its key plane to `0` and its colour
 plane to the transparent index, and rasterizes the whole model into that.
+The scratch **always has a key plane**, independently of whether the final
+caller image is color-only; resolving into a color-only image does not install
+a final key plane.
 Every projected vertex component is shifted left by one before the shear:
 
 ```
@@ -1635,18 +1736,26 @@ texture.
 
 ##### 8. Waterline, digger clipping, and the model shadow
 
-Three passes run over the finished image before it is blitted, all of them
-keyed on §2's height key. They are the reason the key base is 50 rather than 0:
+The body waterline and Digger passes run over the finished staging image;
+shadow preparation runs earlier over the cached body. Their pixel cutoffs use
+§2's height key. They are the reason the key base is 50 rather than 0:
 the key must stay non-negative for geometry below the model origin.
 
-**Waterline.** With `t = seaLevel - trunc(unitWorldY)`, when `t > 0` part of
-the unit is below the water surface and the threshold `t + 50 [+75 if Digger]`
-selects it. Which pass runs depends on ownership:
+**Waterline.** Extract the signed high word of the unit's 16.16 world Y
+(floor, including negative fractions) and subtract it from the unsigned sea
+level byte: `t = seaLevel - hi16(unitWorldY)`. Only `t > 0` admits the pass.
+Then form `t + 50 [+75 if Digger]` and keep its **low byte** as the threshold;
+both pixel helpers compare unsigned key bytes to that unsigned threshold.
+This is wrapping, not saturation. For example, sea level 210 and world Y 0
+produce threshold 4, so a pixel with key 50 is spared even though a wide
+threshold 260 would select it. The gate tests the positive depth before this
+narrowing; a wrapped zero threshold still runs and selects key zero.
+Which pass runs depends on ownership:
 
 - if the unit does not carry the sonar-contact bit of [R-VIS-01 §4] **and**
   its owner is not the local player, every pixel with `key <= threshold` is
-  **erased** — set to the image's transparent index — so a submerged enemy
-  simply is not drawn below the surface;
+  **erased** — set to the image's transparent index — so the selected part
+  of the submerged enemy is not drawn;
 - otherwise every pixel with `key <= threshold` whose colour is not already
   the transparent index is recoloured through a 256-entry **`BLUE TABLE`**, so
   the local player sees their own submerged hull tinted rather than cut off.
@@ -1662,14 +1771,17 @@ below the model origin: the buried half of a pop-up defence. **Established
 [R-REN-03D], with the branch census in [R-RAST-01 §4]. After the common
 master-shadow and `noshadow` tests, retail selects exactly one branch:
 
-1. A **Digger** copies the finished body image, flattens each non-transparent
-   pixel to palette index 0, erases the part at or below key `50 + 75`, and
-   sends the result through the tinted blitter. This branch additionally
-   requires vehicle shadows and rejects `canhover` and `floater`.
+1. A **Digger with a key plane** copies the cached body image, flattens each
+   non-transparent pixel to palette index 0, erases the part at or below key
+   `50 + 75`, and sends the result through the tinted blitter. It does not
+   additionally test vehicle shadows, `canhover`, or `floater`. A keyless
+   Digger takes the separately gated, unclipped silhouette path of
+   [R-REN-03D §1].
 2. An ordinary **mobile** subject uses the same copy-and-flatten silhouette.
    When it is partly submerged, it erases pixels at or below
-   `seaLevel - hi16(unitY) + 50` before the tinted blit. It has the same
-   vehicle-shadow, `canhover`, and `floater` gate as the Digger branch.
+   `low8(seaLevel - hi16(unitY) + 50)` before the tinted blit. It has the same
+   vehicle-shadow, `canhover`, and `floater` gate as the keyless silhouette
+   path.
 3. A **structure** that is not a Digger re-rasterizes the model with the
    dedicated ground-shadow projection, punches the body silhouette out of the
    result, run-length-encodes it, and caches that shadow image. It does not test
@@ -1736,14 +1848,16 @@ A subject reaches model-shadow work only when the options word's master shadow
 bit is set and its definition does not author `noshadow`. Retail then selects
 exactly one branch:
 
-1. **Digger:** requires the vehicle-shadow bit and rejects `canhover` and
-   `floater`; copies and flattens the finished body silhouette, then erases
-   pixels whose key is at or below `50 + 75` so the buried half casts no
-   shadow.
-2. **Mobile:** selected when the structure-class bit is clear; has the same
-   vehicle-shadow, `canhover`, and `floater` gate; copies and flattens the body
-   silhouette, then, when `t = seaLevel - hi16(unitY) > 0`, erases pixels at
-   or below `t + 50` so only the above-water hull casts a shadow.
+1. **Digger with a key plane:** copies and flattens the cached body
+   silhouette, then erases pixels whose key is at or below `50 + 75`. It
+   does not test the vehicle-shadow bit, `canhover`, or `floater`.
+2. **Mobile:** selected when the structure-class bit is clear and Digger is
+   clear; requires the vehicle-shadow bit and rejects `canhover` and `floater`.
+   It copies and flattens the cached body silhouette, then, when
+   `t = seaLevel - hi16(unitY) > 0`, erases pixels at
+   or below `low8(t + 50)`, using the same byte threshold as the body
+   waterline pass. It selects the above-water silhouette in the non-wrapping
+   range; a deeper threshold wraps as described in [R-REN-03A §8].
 3. **Structure:** selected when the structure-class bit is set and Digger is
    clear; uses the dedicated rerasterization of §2 and the punched RLE cache of
    §5. It does not test vehicle shadows, `canhover`, or `floater`. It is skipped
@@ -1752,6 +1866,15 @@ exactly one branch:
    sea level. The conclusion that ordinal 0 is reserved is a **Supported
    inference** from the loader walk; a live-type writer to ordinal 0 would
    settle it.
+
+The keyless presenter groups Diggers with mobile subjects: both require
+vehicle shadows and reject `canhover` and `floater`, and neither applies a
+key-plane erase. Thus the Digger gate changes with the cached image's actual
+key-plane presence. The cache builder can produce a keyed image through the
+instance key-plane flag or unfinished construction [R-REN-03A §2]; Digger
+alone does not choose the allocation. A keyed Digger with master shadows on
+and vehicle shadows off therefore still casts its clipped shadow. This is an
+authored state counterexample, not a claim about stock settings frequency.
 
 All branches end at the tinted blitter of §4. Its alpha-blend table capability
 is enabled at window startup independently of the **`Shading`** preference.
@@ -1790,7 +1913,7 @@ differs from the body walk only in the cache-bit gate, the flat filler at any
 vertex count, the literal fill colour, and the quarter shear in place of the
 half shear. Two projections of one model that disagreed on handedness would
 make a structure's shadow a Z-mirrored copy of its own body, out of step with
-the Digger and mobile branches of §6, which cast the finished body silhouette
+the Digger and mobile branches of §6, which cast the cached body silhouette
 itself and therefore carry the body's sign by construction. **Established
 (direct-static).**
 
@@ -1866,8 +1989,8 @@ its capture and keyed-copy path is specified in [R-FX-01 §4].
 
 After the structure rasterization of §2, retail additionally:
 
-1. composites the **body** image into the finished shadow image, writing the
-   shadow image's *transparent* index wherever the body is opaque — punching
+1. composites the **cached body** image into the finished shadow image, writing
+   the shadow image's *transparent* index wherever the body is opaque — punching
    the body's own silhouette out of its shadow so the ground beneath it is not
    darkened before the body covers it;
 2. run-length-encodes the shadow image's colour plane row by row, each row
@@ -1880,15 +2003,43 @@ The punch-out's five-pixel offset and the blit's cancel: the hole lands
 exactly at the body's own screen position ([R-RAST-01 §4]). Implement the
 punch-out.
 
+**Unknown — horizontal row spill:** the retail punch helper's horizontal
+count does not subtract the destination column. Its caller uses projected
+body/shadow images, so malformed input alone does not bound this case. Trace
+the reachable image extents and source coverage to establish whether ordinary
+structures can write into the next destination row and alter visible shadows.
+Nanolathe retains per-pixel destination clipping until that extent proof exists.
+
 ##### 6. The silhouette branches
 
-The Digger and ordinary-mobile branches copy the unit's own finished
-composition image — both planes — and flatten every non-transparent colour
-pixel to palette index 0. Their branch-specific key-plane erasures are stated
-in §1. The structure branch instead re-rasterizes through §2 and fills its
-faces with index 0 directly. All three end at the same §4 blitter with the same
-§3 placement: a black silhouette blended over the ground, five pixels right
-and sheared by terrain height.
+**Established (producer and consumer traced):** the Digger and ordinary-mobile
+branches copy the unit's retained cached body image, including its key plane
+when present, and flatten every non-transparent colour pixel to palette index
+0. The structure branch uses that same cached body as its punch source, after
+its separate §2 rasterization. These operations precede the staging seed,
+nanoframe reveal, live-piece drawing, attached-child composition and body
+waterline/Digger passes [R-REN-03A §9]. The shadow's own §1 erase is applied to
+the copy, not to the retained body.
+
+The cache builder selects visible cached pieces for a complete ordinary unit;
+its construction override admits all visible pieces while unfinished. Both
+shaded and unshaded builders follow that selector. In keyed presentation,
+later live and reveal writes go to the staging image, not back into the
+retained cache; the keyless live path writes directly to the framebuffer. Therefore a
+complete mobile's visible noncached piece can appear in its body without
+appearing in its silhouette shadow. During construction the cached shadow
+source can contain geometry that the later reveal removes from the body.
+Adding cargo does not add that cargo to the parent's copied silhouette or
+structure punch. These are consequences of the source and ordering, not stock
+asset incidence measurements.
+
+All three branches end at the same §4 blitter with the same §3 placement: a
+black silhouette blended over the ground, five pixels right and sheared by
+terrain height. This source contract does not settle independent attached-child
+shadow admission, current-pose bounds when cached geometry changes without a
+rebuild, or the horizontal punch spill named in §5. Those require their own
+caller and extent proofs; a finished parent/group image is not a substitute
+for the established cached source.
 
 #### R-REN-02R — red/purple fringe provenance
 
@@ -2297,7 +2448,8 @@ Left and top are inclusive; right and bottom are exclusive; two faces
 sharing an edge neither overlap nor leave a gap along it; there is no
 half-pixel centre convention anywhere.
 
-**6. Per pixel.** The textured writers sample `texel = pixels[(v >> 16) * w
+**6. Per pixel.** Except for the keyless composition width-128 case below,
+the textured writers sample `texel = pixels[(v >> 16) * w
 + (u >> 16)]` (the widths 8, 16, 32, 64 and 128 use a shift-and-mask form of
 the same product) with **no clamp and no wrap** — the default corners keep
 `u` in `[0, w-1]` and `v` in `[0, h-1]` because the interpolation never
@@ -2308,6 +2460,26 @@ reaches the right corner value (the last pixel of a span is at
 writing colour and key together when it passes, or unconditionally when the
 target has no key plane. Colour and key are the only outputs; the row is
 consumed as `SHD[(row >> 16) * 256 + texel]`.
+
+**Established composition exception:** when the composition target has no key
+plane, both textured composition writers use raw texels, bypassing SHD even
+when the shaded renderer was selected. At source width 128 their width-128
+span pass is immediately overwritten by the width-64 pass. Both start at the
+same destination, with the same pixel count, initial UVs and UV increments.
+The final sample is therefore `pixels[(v >> 16) * 64 + (u >> 16)]`; authored
+width-128 corner UVs are unchanged. This is a row-stride substitution, not
+wrapping the horizontal coordinate to 64. Keyed composition spans use their
+normal stride and the selected shading. **Direct framebuffer spans use their
+normal source stride** and raw texels; absence of a key plane alone does not
+identify the composition exception. Shaded **flat** composition spans still
+use SHD without a key plane; the raw fallback is specific to textures.
+
+The shaded keyless composition path is reachable: a completed structure with
+`ZBuffer=0`, `Shading` on and `Anti_Alias` off gets a color-only image while
+independently selecting the shaded mapper. With structure anti-aliasing enabled,
+the shared doubled scratch always has a key plane [R-REN-03A §6], even if the
+final resolved image is color-only, so the texture raw fallback does not apply
+to that scratch.
 
 **7. The winding cull.** There is no normal test, no signed-area test and no
 "backface" flag. What removes back faces is step 5: the chain that walks
@@ -2485,16 +2657,16 @@ wreck — is **always tinted, never cut** (§6 below).
 **The shadow gate.** The unit present has **three** shadow branches, selected after the master-shadows bit and the definition's
 `noshadow` have passed:
 
-1. **Digger** (definition bit set): silhouette copy of the finished body
-   image ([R-REN-03A §8]), then the silhouette is **erased wherever
-   `key <= 50 + 75`** — the buried half casts no shadow — and blitted through
-   the tinted blitter. Requires the vehicle-shadow bit and none of
-   `canhover`/`floater`.
+1. **Digger with a key plane** (definition bit set): silhouette copy of the
+   cached body image ([R-REN-03D §6]), then the silhouette is **erased wherever
+   `key <= 50 + 75`** and blitted through the tinted blitter. No additional
+   vehicle-shadow, `canhover`, or `floater` gate applies in this keyed branch.
 2. **Mobile** (structure-class bit clear, [R-RND-02A]): silhouette copy;
    when the unit is below the surface (`t = seaLevel - hi16(unitY) > 0`) the
-   silhouette is erased wherever `key <= t + 50` before the blit, so the
-   shadow of a partly submerged hull is the shadow of the part above water.
-   Same option and definition gate as branch 1.
+   silhouette is erased wherever `key <= low8(t + 50)` before the blit.
+   The threshold wraps as in [R-REN-03A §8]; within the non-wrapping range
+   this leaves the shadow of the part above water.
+   Requires vehicle shadows and rejects `canhover` and `floater`.
 3. **Structure** (structure-class bit set, not a Digger): the re-rasterized,
    punched, RLE-cached shadow of [R-REN-03D §2]–§5. This branch tests **only
    the master bit and `noshadow`** — not the vehicle-shadow bit, not
@@ -2504,13 +2676,13 @@ wreck — is **always tinted, never cut** (§6 below).
    walk starts past (Supported inference from the loader: the walk begins at
    ordinal 1; nothing else was found using ordinal 0 as a live type), and
    the feature pseudo-unit records ordinal `0`; so for every real unit the
-   test is vacuous and for a 3DO feature it means **a wreck at or below sea
-   level casts no shadow**.
+   test is vacuous and for a 3DO feature it means **a wreck below sea
+   level casts no shadow; equality passes this gate**.
 
-So toggling `VehicleShadows` off removes the shadows of mobile units and
-diggers and leaves structure shadows in place; the master `Shadows` bit
-removes all three. Ships are mobile and take branch 2; the cached image
-belongs to structures, and the sea-level gate only ever bites on wrecks.
+So toggling `VehicleShadows` off removes ordinary mobile and keyless Digger
+shadows, while keyed Diggers and structures retain theirs; the master
+`Shadows` bit removes all three. Ships are mobile and take branch 2; the
+separate shadow cache belongs to structures, and the sea-level gate only ever bites on wrecks.
 Everything in
 this paragraph is **Established (direct-static)** except the ordinal-0
 inference, which the decider names.
@@ -2528,9 +2700,9 @@ punch-out. **Established (direct-static).**
 
 **The no-key-plane present is not a reduced copy of the full one.** When the
 cached image has no key plane ([R-REN-03A §2] gate false), the unit present
-draws: shadow (the three branches above, but branch 1 and 2 without their
-erasures, which need a key), then the body blit, then live pieces straight to
-the framebuffer, then every attached child's draw-bit pieces straight to the
+draws: shadow (Digger and mobile both require vehicle shadows and reject
+`canhover`/`floater`, without their key-dependent erasures), then the body
+blit, then live pieces straight to the framebuffer, then every attached child's draw-bit pieces straight to the
 framebuffer; there is no staging, no waterline and no digger pass at all.
 **Established (direct-static).** A `CORFAV` or `CORTRUCK` — the two stock
 `ZBuffer=0` types — is therefore never cut at the waterline or tinted.
@@ -2971,6 +3143,28 @@ defined record to re-publish. The byte-grid reset, rather than an attempted
 retirement through the new raster, disposes of every preceding current-coverage
 footprint.
 
+**Established — full rebuilds retain the same ray throttle.** The full
+rebuild at battle entry and the commander-respawn call use this same bulk
+routine with a nonzero history-reset argument. That argument selects the
+word-grid refill; it does not select a different per-unit publication path.
+The terrain-ray branch still clears only the stored coverage byte, retains
+the stored tile pair, and calls the ordinary refresh. In particular, a
+stationary observer with emitter byte 5 publishes nothing after the refill,
+whereas emitter byte 6 passes the strict height-difference test. A changed
+tile also passes, even at height 5. Circular mode still directly republishes
+its shape. These contracts do not depend on the contents of the ray spokes:
+the observer's own tile distinguishes publication from no publication.
+
+A safe authored case is an already stamped unit at an interior tile with
+model-top byte 0, world height 0 and sea level 0. The observer's sea-level
+raise makes its emitter byte 1. If it remains at that tile while a commander
+respawn triggers the full rebuild, its old current coverage is wiped but its
+ray footprint is not immediately republished. With Unmapped selected, the
+word-grid refill also discards its previous history unless another observer
+publishes it. This establishes an authored boundary case, not a claim about
+stock unit model heights. Entry initialization may supply a different stored
+tile; the comparison, rather than the name of the caller, decides that case.
+
 The refresh has a separate history-reset argument. `LOSType` and `LOS` leave
 the mapping word grid intact, preserving history while rebuilding current
 coverage. `Mapping` and `NowISee` request a word-grid refill using the new bit
@@ -3403,16 +3597,32 @@ branch, which is guarded.
 parse, the per-line quadrant expansion and the raster).
 
 **File grammar.** The tables live in `gamedata/los.tdf`. A `[TABLEINFO]`
-section carries `numtables`; each table is a section named `TABLE%d` for
-`%d` = 0 … `numtables − 1` carrying `numlines`; each line is a key named
-`line%d` whose value is a comma-and-space separated integer list whose **first
-token is the point count**, followed by that many `(u, v)` pairs. Tokenization
+section carries `numtables`; zero-based table slot `d` is loaded from the
+section named `TABLE d + 1`, through `TABLE numtables`. Each table carries
+`numlines`; its zero-based line slot `i` is loaded from the key named
+`line i + 1`, through `line numlines`. The value is an integer list whose
+**first token is the point count**, followed by that many `(u, v)` pairs. Tokenization
 is by the separator set `", "` and each token is converted with the ordinary
 decimal string-to-integer conversion (so trailing garbage in a token is
-ignored). A missing `TABLE%d` section leaves that table's line list empty; a
-missing `line%d` key empties that line. `research/formats` does not own this
-file: it is a TDF, and its grammar is `[fmt tdf]`; only the key meanings are
-stated here.
+ignored). Before tokenization, the line consumer copies at most **511 bytes**
+of the stored value and terminates the copy. This is a byte boundary, not a
+token boundary: the final retained token can be shortened, changing a complete
+coordinate without making the list incomplete. For example, a one-point line
+whose last coordinate has enough leading zeroes can retain its tens digit and
+lose its units digit. The bound applies to each requested line independently;
+it does not limit the size of the whole file or authorize safety assumptions
+when shortening removes required tokens. A missing `TABLE%d` section leaves
+that table's line list empty; a missing `line%d` key empties that line. Only the declared named lines are
+requested: an additional `line` key beyond `numlines` is not another spoke,
+and a missing earlier line does not move a later line into its place. Spaces
+and commas are independent token separators, so a space-only coordinate list
+is accepted. Table, line and point counts are narrowed to signed sixteen-bit
+values; each coordinate is stored as a signed sixteen-bit value and negation
+retains that width. The runtime table-count accessor reports the size created
+from that narrowed declaration, so a safely positive narrowed count, such as
+`65538` becoming `2`, also gives a runtime clamp bound of two. These width
+rules do not establish safe behavior for negative allocation counts or incomplete coordinate lists. `[fmt tdf]` owns
+the TDF grammar; this section owns the key meanings and loader behavior.
 
 **Quadrant expansion happens at load, not at raster time.** Each table's line
 vector is sized to **four times** `numlines`, and each authored line is
@@ -3475,7 +3685,9 @@ Seven details that a summary loses and an implementer needs:
    the bounds test and points rejected by the horizon test. It is the point's
    ordinal in the authored list, counted from one — which is why §3.2's
    "the authored offsets are absolute positions from the observer" and this
-   counter cohere.
+   counter cohere. An out-of-bounds point is skipped, not an end-of-spoke
+   marker: later authored points are still visited. The loader does not require
+   increasing distance or prevent a spoke from leaving and re-entering the map.
 2. The retained pair resets **per line**, not per table.
 3. The initial pair `(-1, 0)` makes the first point of every line admit
    unconditionally: `-1 × 1 < lowDiff × 0 = 0` for every terrain height.
@@ -3543,8 +3755,23 @@ the map edge distinguishes them and shows whether the backbuffer persists
 stale bytes beyond the play rect); that visibility culling itself is binary
 and hard-edged is **Established**.
 
-The mapping word grid is serialized in a save blob; the transient byte sight
-grid, dirty flags, eyeball queue, and radar surfaces are not all serialized.
+**Established — saved mapping is the history store itself.** The `Mapping`
+save item copies the word grid verbatim, including any word bits outside the
+ten player bits; neither its writer nor its reader masks the copied values.
+The reader requires the advertised box size to equal the current map's logical
+word-grid size before copying. It does not reconstruct history from current
+sight, terrain heights, or rendered fog. The neighboring `Metal` and
+`PlayerFeatures` restores are separate: the first replaces only each plot
+cell's metal byte; the second replaces only the placer nibble and preserves
+the other flag bits. Their packing and exact-size gates are owned by
+[08 R-SAVE-02 §12]. This distinction matters even when a restored cell has no
+current sight source: its saved history can still admit the history-based
+visibility predicate. Short-read and malformed-container failure paths are not
+established by this valid-box comparison.
+
+The transient byte sight grid, dirty flags, eyeball queue, and radar surfaces
+are not all serialized; they must not be inferred from the presence of the
+saved history store alone.
 
 **Two-channel fog cache.** A dirty-triggered composer wakes on the
 presentation dirty bit, clears it, and rebuilds the fog/minimap byte surfaces
@@ -3561,7 +3788,7 @@ the camera in 32-pixel cells including signed residues. Per cell:
   already under the cell through the nearest gray palette entries, preserving
   texture; it never writes a constant color [R-RR16-A]. When the options-storage
   dither bit is set, the same state instead writes literal
-  palette index 0 (black) at checker positions `(x + y + parity) & 1 == 1` with
+  palette index 0 (black) at checker positions `(x + y + parity) & 1 == 0` with
   `parity = (camX + camZ) & 1` — black dots over whatever is on screen, never
   the fog color.
 - Else channel one in 1..14: GAF frame `value - 1` drawn from a four-way
@@ -3602,7 +3829,13 @@ non-key pixels covered, key pixels skipped — but what lands differs: the black
 family (channel zero/history) is a plain keyed copy of source pixel 0 (paints
 black); the gray family (channel one/current) is a masked LUT remap that never
 writes the source pixel; the dithered gray family steps x by two and stores
-literal palette index 0 at checker positions. The gray frames are geometrically
+literal palette index 0 where `(x + y + parity) & 1 == 0`, using final
+destination coordinates after placement and clipping and the same camera parity
+as the full-cell checker. A clipped left edge does not restart the pattern.
+**Established (direct-static):** both patterned writers select this even phase;
+for an opaque two-pixel row at destination `(0,0)` with parity zero, the first
+pixel is blackened and the second is unchanged. With parity one those roles
+reverse. The gray frames are geometrically
 LARGER than the black frames for the same nibble value (gray frame-1 is 19×19
 where black is 16×16), and the gray channel draws before the black channel, so
 a boundary cell gets a desaturated fringe surrounding the black cloud — the
@@ -3879,6 +4112,24 @@ at all**. It is observable only on a unit whose `sonardistance` exceeds its
 `radardistance`, where it lets radar detection extend into the sonar circle.
 This is a retail contract, not an oversight to correct: an implementation that
 searches out to the bonused radius will detect units retail never examines.
+
+**Established — the two radius-square paths have different widths.** The
+radar callback's radius is formed by sign-extending the authored signed-word
+radar distance and the emitter's signed whole-height word, adding twice the
+height at 32-bit width, and multiplying that complete sum by itself while
+retaining the low 32 bits. It is not narrowed back to a signed word before
+multiplication. The sonar callback similarly squares its sign-extended
+single authored word. By contrast, the spatial visitor receives its unbonused
+maximum radius shifted into a raw 16.16 word and squares that word with the
+high-product rule of §5. These paths agree for ordinary small radii but are
+not interchangeable at the signed-word boundary. An authored radar distance
+of 32600 and emitter height 200 yield callback radius 33000: a target 32550
+world units away is inside both the visitor and the callback tests, whereas
+narrowing the adjusted radius again would incorrectly reduce the squared
+threshold. If the callback square itself overflows signed 32-bit range, its
+signed comparison also retains that result; the ordinary-circle description
+above assumes a nonnegative representable square. This establishes arithmetic,
+not stock reachability for such a range.
 
 **Pass 3 — jam emission.** Over every unit slot from 1 to the end of the pool,
 for units that are alive, whose **owner slot differs from the viewing player's
@@ -4656,9 +4907,10 @@ idempotent-OR word grid exists to provide (§3.2 "a dead unit merely stops being
 swept and its already-mapped bits persist").
 
 **Save/load.** The final surface is serialized into the save blob. The picture,
-mapped, and temp are rebuilt through the dirty bits on load; the mapping word
-mask and the per-player byte grids are serialized as the Mapping blob. The fog
-cache is not saved and is rebuilt lazily when its cache-valid mode bit is clear.
+mapped, and temp are rebuilt through the dirty bits on load. **Established:**
+the Mapping blob contains only the history word grid, not the per-player
+current-sight byte grids (§3.3, [08 R-SAVE-02 §12]). The fog cache is not saved
+and is rebuilt lazily when its cache-valid mode bit is clear.
 
 ### 3.7 Radar picture build: baked versus generated
 
@@ -4715,31 +4967,36 @@ pairings are rejected by exhaustive search (bounded-negative).
 on screen remains open; an asymmetric-palette probe (row-first, column-first,
 and diagonal orderings yielding distinct results) settles it.
 
-**The shared resampler (Established, direct-static).** Both picture legs
-enter one generic routine with independent source and destination
-dimensions. For each destination axis
-it truncates the source coordinate ratio, blends that sample with its adjacent
-source sample, and applies the same row-first three-lookup ALP sequence above.
-There is no nearest-neighbor path. This includes the authored 252×252 and
-252×256 TNT minimaps when the destination lens is 126×126; no exact
-`2*destination` dimension predicate is part of the gate. Confidence is
-**Established** for the ratio/truncation and ALP order; the source bytes and
-dimensions remain authored by the TNT format [fmt tnt].
+**The shared half-size reducer (Established, direct-static).** Both picture
+legs enter the same fixed 2×2 reducer. Destination pixel `(x,y)` samples
+source coordinates `(2x,2y)`, `(2x+1,2y)`, `(2x,2y+1)` and
+`(2x+1,2y+1)`, using the source's stored width as row stride. The destination
+width and height bound the output loops. Source height does not enter the
+sampling arithmetic, and there is no source-to-destination ratio calculation.
+The top and bottom pairs feed the row-first ALP sequence above in left-to-right
+order. The prior description of a generic ratio-based resampler was incorrect.
 
-**The baked source sub-rectangle** (`[fmt tnt "How the used sub-rectangle is
-sized"]`). The source dimensions that feed this resize are not always the
-baked minimap's stored `width x height`: on a non-square map, only a top-left
-sub-rectangle of the stored bitmap is real terrain, and the rest of its short
-axis is the format's `0x64` fill (`[fmt tnt]`). A reader that hands the full
-stored dimensions to the generic resize above stretches that fill into the
-visible picture, which on a markedly non-square map reads as the terrain
-being shifted toward one corner with a solid band of the fill color occupying
-the rest. The used sub-rectangle's size is computed from the map's
-`PlayRight`/`PlayBottom` by the same long-side fit the on-screen radar
-rectangle uses (the aspect rule below), substituting the stored bitmap
-dimension for the 126-pixel canvas constant; the formula and its verification against five
-shipped maps are in `[fmt tnt]`. Only the cropped sub-rectangle enters the
-resize described above.
+The generated source is exactly twice the destination in each dimension, so
+this reducer visits its whole image. The baked source retains the dimensions
+read from the TNT header: the map loader allocates that size and copies the
+stored pixels; the radar builder passes it directly to the reducer without
+replacing its dimensions or repacking rows. Consequently, a sufficiently large
+baked source contributes the top-left `2*RadarW` by `2*RadarH` rectangle at its
+original row stride. An authored 252×256 source feeding a 126×126 lens uses
+rows 0 through 251; it does not stretch all 256 rows into the lens. As a
+falsification fixture, let every source pixel equal its row number and let
+`ALP[a,b] = a`: output row 63 is 126, whereas ratio-based sampling would yield
+128. All four samples are in bounds in this example.
+
+**Baked padding and consumer extent.** The observed top-left terrain region
+and padding of the sampled TNT files remain authored image properties
+(`[fmt tnt "How the used sub-rectangle is sized"]`). The consumer does not
+calculate that region's dimensions before reduction. Its effective rectangle
+comes from doubling the destination lens, so an odd final row or column of
+authored terrain can remain unused. The fixed reducer does not itself check
+whether the source is large enough for all four samples. **Unknown:** the
+result for an undersized or malformed source; allocation adjacency and device
+behavior must not be replaced by a guessed clamp or stretch rule.
 
 **Aspect and letterbox.** The play area is window width minus 32 by window
 height minus 128, derived from the mode maxima, not from the raw window
@@ -4833,7 +5090,11 @@ the slot the named-block allocator writes, and no other writer touches it.
 
 ### 3.9 Contacts pass on the minimap
 
-Layer order on the final surface (later layers overwrite; no blending):
+**Established:** the final surface is wiped once, then the unit records are
+visited in ascending order. Steps 2–5 below complete for **one unit before the
+next unit starts**; they are not separate whole-list layers. Projectiles are
+visited after the unit walk. Later opaque writes overwrite earlier ones, with
+no blending:
 
 1. wipe final from mapped;
 2. regular unit blip from the FX `radlogo` GAF, drawn when the visibility
@@ -4848,8 +5109,10 @@ Layer order on the final surface (later layers overwrite; no blending):
    frame while the pointer is inside the view with no drag armed, or over the
    minimap. It is not a commander marker and carries no commander term:
    marking every seen commander would put an enemy commander's identity on
-   the minimap. **Established.** The ring obeys the same admission as the
-   blip, so an unadmitted hovered unit draws nothing;
+   the minimap. **Established.** The ring obeys the unit contact visibility
+   gate, but does **not** test the regular blip's blink-suppress byte or phase.
+   An admitted hovered unit can therefore retain its hover ring while its
+   regular blip is blink-suppressed; an unadmitted unit draws neither;
 4. sensor circles (radar/sonar outer, jammer) in their distinct palette indices
    via the solid-circle rasterizer (2,048 angular steps over 32 segments);
 5. weapon/interceptor rings (below);
@@ -4971,8 +5234,13 @@ ringRadius = RadarW * (weaponCoverage - 512) / PlayRight  truncating
 ```
 
 with the authored per-slot coverage reduced by the constant 512 bias before
-scaling (small coverage values can therefore produce a negative radius, which
-clipping drops). When the slot's interceptor flag byte is zero the ring is
+scaling. **Established:** there is no positive-radius test after scaling;
+zero and negative results are passed to the circle helper. A zero radius
+collapses every chord to the centre pixel, which the ordinary line clip
+admits when it is inside the target. A negative radius changes the trig
+endpoints; it is not by itself a reason for the clipper to reject the ring.
+This does not establish safety for overflowing coordinate arithmetic.
+When the slot's interceptor flag byte is zero the ring is
 solid via the solid-circle rasterizer; otherwise it is dashed, and the
 dashed-circle routine receives the same radius, the ring palette index, a
 literal 32, and the blink phase bit. **Established.** Both variants use the
@@ -4998,8 +5266,13 @@ and blink conditions pass.
 pass draws at most one regular blip and, for the hovered identity, one
 additional `radlogohigh` ring; it does not draw duplicate regular blips. Circles
 and weapon/interceptor rings are emitted later in that same unit iteration, so
-they overwrite earlier contact pixels where opaque. There is no independent
-ring-only contact list. A visible unit can appear ring-only when its regular
+they overwrite earlier contact pixels where opaque. The next unit's regular
+blip can in turn overwrite that earlier unit's circles or hover art. For
+example, with two admitted units projected to the same pixel, an opaque
+hover pixel from the first is overwritten by an opaque regular blip from the
+second. Grouping every regular blip before every hover ring reverses that
+result. There is no independent ring-only contact list. A visible unit can
+appear ring-only when its regular
 blip is suppressed by the per-unit blink countdown on a non-blink phase, while
 the range/ring branches still run. Every admitted unit still contributes one
 HOT entry after those presentation branches.
@@ -5022,8 +5295,13 @@ index) and the two jam circles use `radardistancejam` and
 `sonardistancejam` (both in the jammer index); each radius scales as `RadarW · distance / PlayRight`
 (truncating), the centre is the unit's projected minimap position of §3.9,
 and the circles land on the final surface, which is wiped from the mapped
-composite and rebuilt every tick. Nothing in this path writes the mapping
-word grid or any per-player byte grid.
+composite and rebuilt every tick. **Established:** the nonzero test is on
+each signed authored distance **before** scaling, with no positive-radius
+test afterward. Distinct radar and sonar distances produce two circles,
+not only their maximum. A nonzero distance that truncates to zero still
+paints the centre pixel through the circle helper. These writes retain the
+per-unit order of §3.9. Nothing in this path writes the mapping word grid or
+any per-player byte grid.
 
 The deadline-driven **sensor phase** (§3.4, `[R-SENSOR-01]`, `[R-VIS-01 §4]`,
 `[R-VIS-01 §5]`) is a different thing: it runs only when more than one player
@@ -5270,8 +5548,8 @@ surface onto the HUD's own destination surface at the canvas letterbox origin
 that same destination. So the rectangle lives on the destination surface, above
 a FINAL that never contains it — which is why it survives the per-tick FINAL
 wipe and why a save-restored FINAL carries no marker. FINAL is *mapped wipe →
-blips → hover ring → sensor circles → weapon rings →
-projectile dots and markers*, and nothing else (§3.6).
+ascending units (each unit's blip → hover ring → sensor circles → weapon
+rings) → projectile dots and markers*, and nothing else (§3.6, §3.9).
 
 **Established — the rectangle.** The rectangle is the **camera-to-radar
 rectangle**, a four-integer inclusive record recomputed by the per-axis camera
@@ -5638,21 +5916,45 @@ shadows, cursors, victory/defeat/pause art, logos, and GUI panels. Optional
 entry lookup failure leaves the relevant visual absent rather than inventing a
 replacement.
 
-A GAF frame reference is eight bytes: a frame-header offset and a 32-bit
-authored duration in whole simulation ticks (or in scaled wall-clock units for
-cursor playback). A playback cursor is a 12-byte non-owning view over shared
-sequence data: current frame index, countdown, loop-or-hold flag, and entry
-pointer. It does not free sequence storage on termination. Binding a cursor
-clamps an out-of-range start index to zero, loads that frame's authored
-duration into the countdown, and copies the sequence's loop byte. Each
-simulation-tick step decrements the countdown; when the countdown is below two
-it advances to the next frame, wraps to zero for looping sequences or clears the
-entry pointer for non-looping sequences, and loads the new frame's duration.
-Multiple simulation ticks in one present advance the cursor multiple times;
-a pause with no logical ticks freezes it. A separate delta step subtracts a
-signed 16-bit tick delta and can cross multiple frames in one invocation while
-accumulating each newly selected frame's duration. Single-frame entries never
-advance. The registered sequence players for model textures are stepped once per
+**Established — playback arithmetic.** The authored frame duration is a
+32-bit value in the file, but binding and reloading a playback cursor retain
+only its low 16 bits. The cursor owns an unsigned 16-bit frame index and a
+16-bit countdown, a loop flag and a non-owning sequence reference. Termination
+clears the reference without freeing the sequence. For a valid nonempty entry
+and a nonnegative start index, binding replaces an index at or beyond the
+frame count with zero and loads the selected duration. This does not establish
+safe handling of negative starts or missing/empty entries.
+
+The two steppers have different predicates:
+
+- **Single-tick:** test the countdown as unsigned before changing it. At two
+  or more, subtract one. At zero or one, advance the frame index, wrapping to
+  zero for a looping sequence or detaching a non-looping sequence at its end;
+  a still-attached cursor loads the next frame's low-16 duration. This applies
+  even to a one-frame entry: it either reloads frame zero or detaches. A zero
+  duration therefore advances on the next invocation. Multiple simulation
+  ticks in one present cause multiple invocations; no logical tick leaves
+  these players unchanged.
+- **Elapsed delta:** an entry with at most one frame is left unchanged.
+  Otherwise subtract the supplied 16-bit delta from the countdown with
+  16-bit wrap, then interpret the result as signed. Advance only while that
+  signed result is at most zero, accumulating each selected frame's low-16
+  duration with the same wrap; detach at a non-looping end. A remaining value
+  of one does **not** advance. The UI producer supplies the low 16 bits of the
+  difference between successive scaled wall-clock readings; the ordinary
+  forward-time delta is positive.
+
+For two looping frames whose holds are both ten, a freshly bound cursor given
+an elapsed delta of nine still shows frame zero with one remaining; a further
+one selects frame one with ten remaining. This distinguishes the delta path
+from applying the single-tick threshold after subtracting a batch. A hold of
+65,537 loads one in either cursor path, not 65,537. These are authored arithmetic
+examples, not claims about shipped holds or elapsed-time extremes. **Unknown:**
+the general termination outcome of a looping delta traversal whose narrowed
+holds cannot make the signed countdown positive; safe host validation requires
+its own explicit boundary rather than an invented retail fallback.
+
+The registered sequence players for model textures are stepped once per
 simulation tick. Cursor sequences are stepped from a 30-unit-per-second scaled
 wall-clock delta and accumulate authoring countdowns in those scaled units. The
 bounded producer that drives model-texture players is the per-tick walker that
@@ -5845,7 +6147,7 @@ alternate children.
 | opaque (keyed) | copy every source byte `≠ key` | RLE decode: rows above the clip skipped by their row-length prefix, left/right clipping applied while decoding; grammar per `[fmt gaf]` (bit 0 set → transparent run of `byte >> 1`; bit 1 set → repeat the next byte `(byte >> 2) + 1` times; else `(byte >> 2) + 1` literal bytes) | none |
 | raw | whole rectangle copied, no key test (dword-wise when the width is a multiple of four, word-wise when even, else byte-wise) | RLE decode as above | none; used only by the tile pass ([R-COMP-01 §1]) |
 | gray (fog, §3.3) | `if src ≠ key : dst = grayTable[dst]` | **nothing is drawn** | gray table present |
-| dithered gray (§3.3) | x steps by two from parity `(y + dx + parity) & 1`; `if src ≠ key : dst = 0` | nothing is drawn | none |
+| dithered gray (§3.3) | write where `(x + y + parity) & 1 == 0`; x steps by two after aligning the clipped left edge; `if src ≠ key : dst = 0` | nothing is drawn | none |
 | tinted | `if src ≠ key : dst = ALP[src × 256 + dst]` ([R-REN-03D §4]) | tinted RLE variant | window alpha-blend capability, enabled at startup independently of `Shading` ([R-REN-03D §4]) |
 
 The gray-family gate closes a corner of §3.3: a fog cloud frame that is
@@ -5934,14 +6236,22 @@ image or null = screen) draws **32 chords**: starting from `p₀ = (cx + r,
 cy)`, for `k = 1 … 32` it computes `pₖ = (cx + cos(k × 0x800) × r, cy +
 sin(k × 0x800) × r)` with the helpers above and draws the clipped line
 `pₖ₋₁ → pₖ` through the line entry of [R-COMP-01 §2]. **The dashed circle**
-takes a segment count `n` and a phase word: `step = trunc(0x10000 / n)`
-(64-bit division; `n = 0` faults), angles `step, 2·step, …` while `≤ 0x10000`
-(so `n` chords, or `n + 1` when `0x10000` is not a multiple of `step`), the
-same chord construction, and the chord for segment index `i` (counting from
-0 at the first chord) is drawn iff `(i + phase) & 1 == 1` — exactly the
-[03 §3.10] parity rule. Neither routine paints the last chord back to `p₀`
-separately; with 32 steps of `0x800` the final angle is `0x10000 ≡ 0`, so
-the ring closes on `p₀` itself.
+takes a signed segment count `n` and a phase word: `step = trunc(0x10000 / n)`,
+then angles `step, 2·step, …` while `≤ 0x10000`. For positive counts
+`1 ≤ n ≤ 65536`, it constructs `floor(65536 / step)` chords, which need not
+be `n` or `n + 1`: `n = 3` constructs three chords ending at angle 65535;
+`n = 1000` gives step 65 and constructs 1008 chords. Each new endpoint
+becomes the next chord's start even when that chord is not painted. The chord
+for index `i` (counting from 0) is drawn iff `(i + phase) & 1 == 1` — exactly
+the [03 §3.10] parity rule. Neither routine paints a separate closing chord.
+The inspected minimap weapon-range caller supplies **32** segments and the
+low bit of the blink phase; its step is `0x800`, and the final angle is
+`0x10000 ≡ 0`, so its endpoint returns to `p₀`. The general helper's count
+rounding does not change that caller's 32-chord construction. There is no
+count validation in the helper: zero reaches division by zero and a positive
+count above 65536 produces a zero step. **Unknown:** admission of counts
+outside the inspected caller's fixed 32; no portable malformed-count fallback
+is established here.
 
 **The rectangle shader** (target or null = screen; rectangle or null = the
 whole surface; a signed level). Level `< 0` selects the **darken** table and
@@ -5949,7 +6259,14 @@ uses row `level + 32` after clamping the level to `≥ −32`; level `≥ 0`
 selects the **lighten** table at row `min(level, 31)`. If the selected table
 is absent the call returns 0 and draws nothing. Otherwise, over the clipped
 rectangle (the inclusive clipper of [R-COMP-01 §2]) every destination byte is
-replaced by `table[row × 256 + byte]` in place. The two tables are the
+replaced by `table[row × 256 + signedByte]` in place: the destination byte
+is sign-extended. Indices 0–127 address the selected row; indices 128–255
+address the same unsigned column in the **preceding** row. This is specific
+to the rectangle writer, not a change to ordinary shade/light lookup. At row
+zero a high index addresses storage before the table. **Unknown:** the
+reproducible preceding-data contract and reachable fade levels for that case.
+Nanolathe retains its bounded unsigned row-zero lookup as an explicit
+placeholder; it does not invent the bytes outside the table. The two tables are the
 `PALETTE.SHD` block (rows 0–31, [03 §4.3.2]) and the light table of
 [R-FONT-01 §6]; the caller census is the campaign report state 3 and the
 camera fade ([08 R-CAMP-01 §6]).
@@ -6142,12 +6459,14 @@ allocation failing returns 0 with the pool unchanged in count. The static
 initialiser that builds the pool and its slot count is
 [01 R-PLAT-02 §1]'s.
 
-**The container `finished` query.** The effect base class of [R-FX-02 §3]
-carries a virtual entry returning `deadline ≤ currentTick` (unsigned,
-**inclusive**). The removal rule the family bodies apply is [R-FX-01 §3]'s
-strict `expiry < tick`; because the call is virtual, which bodies consult
-this base entry (and on which side of the tick increment) is not traced —
-**Unknown**, decider: a caller census of the table slot.
+**The vent's due query (Established).** The unsigned inclusive query
+previously described here as a base-class `finished` test is the geothermal
+container's spawn gate. It compares the stored **next-spawn tick** with the
+current tick, not the lifetime hint with the current tick. The vent's update
+calls it after advancing and compacting its puffs, then spawns once when it
+passes. Its separate removal verdict is constant false. The class dispatch
+and that update caller close this query's identity; it must not be applied
+as a generic container expiry rule [R-FX-02 §3] [R-STRIP-01 §3].
 
 **Cited, not restated.** The presentation-surface (re)creation family (GDI
 DIB or DirectDraw path, the lost-surface restore, the surface-lock event) is
@@ -6557,8 +6876,13 @@ pseudo-unit's Y is the instance's current height — the sinking integration
 of [05 R-FEAT-01 §13] moves it below the surface — and its sonar-contact bit
 is set permanently at construction ([R-RAST-01 §4]), so the submerged part is
 **always recoloured through the `BLUE TABLE`** (every pixel with
-`key <= (seaLevel - hi16(Y)) + 50`) and never erased, for every viewer. It
-has no `Digger`, so no digger erase. Its structure-class bit is set and its
+`key <= low8((seaLevel - hi16(Y)) + 50)`) and never erased, for every viewer.
+The byte threshold and its wrap are the ordinary body rule, not a special
+feature rule. A model feature placed on flat terrain of height zero with sea
+level 210 reaches this presenter with Y 0 and threshold 4; a key-50 pixel
+keeps its original color. This is a safe authored map/geometry case, not a
+claim about stock-map frequency. The feature has no `Digger`, so no digger
+erase. Its structure-class bit is set and its
 definition ordinal is `0`, so it takes the structure shadow branch with the
 sea-level test: **a wreck whose `hi16(Y)` is below sea level casts no
 shadow** ([R-RAST-01 §4]). It has a key plane (the pseudo-unit's `ZBuffer`
@@ -7014,7 +7338,7 @@ established:**
   the definition's translucent flag and gated on the window's alpha-blend
   capability [R-REN-03D §4]), clipped by
   an inclusive-rect intersect. (B) Digger and mobile model shadows flatten the
-  finished body silhouette to palette index 0. (C) Structure model shadows
+  cached body silhouette to palette index 0. (C) Structure model shadows
   rerasterize every face directly at index 0, punch out the body, and cache the
   result as RLE. Both model families blit through `ALP` before the body; see
   [R-REN-03D]. `ALP` is used both by the anti-alias downscale (three lookups
@@ -7036,9 +7360,10 @@ established:**
 
 *There is no water flag.* The only water-dependent shadow behaviour is the
 mobile silhouette branch's **waterline erase**, which is computed per draw
-rather than authored: with `t = seaLevel − trunc(unitY)`, a subject with `t > 0` is partly
-submerged, and every pixel whose height key is at or below `t + 50` is erased
-before the tinted blit, so only the above-water hull casts a shadow
+rather than authored: with `t = seaLevel − hi16(unitY)`, a subject with `t > 0`
+runs the pass, and every pixel whose height key is at or below `low8(t + 50)`
+is erased before the tinted blit. The non-wrapping range leaves only the
+above-water hull; larger depths follow the byte wrap of [R-REN-03A §8]
 ([R-REN-03D §1] branch 2). No definition key gates it; the only authored inputs
 are the ones already listed in the branch gates. The body image runs the same
 threshold shape in its own waterline pass, where the local player's own units
@@ -7117,7 +7442,11 @@ definition’s rendertype byte; all eight cases are established:
   PROJECTILE RENDERER, not just this record — the only control-flow exit
   spanning later records.
 - 3 — common base sprite plus definition model through a distinct orientation
-  path with a separately built angle block.
+  path with an angle block that this dispatcher does not initialize.
+  **Unknown:** the reproducible orientation inputs for that call; [06
+  R-WFX-01 §4] owns the unresolved contract. Nanolathe retains its existing
+  recorded-angle/model-facing calculation as a deterministic host fallback,
+  not an established type-3 retail orientation.
 - 4 — the definition’s `color` byte picks one of five global GAF sequences
   (0 `cannonshell`, 1 `plasmasm`, 2 `plasmamd`, 3 `ultrashell`, 4
   `plasmasm`); 255 (−1) suppresses the branch entirely and 5..254 draw
@@ -7466,8 +7795,8 @@ through the logical-to-physical remap that beam and lightning colours use.
 Three CRT draws per puff, six per container.
 
 **Smoke puff family** (strips 5 and 9): [06 R-WFX-01 §5] is the arithmetic
-(init parameters, the `hold − 2` start countdown, the `hold/2 + rand·(hold/2)`
-redraw, the wind ×8 and gravity ×4 drift, removal at the last frame); the
+(init parameters, the initial countdown equal to `hold`, the
+`hold/2 + rand·(hold/2)` redraw, the wind ×8 and gravity ×4 drift, removal at the last frame); the
 strip-9 producer parameters are itemized there and in the table above. The
 selector byte chooses the `smoke 1` (0) or `smoke 2` (nonzero) entry; the
 puff draws the selected frame through the ordinary frame blitter after its
@@ -7482,8 +7811,8 @@ producers. Their lifecycle, art selection and draw admission differ as follows:
 
 | | strips-5/9 smoke puffer | geothermal vent |
 |---|---|---|
-| removal verdict | sub-record list empty **and** stored deadline `< tick` | `return 0` — constant false |
-| spawn gate | next-spawn `<=` deadline **and** next-spawn `<=` tick | next-spawn `<=` tick |
+| removal verdict | sub-record list empty **and** stored deadline `< tick` (unsigned) | `return 0` — constant false |
+| spawn gate | next-spawn `<=` deadline (signed 32-bit) **and** next-spawn `<=` tick (unsigned) | next-spawn `<=` tick (unsigned) |
 | vertical drift | gravity word **× 4** | gravity word **× 16** |
 | blitted entry | selected by an init flag between the two smoke entries | the first smoke entry, bound directly |
 | draw admission | per-puff one-point coverage gate | no coverage gate |
@@ -7519,10 +7848,11 @@ class. What gates the puffer's spawn is its own gate's first term, which the
 vent's class drops. For the strips-5/9 puffer the stored deadline therefore
 **is** a lifetime: every weapon-side site passes lifetime 0 — the trail
 puff, `endsmoke` at impact, `startsmoke` at the muzzle, and both emit-sfx
-smoke points — which leaves the deadline at the creation tick; the gate then
-refuses the second spawn and the verdict retires the container on the first
-tick after its one puff is gone. That is what makes these producers
-one-shots. The two parameterised sites are the only ones with a real window:
+smoke points — which leaves the deadline at the creation tick. Away from the
+signed tick boundary, the gate then refuses the second spawn and the verdict retires the
+container on the first tick after its one puff is gone. This is their usual
+one-shot behaviour; [R-STRIP-01 §3] establishes the boundary exception. The
+two parameterised sites are the only ones with a real window:
 the above-sea explosion's land dust (interval 7, lifetime 15 — three puffs)
 and the land wreck's column (interval 15, lifetime 900; a wreck that sinks
 emits nothing at all, [R-LAYER §3]). For the vent the
@@ -8386,7 +8716,7 @@ gray and blue tables). Water and lava motion in retail is entirely tile art
 plus the effects below. **Established (bounded negative over the tile
 blitter, the map loader and the palette install; no candidate remains).**
 
-**2. Underwater presentation is a key-plane clip, not a tint pass.** The
+**2. Underwater presentation uses the model key plane.** The
 complete contract is [R-REN-03A §8] with the ownership rule of
 [R-RAST-01 §4]. The pieces that section leaves implicit:
 
@@ -8395,13 +8725,16 @@ complete contract is [R-REN-03A §8] with the ownership rule of
   definition authors `Digger`), interpolated per span into the image's key
   plane by the polygon raster ([R-RAST-01 §1]; in the shadow-doubled path the
   vertex Y is halved first).
-- The threshold is `t + 50 [+ 75]` with `t = seaLevel − hi16(unitY)`
-  (arithmetic shift, so a unit a fraction below an integer height rounds
-  down); the waterline pass runs only when `t > 0`.
+- The threshold is `low8(t + 50 [+ 75])` with
+  `t = seaLevel − hi16(unitY)`: unsigned sea-level byte minus the signed
+  high word of world Y, so a unit a fraction below an integer height rounds
+  down. The waterline pass first tests `t > 0`, then the pixel helpers use
+  the narrowed unsigned byte. It does not saturate at 255; see the bounded
+  example and producer in [R-REN-03A §8] and [R-RAST-01 §6].
 - Both helpers compare **inclusively**: a pixel is erased or recoloured when
-  `key ≤ threshold`, i.e. when its model height is at or below the water
-  plane. The recolour helper additionally skips pixels already equal to the
-  image's transparent index; the erase helper sets them to that index.
+  `key ≤ threshold`. In the non-wrapping range this selects model heights
+  at or below the water plane. The recolour helper additionally skips pixels
+  already equal to the image's transparent index; the erase helper sets them to that index.
 - Order: waterline (erase or blue) first, then the Digger erase at `key ≤
   125`, then the body blit. The shadow silhouettes get the erase only
   ([R-RAST-01 §4] branches 1–2).
@@ -9088,8 +9421,9 @@ priority.
    **every** resolve — including silent ones — before any gate, so the CRT
    stream advances with queue pops, not with audible successes. Count zero
    produces no pick and the cue is silent.
-3. If audible, the crowding gate `10 - audioThreshold < priority` (signed byte
-   compare) passes, the row has at least one variant, the audible flag is set,
+3. If audible, the crowding gate `10 - audioThreshold < priority` (signed
+   32-bit comparison after zero-extending the threshold and priority bytes)
+   passes, the row has at least one variant, the audible flag is set,
    and sound-flags bit 6 is set, play the chosen alias and set the slot's
    next-allowed frame to `frame + cooldownMult × 30`. The dispatch layer
    additionally requires the master gates — effects volume nonzero,
@@ -9097,8 +9431,9 @@ priority.
    **only on an audible pass** — never on a silent resolve — and the codec
    performs no empty-path check, so the re-arm happens even when the resolved
    path is empty.
-4. If showing text and the gate `10 - speechThreshold < priority` (signed byte
-   compare) passes, take the entry's override line or the row's caption for
+4. If showing text and the gate `10 - speechThreshold < priority` (the same
+   byte promotion and signed 32-bit comparison) passes, take the entry's
+   override line or the row's caption for
    the chosen variant, and print it as `"%s: %s"` prefixed by the unit name
    when the unit is still alive (its chat-enable latch bit set) and the
    caption is non-empty. Otherwise nothing prints.
@@ -9138,43 +9473,118 @@ Nanolathe therefore gathers numbered keys regardless of the bare key's presence
 declares 120 categories. When a variant's authored caption is absent, the
 caption falls back to the slot's static default speech caption.
 
-**Alias registration.** Aliases are registered into a flat, session-lifetime
+**Alias registration.** Aliases are registered into a flat, application-lifetime
 table of 256 slots, each holding a 32-byte name and a 32-byte path — both
 written with a 32-byte bounded copy, both tables laid out at a 32-byte stride,
 with a parallel array of one sample handle per slot; an authored path longer
-than 32 characters truncates. The registry is deduplicated (a new alias whose
+than 32 characters truncates in the retained bookkeeping. **Established:** the
+initial sample probe uses the original path before that bounded copy; truncating
+the probe input would change its behavior. **Established — failed static
+registrations do not retry through ordinary alias playback.** Registration
+stores the probe result even when it is null. Both positional and ordinary
+non-positional alias playback read that stored result; the static sample player
+returns failure for a null result without reopening a path. Re-registering an
+already matched name or anonymous path returns the existing identity before the
+probe, so that also leaves the failed result unchanged. A separate direct-path
+play entry opens the supplied path for that request; this is not repair of the
+registered alias. The retained path participates in the anonymous registration
+comparison, which is case-insensitive over at most 32 bytes and can match a
+previous named registration too. This statement covers the traced static-alias
+entry points, not an inferred retry policy for device recovery or streaming.
+The registry is deduplicated (a new alias whose
 name matches an existing entry, case-insensitive, up to 32 bytes, returns the
-existing identity); the cap is 255 entries, and the 256th registration is
-rejected without eviction and
-returns the zero identity; each alias is probe-loaded at registration time
+existing identity). **Established — successful identities are 0 through 254.**
+Initialization clears the count and immediately enumerates the authored aliases;
+it does not reserve a silent first slot. The cap is 255 entries, and a new name
+after that cap returns zero without eviction. Zero therefore names the first
+real registration as well as the full-table result: both positional and
+non-positional playback accept it, rejecting only the missing identity. A full
+registration can consequently play the first sample. Each alias is probe-loaded at registration time
 through the VFS and the WAV decode path (8.2) with the `sounds/` prefix and the
 canonical candidate tries; the resulting handle, name, and path are stored and
 the count increments even if the probe yields nothing. A name lookup miss
 returns the sentinel id 0xFFFF, which silences the cue. A 33-byte authored
-alias truncates to its stored 32 bytes; lookups stay case-insensitive over the
-32-byte field. **Precedence is VFS mount order — first provider wins** (loose
+alias copies at most 32 bytes into its retained name. Registration duplicate
+checks are bounded to those 32 bytes, but the later named-play lookup uses a
+case-insensitive **NUL-terminated** comparison, not that bounded comparison.
+Names that fit with their terminator have the ordinary first-match behavior.
+For a name that fills the retained field without a terminator, no safe
+standalone truncation-and-lookup rule is established; the surrounding retained
+contents and actual producer length bound must be traced before claiming one. **Precedence is VFS mount order — first provider wins** (loose
 directory, then GP3/CCX, then UFO/HPI, then CD-ROM); the archive flag does not
 alter precedence, and a duplicate alias on a later mount is suppressed by the
 **name** compare above, because an ordinary registration carries a name and
-dedups on it alone. The case-insensitive canonical full-path compare exists
-but runs **only** on the anonymous branch — the one taken when the alias-name
+dedups on it alone. The case-insensitive comparison of the retained path's
+first 32 bytes runs **only** on the anonymous branch — the one taken when the alias-name
 argument is null, which also stores the empty string as the slot's name.
+
+**Established — weapon sounds use anonymous registration.** The weapon loader
+reads `soundstart`, `soundhit`, then `soundwater`, each through a string reader
+that retains at most 255 bytes. A missing or empty value stores the missing
+identity. Every nonempty value is registered with no alias name, and the
+returned identity is retained by the weapon definition. The initial probe uses
+the complete bounded authored value, while duplicate detection compares the
+first 32 bytes of that value with earlier retained paths. It can therefore
+reuse an earlier named registration when its path matches, irrespective of
+that registration's name. The common projectile initializer and the retained
+burst's sound-trigger branch submit the start identity directly; the impact
+branch submits the hit or water identity directly to positional playback.
+None of those sound-identity operations selects a category variant or draws
+randomness. The eight-slot acknowledgement resolver is a separate consumer:
+it draws a variant and opens the selected filename through its direct-file
+path rather than resolving these stored weapon identities.
+
+A weapon sound value is consequently not a request to look up a named alias.
+For example, a named alias `clang` bound to `different` does not redirect a
+weapon's anonymous `clang` request merely because their names coincide. A
+match on an earlier retained path does reuse that identity, including a failed
+sample result. Both kinds of registration share the same capacity and overflow
+result described above. Their admission order is observable; substituting
+first audible playback order for weapon-load registration is not equivalent.
+
+**Established — ordinary admission and lifetime.** Application startup clears
+the registration count and loads the named table. Battle setup clears pending
+category cues, but keeps the registration table and its samples. It then loads
+weapon files in their discovered order and sections in their document order,
+registering each section's start, hit and water sounds in that order. These
+registrations happen while parsing each section, including one whose weapon
+record a later section replaces. Reconstructing admission from only the final
+weapon records therefore loses earlier registrations and can change capacity
+or first-path matches. The enumeration wrapper preserves the file enumerator's
+order; it adds no weapon-ID or sound-name sort.
+
+The normal application lifetime retains these registrations across battle
+reloads. A repeated anonymous path returns the existing identity and sample
+result, including failure, rather than opening the file again. Application
+shutdown frees category data, releases the registered samples in ascending
+identity order, and clears the count before destroying the audio owner. These
+traced startup, battle-entry and shutdown paths establish the ordinary
+lifecycle; they do not establish arbitrary indirect reinitialization or device
+recovery. The direct registration callers in the inspected image are the
+named-table loader and the three weapon sound fields. No sound-variant draw
+occurs in this registration sequence.
+
 A separate global alias loader
 enumerates the children of `gamedata/allsound` and registers each child's
 `sound` key as an alias through the same registry. Unit definitions map their
 category names to category identities, with numeric fallback when a name is
 absent.
 
-**Crowding thresholds.** The two thresholds are separate bytes, both scaled by
-5 from the menu gauge (range 0..10): one for audio (audible gate) and one for
-speech (text gate). The gate is the signed compare `10 − threshold < priority`.
-They are not per family, per alliance, or per player — the 24 slots share the
-two global thresholds, and "by family" only describes how priorities group
-(countdown slots 17..23 at priority 10 versus load/arrived at 7/3). Example
-arithmetic: `select` (priority 10) always passes — at threshold 10 the gate is
-`0 < 10`, true — while `working` (priority 2) fails at threshold 5 (`5 < 2`,
-false). `underattack` (priority 9, 600-frame cooldown) and `working` (priority
-2, 30-frame cooldown) exhibit different windows under the same threshold.
+**Established — crowding thresholds.** Audible speech and acknowledgement
+text use separate global threshold bytes. `SPEECH` on the sound page writes
+the audible threshold [R-AUD-01 §2]; `UNITCHAT` on the speed page writes the
+text threshold [07 R-FE-01 §6]. Each stores the low byte of the resulting
+stage times five, retains the live stage, and derives a new stage from the
+stored byte when reopened. Ordinary stages give 0, 5 and 10; that familiar
+range is not a bound on every authored control.
+
+The consumer zero-extends the stored byte and applies the signed integer
+comparison `10 − threshold < priority`. At threshold zero, priority 10 is
+rejected by equality; at threshold ten it passes. A priority-2 `working`
+message fails at threshold five. Admission through this comparison does not
+bypass the separate audio-enable or cooldown gates. The thresholds are not
+per family, alliance or player: the 24 slots share them. Priority families
+and their separate cooldowns remain as described above.
 
 **Producer census.** The direct-caller census over the bounded corpus is
 closed:
@@ -9261,32 +9671,41 @@ outside the bounded direct-invocation census remain unknown for broadcast behavi
 Music uses WinMM MCI strings for `cdaudio` open, close, stop, status, play, and
 pause.
 
-**Open and probe.** CD initialization opens the MCI `cdaudio` device once. The
-open failure path is established: on a failed `open cdaudio`, the engine
-enumerates windows and retries the open with the enumeration-supplied window
-handle; a second failure disables CD playback. On success it issues
-`stop cdaudio`, sets the time format to milliseconds (a failure here stops and
-closes the device and disables CD playback), and queries the track count with
-`status cdaudio number of tracks`, parsed as a decimal integer. A failed count
-query leaves the count at zero and the per-frame tick idles. The probe also
-builds the 100-entry track-category table with the four repeating categories
-`(trackIndex mod 4) + 1` (Red Book CDs carry at most 99 tracks), initializes
-the current/next track and mode/status fields, and registers the
-`MM_MCINOTIFY` handler on the engine's notification window.
+**Established — open and probe.** An already-open controller returns success
+without reinitializing. Fresh initialization seeds the 100-entry category
+list with `(trackIndex mod 4) + 1`, prepares request 1 and logical next 0,
+and attempts to open the MCI `cdaudio` device. A failed open triggers a window
+enumeration and one retry; a second failure returns unsuccessful. A successful
+open is followed by stop/reset and a request for millisecond time format.
+If that request fails, the routine returns unsuccessful. Its cleanup issues
+stop/close only when the controller's open flag is already set. The local
+initialization path clears that flag before opening and sets it only at the
+successful return, so an unconditional cleanup claim is not justified.
+**Unknown:** external re-entry or device-specific effects during these calls;
+this local control flow does not establish whether the device actually remains
+open after failure.
 
-**Play modes and track transitions.** The CD tick runs once per frame and
-returns early when the track count is zero or playback is paused. It polls
-`status cdaudio mode` and compares the reply exactly against `playing` — a
-failed poll is treated as not-playing and triggers a transition. There are
-exactly five modes:
+The succeeding probe reads the audio-track count and category-list identity;
+a failed count request leaves zero. The probe can set logical next to one for
+a nonempty disc, but the opener subsequently finishes with request one and
+logical next zero, installs the notification handler and marks the controller
+open. A later independent probe can change next again. The exact disc mapping,
+probe and category-list rules are [R-AUD-01 §4].
 
-| Mode | Behavior |
+**Established — play modes and track transitions.** Explicit updates, timer
+callbacks and admitted notifications invoke the controller tick. Count zero
+returns first; desired silence stops even a paused controller; other paused
+updates return. Device queries compare their reply exactly with `playing`,
+and query failure counts as not playing. Query admission and state writes are
+mode-dependent; the ordered algorithm is [R-AUD-01 §4]. Its five modes are:
+
+| Mode | Bounded behavior |
 |---|---|
-| 0 idle | no play; a detected stop resets state |
-| 1 sequential | advance `next` by one, wrapping modulo the track count (`(track mod numTracks) + 1`), and play |
-| 2 random | play `random_draw mod numTracks + 1` |
-| 3 single | play the requested track (a requested track of zero stops playback) |
-| 4 category-shuffle | stop and reset, then scan up to `(draw & 15 + 1) × numTracks` candidate tracks forward with wrap for the `max(1, draw & 15)`-th whose category equals the desired category; none found → stop |
+| 0 idle | If active, clear status before querying; a playing reply stops/resets, while a different reply preserves next and timers. |
+| 1 sequential | When not playing, submit the next logical track before repairing an over-count retained next value to one. |
+| 2 random | When not playing, select `random_draw mod numTracks + 1`. |
+| 3 single | When not playing or next differs from requested, replace a zero request with one and submit the requested track. |
+| 4 category-shuffle | Draw before querying; retain a matching playing track or scan forward for the selected category occurrence. No match stops/resets before the common tail. |
 
 The modes are the `TRACKMODE` choices `Play All|Random|Repeat|Custom` (1..4)
 with 0 = idle; the "category" is the per-track `TRACKTYPE`
@@ -9299,9 +9718,14 @@ The play primitive deduplicates a request for the track already playing,
 applies the CD volume, and issues `play cdaudio from %i` — appending ` to
 <physical + 1>` when the physical track (the logical track plus the
 data-track offset) is below the track count — plus ` notify`, with the
-notification window handle. An MCI error at play leaves
-the status at playing; the next poll detects the failure and retries. After
-any transition the CD volume is re-applied and status is set to playing.
+notification window handle. The primitive writes the playing status before
+it submits, and an MCI error at play does not clear it. Nothing retries the
+request automatically: the controller tick runs only from its explicit
+callers, and the notification handler admits only a successful completion
+([R-AUD-01 §4] lists both). A failed request is therefore re-examined only
+when a later explicit caller runs the tick, whose device query then reports
+not playing and lets the mode arm submit again. After any transition the CD
+volume is re-applied and status is set to playing.
 
 **Pause, notify, volume, and mission media.**
 
@@ -9321,10 +9745,9 @@ any transition the CD volume is re-applied and status is set to playing.
 - CD enable/disable is a configuration mask whose bit 0 gates the play
   primitive; the front tick re-applies it.
 
-The missing-CD failure chain above (window-enumeration retry, then give up;
-time-format failure stops and closes; track-count failure idles the tick) and
-the `MM_MCINOTIFY` handler registration are established; history persistence
-is [R-AUD-01 §4] (`CDLISTS`).
+The missing-CD retry, guarded time-format-failure cleanup, zero-count early
+exit and notification registration above are established control flow.
+History persistence is [R-AUD-01 §4] (`CDLISTS`).
 
 #### The sound device: bring-up, sample buffers, the 32-voice mixer, and the 3-D model [R-AUD-01 §1]
 
@@ -9548,11 +9971,21 @@ into the record as the literal **64**, so a knob at the end of travel reads 64
 and the level `v << 10` is 65,536 — one past the 16-bit mixer word, which the
 clamp above saturates. Both scale by `<< 10`: `27 << 10 = 27,648` and
 `32 << 10 = 32,768` of 65,535. The `SPEECH` gauge (`Off|Medium|Full`) writes
-**both** halves of its store in one arm: bit 6 takes `stage ≠ 0` and `unitchat`
-takes `stage × 5`, the acknowledgement voice level of [07 R-CAM-01 §7], so the
-gate `10 − level < priority` admits nothing at `Off`, priorities ≥ 6 at
-`Medium`, and everything at `Full`. The screen opens the gauge at
-`speechfx ? unitchat ÷ 5 : 0`.
+**both** halves of its store in one arm: bit 6 takes `stage ≠ 0` independently,
+and `unitchat` takes the **low byte** of `stage × 5`, the acknowledgement
+voice level of [07 R-CAM-01 §7]. For the ordinary stages zero, one and two,
+the gate `10 − level < priority` admits nothing at `Off`, priorities ≥ 6 at
+`Medium`, and everything at `Full`.
+
+**Established — SPEECH storage and live stage are separate.** The callback
+requests its options cue before those writes, clears the fired control and
+returns without replacing the gadget's current stage from the stored level.
+On opening the screen, the stage is instead reconstructed as zero when the
+enable bit is clear, or unsigned stored `unitchat ÷ 5` otherwise. Thus an
+already-admitted authored stage 52 stores level 4 while leaving speech enabled
+and the live stage at 52; reopening reconstructs stage zero. The enable bit
+must not be recomputed from the narrowed level, and the live stage must not
+be refreshed as though the screen had reopened.
 
 `RESTORE` on the sound screen sets `fxvol` 27, bits 4–6, Sound Mode 1 (3-D
 off), voice level 10; `UNDO` restores the entry snapshot. Changing `MODE` to
@@ -9638,8 +10071,13 @@ track 1` — if the reply is exactly `audio` the data-track offset is 0,
 otherwise (any other reply, or a failed query) the offset is 1 and the
 count is decremented (floored at 0). So `count` is the number of **audio**
 tracks and logical track *t* is physical track `t + offset`. A nonzero
-count sets the next track to 1; a zero count makes the tick idle (no disc,
-no audio tracks, or no MCI).
+count makes the identification probe set current/next to 1; a zero count
+leaves it zero. **Established — open and probe have distinct final states.**
+Successful first device-open invokes that probe, then overwrites current/next
+with zero and seeds the Repeat request to one before returning. A later
+identification probe can set current/next to one again. Stop also selects one
+for a nonempty disc, but these later boundaries do not change the open result.
+Zero audio tracks makes the tick idle.
 
 **Established fact — the per-disc category list (`CDLISTS`).** A 20-entry
 ring, keyed by the disc serial, persists the category bytes: registry
@@ -9698,8 +10136,10 @@ provenance identified would settle the packaged launch's actual state.
 **Established fact — the MUSIC screen (`MUSIC.GUI` / `MUSICRT.GUI`).**
 Gadgets and effects: `NOTRAK` (`Off|On`) toggles `musicmode` and calls
 enable/disable (disable = stop and reset); `TRACKMODE` (`Play All|Random|
-Repeat|Custom`) sets `cdmode = stage + 1` and applies it — `Repeat` copies
-the selected track into *requested*, `Custom` shows `TRACKTYPE` for the
+Repeat|Custom`) sets `cdmode = stage + 1` and applies it — entering `Repeat`
+copies the controller's retained *requested track* into the screen selection,
+then refreshes the screen. The mode setter only stores the mode, and this
+callback does not immediately play a track. `Custom` shows `TRACKTYPE` for the
 selected track; `TRACKTYPE` writes the selected track's category; `TRACKNUM`
 shows the selected track as `%d`, or `NO DISC` when the selection is 0, and
 is disabled when `musicmode` is off (a typed number re-syncs the selection
@@ -9716,15 +10156,47 @@ the buttons through the grey word, which is why two different helpers write
 them ([07 R-WGT-01 §5], [07 R-WGT-01 §13]). Closing the screen runs the tick
 when in battle, otherwise stops and resets.
 
+**Established — Repeat selection refresh is not a playback request.** The
+ordinary screen refresh writes the selection back to the requested-track
+field while in Repeat, so the entering callback copies the retained request
+out and back without selecting a new request or calling play. Opening an
+already-Repeat screen also loads that retained request into its selection.
+A separate per-frame synchronization compares the displayed track number to
+the controller's current/next track; on a mismatch it adopts that track and
+refreshes again, which can then change the retained request in Repeat. The
+entering callback's copy direction therefore does not establish how long its
+selection remains visible or which later device/controller event wins.
+
+**Established — page callback ordering.** Widget processing precedes this
+track poll, which precedes the fired action. The poll compares the displayed
+decimal text with logical current/next, even while stopped or disabled; equality
+makes no selection write. Its track-detail refresh is narrower than page-entry
+control initialization and does not reseed `TRACKMODE` or `NOTRAK`.
+`RESTORE` and `UNDO` close the old page before rebuilding it. `UNDO` applies
+the snapshotted mode and request. `RESTORE` stores the Custom preference but
+does not apply that mode to the controller; neither the replacement opener
+nor detail refresh adds that mode write. The displayed preference can therefore
+differ from the controller's retained mode immediately afterward. The complete
+call chronology and malformed-text-control boundary are [07 R-FE-01 §6].
+
 The options root greys its own `MUSIC` button when the CD object's open flag is
 zero — no drive, or `open cdaudio` having failed twice. A drive holding no
 audio disc still opens: that case reaches the screen, which then shows
 `NO DISC` ([07 R-FE-01 §6]).
 
 **Established fact — the play primitive `PlayTrack(t)`.** Disabled → report
-success and do nothing. `t = 0` → run the tick instead. Poll `status
-cdaudio mode`; if the reply is `playing` and `t` is the current track →
-success (dedupe). Otherwise `next = t`, `physical = t + offset`, apply the
+success and do nothing. Otherwise set controller status to playing before
+testing the track argument. `t = 0` → run the ordinary tick and report success;
+this is not the stop primitive, and the earlier status write means a previously
+paused controller does not take the tick's paused exit. For a nonzero track, poll
+`status cdaudio mode` before testing track equality. A `playing` reply and
+`t == next` report success without another play request; the comparison uses
+the same retained next-track value that the sequential branch resets after
+submission. It does not use a separate last-submitted or device-current track.
+For example, if an over-count submission leaves a backend playing while the
+controller resets next to one, a subsequent request for one is deduplicated.
+This conditional example does not establish that a particular backend accepts
+the over-count request. Otherwise `next = t`, `physical = t + offset`, apply the
 base volume (fade-aware, below), `set cdaudio time format tmsf` (failure →
 false), then `play cdaudio from <physical>` + (` to <physical + 1>` only
 when `physical < count`) + ` notify`, sent with the engine window as the
@@ -9754,15 +10226,20 @@ invoke it. Timer service remains part of busy-pump housekeeping
    (step 6) regardless of play mode; nothing in the executable requests
    them (bounded negative over all callers) — the two labels are inert.
 5. Otherwise by play mode:
-   * `0` idle: if status ≠ 0, set it 0; if the drive still reports
-     `playing`, stop and reset.
+   * `0` idle: status 0 returns without querying the device. Otherwise set
+     status to 0 before querying it; a `playing` reply stops and resets. A
+     different reply or failed query returns with status 0, preserving the
+     next track, fade step and timers. This arm never reaches the common tail.
    * `1` Play All: not `playing` → `next = next < 1 ? 1 : next + 1`;
      `PlayTrack(next)`; **then** if `next > count`, `next = 1` — the wrap
      is applied after the play, so the frame after the last track issues a
-     play of `count + 1` (which the primitive sends as
-     `play cdaudio from count+1+offset` with no end bound — an out-of-range
-     track the MCI device refuses; the failure leaves status 1 and the next
-     poll re-triggers with `next = 1`).
+     play of `count + 1` (which the primitive submits as
+     `play cdaudio from count+1+offset` with no end bound). Regardless of the
+     command result, the controller then resets next to 1 and reaches the
+     tail. For example, with three tracks and next already 3, it submits 4,
+     retains next 1, and a later not-playing sequential tick submits 2. The
+     device response to the out-of-range request is a separate question; the
+     controller does not pre-wrap the submitted request to track 1.
    * `2` Random: not `playing` → `PlayTrack(rand mod count + 1)`.
    * `3` Repeat: not `playing` **or** `next ≠ requested` → `requested = 1`
      when it was 0; `PlayTrack(requested)`.
@@ -9777,6 +10254,17 @@ invoke it. Timer service remains part of busy-pump housekeeping
    timers cancelled), then step 7.
 7. Tail: force-apply the base volume, bypassing the nonzero-step gauge guard;
    status = 1. An explicit tick can therefore restore volume during a fade or delay.
+
+**Unknown — out-of-range media response.** The controller's submitted track
+and subsequent state writes are established above. Whether a particular native
+CD device or packaged adapter rejects that request, keeps existing playback, or
+changes its completion notifications requires that backend's response contract
+or a manual observation. Under the established callers, a rejected request is
+followed by no successful completion and so by no automatic tick; in Play All
+outside a category transition the next submission waits for an explicit
+caller. Recovery chosen by a portable file backend that rejects the request is
+host policy, not evidence of the device response, and must not be described as
+retail behavior.
 
 The "not `playing`" test is the exact string compare of the `status cdaudio
 mode` reply against `playing`; a failed query counts as not playing. The CRT
@@ -10070,19 +10558,53 @@ presentation-tick units of the timer table (`GetTickCount × rate / 1000`,
 [07 R-CAM-01 §1]) — two seconds at the default rate — and the volume is the
 DirectSound attenuation (`0` = full scale), *not* the −585 of ordinary cues.
 
-**Established fact — start.** `StartStream(path, volume, delay)` copies the
-path into a single global path buffer, stores the volume in a global, arms a
-timer-table slot with period `delay` whose callback is the stream opener,
-and records the slot on the device (the device field the constructor
-initialises to −1, [R-AUD-01 §1]). It does **not** cancel a timer already
-armed: a second start inside the delay overwrites the recorded slot and the
-path buffer, the first timer fires at its own deadline, its callback
-cancels the *recorded* (second) slot, and opens the stream with the
-buffer's *current* (second) path. Net effect: one stream, the later path,
-the earlier deadline. When the timer fires the callback cancels the slot
-(timer slots otherwise repeat) and runs the WAV loader of §8.2 in mode 2
-with the global path and volume; the container rules (DIGI, RIFF, raw) are
-exactly §8.2's, so a streamed file may be any of the three kinds.
+**Established fact — start and overlapping requests.**
+`StartStream(path, volume, delay)` replaces the shared path and volume before
+registering a timer whose callback opens that stream. Registration services
+the live timer table before allocating a slot ([01 R-PLAT-02 §4]); only after
+it returns does the stream owner replace its recorded timer identity. Starting
+a stream does not first cancel an older registration.
+
+The callback cancels the owner's **recorded** timer identity, clears that
+identity, then calls the WAV loader in mode 2 with the current shared path and
+volume. A sole outstanding registration therefore cancels itself. With two
+successfully registered starts before the first deadline, the older callback
+instead cancels the newer slot. Its own slot remains armed, and the enclosing
+timer service reloads that older slot's period after the callback returns.
+Later eligible services invoke it again. Each callback uses the then-current
+shared path; it does not retain its original request's path. A successful open
+tears down any prior stream before starting the new one, so the consequence
+can be repeated restarts of one stream rather than simultaneous playback.
+Failed opens do not disarm that lost registration either. This corrects the
+previous claim that overlapping starts produce only one opening at the first
+deadline.
+
+An independently reproducible controller example uses an otherwise idle timer
+table and two period-60 starts at scaled times 0 and 10. Service exactly at 60
+opens the second path and removes the second timer; service at 120 opens that
+path again through the first timer. A stop between those services stops the
+current buffer but cannot cancel the first timer, whose identity the owner no
+longer retains. The same period-60 timer remains armed afterward. These are
+specified service times, not a guaranteed wall-clock replay rate: late service
+runs a callback once and discards its deficit, and other callbacks can alter
+the live table. If the older timer is already due during the second request's
+pre-allocation service, it still sees the older recorded identity and can
+cancel itself before the replacement is installed; that is a different case.
+
+**Established — authored producer admission.** Briefing setup initializes
+`SHUTUP` to stage 1. Its callback reads the resulting widget stage: zero stops,
+any nonzero stage starts narration with delay 60. An authored three-stage
+button with valid art, three labels other than the forced two-stage `Off|On`
+case, and ordinary button attributes advances from 1 to 2 on release inside
+([07 R-WGT-01 §3]). Clicking it before the opening delay expires therefore
+admits a second start without an intervening stop. A later click advances
+2 to 0 and stops the buffer, but an older lost timer can reopen it. This
+establishes an authored producer for the overlap; it does not claim that the
+ordinary two-stage toggle produces that sequence. Indirect producers and
+other live timer interactions remain separately bounded questions.
+
+The container rules (DIGI, RIFF, raw) remain those of §8.2; none of this path
+uses the static alias registry or its failed-registration lifetime.
 
 **Established fact — the stream buffer.** The opener first cancels any
 pending timer and tears down an existing stream (stop, release, close its
@@ -10123,15 +10645,20 @@ fill offset:
   never a wrap onto the loop.
 
 `StopStream` (the `Start`/`PrevMenu` buttons, `SHUTUP` at stage 0, a key or
-click on the glamour screen, and the results-sequence exit) cancels a
-pending timer, stops and releases the buffer, and closes the file; a stop
-with nothing pending is a no-op. `SHUTUP` is a toggle: its stage after the
+click on the glamour screen, and the results-sequence exit) cancels
+the recorded pending timer, stops and releases the buffer, and closes the
+file. It does not search for older registrations whose identities were
+replaced, so such timers survive the stop. With no recorded timer or buffer,
+the stop has nothing to release. `SHUTUP` is a toggle: its stage after the
 click is tested — `0` stops, any other stage starts the narration again
 (with the same 60-unit delay).
 
-**Edges (Established).** A missing or undecodable narration file: the
-loader returns without creating a buffer, the timer has already been
-cancelled, and nothing plays — no diagnostic. A stream started while the
+**Edges (Established).** A missing or undecodable narration file returns
+before the stream-buffer opener, without creating a new buffer or reporting a
+diagnostic. That early failure does not tear down an already playing stream.
+For a sole pending registration its callback has already cancelled the timer;
+for an older lost registration the repeated-open behavior above still applies.
+There is no implicit retry queue in the file loader itself. A stream started while the
 transient/voice slots are busy is unaffected: it uses none of the 32 voice
 slots or 8 transient slots and is never stolen ([R-AUD-01 §1]). Nothing
 sets the stream buffer's own volume after the start (bounded negative: the
@@ -10379,9 +10906,6 @@ body — most under `R-<id>` headings — and are not restated here.
 - Reader for plot flag bit 7, and whether any unexported code writes
   placer-nibble values into it · §2.2 · static trace over the unrecovered
   regions. Marked `TODO(T23)`.
-- Dense-pack rule: whether a footprint overlapping a live anchor cell is
-  rejected or silently overwrites · §2.2 · manual retail observation
-  (dense-pack fringe map probe). Marked `TODO(question)`.
 - Whether the fog cache's `1 = NW` corner-to-bit assignment holds · §3.3
   [R-RR16-A] · manual retail observation (asymmetric fog GAF probe). Supported
   inference today.
@@ -10414,6 +10938,15 @@ body — most under `R-<id>` headings — and are not restated here.
 - Minimap marker blit site · §3.9 · static trace. The layer ordering
   (contacts overwrite markers) is supported inference. Marked `TODO(question)`.
 ### Renderer
+
+- **Unknown — unequal-pitch surface conversion:** the native surface-to-sprite
+  wrapper installs row pitch as sprite width, replacing its earlier logical
+  width. Five traced consumers use generated, PCX-decoded or saved radar
+  surfaces whose constructors make pitch equal width. The remaining
+  live-window surface producer and its downstream clipping/read width need
+  tracing before an observable padded-surface discrepancy can be asserted.
+  Nanolathe's decoded images are tightly packed; no equivalent native wrapper
+  is implemented. This does not establish a general animation-frame defect.
 
 - **Unknown:** render-type-2 lens transparent key left by heap history; its
   constructor and bounded lifetime contain no initializing write. Observe the
@@ -10506,15 +11039,43 @@ body — most under `R-<id>` headings — and are not restated here.
 
 ### Audio and music
 
+- **Unknown:** external re-entry and device state during a failed initial
+  millisecond-time-format request · §8.4 "Open and probe" · observe or close
+  callback paths during the API call. The locally guarded cleanup is
+  established; an unconditional device-close consequence is not.
+
+- Stream interactions beyond the established single request and authored
+  overlapping narration requests · [R-AUD-02 §1], [01 R-PLAT-02 §4] · trace
+  other callbacks that reset, remove or reuse live timer slots, and distinguish
+  them from device failure. The authored three-stage producer and retained
+  older timer are established; a normal two-stage stock overlap is not claimed.
+
+- Any indirect registration or reinitialization path beyond the established
+  ordinary startup, battle-entry and shutdown lifecycle; and names that fill
+  the retained name without a terminator · §8.3 "Alias registration" · close
+  indirect references, then trace any remaining producer's length bound and
+  the resulting named-play comparison. Ordinary static alias playback's lack
+  of failed-probe retry, including repeated weapon-load registration, is
+  established inline. Device recovery and streaming do not inherit that
+  static-alias lifecycle automatically.
+
+- **Unknown:** a native CD device's or the packaged adapter's response to the
+  Play All over-count request submitted after the last audio track — reject
+  it, keep the current media, or play on to the disc's end and later notify
+  completion · [R-AUD-01 §4] · manual
+  retail observation of Play All past the last track on a native drive and on
+  the packaged MP3 adapter. **Implementation reconciliation (Unknown):**
+  Nanolathe's file backend has no track past the last file; when it rejects
+  that request the host plays the wrapped track one in the same step without
+  reporting a media error. That is host policy, not a claimed retail outcome.
+  Marked `TODO(question)` at the sequential arm.
+
 * **Unknown:** the packaged GOG adapter's actual first-track reply and initial
   category list on a given platform, because its status path leaves the
   reply buffer untouched and disc serial/list state can override defaults ·
   [R-AUD-01 §4 "Packaged MP3 media"] · manual retail observation identifying
   the response buffer and category-list provenance.
 
-- The speech-*text* threshold writer among the sound-options gadgets (the
-  audio threshold's writer is established) · §8.3, [R-AUD-01 §2] · static
-  trace of the `SOUNDSRT` handler (doc 07 owns the screen).
 - Whether dynamically or externally reached callers outside the bounded
   direct-invocation census can drive the 18-byte sound broadcast packet in
   game · §8.3 · static trace over the unrecovered regions.

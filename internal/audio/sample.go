@@ -286,31 +286,6 @@ func (c *SampleCache) LoadPath(path string) (*Sample, error) {
 	return s, nil
 }
 
-// loadCandidates resolves an already-registered identity using its authored
-// path candidates. The cache key remains the alias, preserving one sample per
-// registered identity.
-func (c *SampleCache) loadCandidates(alias string, candidates []string) (*Sample, error) {
-	if c == nil {
-		return nil, fmt.Errorf("audio: nil cache")
-	}
-	if s, ok := c.Get(alias); ok {
-		return s, nil
-	}
-	if c.fs == nil {
-		return nil, fmt.Errorf("audio: no VFS for alias %q", alias)
-	}
-	data, prov, err := c.resolveCandidates(candidates)
-	if err != nil {
-		return nil, err
-	}
-	s, err := decodeSample(alias, data, prov)
-	if err != nil {
-		return nil, err
-	}
-	c.putSample(alias, s)
-	return s, nil
-}
-
 // Purge removes an alias from the cache.
 func (c *SampleCache) Purge(alias string) {
 	if c == nil {

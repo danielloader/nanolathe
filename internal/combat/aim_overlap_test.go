@@ -35,6 +35,10 @@ func TestOverlappingAimZeroPreservesGrantedReadiness(t *testing.T) {
 	for tick := uint32(1); tick <= 12; tick++ {
 		if tick == 2 {
 			w.Destroy(target.Handle, units.DeathKilled)
+			// Model completed finalization before the shooter's next visit.
+			// A death latch alone keeps an allocated target resolvable
+			// [06 R-WPN-04 §1]; the overlap needs an actually removed target.
+			w.FreeImmediate(target.Handle)
 		}
 		if tick == 3 {
 			// North at heading zero gives the second callback a zero yaw.

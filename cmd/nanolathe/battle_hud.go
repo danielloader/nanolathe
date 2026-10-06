@@ -466,10 +466,15 @@ func loadRetailBattleHUD(fs vfs.FSOps, sess *session.Session, cat *content.Catal
 
 // buildBattleRadar installs the production radar picture from the same map
 // asset that populated the session terrain. TNT's MiniMapPresent bit gates the
-// authored bytes; render.BuildRadarPicture crops the stored bitmap's top-left
-// used sub-rectangle (discarding the fill that pads its short axis on a
-// non-square map, observed on 252×252 and 252×256 maps alike) before the
-// bytes pass through the generic ALP source/destination path [fmt tnt][03 §3.7].
+// authored bytes; render.BuildRadarPicture reduces fixed two-by-two blocks at
+// the stored row stride [fmt tnt][03 §3.7].
+//
+// Host fallback: an authored minimap that cannot feed that reducer — smaller
+// than twice the fitted picture, or with an incomplete rectangle — is treated
+// as absent. The radar takes the generated terrain picture, exactly as for a
+// map whose present flag is clear, and the HUD warning path names the map.
+// Retail reads outside such a source with an Unknown result, so this is host
+// policy and never stops battle entry (DESIGN_PRESENTATION_CLIENT §3.1 C4).
 func buildBattleRadar(fs vfs.FSOps, cat *content.Catalog, mapName string, terrain *world.Terrain, pal *palette.Tables) *render.RadarSurface {
 	if terrain == nil || pal == nil {
 		return nil
@@ -490,10 +495,14 @@ func buildBattleRadar(fs vfs.FSOps, cat *content.Catalog, mapName string, terrai
 				maxTNTBytes = cat.Limits.TNTBytes
 			}
 			if data, err := fs.ReadFileLimit(mh.LogicalTNT, maxTNTBytes); err == nil {
-				if tnt, err := formats.LoadTNT(data); err == nil {
+				if tnt, err := formats.LoadTNT(data); err == nil && tnt.MiniMapPresent {
 					w, h := int(tnt.MinimapWidth), int(tnt.MinimapHeight)
-					if tnt.MiniMapPresent && w > 0 && h > 0 && len(tnt.Minimap) == w*h {
+					if w > 0 && h > 0 && len(tnt.Minimap) == w*h && render.BakedRadarSourceFits(layout, tnt.Minimap, w, h) {
 						baked, bakedW, bakedH = tnt.Minimap, w, h
+					} else {
+						hudAssetWarning(fs, mh.LogicalTNT, "authored minimap cannot supply the radar picture; using the generated terrain picture [03 §3.7]",
+							fmt.Errorf("stored minimap %dx%d with %d bytes, expected a complete rectangle of at least %dx%d for the %dx%d radar picture",
+								w, h, len(tnt.Minimap), 2*layout.W, 2*layout.H, layout.W, layout.H))
 					}
 				}
 			}

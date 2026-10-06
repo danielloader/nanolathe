@@ -17,7 +17,9 @@ func TestCommentBlankingPreservesOffsets(t *testing.T) {
 		{"line", "a=1; // note\nb=2;", "a=1;        \nb=2;"},
 		{"block", "a=/*x*/1;", "a=     1;"},
 		{"block with newline", "a=1;/*\n*/b=2;", "a=1;  \n  b=2;"},
-		{"unterminated blanks to eof", "a=1; /* trailing", "a=1;            "},
+		{"unterminated retains final body byte", "a=1; /* trailing", "a=1;           g"},
+		{"trailing opener", "a=1;/*", "a=1;  "},
+		{"one body byte", "/*x", "  x"},
 		{"slash alone", "a=1/2;", "a=1/2;"},
 	}
 	for _, testCase := range cases {
@@ -95,5 +97,25 @@ func TestDuplicateKeyPolicy(t *testing.T) {
 	// authors case variants, so this edge carries no data weight.
 	if last, _ := section.LastValue("key"); last != "2" {
 		t.Fatalf("LastValue = %q, want 2 (upper bound of resolved run)", last)
+	}
+}
+
+// The retained last byte of an unfinished comment still participates in the
+// grammar [02 §4]. These two cases distinguish it from blanking through EOF.
+func TestUnterminatedCommentRetainsGrammarByte(t *testing.T) {
+	if _, err := ParseTDF([]byte("/*x")); err == nil {
+		t.Fatal("retained identifier should produce the missing-equals diagnostic")
+	} else {
+		var pe *ParseError
+		if !errors.As(err, &pe) || pe.Diagnostic != DiagEqualsNotFound {
+			t.Fatalf("wrong retained-byte diagnostic: %v", err)
+		}
+	}
+	doc, err := ParseTDF([]byte("[A]{x=1;/*}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if section := doc.Root.Section("A"); section == nil || section.IntValue("x", 0) != 1 {
+		t.Fatal("retained closing brace did not complete the authored section")
 	}
 }

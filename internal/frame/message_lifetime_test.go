@@ -33,3 +33,29 @@ func TestMessageClearPreservesRecordsAndAppendFlags(t *testing.T) {
 		t.Fatalf("reused record = %+v, want %+v", got, want)
 	}
 }
+
+// Retirement owns its age gate independently of whether new lines may be
+// posted [01 R-PLAT-02 §8]. This fixture exercises the retained-span contract.
+func TestRetainedMessagesAgeWhileLinePostingDisabled(t *testing.T) {
+	r := NewMessageRing()
+	r.Configure(10, 0)
+	r.Append("first", 1, 0, 10, 0)
+	r.Append("second", 1, 0, 10, 0)
+	r.Configure(0, 0)
+	if r.Append("blocked", 1, 0, 10, 31) {
+		t.Fatal("zero line limit admitted a new line")
+	}
+	if r.RetireOne(30) {
+		t.Fatal("retired at the strict deadline")
+	}
+	if !r.RetireOne(31) || r.Display != 1 {
+		t.Fatal("disabled posting suspended or batch-retired the retained span")
+	}
+	r.Configure(10, 0)
+	if got := r.Visible(); len(got) != 1 || got[0].Text != "second" {
+		t.Fatalf("restored display = %#v", got)
+	}
+	if !r.RetireOne(31) || r.Display != r.Producer {
+		t.Fatal("second pump did not retire the remaining line")
+	}
+}

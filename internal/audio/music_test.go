@@ -29,9 +29,9 @@ func TestMusic_SequentialWrap(t *testing.T) {
 		t.Fatalf("seq second %d want 3", m.CurTrack())
 	}
 	m.NotifyTrackEnd()
-	m.Tick(false) // wrap to 1
-	if m.CurTrack() != 1 {
-		t.Fatalf("seq wrap %d want 1", m.CurTrack())
+	m.Tick(false) // submit 4, then reset next to 1 [03 R-AUD-01 §4]
+	if m.CurTrack() != 4 || m.NextTrack() != 1 {
+		t.Fatalf("seq submission cur=%d next=%d, want 4 and 1", m.CurTrack(), m.NextTrack())
 	}
 	m.NotifyTrackEnd()
 	m.Tick(false) // 2
@@ -232,13 +232,13 @@ func TestMusic_FailureFallback(t *testing.T) {
 // Repeat's arm is "not `playing` **or** `next ≠ requested` → `requested = 1`
 // when it was 0; `PlayTrack(requested)`" [03 R-AUD-01 §4 step 5, mode 3]. The
 // requested track is a field of the CD object in its own right, written by the
-// MUSIC screen's `Repeat` stage; `PlayTrack` writes *next*. This test used to
+// MUSIC screen's selection refresh; `PlayTrack` writes *next*. This test used to
 // read the two as one word, which is what let a Repeat battle start silent.
 func TestMusic_SingleRepeat(t *testing.T) {
 	m := NewMusicController()
 	m.Open(5)
 	m.Configure(ModeSingle, 0)
-	m.SetRequestedTrack(3) // the `TRACKMODE` `Repeat` arm's copy
+	m.SetRequestedTrack(3) // retained request before the tick
 	m.Play(3)
 	// While the requested track plays, both halves of the condition are false
 	// and the tick leaves the selection alone.
@@ -488,8 +488,9 @@ func TestMusicFadeCancellationAndCompletionPolling(t *testing.T) {
 	}
 	playing = false
 	m.NotifySuccessfulCompletion()
-	if m.CurTrack() != 2 || polls != 3 {
-		t.Fatal("successful completion did not freshly poll and advance stopped media")
+	// Completion, the tick, and its play primitive each query the device.
+	if m.CurTrack() != 2 || polls != 4 {
+		t.Fatal("successful completion skipped a query or failed to advance stopped media")
 	}
 }
 
@@ -500,6 +501,7 @@ func TestMusicFadeCancellationAndCompletionPolling(t *testing.T) {
 func TestMusic_RepeatBattleEntryStartsWithoutARequestedTrack(t *testing.T) {
 	m := NewMusicController()
 	m.Open(16)
+	m.SetRequestedTrack(0) // Explicit zero request; fresh Open seeds one.
 	m.Configure(ModeSingle, 0)
 	m.Tick(false)
 	if m.Status() != StatusPlaying || m.CurTrack() != 1 {

@@ -380,6 +380,20 @@ func TestGates(t *testing.T) {
 	sel := &testSelector{player: 1, profile: baseProfile, strategic: baseStrat}
 	cands := []string{"armfav"}
 
+	// Direct unordered stocks exercise the consumer gate, not a claimed retail
+	// NaN producer. Rejection must precede every reservoir draw [08 R-P0-05 §3].
+	for _, resource := range []economy.Res{economy.Energy, economy.Metal} {
+		svc := testEcon(1, 800, 1000, 100, 500, 0, 0, 0, 0)
+		svc.Players[1].Stock[resource] = float32(math.NaN())
+		stream := rng.NewSimulation(31337)
+		sel.rng = &stream
+		before := sel.rng.State
+		if _, ok := SelectWithCandidates(sel, builder, svc, cands); ok || sel.rng.State != before || sel.rng.Draws() != 0 {
+			t.Fatalf("unordered stock resource %d admitted selection or drew RNG", resource)
+		}
+	}
+	sel.rng = nil
+
 	// Energy gate: curEnergy <50
 	rng.SeedGlobal(1, 0)
 	econLowEnergy := testEcon(1, 49, 1000, 100, 500, 0, 0, 0, 0)

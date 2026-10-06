@@ -131,6 +131,9 @@ func (s *System) syncMoverStamp(u *units.Unit) {
 		}
 		coll.HasStamp = false
 	}
+	if !stamps || !coll.HasStamp {
+		s.Grid.fileUnit(coll.ID, coll.CachedAnchor, coll.FootPrintX, coll.FootPrintZ)
+	}
 	if stamps && !coll.HasStamp {
 		s.Grid.StampPlane(plane, coll.CachedAnchor, coll.FootPrintX, coll.FootPrintZ, coll.ID)
 		stamped = true

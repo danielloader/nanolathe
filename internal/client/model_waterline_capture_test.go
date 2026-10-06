@@ -173,14 +173,68 @@ func TestMobileShadowCopiesTheComposedSubmarine(t *testing.T) {
 	if dryBody == 0 || dryShadow != dryBody {
 		t.Fatalf("dry ARMSUB has %d body and %d shadow pixels; the shadow must copy its final body silhouette", dryBody, dryShadow)
 	}
-	// The threshold is clamped to 255, so this positive depth clips every
-	// possible key byte inclusively. The body is still present: waterline
-	// ownership tints it, whereas mobile-shadow clipping removes only shadow.
-	wetBody, wetShadow := compose(2, 1000, "armsub-shadow-submerged")
+	// Sea level 205 is a valid authored byte and, at this model's Y=0,
+	// produces the non-wrapping threshold 255. Every possible key is selected.
+	// Ownership tints the body while mobile-shadow clipping removes the shadow.
+	wetBody, wetShadow := compose(2, 205, "armsub-shadow-submerged")
 	if wetBody != dryBody {
 		t.Fatalf("submerged ARMSUB body has %d pixels, want dry body's %d", wetBody, dryBody)
 	}
 	if wetShadow != 0 {
 		t.Fatalf("fully submerged ARMSUB shadow has %d pixels, want none", wetShadow)
 	}
+}
+
+// This authored picture uses no retail art. Columns have sea levels 205, 206,
+// 207 at world Y zero; panel stripes carry keys 0, 1, 50, 255 top-to-bottom.
+// Rows exercise owned body, unobserved enemy body, and feature presentation.
+// Blue is the authored remap; orange is unchanged; dark background is erased
+// [03 R-REN-03A §8].
+func TestWaterlineByteBoundaryCapture(t *testing.T) {
+	c := compositionClient(t)
+	c.width, c.height = 160, 132
+	c.indexed = make([]byte, c.width*c.height)
+	for i := range c.indexed {
+		c.indexed[i] = 8
+	}
+	c.pal.Base[8] = [4]byte{18, 22, 29}
+	c.pal.Base[40] = [4]byte{240, 160, 50}
+	c.pal.Base[90] = [4]byte{65, 150, 245}
+	c.pal.Blue[40] = 90
+	c.buffer = frame.NewBuffer()
+	selected := [3][4]bool{{true, true, true, true}, {true, false, false, false}, {true, true, false, false}}
+	for row := 0; row < 3; row++ {
+		owner, kind := uint8(0), uint8(modelCursorUnit)
+		if row == 1 {
+			owner = 1
+		} else if row == 2 {
+			owner, kind = 1, modelCursorFeature
+		}
+		for column, sea := range []int32{205, 206, 207} {
+			publishSeaLevel(t, c, uint32(1+row*3+column), sea, 0)
+			x, y := int32(6+52*column), int32(6+42*row)
+			img := newModelImage(40, 32, 0, 0, x, y, true, 1)
+			keys := [4]uint8{0, 1, 50, 255}
+			for i := range img.color {
+				img.write(i, 40, true)
+				img.height[i] = keys[i/(40*8)]
+			}
+			c.waterlinePass(img, &presentationrender.UnitDraw{KeyPlane: true}, owner, kind)
+			img.commit(c.indexed, c.width, c.height)
+			for stripe, hit := range selected[column] {
+				want := byte(40)
+				if hit {
+					want = 90
+					if row == 1 {
+						want = 8
+					}
+				}
+				pixel := int(y+int32(stripe*8)+4)*c.width + int(x) + 20
+				if got := c.indexed[pixel]; got != want {
+					t.Errorf("row%d sea%d key%d: color=%d, want%d", row, sea, keys[stripe], got, want)
+				}
+			}
+		}
+	}
+	writeCapture(t, c, "authored-waterline-byte-boundaries")
 }

@@ -24,6 +24,9 @@ func (g *gameShell) drawRetailButtonCaption(c *client.Client, p *ui.Panel, index
 	// foreground, while its FNT fallback uses it [03 R-FONT-01 §6].
 	prefix, letter, suffix := text[:key], text[key:key+1], text[key+1:]
 	draw(prefix, x, color)
+	// TODO(question): settle admission of a keyed later build caption;
+	// retail measures the first stored caption in that branch. Retain selected
+	// prefix spacing until its exceptional writer paths are known [07 R-WGT-01 §3].
 	x += measure(prefix)
 	keyColor := color
 	if build {

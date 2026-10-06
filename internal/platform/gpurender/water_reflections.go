@@ -128,7 +128,7 @@ func (s *waterReflections) fan(run *reflectionRun, n int) {
 // construction child's group region and key delta the lane's.
 func (r *Renderer) reflectModelFace(f *drawlist.ModelFace, ox, oy, scale, cx, cy, fat float32, quad int, page int32) {
 	m := modelFaceReflection{f: f, ox: ox, oy: oy, scale: scale, cx: cx, cy: cy, fat: fat, quad: quad, page: page,
-		g: r.reflections.active, region: r.reflections.region, group: r.modelDirect.groupReflection, keyDelta: r.modelDirect.keyDelta}
+		g: r.reflections.active, region: r.reflections.region, group: r.modelDirect.groupReflection, keyDelta: r.modelDirect.keyDelta, seedPhase: r.modelDirect.seedPhase, seedGroupDelta: r.modelDirect.seedGroupDelta}
 	r.reflectModelFaceAs(&m)
 }
 
@@ -148,6 +148,8 @@ type modelFaceReflection struct {
 	g                          *drawlist.ModelGeometry
 	region, group              modelDirectRegion
 	keyDelta                   int32
+	seedPhase                  modelSeedPhase
+	seedGroupDelta             int32
 }
 
 // reflectModelFaceAs appends one recorded face reflection (reflectModelFace).
@@ -177,6 +179,9 @@ func (r *Renderer) reflectModelFaceAs(m *modelFaceReflection) {
 		groupX = float32(group.x-region.x) + 2*float32(region.bounds.Min.X-group.bounds.Min.X)
 		groupY = float32(group.y-region.y) + 2*float32(region.bounds.Min.Y-group.bounds.Min.Y)
 		occlusionPage, mode = group.page, -1
+	}
+	if m.seedPhase != modelSeedNone {
+		mode = modelSeedReflectionMode(m.seedPhase, m.seedGroupDelta, occlusionPage >= 0)
 	}
 	run := s.run(page, -1, occlusionPage)
 	for _, v := range f.Vertices {
@@ -565,11 +570,25 @@ func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
   key:=floor(custom.y+dot(color.rg,p+vec2(.5)-(src-imageSrc0Origin())))
   if custom.z>0.5 { key=floor(modelQuadLanes(custom.z,p-color.rg).z) }
   key=key-floor(key/256)*256
-  stored:=floor(imageSrc1AtFromSrc0Pos(imageSrc0Origin()+p+vec2(.5)).r*255+.5)
+  pixel:=imageSrc1AtFromSrc0Pos(imageSrc0Origin()+p+vec2(.5))
+  stored:=floor(pixel.r*255+.5)
+  grouped:=custom.w < -0.5
+  delta:=0.0
+  if custom.w < -1.5 {
+   code:=-custom.w-2.0
+   grouped=mod(code,2.0)>0.5
+   delta=mod(floor(code/2.0),65536.0)-32768.0
+   phase:=floor(code/131072.0)+1.0
+   if phase<2.5 {
+    original:=floor(pixel.g*255+.5)
+    if key<original { return vec4(0) }
+    if phase==2.0 && key==1.0 { key=0.0 }
+   }
+  }
   if key<stored { return vec4(0) }
-  if custom.w < -0.5 {
+  if grouped {
    group:=floor(imageSrc2AtFromSrc0Pos(imageSrc0Origin()+p+color.ba+vec2(.5)).r*255+.5)
-   if key<group { return vec4(0) }
+   if clamp(key+delta,0.0,255.0)<group { return vec4(0) }
   }
   c=imageSrc0At(imageSrc0Origin()+p+vec2(.5))
  } else {

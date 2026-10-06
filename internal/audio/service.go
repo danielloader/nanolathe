@@ -38,13 +38,24 @@ type Service struct {
 	hasEventTick      bool
 	streamPath        string
 	streamVolume      int
-	streamDeadlines   []uint32
+	streamTimers      []streamTimer
+	streamTimerID     int // one-based slot; zero means no recorded timer
 	streamPlaying     bool
 	voiceCache        *SampleCache
+	weaponSounds      map[string]AliasID
 	ackClock          func() uint64
 	ackOpportunity    uint64
 	hasAckOpportunity bool
 	intensity         battleIntensity
+}
+
+// streamTimer uses the host's existing presentation deadline convention. Slots
+// are reused without moving armed callbacks.
+// TODO(T23): retain growable host slots until CD/stream registration shares one
+// timer table; independent stream capacity would invent competition [01 R-PLAT-02 §4].
+type streamTimer struct {
+	due, period uint32
+	armed       bool
 }
 
 // NewService constructs the queue, registry/cache, and music controller with
@@ -164,8 +175,8 @@ func (a *Service) loadVoiceLine(alias string) *Sample {
 	return sample
 }
 
-// BindCatalog registers authored aliases in catalog order and installs the
-// unit resolver used by category queue resolution. The resolver is supplied by
+// BindCatalog registers named aliases followed by every weapon sound admission
+// in catalog order, then installs the category queue resolver. It is supplied by
 // the session because the audio package must not own unit state.
 func (a *Service) BindCatalog(cat *content.Catalog, resolver func(pool.Handle) (*Category, string, bool)) {
 	if a == nil {
@@ -178,6 +189,12 @@ func (a *Service) BindCatalog(cat *content.Catalog, resolver func(pool.Handle) (
 				a.Registry.RegisterPath(alias.Alias, alias.Sound)
 			}
 		}
+		a.weaponSounds = make(map[string]AliasID, len(cat.WeaponSoundPaths))
+		for _, path := range cat.WeaponSoundPaths {
+			a.weaponSounds[path] = a.Registry.RegisterAnonymousPath(path)
+		}
+	} else {
+		a.weaponSounds = nil
 	}
 	a.Queue.SetResolver(resolver)
 }
@@ -241,7 +258,7 @@ func (a *Service) DrainEvents(committedTick uint32, events []framepkg.EventView)
 			}
 			if ev.AudioAudible {
 				if ev.AudioPositional {
-					a.playAdmittedPositional(ev.Sound, [3]numeric.Fixed{ev.X, ev.Y, ev.Z})
+					a.playStaticPositional(ev.Sound, [3]numeric.Fixed{ev.X, ev.Y, ev.Z}, ev.AudioAnonymous)
 				} else {
 					// Trigger celebration is a published by-name cue [08 R-TRIG-01 §8].
 					a.PlayUICue(ev.Sound)
@@ -279,9 +296,9 @@ func (a *Service) Viewport() Viewport {
 	return a.viewport
 }
 
-// Load resolves an alias through the registry/cache. Missing aliases are
-// returned as errors to the caller; playback callers intentionally discard
-// that error to preserve retail silence [03 §8.2].
+// Load resolves an alias through the registry/cache. Failed sample loads return
+// errors, which playback callers discard to preserve silence [03 §8.2]. A new
+// alias requested after registration fills resolves the first entry [03 §8.3].
 func (a *Service) Load(alias string) (*Sample, error) {
 	if a == nil || strings.TrimSpace(alias) == "" {
 		return nil, nil
@@ -312,6 +329,10 @@ func (a *Service) PlayPositional(alias string, pos [3]numeric.Fixed, audible fun
 }
 
 func (a *Service) playAdmittedPositional(alias string, pos [3]numeric.Fixed) (Pan, int32, bool) {
+	return a.playStaticPositional(alias, pos, false)
+}
+
+func (a *Service) playStaticPositional(alias string, pos [3]numeric.Fixed, anonymous bool) (Pan, int32, bool) {
 	if a == nil || strings.TrimSpace(alias) == "" {
 		return Pan{}, 0, false
 	}
@@ -326,7 +347,16 @@ func (a *Service) playAdmittedPositional(alias string, pos [3]numeric.Fixed) (Pa
 	} else {
 		volume = Attenuate(pos, v)
 	}
-	sample, _ := a.Load(alias)
+	var sample *Sample
+	if anonymous {
+		// Registration belongs to catalog binding, before audible events.
+		// An absent binding is silent, never a new runtime admission [03 §8.3].
+		if id, ok := a.weaponSounds[alias]; ok {
+			sample, _ = a.Registry.Load(id)
+		}
+	} else {
+		sample, _ = a.Load(alias)
+	}
 	if sample != nil {
 		playRegistered(sample, VolumeFromAttenuation(volume)*gain, PanFloat(pan, v))
 	}
@@ -467,65 +497,84 @@ func (a *Service) StopVoices() {
 	}
 }
 
-// StartStream arms one authored narration/glamour timer on the existing
-// semantic audio owner. Starts overwrite the current path/volume but retain
-// every armed deadline; the earliest deadline admits that current path once
-// [03 R-AUD-02 §1].
+// StartStream replaces the shared request before servicing due callbacks,
+// then retains the newest registration's identity [03 R-AUD-02 §1].
 func (a *Service) StartStream(path string, volume int, delay, now uint32) {
 	if a == nil || path == "" {
 		return
 	}
 	a.streamPath, a.streamVolume = path, volume
-	a.streamDeadlines = append(a.streamDeadlines, now+delay)
+	a.TickStream(now)
+	for i := range a.streamTimers {
+		if !a.streamTimers[i].armed {
+			a.streamTimers[i] = streamTimer{due: now + delay, period: delay, armed: true}
+			a.streamTimerID = i + 1
+			return
+		}
+	}
+	a.streamTimers = append(a.streamTimers, streamTimer{due: now + delay, period: delay, armed: true})
+	a.streamTimerID = len(a.streamTimers)
 }
 
-// TickStream admits a pending stream exactly once when the presentation clock
-// reaches its due unit. Missing files and outputs without StreamOutput remain
-// silent at this boundary.
+// TickStream services live slots in registration-slot order. A callback removes
+// the recorded slot, which need not be its own. An older surviving slot reloads
+// after the callback; late service never catches up [03 R-AUD-02 §1].
 func (a *Service) TickStream(now uint32) {
-	if a == nil || len(a.streamDeadlines) == 0 {
+	if a == nil {
 		return
 	}
-	earlest := a.streamDeadlines[0]
-	for _, due := range a.streamDeadlines[1:] {
-		if due < earlest {
-			earlest = due
+	for i := 0; i < len(a.streamTimers); i++ {
+		if !a.streamTimers[i].armed || now < a.streamTimers[i].due {
+			continue
+		}
+		a.cancelRecordedStreamTimer()
+		a.openStream()
+		// Re-read after the callback: cancellation can target another slot.
+		if i < len(a.streamTimers) && a.streamTimers[i].armed {
+			a.streamTimers[i].due = now + a.streamTimers[i].period
 		}
 	}
-	if now < earlest {
-		return
+}
+
+func (a *Service) cancelRecordedStreamTimer() {
+	if i := a.streamTimerID - 1; i >= 0 && i < len(a.streamTimers) {
+		a.streamTimers[i].armed = false
 	}
-	a.streamDeadlines = nil
+	a.streamTimerID = 0
+}
+
+func (a *Service) openStream() {
 	output, ok := GlobalOutput().(StreamOutput)
-	if a.streamPlaying {
-		if ok {
-			output.StopStream()
-		}
-		a.streamPlaying = false
-	}
 	if !ok {
+		a.streamPlaying = false
 		return
 	}
 	a.Init(nil)
 	if a.Cache == nil {
 		return
 	}
+	// File failure precedes the native stream opener's prior-buffer teardown
+	// [03 R-AUD-02 §1]. It must not silence an already playing stream.
 	sample, err := a.Cache.LoadPath(a.streamPath)
 	if err != nil || sample == nil {
 		return
+	}
+	if a.streamPlaying {
+		output.StopStream()
+		a.streamPlaying = false
 	}
 	if err := output.PlayStream(sample, VolumeFromCentibel(int32(a.streamVolume))); err == nil {
 		a.streamPlaying = true
 	}
 }
 
-// StopStream cancels delayed narration and stops only the active stream
-// player, leaving the ordinary 8-slot cue pool alone.
+// StopStream cancels the recorded timer and stops the active stream. An older
+// registration whose identity was replaced remains armed [03 R-AUD-02 §1].
 func (a *Service) StopStream() {
 	if a == nil {
 		return
 	}
-	a.streamDeadlines = nil
+	a.cancelRecordedStreamTimer()
 	if a.streamPlaying {
 		if output, ok := GlobalOutput().(StreamOutput); ok {
 			output.StopStream()
@@ -541,6 +590,8 @@ func (a *Service) Close() {
 		return
 	}
 	a.StopStream()
+	// Process shutdown ends the host service, including lost stream timers.
+	a.streamTimers = nil
 	a.musicStartPending = false
 	if a.Music == nil {
 		return

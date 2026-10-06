@@ -130,9 +130,10 @@ func (t *Terrain) densePackTeardown(anchorX, anchorZ int32, footX, footZ int32) 
 }
 
 // tearDownFeatureAt is the teardown routine of [05 R-FEAT-01 §4] restricted to
-// the plot writes this package owns; every caller in the executable passes
-// honor 0, so the honoring variant does not exist here and an indestructible
-// feature is never removed by any path.
+// the ordinary placement path and the plot writes this package owns. This
+// path refuses indestructible features. Retail also has separate forced
+// developer-command callers [05 R-FEAT-01 §4]; their implementation remains
+// deferred by DESIGN_DEVELOPER_TOOLS §1.
 //
 //  1. a `0xFFFE` cell walks back to its anchor;
 //  2. an (anchor) word at or above 0xFFFB — empty, void, or any other sentinel

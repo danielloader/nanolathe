@@ -88,3 +88,75 @@ func TestRebuildEntryWithBothBitsClearFillsAllVisible(t *testing.T) {
 		t.Fatal("rebuild discarded the saved observer record while current coverage was disabled")
 	}
 }
+
+// Full rebuild uses the same cleared-byte ray throttle as a live mode command
+// [03 R-VIS-01 §1]. Another observer makes accidental retirement observable.
+func TestRebuildEntryRetainsRayTileAndClearsHeightBeforeThrottle(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		height uint8
+		move   bool
+		want   uint8
+	}{
+		{"height-one", 1, false, 0},
+		{"height-five", 5, false, 0},
+		{"height-six", 6, false, 1},
+		{"moved-height-five", 5, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := entryRayService(ModeHistoryEnabled | ModeCurrentEnabled | ModeTerrainRay)
+			// Select a valid authored table with no spokes: the origin alone
+			// distinguishes publication, independently of horizon geometry.
+			s.SetRayTables(&content.LOSTables{NumTables: 2, Tables: []content.LOSTable{{TableNum: 1}, {TableNum: 2}}})
+			ob := Observer{Owner: 0, CX: 10, CZ: 10, HeightByte: 20, Radius: 32}
+			s.Refresh(1, ob)
+			ob.HeightByte = tc.height
+			if tc.move {
+				ob.CX++
+			}
+			other := ob
+			other.HeightByte = 20
+			s.Refresh(2, other)
+			var eligible [10]bool
+			eligible[0] = true
+			s.RebuildEntry(eligible, []ModeRefreshObserver{{ID: 1, Observer: ob}, {ID: 2, Observer: other}})
+			idx := int(ob.CZ*s.W + ob.CX)
+			if got := s.byteGrids[0][idx]; got != 1+tc.want {
+				t.Fatalf("rebuild count = %d, want %d", got, 1+tc.want)
+			}
+			s.Refresh(1, ob)
+			if got := s.byteGrids[0][idx]; got != 1+tc.want {
+				t.Fatalf("ordinary refresh changed rebuilt count: %d", got)
+			}
+			stored := s.footprints[1]
+			if tc.want == 0 && (stored.storedByte != 0 || stored.live) {
+				t.Fatalf("throttled record retained a contribution: %+v", stored)
+			}
+			s.RetireObserver(1)
+			if got := s.byteGrids[0][idx]; got != 1 {
+				t.Fatalf("retirement changed other observer's contribution: %d", got)
+			}
+			s.RetireObserver(2)
+			if got := s.byteGrids[0][idx]; got != 0 {
+				t.Fatalf("rebuild left extra contribution: %d", got)
+			}
+		})
+	}
+}
+
+func TestRebuildEntryCircularShapeZeroPublishesDirectly(t *testing.T) {
+	s := entryRayService(ModeHistoryEnabled | ModeCurrentEnabled)
+	ob := Observer{Owner: 0, CX: 10, CZ: 10, HeightByte: 1, Radius: 32}
+	s.Refresh(1, ob)
+	var eligible [10]bool
+	eligible[0] = true
+	s.RebuildEntry(eligible, []ModeRefreshObserver{{ID: 1, Observer: ob}})
+	idx := int(ob.CZ*s.W + ob.CX)
+	if got := s.byteGrids[0][idx]; got != 1 || s.footprints[1].storedByte != 0 {
+		t.Fatalf("Circular index-zero publication = %d, stored = %+v", got, s.footprints[1])
+	}
+	s.RetireObserver(1)
+	if got := s.byteGrids[0][idx]; got != 0 {
+		t.Fatalf("Circular index-zero retirement left count %d", got)
+	}
+}

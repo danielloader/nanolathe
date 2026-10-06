@@ -97,6 +97,31 @@ type Account struct {
 	Body       []byte
 }
 
+// HasScalar reports a case-insensitive scalar name match, independently of
+// its type or value. Binary boxes do not participate [08 "Battle versus
+// campaign continuations and timing"].
+func (a *Account) HasScalar(name string) bool {
+	if a == nil {
+		return false
+	}
+	for _, item := range a.Ints {
+		if strings.EqualFold(item.Name, name) {
+			return true
+		}
+	}
+	for _, item := range a.Doubles {
+		if strings.EqualFold(item.Name, name) {
+			return true
+		}
+	}
+	for _, item := range a.Strings {
+		if strings.EqualFold(item.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
 // mergeAccount folds a later account occurrence into the first occurrence.
 // Retail treats duplicate accounts as one logical account: scalar items are
 // last-writer-wins and repeated binary boxes append in descriptor order [08

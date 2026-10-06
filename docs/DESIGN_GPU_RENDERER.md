@@ -539,8 +539,9 @@ geometry and does not justify introducing an unverified retail key constant.
 * **C-G7 Fog composition.** The recorded fog ops are converted to a per-tile
   grid texture (kind, variant, frame, pattern parity) and applied by one shader
   over the world image: solid fills write the dark index, gray fills desaturate,
-  patterned fills test the same `(x + y + parity) & 1` the byte writer tests, and
-  fog GAF frames sample their frame `[03 §3.3]` `[03 §4.3.3 R-RR16-A §1]`. The
+  patterned fills and masked checkers select the even phase of final destination
+  coordinates plus camera parity, matching the byte writer across clipped
+  edges, and fog GAF frames sample their frame `[03 §3.3]` `[03 §4.3.3 R-RR16-A §1]`. The
   visible result per pixel is the byte writer's, subject to Enhanced's approved
   colour arithmetic (§13.3). A composite frame, a frame that extends past its
   atlas tile, or a frame beyond the atlas's range takes the ordered leaf path of
@@ -617,6 +618,15 @@ to use conventional GPU rasterization while preserving the original look. Large
 occlusion errors, unexpected missing subjects, incorrect stage ordering and
 unstable seams are defects, not covered by this allowance. Human review of
 captures and motion is the acceptance gate.
+
+Original preserves the established keyless composition texture fallback:
+raw texels for either shading selection, with the width-128 stride exception
+[03 R-RAST-01 §1 step 6], including diagnostics. Direct framebuffer targets
+retain normal stride. The anti-alias composition scratch always has a key
+plane, even when the resolved image is color-only [03 R-REN-03A §6]. Enhanced
+continues to sample its texture atlas with authored dimensions and its existing
+geometry lighting/depth policy under this raster approximation contract; it
+does not reproduce the software texture fallback.
 
 Two properties keep the approximation bounded. A four-corner face — flat or
 textured — evaluates retail's own two-chain span mapping per fragment from the
@@ -940,8 +950,11 @@ key ownership; a replaced reveal index is written flat, as retail rewrites its
 plane after shading. Outline geometry is the two row endpoints from each ring,
 key-tested against the pixel's key; no polygon-border line primitive replaces
 that pass. BLUE TABLE or erasure applies at the inclusive waterline threshold,
-then the Digger erase. Keyless subjects skip both clipping passes. The final
-body coverage punches its shadow, as in classic. No software image planes are
+then the Digger erase. The recorder uses the software path's shared threshold
+helper: positive depth admits the pass, then the threshold narrows to an
+unsigned byte. A wrapped zero remains an active cutoff; the packet's separate
+waterline mode distinguishes it from no pass. Keyless subjects skip both
+clipping passes. The final body coverage punches its shadow, as in classic. No software image planes are
 allocated during recording. [03 R-COMP-01 §3][03 R-WATER-01 §2]
 
 ### Attached-unit composition
@@ -4639,9 +4652,10 @@ them, and the second composition is suppressed from the reflection source so the
 same world geometry does not reflect twice. A shadow whose source region is
 invalid is **omitted**, never cut from texels that are not the subject's.
 
-Two passes over ONE vertex batch draw the whole frame's subjects at once.
-Groups containing a construction reveal then merge their separately finished
-children as described in §22.4:
+Key and colour passes share one vertex batch. Packets without cached seeds
+use one pair; seeded packets finish cached colour before a later outline/live
+pair, as described under **Cached-plane seed** below. Groups requiring separate
+child resolution then merge their finished children:
 
 1. **Key.** Each face's height key, narrowed to a byte as the span writers narrow
    it, into a key plane under a MAX blend, so a texel holds the highest key drawn
@@ -4722,6 +4736,46 @@ half-colour (§33) rather than an opaque body. The parameter image grows to what
 frame uses up to 2,048 rows (174,762 slots, a mapped quad taking two); a frame
 past it draws its remaining faces linearly. The commit quads bind only the colour plane, so they
 share a run with the sprites around them.
+
+**Cached-plane seed.** Ordinary keyed cached unit packets carry an immutable
+`ModelCachedSeed` with the source image's dimensions and origin before rebasing.
+The final native group rectangle selects the raw or resized seed
+[03 R-REN-03A §4]; doubled atlas rounding does not select it. A zero descriptor
+keeps direct, keyless and standalone adapters on their existing path.
+
+The key image's red channel remains the effective staging key. For seeded
+cached faces its green channel retains the original winning key; resized red
+maps key one to zero. This transform is monotone, so the two MAX results equal
+resolving cached faces and then copying the key plane. Cached colour still
+competes against green, preserving the original winner independently of colour
+transparency. Reveal reads seeded red. Outline/live key and colour passes follow
+without clearing either plane; live writes leave original green alone and are
+never filtered through the resized seed. Packed retained vertices carry no
+per-frame seed decision; run phase and uniforms are chosen on each replay.
+
+Seeded group children use independent regions before ordered merges, including
+children without construction reveal. Construction groups still skip transparent
+children. Ordinary groups preserve their existing shared-key hole policy: a
+transparent child with a higher key hides prior colour, while a transparent tie
+does not overwrite it. Child key shifts retain saturation. Once the source
+key has narrowed to a byte, seeded deltas are reduced to −255…255 consistently
+for merging, carrier clipping and reflection admission. Every larger magnitude
+has the same saturated result for all source bytes; this also represents the
+full difference between two signed height words without a signed-word packing
+fallback. Descriptor-absent arithmetic remains unchanged. No shadow source,
+current-pose bounds policy, supersample, RGB shading or factory membership rule
+changes here. The source origin is retained as immutable metadata; rebased face
+placement already supplies its current offset.
+
+This adds no key-plane image or readback. A page containing seeded outline/live
+runs takes two additional passes; a page with only cached seeds retains two.
+Seeded groups can need additional child regions and merge waves. The pass and
+region accounting includes these costs; this contract makes no stock incidence
+or performance claim.
+The authored device fixture in `model_seed_test.go` measures two versus six
+model passes, one atlas page in both cases, 424 versus 536 submitted vertices,
+and zero versus 158,976 bytes of merge scratch against a fresh no-descriptor
+renderer. This bounds that fixture's added work, not a battle workload.
 
 **Retained packed vertices.** The lane's largest CPU term was re-deriving, for
 every cached-lane face of every presented frame, what the recorder had already
@@ -5166,9 +5220,10 @@ not reproduce that omission, and no software fallback is added.
 
 1. Richer material response and per-pixel lighting remain future work beyond
    §23, §29 and §31.
-2. Non-construction groups still share a key plane: a child texel erased by
-   its own clipping can leave a hole where retail shows the carrier. Construction
-   groups use the isolated composition below. The earlier claim that only
+2. Non-construction groups retain their shared-key hole behavior: a child
+   texel erased by its own clipping can leave a hole where retail shows the
+   carrier. Seeded packets resolve separately but preserve that behavior at
+   merge. Construction groups use the transparent-child admission below. The earlier claim that only
    completed transport cargo uses attachment was stale: factory products attach
    to the build piece too (`Client.attachedChildren`).
 3. The recorder still builds the doubled packet's faces. A packet with a doubled
@@ -5186,7 +5241,8 @@ not reproduce that omission, and no software fallback is added.
 
 **Established (implementation).** A group with a mergeable child carrying a
 reveal on either its native or doubled packet gives every mergeable child an
-independent atlas region. Each child finishes its own reveal, outline and live
+independent atlas region. Cached seeds also require independent regions, with
+the separate ordinary-group admission described above. Each child finishes its own reveal, outline and live
 lanes before its non-transparent pixels can compete with the carrier
 [03 R-REN-03A §4]. This prevents the erased nanoframe interior's key from
 rejecting the factory plate. Every child in the affected group takes this path

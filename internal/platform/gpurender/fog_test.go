@@ -366,6 +366,9 @@ func checkFogDevicePixels() error {
 			return err
 		}
 	}
+	if err := checkFogCheckerPhaseDevicePixels(); err != nil {
+		return err
+	}
 	return checkFogOrderedDevicePixels()
 }
 
@@ -458,7 +461,7 @@ func checkFogDevicePixelsAt(scale camera.ViewScale) error {
 			case x >= p(64) && x < p(96) && y < p(32):
 				// The checker is a destination-pixel test, so it stays one pixel
 				// wide at either scale (§14.2).
-				if (int32(x)+int32(y)+parity)&1 == 1 {
+				if (int32(x)+int32(y)+parity)&1 == 0 {
 					want = darkColor
 				}
 			case x >= p(16) && x < p(32) && y >= p(32) && y < p(48):

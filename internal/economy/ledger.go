@@ -716,17 +716,23 @@ func (s *Service) Transfer(source, destination uint8, res Res, amount float32) {
 // credits the destination WITHOUT repeating the debit [05 R-SHARE-01 §4] — has
 // no transport in a single-player build and no caller here.
 func (s *Service) transfer(src, dst *Player, res Res, amount float32) {
-	if s == nil || src == nil || dst == nil || amount == 0 {
+	if s == nil || src == nil || dst == nil {
 		return
 	}
 	if amount > src.Stock[res] {
 		amount = src.Stock[res]
 	}
-	if amount > src.Stock[res] {
+	// The post-cap zero/unordered gate rejects NaN amounts before any writes
+	// [05 R-SHARE-01 §2]. A zero input can cap to a negative source stock.
+	if amount == 0 || amount != amount {
 		return
 	}
-	src.Stock[res] = float32(float64(src.Stock[res]) - float64(amount))
-	src.Mirror[res].Requested = float32(float64(src.Mirror[res].Requested) + float64(amount))
+	// Credit still proceeds when unordered stock refuses the direct debit.
+	// Only the selected resource participates [05 R-SHARE-01 §2].
+	if amount <= src.Stock[res] {
+		src.Stock[res] = float32(float64(src.Stock[res]) - float64(amount))
+		src.Mirror[res].Requested = float32(float64(src.Mirror[res].Requested) + float64(amount))
+	}
 	addContribution(s, dst, &dst.Mirror[res], float64(amount))
 }
 

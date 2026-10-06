@@ -166,8 +166,8 @@ func decodeSummary(bank *Bank, image *BattleImage) error {
 	if value, present := ac.Int("Gametype"); !present || (value != 1 && value != 2) {
 		return battleImageError("invalid Summary Gametype", "integer Gametype equal to 1 or 2")
 	}
-	if value, present := ac.Int("BetweenMissions"); present && value != 0 {
-		return battleImageError("non-battle Summary image", "BetweenMissions absent or zero")
+	if ac.HasScalar("BetweenMissions") {
+		return battleImageError("non-battle Summary image", "BetweenMissions scalar absent")
 	}
 	image.Summary = s
 	image.Summary.RadarImage = append([]byte(nil), s.RadarImage...)
@@ -655,6 +655,10 @@ func parseOrderBoxName(name string) (uint16, uint32, bool) {
 }
 
 func findUnitTypeName(items []StringItem, definitionIndex uint32) string {
+	// TODO(question): retail's absent-name numeric remapper uses separate
+	// visited/eligible counters. Its skipped-definition flag and caller identity
+	// domain need tracing before replacing the current empty-name/raw-parameter
+	// fallback [08 R-SAVE-ORDER-01].
 	for _, item := range items {
 		if !strings.HasPrefix(item.Name, "UTYPENAME") {
 			continue

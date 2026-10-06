@@ -345,6 +345,25 @@ func TestPlacementSignedWordOverflowBoundariesDoNotDraw(t *testing.T) {
 	}
 }
 
+// These direct arithmetic inputs lock the pre-shift wrapping contract, not a
+// claim that stock maps produce the signed-coordinate boundary [08 R-AI-03 §3].
+func TestPlacementOriginBiasWrapsBeforeCellShift(t *testing.T) {
+	for _, tc := range []struct {
+		origin int32
+		want   int16
+	}{
+		{-2147483648, 2047},
+		{-2146959361, 2047},
+		{-2146959360, -2048},
+		{0, -1},
+		{524288, 0},
+	} {
+		if got := retailOriginCell(numeric.Fixed(tc.origin), 2); got != tc.want {
+			t.Fatalf("origin %d with footprint 2: cell=%d, want %d", tc.origin, got, tc.want)
+		}
+	}
+}
+
 func TestPlacementRepresentativeRetailAssetsGuarded(t *testing.T) {
 	root := testsupport.RetailRoot(t)
 	fs := vfs.New()

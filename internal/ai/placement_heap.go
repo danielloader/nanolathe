@@ -143,7 +143,9 @@ func resolveRetailPlacementDef(m *Manager, defKey string) (retailPlacementDef, P
 }
 
 func retailOriginCell(origin numeric.Fixed, footprint int32) int16 {
-	return int16((int64(int32(origin)) - (int64(footprint) << 19) + (1 << 19)) >> 20)
+	// Bias in the destination word before the signed shift. Widening here
+	// changes which side of the grid an overflowing origin reaches [08 R-AI-03 §3].
+	return int16((int32(origin) - (footprint << 19) + (1 << 19)) >> 20)
 }
 
 func retailPlacementScore(terrain *world.Terrain, rect world.FootprintRect) (int32, error) {

@@ -114,6 +114,7 @@ func (g *gameShell) serviceMenuWidgets(p *ui.Panel, in *input.State) bool {
 			}
 		},
 	})
+	g.pollRetailMusicPage(p)
 	in.DiscardTokens(result.ConsumedTokens)
 	if g.frontend.Mode == modeMenuSkirmish && editorIndex < 0 && !result.Fired && result.ConsumedTokens != 0 && len(frame.Tokens) != 0 && !g.survivalMenu {
 		g.skirmishPlayerCountToken(frame.Tokens[0])

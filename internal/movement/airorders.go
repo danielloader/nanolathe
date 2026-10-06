@@ -111,7 +111,7 @@ func (s *System) newFrozenTerrainPointMarker(u *units.Unit, target pool.Handle, 
 // — or 0x640000 when that `Range` is zero — whenever the **target** is `canfly`
 // [04 R-AIR-01 §4].
 func (s *System) newFollowUnitMarker(u *units.Unit, target pool.Handle) *airMarker {
-	m := &airMarker{sys: s, flags: airMarkerFollow, unit: u, target: target}
+	m := &airMarker{sys: s, flags: airMarkerFollow, unit: u, target: target, attachPiece: airNoPiece}
 	if t := s.unitFor(target); t != nil && t.Def != nil && t.Def.CanFly {
 		m.flags = airMarkerFollow | airMarkerRadial | airMarkerHeadingMatch
 		m.radial = numeric.Fixed(int64(firstWeaponRange(u)) << 16)
@@ -315,26 +315,22 @@ func (m *airMarker) Release() {
 	m.target = 0
 }
 
-// targetAttachPosition is the goal a follow marker takes from its target: the
-// target's own origin.
-//
-// [04 R-AIR-01 §14.1] settles what §4's "target's attach-piece world position"
-// resolves to. The follow branch asks the piece world-position locator of
-// [04 R-REV-02] for the marker's stored attach-piece index on the target, and
-// that locator answers a ZERO offset when the index is negative. The
-// follow-unit constructor — flags 0x01/0x07, which is every user of this
-// branch: `VTOL_Follow`, `AirStrike`'s bound-target marker, the guard seek —
-// stores index −1, so a plain follow marker's goal is exactly the target's
-// origin triple, with no piece arithmetic at all. The radial offset of flag
-// 0x02 is added after, as §4 says.
-//
-// Only the follow-unit-piece constructor (flags 0x05, the transport pickup of
-// [04 R-AIR-01 §9]) stores a real index, and that one does need the piece
-// transform. When a compiled piece world-transform surface reaches this
-// package, the pickup marker is the single call site to route through it; the
-// contract for every other follow marker is unchanged [04 R-AIR-01 §14.1].
+// targetAttachPosition resolves the current mapped piece hierarchy, including
+// the target's orientation, then adds its origin [04 R-AIR-01 §14.1]. Plain
+// follow markers and pickup use the no-piece sentinel; landing's selected pad
+// remains live as its hierarchy animates. Invalid pieces retain zero offset.
 func (m *airMarker) targetAttachPosition(t *units.Unit) Vec3 {
-	return Vec3{X: t.X, Y: t.Y, Z: t.Z}
+	goal := Vec3{X: t.X, Y: t.Y, Z: t.Z}
+	if binding := t.COBBinding(); binding != nil {
+		if offset, ok := binding.ComposePiece(int(int16(m.attachPiece)), t.Move.Heading, t.Move.Pitch, t.Move.Bank); ok {
+			// World-point addition retains each low signed word before the
+			// marker applies its altitude rules [04 R-REV-02].
+			goal.X = numeric.Fixed(int32(goal.X + offset[0]))
+			goal.Y = numeric.Fixed(int32(goal.Y + offset[1]))
+			goal.Z = numeric.Fixed(int32(goal.Z + offset[2]))
+		}
+	}
+	return goal
 }
 
 func (m *airMarker) terrain() *world.Terrain {
@@ -725,8 +721,10 @@ func (s *System) VisitAirBuildWork(u *units.Unit, head *orders.Node, tick uint32
 // treated as end-of-list [04 R-AIR-01 §6].
 const airPadCandidates = 4
 
-// airNoPiece is the reserved no-piece index [04 R-UNIT-06 §3].
-const airNoPiece = 0xFF
+// airNoPiece is the reserved no-piece index, −1 in the marker's signed
+// 16-bit piece word [04 R-AIR-01 §9][04 R-UNIT-06 §3]. Stored as 0xFF it
+// would widen to piece 255, a real piece on a model with more pieces.
+const airNoPiece uint16 = 0xFFFF
 
 // queryLandingPad is the pad scan of [04 R-AIR-01 §6]: the first candidate
 // piece 0..3 of the target that is free wins, where a pad piece is free exactly
@@ -2145,12 +2143,12 @@ func (s *System) airFindBaseAndLand(u *units.Unit, n *orders.Node, sim *rng.Simu
 	return true
 }
 
-// airJitteredApproach is the leg `AirStrike` phase 2 and `AirToGround` phase 1
-// share: a uniform ±45-degree jitter about the bearing to the cached goal, at
-// half the current distance [04 R-AIR-01 §8].
-func (s *System) airJitteredApproach(u *units.Unit, n *orders.Node, sim *rng.Simulation, radius uint16) {
-	d := airPlanarDistance(n.GoalX, n.GoalZ, u.X, u.Z)
-	h := bearing(u.X, u.Z, n.GoalX, n.GoalZ)
+// airJitteredApproach builds the strafing and hover half-distance approach
+// with a uniform ±45-degree jitter. Strafing supplies its cached goal; hover
+// supplies its live target [04 R-AIR-01 §8].
+func (s *System) airJitteredApproach(u *units.Unit, n *orders.Node, sim *rng.Simulation, radius uint16, goalX, goalZ numeric.Fixed) {
+	d := airPlanarDistance(goalX, goalZ, u.X, u.Z)
+	h := bearing(u.X, u.Z, goalX, goalZ)
 	jittered := h + uint16(sim.Uint32n(0x4000)) - 0x2000
 	ox, oz := offsetAtBearing(jittered, numeric.Fixed(d/2))
 	m := s.newPointMarker(u, Vec3{X: u.X - ox, Y: u.Y, Z: u.Z - oz})
@@ -2215,7 +2213,7 @@ func (s *System) legAirToGround(u *units.Unit, n *orders.Node, tick uint32) orde
 			return airLegUnbound(n, tick)
 		}
 		inhibitAirWeapons(u)
-		s.airJitteredApproach(u, n, sim, 0x80)
+		s.airJitteredApproach(u, n, sim, 0x80, n.GoalX, n.GoalZ)
 		n.DynamicGate = airLegGateStrike
 		return 1
 	case 2:
@@ -2277,8 +2275,9 @@ func (s *System) legAirToGround(u *units.Unit, n *orders.Node, tick uint32) orde
 }
 
 // legAirToGroundHover is the `hoverattack` standoff [04 R-AIR-01 §8]. Phases 0
-// and 1 match `AirToGround`. Phase 2 releases the slot-0 latch, aims at the
-// target, builds a point marker on the target's current position with
+// and 1 use the same sequence as `AirToGround`, but phase 1 reads the live
+// target rather than the cached goal. Phase 2 releases the slot-0 latch, aims
+// at the target, builds a point marker on the target's current position with
 // horizontal arrival radius equal to the first weapon slot's `Range`, and
 // zeroes two record scratch words (a side flag and a miss counter). Phase 3 is
 // the orbit: a deterministic ±45-degree left/right alternation about the
@@ -2317,7 +2316,9 @@ func (s *System) legAirToGroundHover(u *units.Unit, n *orders.Node, tick uint32)
 			return airLegUnbound(n, tick)
 		}
 		inhibitAirWeapons(u)
-		s.airJitteredApproach(u, n, sim, 0x80)
+		// Hover approaches the live target without changing the retained order
+		// goal; a queued attack can outlive its clicked position [04 R-AIR-01 §8].
+		s.airJitteredApproach(u, n, sim, 0x80, targetX, targetZ)
 		n.DynamicGate = airLegGateStrike
 		return 1
 	case 2:
@@ -2674,13 +2675,15 @@ func (s *System) legAirToAir(u *units.Unit, n *orders.Node, satisfied uint32, ti
 
 // airFacingDot is the dot product of the unit→target bearing vector and the
 // unit's own facing vector, both taken at 20 world units [04 R-AIR-01 §8].
-// Only its sign is consulted, so the common negation of the two direction
-// vectors ([04 R-MOV-01 §4]'s travel axis) cancels.
+// Each travel component is negated before extracting its signed whole part;
+// fractions must be discarded before multiplication [04 R-AIR-01 §8].
 func airFacingDot(u *units.Unit, targetX, targetZ numeric.Fixed) int64 {
 	const probe = numeric.Fixed(20 << 16)
 	ax, az := offsetAtBearing(bearing(u.X, u.Z, targetX, targetZ), probe)
 	bx, bz := offsetAtBearing(u.Move.Heading, probe)
-	return (int64(ax)*int64(bx) + int64(az)*int64(bz)) >> 16
+	awx, awz := int32(int16(-ax>>16)), int32(int16(-az>>16))
+	bwx, bwz := int32(int16(-bx>>16)), int32(int16(-bz>>16))
+	return int64(int16(awx*bwx + awz*bwz))
 }
 
 // airUnitVelocity is the mover's VELOCITY TRIPLE [04 R-MOV-01 §1] — the words

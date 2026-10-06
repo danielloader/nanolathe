@@ -317,3 +317,26 @@ func TestEraseAtOrBelowClipsTheBuriedHalf(t *testing.T) {
 		t.Fatalf("pixel above the threshold was erased: covered=%v colour=%d", img.covered[2], img.color[2])
 	}
 }
+
+func TestMobileShadowWaterlineWrapKeepsHigherKeys(t *testing.T) {
+	c := compositionClient(t)
+	c.buffer = frame.NewBuffer()
+	publishSeaLevel(t, c, 1, 206, 0)
+	body := newModelImage(3, 1, 0, 0, 20, 20, true, 1)
+	for i, key := range []uint8{0, 1, 50} {
+		body.write(i, 40, true)
+		body.height[i] = key
+	}
+	shadow := c.buildModelShadow(&presentationrender.UnitDraw{CastsShadow: true}, body)
+	if shadow == nil {
+		t.Fatal("mobile shadow absent")
+	}
+	// The active low-byte threshold is zero. Silhouette flattening must not
+	// turn the widened sum into an all-key erase [03 R-REN-03A §8].
+	if shadow.covered[0] || !shadow.covered[1] || !shadow.covered[2] {
+		t.Fatalf("wrapped mobile-shadow coverage=%v, want [false true true]", shadow.covered)
+	}
+	if shadow.height[1] != 1 || shadow.height[2] != 50 || shadow.color[1] != shadowColorIndex || shadow.color[2] != shadowColorIndex {
+		t.Fatal("surviving silhouette lost its keys or flattened color")
+	}
+}

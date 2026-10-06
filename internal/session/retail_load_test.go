@@ -68,7 +68,7 @@ func TestPreflightRetailLoadGametypeAndBetweenMissionsPolarity(t *testing.T) {
 	}{
 		{name: "campaign continuation", gametype: GametypeCampaign, between: 1, want: RetailLoadRouteCampaignContinuation},
 		{name: "campaign battle", gametype: GametypeCampaign, between: 0, want: RetailLoadRouteBattleRestoration},
-		{name: "multiplayer continuation marker", gametype: GametypeMultiplayer, between: 1, want: RetailLoadRouteCampaignContinuation},
+		{name: "multiplayer continuation marker", gametype: GametypeMultiplayer, between: 1, want: RetailLoadRouteFreshEntry},
 		{name: "multiplayer battle", gametype: GametypeMultiplayer, between: 0, want: RetailLoadRouteBattleRestoration},
 	}
 	for _, tc := range tests {

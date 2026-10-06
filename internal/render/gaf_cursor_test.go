@@ -173,7 +173,7 @@ func TestGafCursorWrap(t *testing.T) {
 	if c2.Entry() != nil {
 		t.Fatalf("non-looping should clear entry [03 §4.4]")
 	}
-	// Single-frame never advances [03 §4.4]
+	// Existing Step host bypass; production caller closure is pending.
 	single := syntheticEntry([]int32{5})
 	var c3 Cursor
 	c3.Bind(single, 0, true)
@@ -195,7 +195,7 @@ func TestGafCursorStepDelta(t *testing.T) {
 	var c Cursor
 	c.Bind(entry, 0, true)
 	c.Countdown = 5
-	// Negative delta -12 should cross one frame: 5-12=-7 <2 => advance to 1 with accumulation: -7+10=3
+	// Negative delta -12 should cross one frame: 5-12=-7 <=0 => advance to 1 with accumulation: -7+10=3
 	c.StepDelta(-12)
 	if c.Idx != 1 {
 		t.Fatalf("delta -12 from idx0 countdown5 want idx1 got %d countdown %d", c.Idx, c.Countdown)
@@ -203,7 +203,7 @@ func TestGafCursorStepDelta(t *testing.T) {
 	if c.Countdown != 3 {
 		t.Fatalf("delta accumulation countdown %d want 3 [03 §4.4]", c.Countdown)
 	}
-	// Large negative cross multiple frames: from idx1 countdown3 delta -25 => 3-25=-22 => advance to 2: -22+10=-12 <2 => advance to 0: -12+10=-2 <2 => advance to1: -2+10=8
+	// Large negative cross multiple frames: from idx1 countdown3 delta -25 => 3-25=-22 => advance to 2: -22+10=-12 <=0 => advance to 0: -12+10=-2 <=0 => advance to1: -2+10=8
 	var c2 Cursor
 	c2.Bind(entry, 1, true)
 	c2.Countdown = 3
@@ -408,5 +408,34 @@ func TestGafCursorAssetGuarded(t *testing.T) {
 		if _, ok := gaf.Find(name); !ok {
 			t.Logf("expected build/ghost cursor %q (idx %d) not in GAF", name, idx)
 		}
+	}
+}
+
+// Elapsed playback advances at zero, not at the tick stepper's remaining-one
+// boundary [03 §4.4]. Keep nonloop termination and multi-frame accumulation.
+func TestGafCursorDeltaZeroBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		loop      bool
+		delta     int16
+		index     int
+		remaining int32
+		active    bool
+	}{
+		{"one remaining", true, -9, 0, 1, true},
+		{"exact frame", true, -10, 1, 10, true},
+		{"multiple frames", true, -29, 0, 1, true},
+		{"exact wrap", true, -40, 0, 10, true},
+		{"nonloop final remainder", false, -19, 1, 1, true},
+		{"nonloop exact end", false, -20, 0, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var c Cursor
+			c.Bind(syntheticEntry([]int32{10, 10}), 0, tc.loop)
+			c.StepDelta(tc.delta)
+			if c.Idx != tc.index || c.Countdown != tc.remaining || c.IsActive() != tc.active {
+				t.Fatalf("got index=%d remaining=%d active=%t; want %d/%d/%t", c.Idx, c.Countdown, c.IsActive(), tc.index, tc.remaining, tc.active)
+			}
+		})
 	}
 }

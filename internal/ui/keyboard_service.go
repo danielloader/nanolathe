@@ -75,21 +75,9 @@ func (p *Panel) keyboardQuickKeyAt(index int, token input.Token, alt bool, hooks
 		if capture == index || (capture >= 0 && capture < len(p.Window.Gadgets) && p.Window.Gadgets[capture].Kind == gui.KindTextBox && !alt) {
 			return false
 		}
-		target := p.Index(gadget.Link)
-		if target < 0 || !p.ActiveAt(target) {
-			return false
-		}
-		tg := p.Window.Gadgets[target]
-		if tg.Kind == gui.KindButton && tg.GrayedOut&1 != 0 {
-			return false
-		}
-		if tg.Kind == gui.KindScrollBar && (tg.Attribs&0x10 != 0 || tg.GrayedOut != 0) {
-			return false
-		}
-		// Label quickkeys share the pointer link target rules: buttons fire,
-		// focusable non-buttons only receive focus, and locked sliders reject.
-		// The token is still claimed when that link service accepts it
-		// [07 R-WGT-01 §7].
+		// The label consumes its admitted key before resolving the target.
+		// An unusable target clears the result; admitted non-buttons also
+		// fire after focus setup [07 R-WGT-01 §7].
 		p.serviceLinkOrFire(index, 0, result)
 		return true
 	}
@@ -229,7 +217,6 @@ func (p *Panel) keyboardDefault(enter bool, hooks WidgetHooks, result *ServiceRe
 	if action.Kind != ActionActivate {
 		return false
 	}
-	p.SetFocus(action.Index)
 	if (!enter || !usedDefault) && action.Index >= 0 && action.Index < len(p.Window.Gadgets) {
 		g := p.Window.Gadgets[action.Index]
 		if g.Kind == gui.KindButton {
@@ -243,7 +230,8 @@ func (p *Panel) keyboardDefault(enter bool, hooks WidgetHooks, result *ServiceRe
 			}
 		}
 	}
-	return p.fire(action.Index, 0, result)
+	result.Fired, result.FiredIndex, result.FiredButton = true, action.Index, 0
+	return true
 }
 
 func (p *Panel) keyboardEscape(result *ServiceResult) bool {
@@ -254,8 +242,8 @@ func (p *Panel) keyboardEscape(result *ServiceResult) bool {
 	if index <= 0 || !p.ActiveAt(index) {
 		return false
 	}
-	p.SetFocus(index)
-	return p.fire(index, 0, result)
+	result.Fired, result.FiredIndex, result.FiredButton = true, index, 0
+	return true
 }
 
 func (p *Panel) keyboardHorizontal(delta int, hooks WidgetHooks) bool {

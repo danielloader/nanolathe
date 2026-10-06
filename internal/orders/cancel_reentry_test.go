@@ -268,3 +268,68 @@ func TestCancelAllDoesNotRecleanARecordRemovedByAnEarlierNotice(t *testing.T) {
 		t.Fatalf("release order = %v, want removed sibling then tail, once each", released)
 	}
 }
+
+// Full purge follows the live chains after unlinking each node. This authored
+// callback isolates mutation order without claiming a new retail producer
+// for the callback's particular insertions [04 R-MOV-03 §6].
+func TestCancelAllDrainsCancellationCreatedRecords(t *testing.T) {
+	q, u, _ := reentrantCancelQueue(t)
+	q.Push(Lookup("MobileBuild"), Node{Owner: u.Handle, DynamicGate: 2})
+	head := q.Head()
+	q.Push(Lookup("Move_Ground"), Node{Owner: u.Handle})
+	tail := q.Primary()[1]
+	q.PushSecondary(Lookup("BuildWeapon"), Node{Owner: u.Handle})
+	rear := q.Secondary()[0]
+	var addedFront, addedRear *Node
+	q.binding.Work.CancelNotice = func(_ *units.Unit, n *Node, _ uint32) bool {
+		if n != head || q.indexOfPrimary(n) != -1 || q.Head() != tail {
+			t.Fatal("cancel notice ran before unlinking its record")
+		}
+		if q.detachedNode != n || !q.detachedHasSuccessor {
+			t.Fatal("cancel notice lost the removed record's successor")
+		}
+		n.DynamicGate &^= 2
+		addedFront = q.appendTail(Lookup("Move_Ground"), Node{Owner: u.Handle})
+		addedRear = q.appendTail(Lookup("BuildWeapon"), Node{Owner: u.Handle})
+		return true
+	}
+	var cleaned []*Node
+	q.binding.Movement = &MovementGoalAdapter{Release: func(n *Node) bool {
+		cleaned = append(cleaned, n)
+		return true
+	}}
+	q.CancelAll()
+	want := []*Node{head, tail, addedFront, rear, addedRear}
+	if len(cleaned) != len(want) || len(q.Primary()) != 0 || len(q.Secondary()) != 0 {
+		t.Fatalf("cleaned=%d primary=%d secondary=%d, want all five cleaned", len(cleaned), len(q.Primary()), len(q.Secondary()))
+	}
+	for i, n := range want {
+		if cleaned[i] != n || (n.Flags&FlagTombstone != 0) != (i != 0) {
+			t.Fatalf("cleanup order/tombstone mismatch at %d", i)
+		}
+	}
+}
+
+// An authored cancellation observer isolates duplicate-toggle unlink order
+// and retained successor state [04 R-MOV-03 §6].
+func TestCancelFrontMostUnlinksBeforeCleanup(t *testing.T) {
+	q, u, _ := reentrantCancelQueue(t)
+	q.Push(Lookup("MobileBuild"), Node{Owner: u.Handle, DynamicGate: 2})
+	head := q.Head()
+	q.Push(Lookup("Move_Ground"), Node{Owner: u.Handle})
+	tail := q.Primary()[1]
+	notices := 0
+	q.binding.Work.CancelNotice = func(_ *units.Unit, n *Node, _ uint32) bool {
+		notices++
+		if n != head || q.Head() != tail || q.indexOfPrimary(n) != -1 ||
+			q.detachedNode != n || !q.detachedHasSuccessor {
+			t.Fatal("toggle cleanup did not observe the unlinked record and retained successor")
+		}
+		n.DynamicGate &^= 2
+		return true
+	}
+	if !q.CancelFrontMost(func(n Node) bool { return n.ID == head.ID }) || notices != 1 ||
+		len(q.Primary()) != 1 || q.Head() != tail {
+		t.Fatal("toggle did not remove exactly one record")
+	}
+}

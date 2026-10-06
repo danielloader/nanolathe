@@ -629,6 +629,16 @@ absent or empty contributes nothing. Entries go into a sorted map keyed by the
 source string, inserted if absent and overwritten if already present, so a
 repeated section name keeps the last translation.
 
+**Established — translation value width.** The language-value accessor keeps
+at most 254 bytes before storing the translation. This is a byte limit, not
+a character limit; it can split a multibyte sequence. Forward and reverse
+lookups both see this stored prefix. Section-name copying uses a different
+operation: names shorter than 255 bytes are terminated and retained exactly.
+**Unknown:** a name of 255 bytes or longer has no guaranteed terminator in
+that copy. Its resulting key depends on surrounding temporary contents and
+requires a caller-history and string-construction trace; a guessed truncation
+is not an established key rule.
+
 Lookup takes a source string and returns the mapped translation, or the input
 unchanged when no table is loaded or no entry matches. This lookup compares
 **byte-exactly**, unlike every other name comparison in the content layer,
@@ -762,8 +772,16 @@ Before parsing, comments are blanked: `//`-to-end-of-line and `/* ... */`
 spans are overwritten with ASCII spaces **preserving every character offset**,
 so all downstream offsets see text of unchanged length. Comment delimiters
 are recognized even inside would-be values; they are not quoted literal text.
-Inline trailing comments after the `;` are blanked too. An unterminated `/*`
-blanks everything through end of file. Sibling sections retain source order;
+Inline trailing comments after the `;` are blanked too. **Established:** an
+unterminated block blanks its opener and all following characters except the
+last character before the text terminator, when there is any body text. The
+last character remains available to the grammar. Thus `/*x` leaves a bare `x`
+and causes the ordinary missing-equals diagnostic, while `[A]{x=1;/*}` leaves
+the closing brace and completes the section. An opener at the end of the text
+has no body character to retain. Block-comment line feeds are blanked too;
+line comments preserve their terminating line feed. Nanolathe's preservation
+of block line feeds for source diagnostics is a host policy, not that retail
+operation. Sibling sections retain source order;
 key vectors are maintained by the
 insertion rule below. Both key lookup and first-match section lookup use
 case-insensitive comparison.
@@ -1117,7 +1135,7 @@ does not abort; each reference family has its own failure outcome:
 | Movement class (`movementclass`) | the unit compiler falls back to a scratch record — 255 slopes, depth limits ±10000 — parsed from the unit's own FBI keys (see "Movement class record"); a null profile otherwise | no (degraded) | direct |
 | Model (`objectname`) | **fatal**: the model loader's null result is passed to the fatal channel with the path `objects3d\<objectname>.3DO` as the whole message (`[R-MALF-01 §5]`; the same holds for a weapon `model` and a feature `object`). The compile path never tolerates a missing model. | yes | direct |
 | Side (`side`) | the build-pick filter compares the authored string; a mismatch rejects the pick — an empty side mismatches every acting side | no, but affects AI builds | direct |
-| Sound category (`soundcategory`) | **absent key → category index 0** (the first section of `sound.tdf`); **present but matching no category name → the decimal conversion of the authored text** (0 for non-numeric text, so again the first category; an authored number selects that ordinal directly, unbounded). There is no placeholder record: the index is 0 or the parsed number (`[R-CAT-01 §5]`). | no | direct |
+| Sound category (`soundcategory`) | **absent key → category index 0** (the first section of `sound.tdf`); **present but matching no category name → the decimal conversion of the authored text** (0 for non-numeric text, so again the first category; an authored number selects its unsigned low-16-bit ordinal without a category-count clamp). There is no placeholder record: the index is 0 or the narrowed parsed number (`[R-CAT-01 §5]`). | no | direct |
 
 The feature-record equivalent is different: a feature name found in no parsed
 feature node raises the fatal diagnostic `Record "%s" missing from feature
@@ -1260,7 +1278,17 @@ battle entry (§8). **Established** throughout unless marked.
      until the first missing one. The record's page-count byte becomes the
      index of that first missing page when at least one numbered page
      existed (so page 0 is counted whether or not it exists), else 1 when
-     page 0 exists, else 0;
+     page 0 exists, else 0. **Established — probe range and narrowing:**
+     the probe counter is a signed 32-bit integer, not the three-bit selected
+     page field. Probing continues past page 7 until the first missing or
+     zero-size file; only the final count is narrowed to its low byte. Thus
+     pages 1 through 8 followed by a missing page 9 produce count 9, and
+     pages 1 through 255 followed by a missing page 256 produce count 0.
+     A counted page numbered 8 or above has no selectable state, because
+     the selected-page field keeps three bits; how the page producers wrap
+     past it is `[07 R-HUD-03 §6]`.
+     The basename truncation removes the last dot and everything after it,
+     leaving the definition's actual unit name unchanged;
    * `scripts\<unitname>.COB` is loaded through the script loader
      (`[04 R-COB-01 §1]`; null on absence).
 6. `gamedata\sidedata.tdf` is loaded (fatal `Can't load GAMEDATA.TDF` —
@@ -1281,13 +1309,22 @@ battle entry (§8). **Established** throughout unless marked.
    count 0 but still receives the 60-byte copy.
 7. The progress byte is set to 100 and the catalog-ready flag to 1.
 
-**`soundcategory` resolution.** The unit-record compiler reads `soundcategory` (100 bytes). Absent
-→ index 0. Present → linear scan of the loaded category records (352-byte
-stride) with the case-insensitive comparison; the first match's ordinal is
-stored; **no match → the C-runtime decimal conversion of the authored text**
-is stored as the index, unbounded — `soundcategory=7;` selects the eighth
-category, and any non-numeric unknown name selects category 0. There is no
-muted placeholder.
+**Established — `soundcategory` resolution.** The unit compiler retains at
+most 99 bytes of the authored value. An absent key selects ordinal zero.
+For a present value it scans categories in file order, comparing the retained
+category names case-insensitively; the first equal name wins. Category names
+retain at most 63 bytes, so a longer source name can be addressed by that
+prefix, while the full longer spelling need not match. Duplicate retained
+names do not replace the earlier category. On a miss, the ordinary C-runtime
+decimal conversion supplies the ordinal: non-numeric text selects zero.
+
+Both a matching ordinal and a converted number are stored modulo 65536 and
+later read unsigned by the voice resolver. Thus numeric values 65537 and
+-65535 both select ordinal one. There is no category-count clamp: a retained
+ordinal outside the loaded table reads beyond the valid categories, whose
+playback result is **Unknown**. This does not justify discarding the narrowing
+for numbers whose retained ordinal is valid. The comparison's non-ASCII
+code-page behavior remains the existing open question in §3.
 
 **Established — empty and duplicate names.** An absent or empty `unitname`
 remains empty through compaction, sorting and secondary-file selection. If
@@ -1613,8 +1650,16 @@ identically. Document 06 owns the full chains.
 **Asset names.** String accessor, 256 bytes, default empty: `model`,
 `explosiongaf`, `explosionart`, `waterexplosiongaf`, `waterexplosionart`,
 `lavaexplosiongaf`, `lavaexplosionart`, `soundstart`, `soundhit`, `soundwater`.
-Each sound name resolves to a sound index, or to the all-ones sentinel when
-absent.
+**Established — weapon sound identity.** Each nonempty sound value is an
+anonymous path registration, in start/hit/water order, retaining at most 255
+bytes before registration. The resulting identity is stored in the definition;
+an absent or empty value stores the missing identity. This is not named-alias
+lookup: a matching alias name alone cannot redirect the requested path.
+Registration, path deduplication, failed-probe retention and direct positional
+playback are owned by [03 §8.3]. Ordinary startup registers the named table
+first; battle loading then registers every parsed weapon section in discovery
+and document order, including later-overwritten records. The application keeps
+these registrations across ordinary battle reloads.
 
 **Damage table.** The weapon may carry a nested `DAMAGE` section. Its `default`
 key is read with the integer accessor and default 0 and becomes the fallback
@@ -2718,7 +2763,7 @@ change the accepted bit.
 | `name` | string · 30 bytes | empty | `[07 §6]`, `[08 R-CAMP-01 §2]` (campaign-side match) | Established |
 | `nameprefix` | string · 4 bytes | empty | unknown: no reader located by the key-name grep — decider: reader census on the side record's 4-byte prefix field | Unknown |
 | `commander` | string · 32 bytes | empty | `[08 R-TRIG-01 §3]`, `[08 R-SKIR-01 §7]` | Established |
-| `font` | string · 256 bytes | empty | `[02 §6]` (side font load; missing font is fatal) | Established |
+| `font` | string · 256 bytes | empty | `[02 §6]` (present key loads; failed load is fatal) | Established |
 | `energycolor` | integer · 32-bit | 0 | `[02 §6]`, `[07 §6]` (resource bar palette index) | Established |
 | `metalcolor` | integer · 32-bit | 0 | `[02 §6]`, `[07 §6]` | Established |
 | `x1` | integer · 32-bit | 0 | `[02 §6]`, `[07 §6]` (anchor rectangles) | Established |
@@ -2857,6 +2902,11 @@ the unit name of that side's commander), `font` and `fontgui` (strings;
 retail sides author `console` and `armbutt`), `intgaf` (string, default
 empty), and `energycolor` and `metalcolor` (integers, default 0).
 
+**Established — bounded scalar strings.** The initial side loader retains at
+most 29 bytes of `name`, 3 of `nameprefix`, 31 of `commander`, and 255 of
+`font`. These limits count bytes and apply before the fields reach later
+consumers; they are not display-only clipping.
+
 `energycolor` and `metalcolor` are palette indices: they select the inner-bar
 palette index when the ENERGYBAR and METALBAR controls draw. No bar mask or
 style keys exist in the executable's vocabulary or in retail `sidedata.tdf`.
@@ -2882,12 +2932,16 @@ The helper raises the same fatal missing-section diagnostic as the direct
 reads, naming the missing section and the side, so **every anchor above is
 mandatory**. A missing anchor is a data error, not silently invented geometry.
 
-A side whose font cannot be loaded fails the same way: the font search
-combines the `fonts` directory, the side's font key, and a fixed extension
-table, and a null result raises the side's formatted missing-font message
-through the same modal/fatal diagnostic channel used for a missing anchor.
-The loader does not continue past it — **a missing side font is a data
-error**, not a silent fallback font.
+**Established — a present font key requests a load.** The font search
+combines the `fonts` directory, the bounded side font name, and the font
+extension. A null load enters the fatal diagnostic channel with that path.
+A present empty value still takes the load branch. An absent key skips this
+load and leaves the previous side-font value untouched; absence is not itself
+a fatal branch here. **Unknown:** the resulting lifecycle and first-reader
+behavior for absent font keys across first startup and later reloads. Those
+paths need a writer/reader trace before absence can be assigned a working
+fallback or a guaranteed failure. The failed load of a present font remains
+fatal; these are distinct cases.
 
 ### Interface panel files (`.gui`)
 
@@ -3878,8 +3932,19 @@ bounds of the same bounding record come from the footprint, not the model:
 `±(FootprintX << 20) / 2` and `±(FootprintZ << 20) / 2` in 16.16, with the
 extents `maxX − minX`, `maxZ − minZ` and a "radius" word
 `(extentX + extentZ) / 3` (integer division) written by the unit-record
-compiler. Consumers (selection box, picking, the composition image key) are
-documents 03 and 07 and are not enumerated here.
+compiler. Each footprint is first interpreted as a signed 16-bit integer.
+For each lower bound, negate that integer, shift left by 20 retaining only
+32 bits, then divide the signed result by two toward zero. Each upper bound
+uses the same shift and division without the negation. The shift must wrap
+**before** division; replacing these operations with a shift by 19 changes
+large authored footprints. For footprint 2048, both bounds are −1073741824
+raw fixed units; for 2049, the lower bound is 1073217536 and the upper bound
+is −1073217536. A mobile definition admits these authored values without
+allocating a footprint yard map. This is a definition-compilation boundary,
+not evidence of stock use or safe placement of such a unit. The extent
+subtractions and their sum also retain 32-bit wrap before the radius division.
+Consumers (selection box, picking, the composition image key) are documents
+03 and 07 and are not enumerated here.
 
 **Established fact — there is no min-Y walk, and who reads the height word.**
 The height walk above is the **only** bound retail derives from model
@@ -4134,7 +4199,7 @@ the exact comparisons are in the numbered sections that follow.
 
 | File | Truncated | Oversize (declared size beyond the file) | Wrong magic / version | Duplicate keys / sections | Bad reference | Zero-length | Integer overflow of a declared size |
 |---|---|---|---|---|---|---|---|
-| **HPI / UFO / CCX / GP3** (§3) | *garbage or fault*: the 20-byte header, 36-byte footer and directory-blob reads ignore their counts — a cut inside the blob leaves heap bytes that the relocation pass biases and writes back; a cut inside a stored record is a short read passed to the caller; a cut inside a chunk is silent all-ones | *garbage or fault*: blob size beyond the file → as truncated; record size beyond the file → short read; chunk stored length beyond the file → silent all-ones; chunk **decompressed** length above 65,536 → the LZ77 and zlib decoders write past the 64 KiB chunk buffer (heap overrun) and then report `SQUASHERR_BADUNPACKSIZE` fatally if the produced length differs | *skip* at mount: tag ≠ `HAPI`, version bytes ≠ `00 00 01 00`, or normalized footer ≠ template → not mounted, no message. *fault (fatal box)* at read: chunk marker ≠ `SQSH` → `SQUASHERR_BADHEADER`; method byte `> 3` → `SQUASHERR_BADUNPACKTYPE` (methods 0 and 3 pass the test, decode nothing and fail as `BADUNPACKSIZE`); byte-sum mismatch → `SQUASHERR_BADCHECKSUM` | *accept*: within one directory the **later** entry wins (backward scan, §2 "Lookup"); across archives the first provider wins (§2) | *fault*: an entry offset outside the blob is biased and written back at mount (write to a wild address); a subdirectory chain that loops recurses without a visited set (stack overflow); no check on any of them | *skip*: an empty archive file fails the tag test; an empty stored record is null to every whole-file consumer (size < 1) | *fault (out of memory)*: blob size or chunk stored length ≥ the address space fails allocation; a blob size below 20 skips the decipher loop (signed test) and relocates through bytes beyond the block; an entry count with the top bit set is treated as **no entries** (signed loop bound); chunk index is `position >> 16`, never bounded against the table |
+| **HPI / UFO / CCX / GP3** (§3) | *garbage or fault*: the 20-byte header, 36-byte footer and directory-blob reads ignore their counts — a cut inside the blob leaves heap bytes that the relocation pass biases and writes back; a cut inside a stored record is a short read passed to the caller; a cut inside a chunk is silent all-ones | *garbage or fault*: blob size beyond the file → as truncated; record size beyond the file → short read; chunk stored length beyond the file → silent all-ones; chunk **decompressed** length above 65,536 → the LZ77 and zlib decoders write past the 64 KiB chunk buffer (heap overrun) and then report `SQUASHERR_BADUNPACKSIZE` fatally if the produced length differs | *skip* at mount: tag ≠ `HAPI`, version bytes ≠ `00 00 01 00`, or normalized footer ≠ template → not mounted, no message. *fault (fatal box)* at read: chunk marker ≠ `SQSH` → `SQUASHERR_BADHEADER`; method byte `> 3` → `SQUASHERR_BADUNPACKTYPE` (methods 0 and 3 pass the test but invoke no decoder; their final size check uses retained input state and usually reports `BADUNPACKSIZE`, without a universal failure guarantee); byte-sum mismatch → `SQUASHERR_BADCHECKSUM` | *accept*: within one directory the **later** entry wins (backward scan, §2 "Lookup"); across archives the first provider wins (§2) | *fault*: an entry offset outside the blob is biased and written back at mount (write to a wild address); a subdirectory chain that loops recurses without a visited set (stack overflow); no check on any of them | *skip*: an empty archive file fails the tag test; an empty stored record is null to every whole-file consumer (size < 1) | *fault (out of memory)*: blob size or chunk stored length ≥ the address space fails allocation; a blob size below 20 skips the decipher loop (signed test) and relocates through bytes beyond the block; an entry count with the top bit set is treated as **no entries** (signed loop bound); chunk index is `position >> 16`, never bounded against the table |
 | **TDF text** — FBI, OTA, weapon, feature, movement, side, sound, GUI, campaign, `translate`, `version`, `los` (§4) | *fault (fatal box)*: `Parse error in .TDF File! End of file - nextblock not zero` when the cut is inside a section; `Data field - '=' not found` / `Data field - ';' not found` inside a field; a cut between complete top-level items is accepted | n/a (text) | none: any bytes are text; a binary file reaches `Data field - '=' not found` (fatal) at its first non-blank byte, unless that byte is `[` or `}` | *accept*: repeated sections are all retained, the first-match accessor returns the earliest; an identical key spelling replaces the value (last wins); a case-variant spelling coexists as a second sorted entry (§4) | per family, §5 and the §5 cross-reference table; the generic parser has no references | *default*: a file of size 0 or less is treated as absent — no tree, every typed read returns its default; the family decides whether absent is fatal (§5) | *accept*: the integer accessor's conversion has **no overflow test** and wraps modulo 2³²; the fixed-point accessor multiplies by 65,536, truncates to signed 64 bits, and retains the low 32 bits; finite overflow of the signed 32-bit range wraps, while non-finite or signed-64 overflow yields a zero low word [01 R-DET-01 §1]; the floating accessor returns whatever the C-runtime decimal conversion produced |
 | **FBI unit record** (§5) | as TDF | n/a | *skip*: the catalog loader reads `Version` and `Copyright` from every unit section; a version newer than the executable's (3.1) or a copyright line that does not match the template drops the unit from the catalog — with the `Error` box `Incompatible units found.  They will be ignored.  Please download the latest version of the game.` for the version case, silently for the copyright case | as TDF | weapon miss → record 0 (inactive); corpse miss → no wreck; movement class miss → scratch record; **model miss → fatal, the box shows the path `objects3d\<objectname>.3DO`** (corrects the cross-reference table's "slot stays empty"); script miss → null script, crash at the first creation `[04 R-COB-04 §8]`; sound category miss → index 0, or the decimal value of the authored text (`[R-CAT-01 §5]`) | as TDF (an empty FBI compiles a unit with every default and no name) | as TDF |
 | **OTA map / mission** (§5, `[R-MAP-01]`) | as TDF | n/a | no magic; a parsed file without `GlobalHeader` → status-pane message and failure (`[R-MAP-01 §2]`), battle entry proceeds on the prologue sentinels | as TDF; `Schema <n>` probed by index, a gap ends the probe (`[R-MAP-01 §4]`) | `[units]` name that is no unit → *skip* (slot 0, nothing spawned); `Player` outside 1..10 or a slot without a controller → **fatal** `Player number %d invalid for unit %s`; `[features]` name → **fatal** `Record "%s" missing from feature files`; the TNT named by the OTA missing → **fatal** (path as message); `aiprofile` miss → `ai\default.txt` (`[R-MAP-01 §5]`) | as TDF | as TDF |
@@ -4192,8 +4257,11 @@ format"). The decoder's result codes map to the names `SQUASHERR_OK`,
 `SQUASHERR_BADUNPACKSIZE` (produced ≠ declared), `SQUASHERR_BADUNPACKTYPE`
 (method byte above 3) and every nonzero code is **fatal** with the five-line
 message of §1. Two things the decoder does not check: the method-byte test
-is `> 3`, so methods 0 and 3 pass, decode nothing and fail as
-`BADUNPACKSIZE`; and **neither decoder bounds its output to the 64 KiB chunk
+is `> 3`, so methods 0 and 3 pass but invoke no decoder. Their final
+produced-length comparison uses retained input state: it normally reports
+`BADUNPACKSIZE`, but an accidental numeric equality can pass, so rejection
+is not guaranteed and no output-decoding contract exists for those methods.
+Nanolathe rejects unsupported methods explicitly. Also, **neither decoder bounds its output to the 64 KiB chunk
 buffer** — the LZ77 variant stops only at a match whose position is zero
 (and reads past the compressed buffer if the stream has none), the zlib
 variant is given the header's declared length as its output room. A chunk
@@ -4565,6 +4633,14 @@ questions do not supersede those consumer contracts.
   bit and no isolated reader exists in the bounded census.
 * Code-page behavior for high bytes · §3 · static trace. Marked `TODO(T23)` at
   the site.
+* **Unknown:** translation source names of 255 bytes or longer after the
+  non-terminating section-name copy · §3 "Translation table" · caller-history
+  and string-construction trace; normal shorter keys and the 254-byte value
+  limit are established.
+* **Unknown:** absent side `font` keys across startup and later reloads · §6
+  "SIDE and battle interface data" · trace retained font initialization and
+  first readers. The loader skips the absent key; a present key's failed load
+  remains fatal.
 * Language-specific font fallback and the census of runtime messages that pass
   through the translation lookup · §3 · static trace for the message census,
   asset census for the font fallback. Ordinary startup language selection and

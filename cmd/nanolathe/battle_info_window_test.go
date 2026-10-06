@@ -21,7 +21,8 @@ func TestHelpLineSplit(t *testing.T) {
 	}{
 		{"CTRL+A|Select all units", "CTRL+A", "Select all units"},
 		{"|", " ", ""},
-		{"|blank row text", " ", "blank row text"},
+		{"|x", " ", ""},
+		{"|blank row text", " ", "lank row text"},
 		{"F1|Display information on selected unit", "F1", "Display information on selected unit"},
 		{"no separator", "no separator", ""},
 		{"", "", ""},

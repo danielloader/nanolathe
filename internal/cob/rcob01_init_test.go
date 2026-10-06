@@ -253,8 +253,8 @@ func TestStartScriptChildEmptyDepth(t *testing.T) {
 }
 
 func TestTickDenominatorSleepArithmetic(t *testing.T) {
-	// Sleep stores trunc(denom*ms/1000): 34ms → 1 tick, 33ms → 0 ticks with
-	// the one-guard-decrement minimum [04 §4.6].
+	// These non-overflowing durations store 34ms → 1 tick and 33ms → 0;
+	// both yield the issuing entry before a later guard can resume [04 §4.6].
 	mk := func(ms int32) *VM {
 		code := []uint32{
 			0x10021001, uint32(ms), // push duration [04 §4.3]
@@ -286,7 +286,7 @@ func TestTickDenominatorSleepArithmetic(t *testing.T) {
 		t.Fatalf("sleep 33ms stored %d want 0 ticks [04 §4.6]", got)
 	}
 	if vm33.getStatic(0) != 0 {
-		t.Fatalf("sleep 33 must not complete in its own tick [04 §4.6]")
+		t.Fatalf("sleep 33 must not complete in its issuing entry [04 §4.6]")
 	}
 	vm33.Drain(1)
 	if vm33.getStatic(0) != 7 {

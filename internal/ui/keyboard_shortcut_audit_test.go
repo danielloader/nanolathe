@@ -7,9 +7,9 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 )
 
-// A linked-label accelerator that only focuses a non-button consumes its key
-// but leaves the remaining indexed visits live [07 R-WGT-01 §1][07 R-WGT-01 §7].
-func TestLabelShortcutFocusContinuesIndexedService(t *testing.T) {
+// An admitted non-button link becomes the fired result after focus setup;
+// neither later pointer work nor another token runs [07 R-WGT-01 §7].
+func TestLabelShortcutFiresTargetBeforeLaterIndexedService(t *testing.T) {
 	for _, tokenMode := range []bool{false, true} {
 		for _, pointerFire := range []bool{false, true} {
 			p := NewPanel(&gui.Window{Rect: gui.Rect{W: 100, H: 30}, Gadgets: []gui.Gadget{
@@ -34,15 +34,11 @@ func TestLabelShortcutFocusContinuesIndexedService(t *testing.T) {
 					surfaceVisited = true
 				}
 			}})
-			if !surfaceVisited || result.ConsumedTokens != 1 || p.TextAt(2) != "" {
+			if surfaceVisited || result.ConsumedTokens != 1 || p.TextAt(2) != "" {
 				t.Fatalf("tokenMode=%t pointerFire=%t: surface=%t result=%+v text=%q", tokenMode, pointerFire, surfaceVisited, result, p.TextAt(2))
 			}
-			if pointerFire {
-				if !result.Fired || result.FiredIndex != 4 || result.FiredButton != 1 {
-					t.Fatalf("tokenMode=%t: later pointer result=%+v", tokenMode, result)
-				}
-			} else if result.Fired || p.Focused() != 2 || !p.EditorCaptured() {
-				t.Fatalf("tokenMode=%t: focus-only result=%+v focus=%d captured=%t", tokenMode, result, p.Focused(), p.EditorCaptured())
+			if !result.Fired || result.FiredIndex != 2 || result.FiredButton != 0 || p.Focused() != 2 || !p.EditorCaptured() {
+				t.Fatalf("tokenMode=%t: linked target result=%+v focus=%d captured=%t", tokenMode, result, p.Focused(), p.EditorCaptured())
 			}
 		}
 	}

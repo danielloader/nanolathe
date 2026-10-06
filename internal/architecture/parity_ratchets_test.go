@@ -171,10 +171,8 @@ var float64Baseline = map[string]int{
 	// product run at retail's 53-bit working precision, so nothing else in the
 	// file may introduce a float64 [08 R-P0-05 §3].
 	"internal/ai/selection.go": 0,
-	// The class routine's first pass accumulates at retail's 53-bit working
-	// precision and truncates immediately, the allowlisted transient of
-	// INVARIANTS I2 [08 "Arithmetic and clamping"][08 R-P0-05 §5].
-	"internal/ai/strategic.go":     14,
+	// Class/query working precision is declaration-scoped in typed_guard_test.
+	"internal/ai/strategic.go":     0,
 	"internal/cob/ports.go":        6,
 	"internal/combat/motion.go":    4,
 	"internal/combat/service.go":   2,

@@ -75,7 +75,7 @@ func IsMeteorEnabled(weaponName string) bool {
 // MeteorTarget picks the shower target cell per [06 §6.5] [R-CORE-01 §4.4.1].
 // It consumes two CRT draws [01 §7.2] [06 §6.5] I4: the map DEPTH draw first,
 // then the map WIDTH draw, as crtRand * dimension /0x8000. Results are
-// clamped to [0, dimension-1] when dimension >0; dimension <=0 yields 0.
+// stored as signed 16-bit cells after wide scaling; they are not clamped.
 // Depth-then-width order is behavior.
 func MeteorTarget(crt *rng.CRT, mapWidth, mapHeight int32) (targetX, targetZ int32) {
 	// [06 §6.5] scheduling-side draws: four draws per evaluation even when disabled.
@@ -84,23 +84,23 @@ func MeteorTarget(crt *rng.CRT, mapWidth, mapHeight int32) (targetX, targetZ int
 	if crt == nil {
 		return 0, 0
 	}
-	targetZ = int32(crt.Rand()) * mapHeight / 0x8000 // [06 §6.5] first draw
-	targetX = int32(crt.Rand()) * mapWidth / 0x8000  // [06 §6.5] second draw
+	targetZ = int32(int16(int64(crt.Rand()) * int64(mapHeight) / 0x8000)) // [06 §6.5] first draw
+	targetX = int32(int16(int64(crt.Rand()) * int64(mapWidth) / 0x8000))  // [06 §6.5] second draw
 	return targetX, targetZ
 }
 
 // MeteorOrigin computes the entry cell north of the target per [06 §6.5].
 // It consumes two CRT draws: originZ offset (crt*10/0x8000 -15) giving -15..-6,
 // originX offset (crt*30/0x8000 -15) giving -15..+14.
-// The origin is ALWAYS 6-15 cells north of the target.
+// The northward offset is applied before signed-16 coordinate wrap.
 func MeteorOrigin(crt *rng.CRT, targetX, targetZ int32) (originX, originZ int32) {
 	if crt == nil {
 		return targetX, targetZ
 	}
 	dz := int32(crt.Rand())*10/0x8000 - 15 // [06 §6.5] -15..-6
 	dx := int32(crt.Rand())*30/0x8000 - 15 // [06 §6.5] -15..+14
-	originZ = targetZ + dz
-	originX = targetX + dx
+	originZ = int32(int16(targetZ + dz))
+	originX = int32(int16(targetX + dx))
 	return originX, originZ
 }
 
@@ -122,8 +122,8 @@ func MeteorRadiusAndAngle(crt *rng.CRT, radius int32) (effRadius int32, angle ui
 	if crt == nil {
 		return 0, 0
 	}
-	effRadius = int32(crt.Rand()) * radius / 0x8000 // [06 §6.5]
-	angle = uint16(int32(crt.Rand()) * 2)           // [06 §6.5] 16-bit angle domain step 2
+	effRadius = int32(int64(crt.Rand()) * int64(radius) / 0x8000) // [06 §6.5]
+	angle = uint16(int32(crt.Rand()) * 2)                         // [06 §6.5] 16-bit angle domain step 2
 	return effRadius, angle
 }
 
@@ -146,8 +146,8 @@ func MeteorLateralOffset(crt *rng.CRT, radius int32) (offX, offZ numeric.Fixed) 
 // offset by the lateral sine spread. It consumes the two per-hit draws.
 func MeteorEntryPos(crt *rng.CRT, originX, originZ int32, radius int32) (posX, posY, posZ numeric.Fixed) {
 	offX, offZ := MeteorLateralOffset(crt, radius)
-	posX = numeric.Fixed(int64(originX)<<20) - offX // [06 §6.5] origin<<20 minus spread
-	posZ = numeric.Fixed(int64(originZ)<<20) - offZ
+	posX = numeric.Fixed((int32(int16(originX)) << 20) - int32(offX)) // [06 §6.5] origin<<20 minus spread
+	posZ = numeric.Fixed((int32(int16(originZ)) << 20) - int32(offZ))
 	posY = MeteorHeightFixed // [06 §6.5] exactly 1350 wu
 	return posX, posY, posZ
 }
@@ -156,8 +156,9 @@ func MeteorEntryPos(crt *rng.CRT, originX, originZ int32, radius int32) (posX, p
 // vel = trunc(((target - origin)<<20)/90) with truncation toward zero [01 §8] I3.
 // Vertical velocity is fixed at -15 wu/tick and supplied separately.
 func MeteorVelocity(targetX, originX, targetZ, originZ int32) (velX, velZ numeric.Fixed) {
-	dx := int64(targetX-originX) << 20 // cell delta scaled to fixed world
-	dz := int64(targetZ-originZ) << 20
+	// The shifted cell delta wraps before division [06 §6.5].
+	dx := (int32(int16(targetX)) - int32(int16(originX))) << 20
+	dz := (int32(int16(targetZ)) - int32(int16(originZ))) << 20
 	vx := dx / MeteorFlightTicks // trunc toward zero, Go division matches [01 §8]
 	vz := dz / MeteorFlightTicks
 	return numeric.Fixed(vx), numeric.Fixed(vz)

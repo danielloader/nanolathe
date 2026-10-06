@@ -42,27 +42,30 @@ func TestDragScrollReanchorsAfterClamp(t *testing.T) {
 	}
 }
 
-// Established: pointer drag entry cancels following before the sub-tick
-// phase-10 writer [07 R-CAM-01 §1][07 R-CAM-01 §11]. A host snapshot must
-// not revive the glide that the pointer handler just cancelled.
-func TestDragEntryCancelsPendingGlide(t *testing.T) {
+// Entry clears tracking but does not replace the previous desired origin.
+// Runnable sub-ticks can finish that glide before the first later drag step
+// replaces it from the saved entry anchor [07 R-CAM-01 §11].
+func TestDragEntryPreservesPendingGlide(t *testing.T) {
 	c := testCamera()
-	c.JumpTo(100, 200)
-	c.GlideTo(800, 900)
+	c.JumpTo(128, 128)
+	c.SetTracked(7)
+	c.GlideTo(768, 768)
 	c.LatchTracked()
 	var drag DragScroll
 	drag.Begin(c)
-	for tick := 0; tick < 2; tick++ {
-		c.StepLatchedGlide()
+	if c.Tracked() != 0 || c.LatchedTracked() != 0 || c.Follow.Desired != (Origin{768, 768}) || !c.Follow.Gliding {
+		t.Fatalf("entry tracking/glide state: %+v", c.Follow)
 	}
-	if c.X != 100 || c.Z != 200 || c.Follow.Gliding {
-		t.Fatalf("cancelled glide moved during capture: current=(%d,%d) gliding=%v", c.X, c.Z, c.Follow.Gliding)
-	}
-	// Entry cancellation does not suppress a later glide.
-	c.GlideTo(800, 900)
-	c.LatchTracked()
 	c.StepLatchedGlide()
-	if c.X == 100 && c.Z == 200 {
-		t.Fatal("later glide did not run")
+	if c.X != 448 || c.Z != 448 {
+		t.Fatalf("entry tick did not continue glide: %d,%d", c.X, c.Z)
+	}
+	// The next host pass latched the old glide before pointer dispatch. The
+	// zero-displacement drag still replaces it using its entry-time anchor.
+	c.LatchTracked()
+	drag.Step(c, 0, 0)
+	c.StepLatchedGlide()
+	if c.X != 128 || c.Z != 128 || c.Follow.Desired != (Origin{128, 128}) {
+		t.Fatalf("first step followed the intervening origin/glide: %d,%d desired=%+v", c.X, c.Z, c.Follow.Desired)
 	}
 }

@@ -64,7 +64,7 @@ save box round-trips (the clamped pending count, the speed-slew counter, the
 flag word).
 
 `ScaledNow(tickCount)` is the one conversion from host milliseconds to the
-engine's timebase, `floor(ms × 30 / 1000)` `[01 §4.1]`. It lives here so no
+engine's timebase, `floor(((ms × 30) modulo 2^32) / 1000)` `[01 §4.1]`. It lives here so no
 other package invents its own.
 
 `AdvanceSP(scaledNow)` is the single-player budget. It forms
@@ -83,6 +83,10 @@ increments on a capped sample (a pre-clamp truncation of six or more) and
 decrements on a normal one; sustained capping steps the active speed down,
 sustained normality steps it back toward the request `[01 §4.3]`. The
 asymmetry — an active value *above* the request is left alone — is retail's.
+The slew counter wraps at its signed 16-bit limits before comparison. The
+pending-speed flag samples `active < requested` before hysteresis, survives
+paused single-player iterations, and is copied by save serialization without
+recomputing it from the possibly changed speed pair `[01 §4.3]`.
 
 Pause is a branch, not a multiplier. The single-player path short-circuits
 before the budget is evaluated at all, so the anchor, delta and carry all

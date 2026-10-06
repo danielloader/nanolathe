@@ -139,7 +139,7 @@ func TestKeyboardLabelQuickKeyUsesLinkAndCaptureRules(t *testing.T) {
 	}
 	p = newPanel(gui.Gadget{Kind: gui.KindScrollBar, Name: "TARGET", Active: 1, Attribs: 0x10})
 	r = p.ServiceFrame(WidgetFrame{Tokens: []input.Token{{Kind: input.TokenText, Rune: 'l'}}}, WidgetHooks{})
-	if r.Fired || r.ConsumedTokens != 0 || p.Focused() == 3 {
+	if r.Fired || r.ConsumedTokens != 1 || p.Focused() == 3 {
 		t.Fatalf("locked slider result=%+v focus=%d", r, p.Focused())
 	}
 }

@@ -21,7 +21,7 @@ import (
 type LOSTable struct {
 	TableNum int       // 1 for TABLE1 etc; TABLE d+1 fills zero-based slot d [03 R-COMP-02 §1]
 	NumLines int32     // numlines integer default 0 [02 §6]
-	Lines    [][]int32 // each lineN parsed as []int32 in authored order
+	Lines    [][]int32 // named declared slots, then unused authored lines [03 R-VIS-01 §3]
 }
 
 // LOSTables is the compiled gamedata/los.tdf [02 §6] [PLAN_02 C15] [GAP T14].
@@ -34,7 +34,8 @@ type LOSTables struct {
 	// named TABLE d+1, with an empty record where that section is absent
 	// [03 R-COMP-02 §1]. Sections outside the declared range are appended
 	// after the slots in ascending order so nothing authored is lost (SC9);
-	// no reader addresses them. The clamp bound is NumTables, never len (I1).
+	// no reader addresses them. The clamp bound is signed-word NumTables,
+	// never len (I1) [03 R-VIS-01 §3].
 	Tables []LOSTable
 }
 
@@ -56,21 +57,20 @@ type MeteorDefaults struct {
 	MeteorInterval float32 // source single store [06 §6.5]
 }
 
+// losLineValueBytes is the consumer's maximum copied value, before tokenization
+// [03 R-VIS-01 §3]. The content profile's file cap does not change it.
+const losLineValueBytes = 511
+
 // parseLOSLine parses a LOS line value like " 1, 0, 1" or " 2, 0, 1, 0, 2" into ints.
-// It splits on commas, trims spaces, and uses ParseTDFInteger which tolerates
-// trailing junk and returns 0 for unparsable tokens [02 §4].
+// Comma and ASCII space independently delimit tokens [03 R-VIS-01 §3].
+// ParseTDFInteger tolerates trailing junk and returns 0 for unparsable tokens [02 §4].
 func parseLOSLine(value string) []int32 {
-	value = trimContentCWhitespace(value)
-	if value == "" {
+	parts := strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ' ' })
+	if len(parts) == 0 {
 		return nil
 	}
-	parts := strings.Split(value, ",")
 	out := make([]int32, 0, len(parts))
 	for _, p := range parts {
-		p = trimContentCWhitespace(p)
-		if p == "" {
-			continue
-		}
 		out = append(out, formats.ParseTDFInteger(p))
 	}
 	return out
@@ -78,14 +78,15 @@ func parseLOSLine(value string) []int32 {
 
 // compileLOSTable compiles one [TABLE<n>] section [02 §6] [fmt tdf].
 //
-// line1..lineN are collected in numeric order for determinism (I1); an authored
-// numlines may disagree with the discovered line count, and every discovered
-// line is preserved so the catalog hash stays faithful to the authored bytes.
+// The declared signed-word count selects line1..lineN by name, preserving
+// empty holes [03 R-VIS-01 §3]. Unused authored assignments follow those slots
+// as hash metadata; the raster never consumes them (SC9, I1).
 func compileLOSTable(sec *formats.Section, num int) LOSTable {
 	t := LOSTable{TableNum: num}
 	t.NumLines = sec.IntValue("numlines", 0)
 	type lineEntry struct {
 		idx   int
+		key   string
 		value string
 	}
 	var lines []lineEntry
@@ -102,12 +103,33 @@ func compileLOSTable(sec *formats.Section, num int) LOSTable {
 		if idx <= 0 {
 			continue
 		}
-		lines = append(lines, lineEntry{idx: idx, value: it.Value})
+		lines = append(lines, lineEntry{idx: idx, key: lk, value: it.Value})
 	}
 	sort.SliceStable(lines, func(i, j int) bool { return lines[i].idx < lines[j].idx })
-	t.Lines = make([][]int32, 0, len(lines))
-	for _, le := range lines {
-		t.Lines = append(t.Lines, parseLOSLine(le.value))
+	slots := max(0, int(int16(t.NumLines)))
+	t.Lines = make([][]int32, slots, slots+len(lines))
+	used := make([]bool, len(lines))
+	for i := 0; i < slots; i++ {
+		key := fmt.Sprintf("line%d", i+1)
+		value, present := sec.FirstValue(key)
+		if !present {
+			continue
+		}
+		t.Lines[i] = parseLOSLine(value[:min(len(value), losLineValueBytes)])
+		first := sort.Search(len(lines), func(j int) bool { return lines[j].idx >= i+1 })
+		for j := first; j < len(lines) && lines[j].idx == i+1; j++ {
+			if !used[j] && lines[j].key == key && lines[j].value == value {
+				// A shortened consumer value keeps its complete authored
+				// integer list as unreachable hash metadata after the slots.
+				used[j] = len(value) <= losLineValueBytes
+				break
+			}
+		}
+	}
+	for i, le := range lines {
+		if !used[i] {
+			t.Lines = append(t.Lines, parseLOSLine(le.value))
+		}
 	}
 	return t
 }
@@ -130,15 +152,14 @@ func compileLOSTable(sec *formats.Section, num int) LOSTable {
 // missing or malformed file is therefore returned as a provenance-rich content
 // error; fixtures must provide an authored table [03 §3.2][PLAN_05 C2].
 //
-// Nothing here assumes how many tables, lines or points an authored file may
-// carry. The retail loader's storage for this file is three nested dynamic
-// arrays: it resizes the table list to the declared numtables, a table's line
+// No stock table, line or point census limits authored content. The retail
+// loader uses three nested dynamic arrays: it resizes the table list to the declared numtables, a table's line
 // list to its declared numlines, and a line's point list to the pairs the line
 // spells [03 R-COMP-02 §1]. A content set that authors ninety tables is
-// therefore read the same way a nine-table one is, and the only host bound is
-// the read cap below.
+// therefore read the same way a nine-table one is. The count widths and
+// unresolved malformed-allocation boundaries are described in [03 R-VIS-01 §3].
 //
-// The one host bound is limits.LOSBytes, the content profile's battle-table
+// The content read bound is limits.LOSBytes, the content profile's battle-table
 // read cap; RetailLimits() is the retail baseline. Only the cap moves with the
 // profile — the compiled shape, the slot fill and the hash do not.
 func CompileLOSTables(fs vfs.FSOps, limits Limits) (*LOSTables, error) {
@@ -196,7 +217,7 @@ func CompileLOSTables(fs vfs.FSOps, limits Limits) (*LOSTables, error) {
 	// Stable so two sections carrying the same number keep file order (I1).
 	sort.SliceStable(raws, func(i, j int) bool { return raws[i].num < raws[j].num })
 
-	slots := int(numTables)
+	slots := int(int16(numTables))
 	if slots < 0 {
 		slots = 0
 	}
@@ -204,7 +225,7 @@ func CompileLOSTables(fs vfs.FSOps, limits Limits) (*LOSTables, error) {
 		// A declared slot no section fills reads as the empty line list whether
 		// or not a record is materialized, so the list stops at the highest
 		// authored number: a mistyped numtables cannot force an unbounded
-		// allocation here. The clamp bound stays the declared NumTables.
+		// allocation here. The clamp bound stays the narrowed NumTables.
 		slots = highest
 	}
 	tables := make([]LOSTable, 0, slots+len(raws))

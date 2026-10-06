@@ -185,6 +185,9 @@ type PlaceRequest struct {
 // callback itself is responsible for publishing the pending word at the
 // movement boundary; the order package does not duplicate that state machine.
 type MovementGoalAdapter struct {
+	// DetachTakeoff commits the shared mode-2 attachment release, including its
+	// synchronous spatial projection [04 R-ORD-01 §7][04 R-COLL-01 §11].
+	DetachTakeoff func(*units.Unit) bool
 	// CrowdedMoveBlocked reports local crowd admission and the committed anchor.
 	// It is a pure movement-owned query; orders owns the dwell and completion.
 	CrowdedMoveBlocked func(*units.Unit, *Node) (anchorX, anchorZ int32, blocked bool)

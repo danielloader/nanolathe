@@ -365,9 +365,7 @@ func TestPumpResultCodes(t *testing.T) {
 		}
 	})
 	t.Run("code >9", func(t *testing.T) {
-		// Handler result >9 delegates to the single-record expiry helper:
-		// unlink+cleanup+free, no RNG, not cancel-all [P0-08].
-		// Whole-queue cancel is exclusively code 7 [P0-08] A09.
+		// The primary default drains both segments and returns [04 §3.3].
 		q := &Queue{binding: &QueueBinding{SimRNG: rng.Global.Sim}}
 		u := newTestUnit()
 		restore := setHandler(moveID, func(u *units.Unit, n *Node, s uint32, tick uint32) Code { return Code(12) })
@@ -380,20 +378,11 @@ func TestPumpResultCodes(t *testing.T) {
 		}
 		clearGates(q)
 		q.Pump(u, 10)
-		if len(q.primary) != 1 || q.primary[0].Param1 != 2 {
-			t.Fatalf("code>9 should remove single head, left primary %v", func() []uint32 {
-				var out []uint32
-				for _, n := range q.primary {
-					out = append(out, n.Param1)
-				}
-				return out
-			}())
-		}
-		if len(q.secondary) != 1 {
-			t.Fatalf("code>9 should not touch secondary, got %d", len(q.secondary))
+		if len(q.primary) != 0 || len(q.secondary) != 0 {
+			t.Fatalf("code>9 should drain both segments, got primary %d secondary %d", len(q.primary), len(q.secondary))
 		}
 	})
-	t.Run("code >9 single vs code7 cancel-all", func(t *testing.T) {
+	t.Run("code7 also cancels all", func(t *testing.T) {
 		q := &Queue{binding: &QueueBinding{SimRNG: rng.Global.Sim}}
 		u := newTestUnit()
 		restore := setHandler(moveID, func(u *units.Unit, n *Node, s uint32, tick uint32) Code { return Code(7) })

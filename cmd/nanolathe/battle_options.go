@@ -160,6 +160,7 @@ func (b *battleSession) serviceBattleOptionsWidgets(p *ui.Panel, in *input.State
 			g.moveRetailSliderAt(index, s, p.SliderKnobAt(index))
 		}
 	}})
+	g.pollRetailMusicPage(p)
 	in.DiscardTokens(result.ConsumedTokens)
 	if result.Fired {
 		if _, ok := battleOptionsGadget(result.FiredIndex); ok {

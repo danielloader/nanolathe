@@ -280,6 +280,9 @@ func (c *Client) punchOutModelShadow(shadow, body *modelTarget) {
 // [R-REN-03D §5] attaches the punch only to the structure rasterization. The
 // Digger and mobile silhouette branches remain unpunched.
 func (t *modelTarget) punchOut(body *modelTarget) {
+	// TODO(question): retail's horizontal count does not subtract the
+	// destination column. Prove reachable body/shadow extents and visible row
+	// spill before changing this bounded per-pixel placeholder [03 R-REN-03D §5].
 	if t == nil || body == nil {
 		return
 	}

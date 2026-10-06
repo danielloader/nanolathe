@@ -128,13 +128,17 @@ position equals the consumer index the record is refused and neither index
 changes (reserved-slot wraparound; the oldest entry is never overwritten).
 
 **Motion consumers are closed.** The motion path copies the record wholesale
-into the presentation object's fixed 24-byte current-pointer slot. Each host
-frame the input pass polls the mouse: when the button ring is non-empty it
-pops the next button record, otherwise it copies the motion slot; either way
-the record lands in the game state's canonical pointer record, which the
-pointer update (cursor shape, hover, placement validity), the GUI hit tests,
-and the click/drag dispatch consume. The record's message-number field selects
-the click (down/up/double) handling in the pointer update.
+into the presentation object's current-pointer slot. The raw dequeue returns
+the oldest queued button record when one is present, otherwise it copies the
+motion sample. Its peek counterpart returns the same choice without advancing
+the queue. The host input pass uses both: GUI service can consume a queued
+record before the outer pass chooses the battlefield's canonical pointer
+record, according to the before/after message-kind comparison in §3
+"command-window downs precede battlefield cancellation". Thus one host frame
+is not an unconditional single dequeue shared by GUI and battlefield input.
+The pointer update (cursor shape, hover, placement validity) and click/drag
+dispatch consume the resulting canonical record; its message kind selects
+down/up/double-click handling.
 
 **Clipboard paste is closed.** Paste tokens `0xBF` and `0xEE`, handled inside
 the focused text editor, open the window clipboard and request exactly one
@@ -647,6 +651,21 @@ developer mode. The release-build stubs and profiler routing are detailed in
 diagnostic exists. The remaining commands above are a vocabulary census,
 not a complete implementation contract for their deeper effects.
 
+**Established — developer force removal.** Battle initialization registers
+`BurnAll` and `BurnOne` as mask-4 commands. Ordinary battle TALK dispatch can
+reach them after developer access is enabled; the cheat option alone supplies
+no mask-4 access. The TALK opener's watcher restriction still applies (§5).
+Neither command adds a session-kind or cheat-option test in its handler.
+`BurnAll` walks the terrain in row-major order and requests forced teardown
+for every real feature or footprint fringe encountered. `BurnOne` first
+requires the pointer's feature classification to identify a real feature,
+then requests forced teardown at the pointed terrain cell. Both use the
+indestructibility override of [05 R-FEAT-01 §4]: they remove directly,
+without initiating burning, death successors or reclamation. Clearing an
+anchor also clears its remaining footprint fringes, so the whole-map walk
+subsequently skips those cleared cells. These are developer mutations;
+their availability does not change ordinary gameplay's teardown rules.
+
 **Established — the default unit-spawn handler** (direct static trace;
 corrects this section's earlier "for the viewing player"):
 
@@ -1047,6 +1066,14 @@ tests and prevents a click intended for a dialog from selecting a world unit.
 
 ### The gadget service pass: order, capture, hover help, and who closes the window [R-WGT-01 §1]
 
+**Unknown — a non-window first record:** the top-level hit-rectangle helper
+adds the first record's position twice when that record is not a window.
+The loader/service path's acceptance and subsequent focus behavior for this
+shape remain unresolved. Nanolathe accepts such a record but still skips index
+zero in ordinary gadget hit testing. Keep that deterministic placeholder until
+the complete service path is traced; this is not a demonstrated stock-GUI
+mismatch.
+
 **Established.** One routine services the top window once per host frame
 (the "GUI pass" of §2). Its order is fixed:
 
@@ -1072,8 +1099,12 @@ tests and prevents a click intended for a dialog from selecting a world unit.
 5. Gadgets `1..N` are visited **in index order**. Each visit performs the
    inclusive hit test of §3 (hidden gadgets are skipped before it, so the
    hovered gadget is the **last** hit in index order) and dispatches on the
-   stored kind (the table of §4). The loop stops at the first gadget that
-   reports a *fired* result; later gadgets are not visited that pass.
+   stored kind (the table of §4). After each record, including a hidden
+   record, the loop tests the surviving *fired* result and stops when one
+   remains. A result already supplied by the key matrix does not skip this
+   walk: record 1 still receives its ordinary visit. Its pointer handler can
+   replace that result, and a rejected label-link target can clear it; only
+   the surviving result decides whether later records are visited.
 6. If the hovered gadget changed, the gadget named `HELPTEXT` (16-byte name
    compare) receives the hovered gadget's localized `help` text — the empty
    string when nothing is hovered — and a redraw is requested. This is the
@@ -1159,7 +1190,12 @@ matrix regardless of the inherited navigation switch.
 | Up / Down | Focused listbox: selection −1 / +1 (§4) and the list's change callback. Otherwise focus moves up / down. |
 
 Firing through the matrix sets the same fired-gadget result the mouse path
-sets, so the window callback and close rule of §1 apply unchanged. There
+sets, so the window callback and close rule of §1 apply unchanged. It does
+not immediately invoke the callback or bypass the first gadget visit: the
+ordinary walk's stop test runs after that visit (§1). With a surviving matrix
+result, a hidden first record stops the walk without visiting the next active
+record. With an active first record, its hover, kind-specific input and timed
+work still run before that test. There
 is no per-kind key table beyond this: buttons additionally answer their
 quickkey (§3), labels theirs (§7), and text inputs drain the token stream
 themselves (§6). Every other token passes through.
@@ -1302,8 +1338,24 @@ ordering.
 - The record-list (`0x20`/`0x80`) item structures beyond the height word the
   hit test and knob arithmetic read · §4 [R-WGT-01 §4, §5] · static trace of
   the save/load screens.
+- Caption fitting with widths below six, malformed/overlong caption input,
+  and stock-content impact · [R-FE-02 §5] · trace invalid-input producers and
+  compare actual localized captions with resolved artwork and font metrics.
+- Picture flash/darkening screen-level producers and repaint admission ·
+  [R-WGT-01 §8] · trace colour/grey writers to actual picture kinds before
+  treating a missing host paint branch as a reachable discrepancy.
 
 ### Buttons: art resolution, press semantics per attribute, quickkeys, cue sounds [R-WGT-01 §3]
+
+**Unknown — a keyed later build caption:** the build-attribute painter draws
+the selected caption prefix but measures the first stored caption to place its
+coloured accelerator. Ordinary staged-button construction clears the key and
+rewrites the attributes, excluding that combination. Trace the exceptional
+builder paths and runtime writers to establish whether a nonzero key, build
+attribute and later stored caption can survive together. Nanolathe currently
+measures the selected prefix in both shell and battle painters; keep that
+explicit deterministic placeholder until admission is settled. This is not
+an established underline defect or an ordinary staged-button discrepancy.
 
 **Established — the record.** The authored `status` is stored as the
 button's **down-state word** (0 up, non-zero down); `stages` is a byte and
@@ -1745,11 +1797,48 @@ stage stays 0), is repainted, and becomes the fired result **in place of
 the label** — a linked label click is indistinguishable to the screen from
 a click on the button; an inactive or greyed target swallows the click.
 A non-button target that is active (and, for a slider, not locked)
-receives the **focus** instead (text-input setup as §6) and nothing fires.
+receives the **focus** (text-input setup as §6) and remains the fired result.
+The indexed walk therefore stops and the ordinary per-pass callback, fired
+callback and conditional window close follow (§1). Focus setup does not turn
+this into a focus-only action. If name lookup finds no target, the label
+itself remains the fired result. An inactive target, a greyed button or a
+locked slider instead clears the pending result and permits later gadget
+visits. Pointer release and an admitted quickkey share these link outcomes.
 `HELPTEXT` labels are written by the pass (§1), not by their own handler.
 The label painter is [03 R-FONT-01 §6]; the builder sets attribute
 `0x10` on every label whose `link` is empty, which is why plain caption
 labels never react.
+
+**Established — label centering survives caption replacement.** The painter
+tests the label's current stored X, not its original authored X. When that
+value is `−1`, it measures the current caption and stores
+`trunc((panelWidth − textWidth) / 2)` back into the signed-16 X before
+painting [03 R-FONT-01 §6]. An empty caption still takes this positioning
+step. Subsequent caption writes and full repaints retain the resolved X;
+ordinary right/centre alignment still uses the new caption width. This is
+normally a one-time resolution, but a result that itself stores as `−1`
+continues to satisfy the sentinel test on the next paint.
+The common parser preserves the signed local X; the label painter treats
+only `−1` as special. A literal `−2` is not a label right-edge anchor.
+
+The producer and caller order is reachable in ordinary skirmish setup.
+Its opener creates a separate window, without the child-coordinate
+translation used when appending an options page, and performs the initial
+build and paint before filling the setup controls. The setup fill then
+replaces `MapName` with the selected map name and requests another paint of
+the same records. Thus an active, uniquely named `MapName` label with an
+empty link and authored X `−1` is positioned using its initial localized
+caption, before the selected map name replaces that caption. Creating the
+player-row controls appends records; it does not reload or reposition this
+label. The opener's final full repaint does not repeat initial construction.
+
+The same lifetime also admits later hover updates: setup supplies runtime
+help for its rule controls; the common pass copies the hovered control's
+help into `HELPTEXT` and requests a repaint without resetting that label's
+X (§1). This establishes an authored-content route, not a claim that stock
+labels use the sentinel. Appended pages need their placement translation
+accounted for before applying this contract; an authored `−1` alone does
+not prove that the painter receives `−1`.
 
 ### Surfaces (`hotornot`), picture boxes, lines, and the focus halo [R-WGT-01 §8]
 
@@ -1767,6 +1856,23 @@ surface copied, else a fill with window colour entry 7. A picture box
 darkens by 28 steps when its own flag bit is set; a "line" gadget draws a
 horizontal (attribute 1), vertical (2) or outlined (4) line in the
 gadget's colour (mechanics and the outline's second coordinate below).
+
+**Established — picture paint admission and extent.** A picture with no
+resolved frame performs neither the blit nor the darkening pass. With a
+frame, positive `colorf` selects the light-table blit and zero or negative
+`colorf` selects the ordinary blit. Frame offsets affect image placement;
+the later darkening pass, when its low flag bit is set, covers the gadget's
+own inclusive rectangle rather than the frame's offset image bounds. The
+initial builder clears `colorf` and resolves frame zero before painting.
+Later timed widget visits decrement nonzero `colorf` before repainting (§1).
+
+**Unknown — picture effect producers.** The shared grey/lock setter can
+write the picture's darkening bit, but this does not by itself establish a
+live screen whose picture receives it. Trace screen-level grey/colour writes,
+the targeted gadget kinds and repaint order before assigning a reachable
+flash or darkening discrepancy. No stock effect is claimed from the painter
+body alone.
+
 After every full repaint, when the window's key-navigation flag is set,
 the builder paints a **focus halo** around the focused gadget: for a
 button or surface six one-pixel frames growing outward with palette
@@ -2527,6 +2633,14 @@ the surface renderer uses its background fill. **Established for the shown
 lookup paths; medium confidence for malformed files whose decoder does not
 return null.** [07 §4] [07 §5]
 
+**Established — common-art binding lifetime.** The common-GAF binder only
+replaces the binding when its file-existence probe succeeds; a missing file
+does not explicitly clear an older binding. The startup caller first
+initializes the interface context, clearing the common binding, then binds
+`commongui`. Thus the startup missing-file result above is null because of
+that caller order. It does not establish a general clear-on-miss rule for
+rebinding an existing context.
+
 `textures/logos.gaf` is a texture-set resource rather than a required GUI root.
 The skirmish `Color%d` surface uses its selected frame when present; with no
 resolved frame, the generic no-entry surface path supplies the context
@@ -3098,9 +3212,9 @@ table before the transition.
 | `NEWGAME` | `PrevMenu` (P) | cue `Previous`; requested 3 | `SINGLE` |
 | `NEWGAME` | `Difficulty` | cue `SmlButton`; cycles the difficulty word 0→1→2→0 | — |
 | `NEWGAME` | `Side0` / `Arm`, `Side1` / `Core` | cue `SideSelect`/`SideSelect2`; side word and the two side records rewritten; campaign (and mission) lists rebuilt | — |
-| `MSNBRIEF` | `Start` (S) | disc check 0 else MSGBOX; mount pass; stop narration; requested 2 | loading screen → battle |
+| `MSNBRIEF` | `Start` (S) | cue `BigButton`; disc check 0 else MSGBOX; mount pass; stop narration; requested 2 | loading screen → battle |
 | `MSNBRIEF` | `PrevMenu` (P) | stop narration; cue `Previous`; requested 3 | `NEWGAME` / `ENDMSN` / `SINGLE` by phase (§1) |
-| `MSNBRIEF` | `SHUTUP` | stage 0 stops narration; stage 1 replays it | — |
+| `MSNBRIEF` | `SHUTUP` | cue `Options`; resulting stage 0 stops narration, any nonzero stage requests it again outside live-battle host mode; cue `SmallButton` | — |
 | `MSNBRIEF` | `TextRegion` / `MOREBAR` | cue `More`; next text page | — |
 | `SKIRMISH` | `Start` (S) | preflight of §5; requested 2 | loading screen → battle |
 | `SKIRMISH` | `PrevMenu` (P) | requested 3 | `SINGLE` |
@@ -3246,6 +3360,34 @@ mode 6). `PrevMenu` returns to the screen the briefing was reached from
 in a campaign) is the same text and pager over background `igmbrief`, with
 `OK` closing it.
 
+**Established — narration follows the resulting widget stage.** The `SHUTUP`
+callback reads the named button's stage after the ordinary widget service.
+Zero requests a stream stop. Any nonzero result requests the mission's
+narration again with delay 60 and volume 0, provided the narration key exists
+and the host is not in live-battle mode. It does not toggle an independent
+narration boolean or require a transition from zero to nonzero.
+
+This admits a second delayed start from authored content: a three-stage
+button with ordinary attributes, valid art and three captions such as
+`Quiet|Read|Replay` retains its three stages through construction. Briefing
+setup writes stage 1; an admitted release inside advances it to 2, so its
+callback requests narration again. The next such release wraps it to 0 and
+requests a stop. The forced two-stage `Off|On` construction is a separate
+case [R-WGT-01 §3]. The resulting overlapping-stream behavior belongs to
+[03 R-AUD-02 §1]; this establishes its authored input producer and does not
+claim that the ordinary two-stage stock control creates that overlap.
+
+**Established — callback cue and stop ordering.** `Start` requests
+`BigButton` before checking the disc. A rejected start leaves narration
+running; an admitted start stops it after the mount pass. `PrevMenu` stops
+the stream before requesting `Previous`. Neither stop depends on a narration
+key in the current mission. `SHUTUP` requests `Options` before reading its
+resulting stage, performs the stage-dependent stream action, clears the fired
+result, then requests `SmallButton`. These are ordered requests to the
+ordinary alias resolver, not guarantees that every cue is audible: unresolved
+aliases, sound settings and backend admission can suppress playback
+[03 R-AUD-01 §1]. They do not enter the unit-acknowledgement category queue.
+
 ### `SKIRMISH` start preflight and `SELMAP` [R-FE-01 §5]
 
 **Established fact.** The row controller, alliance icons, resource steps and
@@ -3330,6 +3472,149 @@ ascending by width then height, modes below 640×480 dropped) and writes
 the stand-alone form of the same slider; its opener branch has no live
 caller (every call site passes the merged-page flag), so it is never shown.
 
+**Established — visual-page entry does not run slider value callbacks.**
+The merged visual-page opener installs the `VIDSLDR` and `GAMMA` callbacks
+and seeds their knob positions from the stored settings. Its final repaint
+does not invoke those callbacks. Opening `VISUALS` or `VISUALRT` therefore
+does not rewrite a stored setting from the quantised knob position. This
+differs from the explicit callback pass on `SPEEDS` / `SPEEDSRT` below.
+`RESTORE` and `UNDO` apply their own setting changes before reopening; the
+reopen itself does not perform a second slider read-back.
+
+For example, an authored horizontal `GAMMA` slider of width 13 and height 7
+with no resolved slider art has travel 7 [R-WGT-01 §5]. Stored gamma 12
+seeds knob 4, but remains 12 on page entry. Reading that knob through its
+value callback would truncate `4 / 6 × 20` to 13; page entry does not make
+that call. This establishes an authored geometry boundary, not its
+occurrence on a stock visual page.
+
+**Established — music-page selection, refresh and service order.** The
+screen selection, the music controller's logical current/next track, and its
+Repeat request are distinct. The logical current/next value remains meaningful
+while stopped: a stop resets it to 1 for a nonempty disc, or 0 for no audio
+tracks. It is not merely the identity of an audible track [03 R-AUD-01 §4].
+Successful device opening has a different final boundary: after probing the
+tracks it sets logical current/next to zero and the Repeat request to 1.
+Calling the opener on an already-open controller returns success without
+reinitializing those values.
+A later identification/probe, including the separate callback-registration
+path, can set logical current/next to 1 for a nonempty disc. The page reads
+the state its caller actually supplies; a nonzero track count alone does not
+justify replacing a just-opened controller's zero with 1.
+
+The `MUSIC` / `MUSICRT` opener installs an ordinary action callback and a
+per-service track poll. It first seeds the mode/enable controls. If the stored
+mode is Repeat, it copies the retained Repeat request into the screen
+selection; other modes retain the existing screen selection at this point.
+It then refreshes the track details. This entry refresh does not play a track
+or poll the controller's current/next value. Thus entry and the first later
+widget-service pass are separate state transitions.
+
+The track-detail refresh updates `TRACKTYPE`'s availability and category stage,
+and formats the selected track into `TRACKNUM`, using `NO DISC` for zero.
+These category and label writes are inside the successful `TRACKTYPE` lookup
+branch. Independently of that branch, the refresh applies the music-enable
+setting through `TRACKNUM`'s kind-specific lock helper: buttons and labels
+receive their lock, while text-input controls are unchanged. Then, only when
+the stored mode is Repeat, the refresh passes the screen selection to the
+controller's requested-track setter. It does not reset the `TRACKMODE` or `NOTRAK` stages. In the ordinary nonnegative
+track domain, a request above the controller's track count is rejected by
+that setter rather than clamped [03 R-AUD-01 §4].
+
+Each service pass processes the widgets and their text edits first, then runs
+the active page's track poll, then dispatches any surviving fired gadget to
+the page action callback. The poll also runs when no gadget fires. It parses
+the current `TRACKNUM` text as a signed decimal prefix and compares that
+number with the controller's logical current/next track. A mismatch copies
+the controller value into the screen selection, runs the track-detail
+refresh and marks the page for redraw. Equality makes no selection or
+requested-track write. In particular, the comparison is against the displayed
+text, not the retained screen-selection variable. The decimal parser accepts
+leading ASCII whitespace and an optional sign, stops at the first nondigit,
+and returns zero when there are no digits; `NO DISC` therefore compares as
+zero. Decimal accumulation and the final negation wrap at signed 32-bit
+width. Extended-byte classification remains dependent on the active locale.
+The poll itself has no music-enable guard.
+
+The resulting action order is:
+
+- `TRACKMODE` applies the newly selected mode. Entering Repeat then copies
+  the existing requested track into the screen selection and refreshes the
+  track details, writing that same selection back as the request. This
+  callback makes no immediate play call. The service poll already ran before
+  this callback; a later pass can replace its selection if the displayed
+  number differs from the controller's current/next track.
+- `CDNEXT` and `CDPREV` first change the screen selection with wrap over the
+  audio-track count. Their shared selector returns zero for no audio tracks;
+  otherwise it invokes the play primitive when the controller's status is playing,
+  or changes only the logical current/next value while stopped or paused.
+  With a nonzero track count, the selector first replaces an argument above
+  the count with its remainder after division by that count; an exact
+  multiple can therefore become zero. Its playing branch returns the
+  controller's resulting logical current/next value, even if the play
+  primitive reports failure. The stopped/paused branch preserves status,
+  changes only logical current/next, and makes no play call. A zero count
+  returns zero without changing that value. The selector itself neither
+  checks the enable flag nor writes the Repeat request. The callback adopts
+  its returned value, then refreshes the details. In Repeat that refresh
+  also updates the request. `CDSTOP` stops
+  first, passes track 1 through the same selector, adopts its result and
+  refreshes. `CDPLAY` calls the play primitive with the current screen
+  selection; it does not itself run the detail refresh.
+- `NOTRAK` applies the new enable state and refreshes the mode/enable controls.
+  It does not run the track-detail refresh in that action. Disabling can
+  therefore reset the controller's current/next value before the screen
+  selection follows it on a later service pass.
+
+**Established — music-page close and rebuild are observable actions.** The
+options root snapshots the controller's requested track as well as the
+preference settings and category list; it does not snapshot the screen
+selection. Ordinary root opening and closing do not reset that selection.
+It is initially zero in the loaded image and survives later options-root
+lifetimes; the page-entry, poll and transport transitions above are its
+writers in this flow. Thus closing the front-end music page may reset the
+controller to track 1 while leaving the retained screen selection at another
+track until the next page-entry or service transition. This is a contract
+for the ordinary options flow, not for a host content reload.
+
+The music page's close callback runs the music tick in battle; outside battle
+it stops and resets the controller.
+A page switch through an unhandled root button closes the music page before
+dispatching that button to the root. In particular, root `CANCEL` restores
+the saved music state **after** the active music page's close effect, and
+root `PREV` reaches its save/exit action after that effect. `RESTORE` and
+`UNDO` also close the old music page before opening its replacement, so
+their close callback occurs
+between the setting restoration and replacement-page initialization.
+
+`UNDO` restores the stored volume, category list and mode, applies the mode
+to the controller, requests a music tick if the current and snapshot enable
+bits differ, then stores the snapshot enable bit and restores the snapshotted
+requested track through the ordinary requested-track setter. In the
+nonnegative domain, that setter rejects a saved request above the current
+track count; restoration is not an unconditional assignment. This branch
+does not call the controller's enable/disable setter. It next reapplies
+volume-related state, closes and reopens. Root `CANCEL` uses the same music
+restoration order after its preceding sound restoration.
+`RESTORE` stores volume 32 and preference mode Custom; when the preference
+enable bit was clear, it sets that bit and requests a tick. Unlike `UNDO`,
+this branch does not apply the stored mode to the controller or call its
+enable/disable setter. Neither the replacement opener nor the track-detail
+refresh compensates with a mode
+setter. The newly displayed Custom preference can therefore coexist with
+the controller's prior playback mode. These statements describe immediate
+callback state and call order, not a promised audible result.
+
+The normal outer host pass invokes widget service before servicing the
+presentation timers. Media messages are dispatched separately by the host
+message loop and may invoke the music tick. Consequently neither the Repeat
+action nor its following track poll establishes which track will be audible
+after arbitrary later media notifications or timer expirations. This is the
+same device-response boundary as [03 R-AUD-01 §4]. The text-poll contract
+assumes `TRACKNUM` resolves to a text-bearing control; a missing or wrong-kind
+control supplies no initialized text for this caller and has no stable
+fallback value established here.
+
 **Established — the page background, the page names, and where the merge
 puts a page's gadgets.** Each page draws one full-screen plate —
 `OptSound4x`, `Optmusic4x`, `OptInterface4x`, `OptVisual4x`, with the
@@ -3368,14 +3653,27 @@ so the front-end family always takes the origin-add arm, and `SOUNDS`'s
 that reaches the `PANEL` branch, since it synthesises the gadget.
 
 **Established — the options family's cue column.**
-Every control the four page callbacks and the root callback recognise plays
-`Options`, and `CANCEL` alone plays `Previous`. That includes `RESTORE` and
-`UNDO`, which the transition table of [R-FE-01 §2] does not list: both arms
-on every page converge on a shared tail that repaints and plays `Options`.
+Apart from `TEST` below, the recognised button actions in the four page
+callbacks and the root callback request `Options`, and `CANCEL` alone
+requests `Previous`. That
+includes `RESTORE` and `UNDO`, which the transition table of [R-FE-01 §2]
+does not list. The request's position within an action is callback-specific.
 It also includes the two-stage and list buttons (`ANTI`, `SHADING`,
 `BSHADOWS`, `MODE`, `SPEECH`, `LEFTCLICK`, `UNITCHAT`, `TRACKMODE`,
 `TRACKTYPE`, `NOTRAK`, `CDPLAY`, `CDNEXT`, `CDPREV`, `CDSTOP`) and the
 video-mode button.
+
+**Established — sound-page request ordering.** `MODE` first stores the
+new sound mode, performs its stop/device-mode/front-end-loop effects, and
+refreshes the controls' enable state; it requests `Options` afterward.
+`SPEECH` requests `Options` before writing the speech-enable bit and voice
+level. The sound page's `RESTORE` and `UNDO` request `Options` after applying
+their changes and reopening the page. The ordinary alias backend tests the
+current sound mode and effects volume at the request, so these requests must
+not all be moved to the beginning of the callback. In particular, changing
+`MODE` from `Off` to `Mono` reaches the request with sound enabled; changing
+it to `Off` reaches it with sound disabled. This establishes request order
+and gate state, not guaranteed playback [03 R-AUD-01 §2].
 
 Two kinds of control are silent. The sliders are driven by their own value
 callbacks, and none of them — `VIDSLDR`, `GAMMA`, `FXVOL`, `MUSICVOL`, `GAME`,
@@ -3409,6 +3707,24 @@ After the page opens every slider's value callback runs once so the labels
 match. Clamps: `GAME` value < 1 → 1; `SCREEN` value ≤ 1 → 1; `MAXLINES`
 value < 0 → 0; the others none.
 
+**Established — acknowledgement-text stage storage.** The `UNITCHAT`
+callback reads the named button's resulting stage, multiplies it by five and
+retains only the low eight bits in the caption setting. It does not clamp the
+result to the stock gauge's 0–10 range or rewrite the current button stage.
+Reopening the page derives its initial stage from the stored unsigned byte
+divided by five. The caption consumer subtracts that unsigned byte from ten
+in signed integer arithmetic before comparing the event's priority
+[R-HUD-03 §14.1].
+
+This width is reachable with authored controls beyond the stock three-stage
+button: ordinary attributes, valid button art and 53 short captions preserve
+53 stages through construction [R-WGT-01 §3]. Starting from the default stage
+1, successive admitted releases can reach stage 52. That callback stores 4,
+so a priority-4 caption fails the strict gate `10 − 4 < 4`; reopening the page
+then shows stage 0. The currently displayed stage remains 52 until another
+widget action or page reconstruction. This is an authored-input boundary,
+not a claim that the stock `Off|Medium|Full` control reaches it.
+
 **Established fact — slider arithmetic.**
 
 * Read-out, on every knob move: `value = trunc(pos / (travel − 1) × max)`
@@ -3426,6 +3742,24 @@ value < 0 → 0; the others none.
 * `GAMMA` (max 20): the stored integer `g` is applied as the palette factor
   `0.5 + g / 24` (12 → 1.0, 0 → 0.5, 20 → 1.333), and the wave/CD volumes
   are re-pushed (`v << 10`) whenever it changes.
+
+**Established — the stored reciprocal can change a page-open result.** For
+`SCREEN`, multiply the capped stored value by `travel − 1`, then by the
+binary32 reciprocal of 65 widened to working precision. Do not substitute
+division by 65: the stored reciprocal is slightly larger than the exact
+fraction, and the non-integral ceiling tests that difference. There is no
+post-calculation clamp before the opener stores the knob and runs its value
+callback.
+
+For example, a stored scroll speed of 32 and travel 66 produce a position
+slightly greater than 32, which the opener raises to 33. The immediate value
+callback evaluates `33 / 65 × 65`, truncates to 33 and stores that scroll
+speed. Such travel is reachable with an authored horizontal slider of width
+72 and smaller height when no slider art resolves, since construction uses
+`max(width, height) − 6` [R-WGT-01 §5]. The callback runs before the final
+page repaint; this change does not require a pointer gesture. This example
+establishes an authored geometry boundary, not its occurrence on a stock
+options page.
 
 `SOUND`/`MUSIC` pages: gadget maps and effects are closed in
 [03 R-AUD-01 §2] and [03 R-AUD-01 §4]; nothing here re-traces them.
@@ -3455,11 +3789,19 @@ labels selected by the session's two LOS bits), then in multiplayer
 *Starting Energy* (lobby words × 100 in multiplayer, the skirmish record
 otherwise) and *Max Units*; `EXIT` → `EXITMENU.GUI`; `OK` → close.
 
-**Established fact — every `ARMOPT` button plays the `Options` cue** before it
+**Established fact — every recognised `ARMOPT` button requests the `Options` cue** before it
 runs its route, `OK` included, and the four child openers above run after that
 cue.
 
 **Established fact — the three children's own rows and closes.**
+
+The children's callbacks make their own `Options` requests: `HELP` on `Page`
+and `OK`, `BRIEFING` on `TextRegion`, `MOREBAR` and `OK`, and `GAMEOPTIONS`
+on `OK`. A page-action request precedes the text refill or pager advance;
+an `OK` request precedes the window's default close. These are separate from
+the parent's earlier request when it opened the child. The cleanup callback
+with no fired gadget does not make an `Options` request. As with other alias
+requests, a request does not guarantee playback [03 R-AUD-01 §2].
 
 * `GAMEOPTIONS.GUI` authors only `OK`; every row is a pair of appended labels
   ([R-FE-02 §5]): the name in a column at x 18 of width 110 and the value in a
@@ -3477,8 +3819,13 @@ cue.
   the previous page's labels and keeps the authored records, `Page` and its
   selected stage included. Within a page, a `Line<n>` key the section does not
   hold consumes no row and does not advance y; a value whose first byte is `|`
-  has its whole buffer replaced by a single space, so the key column prints
-  that space and the description column prints what followed the `|`. The
+  has its first two bytes replaced by a space and a string terminator. The
+  key column prints the space; the description starts at original byte 2,
+  after the new terminator, so the original first description byte is lost.
+  For example, `|blank row text` displays `lank row text` as its description.
+  An authored separator-only row has no defined remaining description text
+  beyond its original terminator; Nanolathe's empty-description handling is a
+  safe host boundary, not evidence of a retail empty result. The
   filler performs the **same attribute-word rewrite to 1**, per appended
   record as it is added, so both columns are left-aligned at their column x.
 * Both windows author no kind-7 font record, so their rows take the label
@@ -3681,6 +4028,19 @@ attribute word 2 — which is the centring bit the label painter of §4 tests �
 the line's text in the gadget's own text field. They are appended before the
 panel is resized, and the widening pass afterwards sets every kind-5 gadget's
 width to the finished panel width and re-stamps attribute 2.
+
+**Established — the two paint boundaries.** Opening the authored message
+window includes its initial build and paint before message wrapping. The
+opener then tears down its drawing surfaces while retaining the gadget
+records, appends the message labels, changes the panel dimensions and applies
+the widening pass above, and builds and paints again. A label X resolved by
+the first paint is therefore still present at the second paint; resizing
+does not restore its authored sentinel [R-WGT-01 §7]. The new message labels
+start at explicit X zero and use ordinary centre alignment.
+The widening pass replaces every label's attributes with centre alignment;
+the final initial build then adds the inert attribute only where the link is
+empty, as in [R-WGT-01 §7]. A linked label does not retain an earlier inert
+attribute merely because it had one before widening.
 
 *`titleHeight` is the second gadget record's height field, read after art
 resolution, not the authored byte.* The opener addresses it as a fixed
@@ -4076,17 +4436,97 @@ text bytes intact. The variable record-list payload remains unknown
 ([R-WGT-01 §4], §5).
 
 **Established fact — synthesised gadgets.** Screens append gadgets at run
-time by two helpers. *Append label* adds a kind-5 record named as given at
+time through specialized helpers. *Append label* adds a kind-5 record named as given at
 `(x, y)` with width `panelWidth − x − 5` when the caller passes `−1`, height
 15, `colorf` 15, the attribute word given, active, and the text (127 bytes);
 `GAMEOPTIONS` rows, `HELP` lines, the text pager ([R-HUD-03 §10]), `MSGBOX`
 lines and the `UNITINFOx` values are all made this way. *Append record*
-copies a caller-built record whole and forces its kind to 1 (button);
-it refuses when the window already holds 200 gadgets — the only gadget-count
-cap in the executable, and the reason the skirmish row synthesis (§8) stays
-under it. *Label fit* measures a label's localised text (GAF font: the sum of
-the glyph frame widths; FNT: the font width routine) and, while it exceeds
-`w − 6`, drops the last character.
+copies a caller-built button record and forces its kind to 1; it refuses
+when the window already holds exactly 200 gadgets. The score-bar insertion
+helper independently applies the same equality check before adding a kind-13
+record. Neither establishes a universal capacity guard: the label append
+helper has no corresponding check.
+
+**Established — caption fitting changes stored text.** The shared caption
+fitter resolves the indexed gadget's name through the ordinary first-match
+lookup, obtaining the live text of a button, text input or label. A missing
+text result returns zero. It measures the first terminated caption, removes
+one trailing byte whenever that width exceeds the indexed gadget's signed
+width minus six, and repeats; equality fits. Successful fitting returns the
+remaining width and restores primary GAF-font slot zero. Labels and buttons
+with attribute `0x8000` select slot one before measuring. The active GAF
+family supplies summed glyph widths; with no active GAF font, the currently
+selected FNT supplies the width.
+
+The ordinary button painter selects its FNT, calls this fitter before its
+art and caption branches, and uses the returned width for right/centre
+placement. The initial window builder resolves button artwork and its
+replacement dimensions before this paint. Thus an active, uniquely named
+ordinary button with resolved width at least six can lose trailing caption
+bytes during its first paint; a later wider rectangle does not recover them
+without a new caption write. This is stored-state mutation, not merely a
+clipping limit. It does not establish that every label is automatically
+fitted by its painter, or that the selected later stage is the string the
+helper shortens.
+
+**Established — later stages follow the changed terminators.** Construction
+packs the localized stage captions consecutively, each terminated. The fitter
+changes only trailing bytes of the first caption to terminators; it neither
+moves the later captions nor rebuilds a stage-offset table. The painter then
+starts at its own text and, once per current-stage value, skips to the next
+terminator and advances past it. These positions are recomputed on every
+paint after fitting. The stage count and current-stage byte are unchanged.
+
+Consequently, removing one byte from the first caption inserts one empty
+logical caption before the former second caption; removing two inserts two.
+For example, three captions `AAA`, `BB`, `CC` become the logical sequence
+`AA`, empty, `BB`, `CC` when fitting removes one trailing `A`. With the
+unchanged three-stage count, stages zero through two now display `AA`, empty,
+and `BB`. Widening cannot undo this. This conclusion is bounded to captions
+and stage traversals contained within valid terminated text; it does not
+prescribe reads beyond that text.
+
+The ordinary localized button-text setter replaces the text, regenerates its
+quickkey, and, for a staged button, splits the replacement at `|`, localizes
+each of the declared stage captions and repacks them. Such an explicit
+replacement can therefore restore the former stage sequence. A separate raw
+name-based text writer copies a terminated string and regenerates its key
+without the staged reconstruction; its checked main-menu caller writes the
+version label. A paint-time fit is neither of these replacement operations.
+
+**Established — duplicate names split the text source from the painter.**
+The fitter's forward name scan does not test activity. It stops at the first
+matching name even when that record is not a button, text input or label;
+that wrong-kind match returns no text, rather than continuing to a later
+match. With an eligible match, fitting mutates that record's first caption
+using the *painted* gadget's width and font selection. The painter still
+selects and draws its own caption, while right/centre placement uses the
+width returned from fitting the matching record. Thus an inactive earlier
+label can be shortened by painting a later same-name button; the button's
+own caption need not be shortened. With a wrong-kind first match the returned
+width is zero, but the painted button's own caption is still selected.
+
+**Established — construction and paint order.** Initial construction visits
+all gadget records to resolve artwork, dimensions and localized stage text.
+Its later paint walk visits active children in index order. The normal
+window opener performs this initial build/paint before filling missing
+default/escape names and choosing initial focus, and before returning to its
+screen-specific caller. The focus halo does not rebuild or fit captions.
+A repaint repeats fitting on the current text; merely selecting another
+stage does not repack it. Inactive records skip the ordinary paint walk,
+but remain eligible as a fitter's name match. Activity is not a universal
+guard on direct painter calls: the same-association button-release helper
+repaints each other pressed button it clears without checking activity.
+
+**Unknown — exceptional fitting inputs.** The native loop has no terminating
+empty-text branch when the signed width minus six is negative. Its stock
+reachability needs the resolved-art and runtime-width producers traced; no
+host nontermination behavior is prescribed. Overlong replacements, fewer
+terminated captions than the declared stage count, and traversal beyond
+valid text retain unresolved memory behavior. Stock practical impact also
+remains unknown: a concrete example requires the installed localized caption,
+resolved frame width and actual selected font metrics together. The authored
+examples above establish the algorithm, not a visible defect in normal play.
 
 ### The word-wrap routine [R-FE-02 §6]
 
@@ -4139,12 +4579,34 @@ per-frame surface hook draws every live entry with the window font stored
 for the table: an entry starts in phase A with a deadline of
 `now + 30 × 1.0` (the scaled 30 Hz timer), and each frame whose timer
 exceeds the deadline flips the phase and sets the next deadline to
-`now + 30 × period` of the phase entered (the deadline arithmetic is single
-precision, the timer an integer); phase A draws in colour A, phase B in
-colour B, with no width limit. Turning a page clears the table. A run that
-spans an input line break is pre-split before paging: the pre-pass closes
+`now + 30 × period` of the phase entered, storing the deadline as binary32;
+phase A draws in colour A, phase B in colour B, with no width limit. Turning
+a page clears the table. A run that spans an input line break is pre-split before paging: the pre-pass closes
 the run before the newline and reopens it after (`&` + `CR LF` + `&` +
 letter), so each line blinks on its own.
+
+**Established — sampling and phase admission.** One draw samples the scaled
+clock once for the table. For each live entry the signed integer sample is
+converted to binary32 before comparison with the stored deadline. Equality
+keeps the current phase. A late visit flips the phase once and seeds its next
+deadline from that sampled time; it does not repeatedly catch up missed
+periods or add a period to the expired deadline. Registration adds the
+integer sample to the rate-times-period expression before storing its
+binary32 deadline; a later phase change adds the already-rounded sample.
+For the pager's fixed periods of 1.0 and 0.25 seconds at rate 30, both period
+products are exact. The native wrapping scaled-clock producer of [01 §4.1]
+also keeps its integer sample exactly representable in binary32. This closes
+those arithmetic boundaries without asserting that every host presentation
+clock shares the native clock's epoch or lifetime.
+
+**Established — blink font binding and close.** The pager records the
+`TextRegion` gadget index for blink drawing, not a font ordinal or a font
+handle. Each enabled blink draw resolves that gadget's current `fontnumber`
+against the window's font records before drawing the words; a stored index
+of `−1` leaves the current font selected. Closing the briefing frees the
+blink table, clears its binding and disables its drawing before releasing
+the briefing text. This is the table's lifecycle, not a claim about audio
+completion or the lifetime of the shared font resources.
 
 **Established fact — the label under the blink word draws the run too.** The
 pager's copy loop consumes only the marker bytes; every byte between them is
@@ -4323,16 +4785,34 @@ slides is the Space-held **readout strip** at the bottom edge of the view —
 not the side rail: `PANELSIDE` has one final origin, `(0,0)`, stamped by the
 first paint and nowhere else, and every rail window and gadget rectangle is
 fixed in authored coordinates ("Panel asset binding and draw origins" below;
-[R-HUD-05]). The strip owns a signed pixel offset advanced on a
-15-millisecond wall-clock throttle (a step whose timestamp is early is
-skipped); each accepted step eases by remaining-distance/3 with a minimum
+[R-HUD-05]). **Established — the strip timer and step.** The strip owns a
+signed pixel offset and a clock deadline. Each composer visit reads the
+millisecond clock and compares that reading with the deadline as signed
+32-bit values. It advances only when the reading is **strictly greater**:
+equality skips the step. On admission it reads the clock again and stores
+that second reading plus 15, retaining the low 32 bits, as the next deadline.
+This deadline update precedes the Space/editor test and occurs even when
+the offset already rests at its requested detent. A skipped step still
+paints the strip at its retained offset when that offset is nonzero. Thus
+the gate is not an unsigned elapsed-time test accepting exactly 15 ms,
+and the admission sample need not equal the sample that seeds the next
+deadline. Each accepted movement eases by remaining-distance/3 with a minimum
 step of one pixel in both directions so it always converges; detents are 0
 (parked: the strip sits at the surface's bottom edge, off screen, and is not
 drawn) and -31 (fully raised, its rows on screen over the bottom strip).
-Crossing into a detent plays cues: leaving -31 upward and leaving 0 downward
-play `Panel`; reaching 0 and reaching -31 play `Options`. The strip is
-stepped unconditionally in every session kind ([R-HUD-03 §1]); the bottom
+Leaving -31 upward and leaving 0 downward request `Panel`; reaching 0 and
+reaching -31 request `Options`. These are cue requests, subject to the audio
+service's admission rules, rather than guarantees of audible playback. The
+strip is stepped unconditionally in every session kind ([R-HUD-03 §1]); the bottom
 strip's own draw is the offset's one consumer.
+
+**Established — bounded initialization.** The deadline starts at zero when
+the process image is loaded. The strip initializer reached during common
+battle-data setup clears the pixel offset and binds the band art without
+resetting that deadline. This establishes the initializer's own writes;
+complete retention through every reset and rebuild path remains **Unknown**.
+The clock's epoch is not the Unix wall-clock epoch, so substituting low Unix
+milliseconds does not establish equivalent signed admission at first use.
 
 Space polarity: with Space held the strip slides toward -31 unless a latched
 typed gadget whose authored record type equals `3` (the text-editor family)
@@ -4908,30 +5388,91 @@ or clear the paged bit through [R-P0-11 §1]'s deferred bits; no click writes
 the field, and the only field writers are the `.`/`,` keys, the
 `NEXT`/`PREV` gadgets and the digit keys in the table below. So a `BUILD`
 click always re-shows the remembered page, which is `1` until the unit
-pages, and "the paged bit set over a zero field" is unreachable for a
-builder that has pages ([R-HUD-04 §4]).
+pages. "The paged bit set over a zero field" is unreachable for a builder
+with two to eight pages ([R-HUD-04 §4]); nine or more pages reach it, as
+described below.
 
-The page-cycle keys and buttons ([R-CAM-01 §2]) move as follows, every
-change setting battle-interface dirty bit `0x10` and playing `nextbuildmenu`:
+The page-cycle keys and buttons ([R-CAM-01 §2]) move as follows within
+the ordinary authored page range, setting battle-interface dirty bit `0x10`
+when a live page owner is updated:
 
 | Input | From page 0 | From page `p ≥ 1` |
 |---|---|---|
 | `.` key (next, keyboard) | page 1 | `p+1`, or page 0 when `p == count−1` |
 | `,` key (previous, keyboard) | page `count−1` | `p−1`, or page 0 when `p == 1` |
-| `NEXT` button | page 1 | `p+1`, or page 1 when `p == count−1` (never page 0) |
-| `PREV` button | page `count−1` | `p−1`, or page `count−1` when `p == 1` |
+| `NEXT` button | see below | `p+1`, or page 1 when `p == count−1` (never page 0) |
+| `PREV` button | see below | `p−1`, or page `count−1` when `p == 1` |
 | digit `d` ([R-CAM-01 §2]) | page `d−1` when `d−1 < count`, else nothing | same |
+
+**Established — the producers are field operations.** The table is a
+reading of operations on the page-shown bit `P` (22) and the three-bit page
+field `F` (23–25), not on the displayed page. Write `C` for the definition's
+page-count byte. Field arithmetic keeps three bits, so it is modulo 8, and
+`F` is compared with `C − 1` as an ordinary integer:
+
+| Input | Operation |
+|---|---|
+| `.` key | `P` clear: set `P`, `F := 1`. `P` set and `F == C−1`: clear `P`, keeping `F`. Otherwise `F := (F+1) mod 8`. |
+| `,` key | `P` clear: set `P`, `F := (C−1) mod 8`. `P` set and `F == 1`: clear `P`, keeping `F`. Otherwise `F := (F−1) mod 8`. |
+| `NEXT` button | `F == C−1`: `F := 1`; otherwise `F := (F+1) mod 8`. Then set `P`. `P` is not read. |
+| `PREV` button | `F < 2`: `F := (C−1) mod 8`; otherwise `F := F−1`. Then set `P`. `P` is not read. |
+| digit `d` | `q = d−1`; when `q < C` (signed): `P := (q > 0)`, and when `q ≠ 0`, `F := q mod 8`. Otherwise nothing. |
+
+For two to eight pages and a builder on a shown page, these are the table's
+moves. The buttons do not read `P`, so from the orders state they act on the
+remembered field: `NEXT` shows `F+1`, or page 1 when `F == C−1`, and `PREV`
+shows `F−1`, or `C−1` when `F` is below 2. The stock orders windows
+`ARMGEN.GUI` and `CORGEN.GUI` author no `NEXT` or `PREV` gadget, so stock
+content reaches the buttons only from a build page.
+
+**Established — nine or more pages.** The field holds only 0–7, so page 8
+and above can never be selected, and no field value equals `C − 1`:
+* From field 7, `.` and `NEXT` store field 0 and leave `P` set. Digit 9
+  stores the same state when the count is at least nine.
+* The panel opens displayed page 0 for that state: the orders window, or
+  `<name>0.GUI` when the page-zero bit is set. `BUILD` is still staged from
+  `P`.
+* From that state, `.` and `NEXT` go to page 1 and `,` goes to page 7.
+* `,` from a hidden page and `PREV` from field 0 or 1 store
+  `(C − 1) mod 8`. With nine pages that is field 0 with `P` set, so further
+  `PREV` presses stay on the orders display. With ten pages it is page 1,
+  so `PREV` from page 1 stays on page 1.
+* A `BUILD` click sets `P` without writing `F`, so it re-shows a remembered
+  zero field as that same state.
+
+These are the executable's own field operations, not a host clamp.
+
+**Established — navigation cue requests are not change notifications.**
+The next/previous routines request `nextbuildmenu` at their common exit,
+even when the current page-owner identifier is null or its unit no longer
+has a definition. The ordinary `.` and `,` hotkey arms enter these routines
+without a selected-builder or page-count precheck. A digit-page request has
+a different boundary: it requires a live page owner and a requested page
+below the definition's count, then writes the page state, marks the interface
+dirty, and requests the cue even if that page was already shown. A rejected
+digit-page request does none of those things. These are requests to the
+named UI-sound service; sound availability and playback admission still
+control what is audible.
 
 The gadgets `"%sPREV"` and `"%sNEXT"` (prefix-named, `ARMPREV`/`ARMNEXT`)
 are hidden (`active := 0`) after a page opens when the page-count byte is
 below 2. `ONOFF` on a page shows the builder's on/off bit as its stage when
-the builder is a building (status bit 29). On a page above 0, every gadget
-with `commonattribs` bit `0x04` (a product slot) has its low grey bit set when its
-name does not resolve to a definition and cleared when it does. This replaces
-the authored `grayedout` low bit; other bits of the grey word survive. The
-product-resolution pass follows download placement and applies to ordinary
-authored pages as well as generated pages. Queue counts on product buttons
-are [R-P0-11 §2].
+the builder is a building (status bit 29). On a page above 0, the product-name
+resolution pass visits the header record and all loaded child records except
+the final child. Within that range, a record with `commonattribs` bit `0x04`
+(a product slot) has its low grey bit set when its name does not resolve to a
+definition and cleared when it does. This replaces the incoming low grey bit;
+other bits of the grey word survive.
+
+**Established — the final loaded child is excluded from this pass.** The
+loader replaces the authored `totalgadgets` value with the loaded section
+count minus one. The product-resolution loop stops before that final child,
+whereas ordinary GUI input service includes it. Its exclusion is therefore
+not a malformed declared-count case. The pass leaves that child's incoming
+grey state alone; download placement runs earlier and can already have
+cleared its low grey bit. This boundary applies to ordinary authored pages
+as well as generated pages, and does not by itself establish an effect on a
+stock page. Queue counts on product buttons are [R-P0-11 §2].
 
 **Established — command-button stage and grey state.** After a page opens,
 the command buttons are set from the selection-aggregate words the refresh
@@ -5223,7 +5764,8 @@ For the three slots the census uses:
 | 9 | `build` | 4 | 2 s |
 
 **Established — what `UNITCHAT` therefore does to the census.** The caption
-gate is `10 − unitchattext < priority` ([03 §8.3] step 4, signed byte compare),
+gate is `10 − unitchattext < priority` ([03 §8.3] step 4, signed integer
+comparison after widening the unsigned setting and priority bytes),
 and `unitchattext` is `0` / `5` / `10` for `Off` / `Medium` / `Full`
 ([R-CAM-01 §7]), default `5`:
 
@@ -5401,9 +5943,15 @@ screen only when `hattfont12.gaf` is missing. In a stock install the F3
 destination line looks like every other line.
 
 **Established — the class filter, and the `screenchat` polarity.** The drawer
-selects on a presenter-mode word. Process init sets that word to 3 and nothing
-else in the image writes it, so the other two branches (mode 1: draw only class
-2; mode 2: draw everything except class 8) are unreachable. In mode 3:
+selects on a presenter-mode word. Process initialization selects mode 3;
+the image's static writer census finds only that initialization, so no ordinary
+path to the other modes is established. In dormant mode 1, class 2 leaves the
+display decision unchanged rather than assigning it; other classes clear the
+decision. It can therefore retain the preceding decision or an unwritten
+initial value. The initial value is **Unknown**; establishing an entry path
+and its incoming state would settle it. Mode 2 selects all classes except
+class 8. Neither dormant branch defines the reachable mode-3 behavior. In
+mode 3:
 
 * `screenchat ≠ 0` — the shipped default is 1 ([02 R-KEYS-01 §5]) — **every** class
   draws;
@@ -6843,6 +7391,21 @@ above one plays `SelectMultipleUnits`. Because the cue reads the resulting
 count rather than the change flag, a toggle drag that changed nothing still
 replays a cue.
 
+**Established — selection acknowledgement follows the gesture's result.**
+A Shift-click that removes its pointed unit makes no selection-voice request;
+a Shift-click that adds it requests that unit's voice even if other units
+remain selected. The viewport click and the idle `Interface Type 0` minimap
+click reach this same selector [R-CAM-01 §14]. A rectangle instead counts the eligible units
+that remain selected after the whole owner-range walk, including units
+outside its bounds. Thus, starting with two selected eligible units, a
+Shift-drag containing just one requests the other unit's voice; containing
+both requests no cue. An empty Shift-drag preserves both and requests
+`SelectMultipleUnits`. These are requests into the ordinary sound paths,
+not a guarantee of audible playback: the single-unit acknowledgement still
+passes its viewing-player and unit-state admission and queue gates [03 §8.3].
+The dirty-state change and the list of units hit by the rectangle are not
+substitutes for this resulting-selection count.
+
 **Mouse-button assignment is closed (for `Interface Type 0`; the `1` polarity is [R-CAM-01 §5]).** Every world action — single-unit picking, rectangle drag selection, building placement, and issuing every order including the contextual code 1 — is performed with the **left** mouse button. The **right** mouse button performs only deselection and cancellation: it cancels an armed order or build placement (returning the command latch to idle) or, when the latch is already idle, clears the current selection. The battle input pump routes left-button press and release through the single-click and drag-rectangle paths and the order dispatcher, while a right-button press left available by the earlier GUI service (§3) is routed exclusively to the cancellation path that returns the latch to idle and, when idle, clears selection; no battlefield right-button path queues an order. The cursor table shows the same polarity: every latch shape fires its order on left-click; the right-click column is empty or a transition back to the normal cursor [04 §3.4][07 §8].
 
 Control groups store one group value per unit rather than membership bits in
@@ -7058,13 +7621,15 @@ not an additional whitelist for that queue producer (activation identity and
 [R-P0-11 §1] below). Authored physical pages may name a different product than
 CANBUILD; this must not be corrected by changing either authored source.
 
-**Page encoding is closed.** Page switching validates the selected-builder
-identity first (nonzero single-select id and nonzero definition id) and guards
-against the builder definition's page-count byte. The page number is encoded
-in unit-flag bits 23–25 (`(page & 7) << 23`, cleared by mask `0xFC7FFFFF`)
+**Page encoding is closed.** Direct digit-page selection validates the
+page-owner identity first (nonzero identifier and nonzero definition id) and
+guards the requested page against the definition's page-count byte. The page
+number is encoded in unit-flag bits 23–25 (`(page & 7) << 23`, cleared by mask `0xFC7FFFFF`)
 with bit 22 as the paged indicator (`(page > 0) << 22`, cleared by mask
 `0xFFBFFFFF`); page 0 clears bit 22 and leaves bits 23–25 alone. Switching
-sets battle-interface dirty bit `0x10` and plays the `nextbuildmenu` cue.
+sets battle-interface dirty bit `0x10` and requests the `nextbuildmenu` cue,
+including a valid request for the already-shown page. The next/previous
+routines have the different cue boundary described in [R-HUD-03 §6].
 Generated side-specific build GUIs and selected-builder identifiers are
 asset/catalog driven, and aggregate command state has distinct
 enabled/disabled/mixed paths across the selected set — the fold that produces
@@ -8438,9 +9003,25 @@ if the record's right-button key-state bit (0x02) is clear:
 
 So each frame moves the camera by `16 · trunc(delta / 4)` map pixels per
 axis — four map pixels per screen pixel of mouse travel, quantised to 16 —
-relative to the previous frame, and the origin is always a multiple of 16
-while the mode is active. The mode's entry clears the hold count, tracked
-object and followed projectile.
+from its saved anchor. Each requested origin is a multiple of 16 before the
+clamp; a map-edge clamp can leave the actual origin between those multiples.
+The next step quantizes that clamped origin again. The mode's entry clears
+the hold count, tracked object and followed projectile.
+
+**Established — entry preserves an unfinished glide.** Entry leaves both
+current and desired origins unchanged. The first drag step runs on a later
+host frame; entry itself only captures its anchor and begins cursor capture.
+If the entry frame has runnable sub-ticks, the ordinary follow-camera phase
+still steps toward the previously desired origin after the follow references
+have been cleared. For example, the `n` hotkey can start a glide on the
+previous frame, then Ctrl-right drag entry clears tracking without cancelling
+that glide. With no arrow key or edge-scroll movement, the later scroll pass
+does not overwrite its desired origin. A paused frame or a frame with no
+runnable tick has no such step. The first later drag pass uses the anchor
+saved at entry, not the intervening stepped origin, then copies its clamped
+result into the desired origin as usual. This distinction is between clearing
+follow references and replacing a desired origin; it does not change the
+per-step drag arithmetic above.
 
 **Established — discarded motion has no remainder owner.** The frame stores
 only the clamped, quantized origin as the next anchor and recenters the
@@ -8468,7 +9049,9 @@ copying it to the desired origin. Every writer:
 | Writer | Kind | Clears hold / tracked / followed? |
 |---|---|---|
 | Scroll pass (keyboard, edge) | jump by delta | yes ([R-CAM-01 §10]) |
-| Minimap latch, drag-scroll entry | jump | yes; the per-frame drag step itself does not |
+| Minimap latch | jump | yes |
+| Drag-scroll entry | preserves both origins; captures the current origin as the drag anchor | yes |
+| Drag-scroll step | jump from the saved drag anchor plus the pointer displacement | no |
 | F5–F8 bookmark recall | jump to the stored origin | yes |
 | Load game (`Camera` account) | jump | no (the origin only; the follow references are not in the account, §10 "save ownership") |
 | Battle-start placement | jump: a skirmish player's commander stamp position minus half the viewport [08 R-SKIR-01]; the `Camera` account for a loaded game; otherwise the first start-position record of kind `1` minus half the viewport | no |
@@ -8478,6 +9061,26 @@ copying it to the desired origin. Every writer:
 | F3 (message source) | glide to the source unit's position (its map-pixel X/Z words) | no |
 | Phase 10 itself | steps current toward desired; a dead tracked object (alive bit clear) clears all three | — |
 | `+BigBrother` off, `+Move x y` (developer) | cancel / jump | yes / (developer, untraced) |
+
+**Established — selected-unit cycling starts from the tracked slot.** The
+`t`/`T` helper uses the tracked object's slot as its starting position within
+the local player's allocated unit range. It does not require that object to
+remain selected. It scans strictly after that slot for `t`, or strictly
+before it for `T`, wrapping at the owner's range bounds and returning the
+first record with its selected bit set. With three selected units in slot
+order, tracking the middle one and Shift-clicking it off preserves that
+tracked reference: `t` then chooses the later unit, while `T` chooses the
+earlier one. Restarting at the first or last selected unit because the tracked
+unit left the selection would choose the opposite result in this case.
+
+A null tracked reference starts with slot zero; a slot outside the owner's
+inclusive range is replaced by the range's first slot before this scan.
+Those bounds are the first and last actual records assigned to the owner,
+not an extra sentinel. Forward cycling from null therefore first tests the
+slot after that lower bound and reaches the lower-bound record only on wrap;
+backward cycling first wraps to the upper bound. A scan finding no selected
+record returns null. These are slot-order rules, independent of which units
+are visible on screen.
 
 **Established — the `+BigBrother` companion word.** The word `+BigBrother` writes `1` into is the 16-bit cycle
 counter of the unit sweep tail ([04 R-MOV-03 §1]): while the camera-flags
@@ -8797,7 +9400,13 @@ tests, in this order:
    a blip selects that unit**.
 3. **Cursor kind below `0x11`** → issue the resolved order (the latch code,
    or the contextual code with the latch idle) for the selection at the
-   pointer's world point; Shift keeps the latch as in 1.
+   pointer's world point; Shift keeps the latch as in 1. Once this branch
+   is entered, the handler applies that Shift rule after dispatch without
+   testing whether any actor resolved a descriptor or accepted an order.
+   With Shift clear it returns the latch to idle, clears persistence and
+   resets the palette's default control; with Shift held it sets persistence.
+   A click rejected by the cursor-kind gate never reaches this tail and
+   therefore leaves an armed latch unchanged.
 4. Otherwise, under `Interface Type 1` with the latch idle → deselect all.
 
 ### Supported inference
@@ -9089,6 +9698,18 @@ and the decider that would close it.
 
 ### Input and text
 
+- Complete slide-strip clock deadline retention across reset/rebuild paths
+  and its relation to a portable host clock origin · §6 · close remaining
+  indirect reset writers and the host clock adapter before claiming
+  cross-session timing parity. Initial process zero, the strip initializer's
+  lack of a deadline write, and the two-sample signed strict-deadline update
+  within a composer visit are established.
+
+- An entry path and initial display-decision value for dormant presenter mode 1
+  · [R-HUD-03 §14.4] · establish a writer selecting this mode and trace its
+  incoming decision state. The static writer census finds only mode-3
+  initialization; the ordinary mode-3 filter is settled.
+
 - Case folding outside ASCII in the developer default handler’s unit-name
   pattern comparison · [R-CAM-01 §6], [02 R-CAT-01 §3] · trace the active
   retail code-page comparison table; the ASCII matching contract is settled.
@@ -9127,6 +9748,10 @@ and the decider that would close it.
 
 ### Widgets and screens
 
+- The music-page poll's resulting value when `TRACKNUM` is absent or is not
+  a text-bearing control · [R-FE-01 §6] · trace the incoming temporary-text
+  initialization or observe that malformed page manually. The lookup does
+  not supply text in this case, and no stable fallback is established.
 - User-facing naming of every GUI mode/flag bit; `0x800` (extra redraw on
   close) and `0x1000` (modal centering) are mechanically named · §3 · static
   trace.

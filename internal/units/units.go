@@ -1022,7 +1022,8 @@ type COBBinder func(*Unit) error
 // [P0-16 §3.2]; forcedSlot reconstruction verifies slice bounds and
 // occupancy [P0-16 §3.3].
 type World struct {
-	units []*Unit // live records only; finalization clears this view
+	attachmentObserver AttachmentObserver
+	units              []*Unit // live records only; finalization clears this view
 	// rawUnits exposes a live record while its slot is occupied. Free replaces
 	// that reference with the packet fields retail retains at an empty slot, so
 	// the view models raw slot aliasing without keeping per-unit heaps alive.
@@ -1825,7 +1826,9 @@ func (w *World) create(def *content.UnitDef, owner uint8, x, y, z numeric.Fixed,
 	// the unit is actually built" loop, and the frame smokes for its whole
 	// build.
 	remaining := float32(0)
-	health := int32(def.MaxDamage)
+	// Completed creation stores only the health word; the definition maximum
+	// retains its full width [04 §4.4, port 4].
+	health := int32(int16(def.MaxDamage))
 	if !alreadyBuilt {
 		remaining = 1
 		health = 0
@@ -2159,7 +2162,7 @@ func (w *World) createWithForcedSlotFacing(def *content.UnitDef, owner uint8, x,
 		Move:         MoveState{Mode: CreatedMoverMode, ModeMirror: CreatedMoverMode},
 		Remaining:    0,
 		MaxHealth:    int32(def.MaxDamage),
-		Health:       int32(def.MaxDamage),
+		Health:       int32(int16(def.MaxDamage)), // same completed health-word seed [04 §4.4]
 		PlacementIdx: -1,
 		// Same spawn seed as the ordinary allocator [06 R-WPN-04 §2]. The
 		// restore adapter that follows this call does not carry an

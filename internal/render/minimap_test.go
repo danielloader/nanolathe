@@ -162,11 +162,10 @@ func TestMinimapBuildRadarPictureLetterboxAndGuard(t *testing.T) {
 	if pic.Bits[0] != 0x11 {
 		t.Fatalf("guard idx>=TileCount→0 failed, got %02x want 0x11 [03 §3.7]", pic.Bits[0])
 	}
-	// Authored TNT dimensions are independent of the lens dimensions; the ALP
-	// path accepts arbitrary source sizes, including the observed tall variant
-	// [fmt tnt][03 §3.7].
-	if pic2 := BuildRadarPicture(ter, ter.PlayRight, ter.PlayBottom, m, make([]byte, 4*4), 4, 4, &tables); pic2 == nil || len(pic2.Bits) != pic2.W*pic2.H {
-		t.Fatalf("arbitrary baked scaling must produce a complete picture")
+	// Host validation rejects a baked source that cannot supply the fixed
+	// two-by-two reads; it must not silently use the available terrain.
+	if pic2 := BuildRadarPicture(ter, ter.PlayRight, ter.PlayBottom, m, make([]byte, 4*4), 4, 4, &tables); pic2 != nil {
+		t.Fatal("undersized baked source must be rejected")
 	}
 }
 
@@ -204,10 +203,10 @@ func TestMinimapBuildRadarPictureALPBlend(t *testing.T) {
 	}
 }
 
-func TestMinimapBakedALPArbitraryRetailDimensions(t *testing.T) {
+func TestMinimapBakedALPFixedHalfDimensions(t *testing.T) {
 	// The authored 252×252 and 252×256 sources both feed the 126×126 lens.
 	// ALP is deliberately non-identity so the expected values lock source
-	// coordinate truncation and the row-first three-look-up arithmetic [03 §3.7].
+	// fixed-half coordinates and the row-first three-look-up arithmetic [03 §3.7].
 	var tables palette.Tables
 	for i := 0; i < 256; i++ {
 		for j := 0; j < 256; j++ {
@@ -230,7 +229,7 @@ func TestMinimapBakedALPArbitraryRetailDimensions(t *testing.T) {
 		wantBottom byte
 	}{
 		{name: "square", w: 252, h: 252, wantCenter: 40, wantBottom: 248},
-		{name: "tall", w: 252, h: 256, wantCenter: 64, wantBottom: 28},
+		{name: "tall", w: 252, h: 256, wantCenter: 40, wantBottom: 248},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pic := BuildRadarPicture(nil, 0, 0, camera.Minimap{W: 126, H: 126}, makeSource(tc.w, tc.h), tc.w, tc.h, &tables)
@@ -630,109 +629,143 @@ func TestMinimapPhaseGatesRegularAndDashedPresentation(t *testing.T) {
 	}
 }
 
-// TestMinimapBakedUsedRectCropsPaddingOnNonSquareMap is a play-test
-// regression fixture (WU-19-133): a tall, thin map's baked TNT minimap uses
-// only the left part of the stored bitmap's width, with the rest padded
-// [fmt tnt "Minimap"]. This fixture is authored, not retail bytes: a 20x10
-// stored bitmap standing in for the shipped 252x252/252x256 canvases, with
-// real terrain in columns 0..7 and a solid fill colour (100, matching the
-// TNT format's own verified 0x64 pad byte) in columns 8..19.
-//
-// Before the fix, BuildRadarPicture resampled the whole 20-wide stored
-// bitmap into the destination regardless of how much of it was real, so a
-// destination column past 8/20 of the way across read the fill colour
-// instead of terrain — the reported "blue stripe" on a tall map's minimap.
-// The fix (bakedMinimapUsedRect) crops to the used sub-rectangle first, so
-// every destination column must land on real terrain.
-func TestMinimapBakedUsedRectCropsPaddingOnNonSquareMap(t *testing.T) {
-	const (
-		bakedW, bakedH = 20, 10
-		usedW          = 8 // playW*bakedW/playH = 40*20/100 = 8, truncating
-		fill           = byte(100)
-	)
-	baked := make([]byte, bakedW*bakedH)
-	for y := 0; y < bakedH; y++ {
-		for x := 0; x < bakedW; x++ {
-			if x < usedW {
-				baked[y*bakedW+x] = byte(10 + x) // real terrain content, 10..17
-			} else {
-				baked[y*bakedW+x] = fill // padding outside the used sub-rectangle
+// The fitted short axis consumes an even prefix of the authored image. An
+// odd final content row/column is unused, and padding beyond it stays outside
+// the picture without any crop or source ratio calculation [03 §3.7].
+func TestMinimapBakedFixedHalfPreservesStrideAndOddEdge(t *testing.T) {
+	for _, tall := range []bool{false, true} {
+		playW, playH := int32(1000), int32(401)
+		if tall {
+			playW, playH = playH, playW
+		}
+		layout := camera.LayoutMinimap(playW, playH)
+		const stride, height = 252, 252
+		baked := bytes.Repeat([]byte{100}, stride*height)
+		for y := 0; y < height; y++ {
+			for x := 0; x < stride; x++ {
+				if (!tall && y < 101) || (tall && x < 101) {
+					baked[y*stride+x] = byte(10 + (x+3*y)%80)
+				}
 			}
 		}
-	}
-
-	playW, playH := int32(40), int32(100) // a tall, thin map: playW < playH
-	layout := camera.LayoutMinimap(playW, playH)
-	if layout.W <= 0 || layout.H <= 0 {
-		t.Fatalf("layout got %+v", layout)
-	}
-
-	tables := identityALP() // out = p00, i.e. nearest sample at (sx,sy) truncated
-	pic := BuildRadarPicture(nil, playW, playH, layout, baked, bakedW, bakedH, &tables)
-	if pic == nil {
-		t.Fatalf("baked picture rejected")
-	}
-
-	// The rightmost destination column must still land on real terrain, not
-	// the fill colour: every dst x in [0,W) must map into the used
-	// sub-rectangle's columns [0,usedW), never into the padding beyond it.
-	lastCol := pic.W - 1
-	if got := pic.Bits[lastCol]; got == fill {
-		t.Fatalf("rightmost minimap column read the TNT pad colour (%d) instead of terrain — used-rect crop not applied", fill)
-	}
-	if got, want := pic.Bits[lastCol], byte(10+usedW-1); got != want {
-		t.Fatalf("rightmost minimap column = %d, want %d (last real terrain column, nearest-sampled)", got, want)
-	}
-
-	// No pixel anywhere in the picture may be the pad colour: the crop must
-	// remove every fill byte from the resize's source before it runs.
-	for i, v := range pic.Bits {
-		if v == fill {
-			t.Fatalf("picture pixel %d is the TNT pad colour %d; padding leaked into the resample", i, fill)
+		tables := identityALP()
+		pic := BuildRadarPicture(nil, playW, playH, layout, baked, stride, height, &tables)
+		if pic == nil {
+			t.Fatal("complete baked picture rejected")
+		}
+		for y := 0; y < pic.H; y++ {
+			for x := 0; x < pic.W; x++ {
+				want := byte(10 + (2*x+6*y)%80)
+				if got := pic.Bits[y*pic.W+x]; got != want {
+					t.Fatalf("tall=%v pixel %d,%d = %d, want %d", tall, x, y, got, want)
+				}
+			}
 		}
 	}
 }
 
-// TestMinimapBakedUsedRectWideMapPadsBottomRows mirrors the crop for a wide
-// map, whose real image occupies the top rows with the bottom padded
-// [fmt tnt "Minimap"], the mirror image of the tall-map case above.
-func TestMinimapBakedUsedRectWideMapPadsBottomRows(t *testing.T) {
-	const (
-		bakedW, bakedH = 10, 20
-		usedH          = 8 // playH*bakedH/playW = 40*20/100 = 8, truncating
-		fill           = byte(100)
-	)
-	baked := make([]byte, bakedW*bakedH)
-	for y := 0; y < bakedH; y++ {
-		for x := 0; x < bakedW; x++ {
-			if y < usedH {
-				baked[y*bakedW+x] = byte(10 + y)
-			} else {
-				baked[y*bakedW+x] = fill
-			}
+// A non-square stored rectangle and a deliberately small fitted lens expose
+// any reuse of source-ratio coordinates or a repacked crop [03 §3.7].
+func TestMinimapBakedFixedHalfStoredStride(t *testing.T) {
+	baked := make([]byte, 7*6)
+	for y := 0; y < 6; y++ {
+		for x := 0; x < 7; x++ {
+			baked[y*7+x] = byte(10*y + x)
 		}
 	}
-
-	playW, playH := int32(100), int32(40) // a wide map: playH < playW
-	layout := camera.LayoutMinimap(playW, playH)
-	if layout.W <= 0 || layout.H <= 0 {
-		t.Fatalf("layout got %+v", layout)
-	}
-
 	tables := identityALP()
-	pic := BuildRadarPicture(nil, playW, playH, layout, baked, bakedW, bakedH, &tables)
-	if pic == nil {
-		t.Fatalf("baked picture rejected")
+	pic := BuildRadarPicture(nil, 1, 2, camera.Minimap{W: 2, H: 2}, baked, 7, 6, &tables)
+	if pic == nil || !bytes.Equal(pic.Bits, []byte{0, 2, 20, 22}) {
+		t.Fatalf("stored-stride picture = %+v", pic)
 	}
+}
 
-	lastRow := pic.H - 1
-	idx := lastRow * pic.W
-	if got := pic.Bits[idx]; got == fill {
-		t.Fatalf("bottom minimap row read the TNT pad colour (%d) instead of terrain — used-rect crop not applied", fill)
+func TestMinimapBakedSourceHostBounds(t *testing.T) {
+	tables := identityALP()
+	for _, tc := range []struct {
+		name       string
+		w, h, size int
+	}{
+		{"short width", 3, 4, 12},
+		{"short height", 4, 3, 12},
+		{"short declared buffer", 5, 5, 24},
+		{"zero width", 0, 4, 16},
+		{"zero height", 4, 0, 16},
+		{"negative height", 4, -1, 16},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The battle HUD's fallback decision is this same predicate
+			// (DESIGN_PRESENTATION_CLIENT §3.1 C4).
+			if BakedRadarSourceFits(camera.Minimap{W: 2, H: 2}, make([]byte, tc.size), tc.w, tc.h) {
+				t.Fatal("invalid baked source reported as fitting")
+			}
+			if pic := BuildRadarPicture(nil, 1, 1, camera.Minimap{W: 2, H: 2}, make([]byte, tc.size), tc.w, tc.h, &tables); pic != nil {
+				t.Fatal("invalid baked source produced a picture")
+			}
+		})
 	}
-	for i, v := range pic.Bits {
-		if v == fill {
-			t.Fatalf("picture pixel %d is the TNT pad colour %d; padding leaked into the resample", i, fill)
+	if !BakedRadarSourceFits(camera.Minimap{W: 2, H: 2}, make([]byte, 16), 4, 4) {
+		t.Fatal("exact twice-picture source rejected")
+	}
+	// Surplus declared rows/columns retain their stored stride, including a
+	// complete odd final row and column; they do not stretch into the result.
+	baked := []byte{1, 2, 3, 4, 99, 5, 6, 7, 8, 99, 9, 10, 11, 12, 99, 13, 14, 15, 16, 99, 99, 99, 99, 99, 99}
+	pic := BuildRadarPicture(nil, 1, 1, camera.Minimap{W: 2, H: 2}, baked, 5, 5, &tables)
+	if pic == nil || !bytes.Equal(pic.Bits, []byte{1, 3, 9, 11}) {
+		t.Fatalf("fixed source stride result = %+v", pic)
+	}
+}
+
+// These authored contacts distinguish per-unit ordering, the independent hover
+// gate, and the pre-scale sensor tests [03 §3.9–§3.10].
+func TestMinimapContactDrawingOrderAndAdmission(t *testing.T) {
+	m := camera.Minimap{W: 10, H: 10}
+	mapped := &RadarSurface{W: 10, H: 10, Pitch: 12, Bits: make([]byte, 100)}
+	blit := func(s *RadarSurface, x, y int, color byte, hover bool) {
+		if hover {
+			color = 90
+		}
+		s.Set(x, y, color)
+	}
+	for _, tc := range []struct {
+		name     string
+		contacts []MinimapContact
+		x, y     int
+		want     byte
+	}{
+		{"later blip covers earlier hover", []MinimapContact{{WorldX: 50, WorldZ: 50, Palette: 10, Hovered: true}, {WorldX: 50, WorldZ: 50, Palette: 20}}, 5, 5, 20},
+		{"hover survives regular blink", []MinimapContact{{WorldX: 50, WorldZ: 50, Palette: 10, Hovered: true, BlinkSuppress: 1}}, 5, 5, 90},
+		{"nonzero sensor projects to zero", []MinimapContact{{WorldX: 50, WorldZ: 50, Palette: 10, RangeStatus: true, RawDistRadar: 1}}, 5, 5, 160},
+		{"both sensor distances draw", []MinimapContact{{WorldX: 50, WorldZ: 50, Palette: 10, RangeStatus: true, RawDistRadar: 10, RawDistSonar: 30}}, 6, 5, 160},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := rebuildFinalExactInto(nil, mapped, m, 100, 100, tc.contacts, BlinkState{}, blit, 160, 170, 180)
+			if got, _ := s.At(tc.x, tc.y); got != tc.want {
+				t.Fatalf("pixel (%d,%d) = %d, want %d", tc.x, tc.y, got, tc.want)
+			}
+		})
+	}
+}
+
+// Coverage has already had its bias subtracted in the published record. The
+// circle consumer accepts zero and bounded negative radii for both styles,
+// without changing the selected-unit gate [03 §3.9].
+func TestMinimapWeaponRingNonpositiveRadius(t *testing.T) {
+	m := camera.Minimap{W: 10, H: 10}
+	mapped := &RadarSurface{W: 10, H: 10, Pitch: 12, Bits: make([]byte, 100)}
+	for _, distance := range []int32{0, -10} {
+		for _, dashed := range []bool{false, true} {
+			for _, phase := range []uint8{0, 1} {
+				c := MinimapContact{WorldX: 50, WorldZ: 50, Status: minimapSelectedStatus, RingEnabled: true, RingDashed: dashed, RingRange: distance}
+				s := rebuildFinalExactInto(nil, mapped, m, 100, 100, []MinimapContact{c}, BlinkState{Phase: phase}, nil, 160, 170, 180)
+				x := 5
+				if distance < 0 {
+					x = 4
+				}
+				if got, _ := s.At(x, 5); got != 180 {
+					t.Fatalf("distance=%d dashed=%v phase=%d: pixel (%d,5)=%d, want ring180", distance, dashed, phase, x, got)
+				}
+			}
 		}
 	}
 }

@@ -110,11 +110,13 @@ type Event struct {
 	NanolatheBoxAtSource bool
 	Sound                string
 	AudioPositional      bool
-	AudioWater           bool
-	AudioAudible         bool
-	StatusKind           uint8
-	StatusText           string
-	StatusClass          uint8
+	// AudioAnonymous identifies an authored weapon path, not a named cue [03 §8.3].
+	AudioAnonymous bool
+	AudioWater     bool
+	AudioAudible   bool
+	StatusKind     uint8
+	StatusText     string
+	StatusClass    uint8
 	// AnnounceSlot is the ring speaker byte of a KindAnnounce line; 10 is the
 	// no-speaker sentinel [07 R-HUD-03 §14.3].
 	AnnounceSlot uint8
@@ -381,7 +383,7 @@ func (c *EventBuffer) SnapshotEventsInto(dst []EventView) []EventView {
 			NanolatheTargetBoxKnown: e.NanolatheTargetBoxKnown,
 			NanolatheTargetMin:      e.NanolatheTargetMin, NanolatheTargetMax: e.NanolatheTargetMax,
 			NanolatheBoxAtSource: e.NanolatheBoxAtSource,
-			Sound:                e.Sound, AudioPositional: e.AudioPositional, AudioWater: e.AudioWater, AudioAudible: e.AudioAudible,
+			Sound:                e.Sound, AudioPositional: e.AudioPositional, AudioAnonymous: e.AudioAnonymous, AudioWater: e.AudioWater, AudioAudible: e.AudioAudible,
 			StatusKind: e.StatusKind, StatusText: e.StatusText, StatusClass: e.StatusClass,
 			AnnounceSlot: e.AnnounceSlot,
 		}

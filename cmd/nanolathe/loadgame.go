@@ -162,6 +162,7 @@ func (g *gameShell) loadSaveLoadPanel(mode saveLoadMode) (*ui.Panel, error) {
 	// LOADGAME is a fresh authored open. Build before the panel captures its
 	// runtime state [07 R-WGT-01 §3].
 	g.installRetailWindowButtonArt(window, nil)
+	g.initializeRetailLabels(window)
 	panel := ui.NewPanel(window)
 	if panel == nil {
 		return nil, retailFrontendAssetError(g.cs, "save dialog GUI unavailable", guiPath, "the authored save/load window", nil)

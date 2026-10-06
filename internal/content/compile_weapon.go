@@ -666,12 +666,23 @@ func compileWeaponSectionWithPrior(section *formats.Section, sectionName string,
 // diagnosed rather than aliased into a neighbouring slot; a content profile
 // raises the table instead (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
 func CompileWeaponsWithDuplicates(fs vfs.FSOps, limits Limits) (map[string]*WeaponDef, []WeaponDuplicate, error) {
+	result, err := compileWeapons(fs, limits)
+	return result.weapons, result.duplicates, err
+}
+
+type weaponCompilation struct {
+	weapons    map[string]*WeaponDef
+	duplicates []WeaponDuplicate
+	soundPaths []string
+}
+
+func compileWeapons(fs vfs.FSOps, limits Limits) (weaponCompilation, error) {
 	if fs == nil {
-		return nil, nil, fmt.Errorf("content: nil VFS")
+		return weaponCompilation{}, fmt.Errorf("content: nil VFS")
 	}
 	limits, err := limits.normalize()
 	if err != nil {
-		return nil, nil, err
+		return weaponCompilation{}, err
 	}
 	// Record table substitute: slot (ID) -> record, replacing scalars while
 	// preserving each slot's accumulated damage overrides [02 R-CONTENT-02].
@@ -681,6 +692,7 @@ func CompileWeaponsWithDuplicates(fs vfs.FSOps, limits Limits) (map[string]*Weap
 	// ID-less sections share the unreachable scratch slot before record 0;
 	// their names never enter the catalog [02 §5 R-CONTENT-02].
 	var scratchKeys []string
+	var soundPaths []string
 
 	processFile := func(data []byte, path string, prov Provenance) error {
 		doc, err := formats.ParseTDF(data)
@@ -696,6 +708,14 @@ func CompileWeaponsWithDuplicates(fs vfs.FSOps, limits Limits) (map[string]*Weap
 			if int64(wd.ID) >= int64(limits.Weapons) {
 				return fmt.Errorf("content: weapon %q ID %d is outside the %d-record weapon table", wd.CanonicalKey, wd.ID, limits.Weapons)
 			}
+			// Registration happens for every parsed section, before a later
+			// section can replace its record [03 §8.3]. ID-less sections also
+			// perform these presentation admissions.
+			for _, path := range [...]string{wd.SoundStart, wd.SoundHit, wd.SoundWater} {
+				if path != "" {
+					soundPaths = append(soundPaths, path)
+				}
+			}
 			if wd.ID >= 0 {
 				keysPerID[wd.ID] = append(keysPerID[wd.ID], wd.CanonicalKey)
 				// The later section owns the scalar fields and catalog name;
@@ -710,7 +730,7 @@ func CompileWeaponsWithDuplicates(fs vfs.FSOps, limits Limits) (map[string]*Weap
 
 	entries, entriesErr := discoverArchiveContent(fs, "weapons", ".tdf")
 	if entriesErr != nil {
-		return nil, nil, fmt.Errorf("content: weapons: %w", entriesErr)
+		return weaponCompilation{}, fmt.Errorf("content: weapons: %w", entriesErr)
 	}
 	// ReadDir resolves duplicate logical paths first-provider-wins in mount
 	// order and then sorts by Path [vfs.ReadDir] — provider mount precedence,
@@ -720,11 +740,11 @@ func CompileWeaponsWithDuplicates(fs vfs.FSOps, limits Limits) (map[string]*Weap
 		e := entry.info
 		data, err := readContentEntry(fs, entry)
 		if err != nil {
-			return nil, nil, err
+			return weaponCompilation{}, err
 		}
 		prov := ProvenanceFrom(e)
 		if err := processFile(data, e.Path, prov); err != nil {
-			return nil, nil, err
+			return weaponCompilation{}, err
 		}
 	}
 
@@ -766,7 +786,7 @@ func CompileWeaponsWithDuplicates(fs vfs.FSOps, limits Limits) (map[string]*Weap
 			result[wd.CanonicalKey] = wd
 		}
 	}
-	return result, duplicates, nil
+	return weaponCompilation{weapons: result, duplicates: duplicates, soundPaths: soundPaths}, nil
 }
 
 // WeaponByID selects the record occupying the given slot. A compiled map has

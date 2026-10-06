@@ -70,3 +70,29 @@ func TestUIShadeRectUsesSignedTables(t *testing.T) {
 		t.Fatalf("clamped negative level used index %d, want SHD row 0 result 13", c.indexed[0])
 	}
 }
+
+func TestUIShadeRectSignExtendsHighPaletteIndices(t *testing.T) {
+	tables := &palette.Tables{}
+	for row := 0; row < 32; row++ {
+		for i := 0; i < 256; i++ {
+			tables.Shade[row][i] = byte(row + 20)
+			tables.Light[row*256+i] = byte(row + 80)
+		}
+	}
+	for _, tc := range []struct {
+		level     int
+		low, high byte
+	}{
+		{5, 85, 84}, {-19, 33, 32}, {99, 111, 110},
+		// Row-zero underflow retains the documented bounded placeholder.
+		{0, 80, 80}, {-32, 20, 20},
+	} {
+		c := &Client{width: 4, height: 1, indexed: []byte{0, 127, 128, 255}}
+		c.uiShadeRectRaw(tables, 0, 0, 4, 1, tc.level)
+		for i, want := range []byte{tc.low, tc.low, tc.high, tc.high} {
+			if c.indexed[i] != want {
+				t.Fatalf("level=%d pixel=%d: got %d, want %d", tc.level, i, c.indexed[i], want)
+			}
+		}
+	}
+}

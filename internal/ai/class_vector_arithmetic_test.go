@@ -1,10 +1,16 @@
 package ai
 
 import (
+	"bytes"
+	"fmt"
 	"math"
 	"testing"
 
+	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/mission"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
+	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
 // classVectorFor runs the class routine over one definition and returns its
@@ -19,6 +25,149 @@ func classVectorFor(t *testing.T, def *content.UnitDef) (int8, ClassVector) {
 	s.BindEnergyEnvironment(func() (float32, float32) { return 0, 0 })
 	s.Init([]string{key})
 	return s.SingleVectors[key], s.ClassVectors[key]
+}
+
+// TestWeaponScoreConsumesUnsignedDamageWord locks the consumer width and
+// inactive sentinel gate [08 R-P0-05 §5]. Refresh draws only its outer gate;
+// recomputing these coefficients adds no draws [08 R-P0-05 §6].
+func TestWeaponScoreConsumesUnsignedDamageWord(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		damage int32
+		want   int8
+	}{
+		{"wrap to zero", 65536, 7},
+		{"negative wraps high", -1, 100},
+		{"zero", 0, 7},
+		{"one damage addend", 40, 8},
+		{"unsigned maximum", 65535, 100},
+	} {
+		for _, active := range []bool{true, false} {
+			name, id, want := "active/", int32(1), tc.want
+			if !active {
+				name, id, want = "inactive/", 0, 2
+			}
+			t.Run(name+tc.name, func(t *testing.T) {
+				weapon := &content.WeaponDef{ID: id, DamageDefault: tc.damage}
+				def := &content.UnitDef{UnitName: "damageword", CanonicalKey: "damageword", MinWaterDepth: -1, Weapon1Def: weapon}
+				s := &Strategic{Catalog: &content.Catalog{Units: map[string]*content.UnitDef{def.CanonicalKey: def}}}
+				s.BindEnergyEnvironment(func() (float32, float32) { return 0, 0 })
+				s.Init([]string{def.CanonicalKey})
+				if got := s.SingleVectors[def.CanonicalKey]; got != want {
+					t.Fatalf("initial coefficient = %d, want %d", got, want)
+				}
+
+				// This authored state makes the refresh gate zero. Replacing
+				// the stored coefficient proves that the gated body ran.
+				stream := rng.SimulationFromState(30)
+				probe := stream
+				if draw := probe.Uint32n(30); draw != 0 {
+					t.Fatalf("fixture refresh gate = %d, want zero", draw)
+				}
+				s.SingleVectors[def.CanonicalKey] = -100
+				if !s.MaybeRefresh(30, &stream, 0, nil) {
+					t.Fatal("refresh did not run")
+				}
+				if got := s.SingleVectors[def.CanonicalKey]; got != want {
+					t.Fatalf("refreshed coefficient = %d, want %d", got, want)
+				}
+				if stream.State != probe.State || stream.Draws() != probe.Draws() {
+					t.Fatalf("class recompute changed RNG beyond the outer gate: state/draws = %d/%d, want %d/%d", stream.State, stream.Draws(), probe.State, probe.Draws())
+				}
+				if weapon.DamageDefault != tc.damage {
+					t.Fatalf("consumer changed authored damage to %d, want %d", weapon.DamageDefault, tc.damage)
+				}
+			})
+		}
+	}
+}
+
+// TestClassCoefficientWorkingPrecision locks the stored-single/working-wide
+// boundaries [08 R-P0-05 §5]. The energy fields accept these authored fractions.
+// The fractional metal costs are direct arithmetic fixtures: retail's integer
+// cost loader does not produce them, and no gameplay reachability is claimed.
+func TestClassCoefficientWorkingPrecision(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		def         content.UnitDef
+		coefficient int
+		want        int8
+	}{
+		{"authored passive energy", content.UnitDef{EnergyMake: 0.99999994}, 0, 4},
+		{"authored energy usage", content.UnitDef{EnergyUse: -19.799999}, 2, 98},
+		{"fractional cost arithmetic final sum", content.UnitDef{BuildCostMetal: 50.000008, ExtractsMetal: 1}, 1, 98},
+		{"fractional cost arithmetic combined store", content.UnitDef{BuildCostMetal: 1000.00006, MakesMetal: 1}, 1, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.def.UnitName = "workingprecision"
+			tc.def.MinWaterDepth = -1
+			_, cv := classVectorFor(t, &tc.def)
+			got := [3]int8{cv.C0, cv.C1, cv.C2}[tc.coefficient]
+			if got != tc.want {
+				t.Fatalf("coefficient %d = %d, want %d [08 R-P0-05 §5]", tc.coefficient, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestClassExtractorUsesStoredSingle exercises loader-admitted decimal values
+// that become zero in retail's definition store before all three predicates
+// [08 R-P0-05 §5]. The catalog deliberately retains its parser precision.
+func TestClassExtractorUsesStoredSingle(t *testing.T) {
+	for _, authored := range []string{"1e-46", "-1e-46"} {
+		t.Run(authored, func(t *testing.T) {
+			fbi := fmt.Sprintf("[UNITINFO]{UnitName=tinyextractor;Copyright=Copyright 1997 Humongous Entertainment. All rights reserved.;ExtractsMetal=%s;MinWaterDepth=-1;}", authored)
+			var archive bytes.Buffer
+			if err := vfs.WriteArchive(&archive, []vfs.ArchiveFile{{Path: "units/tinyextractor.fbi", Data: []byte(fbi)}}, vfs.ArchiveWriteOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			fs := vfs.New()
+			t.Cleanup(func() { _ = fs.Close() })
+			if _, err := fs.MountArchiveReader("tinyextractor.ufo", bytes.NewReader(archive.Bytes()), int64(archive.Len()), 1, vfs.ArchiveOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			defs, err := content.CompileUnits(fs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			def := defs["tinyextractor"]
+			if def == nil || def.ExtractsMetal == 0 || float32(def.ExtractsMetal) != 0 {
+				t.Fatal("fixture must retain a nonzero parser value that stores as single-precision zero")
+			}
+			before := def.ExtractsMetal
+			single, cv := classVectorFor(t, def)
+			if single != 2 || cv.C0 != 4 || cv.C1 != 0 {
+				t.Fatalf("coefficients = %d/%d/%d, want 2/4/0", single, cv.C0, cv.C1)
+			}
+			if def.ExtractsMetal != before {
+				t.Fatal("consumer changed the authored catalog")
+			}
+		})
+	}
+}
+
+// These are direct consumer/arithmetic fixtures, not retail-authored NaN
+// claims. The query-result fixture uses an explicit zero environment and an
+// infinite generator to produce unordered multiplication; NaN EnergyUse would
+// exercise a different, producer-owned gate [08 R-P0-05 §5].
+func TestClassPredicatesOnUnorderedInputs(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		def            content.UnitDef
+		single, c0, c1 int8
+	}{
+		{"extractor NaN", content.UnitDef{ExtractsMetal: math.NaN()}, 2, 4, 0},
+		{"query product NaN", content.UnitDef{WindGenerator: math.Inf(1)}, 12, 100, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.def.UnitName = "unordered"
+			tc.def.MinWaterDepth = -1
+			single, cv := classVectorFor(t, &tc.def)
+			if single != tc.single || cv.C0 != tc.c0 || cv.C1 != tc.c1 {
+				t.Fatalf("coefficients = %d/%d/%d, want %d/%d/%d", single, cv.C0, cv.C1, tc.single, tc.c0, tc.c1)
+			}
+		})
+	}
 }
 
 // TestFirstPassAddsTheTwoCostTerms locks [08 R-P0-05 §5]: retail multiplies each
@@ -238,7 +387,8 @@ func TestEnergyCoefficientClampsToZeroAndHundred(t *testing.T) {
 // TestNaNCoefficientsTakeTheUpperArm locks the unordered path of
 // [08 R-P0-05 §5]: retail's upper-bound comparison is unordered-sensitive and
 // NaN sets the bit that branch selects, so a NaN energy or metal coefficient
-// becomes 100, not 0. Only reachable with NaN authored costs.
+// becomes 100, not 0. These directly injected arithmetic inputs do not claim
+// authored reachability: retail loads build costs through an integer accessor.
 func TestNaNCoefficientsTakeTheUpperArm(t *testing.T) {
 	nan := float32(math.NaN())
 	_, cv := classVectorFor(t, &content.UnitDef{
@@ -299,6 +449,74 @@ func TestBuildOptionTermsTestListPresence(t *testing.T) {
 			s.Init([]string{key})
 			if got := s.InitVectors[key]; got != tc.want {
 				t.Fatalf("initialization byte = %d, want %d [08 R-P0-05 §9]", got, tc.want)
+			}
+		})
+	}
+}
+
+// The authored map scalar and definition multiplier keep their single stores,
+// but the selected query product stays wide through the class consumer
+// [05 R-PROD-01 §1][08 R-P0-05 §5]. No live unit or activation gate applies.
+func TestClassTidalQueryRetainsWorkingProduct(t *testing.T) {
+	var archive bytes.Buffer
+	fbi := "[UNITINFO]{UnitName=fractionaltide;Copyright=Copyright 1997 Humongous Entertainment. All rights reserved.;TidalGenerator=1.98;MinWaterDepth=-1;}"
+	if err := vfs.WriteArchive(&archive, []vfs.ArchiveFile{{Path: "units/fractionaltide.fbi", Data: []byte(fbi)}}, vfs.ArchiveWriteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	fs := vfs.New()
+	t.Cleanup(func() { _ = fs.Close() })
+	if _, err := fs.MountArchiveReader("fractionaltide.ufo", bytes.NewReader(archive.Bytes()), int64(archive.Len()), 1, vfs.ArchiveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	defs, err := content.CompileUnits(fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := defs["fractionaltide"]
+	if def == nil {
+		t.Fatal("missing authored definition")
+	}
+	ota, err := formats.ParseTDF([]byte("[GlobalHeader]{tidalstrength=10;}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tide := float32(mission.DecodeMissionGlobals(ota.Root.Section("GlobalHeader")).TidalStrength)
+	s := &Strategic{Catalog: &content.Catalog{Units: defs}}
+	s.BindEnergyEnvironment(func() (float32, float32) { return 0, tide })
+	s.Init([]string{"fractionaltide"})
+	if got := s.ClassVectors["fractionaltide"].C2; got != 99 {
+		t.Fatalf("energy coefficient=%d, want 99 from unrounded query product", got)
+	}
+	// Refresh consumes only its established outer gate; the changed helper
+	// has no draw and does not alter the live-environment access order.
+	stream := rng.SimulationFromState(30)
+	want := stream
+	want.Uint32n(30)
+	s.ClassVectors["fractionaltide"] = ClassVector{}
+	if !s.MaybeRefresh(30, &stream, 0, nil) || s.ClassVectors["fractionaltide"].C2 != 99 {
+		t.Fatal("refresh did not retain the authored tidal coefficient")
+	}
+	if stream.State != want.State || stream.Draws() != want.Draws() {
+		t.Fatal("query changed RNG beyond the refresh gate")
+	}
+}
+
+// Direct-state fixtures settle branch semantics without claiming a decimal
+// NaN writer. The query suppresses unordered definition fields before selecting
+// a generator product [05 R-PROD-01 §1].
+func TestClassifyUnorderedDefinitionGates(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		def  content.UnitDef
+		want float64
+	}{
+		{"energy use falls through", content.UnitDef{EnergyUse: math.NaN(), WindGenerator: 8, TidalGenerator: 12}, -4},
+		{"wind falls through", content.UnitDef{WindGenerator: math.NaN(), TidalGenerator: 12}, -3},
+		{"tidal is rejected", content.UnitDef{TidalGenerator: math.NaN()}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classify(&tc.def, .5, .25); got != tc.want {
+				t.Fatalf("query=%g, want %g", got, tc.want)
 			}
 		})
 	}

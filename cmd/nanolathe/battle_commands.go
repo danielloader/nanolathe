@@ -55,10 +55,22 @@ func (b *battleSession) switchBuildPage(digit int) {
 func (b *battleSession) nextBuildPage() {
 	frame, ok := b.currentSnapshot()
 	if !ok || frame.CommandPage.Builder == 0 || frame.CommandPage.PageCount <= 1 {
+		// Retail requests the cue even without a live page owner. Keep
+		// adaptive sidebar navigation's change-only policy separate
+		// [07 R-HUD-03 §6][DESIGN_INTERFACE_HUD_INPUT §3.3].
+		if ok && b.hud != nil {
+			if _, active := b.hud.expandedSidebarPaging(b, frame); active {
+				return
+			}
+		}
+		b.playUICue(nil, cueNextBuildMenu)
 		return
 	}
 	page, count := b.buildPageNavigationState(frame)
 	target := hud.NextPageKey(page, count)
+	if state, authored := b.authoredPageState(frame); authored {
+		target = state.NextKey(count)
+	}
 	_ = b.dispatchBuildPageCued(target)
 }
 
@@ -66,10 +78,22 @@ func (b *battleSession) nextBuildPage() {
 func (b *battleSession) prevBuildPage() {
 	frame, ok := b.currentSnapshot()
 	if !ok || frame.CommandPage.Builder == 0 || frame.CommandPage.PageCount <= 1 {
+		// Retail requests the cue even without a live page owner. Keep
+		// adaptive sidebar navigation's change-only policy separate
+		// [07 R-HUD-03 §6][DESIGN_INTERFACE_HUD_INPUT §3.3].
+		if ok && b.hud != nil {
+			if _, active := b.hud.expandedSidebarPaging(b, frame); active {
+				return
+			}
+		}
+		b.playUICue(nil, cueNextBuildMenu)
 		return
 	}
 	page, count := b.buildPageNavigationState(frame)
 	target := hud.PrevPageKey(page, count)
+	if state, authored := b.authoredPageState(frame); authored {
+		target = state.PrevKey(count)
+	}
 	_ = b.dispatchBuildPageCued(target)
 }
 
@@ -274,16 +298,10 @@ func (b *battleSession) playUICue(cl *client.Client, alias string) {
 // command the session boundary then refuses retires the latch exactly as it
 // always has.
 //
-// TODO(question): what retail does with the latch when the shape admits the
-// click but the resolver rejects it for every selected actor — [R-CAM-01 §14]
-// step 3 describes the issue step and its Shift rule without saying whether
-// the latch reset follows the loop unconditionally or only a resolved
-// descriptor. The case is reachable: a mobile `canattack` actor with no
-// resolved weapon slot shows `cursorattack` and rejects code 3. Decider: a
-// manual retail observation of the pointer after such a click (arm ATTACK,
-// click, watch whether the shape returns to the arrow), or a trace of the
-// handler's branch-3 tail. Until then the latch retires, which is this
-// build's existing behaviour.
+// Once the shape admits branch 3, its tail tests only Shift after dispatch;
+// it does not read a descriptor/success result [07 R-CAM-01 §14]. Thus even
+// when every actor rejects the order, Shift clear retires the latch and Shift
+// held keeps it. A rejected shape never reaches that tail.
 func (b *battleSession) orderSelected(code int, sx, sy int32, queued bool) bool {
 	// An armed Community wreck-snap preview consumes the reclaim click and
 	// re-issues it at the snapped feature (community patch engine CP-CON-6).
@@ -375,4 +393,25 @@ func (b *battleSession) buildPageNavigationState(f *frame.Frame) (page, count in
 		}
 	}
 	return b.effectiveBuildPage(f), int(f.CommandPage.PageCount)
+}
+
+// authoredPageState is the selected builder's page-shown bit and page field
+// when authored paging is in force. Retail's page producers are operations on
+// that pair, not on the displayed page, which is what keeps nine or more pages
+// cycling [07 R-HUD-03 §6]. Adaptive sidebar paging keeps its local index walk
+// (interface design §3.3), so it reports false there.
+func (b *battleSession) authoredPageState(f *frame.Frame) (hud.PageState, bool) {
+	if f == nil || f.CommandPage.Builder == 0 {
+		return hud.PageState{}, false
+	}
+	if b.hud != nil {
+		if _, active := b.hud.expandedSidebarPaging(b, f); active {
+			return hud.PageState{}, false
+		}
+	}
+	builder, found := snapshotUnitByHandle(f, f.CommandPage.Builder)
+	if !found {
+		return hud.PageState{}, false
+	}
+	return hud.PageStateOf(builder.Flags), true
 }

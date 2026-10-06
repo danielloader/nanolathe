@@ -196,7 +196,9 @@ func (s *Service) StepWeaponsForUnit(u *units.Unit, tick uint32, w *units.World,
 	if s == nil || u == nil {
 		return sum
 	}
-	if !u.Alive || u.Dying {
+	// Death-latched units still receive their weapon visit before slot-end
+	// finalization [04 R-COB-02 §2]. Allocation lifetime is the entry gate.
+	if !u.Alive {
 		return sum
 	}
 	s.rules().CombatTick(s, tick, false)
@@ -267,7 +269,9 @@ func (s *Service) StepWeaponsForUnit(u *units.Unit, tick uint32, w *units.World,
 		// This phase resolves and fires the target already installed at entry.
 		if slot.Target.Kind == units.TargetUnit && slot.Target.Unit != 0 {
 			tu := w.Unit(slot.Target.Unit)
-			if tu == nil || !tu.Alive || tu.Dying {
+			// A retained allocated target reaches SweetSpot even with its death
+			// latch set; acquisition has separate filters [06 R-WPN-04 §1].
+			if tu == nil || !tu.Alive {
 				clearSlotTarget(slot, idx)
 				continue
 			}
@@ -299,7 +303,7 @@ func (s *Service) StepWeaponsForUnit(u *units.Unit, tick uint32, w *units.World,
 			if tu == nil {
 				continue
 			}
-			// The target-point resolver's live-unit outcome [06 R-WPN-04 §1]:
+			// The target-point resolver's allocated-unit outcome [06 R-WPN-04 §1]:
 			// `SweetSpot` on the TARGET's script, then that piece's vertex-box
 			// centre added to the target's position. This point — not the
 			// unit's ground position — is what the aim solve, the shot-time
@@ -506,13 +510,11 @@ func (s *Service) TickWeapons(tick uint32, w *units.World, vis *visibility.Servi
 			}
 			for slot := start; slot <= end; slot++ {
 				u := w.Unit(pool.Handle(slot))
-				if u == nil || !u.Alive || u.Dying {
+				if u == nil || !u.Alive {
 					continue
 				}
-				// The stunned over-approximation lives once, at the top of
-				// StepWeaponsForUnit [06 R-DMG-01 §11]; the copy that stood
-				// here also lowered the mark on expiry, which is the Paralyze
-				// row's job and not this loop's [06 §10].
+				// Match the session's allocated-unit visit, including a pending
+				// death latch [04 R-COB-02 §2].
 				s.StepWeaponsForUnit(u, tick, w, vis, terrain, econ, catalog, simRNG, crtRNG)
 			}
 		}
@@ -521,12 +523,10 @@ func (s *Service) TickWeapons(tick uint32, w *units.World, vis *visibility.Servi
 		// The pool-order walk is only the unsliced fixture path's; the sliced
 		// path above indexes the pool directly and never read this list.
 		for _, u := range w.Iter() {
-			if u == nil || u.Dying {
+			if u == nil {
 				continue
 			}
-			// As above: the stunned skip is StepWeaponsForUnit's one
-			// over-approximation [06 R-DMG-01 §11], and the mark's expiry
-			// belongs to the Paralyze row [06 §10].
+			// As in the sliced path, finalization has not happened yet.
 			buckets[u.Owner] = append(buckets[u.Owner], u)
 		}
 		for player := 0; player < 10; player++ {

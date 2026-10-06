@@ -37,40 +37,40 @@ func TestPathProviderPollsPhysicalSlots(t *testing.T) {
 	s.EnsureUnit(w.Unit(h1))
 	s.EnsureUnit(w.Unit(h2))
 	s.EnsureUnit(w.Unit(h3))
-	// Submit in reverse physical order. The first poll must still select slot 1.
+	// Submit in reverse physical order. The initial cursor is the first slot,
+	// so the first poll visits the building in the second slot.
 	s.SubmitMove(h3, 0, path.Cell{X: 3}, path.Cell{X: 9})
 	s.SubmitMove(h1, 0, path.Cell{X: 1}, path.Cell{X: 7})
 	p := s.pathProvider
-	// The exact inclusive throttle refuses the same physical follower at tick
-	// 59 without consuming its staged payload or stamping it.
 	p.SetPathTick(59)
-	_, result := p.Poll(0)
-	if result != path.PollVisited || handleRow(s.Routes, h1).LastRequestTick != 0 {
-		t.Fatalf("tick-59 first slot = %d timestamp=%d, want visited and unstamped", result, handleRow(s.Routes, h1).LastRequestTick)
+	for i, want := range []path.PollResult{path.PollVisited, path.PollVisited, path.PollNoUnit, path.PollVisited} {
+		if _, got := p.Poll(0); got != want {
+			t.Fatalf("tick-59 visit %d = %d, want %d", i, got, want)
+		}
 	}
-	if _, result = p.Poll(0); result != path.PollVisited {
-		t.Fatalf("tick-59 building slot result = %d, want visited", result)
-	}
-	if _, result = p.Poll(0); result != path.PollVisited {
-		t.Fatalf("tick-59 third-slot result = %d, want throttled visit", result)
-	}
-	if _, result = p.Poll(0); result != path.PollNoUnit {
-		t.Fatalf("tick-59 hole result = %d, want no-unit", result)
+	if handleRow(s.Routes, h1).LastRequestTick != 0 || handleRow(s.Routes, h3).LastRequestTick != 0 {
+		t.Fatal("throttled physical visit stamped a request")
 	}
 	p.SetPathTick(60)
-	got, result := p.Poll(0)
-	if result != path.PollRequest || got.Unit != h1 || handleRow(s.Routes, h1).LastRequestTick != 60 {
-		t.Fatalf("first physical visit = %#v/%d, timestamp=%d; want slot %d request at tick 60", got, result, handleRow(s.Routes, h1).LastRequestTick, h1)
-	}
-	if _, result = p.Poll(0); result != path.PollVisited {
+	if _, result := p.Poll(0); result != path.PollVisited {
 		t.Fatalf("building slot result = %d, want visited", result)
 	}
-	got, result = p.Poll(0)
+	got, result := p.Poll(0)
 	if result != path.PollRequest || got.Unit != h3 || handleRow(s.Routes, h3).LastRequestTick != 60 {
 		t.Fatalf("third physical visit = %#v/%d, timestamp=%d; want slot %d request", got, result, handleRow(s.Routes, h3).LastRequestTick, h3)
 	}
 	if _, result = p.Poll(0); result != path.PollNoUnit {
 		t.Fatalf("hole result = %d, want no-unit", result)
+	}
+	got, result = p.Poll(0)
+	if result != path.PollRequest || got.Unit != h1 || handleRow(s.Routes, h1).LastRequestTick != 60 {
+		t.Fatalf("wrapped first-slot visit = %#v/%d, timestamp=%d; want slot %d request", got, result, handleRow(s.Routes, h1).LastRequestTick, h1)
+	}
+	// Advance past the building, consumed third-slot request and hole.
+	for i := 0; i < 3; i++ {
+		if _, result = p.Poll(0); result == path.PollRequest {
+			t.Fatal("consumed request was admitted twice")
+		}
 	}
 	// One more visit wraps to the first slot. Cancellation and replacement leave
 	// no FIFO residue that could select the old request before this slot visit.
@@ -100,7 +100,7 @@ func TestPathAdmissionConsumesTheFixedExtraCharge(t *testing.T) {
 	if !ok {
 		t.Fatal("missing player-0 slice")
 	}
-	h, err := w.CreateWithForcedSlot(wiringDef(), 0, 0, 0, 0, pool.Handle(start))
+	h, err := w.CreateWithForcedSlot(wiringDef(), 0, 0, 0, 0, pool.Handle(start+1))
 	if err != nil {
 		t.Fatalf("create mover: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestPathAdmissionConsumesTheFixedExtraCharge(t *testing.T) {
 	s.Scheduler.Tick(60)
 	// 1333 allowance: first visit costs 1, admission costs 100, then 1232
 	// no-unit physical visits bring the accumulator to zero.
-	if got, want := s.pathProvider.cursor[0], start+1232; got != want {
+	if got, want := s.pathProvider.cursor[0], start+1233; got != want {
 		t.Fatalf("cursor after fixed admission charge = %d, want %d", got, want)
 	}
 }
@@ -140,12 +140,15 @@ func TestPathProviderBindWorldKeepsCursorForTheSamePool(t *testing.T) {
 	s.SubmitMove(h2, 0, path.Cell{X: 3}, path.Cell{X: 4})
 	p := s.pathProvider
 	p.SetPathTick(60)
-	if got, result := p.Poll(0); result != path.PollRequest || got.Unit != h1 {
-		t.Fatalf("first physical visit = %#v/%d, want slot %d request", got, result, h1)
+	if got, result := p.Poll(0); result != path.PollRequest || got.Unit != h2 {
+		t.Fatalf("first physical visit = %#v/%d, want slot %d request", got, result, h2)
 	}
 	s.BindWorld(w)
-	if got, result := p.Poll(0); result != path.PollRequest || got.Unit != h2 {
-		t.Fatalf("same-world bind visit = %#v/%d, want next slot %d request", got, result, h2)
+	if _, result := p.Poll(0); result != path.PollNoUnit {
+		t.Fatalf("same-world bind visit = %d, want the third-slot hole", result)
+	}
+	if got, result := p.Poll(0); result != path.PollRequest || got.Unit != h1 {
+		t.Fatalf("wrapped same-world visit = %#v/%d, want slot %d request", got, result, h1)
 	}
 
 	newWorld := newMovementFixtureWorld(3)
@@ -157,7 +160,7 @@ func TestPathProviderBindWorldKeepsCursorForTheSamePool(t *testing.T) {
 	if _, result := p.Poll(0); result != path.PollNoUnit {
 		t.Fatalf("replacement-world first visit = %d, want no-unit", result)
 	}
-	if got := p.cursor[0]; got != newStart {
-		t.Fatalf("replacement-world cursor = %d, want reset first slot %d", got, newStart)
+	if got := p.cursor[0]; got != newStart+1 {
+		t.Fatalf("replacement-world cursor = %d, want reset second slot %d", got, newStart+1)
 	}
 }

@@ -144,6 +144,7 @@ type retailOptionsSnapshot struct {
 	interfaceType       int
 	switchAlt           bool
 	categories          [retailMusicCategoryCount]int
+	requestedTrack      int
 }
 
 // retailMusicCategoryCount is the length of the per-track category array: one
@@ -154,8 +155,9 @@ const retailMusicCategoryCount = 100
 // entry snapshot `CANCEL` and `UNDO` restore, and the knob position of every
 // kind-4 slider on the open page [07 R-FE-01 §6].
 type retailOptionsState struct {
-	page     string // "" for the root with no page merged
-	snapshot retailOptionsSnapshot
+	page              string // "" for the root with no page merged
+	musicPageDeparted bool   // The merged host panel may reach more than one close site.
+	snapshot          retailOptionsSnapshot
 	// Sliders are keyed by their window-record index. Their display names are
 	// only for the bounded first-match lookup helpers; two records that happen
 	// to share a name retain separate knob state [07 R-WGT-02 §2].
@@ -308,8 +310,7 @@ func retailSliderValue(knob, travel, max int) int {
 // retailSliderKnob is the position the page open computes from a stored value:
 // `x = min(value, max) * (travel - 1) / max`, `pos = trunc(x)`, and when
 // `x - pos` is non-zero `pos = trunc(x + 1)` — a ceiling for a non-integral x,
-// not a rounding. `VIDSLDR` divides by its maximum rather than multiplying by a
-// stored reciprocal, because its maximum is the mode count and not a constant
+// not a rounding. SCREEN's stored-reciprocal path is handled separately below
 // [07 R-FE-01 §6 "slider arithmetic"].
 func retailSliderKnob(value, travel, max int) int {
 	if travel < 2 || max <= 0 {
@@ -328,6 +329,22 @@ func retailSliderKnob(value, travel, max int) int {
 	}
 	if pos > travel-1 {
 		pos = travel - 1
+	}
+	return pos
+}
+
+// retailScreenSliderKnob preserves the stored binary32 reciprocal before the
+// non-integral ceiling. Division by 65 can erase the fraction that advances
+// the opening knob [07 R-FE-01 §6].
+func retailScreenSliderKnob(value, travel int) int {
+	if travel < 2 {
+		return 0
+	}
+	value = min(int(uint8(value)), 65)
+	x := float64(value) * float64(travel-1) * float64(float32(1.0/65.0))
+	pos := int(x)
+	if x-float64(pos) != 0 {
+		pos = int(x + 1)
 	}
 	return pos
 }
@@ -473,6 +490,7 @@ func (g *gameShell) openRetailOptionsScreen(inBattle bool) error {
 		categories:        retailDefaultCategories(),
 		inBattle:          inBattle,
 		serviceStageIndex: -1,
+		track:             g.retailMusicSelection,
 	}
 	// Retail's stored game speed and the session's requested speed are one
 	// word: the `GAME` slider reads it, the speed setter writes it, and the
@@ -494,11 +512,6 @@ func (g *gameShell) openRetailOptionsScreen(inBattle bool) error {
 	}
 	optionsState.snapshot = g.retailOptionsSnapshot()
 	optionsState.tracks = g.retailMusicTrackCount()
-	if optionsState.tracks > 0 {
-		// A nonzero count sets the next track to 1, which is what the `MUSIC`
-		// page then shows as its selection [03 R-AUD-01 §4].
-		optionsState.track = 1
-	}
 	// The in-battle arm hides every gadget whose name begins `MAP` or `VID`
 	// before the window is built, so the hidden state is what the panel records
 	// [07 R-FE-01 §6]. On the stock files nothing matches: the in-battle
@@ -510,6 +523,7 @@ func (g *gameShell) openRetailOptionsScreen(inBattle bool) error {
 	}
 	g.disableUnavailableOptionsPages(window, inBattle)
 	g.installRetailWindowButtonArt(window, nil)
+	g.initializeRetailLabels(window)
 	optionsPanel = ui.NewPanel(window)
 	if optionsPanel == nil {
 		return retailFrontendAssetError(g.cs, "retail options GUI unavailable", root, "the authored options root", nil)
@@ -613,6 +627,9 @@ func (g *gameShell) retailOptionsSnapshot() retailOptionsSnapshot {
 	if optionsState != nil {
 		s.categories = optionsState.categories
 	}
+	if c := g.retailMusicController(); c != nil {
+		s.requestedTrack = c.RequestedTrack()
+	}
 	return s
 }
 
@@ -625,17 +642,17 @@ func (g *gameShell) restoreRetailOptionsSnapshot(s retailOptionsSnapshot) {
 	g.setCommunityHealthBars(s.communityHealthBars)
 	g.setGameplay(s.gameplay)
 	g.setBuilderOptions(s.builderOptions)
+	oldMusicVolume, oldMusicMode, oldCDMode := g.audioPrefs.MusicVol, g.audioPrefs.MusicMode, g.audioPrefs.CDMode
 	g.audioPrefs = s.audio
+	g.audioPrefs.MusicVol, g.audioPrefs.MusicMode, g.audioPrefs.CDMode = oldMusicVolume, oldMusicMode, oldCDMode
 	g.messages = s.messages
 	g.scrollSpeed = s.scrollSpeed
 	g.gameSpeed = s.gameSpeed
 	g.interfaceType = s.interfaceType
 	g.setSwitchAlt(s.switchAlt)
-	if optionsState != nil {
-		optionsState.categories = s.categories
-		g.applyRetailMusicMode()
-	}
-	g.setRetailMusicEnabled(g.audioPrefs.MusicMode != 0)
+	// Sound restoration precedes the independent music snapshot [07 R-FE-01 §6].
+	g.applyRetailAudioOptions()
+	g.restoreRetailMusicSnapshot(s)
 	g.applyRetailVisualOptions(clPtr)
 	applyGammaOption(clPtr, g.display.Gamma)
 	g.applyRetailAudioOptions()
@@ -643,6 +660,26 @@ func (g *gameShell) restoreRetailOptionsSnapshot(s retailOptionsSnapshot) {
 	// values have live consumers, so the same writes the page made have to be
 	// taken back from them too [07 R-CAM-01 §3][07 R-CAM-01 §7][07 §10].
 	g.applyRetailOptionsToBattle()
+}
+
+// restoreRetailMusicSnapshot preserves the preference/controller distinction:
+// the conditional tick sees the previous enable preference and request, then
+// those stored values are restored without an enable setter [07 R-FE-01 §6].
+func (g *gameShell) restoreRetailMusicSnapshot(s retailOptionsSnapshot) {
+	g.audioPrefs.MusicVol = s.audio.MusicVol
+	g.audioPrefs.CDMode = s.audio.CDMode
+	if optionsState != nil {
+		optionsState.categories = s.categories
+		g.applyRetailMusicMode()
+	}
+	c := g.retailMusicController()
+	if c != nil && g.audioPrefs.MusicMode != s.audio.MusicMode {
+		c.UpdateNow()
+	}
+	g.audioPrefs.MusicMode = s.audio.MusicMode
+	if c != nil && s.requestedTrack <= c.NumTracks() {
+		c.SetRequestedTrack(s.requestedTrack)
+	}
 }
 
 // retailGreyGadget sets or clears one gadget's greyed word by name. "Greyed" is
@@ -679,12 +716,33 @@ func (g *gameShell) openRetailOptionsScreenReportingIn(inBattle bool) {
 
 // closeRetailOptionsScreen pops the root and drops the page.
 func (g *gameShell) closeRetailOptionsScreen() {
+	g.departRetailMusicPage()
+	if g != nil && optionsState != nil {
+		g.retailMusicSelection = optionsState.track
+	}
 	if g != nil && optionsPanel != nil && g.frontend.Panels.Top() == optionsPanel {
 		g.frontend.Panels.Pop()
 	}
 	optionsPanel = nil
 	optionsAssets = nil
 	optionsState = nil
+}
+
+// departRetailMusicPage runs once for the active music page, before a root
+// action or between restoration and reopening [07 R-FE-01 §6]. The frontend
+// shares a panel for root and page, so both transition sites may reach here.
+func (g *gameShell) departRetailMusicPage() {
+	if g == nil || optionsState == nil || optionsState.page != "music" || optionsState.musicPageDeparted {
+		return
+	}
+	optionsState.musicPageDeparted = true
+	if c := g.retailMusicController(); c != nil {
+		if optionsState.inBattle {
+			c.UpdateNow()
+		} else {
+			c.Stop()
+		}
+	}
 }
 
 // retailOptionsActive reports whether the options root is the active panel.
@@ -758,6 +816,7 @@ func (g *gameShell) openRetailOptionsPage(page string) {
 			return
 		}
 	}
+	g.departRetailMusicPage()
 	root := optionsAssets.window
 	panelRect, panelIndex, centred := retailOptionsPanelRect(root)
 	dx, dy := pageWindow.OriginX, pageWindow.OriginY
@@ -776,6 +835,9 @@ func (g *gameShell) openRetailOptionsPage(page string) {
 	for _, gad := range pageWindow.Gadgets[1:] {
 		gad.SourceName = retailOptionsPageSource + gad.SourceName
 		gad.Rect.X += dx
+		if gad.Kind == gui.KindLabel {
+			gad.Rect.X = int32(int16(gad.Rect.X))
+		}
 		gad.Rect.Y += dy
 		kept = append(kept, gad)
 	}
@@ -787,11 +849,13 @@ func (g *gameShell) openRetailOptionsPage(page string) {
 	g.installRetailWindowButtonArt(root, nil)
 	optionsAssets.background = background
 	optionsState.page = page
+	optionsState.musicPageDeparted = false
 	optionsState.sliders = map[int]*retailSliderState{}
 
-	// The panel is rebuilt over the widened gadget list, then the entry values
-	// are pushed into it: after the page opens every slider's value callback
-	// runs once so the labels match [07 R-FE-01 §6].
+	// Rebuild the panel over the merged gadget list, then seed its controls.
+	// Visual-page entry does not read the knobs back into settings
+	// [07 R-FE-01 §6].
+	g.initializeRetailLabels(root)
 	rebuilt := ui.NewPanel(root)
 	if rebuilt == nil {
 		return
@@ -865,9 +929,9 @@ func (g *gameShell) retailSliderStoredValue(key string) int {
 	return 0
 }
 
-// refreshRetailOptionsPage installs every page control's state from the live
-// preference block and runs each slider's value callback once, which is what
-// the page open does [07 R-FE-01 §6].
+// refreshRetailOptionsPage installs controls from the live preference block.
+// Visual pages leave the settings unchanged by their seeded knobs
+// [07 R-FE-01 §6].
 func (g *gameShell) refreshRetailOptionsPage() {
 	if !g.retailOptionsActive() {
 		return
@@ -893,12 +957,16 @@ func (g *gameShell) refreshRetailOptionsPage() {
 		if !ok {
 			continue
 		}
+		knob := retailSliderKnob(g.retailSliderStoredValue(key), travel, max)
+		if key == "screen" {
+			knob = retailScreenSliderKnob(g.retailSliderStoredValue(key), travel)
+		}
 		optionsState.sliders[i] = &retailSliderState{
 			travel:   travel,
 			knobSize: knobSize,
 			arrowW:   arrowW,
 			max:      max,
-			knob:     retailSliderKnob(g.retailSliderStoredValue(key), travel, max),
+			knob:     knob,
 		}
 		// The painter and the pointer service read the panel's knob word, so
 		// the opened position is installed there at once rather than at the
@@ -927,6 +995,11 @@ func (g *gameShell) refreshRetailOptionsPage() {
 	case "sound":
 		g.syncRetailSoundPage()
 	case "music":
+		if g.audioPrefs.CDMode == 3 {
+			if c := g.retailMusicController(); c != nil {
+				optionsState.track = c.RequestedTrack()
+			}
+		}
 		g.syncRetailMusicPage()
 	case "speeds":
 		// `UNITCHAT` is the acknowledgement **text** gauge, displayed as the
@@ -936,11 +1009,13 @@ func (g *gameShell) refreshRetailOptionsPage() {
 		p.SetStageAt(p.Index("LEFTCLICK"), g.interfaceType)
 		g.syncRetailMaxLinesLabel()
 	}
-	// After the page opens, every kind-4 gadget's value callback runs once, so
-	// the labels and the stored values match the knobs the opener just placed
-	// [07 R-FE-01 §6].
-	for _, index := range order {
-		g.commitRetailSliderValue(index, optionsState.sliders[index])
+	// Visual pages seed and paint without invoking value callbacks. SPEEDS
+	// explicitly runs them, including the quantised SCREEN write-back
+	// [07 R-FE-01 §6]. Other pages retain their existing callback pass.
+	if optionsState.page != "visuals" {
+		for _, index := range order {
+			g.commitRetailSliderValue(index, optionsState.sliders[index])
+		}
 	}
 }
 
@@ -1019,6 +1094,11 @@ func (g *gameShell) syncRetailSoundPage() {
 // music on the switch read `Off`, a click turned the music off and showed
 // `On`, and the click back to `Off` turned the music on again.
 func (g *gameShell) syncRetailMusicPage() {
+	g.syncRetailMusicControls()
+	g.syncRetailMusicTrackDetails()
+}
+
+func (g *gameShell) syncRetailMusicControls() {
 	p := optionsPanel
 	if p == nil || optionsAssets == nil {
 		return
@@ -1034,8 +1114,73 @@ func (g *gameShell) syncRetailMusicPage() {
 		retailGreyGadget(optionsAssets.window, name, !tracks)
 	}
 	retailGreyGadget(optionsAssets.window, "TRACKTYPE", !(tracks && g.audioPrefs.CDMode == settings.MaxCDMode))
-	p.SetStageAt(p.Index("TRACKTYPE"), retailTrackCategory(optionsState.track))
-	g.syncRetailTrackLabel()
+}
+
+// syncRetailMusicTrackDetails is also called between widget processing and
+// action dispatch. It must not reseed a mode button whose stage the service
+// just advanced [07 R-FE-01 §6].
+func (g *gameShell) syncRetailMusicTrackDetails() {
+	p := optionsPanel
+	if p == nil || optionsState == nil || optionsAssets == nil {
+		return
+	}
+	if p.Index("TRACKTYPE") >= 1 {
+		retailGreyGadget(optionsAssets.window, "TRACKTYPE", g.audioPrefs.MusicMode == 0 || optionsState.tracks == 0 || g.audioPrefs.CDMode != 4)
+		p.SetStageAt(p.Index("TRACKTYPE"), retailTrackCategory(optionsState.track))
+		g.syncRetailTrackLabel()
+	}
+	if i := p.Index("TRACKNUM"); i >= 1 {
+		// The retail lock helper handles buttons and labels; text-input
+		// controls are unchanged by this helper [07 R-FE-01 §6].
+		kind := p.Window.Gadgets[i].Kind
+		if kind == gui.KindButton || kind == gui.KindLabel {
+			retailGreyGadget(optionsAssets.window, "TRACKNUM", g.audioPrefs.MusicMode == 0)
+		}
+	}
+	if g.audioPrefs.CDMode == 3 {
+		if c := g.retailMusicController(); c != nil && optionsState.track <= c.NumTracks() {
+			c.SetRequestedTrack(optionsState.track)
+		}
+	}
+}
+
+// pollRetailMusicPage follows widget edits but precedes the action callback,
+// even on a pass with no fired gadget [07 R-FE-01 §6].
+func (g *gameShell) pollRetailMusicPage(p *ui.Panel) {
+	if p == nil || p != optionsPanel || optionsState == nil || optionsState.page != "music" {
+		return
+	}
+	i := p.Index("TRACKNUM")
+	if i < 1 || (p.Window.Gadgets[i].Kind != gui.KindButton && p.Window.Gadgets[i].Kind != gui.KindTextBox && p.Window.Gadgets[i].Kind != gui.KindLabel) {
+		// TODO(question): Retail leaves the poll's text uninitialized when
+		// TRACKNUM is absent or has the wrong kind. Skip the poll as a host
+		// fallback until that malformed-page lifetime is settled [07 R-FE-01 §6].
+		return
+	}
+	c := g.retailMusicController()
+	if c != nil && retailMusicTrackNumber(p.TextAt(i)) != int32(c.NextTrack()) {
+		optionsState.track = c.NextTrack()
+		g.syncRetailMusicTrackDetails()
+	}
+}
+
+// retailMusicTrackNumber reads the signed decimal prefix, including the
+// zero result for NO DISC, used by the page poll [07 R-FE-01 §6].
+func retailMusicTrackNumber(text string) int32 {
+	text = strings.TrimLeft(text, " \t\r\n\v\f")
+	negative := false
+	if len(text) != 0 && (text[0] == '+' || text[0] == '-') {
+		negative = text[0] == '-'
+		text = text[1:]
+	}
+	var value int32
+	for i := 0; i < len(text) && text[i] >= '0' && text[i] <= '9'; i++ {
+		value = value*10 + int32(text[i]-'0')
+	}
+	if negative {
+		return -value
+	}
+	return value
 }
 
 // retailTrackCategory reads one track's category byte. Track 0 is "no
@@ -1239,8 +1384,9 @@ func (g *gameShell) setRetailMusicEnabled(on bool) {
 	}
 }
 
-// applyRetailMusicMode applies `cdmode` to the music object. `Repeat` copies the
-// current selection into the requested track [03 R-AUD-01 §4].
+// applyRetailMusicMode applies the mode and categories without selecting or
+// playing a track. The TRACKMODE callback owns its Repeat selection restore
+// [03 R-AUD-01 §4].
 func (g *gameShell) applyRetailMusicMode() {
 	c := g.retailMusicController()
 	if c == nil {
@@ -1249,16 +1395,6 @@ func (g *gameShell) applyRetailMusicMode() {
 	c.Configure(audio.PlayMode(g.audioPrefs.CDMode), c.DesiredCategory())
 	for i, category := range optionsState.categories {
 		c.SetTrackCategory(i+1, category)
-	}
-	if g.audioPrefs.CDMode == 3 {
-		// The copy is the arm's whole effect on the object's track state; the
-		// play below is the "and applies it" half [03 R-AUD-01 §4]. Before the
-		// requested track was a field of its own, the copy had nowhere to go
-		// and Repeat outside this screen played nothing.
-		c.SetRequestedTrack(optionsState.track)
-		if optionsState.track > 0 {
-			c.Play(optionsState.track)
-		}
 	}
 }
 
@@ -1269,38 +1405,39 @@ func (g *gameShell) applyRetailMusicMode() {
 func (g *gameShell) activateRetailMusicTransport(key string) {
 	c := g.retailMusicController()
 	count := optionsState.tracks
+	if c != nil {
+		count = c.NumTracks()
+	}
 	switch key {
 	case "cdplay":
-		if c != nil && optionsState.track > 0 {
+		if c != nil {
 			c.Play(optionsState.track)
 		}
+		return // Play has no detail refresh or Repeat request write [07 R-FE-01 §6].
 	case "cdnext":
-		if count > 0 {
-			optionsState.track++
-			if optionsState.track > count {
-				optionsState.track = 1
-			}
+		optionsState.track++
+		if optionsState.track > count {
+			optionsState.track = 1
 		}
 	case "cdprev":
-		if count > 0 {
-			optionsState.track--
-			if optionsState.track < 1 {
-				optionsState.track = count
-			}
+		optionsState.track--
+		if optionsState.track < 1 {
+			optionsState.track = count
 		}
 	case "cdstop":
 		if c != nil {
 			c.Stop()
 		}
+		optionsState.track = 1
+	default:
+		return
+	}
+	if c != nil {
+		optionsState.track = c.SelectTrack(optionsState.track)
+	} else if count == 0 {
 		optionsState.track = 0
-		if count > 0 {
-			optionsState.track = 1
-		}
 	}
-	if c != nil && (key == "cdnext" || key == "cdprev") && c.IsPlaying() && optionsState.track > 0 {
-		c.Play(optionsState.track)
-	}
-	g.syncRetailMusicPage()
+	g.syncRetailMusicTrackDetails()
 }
 
 // restoreRetailOptionsDefaults is every page's `RESTORE`. Each page restores
@@ -1352,15 +1489,17 @@ func (g *gameShell) restoreRetailOptionsDefaults() {
 		g.audioPrefs.UnitChat = settings.MaxUnitChat
 		g.applyRetailAudioOptions()
 	case "music":
-		// `musicvol` 32, `cdmode` 4, and music turned on [03 R-AUD-01 §4].
+		// Restore the stored preferences; the live controller mode and enable
+		// remain independent [07 R-FE-01 §6].
 		g.audioPrefs.MusicVol = settings.DefaultMusicVol
 		g.audioPrefs.CDMode = settings.DefaultCDMode
 		if g.audioPrefs.MusicMode == 0 {
 			g.audioPrefs.MusicMode = 1
-			g.setRetailMusicEnabled(true)
+			if c := g.retailMusicController(); c != nil {
+				c.UpdateNow()
+			}
 		}
 		g.applyRetailAudioOptions()
-		g.applyRetailMusicMode()
 	case "speeds":
 		// text-scroll 10, lines 10, game speed 10, scroll speed 32,
 		// `Interface Type` 0, voice level 10, text level 5 [07 R-CAM-01 §7].
@@ -1415,14 +1554,8 @@ func (g *gameShell) undoRetailOptionsPage() {
 		g.audioPrefs.UnitChat = s.audio.UnitChat
 		g.applyRetailAudioOptions()
 	case "music":
-		// Volume, list, mode, enable and requested track [03 R-AUD-01 §4].
-		g.audioPrefs.MusicVol = s.audio.MusicVol
-		g.audioPrefs.MusicMode = s.audio.MusicMode
-		g.audioPrefs.CDMode = s.audio.CDMode
-		optionsState.categories = s.categories
-		g.setRetailMusicEnabled(g.audioPrefs.MusicMode != 0)
+		g.restoreRetailMusicSnapshot(s)
 		g.applyRetailAudioOptions()
-		g.applyRetailMusicMode()
 	case "speeds":
 		g.messages.TextScroll = s.messages.TextScroll
 		g.messages.TextLines = s.messages.TextLines
@@ -1524,9 +1657,18 @@ func (g *gameShell) activateRetailOptionsGadget(name string) bool {
 		return false
 	}
 	name = gui.CallbackName(name)
-	// Every arm below either transitions or writes a preference, so the cue
-	// precedes them all, as it does on the screens frontendCue serves.
-	g.playMenuCue(retailOptionsCue(retailOptionsCueKey(name)))
+	if _, pageAction := retailOptionsPageKey(name); pageAction || name == "PREV" || name == "CANCEL" {
+		g.departRetailMusicPage()
+	}
+	// Sound mode must reach the cue with its new backend gates installed;
+	// sound defaults/undo also finish reopening first. Other actions retain
+	// their cue-before-action ordering [07 R-FE-01 §6].
+	cue := retailOptionsCue(retailOptionsCueKey(name))
+	if name == "MODE" || optionsState.page == "sound" && (name == "RESTORE" || name == "UNDO") {
+		defer g.playMenuCue(cue)
+	} else {
+		g.playMenuCue(cue)
+	}
 	switch name {
 	case "NHEALTH", "NCOUNTERS", "NRELOAD", "NVETERAN", "NGROUPS", "NALLIES", "NWEATHER", "NVICTORY":
 		return g.activateCommunityHUDOption(name)
@@ -1541,16 +1683,16 @@ func (g *gameShell) activateRetailOptionsGadget(name string) bool {
 		g.openRetailOptionsPage(page)
 		return true
 	case "PREV":
-		// "OK": every preference is written back, then the window closes
-		// [07 R-FE-01 §6][07 R-FE-01 §11].
+		// Music departure has already run; close the root and persist its
+		// preferences [07 R-FE-01 §6][07 R-FE-01 §11].
 		g.closeRetailOptionsScreen()
 		g.commitWindowSize()
 		g.saveSettings()
 		return true
 	case "CANCEL":
-		// The entry snapshot is restored and re-applied, then the window
-		// closes. Unsaved edits made on any page are discarded, because no
-		// screen writes a value directly [07 R-FE-01 §6][07 R-FE-01 §11].
+		// The active music page departed before root dispatch. Restore the
+		// entry snapshot now, then close the root without another departure
+		// [07 R-FE-01 §6][07 R-FE-01 §11].
 		g.restoreRetailOptionsSnapshot(optionsState.snapshot)
 		g.closeRetailOptionsScreen()
 		return true
@@ -1589,19 +1731,20 @@ func (g *gameShell) activateRetailOptionsGadget(name string) bool {
 		g.syncRetailSoundPage()
 		return true
 	case "SPEECH":
-		// `SPEECH` writes both halves at once: bit 6 takes `stage != 0` and
-		// the acknowledgement voice level takes `stage × 5` [03 R-AUD-01 §2].
+		// Speech enable follows the stage, while the level retains only the
+		// low byte of stage × 5. Keep the live stage until another gesture or
+		// reopen, which derives it from the stored level [03 R-AUD-01 §2].
 		speech := 0
 		if g.audioPrefs.SpeechFX != 0 {
 			speech = g.audioPrefs.UnitChat / 5
 		}
 		stage := g.retailOptionsStage("SPEECH", 3, speech)
 		g.audioPrefs.SpeechFX = boolInt(stage != 0)
-		g.audioPrefs.UnitChat = stage * 5
+		g.audioPrefs.UnitChat = int(uint8(stage * 5))
+		optionsPanel.SetStageAt(optionsPanel.Index("SPEECH"), stage)
 		// Both halves are gates the voice queue reads, so the change reaches
 		// it here rather than waiting for the next battle [03 §8.3].
 		g.applyRetailVoiceGates()
-		g.syncRetailSoundPage()
 		return true
 	case "TEST":
 		g.playRetailSoundTest()
@@ -1613,14 +1756,19 @@ func (g *gameShell) activateRetailOptionsGadget(name string) bool {
 		// does what it then shows [03 R-AUD-01 §4][07 R-WGT-01 §3].
 		g.audioPrefs.MusicMode = g.retailOptionsStage("NOTRAK", 2, g.audioPrefs.MusicMode)
 		g.setRetailMusicEnabled(g.audioPrefs.MusicMode != 0)
-		g.syncRetailMusicPage()
+		g.syncRetailMusicControls()
 		return true
 	case "TRACKMODE":
-		// `TRACKMODE`'s stage plus one is `cdmode`. `Repeat` copies the
-		// selection into the requested track; `Custom` shows `TRACKTYPE` for
-		// the selection [03 R-AUD-01 §4].
+		// Repeat restores the requested track into the screen selection. It
+		// does not play here; later tick/page synchronization stays separate
+		// [03 R-AUD-01 §4].
 		g.audioPrefs.CDMode = g.retailOptionsStage("TRACKMODE", settings.MaxCDMode, g.audioPrefs.CDMode-1) + 1
 		g.applyRetailMusicMode()
+		if g.audioPrefs.CDMode == 3 {
+			if c := g.retailMusicController(); c != nil {
+				optionsState.track = c.RequestedTrack()
+			}
+		}
 		g.syncRetailMusicPage()
 		return true
 	case "TRACKTYPE":
@@ -1644,10 +1792,11 @@ func (g *gameShell) activateRetailOptionsGadget(name string) bool {
 		optionsPanel.SetStageAt(optionsPanel.Index("LEFTCLICK"), g.interfaceType)
 		return true
 	case "UNITCHAT":
-		// `UNITCHAT` is the acknowledgement **text** level, `stage × 5`. Its
-		// voice twin is the sound page's `SPEECH` [07 R-CAM-01 §7].
+		// The setting retains the low byte of stage × 5; the displayed stage
+		// remains unchanged until a later widget action or reopen
+		// [07 R-FE-01 §6].
 		stage := g.retailOptionsStage("UNITCHAT", 3, g.messages.UnitChatText/5)
-		g.messages.UnitChatText = stage * 5
+		g.messages.UnitChatText = int(uint8(stage * 5))
 		optionsPanel.SetStageAt(optionsPanel.Index("UNITCHAT"), stage)
 		// The caption level is the queue's second crowding gate [03 §8.3].
 		g.applyRetailVoiceGates()
@@ -1758,12 +1907,17 @@ func (g *gameShell) commitRetailSliderValue(index int, s *retailSliderState) {
 		g.gameSpeed = value
 		g.applyRetailBattleGameSpeed()
 	case "screen":
-		// The `SCREEN` read-out floors at 1 and stores the scroll-speed byte,
-		// which the camera's scroll pass reads [07 R-CAM-01 §7][07 §10].
+		// Entry can seed a knob beyond the last ordinary pointer position.
+		// Read that signed position without clamping it, then floor at one
+		// and retain the setting byte [07 R-FE-01 §6].
+		value = 0
+		if s.travel >= 2 {
+			value = int(float64(int16(s.knob)) / float64(s.travel-1) * float64(s.max))
+		}
 		if value < settings.MinScrollSpeed {
 			value = settings.MinScrollSpeed
 		}
-		g.scrollSpeed = value
+		g.scrollSpeed = int(uint8(value))
 		g.applyRetailBattleScrollSpeed()
 	case "txtscrol":
 		g.messages.TextScroll = value

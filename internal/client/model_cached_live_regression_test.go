@@ -522,3 +522,157 @@ func TestModelImageInvalidationPreservesRetainedOrientation(t *testing.T) {
 		t.Fatalf("invalidation advanced orientation: %v, want %v", got, before)
 	}
 }
+
+// The final ZBuffer=0 image stays keyless, but anti-aliasing always rasterizes
+// into the shared keyed scratch [03 R-REN-03A §6]. This also selects the keyed
+// texture mapper rather than its raw keyless fallback.
+func TestKeylessStructureAntialiasUsesKeyedScratch(t *testing.T) {
+	c, v := cachedLiveRegressionSubject(t)
+	c.pal = &palette.Tables{}
+	draw, ok := c.unitDrawFor(v)
+	if !ok {
+		t.Fatal("draw missing")
+	}
+	draw.KeyPlane = false
+	for _, aa := range []bool{false, true} {
+		c.antiAlias = aa
+		m, ok := c.composeModelLane(draw, v.Owner, unitTeamColor(v), v.InstanceID, modelCursorUnit, nil, 0, presentationrender.PieceLaneCached, false)
+		if !ok || m.image.height != nil || (m.raster.height != nil) != aa || m.raster.framebuffer {
+			t.Fatalf("aa=%v: final/scratch key-plane contract lost", aa)
+		}
+	}
+	live, ok := c.composeDirectLiveModel(draw, unitTeamColor(v), v.InstanceID, modelCursorUnit, presentationrender.PieceLaneLive)
+	if !ok || !live.raster.framebuffer || live.raster.height != nil {
+		t.Fatal("direct live lane lost framebuffer mapper")
+	}
+}
+
+func cachedStagingKeyOneSubject(t *testing.T) (*Client, frame.UnitView, frame.UnitView) {
+	t.Helper()
+	c := newPieceFixtureClient(t)
+	c.models["seed-parent"] = syntheticModel([]pieceInfo{{name: "base", parent: -1}, {name: "live", parent: 0}}, []syntheticTri{
+		makeTriangle(0, "base", [3][3]float64{{0, -50, 0}, {16, -50, 0}, {0, -50, 16}}, 31, 0),
+		makeTriangle(1, "live", [3][3]float64{{0, -49, 0}, {16, -49, 0}, {0, -49, 16}}, 99, 0),
+	}, 0)
+	c.models["seed-child"] = syntheticModel([]pieceInfo{{name: "base", parent: -1}}, []syntheticTri{
+		makeTriangle(0, "base", [3][3]float64{{0, -50, 0}, {32, -50, 0}, {0, -50, 32}}, 77, 0),
+	}, 0)
+	parent := frame.UnitView{InstanceID: 801, Slot: 1, Model: "seed-parent", X: numeric.FixedFromInt(100), Z: numeric.FixedFromInt(100), ZBuffer: true, BMCode: true, CacheRevision: 1, CacheValidityRevision: 1,
+		Pieces: []frame.PieceView{{Index: 0}, {Index: 1, DontCache: true}}}
+	child := frame.UnitView{InstanceID: 802, Slot: 2, Model: "seed-child", X: parent.X, Z: parent.Z, ZBuffer: true, BMCode: true, NoShadow: true, CacheRevision: 1, CacheValidityRevision: 1}
+	return c, parent, child
+}
+
+// The parent live face has key1 and is above the child key0 at identical
+// projected pixels. Enlarging for cargo must seed first, then draw that live
+// face: filtering a completed parent a second time would let cargo win
+// [03 R-REN-03A §4].
+func TestCachedStagingSeedsBeforeLiveAndCargo(t *testing.T) {
+	c, parent, child := cachedStagingKeyOneSubject(t)
+	c.shadows, c.vehicleShadows = true, true
+	c.pal = &palette.Tables{}
+	cachedLiveReplay(t, c, parent)
+	wantLive := bytes.Count(c.indexed, []byte{99})
+	if wantLive == 0 {
+		t.Fatal("authored live face was not drawn")
+	}
+	cached := c.cachedModelBodies[parent.InstanceID].image
+	colors, keys := bytes.Clone(cached.color), bytes.Clone(cached.height)
+	wantShadow := 0
+	for _, cmd := range c.list.ModelCommands() {
+		if cmd.Classic != nil && cmd.Classic.Shadow != nil {
+			for _, covered := range cmd.Classic.Shadow.Coverage {
+				if covered {
+					wantShadow++
+				}
+			}
+		}
+	}
+	if wantShadow == 0 {
+		t.Fatal("authored mobile parent did not cast a shadow")
+	}
+
+	clearIndexed(c)
+	c.resetListForTest()
+	c.modelScratch.reset()
+	c.modelScratch.active = true
+	defer func() { c.modelScratch.active = false }()
+	if !c.composeCarrier(parent, 0, 0, []frame.UnitView{child}) {
+		t.Fatal("carrier was not recorded")
+	}
+	c.replayForTest()
+	if got := bytes.Count(c.indexed, []byte{99}); got != wantLive {
+		t.Fatalf("live pixels after cargo=%d, want unchanged%d", got, wantLive)
+	}
+	if bytes.Count(c.indexed, []byte{77}) == 0 {
+		t.Fatal("enlarged cargo was not drawn")
+	}
+	if !bytes.Equal(cached.color, colors) || !bytes.Equal(cached.height, keys) {
+		t.Fatal("frame staging changed immutable retained planes")
+	}
+	gotShadow := 0
+	for _, cmd := range c.list.ModelCommands() {
+		if cmd.Classic != nil && cmd.Classic.Shadow != nil {
+			for _, covered := range cmd.Classic.Shadow.Coverage {
+				if covered {
+					gotShadow++
+				}
+			}
+		}
+	}
+	if gotShadow != wantShadow {
+		t.Fatalf("parent-only shadow pixels=%d, want%d", gotShadow, wantShadow)
+	}
+}
+
+// The packet retains source dimensions while live motion and cargo enlarge the
+// current union; neither changes the immutable cached lane's identity.
+func TestGeometryCachedSeedRetainsSourceBeforeRebase(t *testing.T) {
+	c, v := cachedLiveRegressionSubject(t)
+	c.geometryOnlyModels = true
+	record := func(children []frame.UnitView) *drawlist.ModelGeometry {
+		c.resetListForTest()
+		c.modelScratch.reset()
+		c.modelScratch.active = true
+		defer func() { c.modelScratch.active = false }()
+		if len(children) == 0 {
+			if !c.drawUnitModel(v, 0, 0) {
+				t.Fatal("missing unit")
+			}
+		} else if !c.composeCarrier(v, 0, 0, children) {
+			t.Fatal("missing carrier")
+		}
+		cmds := c.list.ModelCommands()
+		return cmds[len(cmds)-1].Geometry.Clone()
+	}
+	first := record(nil)
+	if first.CachedSeed.Width <= 0 || first.CachedSeed.Height <= 0 {
+		t.Fatalf("cached packet omitted seed: key=%v cache=%+v size=%dx%d commands=%d body=%v", first.KeyPlane, first.Cache, first.Width, first.Height, len(c.list.ModelCommands()), c.cachedBody(v.InstanceID) != nil)
+	}
+	source := c.cachedBody(v.InstanceID).geometry
+	want := drawlist.ModelCachedSeed{Width: source.Width, Height: source.Height, OriginX: source.OriginX, OriginY: source.OriginY}
+	if first.CachedSeed != want {
+		t.Fatalf("seed=%+v source=%+v", first.CachedSeed, want)
+	}
+	v.Pieces[1].Tx = numeric.Fixed(48 << 16)
+	moved := record(nil)
+	if moved.Width <= first.Width || moved.CachedSeed != want || moved.Cache != first.Cache {
+		t.Fatalf("live rebase changed seed/cache: first=%+v moved=%+v", first.CachedSeed, moved.CachedSeed)
+	}
+	child := v
+	child.InstanceID++
+	child.Slot++
+	child.X += numeric.Fixed(80 << 16)
+	group := record([]frame.UnitView{child})
+	if group.CachedSeed != want || group.Cache != first.Cache || len(group.Children) != 1 || group.Children[0].Geometry.CachedSeed.Width <= 0 {
+		t.Fatal("cargo recording lost parent/child seed metadata")
+	}
+	if source.CachedSeed != (drawlist.ModelCachedSeed{}) || source.Width != want.Width || source.Height != want.Height {
+		t.Fatal("frame seed mutated retained source")
+	}
+	v.InstanceID = 0
+	v.Slot = 0
+	if got := record(nil).CachedSeed; got != (drawlist.ModelCachedSeed{}) {
+		t.Fatal("standalone adapter opted into cached seed")
+	}
+}

@@ -161,13 +161,13 @@ func TestBriefingWindDrawOrderAndStartRequest(t *testing.T) {
 	if len(opening) != 1 || opening[0].Kind != BriefingAudioStart || opening[0].Path != "camps/briefs/voice.wav" || opening[0].Delay != 60 || opening[0].Volume != 0 {
 		t.Fatalf("opening narration effect = %#v", opening)
 	}
-	stop, err := b.Dispatch(BriefingActionShutup)
-	if err != nil || len(stop.Audio) != 1 || stop.Audio[0].Kind != BriefingAudioStop || stop.Audio[0].Delay != 0 {
-		t.Fatalf("SHUTUP stop effect = %#v, err=%v", stop.Audio, err)
+	stop := b.DispatchNarrationStage(0)
+	if len(stop) != 1 || stop[0].Kind != BriefingAudioStop || stop[0].Delay != 0 {
+		t.Fatalf("SHUTUP stop effect = %#v", stop)
 	}
-	start, err := b.Dispatch(BriefingActionShutup)
-	if err != nil || len(start.Audio) != 1 || start.Audio[0].Kind != BriefingAudioStart || start.Audio[0].Delay != 60 || start.Audio[0].Volume != 0 {
-		t.Fatalf("SHUTUP restart effect = %#v, err=%v", start.Audio, err)
+	start := b.DispatchNarrationStage(1)
+	if len(start) != 1 || start[0].Kind != BriefingAudioStart || start[0].Delay != 60 || start[0].Volume != 0 {
+		t.Fatalf("SHUTUP restart effect = %#v", start)
 	}
 	if _, err := b.Dispatch(BriefingActionStart); err != nil || !called || b.State() != BriefingClosed {
 		t.Fatalf("Start event: called=%v state=%v err=%v", called, b.State(), err)

@@ -29,6 +29,8 @@ import (
 // the centre of its `SweetSpot` piece's vertex box [06 R-WPN-04 §1]; a solar
 // collector answers piece 0 (`base`), whose box has positive height, so the
 // stored aim point sits strictly above the collector's ground position.
+// The model-direct expected point locks the current immutable-geometry
+// placeholder; retail retained-point chronology remains open in that section.
 func TestPeeweeFiresFromItsFlaresAtTheTargetsSweetSpot(t *testing.T) {
 	root := testsupport.RetailRoot(t)
 	fs := vfs.New()

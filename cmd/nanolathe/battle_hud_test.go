@@ -417,8 +417,9 @@ func TestNumberedPageEmptyFileUsesDLButMalformedFileFails(t *testing.T) {
 	}
 }
 
-// The page opener owns enabledness, not the authored grayedout low bit
-// [07 R-HUD-03 §6]. Unknown products and non-product controls remain disabled.
+// Product resolution replaces incoming low grey bits before the final loaded
+// child. The last child retains even a preceding download's clearing
+// [07 R-HUD-03 §6].
 func TestNumberedPageReplacesAuthoredProductGreyBit(t *testing.T) {
 	for _, generated := range []bool{false, true} {
 		t.Run(map[bool]string{false: "physical", true: "download"}[generated], func(t *testing.T) {
@@ -427,13 +428,17 @@ func TestNumberedPageReplacesAuthoredProductGreyBit(t *testing.T) {
 				{Kind: gui.KindButton, Name: "known", CommonAttribs: 4, GrayedOut: 3},
 				{Kind: gui.KindButton, Name: "missing", CommonAttribs: 4, GrayedOut: 2},
 				{Kind: gui.KindButton, Name: "ORDERS", GrayedOut: 3},
+				{Kind: gui.KindButton, Name: "known", CommonAttribs: 4, GrayedOut: 3},
 			}}
 			h := &retailBattleHUD{fs: vfs.New(), cat: &content.Catalog{Units: map[string]*content.UnitDef{
 				"known": {UnitName: "known"}, "download": {UnitName: "download"},
 			}}, windows: map[string]*gui.Window{"builder1": source}}
 			var placements []frame.GeneratedProductPlacement
 			if generated {
-				placements = []frame.GeneratedProductPlacement{{ProductKey: "download", Button: 0}}
+				placements = []frame.GeneratedProductPlacement{
+					{ProductKey: "download", Button: 0},
+					{ProductKey: "unresolved-final", Button: 3},
+				}
 			}
 			w, _, err := h.numberedPage("builder1", 1, placements)
 			if err != nil || w == nil {
@@ -442,10 +447,35 @@ func TestNumberedPageReplacesAuthoredProductGreyBit(t *testing.T) {
 			if w.Gadgets[4].GrayedOut != 2 || w.Gadgets[5].GrayedOut != 3 || w.Gadgets[6].GrayedOut != 3 {
 				t.Fatalf("page grey words = %d,%d,%d; want 2,3,3", w.Gadgets[4].GrayedOut, w.Gadgets[5].GrayedOut, w.Gadgets[6].GrayedOut)
 			}
-			if generated && source.Gadgets[4].GrayedOut != 3 {
+			wantLast := int16(3)
+			if generated {
+				wantLast = 2 // download clearing survives even an unresolved name
+				if w.Gadgets[7].Name != "unresolved-final" {
+					t.Fatal("final-child download was not applied")
+				}
+			}
+			if w.Gadgets[7].GrayedOut != wantLast {
+				t.Fatalf("final child grey=%d, want incoming %d", w.Gadgets[7].GrayedOut, wantLast)
+			}
+			if generated && (source.Gadgets[4].GrayedOut != 3 || source.Gadgets[7].GrayedOut != 3) {
 				t.Fatal("download page changed its authored source")
 			}
 		})
+	}
+}
+
+func TestProductPageResolutionWithoutChildren(t *testing.T) {
+	h := &retailBattleHUD{cat: &content.Catalog{Units: map[string]*content.UnitDef{
+		"known": {UnitName: "known"},
+	}}}
+	h.resolveProductPageGrey(nil, 1)
+	h.resolveProductPageGrey(&gui.Window{}, 1)
+	// A root alone is also the final record, so even an authored product flag
+	// there must not make it enter the resolution pass [07 R-HUD-03 §6].
+	w := &gui.Window{Gadgets: []gui.Gadget{{Kind: gui.KindPanel, Name: "known", CommonAttribs: 4, GrayedOut: 3}}}
+	h.resolveProductPageGrey(w, 1)
+	if w.Gadgets[0].GrayedOut != 3 {
+		t.Fatal("header-only window entered product resolution")
 	}
 }
 

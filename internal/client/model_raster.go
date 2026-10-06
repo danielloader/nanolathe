@@ -143,6 +143,9 @@ type modelTarget struct {
 	originX, originY int32 // image pixel holding the model's own (0,0)
 	anchorX, anchorY int32 // framebuffer pixel holding the model's own (0,0)
 	transparent      uint8
+	// framebuffer selects the direct model mapper, whose raw texture strides
+	// differ from keyless composition images [03 R-RAST-01 §1 step 6].
+	framebuffer bool
 	// scale is 1, or 2 while the structure anti-alias supersample is active
 	// [R-REN-03A §6]. It is descriptive: the caller has already multiplied the
 	// dimensions and origin.
@@ -576,17 +579,15 @@ func (t *modelTarget) tintAtOrBelow(threshold uint8, blue *[256]byte) {
 // waterlineThreshold is the waterline pass's key threshold, or false when the
 // pass does not run. With `t = seaLevel - hi16(unitY)` the pass runs only when
 // `t > 0` — some part of the subject is below the water surface — and selects
-// every pixel with `key <= t + 50 [+75 when the definition authors Digger]`,
-// the same base the height key itself carries [R-REN-03A §8][R-WATER-01 §2].
+// every pixel with `key <= low8(t + 50 [+75 when Digger])`, using the same
+// base as the height key [R-REN-03A §8][R-WATER-01 §2].
 //
 // Both narrowings floor: retail extracts the high word of a 16.16 value with an
 // arithmetic shift, so a unit a fraction below an integer height rounds down.
 //
-// The clamp at 255 is not a choice. The key plane is a byte, so no stored key
-// can exceed 255; a deeper threshold selects every pixel either way, which is
-// exactly what a byte key compared against a wider threshold does. Clamping
-// keeps that behaviour instead of wrapping it into a small number that would
-// spare the deepest geometry.
+// Both pixel helpers consume only the low byte of the computed threshold.
+// Keep the positive-depth gate separate: wrapping to zero still runs the pass
+// and selects key zero inclusively [03 R-REN-03A §8].
 func waterlineThreshold(seaLevel, unitY numeric.Fixed, digger bool) (uint8, bool) {
 	depth := int32(seaLevel.Floor()) - int32(unitY.Floor())
 	if depth <= 0 {
@@ -595,9 +596,6 @@ func waterlineThreshold(seaLevel, unitY numeric.Fixed, digger bool) (uint8, bool
 	threshold := depth + presentationrender.NanoframeHeightBias
 	if digger {
 		threshold += diggerKeyBias
-	}
-	if threshold > 255 {
-		threshold = 255
 	}
 	return uint8(threshold), true
 }

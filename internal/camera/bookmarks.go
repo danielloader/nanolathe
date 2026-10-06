@@ -71,9 +71,9 @@ func (c *Camera) Tracked() pool.Handle {
 	return c.Follow.Tracked
 }
 
-// ClearFollow cancels the follow triple. It is what every writer marked "yes"
-// in [07 R-CAM-01 §12]'s table does: the scroll pass, the minimap latch and
-// drag-scroll entry, and a bookmark recall.
+// ClearFollow cancels tracking and a pending glide for the scroll pass,
+// minimap latch and bookmark recall [07 R-CAM-01 §12]. Drag entry instead
+// clears tracking while preserving a glide.
 func (c *Camera) ClearFollow() {
 	if c == nil {
 		return

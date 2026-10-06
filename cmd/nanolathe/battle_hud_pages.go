@@ -202,14 +202,15 @@ func (h *retailBattleHUD) numberedPage(name string, pageNumber int, placements [
 	return window, sourceArt, nil
 }
 
-// A numbered build-page open replaces the authored low grey bit with the
-// product-name resolution result after download placement; higher bits survive
-// [07 R-HUD-03 §6]. Apply before either sidebar copies its source records.
+// A numbered build-page open resolves product grey bits after download
+// placement, stopping before the final loaded child [07 R-HUD-03 §6]. That
+// child's incoming state survives, including any earlier download clearing.
+// Apply before either sidebar copies its source records; higher bits survive.
 func (h *retailBattleHUD) resolveProductPageGrey(window *gui.Window, page int) {
 	if page <= 0 || window == nil || h.cat == nil {
 		return
 	}
-	for i := range window.Gadgets {
+	for i := 0; i+1 < len(window.Gadgets); i++ {
 		gad := &window.Gadgets[i]
 		if gad.CommonAttribs&4 == 0 {
 			continue
@@ -322,6 +323,7 @@ func (h *retailBattleHUD) installWindow(window *gui.Window, page *formats.GAF) {
 	if h != nil && h.windowContext != nil {
 		h.windowContext.install(window, page, h.common)
 	}
+	h.initializeModalLabels(window)
 }
 
 func (h *retailBattleHUD) ensureWindowBuilt(name string, window *gui.Window, page *formats.GAF) {

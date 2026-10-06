@@ -117,10 +117,11 @@ func TestRepairFeaturePairingUsesLatticeOrderAndTournaments(t *testing.T) {
 		t.Fatalf("feature lattice calls/lists = %d/%d/%d, want 9/9/9", lookupCount, len(energy), len(metal))
 	}
 	for i, feature := range energy {
-		offX := int32(-48 + (i/3)*48)
-		offZ := int32(-48 + (i%3)*48)
+		offX := int32(-48 + (i%3)*48)
+		offZ := int32(-48 + (i/3)*48)
 		wantX := numeric.Fixed(int64(offX) << 16)
 		wantZ := numeric.Fixed(int64(offZ) << 16)
+		// Y locks the retained host fallback, not a recovered retail value.
 		if feature.X != wantX || feature.Z != wantZ || feature.Y != wantX+wantZ {
 			t.Fatalf("sample %d = (%v,%v,%v), want (%v,%v,%v)", i, feature.X, feature.Z, feature.Y, wantX, wantZ, wantX+wantZ)
 		}

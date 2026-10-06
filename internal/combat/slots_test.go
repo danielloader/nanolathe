@@ -202,10 +202,6 @@ func TestReloadTruncationVectors(t *testing.T) {
 		}()
 		ComputeStoredReload(100, 0, 0, 30)
 	}()
-	// Negative health uses signed IDIV trunc toward zero [P1-07 §2.7] — no clamp, factor 122 => 36
-	if got := ComputeStoredReload(-10, 100, 0, 30); got != 36 {
-		t.Fatalf("negative health stored %d, want 36 [P1-07 §2.7] signed trunc", got)
-	}
 	// HealthFactor zero max also faults
 	func() {
 		defer func() {
@@ -225,6 +221,27 @@ func TestReloadTruncationVectors(t *testing.T) {
 	// Unsigned kills: -1 as uint32 huge -> tier 5
 	if got := VeteranReloadForTest(-1, 100); got != 70 {
 		t.Fatalf("negative kills unsigned tier veteran %d, want 70 [06 §4.2]", got)
+	}
+}
+
+// These consumer vectors distinguish unsigned division, signed health-word
+// extension, and the wrapped final product before signed truncation [06 §4.2].
+func TestReloadHealthArithmeticWidths(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		health, maximum, reload, want int32
+	}{
+		{"high-bit maximum", 100, -2147483548, 100, 120},
+		{"current health reads low word", 65536 + 100, 100, 100, 100},
+		{"negative health unsigned quotient", -1, 1, 65535, 91749},
+		{"low word is sign extended", 65535, 1, 65535, 91749},
+		{"final product wraps before division", -1, 100, 65535, -14953114},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ComputeStoredReload(tc.health, tc.maximum, 0, tc.reload); got != tc.want {
+				t.Fatalf("reload = %d, want %d [06 §4.2]", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -271,9 +271,14 @@ func DigitToPage(digit int) int { // [07 §9] C10
 	return digit - 1
 }
 
-// ClampPage clamps a requested page to the builder's page count [07 §9] C10.
+// ClampPage bounds a requested page to the builder's page count [07 §9] C10.
 // Page count comes from the builder definition's page-count byte. If count <=0
 // the page is 0. Excess pages clamp to count-1. Used before EncodePageBits.
+//
+// A page of eight or more is not clamped to seven. Retail's page writers keep
+// the request's low three bits with the page-shown bit set, so with nine or
+// more authored pages a request for page 8 is the shown zero-field state, not
+// page 7 [07 R-HUD-03 §6]. EncodePageBits performs that narrowing.
 func ClampPage(page, count int) int { // [07 §9] C10
 	if count <= 0 {
 		return 0
@@ -283,9 +288,6 @@ func ClampPage(page, count int) int { // [07 §9] C10
 	}
 	if page >= count {
 		page = count - 1
-	}
-	if page > 7 {
-		page = 7 // page number lives in bits 23-25 (3 bits) [07 §9] C10
 	}
 	return page
 }

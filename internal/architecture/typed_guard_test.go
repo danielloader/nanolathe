@@ -505,10 +505,10 @@ var mapFunctionHashes = map[string]string{
 	"internal/ai/profile.go LoadProfile":                         "119b5500c827867e150450327bd13e543b91f5a0711b8b9df6f7a4eb7fc4708f",
 	"internal/ai/strategic.go *Strategic.InitClassVectors":       "22eab29d4bc94cc0442920275dd3e5613c324a5349d32f9880093cf0b854f64f",
 	"internal/ai/strategic.go *Strategic.refreshCountsAndCenter": "27025603520a216e18ea26c811992220b05173da9fe49ce7ec544913f7eb2b40",
-	// Re-audited: the first pass now accumulates at retail's 53-bit working
-	// precision [08 "Arithmetic and clamping"]. The key union, its sort and the
-	// order every consumer sees are unchanged (I1).
-	"internal/ai/strategic.go *Strategic.recomputeClassVectors": "5d879af01880139d273155d9a616fbd7256484085ee699ffb0d8e22e7f9bb9f3",
+	// Re-audited after stored predicates and query/coefficient precision fixes [08 R-P0-05 §5].
+	// All map ranges only collect a key union; its sorted slice still drives
+	// every class-vector calculation and write (I1).
+	"internal/ai/strategic.go *Strategic.recomputeClassVectors": "fc4ad28301055ae7a07a283a792f413f30a347d25fe8b4c1d8ed729227f4841e",
 	// Re-audited: the piece link now uses retail's slot pass and records link
 	// notes [04 R-COB-01 §4]. The two port-install ranges are unchanged and
 	// still only install handlers by key (I1).
@@ -593,6 +593,8 @@ type float64Allowance struct {
 // named struct declarations. The key retains the declaration and authored type syntax,
 // so grouped fields and named or aliased float types cannot hide new state.
 var float64FieldAllowances = map[string]string{
+	"internal/ai/selection.go type ScoreInputs.NetEnergy float64": "I2 transient net-query return retains working precision through comparison [08 R-P0-05 §3]",
+	"internal/ai/selection.go type ScoreInputs.NetMetal float64":  "I2 transient net-query return retains working precision through comparison [08 R-P0-05 §3]",
 	// Audited model rotation coefficients: cached draw/admission transform trig,
 	// never new simulation state; geometry narrows after each rotation [I2].
 	"internal/model/model.go type xformNode.cx float64": "I2 model piece rotation trig cache [03 §2.4]",
@@ -631,6 +633,12 @@ var float64FieldAllowances = map[string]string{
 // names the precise retail operation that needs binary64; all other float64
 // occurrences still use the shrink-only per-file baseline.
 var float64ScopeAllowances = map[string]float64Allowance{
+	"internal/orders/scans.go func patrolResourceAtLeastTwenty":        {3, "I2 patrol stored stock/capacity and binary64 threshold constant compared at working precision [04 R-ORD-01 §4]"},
+	"internal/orders/scans.go func resourceFits":                       {3, "I2 patrol stored stock plus stored feature value compared without narrowing [04 R-ORD-01 §4]"},
+	"internal/ai/strategic.go func classify":                           {8, "I2 net-energy query stored inputs and working-precision return [05 R-PROD-01 §1]"},
+	"internal/ai/strategic.go func *Strategic.classify":                {1, "I2 net-energy query result forwarded without a single store [05 R-PROD-01 §1]"},
+	"internal/ai/strategic.go func *Strategic.recomputeClassVectors":   {25, "I2 class coefficients retain working precision between explicit single stores [08 R-P0-05 §5]"},
+	"internal/ai/strategic.go func ftol64":                             {1, "I2 class working value reaches the truncating integer conversion [08 R-P0-05 §5]"},
 	"internal/orders/combat.go func leashBroken":                       {2, "I2 signed whole-unit leash distance through retail helper [04 R-STANCE-01 §4][01 R-DET-01 §7]"},
 	"internal/orders/work.go func footprintPad":                        {2, "I2 signed footprint words through retail distance before scaling and truncation [05 R-WORK-01 §2]"},
 	"internal/orders/work.go func inBuildRange":                        {2, "I2 wrapping raw coordinate differences through retail distance before signed high-word read [05 R-WORK-01 §2]"},
@@ -661,8 +669,9 @@ var float64ScopeAllowances = map[string]float64Allowance{
 	"internal/clock/clock.go func lagThrottleFactor":           {6, "I2 retained multiplayer throttle expression [01 §4.2]"},
 	"internal/clock/clock.go func decodeBox":                   {2, "I2 clock save-box float32 validation [01 §4.2]"},
 
-	"internal/ai/selection.go func energyRaw": {6, "I2 candidate-score energy pressure: the capacity difference and its product at retail's 53-bit working precision, narrowed only by the two named truncations [08 R-P0-05 §3][08 \"Arithmetic and clamping\"]"},
-	"internal/ai/selection.go func metalRaw":  {6, "I2 candidate-score metal pressure: the capacity difference and its product at retail's 53-bit working precision, narrowed only by the two named truncations [08 R-P0-05 §3][08 \"Arithmetic and clamping\"]"},
+	"internal/ai/selection.go func energyRaw":              {6, "I2 candidate-score energy pressure: the capacity difference and its product at retail's 53-bit working precision, narrowed only by the two named truncations [08 R-P0-05 §3][08 \"Arithmetic and clamping\"]"},
+	"internal/ai/selection.go func ScoreInputsFromEconomy": {4, "I2 stored production and consumption widened before the net subtraction [08 R-P0-05 §3]"},
+	"internal/ai/selection.go func metalRaw":               {6, "I2 candidate-score metal pressure: the capacity difference and its product at retail's 53-bit working precision, narrowed only by the two named truncations [08 R-P0-05 §3][08 \"Arithmetic and clamping\"]"},
 
 	"internal/economy/admission.go func settlePure":                   {12, "I2 settlement working precision [05 R-ECO-01 §1][05 R-ECO-01 §5]"},
 	"internal/economy/admission.go func *Service.settleOneResource":   {12, "I2 settlement working precision [05 R-ECO-01 §1][05 R-ECO-01 §5]"},

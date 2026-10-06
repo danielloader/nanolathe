@@ -89,7 +89,8 @@ func (c *Client) fillPolyTarget(target *modelTarget, p *screenPoly, color uint8,
 // blitTexturedPolyTarget is retail's textured quad mapper over the same walk.
 // The texel is sampled at the interpolated integer texel coordinates —
 // `pixels[(v >> 16) * w + (u >> 16)]` — with no perspective divide and no
-// stored UVs; the default corners keep u in [0, w-1] and v in [0, h-1] because
+// stored UVs. The keyless composition width-128 exception uses stride 64
+// [R-RAST-01 §1 step 6]. The default corners keep u in [0, w-1] and v in [0, h-1] because
 // the interpolation never reaches the right corner's value [R-RAST-01 §1]
 // steps 5-6. The SHD row rides the same interpolation as the key
 // [R-RAST-01 §5].
@@ -120,6 +121,8 @@ func (c *Client) blitTexturedPolyTarget(target *modelTarget, p *screenPoly, gafF
 	id := rendererID(ids)
 	face := p.traceFace()
 	w, h := int(gafFrame.Width), int(gafFrame.Height)
+	stride := modelTextureStride(w, target.height != nil, target.framebuffer)
+	useSHD := p.useSHD && (target.height != nil || target.framebuffer)
 	target.polyScan(p, func(row, xl, xr int32, a, da [spanAttrs]int64) {
 		base := row * int32(target.width)
 		acc := a
@@ -129,20 +132,21 @@ func (c *Client) blitTexturedPolyTarget(target *modelTarget, p *screenPoly, gafF
 			idx := int(base + px)
 			var b uint8
 			sourceState := RendererValueUnavailable
-			inTexture := tx >= 0 && ty >= 0 && tx < w && ty < h && ty*w+tx < len(gafFrame.Pixels)
+			sample := ty*stride + tx
+			inTexture := tx >= 0 && ty >= 0 && tx < w && ty < h && sample < len(gafFrame.Pixels)
 			if inTexture {
 				sourceState = RendererValueAvailable
-				b = gafFrame.Pixels[ty*w+tx]
+				b = gafFrame.Pixels[sample]
 			}
 			shade := presentationrender.NoShadeRow
-			if p.useSHD {
+			if useSHD {
 				shade = spanShadeRow(acc[spanRow])
 			}
 			event := -1
 			if target.trace != nil {
 				keyed := inTexture && b != gafFrame.ColorKey
-				if len(gafFrame.Transparent) != 0 {
-					_, keyed = gafFrame.At(tx, ty)
+				if inTexture && sample < len(gafFrame.Transparent) {
+					keyed = !gafFrame.Transparent[sample]
 				}
 				// The trace still records that the sampled texel carried the
 				// GAF key, because a parity capture wants to see it; the writer
@@ -156,7 +160,7 @@ func (c *Client) blitTexturedPolyTarget(target *modelTarget, p *screenPoly, gafF
 				target.traceRejected(event, RendererReasonHeightRejected, "height")
 			default:
 				target.traceAdmitted(idx, event)
-				if c != nil && c.pal != nil && p.useSHD {
+				if c != nil && c.pal != nil && useSHD {
 					b = c.pal.Shade[shade][b]
 				}
 				if event >= 0 {
@@ -175,7 +179,8 @@ func (c *Client) blitTexturedPolyTarget(target *modelTarget, p *screenPoly, gafF
 // sampling, without diagnostic or construction-reveal work [03 R-REN-03A §5].
 func (c *Client) blitOrdinaryTexturedPoly(t *modelTarget, p *screenPoly, frame *formats.GAFFrame) {
 	w, h := int(frame.Width), int(frame.Height)
-	shaded := c != nil && c.pal != nil && p.useSHD
+	stride := modelTextureStride(w, t.height != nil, t.framebuffer)
+	shaded := c != nil && c.pal != nil && p.useSHD && (t.height != nil || t.framebuffer)
 	last := spanRow
 	if shaded {
 		last = spanAttrs
@@ -184,14 +189,15 @@ func (c *Client) blitOrdinaryTexturedPoly(t *modelTarget, p *screenPoly, frame *
 		base := int(row) * t.width
 		for px := int(xl); px < int(xr); px++ {
 			tx, ty := int(a[spanU]>>16), int(a[spanV]>>16)
-			if tx >= 0 && ty >= 0 && tx < w && ty < h && ty*w+tx < len(frame.Pixels) {
+			sample := ty*stride + tx
+			if tx >= 0 && ty >= 0 && tx < w && ty < h && sample < len(frame.Pixels) {
 				idx := base + px
 				key := spanByte(a[spanKey])
 				if t.height == nil || t.height[idx] <= key {
 					if t.height != nil {
 						t.height[idx] = key
 					}
-					b := frame.Pixels[ty*w+tx]
+					b := frame.Pixels[sample]
 					if shaded {
 						b = c.pal.Shade[spanShadeRow(a[spanRow])][b]
 					}
@@ -236,4 +242,15 @@ func (t *modelTarget) fillPlainModelPoly(p *screenPoly, color uint8) {
 			acc += step
 		}
 	})
+}
+
+// Both composition texture writers bypass SHD when the key plane is absent.
+// Their width-128 pass is then overwritten by the width-64 kernel using the
+// same UVs. Direct framebuffer writers return after their normal width pass
+// [03 R-RAST-01 §1 step 6].
+func modelTextureStride(width int, keyed, framebuffer bool) int {
+	if width == 128 && !keyed && !framebuffer {
+		return 64
+	}
+	return width
 }

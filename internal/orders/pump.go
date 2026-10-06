@@ -1133,7 +1133,7 @@ func (q *Queue) unlinkPrimary(n *Node) {
 // the code values but not the effects, and re-merging them reintroduces the
 // ORD-03 mismatches (secondary code 9 would re-arm, secondary 6/7 would
 // tail-yield or cancel-all). Primary specifics here: code 6 rotates to the
-// segment tail, code 7 is the exclusive whole-queue cancel, code 9's
+// segment tail, code 7 and the above-nine default cancel both segments, code 9's
 // last-record arm re-arms with RNG(30) [R-P0-01].
 //
 // Returns false only for a returning result. Re-arming n does not establish
@@ -1180,7 +1180,7 @@ func (q *Queue) applyPrimaryResultCode(n *Node, code Code, tick uint32) bool {
 		// Shift-queued order issued after a rotate landed at index 1 instead of
 		// at the tail.
 	case 7:
-		q.cancelAll() // [04 §3.3] free every record on both segments and return; whole-queue cancel is exclusively primary code 7
+		q.cancelAll() // [04 §3.3] drain both segments and return
 		return false
 	case 9:
 		n.Flags |= FlagRetryMark // [04 §3.3][R-ORDER-02 §2] completion flag; its reader is the goal installer of [04 R-PATH-01 §8] step 5.3
@@ -1199,10 +1199,9 @@ func (q *Queue) applyPrimaryResultCode(n *Node, code Code, tick uint32) bool {
 		q.unlinkPrimary(n) // [04 §3.3] otherwise unlink and free
 	default:
 		if code > 9 {
-			// [04 §3.3] above 9: single-node expiry helper — unlink, clean,
-			// free, and return; no draw, no whole-queue cancel [P0-08].
-			// Whole-queue cancel is exclusively code 7 [P0-08] A09.
-			q.unlinkPrimary(n)
+			// The primary default shares the full purge; the secondary
+			// default remains a single-record removal [04 §3.3].
+			q.cancelAll()
 			return false
 		}
 		return false

@@ -436,6 +436,18 @@ The executable contains campaign selection, mission list, briefing, end-mission,
 
 Persistence is split. Difficulty, the skirmish lobby fields, and three registry mirrors — difficulty, a games flag, and an all-missions flag — are kept under the installed software registry path and written back immediately when absent so a first run fully populates the registry. One mirror holds the difficulty value masked to 16 bits and cycled by the difficulty controls; a second mirror holds a games flag gated on a display mode, and a third holds an all-missions flag as a single bit. The per-mission W and L characters in memory and the between-missions bank account named Summary that carries a BetweenMissions flag are written through the bank system, not the registry. The bank's timing block that persists scheduler state is a 28-byte binary box; larger boxes have trailing bytes ignored, and the bank's string pool, header, and account enumeration are not range-checked. Campaign continuation on load inspects the saved Summary account for the BetweenMissions flag to decide between fresh mission spawning and battle reconstruction — the battle-entry gate routes the flag-present case to the fresh spawner and the flag-absent case to battle restoration, never the reverse. [P0-05] [lane 08 BetweenMissions polarity]
 
+**Established bodies, bounded reachability — separate registry progress
+helpers.** Two additional helpers select `ArmCamp` when their side argument
+is zero and `CoreCamp` otherwise. The reader requests 26 bytes and, on a
+failed read, fills 25 progress marks with `U` and terminates the string. The
+writer terminates at 25 marks before writing the selected registry value.
+A fresh whole-image search locates neither a direct branch to these helpers
+nor a literal function-pointer reference. Their bodies do not establish that
+the live campaign flow persists marks through the registry: the reviewed
+new-campaign, result and save paths use the reset, in-memory marks and bank
+writer described here. **Unknown:** any dynamically computed entry into these
+helpers; a resolved caller is required before assigning them live behavior.
+
 VFS first-win, first-gap termination, language-prefixed names, wind draws from the CRT stream before simulation, the latch bits and scoring arithmetic, and the registry versus bank split are established. The all-missions registry bit's consumer is located: the single-player panel shows its "Any Msn" control and keeps the bit when set, a toggle callback (inert while the panel's text field holds the "DRDEATH" easter-egg string) flips the bit, toggles the control, and writes the bit back to the registry, and a writeback helper persists it. The mission-list build always counts every mission and neither the new-game panel nor the end-mission screen filters the list by the bit — the exact listbox-selection effect of the toggle remains the bounded residual. The provider-specific enumeration order beyond mount order is host-dependent but deterministic for a given filesystem, and the exact narration and glamour fallback beyond silent suppression is not closed. [P0-05] [lane 08 AllMissions]
 
 
@@ -485,8 +497,9 @@ loader (§6) skips the leading separator and re-joins under `bitmaps\glamour`.
 The new-game panel builds its campaign list by
 enumerating `camps\*.TDF` through the VFS (mount order and first-win as in
 "Campaign discovery" above). Two 256-byte-per-entry name arrays are
-allocated for the count; every enumerated file is opened as TDF and admitted
-to the visible list only when it has a `[HEADER]` block whose `campaignside`
+allocated for the count. The scan has one attempt per enumerated name, but
+advances its current name only after the TDF loader succeeds. A successfully
+loaded file is admitted to the visible list only when it has a `[HEADER]` block whose `campaignside`
 matches **byte for byte** either the local player's side `name` as authored
 in `SIDEDATA` (stock `ARM` / `CORE`) **or** the literal `ALL`. The compare is
 case-sensitive: neither the stored side name nor the authored value is
@@ -494,6 +507,19 @@ case-normalized, so `campaignside=arm` or `=all` is rejected — the accessor
 that read the value folds case only on the key it searches for [fmt tdf].
 Files without `[HEADER]` are skipped silently. The returned count is
 the number admitted; the list order is the enumeration order.
+
+**Established — load failure consumes an attempt without advancing.** If
+opening fails, the file length is nonpositive, or the read reports failure,
+the loader returns failure and the next attempt uses the same campaign name.
+Previously admitted names remain in the returned list. With a persistently
+empty or unreadable file, the remaining attempts therefore repeat that file
+and never visit later names; this differs from a successful load with no
+`[HEADER]`, which does advance. A transient failure can consume one or more
+attempts before a later success advances, shortening the tail visited. This
+is a bounded loop, not an infinite retry. **Unknown:** actual transient I/O
+histories and the consequences of short but nonnegative reads are not settled
+by this enumeration contract; a syntax error is not automatically equivalent
+to the loader's failure return.
 
 **`campaignside` filters, it does not assign.** The direction matters to anything that wants a campaign battle's local side. The
 side is decided *first*: the registry `side` value (0 Arm, 1 Core) is written
@@ -1458,10 +1484,12 @@ commander respawn and watch-mode entry, [R-SKIR-01 §3]):
 3. When mode bit 1 is set, every *active* unit in the pool is walked in
    record order: its observer record is formed from position, the
    definition's sight distance, height (floored at `(seaLevel + 1) << 16`)
-   and the definition's sight-type byte; bit 2 set (true LOS) → the
-   height-ray stamper; bit 2 clear → the circle stamper with radius index
-   `clamp((sightDistance >> 5) − 5, 0, tableCount − 1)` ([03 R-VIS-01
-   §2/§3]). Bit 1 clear → no unit is visited.
+   and the definition's sight-type byte. Its saved coverage byte is cleared,
+   but the saved tile pair is retained. Bit 2 set (true LOS) enters the ordinary
+   ray refresh: an unchanged tile with emitter byte at most 5 skips publication
+   even after this full refill. Bit 2 clear directly invokes the circle stamper
+   with radius index `clamp((sightDistance >> 5) − 5, 0, tableCount − 1)`
+   ([03 R-VIS-01 §1–§3]). Bit 1 clear → no unit is visited.
 4. The *minimap dirty* bit is set, mode bit 3 (the "rebuild pending" bit)
    is cleared, and the two blip refreshers run.
 
@@ -1474,7 +1502,7 @@ first sensor phase completes the picture.
 - The rebuild takes no player argument.
 - With the history argument set it fills every byte of the mapping word grid, so every player's bit in every word. That is all-ones when Mapped and all-zero when Unmapped.
 - It always refills the sight byte grid of every row that is active, controller 1, 2 or 3, seat not 10. Remote rows are included.
-- With line of sight on, it restamps every defined unit in the pool, whoever owns it, into that owner's byte grid and that owner's bit of the word grid. Neither the unit loop nor the stampers test the controller.
+- With line of sight on, it visits every defined unit in the pool, whoever owns it. Circular publication is direct; true-LOS publication retains the unchanged-tile, low-height throttle described above. An admitted stamp updates that owner's byte grid and mapping bit. Neither the unit loop nor the stampers test the controller.
 - Its callers are: battle entry; the four chat commands; the poster writer (twice); the deathmatch respawn; and watch entry. The last two pass the history argument. None is network-driven, so no machine rebuilds anything because a remote player respawned or became a watcher. A remote machine merely receives the new commander as an ordinary remote creation, which registers its own sight.
 
 ### The tail: main GUI, phase priming, second grant, teardown, ready [R-ENTRY-01 §8]
@@ -1490,9 +1518,12 @@ first sensor phase completes the picture.
    (OOS);
 4. **the per-player phase is run once, at global tick 0** — the same
    routine the tick executor calls as phase 5 ([01 §4.4], [R-SKIR-01 §3]).
-   What it does at tick 0, per slot in order `0..9` (live, controller
+   It first runs **one path-search scheduler pass**, before the player loop.
+   The pool and scheduler already exist: idle visits advance the physical
+   unit cursors and charge service even when no route request is admitted.
+   The cursors and accounting persist after entry; this is not a dry run
+   ([04 R-PATH-01 §6]). It then visits slots in order `0..9` (live, controller
    ∈ {1,2,3}, side ≠ 10):
-   - the path-search scheduler's per-tick pass ([04 R-MOV-02A]);
    - the **AI manager** for a controller-2 slot: the strategic-refresh
      countdown (initial 30) decrements to 29 — no refresh; then **all ten
      task records run**, because every task deadline was constructed as 0
@@ -2009,20 +2040,51 @@ row when the result exceeds sea level, with no effect. `mapWidthPx`/
 gone and later polls skip this block; a save does not persist the converted
 centre (only Satisfied/Celebrated, §8), so a loaded mission re-derives it.
 
-**Established — the radius scan.** With centre `(cx, cz)` (16.16) and
-`r = radius << 16`: partition tiles are 128 pixels (`coordinate >> 23` in
-16.16); the tile range is `(cx − r) >> 23 .. (cx + r) >> 23` and likewise
-for Z, each bound clamped to `0 .. tileCount − 1` (a negative bound clamps
-to 0). Tiles are walked Z-outer, X-inner, each tile's unit list followed
-through the partition's per-unit link. For each unit, `dx = unitX − cx`,
-`dz = unitZ − cz` (signed 16.16), and the test is
-`(dx·dx >> 32) + (dz·dz >> 32) <= (r·r >> 32)` with 64-bit products — i.e.
-`trunc(dx_px²) + trunc(dz_px²) <= radius²` in pixel units, **inclusive**,
-planar X/Z, Y ignored. The visitor runs for every unit that passes,
-regardless of owner; the visitor's own gates are: owner slot 0; stored
-name empty or equal (case-insensitive) to the unit's definition name;
-the eligible-unit predicate of §3. A hit completes the condition; the scan
-continues through the remaining tiles.
+**Established — the radius scan and its stored widths.** Construction shifts
+the authored radius left by 16 and retains the low signed 32-bit fixed-point
+word. There is no radius-sign rejection in the poll or scanner. With centre
+`(cx, cz)` and stored radius `r`, compute each of `cx − r`, `cx + r`, `cz − r`
+and `cz + r` with signed 32-bit wrap **before** the arithmetic right shift by
+23. Clamp each resulting partition coordinate independently to
+`0 .. tileCount − 1`. The inclusive ranges are walked Z-outer, X-inner;
+a lower bound above its upper bound produces no visits. A negative stored
+radius does not, by itself, imply an empty range.
+
+Each selected tile's **top-level unit chain** is followed in its retained
+order. For each unit, compute `dx = unitX − cx` and `dz = unitZ − cz` with
+signed 32-bit wrap. Square each signed value using a signed 64-bit product,
+then arithmetic-shift each product right by 32. Add the two shifted distance
+terms with signed 32-bit wrap and compare that signed sum inclusively against
+`(r·r) >> 32`. Thus ordinary non-overflow inputs test
+`trunc(dx_px²) + trunc(dz_px²) <= radius²`, with Y ignored; widening the bounds
+or the final distance sum changes the boundary-domain contract. The visitor
+runs for every unit that passes, regardless of owner, and its return does not
+stop the scan. Its own gates are owner slot 0, empty stored name or a
+case-insensitive definition-name match, and the eligible-unit predicate of
+§3. A hit completes the condition; later visits continue.
+
+**Established — cargo is outside this scan's candidate set.** Attachment
+unlinks a unit from its partition's top-level chain and puts it on its
+carrier's separate cargo chain; detach reinserts it in the partition. This
+radius scanner does not descend into cargo chains. Its eligible-unit visitor
+therefore does not make parked aircraft candidates merely because their
+airbase permits selection. A typed condition whose only matching unit is
+already parked on an airbase remains unsatisfied until that unit detaches and
+qualifies in a scanned tile. This is distinct from `AllUnitsKilled`, whose
+owner-slice walk can still count the same eligible carried unit (§4). Units
+filed in the separate off-map bucket are likewise outside the radius scan.
+
+**Established — finite authored boundary examples.** On a flat zero-height
+map, `MoveUnitToRadius=ANYTYPE,64,64,32768` stores a negative radius. Both
+wrapped endpoints on each axis are negative and clamp to tile zero. An
+eligible uncarried slot-0 unit at `(64,64)` is visited and satisfies the
+condition; rejecting negative stored radii would miss that completion.
+With authored radius `32767`, the same centre again selects only tile zero
+because the upper endpoints wrap negative. If the only eligible unit is at
+`(256,256)`, the condition remains false even though an unrestricted
+whole-pool distance scan would accept that unit. These are custom-content
+counterexamples, not a claim about shipped mission radii. The partition bounds
+and membership are part of the predicate, not an optional scan optimization.
 
 ### The tick site: cadence, order, countdown and latch [R-TRIG-01 §6]
 
@@ -3536,8 +3598,8 @@ The strategic state contributes, per definition type: a three-byte class triple 
 
 For each candidate three hard gates run first:
 
-- reject when current energy is strictly below `50.0`;
-- reject when current metal is strictly below `25.0`;
+- reject when current energy is below `50.0` or unordered;
+- reject when current metal is below `25.0` or unordered;
 - reject when the session mode word equals `1` and the candidate's definition carries the authored `downloadable` flag ([R-AI-01 §8]).
 
 The pressure values then use the player fields:
@@ -3556,7 +3618,7 @@ against stock `92.1` gives `0`, not `1`. Capacities are ordinarily integral,
 because stock content sums integer `energystorage`/`metalstorage` values.
 
 A fourth hard gate runs **after** the two pressure terms, their net-resource
-adjustments and their production ladders, and before the mix: reject when the
+adjustments, production ladders and mix, but before the final score: reject when the
 candidate's completed count reaches its profile limit — `count < limit` is
 required, and `-1` means unlimited. The pressure block between the third gate
 and this one reads only the player aggregates and the truncation helper; it
@@ -3577,6 +3639,24 @@ else if metalProduction < 5.0: metalRaw += 20
 ```
 
 All integer conversions truncate toward zero.
+
+**Established — net-query precision and comparison polarity.** Each net
+query subtracts the stored single-precision consumption from production at
+working precision and returns that result without a single-precision store.
+The `< 1.0` comparison consumes that wider result. For production 1 and
+consumption `2^-26`, the difference is below 1 even though narrowing it to
+single precision would round it to 1. With zero base energy pressure and
+metal mix 50, the energy mix is therefore 70 rather than 50: the low-production
+bonus does not always hide the net-query difference.
+
+Every below-threshold test in the two net adjustments and the two production
+ladders also takes its below branch for an unordered comparison. Thus an
+unordered production takes its first, larger bonus; the initial stock gates
+instead reject an unordered stock before scoring. These are established
+consumer rules. **Unknown — nonfinite producers and stock incidence:** direct
+nonfinite aggregates do not establish a complete retail producer history, and
+the finite precision example is an arithmetic fixture rather than a measured
+stock-battle occurrence.
 
 #### Candidate score and cumulative weighted selection — Established [R-P0-05 §4]
 
@@ -3612,9 +3692,9 @@ The single coefficient (first pass):
 
 ```text
 acc = 1
-if ExtractsMetal != 0.0: acc = 11
+if ordered_nonzero(float32(ExtractsMetal)): acc = 11
 if MakesMetal != 0:      acc += 10
-if Classify(def) < 0:    acc += 10
+if negative_or_unordered(Classify(def)): acc += 10
 
 t0 = trunc(acc + 0.01  * BuildCostMetal)
 t1 = trunc(t0  + 0.002 * BuildCostEnergy)
@@ -3623,7 +3703,7 @@ weaponBase = 11 if CanAttack else 1
 weaponSum = weaponBase
 for each of the three weapon slots:
     if weapon.active != 0:
-        weaponSum += weapon.damage / 40 + 5 + weapon.range / 100
+        weaponSum += uint16(weapon.damage) / 40 + 5 + int32(weapon.range) / 100
 weaponSum = clamp(weaponSum, -100, 100)
 coefficient = clamp(weaponSum + t1, -100, 100)
 ```
@@ -3649,9 +3729,44 @@ reproducible arithmetic rather than a residual: it decides the stored byte for
 every definition whose metal cost is a non-zero multiple of 100
 ([08 "Arithmetic and clamping"]).
 
-The damage and range field identities, widths, and divisions are established
-(the `DAMAGE/default` word and the `range` word of the weapon parser). The
-half-capacity compare reads the owning **player record's live unit count**,
+**Established — extractor predicates consume the stored single value.**
+All three extractor tests in this routine — the first-pass replacement, the
+other-mix bonus and the metal base — reject zero and NaN, and admit any other
+stored value, including a negative value. The definition loader reads
+`extractsmetal` with its floating accessor and stores it at single precision
+before these consumers. Authored `1e-46` and `-1e-46` are finite accepted
+decimal values [fmt tdf], but each becomes signed zero at that store. With
+zero costs, no other bonuses, no weapon, completed count zero and negative
+`MinWaterDepth`, either value produces single coefficient **2**, other mix
+**4** and metal mix **0**. Testing the parser's wider value instead would
+produce 12, 100 and 100. A direct NaN definition value exercises the same
+consumer exclusion but is not evidence of a retail-authored NaN.
+
+Both net-energy bonus tests instead admit negative **or unordered** query
+results. This describes the consumer, not a writer of NaN. In particular,
+the shared query's direct energy-use branch also rejects zero and NaN before
+trying its positive wind and tidal branches. A NaN supplied as energy use
+therefore does not by itself establish that the query returns NaN. A chosen
+generator product can be unordered for nonfinite operands, but the complete
+producer and environment domain remains a separate obligation [05
+R-PROD-01 §1]. Tests that inject NaN directly, or supply a nonfinite generator
+with an explicit environment scalar, are consumer/arithmetic fixtures unless
+that producer path is separately established.
+
+The weapon budget reads `DAMAGE/default` as **unsigned 16-bit**, including
+when the authored integer is negative or exceeds 65535: the weapon loader
+retains its low sixteen bits, and this consumer zero-extends them before
+integer division by 40. Range is signed 32-bit and its division by 100
+truncates toward zero. The integer budget additions wrap at 32 bits before
+the signed clamp. These widths are established in the live class refresh
+as well as the separate weapon-budget and first-coefficient helpers.
+For example, with zero costs, no other bonuses, `CanAttack` clear and one
+active zero-range weapon, authored default damage 65536 yields coefficient
+7; authored default damage −1 yields 100. Using the un-narrowed authored
+integer instead yields 100 and 7 respectively. These are authored boundary
+cases, not evidence of an effect on stock content.
+
+The half-capacity compare reads the owning **player record's live unit count**,
 reached through the strategic state's back-pointer, against the session's
 per-player unit limit ([R-AI-01 §13]).
 
@@ -3662,8 +3777,8 @@ The other-mix coefficient `base` — the accumulator starts at **one**, and
 acc = 1
 if CanAttack:                acc = 21
 if Builder && count < 3:     acc += 30
-if Classify(def) < 0:        acc += 50
-if ExtractsMetal != 0.0:     acc += 50
+if negative_or_unordered(Classify(def)): acc += 50
+if ordered_nonzero(float32(ExtractsMetal)): acc += 50
 if MakesMetal != 0:          acc += 25
 if CanFly:                   acc += 40
 if SonarDistance != 0:       acc += 15
@@ -3685,6 +3800,19 @@ immaterial at the boundary but are as the instructions have them: the lower test
 selects "below or equal", so a value at or below zero yields 0.0 and a NaN yields
 0.0; the upper test selects "below" alone, so a value strictly under thirty is
 kept and anything else, thirty included, selects the literal thirty.
+
+**Established — authored fractional values distinguish the sum width.** The
+loader stores `energymake` at single precision, but its addition to `acc`
+remains at the 53-bit working precision until truncation. With `acc = 1`,
+authored `energymake = 0.99999994` stores the greatest single-precision value
+below one. The wider sum truncates to 1; rounding the sum to single precision
+first produces 2. At completed count zero, negative `MinWaterDepth`, no
+half-capacity addend and no zeroing flags, the resulting other-mix coefficient
+is **4**, not 8. Passive `energymake` does not enter the separate net-energy
+query, so zero energy use, wind generation and tidal generation keep that
+query at zero and do not introduce another bonus. This is a custom-content
+counterexample; the shipped-content agreement described under "Arithmetic
+and clamping" does not authorize narrowing this sum.
 
 Then `count == 0` multiplies the **truncated sum** by four, `count == 1` by two, and `MinWaterDepth >= 0` by three (the movement-class value the FBI compile copies into the definition, [04 R-DOC04-A] — so definitions that may stand in water, [R-AI-03 §6]); the multipliers apply after the `energymake` term is folded in, not to the raw integer accumulator. When `(unitLimit >> 1) < player.liveUnitCount` — an unsigned compare of the session's per-player unit limit against the owning player's live unit count — half of **this iteration's own freshly stored** single coefficient is added, truncated toward zero; the branch is reachable in ordinary late-game state ([R-AI-01 §13]). The value is then zeroed when `CanLoad` is set, when `IsFeature` is set, or when the wind-generator/global-wind comparison of §9 is true, and finally `base = min(val, 100)`.
 
@@ -3714,13 +3842,38 @@ floating point **before** the single truncation. Both comparisons are strict, so
 `0.0` and `100.0` themselves are kept. This subtraction's operand order is
 recovered independently of the first pass's and corroborates it. The
 upper-bound comparison is unordered-sensitive and its condition selects
-"below", which NaN also sets, so a NaN `raw` — reachable only from a NaN authored
-cost or a NaN net-energy result — becomes **100**, not 0.
+"below", which NaN also sets, so a NaN `raw` becomes **100**, not 0.
+This is an arithmetic-input contract. Both authored cost readers use integer
+conversion, and the floating text scanner does not recognize a `NaN` token
+[fmt tdf]; a direct NaN-cost fixture establishes no authored reachability.
+
+**Established — the energy term retains its fractional deficit.** With
+zero energy cost and authored `energyuse = -19.799999`, the loader stores
+−19.799999237060547 at single precision. The net-energy query returns that
+nonzero usage directly, before considering wind or tidal generation. Its
+five-times term and the subtraction retain working precision, yielding
+98.99999618530273 and coefficient **98** after the clamp and truncation.
+Narrowing that product or difference to single precision instead yields 99.
+Other-mix zeroing flags do not gate this independently computed coefficient.
+
+**Established — the generator query return is not a single store.** The
+shared helper retains its selected product and negation at working precision
+[05 R-PROD-01 §1], and this class consumer does not insert a store before
+multiplying by five. For authored map `tidalstrength=10` and unit
+`tidalgenerator=1.98`, with energy use and wind generation zero, the stored
+multiplier is 1.9800000190734863 and the query returns
+−19.800000190734863. With zero energy cost the coefficient truncates
+99.00000095367432 to **99**. An extra single store at the query return rounds
+the magnitude to 19.799999237060547 and produces **98**. The map loader
+accepts the nonnegative stored strength directly; the query reads definition
+and environment values without a live-unit, activation or water-placement
+gate. This finite authored vector is independent of exceptional-input
+reachability and of the resource-settlement admission chain.
 
 The metal coefficient `baseML`:
 
 ```text
-metalBase = 100 if ExtractsMetal != 0.0 else 0
+metalBase = 100 if ordered_nonzero(float32(ExtractsMetal)) else 0
 sum       = float32(BuildCostMetal * -0.02 + (25 if MakesMetal != 0 else 0))
 baseML    = trunc(clamp(metalBase + sum, 0, 100))
 ```
@@ -3732,6 +3885,17 @@ cost)` and can never be negative, and an extractor scores `100 − 0.02 × cost`
 clamped into `[0, 100]`. `ExtractsMetal`'s test selects equality, so `metalBase`
 is 100 only when the field is neither zero nor NaN; as for `baseEL`, a NaN sum
 becomes **100**.
+
+**Established — the metal coefficient has one intermediate store.** Form
+the cost product and add the makes-metal term at working precision, then
+narrow their combined sum once. Add `metalBase` at working precision and
+retain that width through the clamp and truncation. Narrowing the cost
+product separately or narrowing the final base addition introduces stores
+that this consumer does not perform. Both unit-definition cost loaders read
+an authored integer and convert it to the single-precision field; a
+fractional cost supplied directly to an in-memory definition is therefore
+not, by itself, a reachable retail authored-content counterexample. The
+arithmetic store contract and the producer domain are separate obligations.
 
 The definition inputs consumed by the routine — extracts-metal, makes-metal, metal and energy build costs, `energymake`, can-attack, builder, can-fly, can-load, is-feature, `MinWaterDepth`, radar and sonar distance, and wind-generator, plus `energyuse`, wind-generator and tidal-generator through the net-energy query — are recovered runtime field mappings, not guesses based on similarly named proxies. Confidence is high for the comparisons, constants, cadence, and field mappings. The signed classification helper is the definition's **net-energy query**, the shared helper doc 05 specifies ([05 R-PROD-01 §1]); a strictly negative result means net energy producer. Its identity is settled, so nothing in this section is below high confidence.
 
@@ -3931,9 +4095,14 @@ A task record carries a back-pointer to the manager, a pointer to its group
 record, its deadline, and its owning player index. The wave and regroup
 records additionally carry the per-instance tunables named in §4 and §5.
 
-The seven distinct virtual tables are one contiguous run of function pointers
-in read-only data with two entries per class; the second entry of every class
-is never invoked by either dispatcher and has no direct caller
+Each task class has separate update and deletion callbacks. Neither task
+dispatcher invokes the deletion callback. **Manager teardown does:** it walks
+the ten slots in ascending order and invokes each non-null task's deletion
+callback with release requested. The regroup callback restores the base class
+and releases its task allocation; it issues no orders and draws no random
+numbers. The player cleanup path reaches this manager teardown, so the
+address-taken regroup deletion callback is reachable even though it has no
+direct call site. This is allocation lifetime, not a scheduled task update
 [08 "Strategy manager and its task graph"].
 
 #### Resource and builder-queue task body — Established [R-AI-01 §2]
@@ -3980,9 +4149,10 @@ queued at a time and the next is queued only after the queue drains.
 
 Reschedule first: `deadline = tick + 90`. Then read the **strategic centre**
 (the weighted own-unit centroid rebuilt every 30 ticks, [R-P0-05 §5]) once into
-a local, and run **two** independent passes over the task's group vector, each
+a local, and run **two** passes over the task's group vector, each
 in vector order. The first pass places buildings; the second repositions
-builders. A member can be acted on by both passes in the same invocation.
+builders. Both passes share that mutable centre. A member can be acted on by
+both passes in the same invocation.
 
 Two per-player inputs gate both passes:
 
@@ -4014,6 +4184,7 @@ for unit in group vector order:
     if unit.def.cancapture:
         dx = out.x - centre.x
         dz = out.z - centre.z
+        centre.y = out.y                                  # unwritten output; see below
         d  = trunc(sqrt(float(dx)*float(dx) + 0.0 + float(dz)*float(dz)))
         if d > ((playfieldWidth + playfieldHeight) / 3) << 16: placed = false
     if placed:
@@ -4029,6 +4200,39 @@ world-unit result to 16.16, so the cap is a plain world-unit radius. The
 vertical term of the distance is a literal zero loaded onto the x87 stack, not
 an omitted term: the sum is `dx*dx + 0 + dz*dz` in that order, square-rooted in
 80-bit and truncated once. Non-`cancapture` builders are not distance-capped.
+
+**Established — pass 1 also overwrites the shared centre's height.** Every
+capture-capable member that reaches the placement call copies `out.y` into
+`centre.y` before testing the placement result. This happens on success,
+failure and a later distance-cap veto. Earlier admission failures and
+non-capture members do not make this write. The placement root never writes
+`out.y`, and the caller does not initialize it [R-AI-03 §5]. On placement
+failure, the cap also reads the unwritten or previously retained X/Z output.
+
+**Established — one preceding-task history determines the height.** When
+regroup A issues its group move, the construction task runs immediately
+afterward in the same manager sweep, and its first placement attempt belongs
+to a capture-capable member, the unwritten output height retains the source
+group number from that broadcast: **raw fixed-point 3**, or 3/65536
+world units. The broadcast leaves that value intact, the dispatcher makes no
+intervening call, and neither the construction task's setup nor placement
+writes the height before that member reads it. The member transfers this
+value to the shared centre, including on placement failure or a distance-cap
+veto. This establishes a reachable
+history, not a universal initial value.
+
+**Unknown — the numerical value for other preceding-task histories.** If
+regroup A does not issue its move immediately before construction, or earlier
+placement attempts intervene, this bounded trace does not determine the
+residue. The unwritten height survives into the second
+pass's three-dimensional distance tests and can change their destination and
+random-draw branch. It is not generally established as zero, terrain height or
+the builder's height. Under the retail count gates, a capture member admitted
+by pass 1 is ineligible for pass 2, so that member does not replace the residue
+with its known unit height there. Complete the predecessor-schedule and
+caller-stack write census to settle the remaining histories; if no stable
+value exists, a deterministic replacement requires an explicit host policy.
+The pass-2 algorithm below is conditional on the centre left by pass 1.
 
 The order-queue test uses the current order's static gate mask, not its command
 identity [04 "Order descriptor table"]; the semantic name of mask bit 3 is
@@ -4094,7 +4298,7 @@ by the same 64-bit quotient, so the result is exact only up to the per-axis
 `>> 16` truncation.
 
 **The `cancapture` arm's height write lands in the shared centre and is never
-undone** (Established). Before the loop the task copies the strategic centre
+undone** (Established). At invocation entry the task copies the strategic centre
 into a local triple; each member then copies that triple into a *second* buffer,
 which is the one the computed target is written into and the one the move
 submission points at. The `centre.y := unit.y` store above writes the **first**
@@ -4330,9 +4534,14 @@ for unit in group vector order:
 * `probeScore` sums the **single per-type strategic coefficient** ([R-P0-05 §5])
   over the members of the strategic state's **first vector** — the non-allied
   live units the 30-tick refresh collected [R-P0-04 §3] — whose planar distance
-  from the probe satisfies `((dx*dx) >> 32) + ((dz*dz) >> 32) <= 160 * 160`, with
-  the products taken in 64-bit and shifted back. So the rally point is scored by
-  how much **enemy** value sits within 160 world units of it.
+  from the probe passes the inclusive signed comparison
+  `int32(((dx*dx) >> 32) + ((dz*dz) >> 32)) <= 160 * 160`.
+  Each subtraction first wraps to a signed 32-bit 16.16 delta, each square
+  is a signed 64-bit product, and the two shifted terms are added with
+  signed 32-bit wrapping, as in the nearest-hostile metric of §9. Accepted
+  coefficients are signed bytes added to a wrapping signed 32-bit score.
+  Ordinarily this counts **enemy** value within 160 world units; the metric
+  overflow boundary described in §9 also passes this signed radius test.
 * The adoption test is a **randomized comparison**: one draw bounded by the
   incumbent score and one bounded by the challenger score, adopted when the
   first is strictly less than the second. A zero incumbent score therefore
@@ -4416,9 +4625,10 @@ definitions the per-definition profile text of §12 is read from.
 **Group centroid.** Returns false when the group vector is empty. Otherwise it
 sums each member's three signed 16-bit **world-unit** position words (not the
 16.16 words), divides each sum by the member count with truncation toward zero,
-and shifts each quotient left 16 to produce a 16.16 point. The intermediate
-sums are 32-bit, so a group large enough to overflow them is a fault the
-executable does not guard.
+and shifts each quotient left 16 to produce a 16.16 point. Each addition
+wraps at signed 32-bit width, and the final shift retains the low 32 bits.
+Accumulator overflow wraps; it does not itself trap. This arithmetic contract
+does not establish that a normally populated group can overflow the sum.
 
 **Nearest hostile unit.** Walks the ten player slots in ascending order. A slot
 qualifies when its record is present, its control byte is `1`, `2` or `3`, its
@@ -4430,13 +4640,25 @@ unit when its **live** bit is set, its low two status bits are not the value
 exclusion bit of [06 §3.1] — is clear, and its runtime byte bit `0x4` is
 clear; the death latch (bit 14) is not tested, so a hostile that is dying but
 still carries the live bit is a candidate, and an immune one is not until a
-`MakeSelectable` order clears the bit. The metric is `((dx*dx) >> 32) + ((dz*dz) >> 32)` with each product taken as a
-signed 64-bit multiply of the 16.16 deltas and shifted back — that is the
-squared distance in world units, truncated. The best is kept on a **strict**
-less-than, so the first minimum wins on ties and the iteration order (player
+`MakeSelectable` order clears the bit. Each planar subtraction wraps to a
+signed 32-bit 16.16 delta. The metric is
+`int32(((dx*dx) >> 32) + ((dz*dz) >> 32))`: each square is a signed 64-bit
+product, then the two shifted terms are added with signed 32-bit wrapping.
+The best is kept on a **strict signed** less-than, so the first minimum wins
+on ties and the iteration order (player
 slot ascending, then pool ascending) is the tie-break. The initial best is the
 maximum signed 32-bit value, and the helper returns "none" when nothing
 qualifies. The vertical coordinate is passed in but never read.
+
+**Arithmetic boundary (Established).** Each shifted square is at most
+1,073,741,824. The sum overflows only when both signed deltas equal
+−2,147,483,648: the stored metric becomes −2,147,483,648, so it beats every
+nonnegative nearest distance and passes the rally radius test. This is a
+consumer arithmetic fact, not evidence that an ordinary map can produce the
+pair. **Unknown:** whether admitted unit positions and the centroid or
+visibility-validated rally probe can differ by exactly 32,768 world units
+on both axes. Settle this through map extent, placement normalization and
+position-writer bounds, separately for the two callers.
 
 **Group order broadcast.** Given a player, a group number, an intent, a queue
 modifier, an optional target unit, an optional target position and two
@@ -4777,6 +4999,10 @@ the first-rebuild tick and the exclusion bit's full census are in
 
 #### Open items — Unknown [R-AI-01 §17]
 
+* The construction task's unwritten placement-output height, copied into the
+  shared centre before the success test, and failed-placement X/Z reads (§3,
+  [R-AI-03 §5]) · independent caller-stack provenance trace; do not substitute
+  terrain height or claim a fixed branch/RNG outcome.
 * The semantic name of the order gate-mask bits the construction task tests —
   bit 3 in pass 1 and bit 14 in pass 2 [04 "Order descriptor table"] · doc 04
   owns the mask · static trace over the descriptor table's consumers.
@@ -5175,6 +5401,17 @@ cz = int16( (origin.z − (footZ << 19) + (1 << 19)) >> 20 )
 (`1 << 19` is 8 world units in 16.16; `>> 20` divides by 16 world units and
 floors — the same rounding the build cursor uses [07 §9].)
 
+**Established — arithmetic width.** The footprint shift, subtraction and
+half-cell addition above keep their low 32 bits before the signed arithmetic
+shift; the final cell then narrows to a signed 16-bit value. Widening the
+subtraction and addition changes the result at the signed-coordinate boundary.
+For example, raw origin `−2147483648` with footprint 2 produces cell `2047`,
+whereas a widened intermediate produces `−2049`. The scatter helper in §4
+uses this same boundary after its wrapped origin-minus-trigonometric-offset
+calculation. **Unknown — ordinary content reachability:** this arithmetic
+counterexample does not establish that a stock battle produces that origin;
+that requires tracing the map, radius and strategic-centre producers together.
+
 **Filter.** For each record in vector order, `d2 = (px − cx)² + (pz − cz)²`
 in 32-bit cell units; keep the record when `d2 <= D · D` (inclusive). `D` is
 a count of world units used as a count of cells, so the search disc is
@@ -5193,6 +5430,14 @@ slot and re-sifts the former last record. The greatest key is the least
 heap mechanics — deterministic from the vector order, but **not** the vector
 order itself; an implementation must reproduce the heap to reproduce retail's
 choice among equidistant deposits.
+
+**Established — finite-key boundary.** The comparison helpers would treat
+an unordered comparison as taking their less-than arm. The placement caller
+replaces every admitted record's key with a single-precision conversion of a
+signed integer before building the heap, so this caller supplies only finite
+keys, even if its integer arithmetic wraps. A NaN supplied directly to an
+isolated heap helper is therefore not a counterexample to this placement
+ordering contract.
 
 **Candidate loop.** With `best := 0`, `bestCell := none`, `firstD2 := −1`:
 
@@ -5387,9 +5632,12 @@ doc 04's ([R-ORD-01]) — the position's `x`/`z` alone determine the site. On
 helper failure the root writes nothing, leaves the grown radius in place, and
 returns false; the task then skips the submit and the next invocation (90
 ticks later, [R-AI-01 §3]) grows the radius again. The `cancapture` distance
-cap of [R-AI-01 §3] is applied by the task to `out.x`/`out.z` after a
-successful return and can veto the placement without resetting anything — the
-radius is already zero by then.
+cap of [R-AI-01 §3] runs after the call regardless of success, reads
+`out.x`/`out.z`, and copies the unwritten `out.y` into the centre shared with
+pass 2. It can veto a successful placement without resetting anything — the
+radius is already zero by then. The immediately preceding regroup-broadcast
+history determines the copied height as described in [R-AI-01 §3]; other
+histories and the failed-output X/Z values remain Unknown.
 
 #### Unknowns left, with deciders — Unknown [R-AI-03 §6]
 
@@ -5403,8 +5651,12 @@ radius is already zero by then.
   helper (§4) read is the movement class's `MinWaterDepth`, copied at FBI
   compile; whether any *other* reader of the word exists is open · static
   trace of the word's readers.
-- Nothing else in the placement path is open: every constant, comparison,
-  truncation, draw bound and draw order above is read from the executable.
+- **Construction output residue outside the bounded regroup history.** The
+  preceding regroup broadcast establishes one height value ([R-AI-01 §3]);
+  the other preceding-task histories and failed-placement X/Z values remain
+  open · complete the caller-stack write census across task schedules and
+  successive placement attempts. A deterministic replacement without that
+  evidence requires an explicit host policy.
 
 #### The blocker's row test, the validator's mode, the dead `y`, the `bmcode` selector — Established [R-AI-03 §7]
 
@@ -7078,18 +7330,103 @@ is ignored.
 #### Battle versus campaign continuations and timing
 
 **Established.** Load preflight accepts only game type 1 (campaign) and 2
-(multiplayer); any other value fails as invalid. **A save with BetweenMissions equal to 1 routes
-through campaign-continuation handling: battle restoration is skipped and
-the fresh mission spawner rebuilds the battle from the authored mission file
-(the campaign's Summary metadata — Campaign, Mission, Difficulty, Thumbs
-W/L marks — drives the front end). A save without the BetweenMissions item
-(the in-battle marker) routes through the six-state path and directly enters
-battle restoration.** The battle-entry gate checks the Summary
-BetweenMissions item twice, and only the absent/zero case calls the battle
-restore dispatcher; the present case falls through to the fresh spawner, and
-a BetweenMissions save contains only Summary so no battle state could be
-restored. The 28-byte scheduler
-block is persisted verbatim and then
+(skirmish); any other value fails as invalid. The writer emits
+`BetweenMissions` as integer 1 outside a live battle, but the readers test
+**item presence**, not its integer value. Name lookup is case-insensitive and
+searches the account's scalar items without checking their type or payload.
+Thus an integer 0, a negative integer or a string named `BetweenMissions`
+is present for this gate; a binary box alone with that name is not.
+
+There are two distinct consumers. The load dialog redirects to the campaign
+briefing only when the loaded game type is **1** and the item is present; it
+frees the bank and clears the load-pending flag on that route. The battle
+worker, when it still holds a bank, checks presence twice: an absent item
+allows the early player/setup restoration and later battle restoration;
+a present item skips both and takes the fresh mission-spawner path. The
+worker does not apply the dialog's game-type-1 condition to these tests.
+Consequently a kind-2 bank carrying the marker does not take the campaign
+briefing route, even though the worker skips its saved battle state.
+
+**Established — kind 2 with a present marker retains entry context.** A
+full worker trace distinguishes this route from both battle restoration and
+ordinary fresh skirmish entry:
+
+1. Before the worker, the load dialog selects kind 2, resolves `Mission`
+   through the ordinary map/schema loader, and copies that name into the
+   setup's map selection. It installs Summary difficulty and side, the
+   player-count word, and the five skirmish option fields using their normal
+   defaults. The player-count installation happens **after** mission
+   resolution. The kind-2 schema selector scans the existing ten setup
+   controller rows and uses one plus the highest nonzero row index; when
+   every row is zero, it retains the preexisting player-count word as the
+   requested count. The later Summary count does not rerun schema selection.
+2. The local loading state keeps the bank open. The worker seeds its random
+   streams, copies the configured unit limit and setup options, and reaches
+   the first marker test. Presence skips the saved `Player%i` controller
+   reads, the row-count enlargement, and the setup-row-to-player conversion.
+   Thus the setup controller rows used for schema selection and the existing
+   player records used by the world rebuild are **distinct retained inputs**;
+   the marker does not make one reconstruct the other. In particular,
+   Summary `Players` does not synthesize active slots, sides, alliances or a
+   local player. Summary `Side` does not rewrite kind-2 player sides.
+3. The ordinary world rebuild runs. It resets the scheduler to tick zero
+   while retaining the single-player preference speed words, constructs the
+   map and pools, clears the economy state of slots with nonzero controllers,
+   and initializes their AI state under the usual controller gates
+   [R-ENTRY-01 §3]. Saved player identities, stocks, scheduler, units,
+   camera, features and other battle accounts are not restored on this route.
+4. The kind-2 start-position and commander block requires **no open bank**,
+   independently of marker presence. It is skipped here: no starting-position
+   shuffle, its CRT draws, commander allocation, or commander storage bonus
+   is introduced. The visibility/mapping entry rebuild still runs.
+5. The second marker test selects the authored mission-unit spawner. It uses
+   the already selected schema's records, the ordinary unit-name lookup and
+   retained player eligibility, then performs the two placement/interpreter
+   passes of [R-ENTRY-01 §6]. A known unit naming an ineligible player still
+   takes the established fatal path; an unknown definition remains a sparse
+   null entry. An empty unit list clears the trigger victory countdown.
+   Neither a default commander nor a player repair is supplied by this step.
+6. The same camera helper used after campaign spawning selects the first
+   start-position special with stored number zero, subtracts half the current
+   game viewport, applies the ordinary camera clamp, marks the jump, copies
+   the clamped target into the glide position and clears mode bit 3. With no
+   matching special it leaves the world-rebuild camera reset in place. It
+   does not use the retained local player's assigned start position or a
+   saved camera account [R-ENTRY-01 §6, "Campaign camera"].
+7. The common tail installs the GUI and primes the per-player phase at tick
+   zero. The resource-grant helper checks only whether the bank is open, so
+   it makes **no grant** here, including the call after that prime. The bank
+   is released only afterward, before the metal-spot snapshots and worker
+   completion. Ordinary unit-creation effects and the prime still occur;
+   absence of an explicit grant is not a claim that all final stocks are zero.
+
+These gates apply even when the bank also contains complete battle accounts.
+They do not describe the ordinary kind-1 continuation: its dialog route
+releases the bank before briefing and the later fresh campaign entry.
+
+**Unknown — portable kind-2 marker entry without retained state.** The bank
+and mounted content do not determine the retained setup rows, active player
+records, local/viewing identities, alliances and preference speed needed by
+this path. The bounded trace establishes their consumer boundaries, not all
+possible startup, lobby and preceding-battle histories that populate them.
+A complete host mapping requires a snapshot at the load-dialog boundary and
+verification of those producers and the teardown paths for each supported
+entry origin. Replacing that state with saved player accounts or fresh lobby
+defaults is unsupported. The existing host's detached candidate construction
+is an intentional transactional policy; it can copy an established snapshot
+without reproducing retail's mutations of the live front end. Its current
+bank-and-content load dependencies do not supply that snapshot, and ordinary
+fresh-skirmish composition additionally creates commanders and grants
+resources. Rejecting this unresolved route remains preferable to guessing.
+
+For ordinary campaign continuations, presence therefore rebuilds the battle
+from the authored mission file, with Summary campaign, mission, difficulty
+and progress marks supplying the front end. The ordinary writer's
+continuation contains only Summary. An authored campaign Summary carrying
+integer `BetweenMissions=0` is a distinguishing case: it follows the same
+continuation route as integer 1; omission follows battle restoration.
+
+The 28-byte scheduler block is persisted verbatim and then
 recomputed on the first budget pass from a stale anchor, which can produce a
 capped five-tick catch-up, zero, or pause; the per-player UpdateTime deadline
 is an absolute tick advanced by 30 when due and gates settlement. Both random
@@ -7111,8 +7448,9 @@ presentation metadata — authoritative continuation uses
 saves only. The Summary integer named `Mapping` is distinct from the separate
 `Mapping` account.
 
-`BetweenMissions=1` routes a load into campaign continuation handling rather
-than battle reconstruction; the battle loader runs only for battle saves.
+The emitted `BetweenMissions=1` is a presence marker. The load dialog's
+campaign redirect and the battle worker's presence tests are distinct;
+see "Battle versus campaign continuations and timing" above.
 
 Load preflight accepts only `Gametype` 1 (campaign) or 2 (multiplayer);
 anything else fails as an invalid savegame. Campaign saves require the
@@ -7487,6 +7825,18 @@ live base fields above; an implementation carries the raw bytes through the
 staged image. [Unknown]
 
 #### Per-unit order records and subtype payloads [R-SAVE-ORDER-01]
+
+**Unknown — missing unit-type name fallback.** The retail unit-type remapper
+has a numeric fallback when its saved `UTYPENAME` entry is absent. A bounded
+static trace establishes two counters: one advances for every visited
+definition after the null sentinel, while the match counter advances only for
+definitions admitted by a flag test. A match returns the former counter and
+exhaustion returns zero. The flag's semantic role and the identity domain each
+caller expects remain unresolved; the distinct counters alone do not establish
+that the result is an incorrect unit type. Trace the flag writers, save-name
+writer and all remapper callers before implementing this fallback. Nanolathe's
+absent-name path currently retains the raw order parameter; its equivalence is
+not established.
 
 This section gives the save boundary for the dynamic order list. The offsets
 below are positions in a save-file box, not
@@ -8097,10 +8447,17 @@ Before case 3 the CD gates run: `Gametype` 1 without the campaign CD shows
 `Please insert the Campaign CD` and returns; `Gametype` 2 without the
 multiplayer CD shows `Please insert the Multiplayer CD` and returns
 ([R-CAMP-01 §5]); both stop the load with no diagnostic other than the
-insert-CD box. Every case is a return to the load screen — nothing is
-aborted mid-restore, because no battle state has been touched yet; the
-first mutation is the `Thumbs` copy and the session-record writes that
-follow case 4, after which the load cannot fail through a message.
+insert-CD box. These failures precede bulk battle restoration, but preflight
+is **not transactional**. After the full bank opens and before validating
+`Mission`, the callback installs its game type, opens a supplied campaign,
+sets side and difficulty, and for campaign games updates the two side
+mirrors. Campaign opening itself clears/reloads campaign media and mission
+state. A missing or invalid mission then reports failure without restoring
+those earlier values. A type change can replace the existing campaign object
+before that failure. The `Thumbs` copy and subsequent loading-state transition
+occur only after mission validation. This historical mutation order does not
+require a host implementation to discard its documented detached staging
+boundary.
 
 **Established — no `expected %d units, got %d` on the save path.** The
 string `expected %d units, got %d` (and its sibling `No units_expected sent
@@ -8120,8 +8477,8 @@ the five multiplayer rule integers (`CommanderDeath`, `Location`, `Mapping`,
 `LineOfSight`, `LineOfSightType`, each default `1`) are installed; the
 load-pending flag is raised, the session state becomes the loading state with
 the battle-loading worker, and the list buffers are freed. A campaign save
-(`Gametype` 1) that carries the `BetweenMissions` item instead clears the
-load-pending flag, frees the bank, and enters the new-mission sub-state — the
+(`Gametype` 1) that carries the `BetweenMissions` scalar item, regardless of
+its type or value, instead clears the load-pending flag, frees the bank, and enters the new-mission sub-state — the
 continuation route already described under "Summary".
 
 ### The summary panel, exactly [R-SAVE-02 §3]
@@ -8889,7 +9246,7 @@ amount is available (larger boxes have trailing bytes ignored).
 | `0x14` | 2 | requested speed | copied | restored | unchanged | retained; compared with active |
 | `0x16` | 2 | active speed | copied | restored | unchanged | retained; may step toward requested via slew counter |
 | `0x18` | 2 | speed-slew counter (`i16`) | copied | restored | unchanged | incremented/decremented/reset by thresholds when not paused |
-| `0x1A` | 2 | scheduler flags | copied | restored | unchanged | bit 0 is pause gate; bit 1 recomputed from lag, bit 2 from speed mismatch; other bits masked-preserved |
+| `0x1A` | 2 | scheduler flags | copied | restored | unchanged | bit 0 is pause gate; bit 1 recomputed from lag, bit 2 from active below requested before hysteresis; other bits masked-preserved |
 
 The battle-loading state initializes the timing block before the worker starts, but
 the battle-setup initializer overwrites all 28 bytes. No direct code between the read and the
@@ -9553,14 +9910,47 @@ properties:
 
 ## Missing and unknown
 
+- **Unknown — duplicate command-name registration reachability:** insertion
+  ordering folds case, but existing-entry equality compares exact bytes. The
+  traced profile bootstrap registers the fixed names `plan`, `weight` and
+  `limit`; no direct conflicting caller or stored registration callback was
+  found. A complete indirect/computed-call census is needed before claiming
+  that duplicate case variants can affect profile interpretation. Nanolathe
+  parses the established grammar directly and has no corresponding mutable
+  registration seam [R-AI-01 §12].
+- **Unknown — prefix-maximum resource helper reachability:** an isolated
+  helper installs each eligible slot's running resource maxima immediately,
+  with a minimum of 200, rather than revisiting earlier slots after the
+  eventual maxima are known. No direct caller or stored absolute reference
+  was found in the bounded trace. Establish an indirect/computed caller and
+  its option mode before associating it with battle entry or changing the
+  established per-player setup [R-ENTRY-01 §5]. No dependent behavior is
+  implemented from this orphaned helper.
+
 Open items only. Each bullet states what is unknown, the section that owns it,
 and the decider that would close it. Findings that closed an item live in the
 body and are not restated here.
 
 - Malformed empty side display names and transformed suffix terminators in the save/load table · [R-SAVE-02 §3] · bounded constructor/index-reader trace.
+- Missing `UTYPENAME` numeric fallback: skipped-definition flag semantics and
+  the returned identity expected by each caller · [R-SAVE-ORDER-01] · trace the
+  flag writers, name-table writer and all remapper callers before treating a
+  retained raw order parameter as equivalent.
 
 ### Sessions and campaign
 
+- The full nonfinite producer domain of the shared net-energy query ·
+  [R-P0-05 §5], [05 R-PROD-01 §1] · trace exceptional generator and environment
+  values through each query caller. Working-precision return, class-vector
+  unordered consumer gates and direct energy-use NaN suppression are
+  Established; none establishes a fabricated NaN writer.
+- Kind-2 `BetweenMissions` entry's complete retained-state producer history
+  and detached host snapshot mapping · "Battle versus campaign continuations
+  and timing" · trace startup/lobby/preceding-battle origins through load
+  preflight and teardown, then supply setup rows separately from player
+  records and preference state. The worker gates, omitted commander/grant
+  steps, schema-selection timing and authored spawner are Established; no
+  bank-only default reconstruction is established.
 - Whether post-load fixups recompute score-panel ranks from the restored kill
   counters, or leave the registration-time slot order until a later credited
   kill shifts it · [R-SKIR-01 §2], [R-CAMP-01 §9] · static trace of the
@@ -9626,6 +10016,16 @@ body and are not restated here.
 
 ### Computer player
 
+- Reachability of the simultaneous minimum-word planar deltas in the nearest
+  hostile and rally score metrics · [R-AI-01 §7], [R-AI-01 §9] · trace map
+  extent and placement admission, unit position writers, and the centroid or
+  visibility-validated probe bounds; direct arithmetic inputs alone do not
+  establish an authored battle case.
+- The construction task's unwritten placement-output height outside the
+  established immediately preceding regroup-broadcast history, and its
+  failed-placement X/Z reads · [R-AI-01 §3], [R-AI-03 §5] · complete the
+  predecessor-schedule and caller-stack write census; absent a stable value,
+  an explicit deterministic host policy is needed for implementation.
 - Whether a writer separate from the recovered direct-writer caller set
   mutates manager task vectors through an indirect alias · "Strategy manager
   and its task graph" [R-P0-04] · static trace. Marked `TODO(question)`; no

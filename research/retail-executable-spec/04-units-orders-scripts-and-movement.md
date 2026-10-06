@@ -787,7 +787,7 @@ The handler's return code drives the queue [P0-07][P0-08]:
 | 6 | move the record to the tail of its segment and continue (primary); in the secondary pump remove the single record and return without tail yield |
 | 7 | free every record on both segments and return — this is cancel-all (primary); in the secondary pump remove the single record and return without cancel-all |
 | 9 | set a completion flag; if the record is last, reset its phase and set the randomized deadline `tick + 30 + random below 30` (range 30 to 59) [R-P0-01]; otherwise unlink and free |
-| above 9 | delegate to the order expiry helper and return — helper unlinks, cleans, and frees the single record with no random draw and no whole-queue cancel; whole-queue cancel is exclusively code 7 [P0-08] |
+| above 9, compared as unsigned 32-bit | primary: run the full purge of [R-MOV-03 §6], draining the primary chain and then the secondary chain, and return; secondary: unlink, clean and free the current record, then reload the rear head. Neither result arm itself draws RNG. |
 
 **The two deadline draws [R-P0-01] (Established).** The primary pump's switch
 loads the bound 15 in the code-3 arm and the bound 30 in the code-9
@@ -796,12 +796,14 @@ last-record arm into the same shared draw epilogue (`gate |= 1`,
 armed, so code 3 waits 30 to 44 ticks and code 9's
 last-record wait 30 to 59 (section 8.3). The code-9 non-last arm unlinks and
 frees. The secondary pump draws only for its code-3 arm; its code-9 arm is a
-plain remove, and the above-9 delegate never draws.
+plain remove. Neither above-9 result arm makes a deadline draw; cleanup
+callbacks remain part of the selected removal path.
 
 Consequences a reimplementation must preserve: one pump call can cascade a
 record through several phases in the same tick until a waiting or blocked code
-appears; a handler that returns an out-of-range phase code at or below 9
-follows that code's row, while above 9 it takes the single-node expiry helper;
+appears; the handler result is tested as a full unsigned 32-bit value, so any
+value outside 0–9 takes the segment's default arm. In the primary pump that
+is full cancellation, while in the secondary pump it is single-record removal;
 waits are quantized to 30 to 44 ticks for code 3 and 30 to 59 ticks for the
 code-9 last-record wait [R-P0-01]; and goal writes and slot binds made by a
 handler are visible to later handlers in the same cascade, while freed records
@@ -815,7 +817,7 @@ latency; sections 1.1, 8.3).
 after every non-returning code the primary pump **reloads the front head**
 and applies steps 1–4 to it. The walk therefore only ever runs the record at
 the head; a record behind it is reached in a pass only when the head is
-unlinked (codes 5, 8, 9-not-last, the above-9 helper), rotated to the tail
+unlinked (codes 5, 8, 9-not-last), rotated to the tail
 (code 6), or replaced by a handler's head insert ([R-ORD-01 §1]). Code 3
 arms the head's own gate with a future deadline, so the reload finds it
 blocked and the pass ends. A code-2 hold has the same shape: every code-2
@@ -1053,7 +1055,8 @@ path of section 3.4 (capability gates, the empty-name reject sentinel, and
 the non-queued purge). Neither pump nor any handler re-tests the descriptor's
 capability gates afterwards: once admitted, a record leaves the queue only by
 completion (code 5), a removal code (5/8, 9 on a non-last record, the
-secondary pump's 6/7/9, or the above-9 expiry delegate), or cancel-all (7).
+secondary pump's 6/7/9 or above-9 default), or primary cancel-all
+(7 or an unsigned result above 9).
 There is no later validity re-check that pre-empts a queued order; a stale
 target or unreachable goal is handled by waiting, re-arming, or completing —
 never by silent rejection.
@@ -1357,11 +1360,26 @@ script argument, arity 1, receiver none — the cell map of `[R-UNIT-06 §4]`.
 * **Toggle remove-or-add.** The interface's toggling issue (the mobile-build
   toggle of doc 07 is one caller) walks the **front** chain for the first
   record matching the identity, the target when one is supplied, and the goal
-  when one is supplied — `|goalX − recX| <= 0x100000` and the same on Z, i.e.
-  within 16 world units per axis, inclusive; a match is unlinked from its own
-  segment, tombstoned unless it is the front head, cleaned up and freed, and
+  when one is supplied. Each axis subtracts the record coordinate from the
+  issued coordinate with 32-bit wrap, adds 16 fixed-point world units with
+  the same wrap, and accepts an unsigned result at most 32 fixed-point world
+  units. Away from wrapping boundaries this is the inclusive square
+  `|goalX − recX| <= 16` and likewise on Z; Y is ignored. A match is unlinked
+  from its own segment, tombstoned unless it is the front head, cleaned up and freed, and
   nothing is added; with no match the record is added through the ordinary
-  counted insertion. Supplying no unit skips the search.
+  counted insertion. The search runs only when the queued-issue argument is
+  nonzero; an ordinary nonqueued issue skips it even with a valid unit. Both
+  the mobile-build placement caller and the general selected-unit issue
+  caller pass their queue modifier to this argument. The matched record is
+  unlinked **before** cleanup, so its cancellation callback sees the updated
+  chain while the removed record retains its own successor reference.
+
+  **Established — arithmetic boundary.** At this consumer, issued raw X
+  `−2147483648` and recorded raw X `2147483647` differ by one raw fixed-point
+  unit after wrap and therefore match if the other predicates pass. A wider
+  absolute subtraction would reject them. This is a stored-input boundary,
+  not proof that a world click can produce this pair; producer reachability
+  remains in the Unknown list.
 * **The purge.** One helper serves both purges of section 3.3: in
   *keep-survivors* mode it removes every front-chain record whose static-mask
   copy lacks **bit 2** (`0x4`); in *full* mode it removes every record of the
@@ -1370,7 +1388,8 @@ script argument, arity 1, receiver none — the cell map of `[R-UNIT-06 §4]`.
   cleanup of [R-ORDER-02 §2], and frees.
   The keep-survivors mode is what the damage-reaction auto-engage issue
   ([08 R-AI-01 §11], [R-STANCE-01 §3]) calls before inserting its attack; the
-  full mode is the pump's cancel-all (code 7) and unit finalisation. **Static
+  full mode is the primary pump's cancel-all (code 7 and its unsigned
+  above-9 default) and unit finalisation. **Static
   bit 2 is therefore the purge-survivor bit** section 3.3 names —
   `MakeSelectable`, `Wait`, `AttackUType`, `WaitForAttack`, `GetBuilt`,
   `BeCarried`, `Paralyze`, `SelfRepair` and `BuildingBuild` survive an
@@ -2307,12 +2326,14 @@ Readers must tolerate a dead or reused slot.
   **before** attacker validation and before any stance, controller, or
   build-state test: attacker-less damage (a self-inflicted explosion, a
   console-applied packet) raises the bit exactly as enemy fire does.
-* *Recipients.* Every order record whose observer node is linked on the
-  victim — a record whose target is the victim and whose descriptor carries
-  the observer static bit (`0x200`, [R-MOV-03 §7]) — **regardless of which
-  unit owns the record and regardless of the record's position in its
-  queue**. A guard record (target = ward) is one such record; an enemy's
-  attack record targeting the ward is another, and it receives the bit too
+* *Recipients.* Every order record whose observer node is currently linked on
+  the victim — **regardless of which unit owns the record and regardless of
+  the record's position in its queue**. The observer static bit (`0x200`)
+  controls constructor admission,
+  not this notification walk: a later explicit target binding can register a
+  record whose constructor cleared that bit [R-MOV-03 §7]. A guard record
+  (target = ward) is one such record; an enemy's attack record targeting the
+  ward is another, and it receives the bit too
   (its gates never admit `0x10`, so the bit merely accumulates there).
 * *Effect.* `record.pending |= 0x10`. Nothing else is written; no phase or
   gate changes.
@@ -3049,8 +3070,8 @@ body, at implementable precision:
 The detach applies the kind-10 event with carrier null: the product is
 unlinked from the factory's cargo list, its hang-piece byte becomes `0xff`,
 flags bit 17 and the carrier pointer are cleared, it is pushed onto the front
-of its **current** sector bucket (the bucket its committed position selects,
-[R-COLL-01 §4]), and its mover mode is set to 1. **No clear, no stamp and no
+of its **retained** sector bucket (the last stamp's sector choice,
+[R-COLL-01 §11]), and its mover mode is set to 1. **No clear, no stamp and no
 position write happen at detach**: the product keeps the cached cell pair and
 the ground-word footprint the carried setter last wrote, at the pad, with the
 orientation of §2. The second invocation from state 4 finds no carrier and
@@ -3889,14 +3910,8 @@ spends that visit's feature tournament draws. (An implementation that merges the
 cases into one *wait* consumes the wrong number of simulation draws on the
 unresolvable path and desynchronises every later draw in the session.) Then
 when both energy and metal are at least 20 % of their storages → hold.
-Otherwise feature pairing samples a square lattice at 48-world-unit
-steps; the helper argument is the diameter (`sightdistance`, hence ±half the
-value). Each sampled point resolves independently and appends its sample
-coordinates and authored resource values to the energy and/or metal list when
-both `reclaimable` and `autoreclaimable` are set. For each nonempty list,
-three bounded picks with replacement retain the greatest value using strict
-`>` (the first sampled tie wins), energy list before metal list. There is no
-nearest-feature score or deduplication. None → hold. In order: a metal feature
+Otherwise feature pairing uses the shared lattice and tournament described
+below, with diameter `sightdistance`. None → hold. In order: a metal feature
 exists and metal < 20 % of storage → spawn `Reclaim` on it; else if no energy
 feature or energy ≥ 20 %: a metal feature whose value fits under storage →
 spawn `Reclaim` on it; **a missing metal feature is never itself a reason to
@@ -3905,7 +3920,8 @@ value would overflow metal storage. There the ladder holds when there is **no
 energy feature**, holds when the energy feature's value would overflow energy
 storage, and otherwise spawns `Reclaim` on the energy feature; else
 (energy feature and energy < 20 %) spawn `Reclaim` on the energy feature. Both
-"fits" tests are inclusive: `stock + value ≤ storage` admits. Every
+"fits" tests are inclusive, with the working precision and unordered cases
+specified below. Every
 spawn releases this record's payload, inserts the reclaim (goal = the sampled
 feature position) at the head, clears this record's gate, and returns *wait*
 (the first arm releases the payload twice — once before the allocation and
@@ -3927,6 +3943,98 @@ short-circuit
 applies throughout: a bound below 2 returns zero without advancing the seed,
 so a one-entry list still makes its three calls and advances the seed on none
 of them.
+
+**Established — resource comparison precision, shared with the aircraft
+patrol.** Every 20 % test in these two handlers multiplies the stored
+single-precision capacity by the binary64 constant nearest to decimal `0.2`.
+The product remains at the runtime's 53-bit working precision [01 R-DET-01 §1]
+through comparison with the stored single-precision stock; it is not rounded
+to single precision first. The healthy arm means `threshold ≤ stock` **or an
+unordered comparison**; the low arm is its complement, the ordered strict
+`stock < threshold`. This governs repair-scan admission, the ground-only
+both-stores hold, and both resources in the reclaim ladder. Each fit test adds
+the stored single-precision stock and feature value at working precision,
+without an intermediate single-precision store, then admits `sum ≤ capacity`
+or unordered. These are consumer comparison rules; they do not establish an
+authored producer of NaN stock or capacity.
+
+**Established — feature value domain.** The feature loader reads `metal` and
+`energy` as integers, keeps their unsigned low 16 bits, and stores those values
+as single precision. Every admitted authored value is therefore an exactly
+representable integer from 0 through 65535. Fractional text is not a route to
+fractional feature value at this consumer. The sampler admits each resource
+list only for an ordered nonzero value, which is equivalent to a positive value
+on this authored domain.
+
+**Established — fixed-point lattice and tournament order.** The helper receives
+a signed 16.16 diameter. Ground patrol converts its signed definition
+`sightdistance` word into that form; air patrol supplies 240 world units.
+Halve the raw fixed-point diameter with signed truncation toward zero. Start
+Z at `centreZ − half`, then for each Z start X at `centreX − half`:
+**Z is the outer loop and X the inner loop**. Continue each loop while its
+signed coordinate is at most `centre + half`, adding exactly 48 world units
+in fixed point; the endpoint is sampled only when a step lands on it. The additions
+and subtractions retain signed 32-bit wrapping semantics. Do not floor the
+centre to whole world units or halve a whole-unit diameter first: an odd
+positive diameter starts half a world unit from the integer-centred result.
+Each sample resolves its map cell from raw X and Z, including the ordinary
+feature-fringe parent lookup. Both `reclaimable` and `autoreclaimable` must be
+set. Append the sample position and resource value independently to each
+qualifying list; repeated samples of one feature are retained.
+
+Process the energy list before the metal list. Each nonempty list makes
+exactly three bounded picks with replacement. The best value starts at zero
+and the selected index at the first list entry. Replace the selection only
+when the sampled value is strictly greater, so on the authored positive-value
+domain the first tournament pick having the maximal sampled value wins ties.
+This is neither nearest-feature selection nor first-in-lattice tie breaking.
+
+**Established — finite distinguishing cases.** These boundaries do not require
+corrupt saved state:
+
+- A human mission beginning with zero energy has the ordinary 200 energy
+  storage bonus. With one complete unit authored with `energyStorage=3` and
+  `energyMake=40.6`, and no other energy production, cost or storage, a normal
+  settlement supplies capacity 203 and stock `float32(40.6)` ([05 R-ECO-01 §2],
+  [05 R-ECO-01 §4], [05 R-ECO-01 §5], [08 R-ENTRY-01 §8]). That stock is below
+  the working-precision threshold, so repair scanning is not admitted.
+  Rounding the threshold to single precision would admit it.
+- An authored initial resource grant of 16777216 supplies that stock and
+  storage bonus without an upper clamp. With zero additional storage and a
+  feature value of 1, the fit sum exceeds capacity. Rounding the sum to single
+  precision incorrectly makes it fit. Ground patrol can reach this arm with
+  the other resource low and no feature for that resource; aircraft patrol
+  has no both-stores early hold (§7).
+- With centre X/Z `(64, 64)` and diameter 96, equal positive energy features
+  at sample positions `(64, 16)` and `(16, 64)` enter the list in that order.
+  Seed 1 chooses index 1 on its first bounded pick of two; ties preserve that
+  choice over the remaining two picks. Reversing the loop nesting selects
+  the other feature with the same three draws. With `sightdistance=97`, the
+  same centre instead starts each axis at 15.5; flooring it to 16 can select
+  a different map cell. These are ordinary positive in-bounds feature cells
+  and admitted signed-word sight distances.
+
+**Established — pathological coordinate overflow.** The signed loop test and
+wrapped 48-unit increment do not guarantee termination. In particular, an
+upper endpoint equal to the greatest signed raw coordinate cannot be exceeded
+by any later wrapped coordinate. **Unknown:** a complete classification and
+observable outcome for all overflowing histories, including their allocation
+and map-lookup effects. A bound on samples derived from diameter is a host
+safety limit, not an established retail exit. Ordinary in-bounds lattice
+selection above does not depend on this gap.
+
+**Unknown — the sampler's copied Y.** The sampler initializes each sample's X
+and Z but copies an unwritten temporary Y into returned feature positions.
+The map-cell lookup does not write that Y. A terrain-height query or the
+feature's own Y is therefore not an established substitute. Ground `Reclaim`
+resolves the feature using X/Z and installs an origin-cell/footprint rectangle;
+its spray height is calculated separately (§5). `VTOL_Reclaim` copies the
+position into a point marker, but the marker rewrites Y before its ordinary
+horizontal arrival test (§7, [R-AIR-01 §4]). Its save writer can copy the
+stored marker Y. Exact values and observations before the first goal update
+remain unresolved: a caller-history and first-reader trace, including queue
+presentation and save timing, is needed. The established planar selection
+contract does not require inventing that height.
 
 ### The work handlers [R-ORD-01 §5]
 
@@ -4212,7 +4320,8 @@ The producers of pending bits `0x8`, `0x10000` and `0x10`:
   both, and the node's separate method table has its destructor as its first
   entry. When a unit is destroyed, the removal path walks every observer node
   registered on that unit, invokes each node's registered handler's first
-  method with `0x8`, and then unlinks the node. This
+  method with `0x8`, and then unlinks the node if the callback left its
+  observed target unchanged and non-null [R-MOV-03 §7]. This
   is why the attack, guard, work, and wait pre-checks all treat `0x8` as
   "target lost".
 * **`0x10000` — target cloaked.** The unit edge machine's bit 2 is the cloak
@@ -4230,10 +4339,9 @@ The producers of pending bits `0x8`, `0x10000` and `0x10`:
 
 ### The observer node, and pending bit 0x10's producer [R-MOV-03 §7]
 
-The order record's *target smart-reference* (section 3.2) is a 16-byte
-**observer node** embedded in the record: a method table, the observed unit,
-a link to the next node on that unit's observer list, and a handler
-reference. Construction links the node at the **head** of the target's list
+The order record owns a *target smart-reference* (section 3.2), an
+**observer node** retaining the observed unit and an optional notification
+receiver. Construction links the node at the **head** of the target's list
 when the target is live (definition index nonzero); otherwise the node stays
 unlinked. The record constructor sets the handler to the record itself,
 clears `0x200` from the static-mask copy when no target was supplied and
@@ -4241,9 +4349,11 @@ clears `0x200` from the static-mask copy when no target was supplied and
 unlinks the node again, clearing its observed-unit reference. This is a
 constructor admission rule, not a continuing restriction: a later handler can
 relink the reference independently of that static bit, as `Guard_NoMove` does
-when it binds an acquired target ([R-ORD-01 §3]). Relinking to another live
-unit splices the node out of the old list and pushes it at the head of the new
-one; unlinking, including record cleanup, clears the observed-unit reference.
+when it binds an acquired target ([R-ORD-01 §3]). Relinking first splices the
+node out of its current list, then pushes it at the supplied defined unit's
+head. Supplying the same unit still performs that unlink and head insertion;
+supplying null or an undefined unit leaves the reference clear. Unlinking,
+including record cleanup, clears the observed-unit reference.
 These linkage and clear rules are **Established** by the shared reference
 helper and the constructor's call to it.
 
@@ -4258,6 +4368,18 @@ taken damage wakes with pending bit 4. That is why the guard handlers'
 `0x18` gate reads "target lost or target hit". Doc 06's "which task types act
 on code 16" has the same answer: all of them, identically, through the
 pending word.
+
+**Established — removal callback ordering.** Final target removal repeatedly
+processes the current head of the target's reference list. It remembers that
+node's observed unit, calls its receiver with the target-lost bit when a
+receiver exists, then checks the node again. Only an unchanged, non-null
+observed unit is unlinked and cleared by this step. A callback that cleared
+the reference or rebound it to a different unit retains its result; rebinding
+to the same unit does not prevent this clear. The walk then reloads the dying
+unit's current list head. The ordinary order receiver only ORs the event into
+its pending word, so it does not rebind during this callback. Air markers have
+no receiver and are simply unlinked [R-AIR-01 §4]. These two receiver forms do
+not establish the behavior of an untraced callback that mutates other nodes.
 
 ### The five VTOL work twins [R-ORD-01 §7]
 
@@ -4327,8 +4449,11 @@ no nanolathe stamp: an aircraft repairs from wherever its marker leaves it.
 as the ground twin does (none → status 7 `Reclamation failed`, abandon; not
 reclaimable → abandon). Phase 0: preamble with `Reclaiming`, plus
 `canreclamate`. Phase 1: air marker **on the feature's goal position with no
-altitude or radius setter** — arrival is the default `dist ≤ 0.5` world
-units of [R-AIR-01 §4] at the goal's own Y; install; gate = `0xE0`; advance.
+altitude or radius setter** — arrival is the default horizontal
+`dist ≤ 0.5` world units of [R-AIR-01 §4]. The marker's ordinary goal update
+replaces Y with sector height plus cruise altitude before testing arrival;
+there is no Y arrival requirement without the altitude flag. Install;
+gate = `0xE0`; advance.
 Phase 2: satisfied `0x40` → abandon; `p1 = trunc(30 + (metal + energy) /
 2)` from the feature definition — the constant is **30** where the ground
 twin uses 15, so an aircraft takes fifteen more ticks per feature; status 11;
@@ -4385,16 +4510,17 @@ position; the patrol-chain setup of [R-ORD-01 §4]; preamble with
    `u` releases the payload, explicitly spawns `VTOL_HelpBuild` on `u` at the
    head, gate = 0, and returns *wait*. The explicit spawn bypasses the command
    issuer's stance and return-move additions, but does not bypass admission.
-5. Feature pairing uses a diameter of 240 world units (±120), samples every
-   48 world units, and resolves each lattice point independently. Qualifying
-   entries require both `reclaimable` and `autoreclaimable`; nonzero authored
-   energy and metal values put an entry in the corresponding list, with
-   duplicates retained in sample order. Each nonempty list then takes three
-   bounded picks with replacement and keeps the greatest authored value under
-   strict `>` (energy before metal). There is no nearest-feature selection.
-   None → hold. Then the ground twin's decision tree verbatim
-   ([R-ORD-01 §4]) with one substitution: every spawn is `VTOL_Reclaim` on the
-   sampled feature, inserted at the head with gate = 0, *wait*.
+5. Feature pairing uses the shared fixed-point lattice and tournament of
+   [R-ORD-01 §4] with diameter 240 world units (±120). **There is no early
+   both-stores-healthy hold here.** If the pad and repair branches have not
+   ended the visit, the aircraft reaches the tournaments even when both
+   stocks are at least 20 % of capacity. None → hold. Then use the ground
+   twin's reclaim decision ladder, including its comparison precision, with
+   every spawn replaced by `VTOL_Reclaim` on the sampled feature, inserted at
+   the head with gate = 0, *wait*. For example, stocks 100 and capacities 200,
+   no repair candidate and two sampled energy-only features of value 1 reach
+   three simulation draws and a reclaim spawn. The ground-only early hold
+   would suppress both effects.
 
 Other phase: cancel-all. Draws occur only at reached sites: the low-health pad
 pick, the unit-candidate pick, and the conditional energy and metal feature
@@ -4625,9 +4751,9 @@ loop:
 So "continue walking" in §3.3's table means *reload the head and apply the
 gate test to it*. Consequences: codes 0 and 1 re-run the **same** record
 with its new phase in the same tick (the cascade); code 3 re-gates the head
-so the reload ends the pass; codes 5, 8, 9-not-last and the above-9 helper
-hand the pass to
-the record that was behind; code 6 hands it to the record behind and the
+so the reload ends the pass; codes 5, 8 and 9-not-last hand the pass to
+the record that was behind; primary code 7 and the above-9 default drain
+both segments and return; code 6 hands it to the record behind and the
 rotated record is visited again only when the walk reaches the tail; a
 handler that head-inserts a record ([R-ORD-01 §1]) hands the pass to the
 inserted record — that, and only that, is the sense in which "the next record
@@ -5581,9 +5707,10 @@ the one arm that does.
   the feature and move tests. Code 8 rejects outright.
 * *Code 2:* nano-reach **and** a second, stricter compare: the same
   sign-extended health, taken as unsigned, is **below** `maxdamage`
-  (unsigned). This excludes the over-full and latched targets nano-reach
-  admits, so a move-click on a latched friendly is a move, while a code-8
-  request on it is a repair order that the next slot visit finds dead.
+  (unsigned). Death-latched targets are not categorically excluded: with
+  `maxdamage = 100`, health zero passes this comparison, while health −5
+  and health 150 fail it. The death latch is not itself an input to either
+  health comparison; the command resolver's separate alive gate still applies.
 
 **Rule for an implementation.** One admission function carrying the health
 inequality; codes 1 and 8 call it and nothing more; code 2 calls it and then
@@ -6735,19 +6862,45 @@ definitions would be inventing content.
 
 **Established fact — tick denominator:** The VM tick denominator is the constant 30, read at VM zero-init from the engine's tick-rate global and written once at process startup from the fixed 30-tick configuration. It is copied to the VM's own tick-denominator field and immutable after. It is not derived per-tick from the wall-clock or game-speed budget. A bounded scan finds no zero guard before any of the divisions by it: four opcodes divide (move, turn, spin, stop-spin) but there are **five** divisions, because spin divides both its operands — its speed and its acceleration. A synthetic zero denominator would raise the processor divide fault. Sleep uses multiply `denom*ms` not divide and is not affected.
 
-**Established fact — division and remainder:** Every `speed/denom`, `accel/denom` and `decel/denom` uses signed division truncating toward zero (positive denominator); remainder is discarded with no carry between ticks. Thus `−100/30` is `−3`, not `−4`. Sleep timer is `(denom * ms)/1000` trunc toward zero, denominator positive, also discarding remainder.
+**Established fact — division and remainder:** Every `speed/denom`, `accel/denom` and `decel/denom` uses signed division truncating toward zero (positive denominator); remainder is discarded with no carry between ticks. Thus `−100/30` is `−3`, not `−4`. Sleep first stores the low 32 bits of `denom * ms`, interprets that result as signed, and then divides by 1000 with truncation toward zero, also discarding remainder. Widening the multiplication until after the division changes large-duration results.
 
-**Established fact — move and turn arrival:** Move and positional turn snap on inclusive arrival: if `cur+step` equals or overshoots `target` the interpolator snaps to `target` and clears the axis busy word, otherwise it steps and keeps the piece dirty. Turn chooses direction by shortest-arc from the raw signed difference `delta = tgt − cur`: start with `perTick = trunc(speedRaw/30)`; if `delta==0`, write 0; otherwise negate it exactly when `(abs(delta) > 0x8000) != (delta < 0)`. The half-circle comparison is strict. Thus an exact positive half-circle leaves the speed sign alone, while an exact negative half-circle negates it; the two target directions remain deterministic without collapsing the signed target delta into a signed-16-bit value before this decision.
+**Established fact — move issuance and signed arrival:** Move takes the signed
+script speed, divides it by the tick denominator with truncation toward zero,
+and negates that result exactly when the signed target is below the current
+translation. It does not take the speed's absolute value. During interpolation,
+a nonzero stored speed produces a candidate by multiplying that speed by the
+call delta and adding the current translation; both operations retain the low
+32 bits. The signed comparison uses this wrapped candidate. A positive stored
+speed snaps to the target and clears the speed when the candidate is at or
+above the target; a negative stored speed does so when the candidate is at or
+below the target. Otherwise the candidate is committed and the piece remains
+busy. No distance or widened magnitude comparison replaces these tests.
+
+**Established fact — script-reachable translation edge cases:** Literal script
+operands preserve their signed 32-bit values, and `move-now` commits a full
+translation value through the model adapter without a numeric clamp. Thus
+these cases can be constructed by a valid script and reached by the ordinary
+delta-one unit visit, without injecting saved animation state. In raw fixed-point
+units, current 0, target 100 and script speed −30 produce stored speed −1;
+the first interpolation snaps to 100 and clears the speed. With current
+2147483646, target 2147483647 and script speed 60, the candidate wraps to
+−2147483648 and remains busy. The corresponding negative-direction example,
+current −2147483647, target −2147483648 and script speed 60, wraps to
+2147483647 and remains busy. These examples establish interpreter behavior,
+not occurrence in the shipped scripts.
+
+**Established fact — positional turn arrival:** Positional turn snaps on inclusive
+arrival and clears its speed when it reaches or passes the target. Turn chooses direction by shortest-arc from the raw signed difference `delta = tgt − cur`: start with `perTick = trunc(speedRaw/30)`; if `delta==0`, write 0; otherwise negate it exactly when `(abs(delta) > 0x8000) != (delta < 0)`. The half-circle comparison is strict. Thus an exact positive half-circle leaves the speed sign alone, while an exact negative half-circle negates it; the two target directions remain deterministic without collapsing the signed target delta into a signed-16-bit value before this decision.
 
 **Established fact — spin accel and stop-spin:** Spin (`0x10003000`) writes the spin target speed as `trunc(speed/30)` and the spin acceleration as `trunc(accel/30)`, and marks the turn-target/marker word with the `0xffffffff` sentinel; if `accel/30 == 0` the spin current speed is set to the target immediately (fast path). Otherwise the interpolator's acceleration-ramp block runs whenever the stored acceleration is nonzero, including when the current and target speeds initially match. It adds that signed acceleration **once per interpolation call** (it does not multiply the ramp by the call's delta), stores the signed 32-bit result, and then clamps inclusively: when the stored acceleration is negative and the post-add speed is at or below the target, or positive and the post-add speed is at or above the target, it snaps to the target and clears the acceleration. The stored-word addition wraps before that signed comparison. Stop-spin (`0x10004000`) writes the spin target speed to 0 and the spin acceleration to `−trunc(decel/30)`; if that is 0 it clears the spin current speed immediately (stop-now). Spin never completes on its own; it is terminated only by stop-spin. Stop-spin does not set the per-piece busy flag or the global dirty flag — it relies on the prior spin's dirty to ensure the next interpolator pass processes the negative ramp.
 
-**Established fact — zero-speed and zero-decel:** If `|speedRaw| < 30` then `perTick == 0` (`|decel|<30` likewise 0). The interpreter still writes the per-piece busy flag and the global dirty flag for move/turn/spin, but the interpolator's busy-word guards (`move-speed word != 0`, `turn-speed word != 0`) are false so no motion occurs; the per-piece reduction clears dirty on the next tick. A `wait-for-move` polling the move-speed word or `wait-for-turn` polling the turn-speed word therefore wakes immediately (does not block) when the issued speed truncated to zero. Spin with zero speed and zero accel still dirties for one tick via the fast path then clears; a stopped spin (spin current speed 0, marker `0xffffffff`, spin acceleration 0) has no motion and is cleared as idle.
+**Established fact — zero-speed and zero-decel:** If `|speedRaw| < 30` then `perTick == 0` (`|decel|<30` likewise 0). The interpreter still writes the per-piece busy flag and the global dirty flag for move/turn/spin, but the interpolator's busy-word guards (`move-speed word != 0`, `turn-speed word != 0`) are false so no motion occurs; the per-piece reduction clears dirty on the next tick. Issuing `wait-for-move` or `wait-for-turn` always parks the thread and ends that interpreter entry, even when the corresponding speed is already zero. Its guard resumes the thread on a later interpreter entry once the polled speed is zero; that later entry can be a synchronous delta-zero pass in the same simulation tick. Spin with zero speed and zero accel still dirties for one tick via the fast path then clears; a stopped spin (spin current speed 0, marker `0xffffffff`, spin acceleration 0) has no motion and is cleared as idle.
 
 **Established fact — dirty lifecycle:** The piece interpolator clears the global dirty flag at entry, then per piece clears the per-piece busy flag at the start of the piece scan and re-sets it to 1 if any axis remains busy after processing the move block, the acceleration-ramp block and the rotation block. The epilogue OR-reduces: if any piece's busy flag is 1, the global dirty flag is set to 1. The interpreter's `move`, `turn`, and `spin` set both the per-piece busy flag and the global dirty flag. The immediate operations do not set dirty: `move-now` commits a position and clears **only** the move-speed word; `turn-now` commits an angle and clears the turn-speed and spin-acceleration words; `stop-spin` writes its own target/acceleration state as described above. A retarget while active overwrites the target and recomputes sign/delta from the physical get-position/get-angle at issuance.
 
-**Established fact — sleep:** Sleep converts the script duration as `trunc(denom * milliseconds / 1000)` with `denom==30` and stores it as the thread's timer. On every later entry the guard subtracts the tick delta first and wakes only when the result is at or below zero. **A sleep therefore occupies its truncated tick count plus exactly one guard decrement, so its minimum latency is one tick, not zero** — a sleep of 33 ms truncates to 0 and wakes on the next drain's guard; 34 ms truncates to 1. A zero or negative duration behaves the same. Engine wake passes run all eight slots with delta 0, so they never advance a timer, but they do wake any thread whose timer is already at or below zero.
+**Established fact — sleep:** Sleep multiplies the script duration in milliseconds by 30, keeps the signed 32-bit product, divides that product by 1000 with truncation toward zero, stores the timer, and ends the current interpreter entry. On every later entry the guard subtracts the tick delta first and resumes the thread when the stored result is at or below zero. For a nonnegative timer `N` and ordinary delta-one visits without arithmetic overflow, this takes `max(N, 1)` later visits: 33 ms gives zero and 34 ms gives one, and both resume at the next such visit; 67 ms gives two and needs two visits. There is no additional decrement after the timer reaches zero. A zero or negative timer still yields the issuing entry, but need not wait for a new simulation tick: an engine wake pass with delta zero can resume it later in the same tick. Such a pass does not advance a positive timer.
 
-**Established fact — drain and lerp order:** Per-unit tick entry drains `for slot 0..7: interpreter(this,slot,delta)` then `interpolator(this,delta)` with the same `delta` (retail passes 1; synchronous helpers pass 0 so lerp is skipped). The interpolator is a no-op when `delta==0` or `global dirty==0` or pieceCount==0. Thus a `move` issued in the drain moves the piece by `step = perTick*delta` in the **same** tick's trailing lerp; a `wait` that snaps during that lerp wakes only at the **next** tick's early guard (one-tick latency). A synchronous query nests a full interpreter run inside the caller at delta 0; re-entrancy is possible and retail places no guard against querying a unit mid-drain.
+**Established fact — drain and lerp order:** Per-unit tick entry drains `for slot 0..7: interpreter(this,slot,delta)` then `interpolator(this,delta)` with the same `delta` (retail passes 1; synchronous helpers pass 0 so lerp is skipped). The interpolator is a no-op when `delta==0` or `global dirty==0` or pieceCount==0. Thus a `move` issued in the drain moves the piece by `step = perTick*delta` in the **same** tick's trailing lerp; a waiting thread whose motion finishes in that trailing lerp is not revisited by the same drain. Its next interpreter entry observes completion; ordinarily that is the next tick's early guard, though a subsequent synchronous wake pass can observe it earlier. A synchronous query nests a full interpreter run inside the caller at delta 0; re-entrancy is possible and retail places no guard against querying a unit mid-drain.
 
 **Established fact — immediate commit and slot-order wake:** `move-now` (`0x1000b000`) writes the translation target, clears **only** the move-speed word, and commits through the model adapter's set-position; it leaves positional turn and spin state alone. `turn-now` (`0x1000c000`) writes the angle target, clears the turn-speed and spin-acceleration words, and commits through set-angle. Both commits occur inside the drain and are visible to later script slots and later simulation phases in the same tick. A `wait-for-move`/`wait-for-turn` wakes when its polled busy word reads zero. For immediate ops the wake is slot-ordered: if issuer slot `i` < waiter slot `j`, the waiter's early guard has not yet run and sees zero same tick; if `i > j` the waiter already yielded and wakes next tick. A different piece/axis has no effect. The drain has no second scan after the lerp, so this asymmetry is contract.
 
@@ -6769,6 +6922,13 @@ only from an UNRECOGNIZED opcode value in any family and from the
 thread-return opcode. Nanolathe must either validate the index itself or
 treat the operand as engine-guaranteed valid — retail provides no check to
 clone.
+
+**Unknown — shipped-script translation edge cases:** Whether shipped scripts
+supply negative move speeds or translations whose next step overflows has not
+been established by this executable trace. A stock-script operand-flow census
+covering literals, arithmetic, locals, statics and callback inputs, or a manual
+retail scenario that reaches the relevant values, would settle occurrence.
+This uncertainty does not change the established signed arithmetic above.
 
 **Unknown — allocation-failure deterministic fault policy:** where retail
 would abort through its allocator's abort path remains `TODO(question)`; the
@@ -7419,9 +7579,11 @@ is not the cargo, and is not itself being carried. Only then does it build a
 seven-byte event — a kind byte, the cargo identifier, the carrier identifier,
 the piece byte and the third value byte — submit it on the event channel and
 apply it. The apply step unlinks the cargo from its previous carrier (or from
-the world list), stores the piece byte on the cargo, relinks at the new
-carrier's list head, and sets a state bit **iff the piece byte is the reserved
-"no piece" value** — which is the engine-side meaning of `[fmt cob]`'s
+the world bucket), stores the piece byte on the cargo, and either relinks at
+the new carrier's list head or, on detach, immediately head-inserts in the
+retained world sector [R-COLL-01 §11]. Detach clears the no-piece state bit;
+attachment sets it **iff the piece byte is the reserved "no piece" value** —
+which is the engine-side meaning of `[fmt cob]`'s
 `attach-unit … to 0-1` idiom: cargo that rides the carrier without following a
 piece.
 
@@ -9299,9 +9461,12 @@ locate(unit, pieceIndex) -> offset from the unit origin
     return (v.x, v.y, -v.z)
 ```
 
-The factory helper then adds the factory unit's committed world X/Y/Z to that
-offset componentwise. The loop starts at the *parent* of the selected piece,
-so the selected piece's own angles never rotate its own translation.
+The world-position locator then adds the unit's committed world X/Y/Z to
+that offset componentwise. **Established — each final sum wraps to signed
+32-bit fixed point**, before any caller-specific altitude adjustment or
+ceiling. The factory and the selected-pad follow marker use this world-point
+form. The loop starts at the *parent* of the selected piece, so the selected
+piece's own angles never rotate its own translation.
 
 `rotate(v, a)` applies three two-coordinate rotations in this chronological
 order, each writing both coordinates of its pair back before the next runs:
@@ -10610,7 +10775,7 @@ centre-minus-pads form.
 
 ### 7.3 Scheduler budget, publication, and route storage
 
-**Established fact:** Path work is budgeted. A global scheduler counter replenishes on every 150th scheduler call — the scheduler runs once per tick, so every 150 ticks. Per-player quanta use six-times, three-times, and one-times weighting based on scheduler state. Each expansion **iteration** is limited to 100 heap pops; a scheduler call re-enters the same latched request for as many iterations as its step budget allows, so one call can drive several 100-pop slices of one search. [R-PATH-01 §6] states the exact counters, the admission walk, and what each charge buys.
+**Established fact:** Path work is budgeted. A global scheduler counter replenishes on every 150th scheduler call, counting the battle-entry prime as well as ordinary tick calls. Per-player quanta use six-times, three-times, and one-times weighting based on scheduler state. Each expansion **iteration** is limited to 100 heap pops; a scheduler call re-enters the same latched request for as many iterations as its step budget allows, so one call can drive several 100-pop slices of one search. [R-PATH-01 §6] states the exact counters, the admission walk, and what each charge buys.
 
 **Established — what admits a unit to the scheduler ([R-MOV-01 §7]).** The
 scheduler walks players round-robin and, for each unit it reaches, calls the
@@ -10682,10 +10847,29 @@ scale when it admits a request. Nothing else reads it. Work slices come from a
 different array entirely, and that array is topped up with an **equal share**
 per eligible player.
 
-**The scheduler call, exactly.** Per scheduler call — and the scheduler runs
-once per tick as the **first step of the per-player orders, path, economy and
-occupancy phase**, after the per-unit sweep phase of the same tick and before
-this phase's own per-player loop ([01 §4.4] owns the absolute phase order):
+**Initialization and entry prime — Established.** Battle setup assigns the
+player unit slices before constructing the scheduler. Each unit cursor is
+initialized to its player's **first allocatable physical slot**, not to the
+preceding slot or the global null sentinel [R-P0-16-A]. An idle iteration
+advances before inspecting the selected unit: the first poll therefore visits
+the second slot when the slice has more than one slot, and wraps to the first
+when it has one. Empty slots still advance the cursor and consume the ordinary
+visit charge. The same rule applies after wrapping at the slice's last slot.
+
+The battle-entry tail invokes the per-player phase once: at global tick zero
+for fresh entry, or at the restored tick for saved-battle entry
+[08 R-ENTRY-01 §8]. Its scheduler call runs before that phase's player loop,
+with the already constructed pool and cursors. These visits count even when
+no follower admits a request. The resulting cursors, service counts, call
+counter and work balances persist into the ordinary tick loop; the entry
+tail does not reset them. Omitting these visits because no request is staged
+can change the admission order of requests staged later.
+
+**The scheduler call, exactly.** Per scheduler call — once during the entry
+prime above and then once per tick as the **first step of the per-player
+orders, path, economy and occupancy phase**. Ordinary tick calls follow the
+per-unit sweep phase of the same tick; every call precedes this phase's own
+per-player loop ([01 §4.4] owns the absolute phase order):
 
 1. If the session's player count is zero, do nothing.
 2. Increment a call counter. When the incremented value **reaches** 150 — `>=
@@ -10728,11 +10912,16 @@ An iteration is one of three things:
   until the first publishes, exhausts, or is cancelled.
 * **Fairness is by unit visits, not by search work.** The equal-share
   accumulator buys roughly `1333` unit polls per tick spread across players;
-  a player whose accumulator runs out is skipped until the next call. There is
+  when selecting a new request, a player below one credit is skipped. There is
   no starvation guard beyond the round-robin and no priority: a single
-  long search consumes 100-step slices from *its own* player's accumulator
-  until that accumulator goes non-positive, at which point the loop ends for
-  the tick with the request still latched, and resumes next tick.
+  long search charges its own player's accumulator but continues while the
+  **combined call-local total** is positive. The active player's accumulator
+  may therefore become negative while other players still have credit. The
+  positive-player-credit test belongs only to selecting a new request when
+  none is active; it does not stop a latched search. Once the combined total
+  is exhausted, a still-active search retains its state for the next call.
+  Negative player balances carry forward and receive the next equal-share
+  addition; they are not clamped at zero by the retail continuation loop.
 * **Budget exhaustion returns nothing.** The loop simply ends; the heap, the
   node pool, the acceptance threshold and the fan width are untouched, and the
   follower is not notified. Only heap exhaustion and the early exits publish.
@@ -12005,7 +12194,13 @@ step takes the carrier's hang position for the cargo ([R-AIR-01 §9]) and
 passes it to the *carried-position setter* of §4 with the mover's mode bits;
 it then copies the carrier's velocity triple and scalar speed into this mover
 (zeroes when the carrier has no mover), clears the transform-dirty bit and
-returns. Nothing below runs for cargo.
+returns. Nothing below runs for cargo. The setter quantizes that committed
+hang position directly; it does not add the copied velocity a second time.
+For a one-cell footprint at X = 127 world units, a carrier velocity of +2
+leaves the cargo anchor at cell 7. Quantizing X + velocity would instead
+produce cell 8 and can turn a same-cell update into a clear/stamp. This is a
+finite caller-contract counterexample, not a claim about a shipped carrier's
+speed or animation at that coordinate.
 
 **Established — the stationary early return.** The proposal is
 `proposed = position + velocity` per axis (16.16, 32-bit wraparound) and
@@ -12271,9 +12466,19 @@ the derived-height recompute over the grown rectangle and a reclassification
 of the rectangle in every active class layer follow.
 
 **Established — restamp.** Gated on flags bit 27: it clears the bit and
-re-runs the stamp loop at the cached pair with the overlap protocol; for the
-building class a cell the yard map no longer selects that holds the self
-identity is released to 0. Its three callers: the overlap scan above (an
+visits the cached rectangle with the overlap protocol. Its plane dispatch is
+not the ordinary stamp's dispatch: a non-building unit whose cached mode
+mirror is 1 uses the ground word; every other cached non-building mode uses
+the air word. There is no separate mode-2 admission test here. For the building class, a cell the yard
+map no longer selects that holds the self identity is released to 0. The
+restamp does not update sector filing or list order. Reaching its non-ground
+arm with mode 0 or 3 and the intruder bit already set requires the writer
+history identified in the Unknown list; the consumer branch alone does not
+establish stock incidence. Attachment changes the mover's requested mode,
+not this cached mirror. A subsequent carried-position update with a different
+mode clears the old footprint and intruder bit before writing the new mirror
+and stamping. Thus attachment of an existing ground intruder alone does not
+prove a mode-0 restamp history. Its three callers: the overlap scan above (an
 intruder re-claims cells its host just released), the **yard-open port write**
 (after the admission gate of §4.7 passes: write the yard bit, set bit 27,
 restamp, reclassify the rectangle in every layer — this is the moment a
@@ -12284,9 +12489,9 @@ loader's post-load pass.
 ([04 §2.3]), the commit success branch, the carried-position setter (used by
 the commit's carried branch and by `Teleport`, [R-SPEC-01 §2]), the network
 unit-state apply and the ally-transfer re-creation (both out of scope, doc 08),
-and the restamp. Clear: the commit success branch, the carried-position
-setter, unit finalisation at death or free ([04 §6] / [04 §2.3]), and the
-same two doc-08 paths. The carried-position setter is the commit's fast path
+and the separate restamp cell writer. Clear: the commit success branch, the
+carried-position setter, unit finalisation at death or free ([04 §6] / [04
+§2.3]), and the same two doc-08 paths. The carried-position setter is the commit's fast path
 and success branch without the validator: same-cell-and-mode → write XYZ;
 otherwise clear, write XYZ and the new pair and mode, stamp, LOS wrapper;
 dirty in both cases. Every writer stamps at the unit's cached pair; there is
@@ -12400,14 +12605,21 @@ both restamped when the host clears it, and **the first restamped takes the
 cell**. The order is: lower sector column first; within a column, lower sector
 row; within one sector, the bucket from its head, i.e. whichever of the two
 most recently crossed into that sector. A carrier's cargo is visited
-immediately after the carrier, and cargo mover mode is 0, so its restamp
-writes no cell either way.
+immediately after the carrier, in cargo-list order, even when the carrier's
+own rectangle did not intersect the query. Only the carrier's top-level
+bucket must be in the scanned span; each cargo rectangle is then tested
+independently. A cargo unit's own retained sector reference does not select
+which overlap scan reaches it.
 
-*Implementation note (not a retail fact).* Nanolathe reproduces the sector
-selection, the column-major sweep and the within-bucket order exactly,
-deriving each candidate's record from its committed position and its off-map
-filing from the same bounds test; the relink events an implementation must
-mirror are [R-COLL-01 §11].
+**Established — carried does not imply a cell-free restamp.** Ordinary
+transport and landing requests use mode 0, but factory products are attached
+in mode 1 and retain a ground footprint while unfinished [R-FAC-02 §1–§3].
+They can participate in ground-cell contention and the restamp's first-writer
+ordering. The mode-0 consumer also cannot be dismissed as a no-op: its separate
+restamp dispatch is the air-word arm described in §4, subject to the intruder
+bit gate. A representation that keeps every cargo unit independently in the
+world buckets must reproduce the carrier-relative visit sequence; merely
+visiting the same set in each unit's own bucket is not an ordering proof.
 
 ### The blocked flag: writers, readers, persistence, and the save bit [R-COLL-01 §5]
 
@@ -12578,17 +12790,59 @@ it. For an implementation the events that relink are these, exhaustively:
    unlinks, so a reused pool slot never inherits a dead unit's place.
 2. **The cargo detach apply** ([R-AIR-01 §9]'s attach/detach event, the
    detach branch): the unit is head-inserted into the record it is filed in.
-   While carried, its mode-0 stamps kept that record reference current
-   without linking (§4A step 3), so **a released cargo becomes the most
-   recent entry of the sector it is released in**.
+   This happens immediately inside the accepted detach apply, before the
+   requested mover mode is written, without testing whether the cell, mode
+   or sector changed. It uses the retained sector reference; it does not
+   recompute a record from XYZ, clear a footprint or stamp a new one. Thus
+   **a released cargo becomes the most recent entry of its retained sector
+   immediately**, including a stationary mode-1 factory product at completion.
+   Deferring the head insert to a later movement commit loses this ordering.
 3. **The cargo attach apply** unlinks the unit; while carried it is in no
    bucket and the scan reaches it through its carrier's cargo list.
 
-The restamp and the clear never relink (§4A). The per-unit state an
-implementation needs is therefore two words: the sector the unit is filed
-under, and a monotonically increasing link sequence written at each of the
-three events above; within one sector the scan order is that sequence,
-descending.
+**Established — retained filing and top-level membership are distinct.**
+Attachment removes an uncarried unit from its current world bucket before
+putting it at the carrier's cargo-list head. A transfer between carriers
+removes it from the previous cargo chain instead. Neither operation discards
+its retained sector reference. When a carried-position update invokes the
+stamp, the selected sector reference is refreshed even in a mode that writes
+no cell, while top-level membership remains absent (§4A). This includes
+crossing into or out of the separate off-map record.
+
+The carried-position setter's same-cell/same-mode fast path writes XYZ only;
+it does **not** call the stamp or refresh that reference. Consequently the
+retained sector can differ from the sector computed from current XYZ. For a
+two-cell footprint, X changing from 127 to 129 world units keeps the biased
+anchor at cell 7 but crosses the world-position sector boundary. With Z and
+mode unchanged, the fast path retains the previous sector; an immediate
+detach head-inserts there. This is a finite setter-contract example, not a
+claim that a particular shipped factory animates that path. Recomputing a
+sector at detach would change this behavior.
+
+The restamp and clear never relink (§4A). A host representation must retain
+both the last stamp's sector choice and whether the unit is linked in a
+world bucket or on a carrier. Link recency alone cannot represent cargo
+membership or the carrier-relative overlap order.
+
+**Established — radius consumers have a different population.** The radius
+scanner walks only top-level bucket chains and never descends cargo lists.
+This applies both to mission radius conditions [08 R-TRIG-01 §5] and the
+repair-patrol candidate collectors [R-ORD-01 §4, §7], [R-ORD-02 §4]. The
+repair visitor's grounded-mode test does not make a carried mode-1 nanoframe
+eligible: that unit never reaches the visitor. With sufficient repair
+resources, one ordinary damaged friendly candidate and one unfinished
+factory product in range, only the ordinary candidate enters the retail
+vector. Including both changes its bounded random-pick input from one to two,
+which also changes whether the simulation stream advances. No new exclusion
+belongs in unrelated owner-slice predicates or in the rectangle overlap
+scanner.
+
+*Implementation scope (not a retail claim).* The host mission-radius adapter
+filters attached units from its shared index. That addresses its cargo
+population, but does not establish the index's attachment filing, detach
+recency or overlap ordering. Modern traffic admission and Community patrol
+work selection remain separate policies; they do not establish retail index
+behavior.
 
 ### 8.3 Final-order arrival and the satisfied-bit handshake [R-P0-01]
 
@@ -13478,7 +13732,7 @@ also code 8; gate four returns code 8 with NO message.
 | 0 | Require a live carrier mover and `canfly` (else 7). Size gate: the target's cached footprint-X WORD, compared signed, must be at or below the carrier definition's `transportsize` BYTE zero-extended; otherwise emit `Unit is too heavy to transport` and return 8. Set status message `Loading`; release the manual-target latch on all three weapon slots (the `3` is the all-slots index, not a state code — step 1 of the shared takeoff preamble, [R-AIR-01 §6]); detach the carrier from ITS own parent when carried; raise Activate — its edge is what emits notification 3, one step later ([R-AIR-01 §6] step 3, [R-UNIT-06 §2]). The phase's last three acts are ONE block guarded by "the committed mover mode is `1`, grounded": force mover mode 2, queue a point command at the carrier's current X/Z with altitude `cruisealt/2` (signed, round toward zero) and NO arrival radius, and OR `0xE0` into the record's gate. A carrier already airborne takes none of the three and advances with the record's gate UNTOUCHED and no goal installed — phase 1's `0x100E8` assignment is what first arms it. | 1 |
 | 1 | Queue the follow command toward the target with the full `cruisealt` altitude offset and horizontal arrival radius `0x30`; status `= 0x100E8`. | 1 |
 | 2 | Status `Preparing for transport`. Pre-seed the first `QueryTransport` output to `-1` and run the synchronous four-output query (unanswered outputs read 0, so the observed seed is `[-1, 0, 0, 0]`; a missing script leaves `-1`, the root-piece fallback). Retain output 0 as the attach piece; status `= 0x100E8`. | 1 |
-| 3 | Start asynchronous one-argument `BeginTransport` with the exact 32-bit value of the target definition's model total-height dword — the height dword the engine derives from the 3DO bounds at definition load, not an authored FBI key ([R-UNIT-06 §3]) — mirrored through the network forwarder; evaluate the attach piece's Y in the **carrier's model frame** (the piece-hierarchy evaluator without the unit-origin addition, [R-REV-02]); construct a follow-unit marker on the **cargo** as the carrier's goal with altitude offset = the NEGATED signed 16-bit integer part of that Y — lowering the carrier until its attach piece meets the cargo ([R-AIR-01 §9]); status `= 0x100EA`. | 1 |
+| 3 | Start asynchronous one-argument `BeginTransport` with the exact 32-bit value of the target definition's model total-height dword — the height dword the engine derives from the 3DO bounds at definition load, not an authored FBI key ([R-UNIT-06 §3]) — mirrored through the network forwarder; evaluate the attach piece's Y **relative to the carrier origin**, retaining the carrier's orientation (the piece-hierarchy evaluator without the unit-origin addition, [R-REV-02]); construct a follow-unit-**piece** marker on the **cargo** with the reserved no-piece index (`−1`), retaining heading matching, as the carrier's goal with altitude offset = the NEGATED signed 16-bit integer part of that Y — lowering the carrier until its attach piece meets the cargo ([R-AIR-01 §9]); status `= 0x100EA`. | 1 |
 | 4 interrupted | Interrupt-flag combination present (`flags & 0x42`): start the deferred zero-argument `EndTransport` and return WITHOUT attaching. | 8 |
 | 4 success | Attach the target to the carrier on the queried piece; emit event code 12; build the climb-away point marker at the carrier's current X/Z with altitude `cruisealt`, no radius — but never install it ([R-AIR-01 §10] item 3); status `|= 0xE0`. | 1 |
 | 5 | No work. | 5 |
@@ -13857,8 +14111,15 @@ emits status cue slot 7 `Repair aborted.` and returns 8. Phase 0 returns 1 as
 soon as the unit's health has reached its definition's `MaxDamage` (unsigned
 compare, `MaxDamage <= health`); otherwise it sets the record's deadline to the
 current tick plus 30, ORs `0x8` into the gate word, and returns 2. Phase 1
-emits status cue slot 10 `Unit repaired` and returns 5. This is one of the four
-`Unit repaired` producers the doc 05 caption sweep is looking for.
+emits status cue slot 10 `Unit repaired` and returns 5. Every other phase
+returns 7 without the success cue. The phase-0 health operand is the signed
+16-bit instance health, sign-extended and then compared as unsigned 32-bit
+against the definition's maximum-health word. Negative health is not clamped
+to zero, and a zero or high-bit maximum is not replaced with another maximum.
+For example, the consumer advances with health −1 and maximum 100. This
+arithmetic example does not establish a live repair-order producer for that
+state. This is one of the four `Unit repaired` producers the doc 05 caption
+sweep is looking for.
 
 ### The landing-legality predicate [R-AIR-01 §6a]
 
@@ -14179,8 +14440,15 @@ truncates to 111 rather than 112 `[03 §2.2]`.
   horizontal arrival radius `0x80`; gate `= 0x100EA`; return 1.
 * 5 — set the phase to 2 and return 2, closing the loop.
 
-**Established — `AirToGroundHover`: the `hoverattack` standoff.** Phases 0 and 1
-match `AirToGround`. Phase 2 releases slot 0, binds that slot to the target, builds a point marker on the
+**Established — `AirToGroundHover`: the `hoverattack` standoff.** Phase 0
+runs the shared takeoff preamble. Phase 1 inhibits all three slots and builds
+the same jittered half-distance approach as `AirToGround`, with arrival radius
+128 and gate `0x100E8`, but its distance and bearing read the **live target's
+current X/Z directly**. They do not read or refresh the record's cached goal.
+The constructor copies the supplied goal once; a moving target can therefore
+separate these inputs before phase 1 runs. One bounded random draw below
+`0x4000` follows the distance and bearing computations in either executor.
+Phase 2 releases slot 0, binds that slot to the target, builds a point marker on the
 **target's** current position with horizontal arrival radius equal to the first
 weapon slot's `Range`, and zeroes two record scratch words (a side flag and a
 miss counter). Phase 3 is the orbit:
@@ -14241,8 +14509,9 @@ additional requirement — when that flag is set — that the velocity's bearing
 equal the commanded heading exactly. The flag is never set in play
 ([R-AIR-01 §14]), so the rotation and the heading requirement are dead. Phase
 0 is the takeoff preamble plus a
-one-tick deadline. Phase 1 inhibits all slots, releases slot 0, binds the unit
-target to slot 0 and then:
+one-tick deadline and a reset of the pursuit scratch counter to zero. This
+reset occurs whether the aircraft was grounded or already airborne. Phase 1
+inhibits all slots, releases slot 0, binds the unit target to slot 0 and then:
 
 * When the arrival bits `0xE0` are set and the dot product of the
   unit→target bearing vector and the unit's own facing vector (both taken at
@@ -14268,9 +14537,46 @@ target to slot 0 and then:
   ([R-AIR-01 §14]).
 * Otherwise — arrival bits set with a non-positive dot, or arrival bits clear
   with the counter at or above `0x5A` — the leg gives up: it releases the
-  payload, spawns `VTOL_Evade` with the same target at the head, zeroes the
-  counter and the gate, and returns *restart* ([R-ORD-02 §5]); the seek
+  payload, supplies the same target and no goal to a fresh `VTOL_Evade`
+  constructor, inserts it at the head, zeroes the counter and the gate, and
+  returns *restart* ([R-ORD-02 §5]); the seek
   re-issue belongs to the entry sequence's step 1.
+
+**Established — dogfight facing quantization.** Both phase-1 dot-product
+checks construct the two 20-world-unit vectors with the shared table component
+routine, then negate each raw component into the travel direction. Each
+component's signed 16-bit whole-world-unit part is read **after that negation**,
+before either multiplication. Thus a negative fractional travel component
+floors to the next lower integer; negating an already extracted integer is
+not equivalent. Multiply the whole X components, multiply the whole Z
+components, add, and test the signed low 16 bits of the sum strictly above
+zero. At this magnitude the whole components are within −20 through 20, so
+the final sum cannot overflow the signed 16-bit range. Multiplying raw 16.16
+components and discarding fractions only after summation is a different test.
+
+For a target bearing of 32768 and an aircraft heading of 16480, the resulting
+whole travel vectors are `(0, 20)` and `(−20, 0)`: the dot is zero. Retaining
+the fractional components instead produces a positive dot. With movement
+arrival delivered, this boundary takes the give-up arm and does not construct
+the straight-ahead marker or draw its random deadline. Without arrival and
+with a pursuit counter below 90, it adds 45 to that counter instead of clearing it. These are finite
+angle/coordinate consumer examples, not measurements of their frequency in a
+stock battle.
+
+**Established — ordinary dogfight give-up composition.** Supplying a target
+at construction does not imply that the new evasion record retains it. The
+registered `VTOL_Evade` descriptor has no target-observer bit (§3.1), so the
+ordinary constructor clears its target reference ([R-MOV-03 §7]). The dogfight
+caller immediately inserts that record; neither it nor head insertion rebinds
+the target. Evasion's null-target entry therefore completes before either
+random break leg runs. The original dogfight record restarts through phase 0,
+setting a one-tick deadline, with its released marker still absent and no
+random draw from this give-up transition. The branch's observable difference
+from straight flight is consequently marker release, pursuit restart and
+omission of the random straight-flight deadline, not a random sideways break.
+The evasion phase bodies below are consumer contracts; reaching them would
+require a separate producer that retains or later binds a target. Such a
+producer is **Unknown** in this bounded caller trace.
 
 **Established — `VTOL_Evade`.** Its separate entry first returns 5 on a null
 target, then returns 5 when the satisfied set intersects `0x10008`. Neither
@@ -14281,7 +14587,8 @@ leash check before phase dispatch. Phase 0 requires a live mover and `canfly`, d
 left or right — then builds a point marker at `unitPos − offset(h, Range)`
 with horizontal arrival radius `0x80` and gate `0x100E8`. Phase 1 repeats the
 same break **on the same side** (the scratch word is re-read, not re-drawn) at
-**twice** the radius. Phase 2 returns 5. Exactly one random draw per evasion.
+**twice** the radius. Phase 2 returns 5. Every other phase returns 7 without a
+marker or random draw. Exactly one random draw per ordinary evasion, in phase 0.
 
 ### The two transport executor pairs, and the corrected hang and drop offsets [R-AIR-01 §9]
 
@@ -14334,15 +14641,45 @@ goal with radius parameter `24 · FootprintZ` of the carrier's definition —
 [R-AIR-01 §10] — when the carrier definition has `canhover` set and `0` when
 it does not, gate `= 0xE8`. Phase 3 returns 0.
 
-**The phase-3 offset of `VTOL_Pickup` is measured in the carrier's model
-frame, and the marker is the carrier's goal (Established).** The transform it
+**The phase-3 offset of `VTOL_Pickup` is relative to the carrier's origin,
+and the marker is the carrier's goal (Established).** The transform it
 evaluates is the piece-hierarchy evaluator **without** the unit-origin addition
 (the inner half of the exit-piece locator of [R-REV-02]), so the value is the
-attach piece's Y in the **carrier's own model frame**, not a world Y; and the
-marker it builds is a follow-unit marker on the **cargo**, installed as the
-**carrier's** movement goal, so the negated offset lowers the *carrier* until
-its attach piece meets the cargo. Nothing hangs before the attach. The value
-used is the signed 16-bit integer part of that model-frame Y, negated.
+attach piece's Y **offset from the carrier origin**, not its absolute world Y.
+The locator still folds the carrier's current bank, heading and pitch into
+the root's angles when walking a descendant piece. Omitting the origin
+addition does not remove those rotations. The
+marker it builds is a **follow-unit-piece** marker on the **cargo**, with the
+reserved no-piece index `−1`, installed as the **carrier's** movement goal.
+The queried carrier piece determines the altitude offset and later attachment;
+it is not the cargo piece passed to this marker. The negated offset lowers the
+*carrier* until its attach piece meets the cargo. Nothing hangs before the
+attach. The value used is the signed 16-bit integer part of that oriented
+Y offset, negated. It is sampled during this phase; later changes to the
+carrier's pose do not recompute the installed marker's altitude offset.
+
+**Established — lowering also matches the cargo's heading.** The constructor
+retains the follow and heading-match flags even with the no-piece index; the
+altitude setter adds the explicit-altitude flag, and this phase installs no
+horizontal arrival radius. Goal updates therefore follow the cargo's origin
+plus the altitude offset. Inside the command producer's heading-query range,
+the marker supplies the cargo's own heading. Arrival requires the ordinary
+default horizontal tolerance, exact equality of carrier and cargo headings,
+and the explicit-altitude tolerance ([R-AIR-01 §4]). The earlier approach
+phase uses the plain follow-unit constructor and its explicit radius; it does
+not establish the lowering phase's constructor or arrival contract.
+
+A finite distinguishing case is stationary ground cargo with the carrier
+already at the lowering goal, but their headings one quarter-turn apart.
+A carrier piece whose model-frame Y is zero and a `BeginTransport` callback
+that makes no changes keep the geometry fixed; positive cargo model height
+above sea level passes the sea-level entry gate, with the other load gates
+clear. The lowering marker supplies the cargo's
+heading and withholds the arrival pending bit until the headings match.
+Substituting a plain follow-unit marker for grounded cargo supplies no heading
+and incorrectly reports arrival at that position. The marker and these
+command-producer branches draw no RNG. This comparison concerns the ordinary
+arrival wake; other pending interruption bits can still wake the order.
 
 **The `VTOL_Unload` lowering offset is the cargo's model TOTAL-HEIGHT integer
 (Established).** The word read is the high half of the
@@ -14725,13 +15062,30 @@ root and Z negated, as [R-REV-02] states). The locator answers a **zero
 offset** when the index is negative, at or beyond the model's piece count, or
 the target has no model. The **follow-unit** constructor (flags `0x01` /
 `0x07`) stores index **−1**, so a plain follow marker's goal is exactly the
-target's origin triple — no piece arithmetic at all. Only the
-**follow-unit-piece** constructor (flags `0x05`, the transport pickup of §9)
-stores a real index: the attach piece the transport query returned. For
-`VTOL_Follow`, `AirStrike`'s bound-target marker and every other follow-unit
-user, "the target's position" is therefore the whole contract; the exit-piece
-transform matters to pickup alone. The radial offset of flag `0x02` is added
-after, as §4 says.
+target's origin triple — no piece arithmetic at all. The
+**follow-unit-piece** constructor (flags `0x05`) stores its supplied index,
+which may itself be `−1`: transport pickup's lowering phase and landing's
+initial approach both use that sentinel. Pickup's queried carrier piece is
+used separately for the lowering offset and attachment ([R-AIR-01 §9]).
+Landing's later pad approach and descent instead pass the selected **target
+pad piece**, so their goals consume that piece's world transform (§10.3).
+For `VTOL_Follow`, `AirStrike`'s bound-target marker and other plain follow-unit
+users, the target origin is the whole piece-position contract. The radial
+offset of flag `0x02` is added afterward, as §4 says.
+
+**Established — selected pad geometry remains live.** Each follow-marker goal
+update invokes the locator again. The selected target piece, its current
+ancestor translations and rotations, and the target unit's current orientation
+therefore determine the pad approach and descent goals; the phase that selects
+the piece does not freeze its position. The default arrival method updates the
+goal again before comparing. A valid descendant pad piece with a horizontal
+offset of 64 world units distinguishes the phase-3 approach from a unit-origin
+substitute: an aircraft at the pad owner's origin lies outside the marker's
+48-unit horizontal arrival radius. The same origin substitute would accept it.
+This finite authored-model case needs neither target motion nor a nonzero unit
+orientation, and the phase's query can return that valid piece as its first
+free candidate. A later animation changing that piece's hierarchy changes the
+goal without requiring another pad query.
 
 **§14.2 — The coarse early accept of [R-AIR-01 §6a] reads the mapping word
 grid. Established, direct.** The grid is the **mapping word grid** of
@@ -15098,12 +15452,35 @@ executable answers.
 Open items only. Each bullet states what is unknown, the section that owns it,
 and the decider that would close it.
 
+- **Unknown — out-of-range handler-result producers.** The full unsigned
+  32-bit result dispatch and its two default actions are established (§3.3),
+  but this review has not established a valid-content handler history that
+  returns outside 0–9. Tests injecting such a result verify the consumer only.
+  A complete registered-handler return and caller-state trace would settle
+  whether these branches have reachable gameplay effects; a narrowed host
+  result type is not evidence about the native return domain.
+- **Unknown — wrapped duplicate-goal reachability.** The queued toggle
+  compares wrapped 32-bit coordinate differences [R-MOV-03 §6]. Whether
+  normal pointer projection, placement snapping, group offsets or restored
+  queued goals can produce a matching pair across the signed coordinate
+  boundary needs those producers traced end to end. The arithmetic example
+  in that section establishes only the consumer boundary.
+
 - **Unknown:** the complete factory attachment and queue lifecycle for authored
   `bmcode` values above 1. The stored byte, nonzero class branch and absence of a
   mover are established [08 R-AI-03 §7.4]; tracing the factory path for such a
   definition would settle its remaining lifecycle effects.
 
 ### Simulation and identity
+
+- **Unknown — nonfinite construction state at transport admission.** The
+  transport predicate's last comparison admits an unordered construction
+  scalar (§10.2). The saved-unit writer and reader copy this scalar, so its
+  producer set is not limited to construction settlement [08 R-SAVE-02 §6].
+  Whether a valid retail construction/save history generates NaN and preserves
+  it until a load command reaches this predicate remains unresolved. A complete
+  scalar-writer and restore-to-command trace would settle that reachability;
+  injecting NaN directly tests only the established consumer.
 
 - **Unknown:** whether initial or reused weapon-slot commanded yaw/pitch is
   read before later aim or restore writes · [R-UNIT-06 §7] · first-reader
@@ -15136,6 +15513,19 @@ and the decider that would close it.
   · doc 08 · static trace.
 
 ### Orders and queues
+
+- **Unknown:** complete outcomes for overflowing feature-lattice coordinates
+  · [R-ORD-01 §4] · finite-cycle and allocation/lookup analysis for the wrapped
+  start, endpoint and increments. Retail's signed loop can fail to terminate;
+  the host's retained diameter-derived work bound does not establish parity
+  outside the ordinary coordinate domain.
+
+- **Unknown:** the unwritten Y copied by the repair-patrol feature sampler,
+  and its visibility before an air marker's first goal update · [R-ORD-01 §4]
+  · caller-history and first-reader census through order construction, queue
+  presentation, marker serialization and update scheduling. Ground feature
+  approach is planar and ordinary air-marker arrival replaces Y; neither
+  closes the value of the retained order coordinate.
 
 - **Unknown:** the cause of the patrol movement discrepancy in
   [issue 83](https://github.com/nanolathe-gg/nanolathe/issues/83), reported for
@@ -15265,12 +15655,29 @@ and the decider that would close it.
 
 ### Ground movement
 
+- **Unknown:** a complete ordinary writer history reaching non-building
+  restamp with cached mode 0 or 3 and the intruder bit set · [R-COLL-01 §4, §4A] ·
+  trace the cached-mode and overlap-bit writes across attachment, the next
+  carried commit, yard callbacks and save restoration. The air-word consumer branch is
+  Established; a consumer-only fixture must not claim stock reachability.
+
 - The emergent head-on deadlock timing — first divergent route between 30
   and 60 ticks after the block — is a Supported inference from two
   Established mechanisms · §8.2 [R-COLL-01 §7] · manual retail observation
   of two units ordered through each other in a one-cell corridor.
 
 ### Hover and VTOL
+
+- **Unknown — unusual saved or resumed air-order states.** The consumers
+  establish the dogfight phase-0 pursuit reset, repair-wait signed-health to
+  unsigned comparison, and the repair/evasion invalid-phase returns
+  [R-AIR-01 §6], [R-AIR-01 §8]. A complete producer trace is still needed to
+  establish whether a valid game or save history reaches these handlers with
+  a nonzero pursuit counter at phase 0, negative repair-patient health, or an
+  out-of-range phase. The repair-wait descriptor's registration alone does
+  not establish an ordinary producer of that order. Trace order creation,
+  interruption, reconstruction and first dispatch before claiming stock
+  symptoms for these consumer boundaries.
 
 - Ordinary gameplay producer of mover mode `3` · §9.1 [R-AIR-01 §3] · static
   trace of the save/network stream writer that supplies the reduced flight

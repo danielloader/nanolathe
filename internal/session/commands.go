@@ -945,12 +945,11 @@ func removeQueuedWorldOrder(actor *units.Unit, kind orders.ID, target pool.Handl
 	if q == nil {
 		return false
 	}
-	within := func(a, b numeric.Fixed) bool {
-		d := a - b
-		if d < 0 {
-			d = -d
-		}
-		return d <= queuedPointTolerance // inclusive at the boundary [07 R-P0-11 §6]
+	within := func(stored, issued numeric.Fixed) bool {
+		// The biased window is evaluated in the raw coordinate word, including
+		// wrap at its signed boundary [04 R-MOV-03 §6].
+		d := uint32(issued) - uint32(stored) + uint32(queuedPointTolerance)
+		return d <= 2*uint32(queuedPointTolerance)
 	}
 	return q.CancelFrontMost(func(n orders.Node) bool {
 		if n.ID != kind {

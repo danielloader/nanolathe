@@ -156,7 +156,7 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 	viewScale := max(custom.w, 1.0)
 	cellPix := cellPixels * viewScale
 	tilePix := atlasTile * viewScale
-	// The byte writers' checker phase: write where (x + y + parity) & 1 == 1.
+	// The byte writers' checker phase: write where (x + y + parity) & 1 == 0.
 	// The checker stays a test on the DESTINATION pixel, so it is one screen
 	// pixel wide at any factor, exactly as it is at any view scale.
 	checker := mod(sp.x+sp.y+custom.z, 2.0)
@@ -181,7 +181,7 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 					col = desaturate(col)
 				}
 			} else if code1 == ch1PatFill {
-				if inCell && checker > 0.5 {
+				if inCell && checker < 0.5 {
 					col = palAt(darkIndex)
 				}
 			} else if code1 >= ch1GrayPlain && inTile {
@@ -196,7 +196,7 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
 				t := imageSrc2AtFromSrc0Pos(imageSrc0Origin() + vec2(tileCol*tilePix+d.x+0.5, row*tilePix+d.y+0.5))
 				if t.g >= 0.5 {
 					if dithered {
-						if checker > 0.5 {
+						if checker < 0.5 {
 							col = palAt(darkIndex)
 						}
 					} else {

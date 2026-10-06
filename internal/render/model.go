@@ -715,6 +715,9 @@ func BuildProjectileModelPiecesInto(m *model.Model, v frame.ProjectileView, now 
 	if v.Meteor {
 		pitch = v.MeteorPitch
 	}
+	// TODO(question): render type 3 reads unwritten retail angle scratch.
+	// Establish its reproducible inputs; until then keep the existing
+	// deterministic recorded-angle/model-facing fallback [03 §5.4][06 R-WFX-01 §4].
 	modelFacing := v.RenderType != RenderTypeRecordOrientation
 	worldPos := [3]numeric.Fixed{v.X, v.Y, v.Z}
 	parent = buildProjectileStandalonePiece(m, m.Root, v.Roll, v.Yaw, pitch, modelFacing, worldPos, nil, now, parentScratch)

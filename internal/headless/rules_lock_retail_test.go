@@ -183,6 +183,10 @@ import (
 // wait before setting INBUILDSTANCE; its changed pose also changes the nano
 // source and authoritative particle lifetime. All warm/final and Ashap locks
 // move, initial compositions stay fixed, and every mode reaches 54000 ticks.
+// Dogfight facing now multiplies signed whole components [04 R-AIR-01 §8].
+// Restoring only the old facing test restores the prior Strict/Modern final
+// battle and pool locks. Initial/600-step, Community and both Ashap locks stay
+// unchanged; the queued-hover correction does not move these fixtures.
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
@@ -204,14 +208,34 @@ const (
 	lockBenchStrictInitial           = "partial-v1:bf488aacf042d582"
 	lockBenchCommunityInitial        = "partial-v1:55165c066f8b6eaa"
 	lockBenchModernInitial           = "partial-v1:55165c066f8b6eaa"
-	lockBenchStrictWarm              = "partial-v1:6b71c463c7f5fef9"
-	lockBenchCommunityWarm           = "partial-v1:b4cc704e749819f3"
-	lockBenchModernWarm              = "partial-v1:eee9e3d0c9d0a5fc"
-	lockBenchStrictFinal             = "partial-v1:5c7c938698477510"
-	lockBenchCommunityFinal          = "partial-v1:e73cccda0a0a136e"
-	lockBenchModernFinal             = "partial-v1:f4ba52e0d540c585"
+	lockBenchStrictWarm              = "partial-v1:c7460e184c2737b9"
+	lockBenchCommunityWarm           = "partial-v1:44a89fe91c0b44cb"
+	lockBenchModernWarm              = "partial-v1:4106ea203d08ae7d"
+	lockBenchStrictFinal             = "partial-v1:72b7e14bd65c2ee0"
+	lockBenchCommunityFinal          = "partial-v1:550966a31f52a311"
+	lockBenchModernFinal             = "partial-v1:5762eecdf523bf33"
 )
 
+// The expanded retail audit corrects active-search budget continuation
+// [04 R-PATH-01 §6] and keeps allocated dying shooters/retained targets in
+// their established weapon visits [04 R-COB-02 §2][06 R-WPN-04 §1]. Together
+// these move all benchmark warm/final locks and the Strict effect-pool lock.
+// Diagnostic builds restoring both previous behaviors reproduce every old
+// lock; restoring either family alone does not. Initial and Ashap locks stay
+// unchanged. Modern carry, idle and traffic policies remain selected as before.
+// That correction's pool scene first sampled full at tick 3159 and refused 22
+// admissions by step 4500, retaining timing at capacity.
+//
+// The entry composition now binds the world before its scheduler prime
+// [08 R-ENTRY-01 §8], and new path cursors start on the first allocatable slot
+// before advancing [04 R-PATH-01 §6]. Resetting only the cursors after the prime
+// reproduces all preceding benchmark locks and the pool lock; the first
+// divergence has equal RNG counts but a different physical path admission.
+// Applying the separately verified initial-cursor correction yields the locks
+// above. Initial, Ashap and Modern benchmark locks remain unchanged. The
+// original seed-five pool scene now first samples full at tick 2314 and refuses
+// 36 admissions by step 4500; disabling timing still changes its fingerprint.
+//
 // TestStrictFingerprintIsLocked holds the retail baseline. Nothing in a Modern
 // rule set may move any value here.
 func TestStrictFingerprintIsLocked(t *testing.T) {
@@ -247,10 +271,13 @@ func TestStrictFingerprintIsLocked(t *testing.T) {
 // fingerprint, so a later behaviour change that leaves the pool below capacity
 // fails here with that message instead of silently turning this back into a
 // lock that cannot see timing.
+// With corrected dogfight facing [04 R-AIR-01 §8], this same scene first
+// samples full at tick 2314 and refuses 151 admissions by step 4500. Restoring
+// only the old facing calculation restores the preceding hash and 36 refusals.
 const (
 	lockPoolSeed           uint32 = 5
 	lockPoolSteps                 = 4500
-	lockPoolStrictAt4500          = "partial-v1:b434fe20d2382cd6"
+	lockPoolStrictAt4500          = "partial-v1:1f9947b398e868ef"
 	lockPoolStrictCapacity        = 300 // retail's fixed active-effect pool [03 §1]
 )
 

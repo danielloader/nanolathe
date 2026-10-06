@@ -231,12 +231,14 @@ type UnitDef struct {
 	ModelTopFixed int32
 
 	// BuildPageCount is the definition's build-menu page-count byte
-	// [02 R-CAT-01 §5 step 5]. With `<n>` the unit name, the compiler probes
+	// [02 R-CAT-01 §5 step 5]. With `<n>` the unit name minus its final
+	// dotted suffix, the compiler probes
 	// `guis/<n>1.GUI`, `guis/<n>2.GUI`, … until the first missing one; the byte
 	// is the index of that first missing page when at least one numbered page
 	// existed (so page 0 — the orders state — is counted whether or not
 	// `guis/<n>0.GUI` exists), else 1 when page 0 exists, else 0. Valid pages
-	// are therefore `0 .. BuildPageCount-1`.
+	// are bounded by both that byte and the selected-page field's three bits.
+	// Discovery itself continues past page 7 and stores the count's low byte.
 	//
 	// Two authored sources establish page existence. Physical `<n>N.GUI` files
 	// establish the initial count [02 R-CAT-01 §5 step 5]. A later download
@@ -415,8 +417,8 @@ func (u *UnitDef) DefinitionMask() CategoryMask {
 //
 // Second, these are world-space extents, so the model/world Z mirror of
 // [03 R-RAST-01 §2] does not apply — the sign defect WU-19-138 found in the
-// slot-distance word cannot recur here. X and Z are symmetric halves of the
-// footprint, and Y is the height walk, which runs after the model-mirroring
+// slot-distance word cannot recur here. X and Z are independently computed
+// footprint bounds, and Y is the height walk, which runs after the model-mirroring
 // pass and on the one coordinate that pass never negates [02 "Mirroring"].
 //
 // A nil definition, or one with a zero footprint, yields a degenerate box at
@@ -425,15 +427,15 @@ func (u *UnitDef) BoundingExtents() (min, max [3]int32) {
 	if u == nil {
 		return min, max
 	}
-	// (footprint << 20) / 2 == footprint << 19, formed at the same 32-bit
-	// width the definition loader uses.
-	halfX := u.FootprintX << 19
-	halfZ := u.FootprintZ << 19
+	// Each signed bound wraps its shift before division. Moving the division
+	// into the shift changes oversized authored footprints [02 R-CAT-01 §7].
+	minX, maxX := (-u.FootprintX<<20)/2, (u.FootprintX<<20)/2
+	minZ, maxZ := (-u.FootprintZ<<20)/2, (u.FootprintZ<<20)/2
 	top := u.ModelTopFixed
 	if top < 0 {
 		top = 0 // the walk is floored at zero [02 R-CAT-01 §7]
 	}
-	return [3]int32{-halfX, 0, -halfZ}, [3]int32{halfX, top, halfZ}
+	return [3]int32{minX, 0, minZ}, [3]int32{maxX, top, maxZ}
 }
 
 // UnknownKeysSorted returns inert keys sorted for hash stability (I1).

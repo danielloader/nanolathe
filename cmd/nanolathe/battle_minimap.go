@@ -263,7 +263,7 @@ func (b *battleSession) minimapClickOrder(cl *client.Client, mx, my int32, addit
 					kind = session.HumanSelectionToggle
 				}
 				_ = b.enqueueSelectionCommand(session.HumanCommand{Kind: kind, Selection: session.HumanSelectionCommand{Handles: []pool.Handle{h}}})
-				playSelectionCue(b.sess, []pool.Handle{h}) // [07 §9]
+				b.playPointSelectionCue(h)
 				return
 			}
 		}

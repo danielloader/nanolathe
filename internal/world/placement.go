@@ -1259,7 +1259,7 @@ func (t *Terrain) SiteHeight(cx, cz int32, yard []YardCell, footX, footZ int, wa
 // SampleMetal computes the metal an extractor samples from its footprint at
 // creation [05 R-PROD-01 §6]:
 //
-//	sampled metal = extracts-metal multiplier x Σ(cell metal byte + 1)
+//	sampled metal = extracts-metal multiplier x int16(uint16(Σ(cell metal byte + 1)))
 //
 // Every covered cell contributes at least one, so a zero-metal cell still adds
 // one. The rate is stored once on the unit and never resampled, so later
@@ -1275,18 +1275,11 @@ func (t *Terrain) SiteHeight(cx, cz int32, yard []YardCell, footX, footZ int, wa
 // The metal field must have been seeded by ApplySchema first; sampling before
 // that is an error rather than a plausible wrong number.
 //
-// The intermediate's shape is settled [05 R-PROD-01 §6-A]: the accumulator is
-// sixteen bits of Σ(metalByte + 1) over the in-bounds footprint cells, and the
-// rate is `float32( ((float)(int32)(accumulator << 16)) × extractsmetal × 2⁻¹⁶ )`
-// evaluated left to right with the only narrowing at the store. Because
-// `accumulator << 16` is exact as a floating value and `extractsmetal` is a
-// single, that rounds once at the store to the same single as
-// `float32(accumulator) × extractsmetal` for every accumulator below 0x8000 —
-// which is what this computes. There is no other rounding to preserve. The one
-// corner is the sign: at 0x8000 and above the shifted word loads as a negative
-// 32-bit integer and retail's rate goes negative, where a wider or unsigned
-// accumulator diverges; no shipped footprint reaches it, and the wrap is
-// visible in SampleMetalWithFootprintSum's second return value below.
+// The accumulator wraps at sixteen bits and is interpreted signed for the
+// rate [05 R-PROD-01 §6-A]. Scaling that signed value by the single-precision
+// multiplier rounds once, at the rate store: the established wide product's
+// power-of-two scale and reciprocal cancel exactly. This includes the negative
+// rates at the sign boundary and the zero rate after accumulator wrap.
 func (t *Terrain) SampleMetal(cx, cz int32, footX, footZ int, extractsMetal float32) (float32, error) {
 	rate, _, err := t.SampleMetalWithFootprintSum(cx, cz, footX, footZ, extractsMetal)
 	return rate, err
@@ -1302,14 +1295,6 @@ func (t *Terrain) SampleMetal(cx, cz int32, footX, footZ int, extractsMetal floa
 // size their animation rate from it [04 R-COB-04 §9]. Returning it here is the
 // only way a creation path can issue that callback without walking the
 // footprint a second time.
-//
-// The rate itself is unchanged: still float32(Σ(byte+1)) × extractsMetal over
-// a wide accumulator, so the modulo-65536 wrap retail's sixteen-bit
-// accumulator would take is visible in the second return value only. Reaching
-// it needs Σ(byte+1) ≥ 65536, which no shipped footprint approaches
-// [05 R-PROD-01 §6]; the rate-side sign corner is the one named above, and
-// [05 R-PROD-01 §6-A] states that it is the only divergence a wider
-// accumulator produces.
 //
 // The rectangle may leave the map. The walk resolves each coordinate through a
 // per-cell bounds test — 0 ≤ x < cell width and 0 ≤ z < cell height, else no
@@ -1342,7 +1327,7 @@ func (t *Terrain) SampleMetalWithFootprintSum(cx, cz int32, footX, footZ int, ex
 	}
 	// Outer loop over the Z extent from the stamped Z cell, inner over the X
 	// extent from the stamped X cell [05 R-PROD-01 §6].
-	sum := int64(0)
+	sum := uint16(0)
 	for dz := 0; dz < footZ; dz++ {
 		z := cz + int32(dz)
 		if z < 0 || z >= t.CellH {
@@ -1353,8 +1338,8 @@ func (t *Terrain) SampleMetalWithFootprintSum(cx, cz int32, footX, footZ int, ex
 			if x < 0 || x >= t.CellW {
 				continue // off-map column: no cell, no +1
 			}
-			sum += int64(t.Plot[z*t.CellW+x].Metal()) + 1
+			sum += uint16(t.Plot[z*t.CellW+x].Metal()) + 1
 		}
 	}
-	return float32(sum) * extractsMetal, uint16(sum), nil
+	return float32(int16(sum)) * extractsMetal, sum, nil
 }

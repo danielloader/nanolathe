@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 )
 
 // newCostDef is a definition whose only class-routine inputs are the two build
@@ -72,8 +73,8 @@ func TestFirstPassHoldsRetailWorkingPrecision(t *testing.T) {
 // the table above discriminates, not as a second implementation.
 func TestFirstPassFloat32FormDiffersOnHundredMultiples(t *testing.T) {
 	firstPassFloat32 := func(metal, energy float32) int32 {
-		t0 := ftol(float32(1) + metal*float32(0.01))
-		return ftol(float32(t0) + energy*float32(0.002))
+		t0 := numeric.TruncateFloat32ToLow32(float32(1) + metal*float32(0.01))
+		return numeric.TruncateFloat32ToLow32(float32(t0) + energy*float32(0.002))
 	}
 	for _, tc := range []struct {
 		name         string

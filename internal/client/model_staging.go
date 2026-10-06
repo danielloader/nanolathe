@@ -65,8 +65,9 @@ func (c *Client) stagingDisplacement(parent, child composedModel) (int32, int32)
 	p, ch := parent.draw.WorldPos, child.draw.WorldPos
 	px, py := rasterCamera.WorldToScreen(p[0], p[1], p[2])
 	cx, cy := rasterCamera.WorldToScreen(ch[0], ch[1], ch[2])
-	return parent.image.anchorX + cx - px - child.image.anchorX,
-		parent.image.anchorY + cy - py - child.image.anchorY
+	ax, ay := c.modelAnchor(parent.draw)
+	return ax + cx - px - child.image.anchorX,
+		ay + cy - py - child.image.anchorY
 }
 
 // composeCarrier presents one unit together with its attached children.
@@ -84,7 +85,7 @@ func (c *Client) composeCarrier(v frame.UnitView, sx, sy int32, children []frame
 	if len(children) == 0 {
 		return c.drawUnitModel(v, sx, sy)
 	}
-	carrier, ok := c.composeUnitModelState(v, false, false)
+	carrier, cached, ok := c.prepareUnitModelState(v, false)
 	if !ok {
 		// The carrier has no resolvable model of its own. Its children are
 		// still real units and still present, each on its own.
@@ -142,11 +143,32 @@ func (c *Client) composeCarrier(v frame.UnitView, sx, sy int32, children []frame
 		})
 	}
 	if len(staged) == 0 {
+		if cached {
+			carrier = c.stageCachedUnitModel(carrier, v, false, nil)
+		}
 		c.finalizeModelImage(carrier.image, carrier.draw, v.Owner, modelCursorUnit)
 		c.finishModel(carrier, nil)
 		return true
 	}
-	staging := stagingImage(carrier.image, staged, c.borrowModelImage)
+	var staging *modelTarget
+	if cached {
+		// Cargo and current parent geometry determine the final box before
+		// the cached seed, reveal, or live raster writes [03 R-REN-03A §4].
+		carrier = c.stageCachedUnitModel(carrier, v, false, staged)
+		staging = carrier.image
+	} else {
+		// Standalone previews have already composed their all-piece image;
+		// retain that adapter's covered-pixel copy instead of re-seeding it
+		// as if it were a raw cached lane.
+		staging = stagingBox(carrier.image, staged, c.borrowModelImage)
+		staging.copyCoveredFrom(carrier.image)
+	}
+	// Freeze the parent's own shadow before children write into the union.
+	// Its source remains the completed parent, as in the existing classic
+	// shadow adapter; the later body command must not build it a second time.
+	if carrier.draw.CastsShadow {
+		c.emitModel(pendingModelCommit{m: carrier, shadow: true})
+	}
 	for i := range staged {
 		target := staged[i].stagingTarget()
 		staging.compositeChild(&target, staged[i].keyDelta)
@@ -155,7 +177,7 @@ func (c *Client) composeCarrier(v frame.UnitView, sx, sy int32, children []frame
 		}
 	}
 	c.finalizeModelImage(staging, carrier.draw, v.Owner, modelCursorUnit)
-	c.finishModel(carrier, staging)
+	c.emitModel(pendingModelCommit{m: carrier, blit: staging, body: true, trace: true})
 	// A child's parity trace is resolved only now: the pixels it describes are
 	// final once the staging image is on the framebuffer.
 	for i := range staged {
@@ -167,6 +189,10 @@ func (c *Client) composeCarrier(v frame.UnitView, sx, sy int32, children []frame
 // recordCarrierGeometry follows the classic preparation and shadow/body commit
 // order, retaining only geometry. Keyless or missing carriers leave children
 // in the ordinary painter path [03 R-REN-03A §4].
+// CachedSeed on each ordinary keyed packet preserves the source dimensions
+// before the executor chooses its final union [03 R-REN-03A §4].
+// TODO(question): independently close Enhanced shadow-source chronology and
+// changed cached-pose bounds through retail callers before changing either.
 func (c *Client) recordCarrierGeometry(v frame.UnitView, children []frame.UnitView) bool {
 	carrier, carrierLive := c.unitGeometryPair(v, false)
 	if carrier == nil || !carrier.KeyPlane {
@@ -233,14 +259,31 @@ func (c *Client) composeUnitModel(v frame.UnitView) (composedModel, bool) {
 
 // A child forces a two-plane image; a carrier defers its water/digger pass
 // until attached children have joined it [03 R-REN-03A §4].
-func (c *Client) composeUnitModelState(v frame.UnitView, child, finalPasses bool) (result composedModel, valid bool) {
+func (c *Client) composeUnitModelState(v frame.UnitView, child, finalPasses bool) (composedModel, bool) {
+	m, cached, ok := c.prepareUnitModelState(v, child)
+	if !ok {
+		return composedModel{}, false
+	}
+	if cached {
+		m = c.stageCachedUnitModel(m, v, child, nil)
+	}
+	if finalPasses && m.image != nil {
+		c.finalizeModelImage(m.image, m.draw, v.Owner, modelCursorUnit)
+	}
+	return m, true
+}
+
+// prepareUnitModelState returns the read-only keyed cached image. Its caller
+// places it and seeds a frame-owned staging target before any reveal
+// or live drawing. Keyless and standalone adapters are already composed.
+func (c *Client) prepareUnitModelState(v frame.UnitView, child bool) (result composedModel, cached, valid bool) {
 	// Retail tints the cached/staged image blit; direct polygons remain their
 	// ordinary lane [03 R-RAST-01 §7]. Developer modes take the same image
 	// branch [03 §3.12]; neither belongs in retained pixels.
 	defer func() { result.cloaked = (v.Cloaked || c.developer.Mode != 0) && !result.direct }()
 	draw, ok := c.unitDrawFor(v)
 	if !ok {
-		return composedModel{}, false
+		return composedModel{}, false, false
 	}
 	if child {
 		draw.KeyPlane = true
@@ -252,10 +295,7 @@ func (c *Client) composeUnitModelState(v frame.UnitView, child, finalPasses bool
 	// non-retained all-piece adapter rather than pretending to be a live unit.
 	if id == 0 || !c.modelScratch.active {
 		m, ok := c.composeModelLane(draw, v.Owner, unitTeamColor(v), id, modelCursorUnit, reveal, outline, presentationrender.PieceLaneAll, false, c.selectedModelSkin(v.InstanceID, v.Owner))
-		if ok && finalPasses {
-			c.finalizeModelImage(m.image, draw, v.Owner, modelCursorUnit)
-		}
-		return m, ok
+		return m, false, ok
 	}
 	body := c.cachedBody(id)
 	missing := body == nil || body.image == nil || body.cacheRevision != v.CacheRevision
@@ -264,7 +304,7 @@ func (c *Client) composeUnitModelState(v frame.UnitView, child, finalPasses bool
 	if c.cachedBodyMustRebuild(body, v, draw, orient) || missing && required || draw.KeyPlane && body != nil && body.image != nil && body.image.height == nil {
 		cached, built := c.composeModelLane(draw, v.Owner, unitTeamColor(v), id, modelCursorUnit, nil, 0, presentationrender.PieceLaneCached, false, c.selectedModelSkin(v.InstanceID, v.Owner))
 		if !built {
-			return composedModel{}, false
+			return composedModel{}, false, false
 		}
 		c.replaceCachedBody(id, v, draw, cached.image)
 		body = c.cachedBody(id)
@@ -284,50 +324,46 @@ func (c *Client) composeUnitModelState(v frame.UnitView, child, finalPasses bool
 		// Do not advance the orientation reference here: it belongs to an actual
 		// cached-body rebuild, and changing it for a direct pose would lose a
 		// sequence of sub-threshold turns [03 §5.2].
-		return composedModel{draw: draw, direct: true, directLane: presentationrender.PieceLaneAll}, true
+		return composedModel{draw: draw, direct: true, directLane: presentationrender.PieceLaneAll}, false, true
 	}
-	base := c.cachedBodyImage(body, draw)
-	if base == nil {
-		return composedModel{}, false
+	if body.image.height == nil {
+		base := c.cachedBodyImage(body, draw)
+		return composedModel{image: base, raster: base, draw: draw}, false, base != nil
 	}
-	if base.height == nil {
-		// Keyless cached/live presentation uses a direct framebuffer live pass.
-		// It is selected by drawUnitModel after the cached body commits; return
-		// the body here so carrier handling keeps its established fallback.
-		return composedModel{image: base, raster: base, draw: draw}, true
-	}
-	if !child {
-		c.revealModelImage(base, draw, reveal, outline)
-	}
-	// A keyed image stages live geometry against the copied cached plane. A
-	// structure under construction keeps every piece in its cached lane and
-	// skips this second pass [03 R-REN-03A §4].
-	if !(draw.Structure && draw.UnderConstruction) {
-		base = c.stageLivePieces(base, draw, unitTeamColor(v), id, c.selectedModelSkin(v.InstanceID, v.Owner))
-
-	}
-	if child {
-		c.revealModelImage(base, draw, reveal, outline)
-	}
-	if finalPasses {
-		c.finalizeModelImage(base, draw, v.Owner, modelCursorUnit)
-	}
-	return composedModel{image: base, raster: base, draw: draw}, true
+	// Retained pixels remain immutable until the union copies them once
+	// directly into the final staging allocation.
+	return composedModel{image: body.image, draw: draw}, true, true
 }
 
-// stageLivePieces rasterizes into the union itself, at native scale. A live
-// texel equal to the image key still writes color and height, erasing a cached
-// color behind it; it must not be treated as a keyed child blit
-// [03 R-REN-03A §4/§5].
-func (c *Client) stageLivePieces(base *modelTarget, draw *presentationrender.UnitDraw, selector teamColor, id uint64, skins ...*ModelSkin) *modelTarget {
-	polys := c.collectDrawPolysLane(draw, selector, id, modelCursorUnit, presentationrender.PieceLaneLive, skins...)
-	if len(polys) == 0 {
-		return base
-	}
-	w, h, ox, oy, _ := c.projectedModelExtent(draw, presentationrender.PieceLaneLive, false)
+// stageCachedUnitModel seeds the final parent/live/cargo union once, then
+// applies reveal and live geometry in their owning order [03 R-REN-03A §4].
+func (c *Client) stageCachedUnitModel(m composedModel, v frame.UnitView, child bool, children []stagingChild) composedModel {
+	draw := m.draw
+	w, h, ox, oy, _ := c.projectedModelExtent(draw, presentationrender.PieceLaneAll, false)
 	ax, ay := c.modelAnchor(draw)
 	extent := modelTarget{width: w, heightPx: h, originX: ox, originY: oy, anchorX: ax, anchorY: ay}
-	stage := stagingImage(base, []stagingChild{{model: composedModel{image: &extent}}}, c.borrowModelImage)
+	base := *m.image
+	base.anchorX, base.anchorY, base.blit = ax, ay, camera.ViewScaleNative
+	stage := stagingImage(&base, children, c.borrowModelImage, &extent)
+	reveal, outline := c.unitNanoframeReveal(v)
+	if !child {
+		c.revealModelImage(stage, draw, reveal, outline)
+	}
+	if !(draw.Structure && draw.UnderConstruction) {
+		c.drawLivePieces(stage, draw, unitTeamColor(v), unitPresentationID(v), c.selectedModelSkin(v.InstanceID, v.Owner))
+	}
+	if child {
+		c.revealModelImage(stage, draw, reveal, outline)
+	}
+	m.image, m.raster = stage, stage
+	return m
+}
+
+// drawLivePieces writes into the already-seeded union. A live key-colored
+// texel still writes its key and color; no later staging copy may filter it
+// as cached data [03 R-REN-03A §4/§5].
+func (c *Client) drawLivePieces(stage *modelTarget, draw *presentationrender.UnitDraw, selector teamColor, id uint64, skins ...*ModelSkin) {
+	polys := c.collectDrawPolysLane(draw, selector, id, modelCursorUnit, presentationrender.PieceLaneLive, skins...)
 	placeFaces(polys, stage.originX, stage.originY, 1)
 	for i := range polys {
 		if polys[i].frame != nil {
@@ -336,7 +372,6 @@ func (c *Client) stageLivePieces(base *modelTarget, draw *presentationrender.Uni
 			c.fillPolyTarget(stage, &polys[i], polys[i].color, id)
 		}
 	}
-	return stage
 }
 
 // composeChildModel composes one attached child for the staging path.
@@ -387,16 +422,21 @@ func (c *Client) drawChildModel(v frame.UnitView) {
 // Recording passes a frame-owned image slot as allocate; standalone callers pass
 // newModelImage for independently allocated storage. Both use the same union and
 // composition.
-func stagingImage(body *modelTarget, children []stagingChild, allocate func(int, int, int32, int32, int32, int32, bool, int32) *modelTarget) *modelTarget {
+func stagingImage(body *modelTarget, children []stagingChild, allocate func(int, int, int32, int32, int32, int32, bool, int32) *modelTarget, extra ...*modelTarget) *modelTarget {
+	stage := stagingBox(body, children, allocate, extra...)
+	stage.seedCachedFrom(body)
+	return stage
+}
+
+func stagingBox(body *modelTarget, children []stagingChild, allocate func(int, int, int32, int32, int32, int32, bool, int32) *modelTarget, extra ...*modelTarget) *modelTarget {
 	if body == nil {
 		return nil
 	}
 	left, top := body.screenX(0), body.screenY(0)
 	right, bottom := body.screenX(int32(body.width)-1), body.screenY(int32(body.heightPx)-1)
-	for i := range children {
-		ch := children[i].stagingTarget()
-		if ch.width == 0 || ch.heightPx == 0 {
-			continue
+	extend := func(ch *modelTarget) {
+		if ch == nil || ch.width == 0 || ch.heightPx == 0 {
+			return
 		}
 		if l := ch.screenX(0); l < left {
 			left = l
@@ -411,20 +451,55 @@ func stagingImage(body *modelTarget, children []stagingChild, allocate func(int,
 			bottom = b
 		}
 	}
+	for i := range children {
+		ch := children[i].stagingTarget()
+		extend(&ch)
+	}
+	for _, ch := range extra {
+		extend(ch)
+	}
 	// The staging image keeps the carrier's anchor, so its origin is whatever
 	// puts the union's top-left corner at image pixel (0,0).
 	originX := body.anchorX - left
 	originY := body.anchorY - top
 	staging := allocate(int(right-left+1), int(bottom-top+1), originX, originY, body.anchorX, body.anchorY, body.height != nil, 1)
-	staging.copyFrom(body)
 	return staging
 }
 
-// copyFrom copies one image's covered pixels into this one, both planes, at the
-// screen position each already carries. It is the "cached image is copied or
-// re-blitted into it" step of [R-REN-03A §4]: an unconditional copy, with no
-// key test, because the staging image is empty underneath.
-func (t *modelTarget) copyFrom(src *modelTarget) {
+// seedCachedFrom follows the two plane-copy branches of [03 R-REN-03A §4].
+// Equal dimensions copy raw bytes. A resized target copies each plane keyed
+// independently against the source transparent index, including the key plane.
+func (t *modelTarget) seedCachedFrom(src *modelTarget) {
+	if t == nil || src == nil {
+		return
+	}
+	if t.width == src.width && t.heightPx == src.heightPx {
+		copy(t.color, src.color)
+		copy(t.covered, src.covered)
+		copy(t.height, src.height)
+		return
+	}
+	for sy := 0; sy < src.heightPx; sy++ {
+		iy := t.imageY(src.screenY(int32(sy)))
+		for sx := 0; sx < src.width; sx++ {
+			ix := t.imageX(src.screenX(int32(sx)))
+			if ix < 0 || iy < 0 || ix >= int32(t.width) || iy >= int32(t.heightPx) {
+				continue
+			}
+			si, di := sy*src.width+sx, int(iy)*t.width+int(ix)
+			if src.color[si] != src.transparent {
+				t.color[di], t.covered[di] = src.color[si], true
+			}
+			if t.height != nil && src.height != nil && src.height[si] != src.transparent {
+				t.height[di] = src.height[si]
+			}
+		}
+	}
+}
+
+// copyCoveredFrom retains the standalone all-piece preview adapter's copy.
+// It receives a finished image, never a raw retained cached lane.
+func (t *modelTarget) copyCoveredFrom(src *modelTarget) {
 	if t == nil || src == nil {
 		return
 	}

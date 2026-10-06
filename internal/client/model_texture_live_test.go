@@ -74,7 +74,7 @@ func TestCursorScaledDeltaIsIndependentOfSimulationTicks(t *testing.T) {
 	if cs.play.Idx != 0 || cs.play.Countdown != 4 {
 		t.Fatalf("one scaled unit: index=%d countdown=%d", cs.play.Idx, cs.play.Countdown)
 	}
-	c.StepCursorScaledDelta(3)
+	c.StepCursorScaledDelta(4)
 	if cs.play.Idx != 1 {
 		t.Fatalf("scaled wall-clock delta did not advance cursor: index=%d", cs.play.Idx)
 	}
@@ -129,5 +129,25 @@ func TestModelTexturePlayersArePerPrimitive(t *testing.T) {
 	first.player.Step()
 	if got, _ := second.player.Frame(); got != content.AssetID(ref.key+"#0") {
 		t.Fatalf("second primitive followed first cursor: %q", got)
+	}
+}
+
+func TestCursorScaledDeltaRetainsLastDurationUnit(t *testing.T) {
+	entry := &formats.GAFEntry{FrameCount: 2, Frames: []formats.GAFFrameRef{
+		{Value: 10, Frame: &formats.GAFFrame{Pixels: []byte{1}}},
+		{Value: 10, Frame: &formats.GAFFrame{Pixels: []byte{2}}},
+	}}
+	cs := &Cursors{}
+	cs.play.Bind(entry, 0, true)
+	c := &Client{cursors: cs}
+	// Positive elapsed time goes through the production adapter, preserving
+	// its existing negative-delta API convention [03 §4.4].
+	c.StepCursorScaledDelta(9)
+	if cs.play.Idx != 0 || cs.play.Countdown != 1 || cs.Frame() != entry.Frames[0].Frame {
+		t.Fatalf("after nine: index=%d remaining=%d", cs.play.Idx, cs.play.Countdown)
+	}
+	c.StepCursorScaledDelta(1)
+	if cs.play.Idx != 1 || cs.play.Countdown != 10 || cs.Frame() != entry.Frames[1].Frame {
+		t.Fatalf("after ten: index=%d remaining=%d", cs.play.Idx, cs.play.Countdown)
 	}
 }

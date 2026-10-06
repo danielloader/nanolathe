@@ -115,17 +115,17 @@ func TestMapReadCapDefaultsToRetail(t *testing.T) {
 }
 
 // bigLOSFixture authors a LOS table file with the given table count, each
-// table carrying lines wide enough to push the file past the retail
-// battle-table read cap. Table n is authored as radius n: its one line is the
-// point count followed by that many (0, k) pairs, the shape [03 R-VIS-01 §3]
-// describes.
+// table carrying one complete line within the consumer's 511-byte boundary.
+// Table n is authored as radius n: its line is the point count followed by
+// that many (0, k) pairs [03 R-VIS-01 §3]. Comment padding, not longer values,
+// pushes the file past the retail battle-table read cap.
 func bigLOSFixture(tables int, padTo int) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[TABLEINFO]\n{\n\tnumtables=%d;\n}\n", tables)
 	for n := 1; n <= tables; n++ {
 		fmt.Fprintf(&b, "[TABLE%d]\n{\n\tnumlines=1;\n\tline1=%d", n, n)
 		for k := 1; k <= n; k++ {
-			fmt.Fprintf(&b, ", 0, %d", k)
+			fmt.Fprintf(&b, ",0,%d", k)
 		}
 		b.WriteString(";\n}\n")
 	}

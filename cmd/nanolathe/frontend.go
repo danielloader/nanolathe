@@ -268,6 +268,9 @@ type gameShell struct {
 	// briefing effects are never sent to a second frontend-only service
 	// [03 R-AUD-02 §1][I6].
 	audioOwner *audio.Service
+	// retailMusicSelection survives ordinary options roots, independently of
+	// the controller next/request fields [07 R-FE-01 §6]. New shells start at zero.
+	retailMusicSelection int
 	// frontendAliasesBound records that the authored alias table has been
 	// registered on audioOwner so the front end's own interface cues resolve
 	// [02 "Sound aliases"][07 R-FE-01 §2].
@@ -891,6 +894,7 @@ func (g *gameShell) openMenuWithTokenFlush(mode shellMode, flushTokens bool) {
 				}
 			}
 			g.disableUnavailableFrontendEntries(window, mode)
+			g.initializeRetailLabels(window)
 			panel = ui.NewPanel(window)
 			if mode == modeMenuMain {
 				// Retail supplies its literal, reveals the authored label, and

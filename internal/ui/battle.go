@@ -1,8 +1,7 @@
 package ui
 
 import (
-	"time"
-
+	"github.com/nanolathe-gg/nanolathe/internal/clock"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 )
@@ -174,7 +173,7 @@ type BattleState struct {
 	// simulation state is reachable through this value [I6].
 	Input BattleInputState
 
-	// PanelOffset, PanelTarget, and PanelLastThrottle are the sole owner of the
+	// PanelOffset, PanelTarget, and PanelDeadline are the sole owner of the
 	// §6 slide. Only the input / host-frame update advances it [07 §6][I6].
 	//
 	// What the offset moves is the bottom slide strip — `Game Time` /
@@ -191,10 +190,12 @@ type BattleState struct {
 	// them (-31 "parked", 0 "fully visible"); by the two later closures above
 	// the strip is fully drawn at -31 and invisible at 0. The arithmetic is the
 	// same under either label, so the constant names are left alone.
-	PanelOffset       int8
-	PanelTarget       int8
-	PanelLastThrottle uint32
-	panelCue          func(string)
+	// TODO(question): the deadline remains per battle as a host boundary until
+	// the remaining reset/rebuild writers close its retail lifetime [07 §6].
+	PanelOffset   int8
+	PanelTarget   int8
+	PanelDeadline uint32
+	panelCue      func(string)
 }
 
 // NewBattleState returns a closed modal state with no captured press. The
@@ -217,7 +218,7 @@ func NewProductionBattleState() *BattleState {
 }
 
 // SetPanelCue installs the optional authored cue sink. UI owns when a cue is
-// due — a rail detent transition, or an `ARMOPT` button press — and the
+// due — a rail detent transition or a recognised options action — and the
 // composition root owns how the alias is played, so no interface sound is
 // reached from this layer [07 §6][07 R-WGT-01 §3].
 func (s *BattleState) SetPanelCue(cue func(string)) {
@@ -247,18 +248,32 @@ func (s *BattleState) SetPanelTarget(spaceHeld, editorFocused bool) {
 	}
 }
 
-// AdvancePanel advances one slide step at an explicit wall-clock timestamp.
-// Early timestamps are ignored; accepted steps ease by remaining/3 with a
-// one-pixel minimum, and detent transitions emit the established cues [07 §6].
+// AdvancePanel uses one explicit timestamp for both clock samples. Production
+// uses AdvancePanelWithClock so an admitted visit takes a fresh sample [07 §6].
 func (s *BattleState) AdvancePanel(now uint32, spaceHeld, editorFocused bool) {
+	s.advancePanel(func() uint32 { return now }, spaceHeld, editorFocused)
+}
+
+// AdvancePanelWithClock reads admission time and, only on admission, a second
+// time for the next deadline. The source must share the deadline's origin;
+// low Unix milliseconds with a fresh zero deadline are not equivalent [07 §6].
+func (s *BattleState) AdvancePanelWithClock(source clock.MillisSource, spaceHeld, editorFocused bool) {
+	if source == nil {
+		return
+	}
+	s.advancePanel(source.Millis32, spaceHeld, editorFocused)
+}
+
+func (s *BattleState) advancePanel(sample func() uint32, spaceHeld, editorFocused bool) {
 	if s == nil {
 		return
 	}
-	s.SetPanelTarget(spaceHeld, editorFocused)
-	if now-s.PanelLastThrottle < PanelThrottleMs {
+	if int32(sample()) <= int32(s.PanelDeadline) {
 		return
 	}
-	s.PanelLastThrottle = now
+	// Refresh before inspecting input, including a visit already at a detent.
+	s.PanelDeadline = sample() + PanelThrottleMs
+	s.SetPanelTarget(spaceHeld, editorFocused)
 	if s.PanelOffset == s.PanelTarget {
 		return
 	}
@@ -288,14 +303,6 @@ func (s *BattleState) AdvancePanel(now uint32, spaceHeld, editorFocused bool) {
 	if s.PanelOffset != previous && (s.PanelOffset == PanelVisible || s.PanelOffset == PanelParked) && s.panelCue != nil {
 		s.panelCue("Options")
 	}
-}
-
-// AdvancePanelNow is the wall-clock host-frame entry point [07 §6][I6].
-func (s *BattleState) AdvancePanelNow(spaceHeld, editorFocused bool) {
-	if s == nil {
-		return
-	}
-	s.AdvancePanel(uint32(time.Now().UnixMilli()&0xffffffff), spaceHeld, editorFocused)
 }
 
 // Latch returns the currently armed semantic order. A nil state is idle.
@@ -583,9 +590,11 @@ func (s *BattleState) Activate(name string) BattleModalAction {
 	case BattleModalBriefing:
 		switch name {
 		case "OK":
+			s.playCue("Options")
 			s.modal = BattleModalOptions
 			s.ClearModalPress()
 		case "TextRegion", "MOREBAR":
+			s.playCue("Options")
 			// The in-battle briefing clears the inert-label attribute bit on
 			// both, so unlike MSNBRIEF they are ordinary fired gadgets here;
 			// either one pages the text [07 R-FE-01 §7][07 R-HUD-03 §10].
@@ -593,15 +602,18 @@ func (s *BattleState) Activate(name string) BattleModalAction {
 		}
 	case BattleModalGameOptions:
 		if name == "OK" {
+			s.playCue("Options")
 			s.modal = BattleModalOptions
 			s.ClearModalPress()
 		}
 	case BattleModalHelp:
 		switch name {
 		case "OK":
+			s.playCue("Options")
 			s.modal = BattleModalOptions
 			s.ClearModalPress()
 		case "Page":
+			s.playCue("Options")
 			return BattleModalActionHelpPage
 		}
 	case BattleModalRestart:

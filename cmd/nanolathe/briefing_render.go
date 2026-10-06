@@ -259,6 +259,7 @@ func (g *gameShell) loadBriefingPanel(planet BriefingPlanet) *ui.Panel {
 	g.assets.briefing.art = art
 	window := gui.CloneWindow(g.assets.briefing.window)
 	g.installRetailWindowButtonArt(window, g.assets.briefing.art)
+	g.initializeRetailLabels(window)
 	panel := ui.NewPanel(window)
 	// Retaining a previous GAF after a failed load does not install this
 	// visit's callback. Once installed, condition text survives a missing
@@ -311,7 +312,11 @@ func (g *gameShell) briefingInput(cl *client.Client) {
 			case "PrevMenu":
 				g.dispatchBriefing(BriefingActionPrev)
 			case "SHUTUP":
-				g.dispatchBriefing(BriefingActionShutup)
+				// Cue requests surround the resulting-stage stream action
+				// [07 R-FE-01 §4]; playback admission belongs to the audio owner.
+				g.playMenuCue("Options")
+				g.consumeBriefingAudio(g.briefing.DispatchNarrationStage(p.StageAt(p.Index("SHUTUP"))))
+				g.playMenuCue("SmallButton")
 			}
 			return
 		}
@@ -346,13 +351,11 @@ func (g *gameShell) dispatchBriefing(action BriefingAction) {
 	if g == nil || g.briefing == nil {
 		return
 	}
-	// `MSNBRIEF`'s cue column [07 R-FE-01 §2]: `PrevMenu` plays `Previous` and
-	// `TextRegion`/`MOREBAR` plays `More`; the `Start` and `SHUTUP` rows carry
-	// no cue. It runs in the screen handler that consumes the fired result
-	// [07 R-WGT-01 §3].
+	// Start requests its cue before validation; Prev requests its cue only
+	// after stopping the stream [07 R-FE-01 §4].
 	switch action {
-	case BriefingActionPrev:
-		g.playMenuCue("Previous")
+	case BriefingActionStart:
+		g.playMenuCue("BigButton")
 	case BriefingActionMore:
 		g.playMenuCue("More")
 	}
@@ -363,6 +366,7 @@ func (g *gameShell) dispatchBriefing(action BriefingAction) {
 	}
 	if action == BriefingActionPrev {
 		g.consumeBriefingAudio(event.Audio)
+		g.playMenuCue("Previous")
 		g.briefing, g.briefingPanel = nil, nil
 		g.openMenu(modeMenuMission)
 		return

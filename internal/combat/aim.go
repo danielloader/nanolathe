@@ -88,12 +88,12 @@ func DriftGatePass(w *content.WeaponDef, stationary bool, storedYaw, wantYaw, st
 // The angle units are the uint16 angle-per-circle of the slot angles, so 182
 // units is about half a degree — `accuracy` is neither degrees nor a percent.
 //
-// Zero or negative maxHealth raises the processor divide fault in retail, the
-// same malformed-only case the reload computation reproduces; stock
-// MaxDamage is always positive.
+// Only zero maxHealth faults. A high-bit maximum is a valid unsigned divisor,
+// including when completed-unit initialization leaves positive low-word health
+// [06 §4.2].
 func accuracySpreadBoundWithDivisor(accuracy, health, maxHealth int32, div uint32) uint16 {
-	if maxHealth <= 0 {
-		panic("combat: zero or negative maxHealth divide fault in accuracy spread [06 R-WPN-03 §4]")
+	if maxHealth == 0 {
+		panic("combat: zero maxHealth divide fault in accuracy spread [06 R-WPN-03 §4]")
 	}
 	healthTerm := uint32(int32(int16(health))<<11) / uint32(maxHealth)
 	bound := uint16(accuracy) - uint16(healthTerm) + 0x800

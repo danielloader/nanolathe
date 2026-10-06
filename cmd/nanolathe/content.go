@@ -12,6 +12,7 @@ import (
 	contentprofiles "github.com/nanolathe-gg/nanolathe/internal/content/profiles"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/install"
+	"github.com/nanolathe-gg/nanolathe/internal/maplibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/vfs"
@@ -86,6 +87,9 @@ type contentSet struct {
 	// no Nanolathe config (docs/DESIGN_MODS_MUTATORS.md §4.5), "" otherwise.
 	// It is also modNotice unless the selection had its own notice to show.
 	configNotice string
+	// skippedMaps are downloaded map packages this mount left out, with the
+	// reason; they stay removable from the More maps catalogue.
+	skippedMaps []maplibrary.Skipped
 	// profileControls is the controls preset of a config mounted without a
 	// mod (--mod-config on a manual stack). It is offered once
 	// (docs/DESIGN_MODS_MUTATORS.md §4.3); a mod carries its own in mod.
@@ -171,6 +175,11 @@ func openContent(opts Options) (*contentSet, error) {
 // required products.
 func mountContent(opts Options, baseRoots []string, selection modSelection) (*contentSet, error) {
 	started := time.Now()
+	config, err := resolveMountConfig(opts, selection)
+	if err != nil {
+		return nil, err
+	}
+	profile := config.meta.Content()
 	roots := append([]string(nil), baseRoots...)
 	if selection.mod != nil {
 		roots = append(roots, selection.mod.Dir)
@@ -185,6 +194,28 @@ func mountContent(opts Options, baseRoots []string, selection modSelection) (*co
 			}
 		}
 	}
+	// Downloaded maps never stop a start: a package that fails its mount-time
+	// audit, or no longer validates against this base and mod stack, is left
+	// out and named in a notice, and the rest still mount below the base
+	// (docs/DESIGN_CONTENT_VFS.md "Downloaded community maps").
+	var mapRoots, mapNotes []string
+	var skippedMaps []maplibrary.Skipped
+	if mapLibraryLayoutSupported(profile.Layout()) {
+		installed, skipped, err := installedMapRoots(opts)
+		if err != nil {
+			mapNotes = append(mapNotes, "nanolathe: downloaded maps not mounted: "+noticeReason(err))
+		}
+		kept, rejected := maplibrary.SelectRoots(installed, roots)
+		mapRoots, skippedMaps = kept, append(skipped, rejected...)
+	}
+	for _, s := range skippedMaps {
+		mapNotes = append(mapNotes, mapSkipNote(s))
+	}
+	for _, note := range mapNotes {
+		fmt.Fprintln(os.Stderr, note)
+	}
+	mapRootsCount := len(mapRoots)
+	roots = append(mapRoots, roots...)
 	fileSystem := vfs.New()
 	if err := fileSystem.MountGameDirectories(roots); err != nil {
 		fileSystem.Close()
@@ -200,12 +231,6 @@ func mountContent(opts Options, baseRoots []string, selection modSelection) (*co
 	// The Nanolathe config is chosen before anything reads content: its
 	// content section is the directory table and limits every reader goes
 	// through (docs/DESIGN_CONTENT_VFS.md §5 "Content profiles").
-	config, err := resolveMountConfig(opts, selection)
-	if err != nil {
-		fileSystem.Close()
-		return nil, err
-	}
-	profile := config.meta.Content()
 	mod := selection.mod
 	if mod != nil && config.path != "" {
 		// A config named on the command line stands in for the mod's own, so
@@ -230,9 +255,13 @@ func mountContent(opts Options, baseRoots []string, selection modSelection) (*co
 		gameplayFeatures: config.meta.CommunitySources(),
 		config:           config.meta.Config,
 		configPath:       config.path,
-		root:             roots[0], roots: append([]string(nil), roots...), notes: fileSystem.Notes(),
+		root:             baseRoots[0], roots: append([]string(nil), roots...), notes: fileSystem.Notes(),
 		mod: mod, baseRoots: append([]string(nil), baseRoots...), manualRoots: selection.manual, modNotice: notice,
-		configNotice: config.notice, savedMod: selection.saved,
+		configNotice: config.notice, savedMod: selection.saved, skippedMaps: skippedMaps,
+	}
+	set.notes = append(set.notes, mapNotes...)
+	if mapRootsCount > 0 {
+		set.limits.TNTBytes = max(set.limits.TNTBytes, maplibrary.MaxTNTBytes)
 	}
 	if mod == nil {
 		set.profileControls = config.meta.Controls

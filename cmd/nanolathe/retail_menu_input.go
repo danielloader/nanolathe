@@ -68,9 +68,16 @@ func (g *gameShell) serviceMenuWidgets(p *ui.Panel, in *input.State) bool {
 			}
 		}
 		p.ScrollTextListAt(index, -in.Mouse.ScrollY)
+		if g.mapRemovals.panel == p && g.mapRemovals.pressed != 0 {
+			g.mapRemovals.pressed = -1
+		}
 	}
 	editorIndex := p.EditorIndex()
 	frame := pointerFrame(in, widgetTokens(in), g.widgetTimerAdvanced(p))
+	if g.serviceMapRemovePointer(p, frame) {
+		in.DiscardTokens(len(frame.Tokens))
+		return true
+	}
 	if g.battle != nil {
 		frame.DisableQuickKeys = g.battle.developer.quickkeysDisabled
 	}
@@ -212,8 +219,9 @@ func (g *gameShell) modalInput(cl *client.Client) {
 	}})
 	in.DiscardTokens(result.ConsumedTokens)
 	if result.Fired {
-		if _, ok := modalGadget(m, result.FiredIndex); ok {
+		if gad, ok := modalGadget(m, result.FiredIndex); ok {
 			g.frontend.Panels.CloseModal()
+			g.finishMapRemovalConfirmation(m, gad.Name)
 		}
 	}
 }
@@ -237,6 +245,9 @@ func widgetTokens(in *input.State) []input.Token {
 
 func (g *gameShell) commitListSelection(name string, index int) {
 	name = gui.CallbackName(name)
+	if g.commitMapsListSelection(name, index) {
+		return
+	}
 	if g.commitModsListSelection(name, index) {
 		return
 	}
@@ -265,6 +276,9 @@ func (g *gameShell) activateGadget(name string) {
 	key := frontendCallbackKey(name)
 	// The Mods & Mutators windows are children over MAINMENU
 	// (docs/DESIGN_MODS_MUTATORS.md §8.2).
+	if g.activateMapsGadget(name) {
+		return
+	}
 	if g.activateModsGadget(name) {
 		return
 	}
@@ -378,6 +392,10 @@ func (g *gameShell) activateGadget(name string) {
 		}
 	case modeMenuMap:
 		switch name {
+		case "GETMAPS":
+			if err := g.openMapsFetch(); err != nil {
+				reportRetailMessageError(g.showRetailMessage(err.Error()))
+			}
 		case "PREVMENU":
 			g.openMenu(g.mapReturn)
 		case "LOAD", "MAPNAMES":

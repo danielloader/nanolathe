@@ -9,6 +9,7 @@ import (
 const (
 	nanolatheModule   = "github.com/nanolathe-gg/nanolathe"
 	modFetchPackage   = nanolatheModule + "/internal/modfetch"
+	mapLibraryPackage = nanolatheModule + "/internal/maplibrary"
 	modLibraryPackage = nanolatheModule + "/internal/modlibrary"
 	desktopCommand    = nanolatheModule + "/cmd/nanolathe"
 )
@@ -26,8 +27,10 @@ const (
 //     internal/modfetch: mod selection happens before a session exists and
 //     never reaches a tick.
 //
-// Like the platform guard, it runs `go list -test` over the whole module so a
-// test binary cannot smuggle the dependency in either.
+// Like the platform guard, it runs `go list -test` over the whole module.
+// Desktop download integration tests may serve loopback fixtures through
+// net/http and httptest. The ordinary desktop package is checked separately,
+// so this exception cannot admit a production HTTP import.
 func TestNetworkStaysInTheModFetcher(t *testing.T) {
 	root := repositoryRoot(t)
 	cmd := exec.Command("go", "list", "-test", "-f", "{{.ImportPath}}|{{join .Imports \" \"}}|{{join .Deps \" \"}}", "./...")
@@ -46,6 +49,9 @@ func TestNetworkStaysInTheModFetcher(t *testing.T) {
 
 		if owner != modFetchPackage {
 			for _, imported := range imports {
+				if owner == desktopCommand && name != desktopCommand && (imported == "net/http" || imported == "net/http/httptest") {
+					continue
+				}
 				if imported == "net/http" || strings.HasPrefix(imported, "net/http/") {
 					t.Errorf("%s imports %s; only %s may", name, imported, modFetchPackage)
 					break
@@ -62,7 +68,7 @@ func TestNetworkStaysInTheModFetcher(t *testing.T) {
 		}
 		if isAuthoritativePackage(owner) {
 			for _, dep := range deps {
-				if dep == modFetchPackage || dep == modLibraryPackage {
+				if dep == modFetchPackage || dep == modLibraryPackage || dep == mapLibraryPackage {
 					t.Errorf("authoritative package %s depends on %s", name, dep)
 					break
 				}

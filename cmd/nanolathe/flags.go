@@ -28,6 +28,8 @@ import (
 // Options is the command-line surface for the retail runtime and its host
 // configuration. Developer probes and capture modes are separate tools.
 type Options struct {
+	// excludedMapRoot belongs only to a prepared map-removal mount; never saved.
+	excludedMapRoot   string
 	Gameplay          gameplay.Mode
 	GameplaySet       bool
 	GameplayOverrides []community.Overrides

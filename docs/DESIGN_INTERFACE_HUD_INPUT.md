@@ -4254,6 +4254,28 @@ title gate and the retail default. `TestCommunityHUDEverySwitchCommits` locks
 the switch: each HUD row writes only its own preference, and the click plays
 only the `Options` cue.
 
+### Community map downloads
+
+The map selection screen offers **More maps** above its minimap, a user-authorized
+2026-10-05 desktop content browser. It lists community maps with download
+sizes and installed status, downloads a chosen map and its shared features,
+and returns it to the ordinary map selector. Progress, cancellation and
+failure messages belong to this frontend flow, with no network activity in
+battle. Installation preserves the active mod and the live skirmish or
+Survival setup. The catalogue shows a small authored minimap before downloading;
+each removable locally downloaded map has an X inside its row in both lists.
+The X confirms removal of that row without changing the map selection, and
+its draw and pointer bounds follow list scrolling and clipping.
+A downloaded package the mount left out shows as "not loaded" in the catalogue,
+with its reason in place of the homepage line, and keeps its X so it can be
+deleted ([DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md#5-divergences)).
+An installed map whose package, or a feature package it requires, the
+catalogue has republished shows "update available", and Load reads Update. A
+map that the installed game or selected mod already supplies shows "in your
+install", explains that it is already in the map list, and greys Load.
+Retail, manual and active-mod maps stay protected. Catalogue trust, library layout and mount precedence are
+owned by [DESIGN_MODS_MUTATORS §5.6](DESIGN_MODS_MUTATORS.md#56-community-map-catalogue).
+
 ### 3.17 The Nanolathe screen
 
 **Policy.** A Nanolathe-owned setup screen, user-authorized 2026-09-28 as a

@@ -133,11 +133,12 @@ type gameShell struct {
 	mapLabels []string
 	// mapCensus is the host's account of how maps was built, reported once
 	// at startup (writeFrontendStartupReport).
-	mapCensus skirmishMapCensus
-	mapIdx    int
-	mapReturn shellMode
-	mapData   map[string]*retailMapData
-	setup     session.SkirmishConfig
+	mapCensus   skirmishMapCensus
+	mapRemovals mapRemovalRows
+	mapIdx      int
+	mapReturn   shellMode
+	mapData     map[string]*retailMapData
+	setup       session.SkirmishConfig
 	// savedUnitLimit is the file's own unitLimit, zero when the player chose
 	// none. Settings writes return it unchanged, so neither the default nor a
 	// one-off --unit-limit is ever recorded as the player's choice.
@@ -873,6 +874,9 @@ func (g *gameShell) openMenuWithTokenFlush(mode shellMode, flushTokens bool) {
 					applySurvivalLayout(window)
 				}
 			}
+			if mode == modeMenuMap {
+				installGetMapsButton(window)
+			}
 			if mode == modeMenuSingle {
 				addSurvivalButton(window)
 			}
@@ -1061,6 +1065,7 @@ func (g *gameShell) step(delta float64, cl *client.Client) {
 	// dialog never reports a drop install as its own download.
 	g.pollModDrop(cl)
 	g.pollModsFetch()
+	g.pollMapsFetch()
 	// The Nanolathe screen gets ready while the main menu idles, so it opens
 	// onto a staged scene (nlscreen.go).
 	if nlScreenInst != nil && g.frontend != nil {

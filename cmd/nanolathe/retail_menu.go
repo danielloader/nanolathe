@@ -467,6 +467,7 @@ func (g *gameShell) refreshMapPanel() {
 		}
 	}
 	g.setListItems("MAPNAMES", items, g.mapIdx)
+	g.refreshMapRemovalRows(p)
 	if len(g.maps) == 0 {
 		p.SetText("DESCRIPTION", "")
 		p.SetText("SIZE", "")

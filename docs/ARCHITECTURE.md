@@ -112,7 +112,8 @@ package implements.
 | `internal/content/profiles` | Content profiles: the content section of a mod's `nanolathe-mod.json` (directory table, limits, front-end art) and the base game's built-in profile, applied as a `vfs.Layout` at the mount boundary. No per-mod data and no detection | DESIGN_CONTENT_VFS §5 |
 | `internal/settings` | Front-end preferences that survive a restart (last skirmish setup, per-slot side/colour/ally, difficulty, the selected mod and mutators) | DESIGN_CONTENT_VFS |
 | `internal/modlibrary` | The installed-mod library: data directory, `nanolathe-mod.json` metadata and the mod's Nanolathe config (content, rules, settings, keys, locks), mod selection, and zip or folder install with extraction and validation. No network | DESIGN_MODS_MUTATORS §4 |
-| `internal/modfetch` | The nanolathe.gg mod manifest and resumable, SHA-256-verified downloads. The only package that imports `net/http`, and only `cmd/nanolathe` imports it | DESIGN_MODS_MUTATORS §5 |
+| `internal/maplibrary` | Installed community maps and shared feature packages: map-only validation and deterministic library roots, reusing modlibrary atomic installs; no network | DESIGN_MODS_MUTATORS §5.6 |
+| `internal/modfetch` | The nanolathe.gg mod and map manifests and resumable, SHA-256-verified downloads. The only package that imports `net/http`, and only `cmd/nanolathe` imports it | DESIGN_MODS_MUTATORS §5 |
 
 ### Runtime core
 

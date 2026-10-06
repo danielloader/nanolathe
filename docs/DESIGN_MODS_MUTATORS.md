@@ -68,7 +68,7 @@ To keep the two apart, code for this feature never uses the bare identifier
 | D2 | Every save gets a sidecar recording the mod, content profile, rule set, Community table, unit limit and mutators active when it was written. Loading the save restores that selection, including switching mod. The loading screen shows it. |
 | D3 | Redistribution permission is assumed. Nanolathe hosts the manifest **and** every download, so availability does not depend on the original sites and the hosted zips can be cleaned (§5.5). The manifest is on nanolathe.gg; the zips are assets of one GitHub release (`mods`) on the website repository, so the site's history does not carry them (revised 2026-09-23). |
 | D4 | Trust is HTTPS to nanolathe.gg. Manifest signatures are a follow-up, not a v1 requirement (§5.4). |
-| D5 | The client may use the network to fetch the mod manifest and mod downloads and, since DESIGN_MULTIPLAYER was adopted (2026-10-01, its §15 Q1), to connect to a multiplayer relay — and for nothing else. |
+| D5 | The client may use the network to fetch mod and community-map catalogues and their downloads (maps authorized 2026-10-05, §5.6) and, since DESIGN_MULTIPLAYER was adopted (2026-10-01, its §15 Q1), to connect to a multiplayer relay — and for nothing else. |
 | D6 | One zip per mod version, containing the complete content root. No layers. |
 | D7 | Mutators are global: every player, human and computer, plays the same catalog. |
 | D8 | Gameplay mode and renderer stay orthogonal to the mod. A mod may declare a minimum gameplay mode, which the selector enforces visibly; nothing switches silently. |
@@ -739,6 +739,109 @@ or battle acceptance, and neither receives an unsupported catalogue entry.
 The sourced release identities, requirements and evidence needed to proceed
 are recorded in [legacy packages](../research/extensions/legacy-mod-packages.md).
 
+### 5.6 Community map catalogue
+
+User-authorized 2026-10-05. The map picker offers **More maps** above the minimap
+preview to browse and install curated community maps individually. The download
+list sorts by map name alphanumerically, ignoring capitalization, for both live
+and cached catalogues. Retail maps are supplied by
+the player's install and do not appear in the hosted collection. This is
+host content management in every gameplay mode, not a gameplay rule or a mod
+selection. Installing a map does not change the selected mod, rules, settings
+or mutators.
+
+The catalogue is `https://nanolathe.gg/maps/manifest.json`; its archives are
+versioned assets of the website repository's separate `maps` release. The
+schema-1 document has `maps` and `dependencies` arrays. Each record uses the
+mod catalogue's identity, summary, homepage and `archive` fields. A map also
+names one canonical `map` path (`maps/<name>.ota`) and a `requires` array of
+dependency IDs. Dependencies are direct shared content packages, not another
+mod or a dependency graph. IDs are unique across both arrays; an unresolved
+reference refuses the catalogue. Archive size and SHA-256 are mandatory.
+Map catalogue development uses `NANOLATHE_MAP_CATALOG` under the same origin
+rules as the mod override. The shared `modfetch.Client` fetches, caches and
+verifies both catalogues; a separate cache directory keeps them independent.
+
+A map may also carry `preview: {url, size, sha256}`. This optional PNG uses the
+same trusted origins as map archives, is at most 1 MiB, and has positive
+dimensions no larger than 1024 × 1024. Its hash identifies a separate persistent
+preview cache. The catalogue fetches only the selected map's picture, without
+fetching its map ZIP; changing selection or closing the dialog cancels obsolete
+requests. An old response cannot replace the current picture. Verified cached
+pictures work offline. Missing or failed previews leave map downloads available.
+`tools/map-previews` exports authored TNT minimaps through the reference palette,
+using the chooser's source crop to omit padding, and adds their identities to
+the manifest. These are presentation assets, not newly generated terrain.
+
+The installed map library is `$XDG_DATA_HOME/nanolathe/maps`, falling back
+to `~/.local/share/nanolathe/maps`. It reuses the mod library's atomic
+extraction, identity checks and receipts, with identity-only schema-1
+`nanolathe-mod.json` files. `internal/maplibrary` restricts the payload to
+maps and their feature/art support; map packages cannot install gameplay
+configs, units, AI replacements or executable code. A map install requires
+its named OTA and paired TNT to parse. Shared features install once before
+the requested map. A package's features must resolve from the base install,
+the selected mod and its own declared dependencies alone: another installed
+map package never completes it, though the package may not change that
+package's existing feature definitions. A package whose map path the base
+install or selected mod already supplies is refused as "already in your
+install", since the base copy would win the path. A failed or cancelled
+transfer never exposes a partial map, and a retry uses the existing
+hash-bound resume mechanism.
+
+On ordinary desktop startup, installed map roots mount in deterministic
+order below the retail roots and the active mod. Existing retail/mod assets
+therefore win any overlapping logical path. Validation also refuses differing
+same-name feature definitions even when they live at different logical paths,
+because feature compilation resolves names as well as paths. Packages exclude
+the authoritative sight-mask archive. When a downloaded map root is mounted,
+the terrain-file read cap is at least 64 MiB: a bounded host admission budget
+for the inspected large maps, not a change to terrain interpretation. Other
+profile limits remain as selected; with no downloaded roots all limits remain
+unchanged. The base install identity and
+mod selection exclude these map-library roots. Displayless runs, captures
+and benchmarks do not discover the library implicitly; deliberate checks
+supply explicit roots. No fetch occurs on startup, in battle, or during
+simulation: the player opens the catalogue or requests a download.
+Profiles that redirect map or feature-support directories omit the automatic
+library mount; the download dialog explains that their layout is unsupported.
+Unrelated directory redirects do not disable maps. Installed maps never stop
+a start: the mount-time audit ignores file-manager clutter, and a package
+that fails it, or no longer validates against the current base and mod
+stack, is left unmounted with a notice naming its directory
+([DESIGN_CONTENT_VFS §5](DESIGN_CONTENT_VFS.md#5-divergences)).
+
+The picker shows download progress and failures, can cancel a transfer, and
+uses a validated cached catalogue when offline. After a successful install,
+it refreshes content at the existing frontend publication boundary, keeping
+the player's live skirmish/Survival setup and selected mod. The map becomes
+selectable immediately, without restarting. Mounted package versions are
+never replaced while their archive handles are live. When the catalogue
+republishes an installed id and version, or a dependency it requires, with
+other bytes, the row offers an update. The verified archives install on the
+frontend between remounts: mount without the old package, replace it through
+the library's same-version replacement, and mount the result. A failed
+replacement keeps the old package, which the final mount restores. The first release does
+not promise multiplayer map synchronization or automatic save dependency
+recovery; those remain with their owning workflows.
+
+Each map row in the ordinary picker and community catalogue exposes an **X**
+only when its winning provider belongs to a receipt-backed map package in the downloaded map library. Retail, manually
+mounted and active-mod maps do not receive a delete action. Confirmation names
+the clicked row's downloaded map without selecting or loading it. Row controls
+follow the visible list bounds and scroll position; eligibility is cached for
+the current list and mounted content, then revalidated before removal. Removal
+runs only in the frontend with no active map download: prepare a valid mount without that package, publish it and close the
+old readers before deleting the package through the library. If deletion fails,
+restore its availability. Refresh the selection without changing the player's
+other setup values. Shared feature packages remain installed for other maps.
+
+Release preparation preserves author credits and readmes, records exact
+source and package identities, verifies feature dependencies and map loading,
+and publishes only inspected payloads. Package findings and unresolved
+compatibility questions belong in
+[community map packages](../research/extensions/community-map-packages.md).
+
 ## 6. Mutators
 
 ### 6.1 Policy
@@ -1173,7 +1276,8 @@ leaves the line empty (DESIGN_INTERFACE_HUD_INPUT §2.6).
 | Package | Owns | Imported by |
 |---|---|---|
 | `internal/modlibrary` | data directory layout, metadata and the mod's config (§4.2), installed listing, selection resolution (mod → root, config, minimum, preset), extraction and validation, receipts. No network. | both commands |
-| `internal/modfetch` | manifest fetch and cache, downloads with resume and progress. The only package that imports `net/http`. | `cmd/nanolathe` only |
+| `internal/maplibrary` | separate installed-map root and map-only payload validation, reusing modlibrary extraction and receipts. No network. | desktop command |
+| `internal/modfetch` | mod and map manifest fetch and cache, downloads with resume and progress. The only package that imports `net/http`. | `cmd/nanolathe` only |
 | `internal/content` | `Factor`, `Mutators`, `ApplyMutators`, the mutated catalog identity | session, commands |
 | `internal/save` | the sidecar type and its read/write, separate from the bank's bytes | session, commands |
 | `internal/session` | mutators and recorded Community sources in battle-entry and restore requests; building the sidecar value; reports | commands |
@@ -1193,6 +1297,9 @@ dependencies.
 
 | What | Where |
 |---|---|
+| Map catalogue dependency references and canonical OTA paths validate; cache and archive trust checks also cover maps | `modfetch` |
+| Map installs reject gameplay/config payloads, parse OTA/TNT pairs, and list installed roots deterministically | `maplibrary` |
+| Map download preserves mod and setup, installs shared dependencies once, and exposes the selected map without restart; map picker and download panel visually reviewed | desktop map-catalog tests and captures |
 | Extraction refuses absolute paths, `..`, symlinks and case-folded duplicates; skips executables and `__MACOSX`; enforces the caps; an interrupted install leaves nothing installed | `modlibrary` tests on authored fixture zips |
 | Metadata disagreeing with the manifest refuses the install; unmet `requires` block selection | `modlibrary` |
 | Catalogue replacement preserves the original version, verifies the archive, keeps the old install on failure and recovers interrupted publication before staging cleanup; manual duplicates still refuse | `modlibrary.TestCatalogueReplacementKeepsOldInstallUntilValidated`, `modlibrary.TestReplacementRequiresVerifiedArchiveIdentity`, `modlibrary.TestOpenRecoversInterruptedReplacement` |

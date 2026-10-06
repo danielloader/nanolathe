@@ -53,7 +53,12 @@ func (g *gameShell) drawRetailListRows(c *client.Client, p *ui.Panel, index int,
 		// Alignment measures the stored text before the heading prefix is
 		// skipped. Its inclusive row rectangle is also the shade boundary
 		// [07 R-WGT-01 §4].
-		x, width := retailListTextPen(r, gad.Attribs, measure(text))
+		textRect := r
+		removeRect, removable := g.mapRemoveRowRect(p, index, idx)
+		if removable {
+			textRect.W = removeRect.X - r.X - 3
+		}
+		x, width := retailListTextPen(textRect, gad.Attribs, measure(text))
 		heading := p.ListRowFlagAt(index, idx) == 1 || strings.HasPrefix(text, "&G")
 		if p.ListRowFlagAt(index, idx) != 1 && strings.HasPrefix(text, "&") && len(text) >= 2 {
 			text = text[2:]
@@ -84,6 +89,9 @@ func (g *gameShell) drawRetailListRows(c *client.Client, p *ui.Panel, index int,
 			}
 		} else if idx == selected && gad.Attribs&0x100 == 0 {
 			g.drawListSelection(c, r, y, rowHeight)
+		}
+		if removable {
+			g.drawMapRemoveCap(c, p, idx, removeRect)
 		}
 	}
 }

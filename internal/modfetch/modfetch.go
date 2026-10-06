@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -45,23 +46,41 @@ type Archive struct {
 // Entry is one downloadable mod version's identity, display text and archive.
 // The archive's own nanolathe-mod.json supplies its config (§5.1).
 type Entry struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name"`
-	Version  string  `json:"version"`
-	Summary  string  `json:"summary,omitempty"`
-	Homepage string  `json:"homepage,omitempty"`
-	Archive  Archive `json:"archive"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Version  string   `json:"version"`
+	Summary  string   `json:"summary,omitempty"`
+	Homepage string   `json:"homepage,omitempty"`
+	Archive  Archive  `json:"archive"`
+	Preview  *Archive `json:"preview,omitempty"`
+	Map      string   `json:"map,omitempty"`
+	Requires []string `json:"requires,omitempty"`
 }
 
 // Manifest is the catalogue document. The entries' order is the display
 // order (§4.2).
 type Manifest struct {
-	Schema int     `json:"schema"`
-	Mods   []Entry `json:"mods"`
+	Schema       int     `json:"schema"`
+	Mods         []Entry `json:"mods,omitempty"`
+	Maps         []Entry `json:"maps,omitempty"`
+	Dependencies []Entry `json:"dependencies,omitempty"`
 }
 
 // DefaultCatalogURL is the hosted catalogue (§5.1, P12).
 const DefaultCatalogURL = "https://nanolathe.gg/mods/manifest.json"
+
+// DefaultMapCatalogURL is the separately hosted map catalogue (§5.6).
+const DefaultMapCatalogURL = "https://nanolathe.gg/maps/manifest.json"
+
+const mapCatalogEnv = "NANOLATHE_MAP_CATALOG"
+
+// MapCatalogURL returns the map catalogue, with the same development override policy.
+func MapCatalogURL() string {
+	if override := strings.TrimSpace(os.Getenv(mapCatalogEnv)); override != "" {
+		return override
+	}
+	return DefaultMapCatalogURL
+}
 
 // catalogEnv names the development override for the catalogue URL.
 const catalogEnv = "NANOLATHE_MOD_CATALOG"
@@ -100,7 +119,7 @@ func CatalogURL() string {
 type Client struct {
 	CatalogURL string       // "" = CatalogURL()
 	HTTP       *http.Client // nil = a client with sane timeouts that refuses redirects to another origin
-	CacheDir   string       // where manifest.json is cached (the library root); "" disables the cache
+	CacheDir   string       // where the manifest and map previews are cached; "" disables the cache
 
 	// idle is how long a download may go without receiving a byte; tests
 	// shorten it.
@@ -141,7 +160,7 @@ func (o origin) String() string { return o.scheme + "://" + o.host }
 // loopback names.
 func catalogOrigin(raw string) (*url.URL, origin, error) {
 	refuse := func(reason string) error {
-		return &diagError{what: "mod catalogue URL refused: " + reason, logical: raw, providers: []string{catalogEnv, DefaultCatalogURL}, expected: "an https URL on " + catalogHost + ", or an http override on 127.0.0.1 or localhost", wrapped: ErrOriginRefused}
+		return &diagError{what: "content catalogue URL refused: " + reason, logical: raw, providers: []string{catalogEnv, mapCatalogEnv, DefaultCatalogURL, DefaultMapCatalogURL}, expected: "an https URL on " + catalogHost + ", or an http override on 127.0.0.1 or localhost", wrapped: ErrOriginRefused}
 	}
 	u, err := url.Parse(raw)
 	if err != nil || !u.IsAbs() || u.Hostname() == "" {
@@ -155,11 +174,13 @@ func catalogOrigin(raw string) (*url.URL, origin, error) {
 	if o.scheme == "https" && host == catalogHost {
 		return u, o, nil
 	}
-	if override := strings.TrimSpace(os.Getenv(catalogEnv)); override != "" && raw == override {
-		if o.scheme == "https" || (o.scheme == "http" && (host == "127.0.0.1" || host == "localhost")) {
-			return u, o, nil
+	for _, env := range []string{catalogEnv, mapCatalogEnv} {
+		if override := strings.TrimSpace(os.Getenv(env)); override != "" && raw == override {
+			if o.scheme == "https" || (o.scheme == "http" && (host == "127.0.0.1" || host == "localhost")) {
+				return u, o, nil
+			}
+			return nil, origin{}, refuse("the development override may use http only on 127.0.0.1 or localhost")
 		}
-		return nil, origin{}, refuse("the development override may use http only on 127.0.0.1 or localhost")
 	}
 	return nil, origin{}, refuse("not the nanolathe.gg origin")
 }
@@ -254,7 +275,7 @@ func (c *Client) httpClient(redirect redirectPolicy) *http.Client {
 	client.Jar = nil
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= maxRedirects {
-			return fmt.Errorf("nanolathe: mod download stopped after %d redirects", maxRedirects)
+			return fmt.Errorf("nanolathe: content download stopped after %d redirects", maxRedirects)
 		}
 		return redirect(req.URL)
 	}
@@ -324,7 +345,7 @@ func (c *Client) fetchLive(ctx context.Context, base *url.URL, allowed origin) (
 		defer cancel()
 	}
 	fail := func(what string, wrapped error) error {
-		return &diagError{what: what, logical: base.String(), providers: []string{allowed.String()}, expected: "a schema 1 mod catalogue", wrapped: wrapped}
+		return &diagError{what: what, logical: base.String(), providers: []string{allowed.String()}, expected: "a schema 1 content catalogue", wrapped: wrapped}
 	}
 	req, err := newRequest(ctx, base.String())
 	if err != nil {
@@ -332,18 +353,18 @@ func (c *Client) fetchLive(ctx context.Context, base *url.URL, allowed origin) (
 	}
 	resp, err := c.httpClient(stayOn(allowed)).Do(req)
 	if err != nil {
-		return Manifest{}, fail("fetching the mod catalogue failed: "+err.Error(), err)
+		return Manifest{}, fail("fetching the content catalogue failed: "+err.Error(), err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return Manifest{}, fail("fetching the mod catalogue failed: HTTP "+strconv.Itoa(resp.StatusCode), nil)
+		return Manifest{}, fail("fetching the content catalogue failed: HTTP "+strconv.Itoa(resp.StatusCode), nil)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes+1))
 	if err != nil {
-		return Manifest{}, fail("reading the mod catalogue failed: "+err.Error(), err)
+		return Manifest{}, fail("reading the content catalogue failed: "+err.Error(), err)
 	}
 	if len(raw) > maxManifestBytes {
-		return Manifest{}, fail(fmt.Sprintf("mod catalogue is larger than %d bytes", maxManifestBytes), nil)
+		return Manifest{}, fail(fmt.Sprintf("content catalogue is larger than %d bytes", maxManifestBytes), nil)
 	}
 	return parseManifest(raw, base, allowed)
 }
@@ -357,53 +378,141 @@ var sha256Pattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 // are ignored. One bad entry refuses the whole catalogue (§5.1).
 func parseManifest(raw []byte, base *url.URL, allowed origin) (Manifest, error) {
 	fail := func(what string) error {
-		return &diagError{what: what, logical: base.String(), providers: []string{allowed.String()}, expected: "a schema 1 mod catalogue"}
+		return &diagError{what: what, logical: base.String(), providers: []string{allowed.String()}, expected: "a schema 1 content catalogue"}
 	}
-	var manifest Manifest
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return Manifest{}, fail("reading the mod catalogue failed: " + err.Error())
+	var wire struct {
+		Schema       int               `json:"schema"`
+		Mods         []json.RawMessage `json:"mods"`
+		Maps         []Entry           `json:"maps"`
+		Dependencies []Entry           `json:"dependencies"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return Manifest{}, fail("reading the content catalogue failed: " + err.Error())
+	}
+	manifest := Manifest{Schema: wire.Schema, Maps: wire.Maps, Dependencies: wire.Dependencies}
+	for _, rawEntry := range wire.Mods {
+		// These fields used to be ignored regardless of JSON type in the mod
+		// catalogue, and remain configuration-free there (§5.1).
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(rawEntry, &fields); err != nil {
+			return Manifest{}, fail(err.Error())
+		}
+		for key := range fields {
+			if strings.EqualFold(key, "map") || strings.EqualFold(key, "requires") || strings.EqualFold(key, "preview") {
+				delete(fields, key)
+			}
+		}
+		clean, _ := json.Marshal(fields)
+		var entry Entry
+		if err := json.Unmarshal(clean, &entry); err != nil {
+			return Manifest{}, fail(err.Error())
+		}
+		manifest.Mods = append(manifest.Mods, entry)
 	}
 	if manifest.Schema != manifestSchema {
-		return Manifest{}, fail(fmt.Sprintf("mod catalogue schema %d is not supported", manifest.Schema))
+		return Manifest{}, fail(fmt.Sprintf("content catalogue schema %d is not supported", manifest.Schema))
 	}
-	seen := make(map[string]bool, len(manifest.Mods))
-	for i := range manifest.Mods {
-		entry := &manifest.Mods[i]
+	validate := func(entry *Entry) error {
 		// The selector shares the installed library's safe identity grammar,
 		// without involving a ZIP metadata schema. Its CLI normalization must
 		// not change an identity supplied by the catalogue (§4.2, §5.1).
 		id, version, err := modlibrary.ParseSelector(entry.ID + "@" + entry.Version)
 		if err != nil {
-			return Manifest{}, fail(fmt.Sprintf("mod catalogue entry %d is invalid: %v", i, err))
+			return fail(fmt.Sprintf("content catalogue entry %s is invalid: %v", entry.ID, err))
 		}
 		if id != entry.ID || version != entry.Version {
-			return Manifest{}, fail(fmt.Sprintf("mod catalogue entry %d has an invalid id or version", i))
+			return fail(fmt.Sprintf("content catalogue entry %s has an invalid id or version", entry.ID))
 		}
 		if strings.TrimSpace(entry.Name) == "" {
-			return Manifest{}, fail(fmt.Sprintf("mod catalogue entry %d has an empty name", i))
+			return fail(fmt.Sprintf("content catalogue entry %s has an empty name", entry.ID))
 		}
 		key := entry.ID + "@" + entry.Version
-		if seen[key] {
-			return Manifest{}, fail("mod catalogue lists " + key + " twice")
-		}
-		seen[key] = true
 		archiveURL, err := base.Parse(entry.Archive.URL)
 		if err != nil || entry.Archive.URL == "" {
-			return Manifest{}, fail(fmt.Sprintf("mod catalogue entry %s has an unreadable archive URL", key))
+			return fail(fmt.Sprintf("content catalogue entry %s has an unreadable archive URL", key))
 		}
 		if !archiveAllowed(archiveURL, allowed) {
-			return Manifest{}, fail(fmt.Sprintf("mod catalogue entry %s downloads from another origin", key))
+			return fail(fmt.Sprintf("content catalogue entry %s downloads from another origin", key))
 		}
 		entry.Archive.URL = archiveURL.String()
 		if entry.Archive.Size <= 0 {
-			return Manifest{}, fail(fmt.Sprintf("mod catalogue entry %s has no archive size", key))
+			return fail(fmt.Sprintf("content catalogue entry %s has no archive size", key))
 		}
 		if !sha256Pattern.MatchString(entry.Archive.SHA256) {
-			return Manifest{}, fail(fmt.Sprintf("mod catalogue entry %s has no valid SHA-256", key))
+			return fail(fmt.Sprintf("content catalogue entry %s has no valid SHA-256", key))
 		}
 		entry.Archive.SHA256 = strings.ToLower(entry.Archive.SHA256)
+		return nil
 	}
+	if len(manifest.Mods) > 0 && (len(manifest.Maps) > 0 || len(manifest.Dependencies) > 0) {
+		return Manifest{}, fail("a catalogue cannot mix mods and maps")
+	}
+	seen := make(map[string]bool)
+	for i := range manifest.Mods {
+		entry := &manifest.Mods[i]
+		if err := validate(entry); err != nil {
+			return Manifest{}, err
+		}
+		key := entry.ID + "@" + entry.Version
+		if seen[key] {
+			return Manifest{}, fail("content catalogue lists " + key + " twice")
+		}
+		seen[key] = true
+		// Legacy mod catalogue configuration fields remain ignored (§5.1).
+		entry.Map, entry.Requires = "", nil
+	}
+	seen = make(map[string]bool)
+	dependencies := make(map[string]bool)
+	for i := range manifest.Dependencies {
+		entry := &manifest.Dependencies[i]
+		if err := validate(entry); err != nil {
+			return Manifest{}, err
+		}
+		if seen[entry.ID] {
+			return Manifest{}, fail("map catalogue repeats id " + entry.ID)
+		}
+		seen[entry.ID] = true
+		if entry.Map != "" || len(entry.Requires) != 0 || entry.Preview != nil {
+			return Manifest{}, fail("map dependency cannot name a map, preview or dependencies: " + entry.ID)
+		}
+		dependencies[entry.ID] = true
+	}
+	for i := range manifest.Maps {
+		entry := &manifest.Maps[i]
+		if err := validate(entry); err != nil {
+			return Manifest{}, err
+		}
+		if seen[entry.ID] {
+			return Manifest{}, fail("map catalogue repeats id " + entry.ID)
+		}
+		seen[entry.ID] = true
+		if !safeMapPath(entry.Map) {
+			return Manifest{}, fail("map catalogue entry has an unsafe map path: " + entry.ID)
+		}
+		if entry.Preview != nil {
+			preview, err := validatePreview(*entry.Preview, base, allowed)
+			if err != nil {
+				return Manifest{}, err
+			}
+			entry.Preview = &preview
+		}
+		required := make(map[string]bool)
+		for _, id := range entry.Requires {
+			if !dependencies[id] || required[id] {
+				return Manifest{}, fail("map catalogue entry has an unknown or repeated dependency: " + id)
+			}
+			required[id] = true
+		}
+	}
+
 	return manifest, nil
+}
+
+// safeMapPath restricts hosted maps to the flat map-discovery directory.
+func safeMapPath(name string) bool {
+	return path.Clean(name) == name && strings.EqualFold(path.Dir(name), "maps") &&
+		strings.EqualFold(path.Ext(name), ".ota") && len(path.Base(name)) > len(".ota") &&
+		!strings.ContainsAny(name, "\\:\x00\r\n") && !strings.HasPrefix(name, "/")
 }
 
 func (c *Client) cachePath() string { return filepath.Join(c.CacheDir, manifestCacheName) }
@@ -511,7 +620,7 @@ func (c *Client) Download(ctx context.Context, e Entry, dst string, progress fun
 		redirect = httpsRedirects
 	}
 	if e.Archive.Size <= 0 || !sha256Pattern.MatchString(e.Archive.SHA256) {
-		return fail("mod catalogue entry has no archive identity", nil)
+		return fail("content catalogue entry has no archive identity", nil)
 	}
 
 	part := partialName(dst, e)
@@ -571,9 +680,9 @@ func (c *Client) transfer(ctx context.Context, redirect redirectPolicy, target *
 		wasStalled := stalled
 		stallMu.Unlock()
 		if wasStalled {
-			return fail(fmt.Sprintf("mod download stalled for %s; it resumes from %s on the next attempt", idle, part), err)
+			return fail(fmt.Sprintf("content download stalled for %s; it resumes from %s on the next attempt", idle, part), err)
 		}
-		return fail("mod download interrupted: "+err.Error(), err)
+		return fail("content download interrupted: "+err.Error(), err)
 	}
 
 	req, err := newRequest(ctx, target.String())
@@ -608,7 +717,7 @@ func (c *Client) transfer(ctx context.Context, redirect redirectPolicy, target *
 		_ = os.Remove(part)
 		return fail("the server refused to resume the download", nil)
 	default:
-		return fail("mod download failed: HTTP "+strconv.Itoa(resp.StatusCode), nil)
+		return fail("content download failed: HTTP "+strconv.Itoa(resp.StatusCode), nil)
 	}
 	if resp.ContentLength >= 0 && offset+resp.ContentLength != size {
 		_ = os.Remove(part)

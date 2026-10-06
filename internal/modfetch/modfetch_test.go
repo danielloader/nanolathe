@@ -339,7 +339,7 @@ func TestManifestIgnoresMetadataFields(t *testing.T) {
 		Summary: "Catalogue description", Homepage: "https://example.invalid",
 		Archive: Archive{URL: server.URL + "/mods/sample.zip", Size: 1, SHA256: strings.Repeat("a", 64)},
 	}
-	if len(result.Manifest.Mods) != 1 || result.Manifest.Mods[0] != want {
+	if len(result.Manifest.Mods) != 1 || !reflect.DeepEqual(result.Manifest.Mods[0], want) {
 		t.Fatalf("catalogue entries = %+v, want %+v", result.Manifest.Mods, want)
 	}
 	raw, err := json.Marshal(result.Manifest.Mods[0])

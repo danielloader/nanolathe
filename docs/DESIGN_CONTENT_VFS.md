@@ -769,6 +769,21 @@ selection or the active battle's limit, including Strict restore behavior.
 
 ## 5. Divergences
 
+**Downloaded community maps** (user-authorized 2026-10-05) live in a separate
+map library. Ordinary desktop mounts put its installed map/feature roots
+below the base install and the active mod, so existing logical paths keep
+their winners. The map catalogue and installation boundary are owned by
+[DESIGN_MODS_MUTATORS §5.6](DESIGN_MODS_MUTATORS.md#56-community-map-catalogue).
+Captures, benchmarks and displayless runs retain explicit-root control.
+Downloaded maps never stop a start. The mount-time audit ignores file-manager
+clutter inside a package (`.DS_Store`, `Thumbs.db`, `desktop.ini`, AppleDouble
+`._*` files and `__MACOSX/` folders), which never counts as a map; installing a
+hash-pinned archive stays strict. A package that still fails its identity or
+content audit, or no longer validates against the current base and mod stack
+(such as a feature collision), is left unmounted with a startup notice naming
+the reason and its directory, while the base game and the other packages
+mount; its map stays removable from the catalogue.
+
 Each is a place where the code deliberately departs from the written contract,
 with the reason and the resolution. None is a compatibility flag: there is one
 behaviour.

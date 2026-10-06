@@ -332,6 +332,10 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 			old.refreshMainMenuModStatus(p)
 		}
 	}
+	if mapDownload.view().running {
+		fail(&missingProductError{what: "wait for the map download to finish before switching content", logical: request.selector, expected: "a completed map install"})
+		return
+	}
 	if modDownload.blocksMount(request.selector) {
 		fail(&missingProductError{what: "wait for the mod update to finish before switching to it", logical: request.selector, expected: "a completed mod install"})
 		return
@@ -733,6 +737,8 @@ func (g *gameShell) modsFetchPanelActive() bool {
 // modsPanelAssets supplies the background of either Nanolathe window.
 func modsPanelAssets(p *ui.Panel) *retailPanelAssets {
 	switch {
+	case p != nil && p == mapsFetchPanel:
+		return mapsFetchAssets
 	case p != nil && p == modsPanel:
 		return modsAssets
 	case p != nil && p == modsFetchPanel:

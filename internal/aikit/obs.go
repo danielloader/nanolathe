@@ -82,14 +82,16 @@ type OwnUnit struct {
 	// at an earlier observation (the pool recycles slots without a
 	// generation), so per-handle brain state keyed by H must be reset when
 	// (H, Gen) changes.
-	Gen       uint32
-	Info      *UnitInfo
-	X, Y, Z   int32
-	HP, MaxHP int32
-	Built     bool
-	Progress  int32 // construction progress percent
-	Order     OrderClass
-	QueueLen  int32 // primary orders (factories: queued products)
+	Gen             uint32
+	Info            *UnitInfo
+	X, Y, Z         int32
+	HP, MaxHP       int32
+	Built           bool
+	Progress        int32 // construction progress percent
+	Order           OrderClass
+	QueueLen        int32    // primary orders (factories: queued products)
+	Ammo            [3]int32 // completed rounds per weapon slot, copied from the live unit
+	StockpileQueued [3]int32 // positive signed BuildWeapon counts per slot, saturated at MaxInt32
 	// Target is the product of the first build order in the queue (a
 	// builder's current construction, a factory's current item), nil when
 	// the unit is not building.

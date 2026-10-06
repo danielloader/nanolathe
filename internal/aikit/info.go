@@ -36,7 +36,9 @@ const (
 	RoleFighter
 	RoleKamikaze
 	RoleMobile
-	RoleAssist // mobile builder whose products are all units (nano tower style) or immobile nano
+	RoleAssist      // mobile builder whose products are all units (nano tower style) or immobile nano
+	RoleStockpile   // active stockpile weapon that attacks units
+	RoleInterceptor // active weapon that intercepts projectiles
 )
 
 // Has reports whether every bit of r2 is set.
@@ -62,7 +64,7 @@ type UnitInfo struct {
 	BuildTime     int32 // authored build time (work units)
 	Value         int32 // metal-equivalent cost: metal + energy/EnergyPerMetal
 	HP            int32
-	DPS           int32 // summed default damage per second of every active weapon that fires at units (not interceptors)
+	DPS           int32 // sustained default damage per second (excludes stockpiles and interceptors)
 	AirDPS        int32 // the part of DPS whose weapons can engage aircraft
 	WaterDPS      int32 // the part of DPS from water-only weapons (torpedoes): no use against land
 	StunDPS       int32 // the part of DPS from paralyzer weapons: stuns, never kills
@@ -162,7 +164,7 @@ func BuildTable(cat *content.Catalog, rules construction.Rules) *Table {
 		classifyBuilder(info)
 		// Factories, towers and the like author a little storage; they are
 		// not storage buildings.
-		if info.Role.Any(RoleFactory | RoleDefense | RoleRadar | RoleSonar | RoleCommander | RoleBuilder | RoleMobile) {
+		if info.Role.Any(RoleFactory | RoleDefense | RoleRadar | RoleSonar | RoleCommander | RoleBuilder | RoleMobile | RoleStockpile | RoleInterceptor) {
 			info.Role &^= RoleStorage
 		}
 	}
@@ -241,14 +243,15 @@ func weaponActive(w *content.WeaponDef) bool {
 	return w != nil && !content.IsWeaponInactive(w)
 }
 
-// firesAtUnits reports whether an active weapon ever takes a unit target. An
+// firesAtUnits reports whether an active weapon supplies sustained unit fire.
+// Stockpile rounds are separately funded ammunition [06 §11.1]. An
 // interceptor (a stock anti-nuke) never does: when its slot re-acquires it
 // scans projectiles and aims at the winning one's position [06 §3.2], so it
 // adds nothing to what a unit's fire does to other units — and its authored
 // range (tens of thousands of world units, the coverage it intercepts over)
 // is not a reach into the enemy base.
 func firesAtUnits(w *content.WeaponDef) bool {
-	return weaponActive(w) && !w.Interceptor
+	return weaponActive(w) && !w.Interceptor && !w.Stockpile
 }
 
 // intercepts reports whether a definition carries an active interceptor.
@@ -298,6 +301,13 @@ func summarize(key string, def *content.UnitDef) *UnitInfo {
 		u.Role |= RoleMobile
 	}
 	for _, w := range [...]*content.WeaponDef{def.Weapon1Def, def.Weapon2Def, def.Weapon3Def} {
+		if weaponActive(w) {
+			if w.Interceptor {
+				u.Role |= RoleInterceptor
+			} else if w.Stockpile {
+				u.Role |= RoleStockpile
+			}
+		}
 		if !firesAtUnits(w) {
 			continue
 		}
@@ -393,7 +403,7 @@ func summarize(key string, def *content.UnitDef) *UnitInfo {
 			}
 		}
 	}
-	if mobile && !def.Builder && !def.Commander && u.Role&(RoleTransport) == 0 {
+	if mobile && !def.Builder && !def.Commander && u.Role&(RoleTransport|RoleStockpile|RoleInterceptor) == 0 {
 		// A scout is fast and cheap for its speed class, or an unarmed
 		// mobile whose only purpose can be looking — not a mobile anti-nuke,
 		// whose interceptor is its purpose.

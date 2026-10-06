@@ -33,6 +33,9 @@ func (st *Strategy) Plan(b *core.Board) {
 	s.p = st.vr.planned
 	p := &s.p
 	s.observe(b)
+	if st.pr != nil {
+		s.interceptorQueued = st.pr.hasQueuedInterceptor(b)
+	}
 	s.observeArmy(b) // army: production against income (army.go)
 	s.refillAPM()
 	st.vr.watch(b, s)

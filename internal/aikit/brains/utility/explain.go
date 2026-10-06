@@ -17,6 +17,8 @@ func kindName(k commitKind) string {
 		return "combat"
 	case pScout:
 		return "scout"
+	case pInterceptor:
+		return "interceptor"
 	}
 	if int(k) < len(commitNames) {
 		return commitNames[k]

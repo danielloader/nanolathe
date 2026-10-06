@@ -95,8 +95,9 @@ type Economy struct {
 	fails int32
 	// scratch per decision
 	bestQ, bestDef int64
-	bestQR         int64   // best reach-weighted factory quality on offer (switches on)
-	def            defPlan // the proactive defense plan's state (defense*.go)
+	bestQR         int64         // best reach-weighted factory quality on offer (switches on)
+	def            defPlan       // the proactive defense plan's state (defense*.go)
+	strategic      strategicPlan // stockpile ammunition and deliberate ground targets
 	// fac_backoff: factory site searches that found no site lately.
 	facOff     [facOffSlots]facBackoff
 	facOffNext int
@@ -141,6 +142,9 @@ func (e *Economy) Plan(b *core.Board) {
 	budget -= nf
 	if att := int(b.K.Persona.Attention); budget > att {
 		budget = att
+	}
+	if budget > 0 {
+		budget -= e.strategic.service(b, budget)
 	}
 	// A build issued last think that left its builder idle failed to place.
 	// When the batch it went out in reports a search that found no site, a
@@ -681,6 +685,8 @@ func (e *Economy) evalBuildings(b *core.Board, u *aikit.OwnUnit, bs *builderStat
 		}
 		var c cand
 		switch {
+		case p.Role.Any(aikit.RoleStockpile | aikit.RoleInterceptor):
+			c = e.evalStrategic(b, u, p)
 		case p.Role.Has(aikit.RoleExtractor):
 			continue
 		case p.Role.Has(aikit.RoleFactory) && ext:

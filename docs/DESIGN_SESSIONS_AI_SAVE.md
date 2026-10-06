@@ -2328,6 +2328,79 @@ asynchronous hosts are compared by arena runs
 ([MODERN_AI_RESEARCH §6](MODERN_AI_RESEARCH.md#6-results-2026-09-23)); an
 automated lock is owed.
 
+#### Modern AI stockpile weapons
+
+**Nanolathe Modern policy, user-authorized 2026-10-05 (issue #93).**
+The Modern computer player builds and operates stockpile launchers and
+interceptors in every gameplay mode, including Strict 3.1. This extends the
+existing per-player controller exception, not the rule registry. Classic
+players retain their planner, including the separately configured ProTA
+pseudo-product path (§2.8). Retail stockpile costs, production, targeting and
+interception remain `[06 §11.1]` and `[06 §11.2]`.
+
+**Recognition and commands.** Active authored weapon flags identify offensive
+stockpiles and interceptors, without unit-name lists. Neither supplies sustained
+DPS or ordinary defense/combat/scout value by itself. Own observations copy
+three completed-ammunition counts and three positive signed secondary
+`BuildWeapon` queue sums; malformed sums saturate rather than wrap. The
+controller emits a slot-specific stockpile command through the normal delayed,
+APM-limited batch. At application the executor rechecks ownership, allocation
+identity, completion and the active stockpile slot, bounds completed plus
+pending rounds to 200, and coalesces an ordinary `BuildWeapon` order without
+purging primary work. Enqueue grants no ammunition, debits no resources and
+draws no RNG. The ordinary production service pays for every round.
+
+**Investment.** Utility economy candidates include one offensive launcher and
+one home interceptor. Existing units, nanoframes and build commitments reserve
+that budget. Proactive investment begins at fifteen minutes; an identified
+enemy targetable stockpile weapon admits earlier interceptor investment. A
+launcher also needs a worthwhile known target within its authored range from
+the proposed site. A purchase plus its first round must be fundable from stock
+while retaining one fifth of resource capacity, or from 180 seconds of gross
+income while retaining that reserve and not consuming faster than income.
+Each resource is checked separately. The candidate's base score is 1200, or
+3000 for defense against an observed stockpile threat, multiplied by the
+existing affordability, travel and site-threat considerations. These are AI
+planning choices, not historical constants. A mobile interceptor is the
+factory fallback when no completed builder offers a land stationary system;
+pending factory requests also reserve the one-system budget. It moves toward
+home when idle outside half its weapon's coverage. This first policy protects
+the home economy; it does not attempt a coverage network for every expansion.
+
+**Ammunition and targeting.** Before new construction assignments, the economy
+layer uses its action budget to maintain one offensive round and three
+interceptor rounds per active stockpile slot. It requests only one round at a
+time and never adds to an outstanding slot queue. Funding uses the same
+reserve rule with a 120-second income horizon. The ordinary autonomous scan
+operates loaded interceptors. For an offensive primary slot the controller
+also issues ordinary ground attacks at the highest-value remembered hostile
+building in range, with stable observation-order ties. An untyped radar blip
+or guessed start is not a target. Value must cover half the round's
+metal-equivalent cost (energy divided by the existing planning rate of 60),
+with a minimum of 100. Own units and observed allies exclude an aim point
+within half the largest authored area of slots zero and one (ordinary ground
+attack binds both, `[04 R-ORD-01 §3]`) plus a footprint pad of eight times the sum
+of footprint dimensions and a 64-world-unit reaction margin. This check is
+planning from an observation, not a promise about unseen allies or subsequent
+movement. After ammunition decreases, or the safe chosen point changes or
+disappears, the brain clears its ground order; it waits one minute between
+deliberate attack submissions. All stockpile slots receive ammunition; deliberate
+aim selection is driven by a primary offensive stockpile, and the third slot
+retains ordinary autonomous acquisition. Engine autonomous fire and physical launch
+checks are unchanged.
+
+**Boundaries and verification.** All mutable planning state belongs to the
+controller and allocation generation. A load rebuilds it from the copied
+ammunition and queue observations. Survival buddies inherit the same utility
+economy service; the passive attacker does not think. Unit tests cover authored
+roles, queue detachment/coalescing, slot and actor checks, budgets, unchanged
+enqueue resources/RNG, funding boundaries, target knowledge and clearance,
+replacement reservations and generation reuse. Retail integration tests run
+the configured brain with the shipped silo and interceptor in all three rule
+sets, verify paid production and bounded reserves, and retain Classic controls.
+The synchronous/asynchronous host checks and unchanged Classic fingerprint
+locks remain part of verification.
+
 #### Modern AI infector focus
 
 **Nanolathe Modern policy, user-authorized 2026-10-05.**

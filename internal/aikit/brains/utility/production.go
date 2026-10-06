@@ -11,6 +11,7 @@ const (
 	pCons commitKind = 20 + iota
 	pCombat
 	pScout
+	pInterceptor
 )
 
 // queueDepth keeps each factory at most this many products deep (the one
@@ -214,6 +215,9 @@ func (pr *Production) produce(b *core.Board, budget int) {
 			var c cand
 			c.prod, c.spot = q, -1
 			switch {
+			case q.Role.Has(aikit.RoleInterceptor):
+				c.kind = pInterceptor
+				c.score = pr.interceptorScore(b, q)
 			case si.canEco:
 				drain := max64(int64(q.BuildPower)*s.rMB/1000, 1)
 				gap := clamp((desiredEco-ecoCap)*1000/drain, 0, 1200)
@@ -298,6 +302,8 @@ func (pr *Production) produce(b *core.Board, budget int) {
 		r.prod, r.tick = best.prod, s.tick
 		s.count[best.prod.Index]++
 		switch best.kind {
+		case pInterceptor:
+			s.interceptorQueued = true
 		case pCons:
 			pending++
 			armyFirst = s.armyFirst(pr, pending)

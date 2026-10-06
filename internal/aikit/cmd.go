@@ -28,6 +28,7 @@ const (
 	CmdReplace                      // code 12 on an own building, then code 14 on its metal spot
 	CmdUnblock                      // code 12 on whatever seals an own factory's exit
 	CmdClear                        // code 12 on features around a point (streets first, then wrecks)
+	CmdStockpile                    // counted BuildWeapon in the secondary queue
 )
 
 // Command is one player-level action. A group order is one command.
@@ -38,6 +39,7 @@ type Command struct {
 	Target       pool.Handle
 	X, Z         int32
 	Product      *UnitInfo
+	Slot         int32 // weapon slot for CmdStockpile
 	Count        int32
 	Spot         int32 // metal spot index for an extractor, -1 otherwise
 	Spacing      int32 // extra cells kept free around a placed building
@@ -442,6 +444,8 @@ func (e *executor) exec(c *Command, b *batch, tick uint32, w *units.World) bool 
 	switch c.Kind {
 	case CmdBuild:
 		return e.execBuild(c, b, tick, w)
+	case CmdStockpile:
+		return e.execStockpile(c, b, tick, w)
 	case CmdProduce:
 		return e.execProduce(c, b, w)
 	case CmdReplace:

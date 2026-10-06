@@ -637,6 +637,7 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 		}
 		built, progress := buildProgress(u)
 		class, qlen, targetKey := queueState(u, classes)
+		ammo, queued := stockpileState(u)
 		var target *UnitInfo
 		if targetKey != "" {
 			target = table.Lookup(targetKey)
@@ -647,6 +648,7 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 			X: fixedToWorld(int64(u.X)), Y: fixedToWorld(int64(u.Y)), Z: fixedToWorld(int64(u.Z)),
 			HP: u.Health, MaxHP: u.MaxHealth, Built: built, Progress: progress,
 			Order: class, QueueLen: qlen, Tag: ob.tags[hd], Target: target,
+			Ammo: ammo, StockpileQueued: queued,
 		})
 		ob.addSensor(u)
 	}

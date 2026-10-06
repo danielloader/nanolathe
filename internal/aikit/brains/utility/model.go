@@ -58,15 +58,16 @@ const (
 	cFactory
 	cDefense
 	cRadar
-	cUpgrade // replace one of our extractors by a richer one
-	cAssist  // help a nanoframe
-	cGuard   // guard (assist) a factory
+	cStrategic // stockpile launcher or interceptor; not sustained firepower
+	cUpgrade   // replace one of our extractors by a richer one
+	cAssist    // help a nanoframe
+	cGuard     // guard (assist) a factory
 	cRetreat
 	cUnblock // reclaiming what seals a factory's exit
 	cClear   // reclaiming wrecks and street features
 )
 
-var commitNames = [...]string{"none", "mex", "energy", "maker", "storage", "factory", "defense", "radar", "upgrade", "assist", "guard", "retreat", "unblock", "clear"}
+var commitNames = [...]string{"none", "mex", "energy", "maker", "storage", "factory", "defense", "radar", "strategic", "upgrade", "assist", "guard", "retreat", "unblock", "clear"}
 
 func (c commitKind) build() bool { return c >= cMex && c <= cUpgrade }
 
@@ -287,6 +288,8 @@ type shared struct {
 	arm         armyState         // production against income (army, army.go)
 	mt          metalState        // metal use: rules and audit (metal, econ_metal.go)
 	open        openState         // the opening policy (open_*, opening.go)
+
+	interceptorQueued bool // factory work reserves the strategic defense budget
 }
 
 func (s *shared) setup(k *aikit.Kit) {

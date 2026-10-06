@@ -15,7 +15,7 @@ import (
 // preview, independent of gameplay mode (interface design §3.3 and §3.17).
 func nlSidebarOption(t *testing.T, s *nlScreen, key string) nlCard {
 	t.Helper()
-	for _, card := range s.graphicsCards() {
+	for _, card := range s.gameCards() {
 		if card.key == "sidebar" {
 			part := card.parts[0]
 			if key == "sidebar-orders" {
@@ -24,7 +24,7 @@ func nlSidebarOption(t *testing.T, s *nlScreen, key string) nlCard {
 			return nlCard{key: card.key, label: part.label, steps: part.steps, get: part.get, set: part.set, desc: card.desc}
 		}
 	}
-	t.Fatalf("missing Graphics card %s", key)
+	t.Fatalf("missing Game card %s", key)
 	return nlCard{}
 }
 
@@ -221,7 +221,7 @@ func TestNLSidebarPageOwnsBothChoicesAndTheirPaths(t *testing.T) {
 	if card.label != "Sidebar" || card.kind != nlGroup || len(card.parts) != 2 || card.compare != nil {
 		t.Fatal("sidebar choices do not share one page")
 	}
-	for _, c := range s.graphicsCards() {
+	for _, c := range s.gameCards() {
 		if c.key == "sidebar-orders" {
 			t.Fatal("orders still has a separate page")
 		}

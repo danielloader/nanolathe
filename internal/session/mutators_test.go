@@ -377,7 +377,7 @@ const mutatorCampaignMission = "camps/Arm Campaign.tdf:MISSION0"
 // written. Skipped without retail assets.
 func TestEntrySitesApplyMutatorsInStrict(t *testing.T) {
 	f := loadRetailFixture(t)
-	m := content.Mutators{BuildSpeed: content.Factor{Num: 2, Den: 1}, BuildCost: content.Factor{Num: 1, Den: 2}}
+	m := content.Mutators{BuildSpeed: content.Factor{Num: 2, Den: 1}, BuildCost: content.Factor{Num: 1, Den: 2}, Sight: content.Factor{Num: 4, Den: 1}}
 	base := f.cat.Units[content.CanonicalKey(f.cat.Sides[0].Commander)]
 	baseWorker, baseTime, baseMetal, baseHash := base.WorkerTime, base.BuildTime, base.BuildCostMetal, f.cat.Hash
 	checkCommander := func(site string, cat *content.Catalog) {
@@ -388,6 +388,9 @@ func TestEntrySitesApplyMutatorsInStrict(t *testing.T) {
 		}
 		if u.BuildTime != (baseTime+1)/2 || u.WorkerTime != baseWorker || u.BuildCostMetal != float32((int64(baseMetal)+1)/2) {
 			t.Fatalf("%s: commander buildtime %d workertime %d metal %v, want half of %d, %d and half of %v", site, u.BuildTime, u.WorkerTime, u.BuildCostMetal, baseTime, baseWorker, baseMetal)
+		}
+		if u.SightDistance != base.SightDistance*4 || cat.LOS.NumTables <= f.cat.LOS.NumTables || cat.Sight.Count() <= f.cat.Sight.Count() {
+			t.Fatalf("%s: sight definitions or raster inputs did not expand", site)
 		}
 	}
 

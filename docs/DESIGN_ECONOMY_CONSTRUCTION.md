@@ -802,8 +802,12 @@ outcome: a permanent diagnostic, not the silent loop.
 **C18 — nanoframe allocation.** On success the allocator creates the unit **at
 the resolved exit transform, not at the derived anchor**, with the owner, the
 product definition, remaining fraction 1, health 0 and the build stance cleared.
-For a mobile product, allocation also establishes its mover and collision state
-before the product is attached or a counted successor can revisit the exit. The
+Allocation establishes spatial and collision state for buildings as well as
+mobile products before a later order can scan nearby work. Incomplete buildings
+must already belong to the ordinary sectors used by repair patrols; a placement
+stamp alone does not register them (issue 92). This includes yards whose current
+state selects no occupied cells. Mobile products also acquire their mover state
+before attachment or a counted successor revisits the exit. The
 ground footprint stays at the pad after completion until an ordinary mover
 commit clears it, or an aircraft changes to the air plane; construction does
 not release it.

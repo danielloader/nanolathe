@@ -153,7 +153,7 @@ func (s *Service) allocateNanoframeFacing(factory *units.Unit, def *content.Unit
 			// reservePlacement files the placement record itself, before it
 			// stamps, so record and stamp agree on the yard state
 			// [04 R-COLL-01 §4].
-			s.ensureProductMover(prod)
+			s.ensureProductSpatialState(prod)
 		}
 		return prod, nil
 	}
@@ -183,17 +183,18 @@ func (s *Service) allocateNanoframeFacing(factory *units.Unit, def *content.Unit
 	// reservePlacement files the placement record itself, before it stamps, so
 	// record and stamp agree on the yard state [04 R-COLL-01 §4].
 	initializeNanoframe(prod, def)
-	s.ensureProductMover(prod)
+	s.ensureProductSpatialState(prod)
 	return prod, nil
 }
 
-// ensureProductMover gives a mobile factory product its collision state at
-// allocation, before it is attached and before a same-pump successor can test
-// the exit. Completion may detach it in that same pump; waiting for the
-// session's later publication hook leaves that product without the mover that
-// owns its retained ground stamp [04 R-FAC-02 §1–§3][04 R-COLL-01 §4].
-func (s *Service) ensureProductMover(product *units.Unit) {
-	if s == nil || s.Movement == nil || s.Movement.Routes == nil || product == nil || product.Def == nil || product.Def.BMCode == 0 {
+// ensureProductSpatialState files every nanoframe in the ordinary sectors at
+// allocation, including buildings that repair patrols must see before completion
+// [04 R-COLL-01 §4, §11][04 R-ORD-02 §4]. Mobile products also need their collision
+// state before attachment or a same-pump successor tests the factory exit
+// [04 R-FAC-02 §1–§3]. EnsureUnit handles both classes and skips path layers for
+// buildings; a construction placement stamp alone has no sector filing record.
+func (s *Service) ensureProductSpatialState(product *units.Unit) {
+	if s == nil || s.Movement == nil || s.Movement.Routes == nil || product == nil || product.Def == nil {
 		return
 	}
 	s.Movement.EnsureUnit(product)

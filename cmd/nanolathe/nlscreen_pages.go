@@ -275,6 +275,7 @@ func (s *nlScreen) gameCards() []nlCard {
 			scene:    func(*nlDraft, int) string { return "armor" },
 			enhanced: true,
 		},
+		s.sidebarCard(),
 	}
 }
 
@@ -418,7 +419,6 @@ func (s *nlScreen) graphicsCards() []nlCard {
 			scene:    func(*nlDraft, int) string { return "armor" },
 			enhanced: true,
 		},
-		s.sidebarCard(),
 		{
 			key: "fullscreen", label: "Fullscreen", pics: []string{"armmark", "armrad"}, kind: nlHalves,
 			steps: []string{"Windowed", "Fullscreen"}, subs: []string{"A window you can move", "The whole display"},

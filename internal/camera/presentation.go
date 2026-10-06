@@ -49,6 +49,10 @@ func (c *Camera) SetPresentationView(v PresentationView) {
 		v.Factor = ZoomMax.Float()
 	}
 	c.Zoom, c.Scale = z, z.Step()
+	if !c.ViewportZoomFloor {
+		c.setBoundedPresentationView(v)
+		return
+	}
 	c.X, c.Z = int32(math.Floor(v.X)), int32(math.Floor(v.Z))
 	beforeX, beforeZ := c.X, c.Z
 	c.Clamp()
@@ -59,4 +63,38 @@ func (c *Camera) SetPresentationView(v PresentationView) {
 		v.Z = float64(c.Z)
 	}
 	c.zoomView, c.zoomViewX, c.zoomViewZ, c.zoomViewFactor = v, c.X, c.Z, z
+}
+
+// setBoundedPresentationView gives map edges precedence over cursor anchoring.
+// Clamp the continuous projection before flooring the integer camera: rounding
+// the bounds first makes an edge wobble while zooming (DESIGN_GPU_RENDERER §16.7).
+func (c *Camera) setBoundedPresentationView(v PresentationView) {
+	v = c.boundedPresentationView(v)
+	c.X, c.Z = int32(math.Floor(v.X)), int32(math.Floor(v.Z))
+	c.zoomView, c.zoomViewX, c.zoomViewZ, c.zoomViewFactor = v, c.X, c.Z, c.EffectiveZoom()
+}
+
+func (c *Camera) boundedPresentationView(v PresentationView) PresentationView {
+	v.X = clampPresentationAxis(v.X, c.MapW, c.ViewW-OriginX, OriginX, v.Factor)
+	v.Z = clampPresentationAxis(v.Z, c.MapH, c.ViewH-2*OriginY, OriginY, v.Factor)
+	return v
+}
+
+func clampPresentationAxis(origin float64, mapSize, screenSpan, screenLeading int32, factor float64) float64 {
+	span, leading := float64(max(screenSpan, 0))/factor, float64(screenLeading)/factor
+	if span >= float64(mapSize) {
+		return (float64(mapSize)-span)/2 - leading
+	}
+	return max(-leading, min(float64(mapSize)-span-leading, origin))
+}
+
+// BoundPresentationView applies Modern's edge/fit policy to a displayed sample
+// without changing the camera. Hosts must also bound interpolated samples:
+// blending endpoints on opposite sides of the fit transition can expose an
+// edge between them (DESIGN_GPU_RENDERER §16.7).
+func (c *Camera) BoundPresentationView(v PresentationView) PresentationView {
+	if c == nil || c.ViewportZoomFloor || c.Zoom <= 0 {
+		return v
+	}
+	return c.boundedPresentationView(v)
 }

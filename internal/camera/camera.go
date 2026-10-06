@@ -340,28 +340,15 @@ func (c *Camera) Clamp() {
 	spanW, spanH := c.BattleView()
 	leadX, _, leadZ, _ := c.clampInsets()
 	if !c.ViewportZoomFloor && c.Zoom > 0 {
-		floor, live := c.MinZoom(), c.zoom()
-		c.X = clampZoomAxis(c.X, c.MapW, spanW, leadX, c.ViewW-OriginX, floor, live)
-		c.Z = clampZoomAxis(c.Z, c.MapH, spanH, leadZ, c.ViewH-2*OriginY, floor, live)
+		view := c.boundedPresentationView(c.PresentationView())
+		// Keep the integer inverse-projection contract used by picking while
+		// retaining the independently bounded continuous view for drawing.
+		c.setBoundedPresentationView(PresentationView{X: float64(c.X), Z: float64(c.Z), Factor: view.Factor})
+		c.zoomView = view
 		return
 	}
 	c.X = clampAxis(c.X, c.MapW, spanW, leadX)
 	c.Z = clampAxis(c.Z, c.MapH, spanH, leadZ)
-}
-
-// clampZoomAxis retains the full-map view's spare margin in screen pixels.
-// Re-centring a shorter axis at every factor would move the point under the
-// pointer; this bounded space lets zoom keep its anchor (DESIGN_GPU_RENDERER
-// §16.5, §16.7). At the floor the bounds meet at the centred overview.
-func clampZoomAxis(origin, mapSize, span, leading, screenSpan int32, floor, live Zoom) int32 {
-	spare := max(int64(screenSpan)*int64(ZoomUnit)-int64(mapSize)*int64(floor), 0)
-	padding := int32(spare / (2 * int64(live)))
-	minimum := -leading - padding
-	maximum := mapSize - span - leading + padding
-	if live <= floor || minimum > maximum {
-		return (mapSize-span)/2 - leading
-	}
-	return max(minimum, min(maximum, origin))
 }
 
 // Drag pans by a screen-pixel delta via middle-drag, converted to world pixels
@@ -399,7 +386,7 @@ func (c *Camera) SetScaleAbout(mx, my int32, newS ViewScale) {
 	// and the live factor together, which is the classic executor's only mode
 	// and F9's classic cycle (§16.8). The map-derived floor of MinZoom is NOT
 	// applied here — a step is always at least 1x. Legacy controls keep the
-	// retail clamp domain; Modern uses its bounded overview margin (§16.7).
+	// retail clamp domain; Modern centres axes that fit in the viewport (§16.7).
 	c.requestedZoom = ZoomOf(newS)
 	c.setZoomAboutRaw(mx, my, ZoomOf(newS))
 	c.Scale = newS.Norm()
@@ -472,11 +459,15 @@ func (c *Camera) setZoomAboutRaw(mx, my int32, newZ Zoom) {
 	view.X += float64(mx-OriginX) * (1/view.Factor - 1/newZ.Float())
 	view.Z += float64(my-OriginY) * (1/view.Factor - 1/newZ.Float())
 	view.Factor = newZ.Float()
-	if c.X != beforeX {
-		view.X = float64(c.X)
-	}
-	if c.Z != beforeZ {
-		view.Z = float64(c.Z)
+	if !c.ViewportZoomFloor {
+		view = c.boundedPresentationView(view)
+	} else {
+		if c.X != beforeX {
+			view.X = float64(c.X)
+		}
+		if c.Z != beforeZ {
+			view.Z = float64(c.Z)
+		}
 	}
 	c.zoomView, c.zoomViewX, c.zoomViewZ, c.zoomViewFactor = view, c.X, c.Z, newZ
 }

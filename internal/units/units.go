@@ -1261,7 +1261,10 @@ func (w *World) allocatorMoverTail(u *Unit, def *content.UnitDef, moverMode uint
 // Immediately after storing the rate, and only when the unit has a script, the
 // creator hands the raw footprint accumulator to the script as a deferred
 // `SetSpeed` so a stock extractor can size its animation [04 R-COB-04 §9];
-// NotifyExtractorFootprint owns that contract.
+// NotifyExtractorFootprint owns that contract. Both creators call this at step
+// 5 of the creation-time callback sequence [04 R-CB-01 §4] — after the
+// binding's `Create` and weapon-slot pass, before the `activatewhenbuilt`
+// raise of step 6 — so that `SetSpeed` is queued ahead of `Activate`.
 func (w *World) sampleExtraction(u *Unit, def *content.UnitDef) {
 	if w == nil || u == nil || def == nil || w.extraction == nil {
 		return
@@ -1870,6 +1873,17 @@ func (w *World) create(def *content.UnitDef, owner uint8, x, y, z numeric.Fixed,
 	u.AllocationSerial = w.lastAllocationSerial
 	w.pendingAllocationSerials--
 	serialPending = false
+	// Step 5 of the creation-time callback sequence [04 R-CB-01 §4]: the
+	// creator samples the extraction rate for every unit it makes
+	// [05 R-PROD-01 §6]. It follows the binding, which ran `Create` and the
+	// weapon-slot pass that queues `SetMaxReloadTime` (steps 3–4), and it
+	// precedes the mover tail [04 §2.3b] and step 6, the `activatewhenbuilt`
+	// raise below. The deferred `SetSpeed` it may start is therefore queued
+	// ahead of that raise's deferred `Activate`; neither runs inside `Create`'s
+	// immediate drain, so both first execute in the unit's first normal drain
+	// in that order, and an already-built extractor whose `Activate` reads what
+	// `SetSpeed` stored sees the sampled footprint value.
+	w.sampleExtraction(u, def)
 	// The ordinary common initializer and COB Create see grounded mode first.
 	// The wrapper then writes its two-bit mode argument; capture supplies the
 	// replaced unit's mode through that argument [05 R-WORK-01 §15]. Mark a
@@ -1924,11 +1938,6 @@ func (w *World) create(def *content.UnitDef, owner uint8, x, y, z numeric.Fixed,
 	if w.OnCreate != nil {
 		w.OnCreate(h, u)
 	}
-	// The creator samples the extraction rate for every unit it makes
-	// [05 R-PROD-01 §6]. It runs last so the deferred `SetSpeed` it may start
-	// follows `Create` and the `activatewhenbuilt` `Activate` raise above, the
-	// order the placement call sites this replaces produced.
-	w.sampleExtraction(u, def)
 	return h, nil
 }
 
@@ -2189,6 +2198,13 @@ func (w *World) createWithForcedSlotFacing(def *content.UnitDef, owner uint8, x,
 	u.AllocationSerial = w.lastAllocationSerial
 	w.pendingAllocationSerials--
 	serialPending = false
+	// Same creation-time sample as the ordinary allocator, at the same step 5
+	// of [04 R-CB-01 §4] [05 R-PROD-01 §6]: before the mover tail and the
+	// `activatewhenbuilt` raise below, so the extractor `SetSpeed` is queued
+	// ahead of `Activate` here too. The restore adapter that follows this call
+	// overwrites the rate with the saved one where the save image carries it,
+	// which is what retail restores.
+	w.sampleExtraction(u, def)
 	// Save reconstruction runs the same allocator, so the same tail runs here;
 	// the restore adapter that follows writes the saved position, orientation
 	// and mode over everything it produced [08 R-SAVE-02 §6].
@@ -2212,10 +2228,6 @@ func (w *World) createWithForcedSlotFacing(def *content.UnitDef, owner uint8, x,
 	if w.OnCreate != nil {
 		w.OnCreate(h, u)
 	}
-	// Same creation-time sample as the ordinary allocator [05 R-PROD-01 §6].
-	// The restore adapter that follows this call overwrites the rate with the
-	// saved one where the save image carries it, which is what retail restores.
-	w.sampleExtraction(u, def)
 	return h, nil
 }
 

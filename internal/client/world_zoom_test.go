@@ -1,6 +1,7 @@
 package client
 
 import (
+	"math"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
@@ -431,3 +432,42 @@ func (s lineCounter) Cursor(drawlist.Cursor)   {}
 func (s lineCounter) Expand()                  {}
 func (s lineCounter) Flash(drawlist.Flash)     {}
 func (s lineCounter) Halo(drawlist.Halo)       {}
+
+func TestUnblendedWorldSpaceKeepsFractionalMapEdgeFlush(t *testing.T) {
+	for _, direction := range []int32{-1, 1} {
+		cam := &camera.Camera{ViewW: 1024, ViewH: 768, MapW: 4096, MapH: 4096}
+		cam.SetZoomAbout(camera.OriginX, camera.OriginY, 704)
+		cam.JumpTo(direction*100000, direction*100000)
+		c := &Client{cam: cam, width: 1024, height: 768}
+		w := c.worldSpace(true)
+		factor := float64(w.Factor)
+		if factor == 0 {
+			factor = w.Zoom.Float()
+		}
+		v := c.presentationCameraView()
+		for _, axis := range []struct {
+			origin, edge, screen int32
+			offset               float32
+			precise              float64
+		}{
+			{cam.X, 0, camera.OriginX, w.OffsetX, v.X},
+			{cam.Z, 0, camera.OriginY, w.OffsetY, v.Z},
+		} {
+			if direction > 0 {
+				axis.edge = 4096
+				if axis.screen == camera.OriginX {
+					axis.screen = 1024
+				} else {
+					axis.screen = 736
+				}
+			}
+			got := float64(axis.edge-axis.origin)*factor + float64(axis.offset)
+			if direction < 0 && math.Abs(got-float64(axis.screen)) > 1e-5 || direction > 0 && (got < float64(axis.screen)-1e-5 || got >= float64(axis.screen)+factor+1e-5) {
+				t.Fatalf("world edge at %g, want coverage through %d", got, axis.screen)
+			}
+			if math.Abs((float64(axis.edge)-axis.precise)*v.Factor-got) > 1e-5 {
+				t.Fatal("picking and world transform disagree")
+			}
+		}
+	}
+}

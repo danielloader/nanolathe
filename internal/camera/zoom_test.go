@@ -89,10 +89,7 @@ func TestMinZoomShowsTheFullMapAndCentresTheSpareAxis(t *testing.T) {
 	if w < cam.MapW || h < cam.MapH {
 		t.Fatalf("at the floor the %dx%d battle view cannot show the %dx%d map", w, h, cam.MapW, cam.MapH)
 	}
-	x, z := cam.BattleViewOrigin()
-	if x != 0 || z+h/2 != cam.MapH/2 {
-		t.Fatalf("full map was not centred: viewport origin (%d,%d), size %dx%d", x, z, w, h)
-	}
+	checkPresentedBounds(t, cam)
 	// One unit above it would cut off an axis: the full-map floor is tight.
 	cam.Zoom = minZ + 1
 	w2, h2 := cam.BattleView()
@@ -101,7 +98,7 @@ func TestMinZoomShowsTheFullMapAndCentresTheSpareAxis(t *testing.T) {
 	}
 }
 
-func TestFullMapZoomBoundsRetainOnlyTheOverviewMargin(t *testing.T) {
+func TestFullMapZoomBoundsStopAtMapEdges(t *testing.T) {
 	c := &Camera{ViewW: 1024, ViewH: 768, MapW: 4096, MapH: 2048}
 	c.SetZoomAbout(OriginX, OriginY, c.MinZoom())
 	x, z := c.X, c.Z
@@ -110,13 +107,12 @@ func TestFullMapZoomBoundsRetainOnlyTheOverviewMargin(t *testing.T) {
 		t.Fatal("panning moved the centred full-map view")
 	}
 	c.SetZoomAbout(OriginX, OriginY, ZoomUnit)
-	// The 896x704 viewport fits this map at 0.21875x. Its spare
-	// vertical margin is (704 - 2048*0.21875)/2 = 128 screen pixels.
+	// Returning to native removes the overview margins from the pan bounds.
 	for _, direction := range []int32{-1, 1} {
 		c.JumpTo(direction*10000, direction*10000)
-		wantX, wantZ := int32(-OriginX), int32(-OriginY-128)
+		wantX, wantZ := int32(-OriginX), int32(-OriginY)
 		if direction > 0 {
-			wantX, wantZ = c.MapW-c.ViewW, c.MapH-c.ViewH+OriginY+128
+			wantX, wantZ = c.MapW-c.ViewW, c.MapH-c.ViewH+OriginY
 		}
 		if c.X != wantX || c.Z != wantZ {
 			t.Fatalf("direction %d: bounds (%d,%d), want (%d,%d)", direction, c.X, c.Z, wantX, wantZ)

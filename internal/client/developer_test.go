@@ -236,6 +236,8 @@ func TestDeveloperLineClipsEndpointsAndSmoothZoom(t *testing.T) {
 	if !bytes.Equal(want, c.indexed) {
 		t.Fatal("developer line did not clip endpoints before rasterization")
 	}
+	// Keep this clipping fixture away from the map edge at the new factor.
+	c.cam.MapW = 4096
 	c.cam.Zoom = camera.ZoomUnit * 3 / 4
 	got := c.developerClip()
 	if got.X != 170 || got.Y != 42 || got.W != 97 || got.H != 102 {

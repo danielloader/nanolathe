@@ -92,8 +92,10 @@ func (c *Client) worldSpace(begin bool) drawlist.WorldSpace {
 	if c.cam != nil {
 		w.Zoom = c.cam.EffectiveZoom()
 		w.Step = c.cam.EffectiveScale()
-		if c.camBlending {
-			v := c.camDrawView
+		// Non-interpolated captures also need the bounded subpixel edge:
+		// flooring the camera alone can expose a one-pixel border (§16.7).
+		v := c.presentationCameraView()
+		if c.camBlending || v.X != float64(c.cam.X) || v.Z != float64(c.cam.Z) {
 			w.Factor = float32(v.Factor)
 			w.OffsetX = float32((float64(c.cam.X) - v.X) * v.Factor)
 			w.OffsetY = float32((float64(c.cam.Z) - v.Z) * v.Factor)

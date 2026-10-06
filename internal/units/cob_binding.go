@@ -291,7 +291,8 @@ type creationCallbacks interface {
 // second Query* when AimFrom returns -1, then SetMaxReloadTime
 // [R-CB-01 §4]. Query* supplies the muzzle identity; the separate AimFrom
 // result is retained until the aim-origin consumer wires it. The extractor
-// SetSpeed follows this sequence at a terrain-aware producer outside units.
+// SetSpeed follows this sequence: both creators call sampleExtraction next,
+// before the activatewhenbuilt raise [R-CB-01 §4].
 //
 // I11 divergence, deliberate. Retail runs this initializer unconditionally
 // after the model bind on all three creation paths, and its query adapter

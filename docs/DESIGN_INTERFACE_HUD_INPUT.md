@@ -2804,9 +2804,9 @@ by a simulation phase, and is not saved [I6].
   Community controls. Wheel input then needs 180 host milliseconds of quiet
   before a new burst can leave the stop; pinch needs a fresh gesture.
   The world point under the pointer stays put within the camera bounds. Modern
-  retains the centred overview's spare border in screen pixels at higher zoom
-  factors, so rectangular maps do not re-centre their shorter axis during
-  zooming in (DESIGN_GPU_RENDERER §16.7). Fractional wheel travel banks
+  centres an axis while the whole map fits on it, then limits panning to its
+  edges; those bounds take precedence over cursor anchoring and are applied
+  continuously during zooming (DESIGN_GPU_RENDERER §16.7). Fractional wheel travel banks
   until it is worth a notch. The live wheel factor eases toward its target
   on the host Update grid; pinch follows the fingers directly. The
   classic executor takes no wheel zoom at all.
@@ -4502,9 +4502,12 @@ Card portraits and mutator examples follow the same content selection. When a
 capability is absent, the preview uses a compatible demonstration and explains
 the limitation. This is settings presentation policy, user-authorized 2026-09-30.
 
-**Graphics and Effects pages.** Graphics holds the renderer, frame rate,
-game resolution, sidebar and fullscreen. Renderer, resolution and fullscreen
-work with both renderers; frame rate and the adaptive sidebar require Enhanced.
+**Game, Graphics and Effects pages.** Game holds content, rules, unit limit,
+radar dots and the Sidebar card's Build items and Orders below build preferences.
+Graphics holds the renderer, frame rate, game resolution and fullscreen.
+Renderer, resolution and fullscreen work with both renderers; frame rate and
+the adaptive sidebar require Enhanced. The Sidebar card's placement does not
+change its saved preferences or the Graphics & effects preset scope.
 Resolution offers monitor-derived presets
 and editable dimensions through the host transaction in DESIGN_PRESENTATION_CLIENT
 §2.1. Effects holds Enhanced's own looks, the player

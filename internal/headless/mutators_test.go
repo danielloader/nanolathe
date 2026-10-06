@@ -57,23 +57,20 @@ func TestDisplaylessRequestForwardsMutators(t *testing.T) {
 	}
 }
 
-// TestSightMutatorReachesTheLOSRasters: Sight scales the sightdistance both
-// rasters quantize when a unit publishes, through the battle's catalog clone,
-// in Strict 3.1 as in every mode. Circular line of sight grows with it. True
-// line of sight stops at the last reachable LOS.TDF table, TABLE8 or
-// sightdistance 256 with the stock nine, which the Arm commander's 290
-// already selects, so doubling it changes nothing there while halving it
-// shrinks the footprint [03 §3.2][03 R-COMP-02 §1]
-// (docs/DESIGN_MODS_MUTATORS.md §6.5). Skipped without retail assets.
+// TestSightMutatorReachesTheLOSRasters: Sight scales the definition and extends
+// the per-battle raster inputs in every mode. Both True and Circular sight
+// grow above identity and shrink below it (docs/DESIGN_MODS_MUTATORS.md §6.5).
+// Without mutators the authored caps remain [03 §3.2][03 R-COMP-02 §1].
+// Skipped without retail assets.
 func TestSightMutatorReachesTheLOSRasters(t *testing.T) {
 	cat, fs := retailcat.Shared(t)
-	covered := func(losType int, sight content.Factor) int {
+	covered := func(mode gameplay.Mode, losType int, sight content.Factor) int {
 		t.Helper()
 		cfg := session.DirectSkirmishConfig("metal heck")
 		cfg.ApplyDefaults()
 		cfg.LOSType = losType
 		fb, err := ComposeFreshBattle(FreshBattleRequest{
-			Kind: ScenarioDirectOTA, Map: cfg.MapName, Skirmish: cfg, Gameplay: gameplay.Strict31,
+			Kind: ScenarioDirectOTA, Map: cfg.MapName, Skirmish: cfg, Gameplay: mode,
 			LocalOwner: -1, SimulationSeed: 7, CRTSeed: 7, FS: fs, Catalog: cat,
 			Mutators: content.Mutators{Sight: sight},
 		})
@@ -91,10 +88,12 @@ func TestSightMutatorReachesTheLOSRasters(t *testing.T) {
 		return n
 	}
 	half, one, two := content.Factor{Num: 1, Den: 2}, content.Factor{}, content.Factor{Num: 2, Den: 1}
-	if c1, c2 := covered(0, one), covered(0, two); c2 <= c1 {
-		t.Fatalf("Circular coverage %d at Sight x2, want more than %d at x1", c2, c1)
-	}
-	if t1, t2, th := covered(1, one), covered(1, two), covered(1, half); t2 != t1 || th >= t1 {
-		t.Fatalf("True coverage x0.5/x1/x2 = %d/%d/%d, want the x2 footprint equal to x1 (both at the top table) and x0.5 smaller", th, t1, t2)
+	for _, mode := range []gameplay.Mode{gameplay.Modern, gameplay.Community39, gameplay.Strict31} {
+		for _, losType := range []int{0, 1} {
+			h, o, d := covered(mode, losType, half), covered(mode, losType, one), covered(mode, losType, two)
+			if h >= o || d <= o {
+				t.Fatalf("mode %v LOS %d coverage x0.5/x1/x2 = %d/%d/%d, want increasing coverage", mode, losType, h, o, d)
+			}
+		}
 	}
 }

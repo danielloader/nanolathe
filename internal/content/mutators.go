@@ -395,7 +395,8 @@ func (m Mutators) describe(label func(Factor) string) []string {
 // and later Income, Salvage, Fire rate and Unit speed, did not change the
 // meaning of any existing set string, since no string written before them
 // names their keys, so the tag stayed 2.
-const mutatorIdentityTag = "mutators/2"
+// Tag 3: Sight above identity extends the per-battle visibility inputs.
+const mutatorIdentityTag = "mutators/3"
 
 // Digest is a stable identity of the set: a hash of mutatorIdentityTag and the
 // canonical String. Field order cannot move it, because String walks keys in
@@ -539,12 +540,10 @@ const (
 //     veterancy tier. That product is retail arithmetic and is not guarded.
 //
 // Sight scales every unit's SightDistance, saturating at the signed 16-bit
-// store. Both rasters quantize the live value at each publication, so no LOS
-// table needs recomputing, and each clamps at its table's last entry: the
-// terrain-ray group at sightdistance 256 with the stock tables, which 110 of
-// the 278 stock definitions already reach at x1, and the sight-shape index at
-// 448 [03 §3.2][03 R-COMP-02 §1]. Under True line of sight, factors above one
-// therefore barely widen what units see (docs/DESIGN_MODS_MUTATORS.md §6.5).
+// store. Above identity it also extends the per-battle raster inputs so the
+// original table caps do not swallow the increase. Original reachable data
+// and the raster arithmetic remain unchanged [03 §3.2][03 R-COMP-02 §1]; the
+// generated content is Nanolathe policy (docs/DESIGN_MODS_MUTATORS.md §6.5).
 // The fire-at-will opportunity scan, the standing-move leash and the patrol
 // and VTOL work scans also read sightdistance and widen with it at every
 // factor [04 R-STANCE-01 §3][04 R-STANCE-01 §4][04 R-ORD-01 §4]
@@ -683,10 +682,11 @@ const (
 // The only compile-time values derived from a mutated field are the moverate1
 // and moverate2 defaults, twice maxvelocity; Unit speed scales them by the
 // same k, so they stay twice the scaled velocity to within one 16.16 unit.
-// Nothing else is recomputed: the unit, weapon and feature compilers assign
-// the mutated fields and only fold them into per-definition hashes, which stay identities of the authored
-// records (§6.6); the LOS tables and sight shapes are compiled from their own
-// files. With a zero set nothing changes, Hash included. Otherwise Hash
+// The unit, weapon and feature compilers otherwise assign the mutated fields
+// and fold them into per-definition hashes, which remain identities of the
+// authored records (§6.6). Sight above identity additionally extends the LOS
+// tables and sight shapes under §6.5. With a zero set nothing changes, Hash
+// included. Otherwise Hash
 // becomes a hash of the base Hash and Digest — that is, of the identity tag,
 // the base Hash and String. A set with a factor off the step list, or a unit
 // cost that is not an integral 32-bit store, is refused before anything is
@@ -745,6 +745,9 @@ func (c *Catalog) ApplyMutators(m Mutators) error {
 				u.TurnRate = int32(k.scale(stored, mutatorTurnRateLimit))
 			}
 		}
+	}
+	if m.Sight.Num > m.Sight.Den {
+		c.extendMutatorSight(units)
 	}
 	if !m.Income.IsIdentity() {
 		for _, u := range units {

@@ -247,6 +247,13 @@ same byte refcount; the mode bit selects only the shape.
   gated by the LOS word's low byte, with the high byte deciding whether the
   retained horizon advances `[03 §3.2]` `[03 R-VIS-01 §3]`.
 
+Sight mutators above ×1 extend the per-battle compiled raster inputs before
+this service is created, in every mode. This is Nanolathe-generated content;
+the retail table selection and horizon arithmetic described here stay unchanged.
+[DESIGN_MODS_MUTATORS §6.5](DESIGN_MODS_MUTATORS.md#65-the-mutators) owns the
+geometry, identity and verification contract. Without mutators the authored
+limits above remain the retail baseline.
+
 `Refresh` is the throttled entry point every publisher goes through: it stores
 each observer's last raster and recomputes only when the coverage tile moved, or
 — in ray mode — the observer height byte moved by more than five, or, in sprite

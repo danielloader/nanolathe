@@ -3432,8 +3432,9 @@ under the cursor.
 **Continuous Enhanced presentation.** The 30 Hz zoom controller owns input
 targets and the ease, and its integer camera remains available to ordinary input
 and clamp consumers. Beside that origin, zoom operations retain the precise
-anchor using `origin + anchor/oldZoom − anchor/newZoom`; a clamped axis takes the
-integer clamp result, and another writer changing the integer origin or factor
+anchor using `origin + anchor/oldZoom − anchor/newZoom`; a clamped Modern axis
+takes the continuous edge or centred-fit result (legacy retains its integer
+clamp), and another writer changing the integer origin or factor
 invalidates the retained fraction. Every host sample carries
 `(originX, originZ, zoom)`. At presentation fraction `t`,
 `zoom = lerp(previousZoom, currentZoom, t)` and, for each axis,
@@ -3598,20 +3599,25 @@ its exact native/detail scale cycle instead of adopting fractional stops.
 `min(viewW/mapW, viewH/mapH)` over the battle viewport and the playable map,
 rounded down and bounded to 1/1024..1×, so native remains reachable even when
 the map already fits at 1×. Both playable axes fit at the floor.
-For a camera with an explicit zoom, the floor centres both axes, leaving space
-around the map. Above the floor, the clamp retains each axis's overview margin
-in screen pixels instead of re-centring its shorter axis at every factor.
-For an axis with native viewport span `V`, playable map size `M`, floor `f`
-and live factor `z`, the allowed padding in world pixels is
-`floor(max(V - M*f, 0) / (2*z))`. It extends both ordinary map-edge bounds;
-when integer rounding inverts them, that axis remains centred. This bounded
-border space also applies to panning after an explicit zoom, including at
-native and detail factors. It lets a point anywhere within the centred overview
-stay under the pointer throughout zooming in, even while the shorter axis fits
-entirely on screen. A pointer in the border space can still reach a clamp.
-Unzoomed cameras and legacy controls retain their existing bounds.
-This is Nanolathe presentation policy (user-authorized 2026-10-04), with no
-authoritative effects. Targets below the floor are clamped at the controller and
+For a camera with an explicit zoom, each axis that fits entirely inside the
+viewport stays centred, with equal unavoidable margins and no panning on that
+axis. Once the projected map fills an axis, its origin is bounded by the map
+edges, with no extra border allowance. Cursor anchoring applies within those
+bounds; an edge takes precedence when both cannot hold. Each zoom sample starts
+from the previous bounded view, so it does not retain a displaced anchor that
+would pull the camera back after leaving an edge. Both the fit transition and
+the edge clamp use the continuous presentation factor before flooring the
+integer camera, avoiding rounding jumps at fractional zoom factors. The host
+also bounds every interpolated view: legal endpoints on opposite sides of the
+fit threshold do not guarantee a legal intermediate projection. Non-interpolated
+recordings also bound their integer fallback view and carry any edge correction
+in the world transform, so rounding cannot expose a single border pixel.
+
+This replaces the retained overview-margin allowance approved on 2026-10-04:
+the user requested hard map edges with smooth cursor zoom on 2026-10-05.
+It is Nanolathe presentation policy, with no authoritative effects. Unzoomed
+cameras and legacy controls retain their existing bounds.
+Targets below the floor are clamped at the controller and
 camera. The viewport span is taken in framebuffer pixels, because the chrome
 does not move with the zoom. The host sets `Camera.ViewportZoomFloor` for legacy
 and Community controls: the greater axis ratio rounded upward, bounded to
@@ -3648,9 +3654,9 @@ exception immediately. The paused world cache includes this gate; resolution
 changes refit the retained tactical request to the new floor.
 
 The step writer deliberately does **not** apply this floor: a step is always at
-least 1×. Modern border bounds are applied alongside `clampAxis`, leaving the
+least 1×. Modern presentation bounds are applied alongside `clampAxis`, leaving the
 retail primitive intact. Camera tests cover direct and eased pointer anchoring on wide,
-tall and square maps, bounded border panning and the legacy bypass, alongside
+tall and square maps, edge-limited panning, centred fitted axes and the legacy bypass, alongside
 full-map fit, collapsed stops, preferred-lock barriers, reversal, fractional
 wheel travel and wrapping host milliseconds.
 Host tests cover the three mode boundaries, both pinch styles, input ownership,

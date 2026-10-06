@@ -252,14 +252,15 @@ func (c *Client) blendCameraView(prev, cur camera.PresentationView, fraction16 i
 		return (a*prev.Factor + (b*cur.Factor-a*prev.Factor)*f) / factor
 	}
 	w, h := c.cam.EffectiveView()
-	return camera.PresentationView{X: axis(prev.X, cur.X, w), Z: axis(prev.Z, cur.Z, h), Factor: factor}
+	return c.cam.BoundPresentationView(camera.PresentationView{X: axis(prev.X, cur.X, w), Z: axis(prev.Z, cur.Z, h), Factor: factor})
 }
 
 // CameraViewFor is the camera view a recording pass with inputs d frames the
 // world through: the blend of its two stepped samples when it has them, its
 // integer origin otherwise. It is for host diagnostics — the live trace times
 // camera motion with it — and reads nothing the digest does not carry apart
-// from the viewport, which only decides that a long move is a jump.
+// from the viewport, map extents and control policy, which decide jumps and
+// presentation bounds; the host invalidates recordings when these change.
 func (c *Client) CameraViewFor(d PresentationInputs) camera.PresentationView {
 	if c == nil || c.cam == nil {
 		return camera.PresentationView{X: float64(d.CamX), Z: float64(d.CamZ), Factor: 1}
@@ -267,7 +268,7 @@ func (c *Client) CameraViewFor(d PresentationInputs) camera.PresentationView {
 	if d.Interpolation && d.CamSamples >= 2 && d.CameraFractionSet && c.committedPrevious() != nil {
 		return c.blendCameraView(d.CamPrevView, d.CamCurView, d.CameraFraction16)
 	}
-	return camera.PresentationView{X: float64(d.CamX), Z: float64(d.CamZ), Factor: d.CamZoom.Float()}
+	return c.cam.BoundPresentationView(camera.PresentationView{X: float64(d.CamX), Z: float64(d.CamZ), Factor: d.CamZoom.Float()})
 }
 
 // PresentedTicks names the committed pair the current presentation pass reads
@@ -300,7 +301,7 @@ func (c *Client) presentationCameraView() camera.PresentationView {
 	if c.cam == nil {
 		return camera.PresentationView{Factor: 1}
 	}
-	return camera.PresentationView{X: float64(c.cam.X), Z: float64(c.cam.Z), Factor: c.cam.EffectiveZoom().Float()}
+	return c.cam.BoundPresentationView(camera.PresentationView{X: float64(c.cam.X), Z: float64(c.cam.Z), Factor: c.cam.EffectiveZoom().Float()})
 }
 
 // beginCameraBlend installs a temporary recording camera. Integer projection

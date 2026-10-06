@@ -1,6 +1,7 @@
 package client
 
 import (
+	"math"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
@@ -477,6 +478,43 @@ func TestCameraBlendSnapsOnAViewportSizedJump(t *testing.T) {
 		c := &Client{cam: &camera.Camera{ViewW: 640, ViewH: 480}, camPrevView: camera.PresentationView{X: float64(tc.prev), Factor: 1}, camCurView: camera.PresentationView{X: float64(tc.cur), Factor: 1}, cameraFraction16: fractionOne / 2}
 		if got := int32(c.blendedCameraView().X); got != tc.want {
 			t.Fatalf("%d -> %d: %d, want %d", tc.prev, tc.cur, got, tc.want)
+		}
+	}
+}
+
+// Fit-to-edge transitions need the same bounds between host samples: a blend
+// of two legal views can otherwise expose an edge in the middle (§16.7).
+func TestCameraBlendBoundsFitTransitions(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		for _, reverse := range []bool{false, true} {
+			cam := &camera.Camera{ViewW: 1024, ViewH: 768, MapW: 8192, MapH: 2048, Zoom: camera.ZoomUnit / 2, ViewportZoomFloor: legacy}
+			c := &Client{cam: cam}
+			for _, bottom := range []bool{false, true} {
+				prev := camera.PresentationView{X: 1000, Z: -512, Factor: 0.25}
+				cur := camera.PresentationView{X: 1000, Z: -64, Factor: 0.5}
+				if bottom {
+					cur.Z = 576
+				}
+				if reverse {
+					prev, cur = cur, prev
+				}
+				for i := int32(0); i <= 16; i++ {
+					v := c.blendCameraView(prev, cur, i*fractionOne/16)
+					first, last := -v.Z*v.Factor, (float64(cam.MapH)-v.Z)*v.Factor
+					if legacy {
+						want := prev.Z*prev.Factor + (cur.Z*cur.Factor-prev.Z*prev.Factor)*float64(i)/16
+						if math.Abs(v.Z*v.Factor-want) > 1e-8 {
+							t.Fatal("legacy camera blend changed")
+						}
+					} else if float64(cam.MapH)*v.Factor <= 704 {
+						if math.Abs((first-32)-(736-last)) > 1e-8 {
+							t.Fatalf("fitted blend not centred: %+v", v)
+						}
+					} else if first > 32+1e-8 || last < 736-1e-8 {
+						t.Fatalf("blend exposed map edge: %+v", v)
+					}
+				}
+			}
 		}
 	}
 }

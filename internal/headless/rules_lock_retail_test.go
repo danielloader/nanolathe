@@ -187,17 +187,25 @@ import (
 // Restoring only the old facing test restores the prior Strict/Modern final
 // battle and pool locks. Initial/600-step, Community and both Ashap locks stay
 // unchanged; the queued-hover correction does not move these fixtures.
+//
+// Building nanoframes now acquire spatial/collision state at allocation, so
+// repair patrol can discover them before completion [04 R-COLL-01 §4, §11]
+// [04 R-ORD-02 §4] (issue 92). The Strict/Community 6000-tick and all three
+// long Ashap locks include the newly present unfinished-building collision
+// records and their route dirty flags. An observation-only diagnostic omitting
+// just those fields reproduces every preceding Ashap lock without changing
+// simulation. All benchmark locks and the Modern 6000-tick lock stay unchanged.
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
 	lockAshapUnitLimit             = 250 // Strict setting; Community's table overrides it.
 	lockDifficulty                 = 1
-	lockAshapStrict6000            = "partial-v1:48023152593bee2d"
-	lockAshapCommunity6000         = "partial-v1:61f603cde55fa26e"
+	lockAshapStrict6000            = "partial-v1:1fc360913f7d32fb"
+	lockAshapCommunity6000         = "partial-v1:25ebe70b68b04a1a"
 	lockAshapModern6000            = "partial-v1:b574c1e0b3361b82"
-	lockAshapStrict54000           = "partial-v1:8fa5964cb1b804df"
-	lockAshapCommunity54000        = "partial-v1:8bd157c5a04b67cd"
-	lockAshapModern54000           = "partial-v1:36216fb2df6814e2"
+	lockAshapStrict54000           = "partial-v1:72d73a6f61165e9d"
+	lockAshapCommunity54000        = "partial-v1:588a267d3a1a7c0e"
+	lockAshapModern54000           = "partial-v1:954703145cb88cf6"
 	lockAshapStrictEnd      uint32 = 54000
 	lockAshapCommunityEnd   uint32 = 54000
 	lockAshapModernEnd      uint32 = 54000

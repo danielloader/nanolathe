@@ -862,7 +862,7 @@ compatibility questions belong in
 
 A mutator is a deterministic transform of compiled definitions. It is applied
 to the per-battle catalog clone before a session exists. The result is a
-catalog that a content package could have authored with those values, and
+catalog of compiled content values, including generated sight data (§6.5), and
 every gameplay mode already accepts content packages, so mutators are
 orthogonal to the gameplay mode in the same way content profiles are (D1).
 
@@ -967,9 +967,9 @@ wrapped value, because the mutator starts from the stored value. A mutator
 never introduces a wrap.
 
 **Identity tag.** The mutated catalog's identity hashes the tag
-`mutators/2`, the base hash and the canonical set. The tag changes whenever
+`mutators/3`, the base hash and the canonical set. The tag changes whenever
 any mutator's transform changes meaning (it moved to 2 when Build speed
-switched to `buildtime`).
+switched to `buildtime`, and to 3 when Sight began extending raster inputs).
 
 **The step list** (initial): 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4. Each step is
 an exact rational (a whole number of quarters), and its one spelling, in the
@@ -987,12 +987,52 @@ product exact.
 | Health | unit `MaxDamage` | k× hit points | Retail repair and self-heal restore exactly 1 HP per accepted visit ([05 R-WORK-01 §3]), so repairing to full takes about k× as long. The unit-reclaim pulse is proportional to `maxdamage` ([05 R-WORK-01 §4]). Feature `damage` (wreck hit points) is unchanged. |
 | Damage | every weapon's `DamageDefault` and `Damage` entries (the default scaled from its stored 16-bit value) | k× damage | Includes death explosions, self-destruct, burn and meteor weapons, and damage to features, whose hit points are not scaled, so features die faster. Health and Damage at the same factor roughly cancel between units, apart from truncation and the thresholds. A hit of 30,000 or more skips the armored-state reduction ([06 §9.2]); the commanders' disintegrators already do at ×1. |
 | Blast size | every weapon's `AreaOfEffect` above 16, from its stored unsigned 16-bit value, never scaled below 17 | every blast reaches k× as far | A projectile that meets a unit with an area of 16 or less damages that unit alone and skips the area sweep ([06 §9.1]), and Modern's reliable direct-fire class uses the same bound, so a direct-hit weapon is left alone and a splash weapon never scales into that class: a laser gains no splash, and the smallest stock splash (30) floors at 17 at ×0.25 instead of becoming a direct hit. Death, self-destruct, burn and meteor weapons are included. The radius is the area halved and the falloff reads distance over radius, so a recipient at the same fraction of the radius takes the same share ([06 §9.3]). The broad phase visits about k² times the cells ([06 §9.3]); the stock largest area, 950, is 3,800 at ×4. The sweep remembers twenty units and processes a unit met again after that ([06 §9.3]), so a wider blast re-hits large multi-cell units sooner. Interceptors catch within k× the distance, because their catch test uses the same field ([06 R-WPN-05 §10]). The kamikaze pulse ring and the area-of-effect range ring widen with it ([04 R-SPEC-01 §1], [07 R-P0-11 §3]). Explosion art is not scaled. |
-| Sight | unit `SightDistance` | k× sight, up to each raster's limit | Both rasters quantize `sightdistance` whenever a unit publishes its sight, so no table derives from it ([03 §3.2]). Each stops at a fixed limit the mutator does not move. True line of sight stops at the last reachable LOS.TDF table, 8 cells or `sightdistance` 256 with the stock nine tables ([03 R-COMP-02 §1], SC9); Circular stops at the last visibility-mask frame, 14 cells or 448. At ×1, 110 of the 278 stock definitions (82 of the 152 mobile ones) already reach the True limit and 46 more are one cell short, so under True line of sight, the skirmish default and the only raster a campaign battle uses ([08 R-SKIR-01 §4]), factors above 1 barely widen what units see while factors below 1 shrink it. Under Circular only one stock definition starts at the limit. The ranges that read `sightdistance` widen at every factor: the fire-at-will opportunity scan and hold-position leash ([04 R-STANCE-01 §3], [04 R-STANCE-01 §4]) and the patrol and VTOL work scans ([04 R-ORD-01 §4], [04 R-ORD-01 §7]). |
+| Sight | unit `SightDistance`; for factors above 1, larger per-battle LOS tables and circular masks | k× the authored sight distance, quantized to coverage cells | The definition saturates at 32,767. Factors at or below 1 retain the authored raster tables and their existing limits. Factors above 1 extend the compiled raster inputs as described below; terrain occlusion and publication arithmetic are unchanged in every mode. The fire-at-will opportunity scan and hold-position leash ([04 R-STANCE-01 §3], [04 R-STANCE-01 §4]) and patrol and VTOL work scans ([04 R-ORD-01 §4], [04 R-ORD-01 §7]) also read the scaled distance. |
 | Radar | unit `RadarDistance`, `SonarDistance`, `RadarDistanceJam`, `SonarDistanceJam` by the same factor | k× radar and sonar | All four are plain search radii, so detection and jamming stay in proportion ([03 R-VIS-01 §5]). The emitter's height bonus is not scaled ([03 R-VIS-01 §4]); `mincloakdistance` is left alone. |
 | Income | unit `MetalMake`, `ExtractsMetal`, `WindGenerator`, `TidalGenerator`; the magnitude of a negative `EnergyUse`; and `EnergyMake`'s surplus over a positive `EnergyUse`: with `sm`, `se` the stored singles, `sm > se` becomes `float32(se + float64((sm − se)·k))` (the conversion keeps the product from fusing into the sum) | every unit produces k× what it makes beyond its own upkeep while that upkeep is charged | Each settlement contribution is the field times something the mutator leaves alone — the wind scalar, the tidal strength, the footprint's metal sum — so output scales by k ([05 R-ECO-01 §2], [05 R-PROD-01 §3], [05 R-PROD-01 §4], [05 R-PROD-01 §6]). A negative `energyuse` is not a malformed value here: it is the production arm the stock solar collectors author (−20), whose negation is added to production, so its magnitude scales and its sign and arm are kept ([05 R-ECO-01 §2]). 126 stock units author `energymake` equal to `energyuse` (radar and sonar towers, jammers, most mobile units); scaling `energymake` alone would make them net drains below ×1 and generators above it, so only the surplus scales: a fusion plant makes exactly k×, a self-powered radar stays neutral while its upkeep is charged, CORCOM's 25 for an upkeep of 1 becomes 1 + 24k, and ARMCOM, with no upkeep, makes 25k. Positive `energyuse`, `makesmetal`, storage and costs are unchanged: a metal maker keeps its authored conversion ([05 R-PROD-01 §5]), and more energy runs more makers. Upkeep is charged only while a building is activated or a mobile unit is activated or moving, and `energymake` is paid whenever the unit is complete ([05 R-ECO-01 §2]), so a switched-off radar or a parked mobile unit keeps its unscaled make at every factor. Storage fills sooner and production beyond it is wasted at the settlement clamp ([05 R-ECO-01 §6]). The computer players' difficulty discount multiplies each contribution and composes with Income ([05 R-ECO-01 §3]). An extractor samples its rate at creation ([05 R-PROD-01 §6]), and a save carries it. The HUD rates are settlement values and show the scaled output. The Classic AI's class vector clamps `energymake` at 30 ([08 R-P0-05 §5]), and the Modern AI's integer summaries round small scaled values. |
 | Salvage | feature `Metal`, `Energy` of every definition that is not `indestructible`: wrecks, heaps, rocks and trees, whether a map, a mission or a death places them. A corpse-chain feature takes Build cost × Salvage, rounded once | reclaim pays k× | Map features resolve to catalog definitions when the terrain loads, after battle entry has applied the mutators, so one transform reaches every placement. The deposit pass writes the low byte of an indestructible definition's `metal` into the extraction grid ([05 R-FEAT-01 §7]); scaling it would wrap that byte (250 × 2 is 244), so deposits are excluded. No stock indestructible definition is reclaimable. Feature reclaim counts down `trunc(15 + (energy + metal)/2)` work at a fixed rate and pays the whole pool on the removing visit ([05 R-WORK-01 §5]), so a builder earns at about the same rate for about k× as long. Repair patrol's reclaim scan ranks by value and admits a metal feature only when it fits under storage, inclusively ([05 R-FEAT-01 §6], [04 R-ORD-01 §4]), so large pools are passed over sooner when storage is nearly full. The HUD footer shows the scaled pools ([07 R-HUD-03 §3]). The computer players' discount applies to the payout ([05 R-ECO-01 §3]). Resurrection reads no pool ([05 R-WORK-01 §7]). The largest stock pool, 40,100, saturates at 65,535 from ×2. |
 | Fire rate | every weapon's `ReloadTime`, from its stored unsigned 16-bit value, scaled by the **inverse** factor as Build speed scales `buildtime` | every weapon fires k× as often | The slot fires when its countdown reaches zero ([06 §4.2]), at most once per tick per slot, so short stock reloads round unevenly at ×4 (5 ticks becomes 1). Zero stays zero and the minimum of one never creates a free round ([06 R-WPN-05 §2]). `energypershot` and `metalpershot` are billed per shot, so drain grows k-fold at the same cost per shot ([06 §4.2]). A stockpile round advances five progress per visit up to `reloadtime` and bills in proportion to progress, so nukes and anti-nukes build rounds in 1/k of the time at the same total cost, demanding k× per visit ([06 §11.1]); the stock 3,600–5,400-tick rounds (2–3 minutes) take 30–45 s at ×4. `burstrate` spaces shots within a burst on its own schedule and is untouched; a burst longer than the scaled reload overlaps the next ([06 §4.3]). The veteran reload is an integer percentage of `reloadtime`, so the bonus flattens at the smallest reloads ([06 §4.2]). `SetMaxReloadTime` hands scripts the scaled value ([06 R-WPN-05 §3]). Weapons with no reload — meteor, burn and death weapons — are unaffected. The Classic AI does not read reload; the Modern AI's damage-rate estimates scale. |
 | Unit speed | unit `MaxVelocity`, `TurnRate` (from its stored unsigned 16-bit value), `MoveRate1` and `MoveRate2` by k; `Acceleration` by k²; `BrakeRate` by k² for a unit that does not fly and by k for one that does | every unit moves and turns k× as fast along paths of the same shape | The mover chooses the ground or flight integrator on the definition's `canfly` bit alone ([04 R-MOV-01 §1]). The ground mover accelerates only while the lookahead is beyond twice its turning distance `|err|·speed/turnrate` and the point two ahead is beyond its braking distance `speed²/(2·brakerate)` ([04 R-MOV-01 §4]); both are unchanged, as is the distance to reach top speed, and the time to reach it is 1/k. The flight integrator compares horizontal speed with `brakerate` itself and turns the excess toward the heading, so there `brakerate` is a speed ([04 §10.1]); the loss term `acceleration/maxvelocity` of its decay grows k-fold, and so do the approach speed `sqrt(2·a·d)` and the terminal speed. The movement-rate tiers compare speed with the two thresholds, so a unit changes tier at the same fraction of its speed ([04 R-MOV-01 §6]). No COB port sets a speed ([04 R-COB-03 §1]). Fixed distances do not scale — the waypoint capture radius, the lookahead, the air service radii — so a unit whose step outgrows the capture radius can pass a waypoint and loop back to it, and the collision validator tests only the proposed rectangle ([04 R-COLL-01 §1]); the maintainer accepts overshoot at high factors (P18). Tick cadences (repath, air order deadlines) and weapons — projectile speed, turret turn rate — are unchanged, so fast units outrun more fire. `cruisealt` and the bank and pitch gains are untouched. The Modern AI's absolute speed thresholds (fast, scout) see the scaled speeds. |
+
+**Expanded sight data — Nanolathe mutator policy (issue #94, user-authorized
+2026-10-05).** Above ×1, enlarge the per-battle compiled inputs in every mode,
+including Strict 3.1. Retail itself keeps its authored caps: with stock data,
+True sight stops at 8 cells and Circular at 14 ([03 R-COMP-02 §1], SC9).
+The former transform only scaled the definition, so most stock units gained
+little or no visible range. The new transform supports the scaled authored
+radius, not a multiple of the already capped visible footprint.
+
+After scaling definitions, collect their positive signed-word radii divided by
+32. Preserve all originally reachable tables and frames byte for byte. For each
+needed radius above the original cap, generate an inclusive integer disc
+(`x² + y² ≤ r²`). A circular frame has side `2r+1` and anchor `(r,r)`.
+A terrain table has `2r` first-quadrant rays: aim at `(r,0)` through `(r,r)`,
+then `(r−1,r)` through `(1,r)`. At dominant-axis distance `d=1..r`, each
+coordinate is `(endpoint*d + floor(r/2)) div r`; stop when the point leaves
+the disc. The consumer supplies its existing four rotations and its existing
+strict terrain-horizon comparisons. This is generated Nanolathe content,
+not a claim about retail's authored geometry; long compiled lines are not
+subject to the retail text loader's 511-byte value limit.
+
+Extend the declared terrain count to `largest needed radius + 1`, because
+group `g` reads slot `g−1` and the clamp stops at count minus one. Keep unused
+new slots at the old clamped footprint, and retain originally unreachable
+terrain sections after the new declared list. Circular slots likewise retain
+the old clamped mask unless a definition needs that larger radius. Generate
+only distinct needed radii: allocation is quadratic per generated radius,
+rather than for every intermediate radius up to the largest mod value.
+Missing raster resources remain missing; an empty terrain table range remains
+empty. Unit publication and temporary death sight both read the transformed
+definition, so entry, movement, death, mode changes and save reconstruction
+share the same data. No mutator is consulted during a tick, no RNG is drawn,
+and no new gameplay seam or per-tick state is added.
+
+The existing wrapping byte refcounts are retained, including repeated visits
+where terrain rays overlap. Expanded sight increases both raster work and
+coverage overlap; extreme mod radii or crowded observers can still wrap these
+counts. Tests exercise hole-free current coverage at the stock ×4 radii,
+terrain obstruction, balanced removal, original-slot preservation and clone
+isolation. No-mutator battles retain the original content and fingerprints.
 
 **Known hazards.** The unit-reclaim pulse forms a 32-bit product of
 `workertime`, a kill factor, `maxdamage` and 15, which retail lets overflow
@@ -1015,15 +1055,13 @@ products, because the retail arithmetic stays retail.
 **Derived values.** `ApplyMutators` must recompute any compile-time value
 derived from a field it changes. A search of the unit compiler found these
 fields assigned and not otherwise derived from. The implementing unit confirms
-the same for AI profiles, build menus, the weapon linker and the LOS tables,
-and lists anything it finds here. The LOS tables and the visibility-mask
-frames derive nothing from `sightdistance`: both rasters quantize the
-definition's live value each time a unit publishes its sight ([03 §3.2]), so
-Sight needs no recompute.
+the same for AI profiles, build menus and the weapon linker. Sight additionally
+extends its compiled raster inputs above ×1 under the policy above; both
+rasters continue selecting those inputs from the live definition ([03 §3.2]).
 
 ### 6.6 Identity and reports
 
-- The clone's `Catalog.Hash` becomes a hash of `mutators/2`, the base hash and
+- The clone's `Catalog.Hash` becomes a hash of `mutators/3`, the base hash and
   `Mutators.String()`. With no mutators, nothing is transformed and nothing is
   rehashed, so every existing identity and fingerprint is unchanged. When the
   battle also has unit restrictions, the base hash is the restricted one
@@ -1347,6 +1385,7 @@ dependencies.
 | Layers, diffs and atomic subtrees; a change is kept per mod; locked paths play the mod's value until overridden and keep the player's; presets save and apply by part | `settings.TestLayers*`, `main.TestModSettingsKeepChangesPerMod`, `main.TestModConfigSettingsAndLocks`, `main.TestNLScreenPresetsSaveAndApplyPart` (retail tier) |
 | SHA-256 and size mismatch, truncated download, resume only for the same expected hash, off-origin redirect refused, offline cache shown | `modfetch` against `httptest` |
 | Zero mutators leave the clone deep-equal with an equal `Hash`; each mutator changes exactly its fields; rounding, minimum-one, saturation and `v ≤ 0` boundaries; the hash is independent of field order | `content` |
+| Sight above ×1 expands both rasters, preserves terrain obstruction and balances retirement; original inputs and reductions remain unchanged | `content.TestSightMutatorExtendsOnlyNeededRasterInputs`, `content.TestGeneratedSightRaysCoverDisc`, `visibility.TestSightMutatorWidensCoverageAndRetires`, `visibility.TestSightMutatorKeepsTerrainOcclusion`, `visibility.TestStockSightMutatorCoverage` (retail tier) |
 | Mutators reach fresh skirmish, mission entry and restore; all six fingerprint locks unchanged | `session`, `headless` |
 | Under Strict 3.1 with Build speed ×2, a fixed construction finishes in half the ticks and bills the same total resources (a relationship, not a census) | `session` |
 | Under Strict 3.1, Income scales a generator's and a solar collector's settlement production k-fold and leaves a self-powered unit neutral; Unit speed shortens a straight move to about 1/k of the ticks; Fire rate builds a stockpile round in 1/k of the ticks at the authored cost (relationships) | `session.TestStrictIncomeScalesSettlementProduction`, `session.TestStrictUnitSpeedShortensAStraightMove`, `session.TestFireRateStockpilesAtEqualCost` |

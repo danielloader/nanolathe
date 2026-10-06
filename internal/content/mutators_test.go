@@ -648,7 +648,7 @@ func TestApplyMutatorsRefusesBeforeWriting(t *testing.T) {
 // TestMutatedCatalogIdentity locks §6.6: a non-zero set moves Catalog.Hash to
 // a value determined by the base hash and the canonical set, so equal sets
 // agree however they were assembled and different sets disagree. The digest
-// carries the identity tag, which moved to "mutators/2" when Build speed's
+// carries the identity tag, which moved to "mutators/3" when Sight's
 // transform changed meaning.
 func TestMutatedCatalogIdentity(t *testing.T) {
 	base := mutatorFixture(t)
@@ -679,8 +679,8 @@ func TestMutatedCatalogIdentity(t *testing.T) {
 		}
 		seen[hash] = info.Key
 	}
-	if want := HashDefinition([]byte("mutators/2\n" + all.String() + "\n")); all.Digest() != want {
-		t.Fatalf("digest %s is not the mutators/2 hash of the canonical set", all.Digest())
+	if want := HashDefinition([]byte("mutators/3\n" + all.String() + "\n")); all.Digest() != want {
+		t.Fatalf("digest %s is not the mutators/3 hash of the canonical set", all.Digest())
 	}
 	if all.Digest() == HashDefinition([]byte("mutators/1\n"+all.String()+"\n")) || all.Digest() == (Mutators{}).Digest() {
 		t.Fatal("digest must carry the current identity tag and follow the set")

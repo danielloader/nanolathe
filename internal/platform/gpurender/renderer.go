@@ -71,7 +71,10 @@ type Renderer struct {
 	// surfaces[1] holds the read copy every layer that samples the composite it
 	// rewrites shares: fog, the ordered lens, the ground-light pools and the
 	// blast and plume refraction. Only the region the batch will actually sample
-	// is copied here, just before the batch reads it (readcopy.go).
+	// is copied here, just before the batch reads it (readcopy.go). The copy
+	// occupies its top-left w×h; the ground-light field fills the rest
+	// (groundFieldLayout, §31.8), so every reader keeps its samples inside the
+	// frame, and one that clamps clamps to the frame, never to imageSrc0Size.
 	surfaces [2]*ebiten.Image
 	// placeholder backs an image slot no op in a run requested, for the case
 	// where no palette (and so no table atlas) has been installed.
@@ -296,6 +299,8 @@ func NewChecked(pal *palette.Tables, w, h int) (*Renderer, error) {
 	compile(&r.distortion.shader, newDistortionShader)
 	compile(&r.arrival.shader, newArrivalShader)
 	compile(&r.ground.shader, newGroundLightShader)
+	compile(&r.ground.resolveShader, newGroundResolveShader)
+	compile(&r.ground.clearShader, newGroundClearShader)
 	if err := r.initModelDirect(); err != nil && firstErr == nil {
 		firstErr = err
 	}
@@ -315,8 +320,10 @@ func (r *Renderer) ensureSize(w, h int) {
 	if r.surfaces[0] != nil && r.w == w && r.h == h {
 		return
 	}
+	readW, readH, field, fits := groundFieldLayout(w, h, ebiten.MaxImageSize())
+	r.ground.fieldRect, r.ground.fieldFits = field, fits
 	r.surfaces[0] = newRendererImage(w, h)
-	r.surfaces[1] = newRendererImage(w, h)
+	r.surfaces[1] = newRendererImage(readW, readH)
 	r.w, r.h = w, h
 	r.sched.resetFrame(w, h)
 }

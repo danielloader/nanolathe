@@ -310,7 +310,10 @@ identities early through `PrepareTerrain` (§14.8).
 frame is drawn into and the image `Execute` returns: every source index is
 resolved through `PAL` at the fragment that writes it, so there is no expansion
 pass (§13.3, C-G8 as amended). `surfaces[1]` holds the read copy the fog run and
-the `readcopy.go` layers sample. Index-carrying *sources* — tiles, GAF frames,
+the `readcopy.go` layers sample in its top-left frame-sized region; beyond that
+region it holds the ground-light field (§31.8), so every reader keeps its
+samples inside the frame, and one that clamps clamps to the frame, never to the
+read surface's own size. Index-carrying *sources* — tiles, GAF frames,
 glyph strips, the model pages' key plane — stay in the red channel of RGBA8,
 sampled nearest in Kage pixel mode, so `index = int(r*255 + 0.5)` recovers the
 byte exactly (C-G4).
@@ -6388,8 +6391,9 @@ executor multiplies by `percent / 100` (`effectStrengthOffset`, with
 `EffectStrengthDefault` = 100 and `EffectStrengthMax` = 200). The ground strength
 multiplies each pool's terrain gain after the family share and envelope of §31.6
 and §31.7 and the content pack's ground family (§19.4), so models, smoke and the
-glow layer are untouched; the pass's own clamp against 1 − base still bounds a
-strong pool. The ring strength multiplies each admitted ring's displacement
+glow layer are untouched. Section 31.8 applies a bounded nonlinear response
+after the linear energy multiplier; doubling strength need not double the
+visible brightness increase. The ring strength multiplies each admitted ring's displacement
 strength after the shape of §25 and §25.2 — radius and width are unchanged, and
 the read region's pad and the 32-ring budget both use the scaled value, whose
 order a common factor does not change. At 0 either is off exactly as its switch
@@ -6637,37 +6641,34 @@ record extent is wider than the framebuffer below a rest factor (§16.3).
 
 ### 31.3 Ground illumination — contract BL7
 
-The terrain pass ends, after the water surface and the reflection resolve, with
-one pass over the visible lights:
+The terrain pass ends after the water surface and reflection resolve. With no
+selected visible light, ground light disabled, or strength zero, it does no
+lighting work. Otherwise it submits the scheduler, copies the affected
+composite rectangle into the read surface, accumulates the visible lights into
+a bounded half-resolution field beside that copy in the same pass, then
+resolves the rectangle once. Section 31.8 owns the bounded response and the
+field's storage.
 
-1. if no light is selected, the ground light switch is off, or the player's
-   ground light strength is 0 (§30), nothing happens at all
-   — no copy, no batch, no cost;
-2. otherwise the scheduler is submitted (one barrier), the region the batch
-   samples is copied into the read surface (`readcopy.go`), and one clipped quad
-   per light is drawn in ONE additive batch.
+The previous per-source `min(contribution, 1 - base)` and additive composition
+could flatten even a single bright pool, and overlapping pools could each spend
+the same headroom. The clamp prevented numeric overflow per contribution; it
+never guaranteed preservation of painted texture. Section 31.8 replaces it
+with a joint response whose brightness approaches its limit smoothly.
 
-The fragment is **base × light**, not a flat wash: it samples the copied composite
-under the pixel — the ground albedo already carrying the map's painted lighting —
-and outputs `min(base × colour × falloff × 2.0, 1 − base)` with alpha zero. The
-clamp against `1 − base` stops a bright source from flattening the ground to
-white, and the additive blend makes overlapping pools sum as `base × (1 + Σ L)`.
-The gain 2.0 stays well below §23.2's model-face gain, because terrain already
-carries the map's own lighting.
-
-The falloff is the radial law of §23.2 **with the square dropped** — a ground pool
-is read as a shape and wants a body, where a model face wants a tight core — over
-`distance² = dx² + dy² + h²`, `h` being the source's stored absolute height. The
-pool is centred on the source's **projected** position, `Y − h/2`, the same
-half-height projection as visible objects [03 §2.5], because the pass has no
-terrain receiver height (SC20 explains why painted terrain cannot be inverted that
-way on elevated ground); that correction applies to every family, nanolathe
-clusters included, while model and smoke receivers retain their physical source
-coordinates and response. The explosion source retains its quarter-frame lift
-(§23.2), taken from the current animation frame, so its pool projects one eighth
-of a frame above the event anchor, and
-the per-animation reach of §23.2 is what lets it light the opening flash; no new
-lift or art centroid is introduced. Air bursts retain absolute-height attenuation.
+The falloff smoothsteps `f = 1 − distance²/radius²` as `f²(3 − 2f)` (§31.7),
+with `distance² = dx² + dy² + h²`. Here `h` is the nonnegative difference
+between source height and the ground height its producer carries; producers
+without that metadata still measure from the sea datum (§31.7). The pool is
+centred on the source's **projected** position, `Y − sourceHeight/2`, the same
+half-height projection as visible objects [03 §2.5]. Projection uses the
+absolute source height, independently of the attenuation height. The pass has
+no per-pixel terrain receiver height (SC20 explains why painted terrain cannot
+be inverted that way on elevated ground). This placement applies to every
+family, nanolathe clusters included, while model and smoke receivers retain
+their physical source coordinates and response. The explosion source retains
+its quarter-frame lift (§23.2), taken from the current animation frame, so its
+pool projects one eighth of a frame above the event anchor. Its per-animation
+reach still lights the opening flash; no new lift or art centroid is introduced.
 The quad covers the light's full radius rather than the smaller disc a lifted
 light reaches, so the cover is conservative and the shader's own distance test
 discards the difference without a square root [I2]. The world transform of §16.3
@@ -6686,11 +6687,14 @@ it.
 
 ### 31.4 Cost and verification
 
-Cost is two extra submissions — the barrier's copy and the batch — in a frame with
-a light in view, and nothing in a frame without one. Optional
-`NANOLATHE_EXPLOSION_SHOTS` captures a frame sequence for inspection. The
-synthetic and opt-in real-device coverage this section carried, and the
-measurements behind its constants, are in the history file (§31.4, §31.6).
+The §31.8 response costs two passes in a lit frame, as the original additive
+pass did: one into the read surface carrying the clipped composite copy, the
+field clear and the field batch, and the resolve back onto the composite. The
+field has no image of its own; it occupies space the read surface's texture
+usually already has (§31.8 "Field storage"). No visible light means no copy,
+clear or draw. Device fixtures cover source placement, flash fade, independent
+switches, strength, the highlight response and the field's frame edges. The
+battle benchmark compares the same scene before and after on both executors.
 
 ### 31.5 Known limits
 
@@ -6719,7 +6723,7 @@ new peak remains. Current-art colour still modulates this envelope, so it cannot
 invent light from dark pixels. Radius, position, radial falloff and the albedo law
 are unchanged, and water receives the same short flash through the existing pass.
 Nearby models and smoke retain the prior full-colour response. The other
-families' terrain gain and timing are §31.7's.
+families' terrain gain and timing are defined in §31.7–§31.8.
 
 The recorder supplies an independent, presence-tagged `LightingAge`: committed tick
 minus published effect `StartTick` plus the presentation fraction when enabled,
@@ -6727,8 +6731,9 @@ populated regardless of the Distortion setting. Untimed detached sources receive
 the lower peak gain but retain art-driven lifetime; missing age does not mean an
 expired or newly restarted explosion, and the main production explosion recorder
 always publishes age. Hidden or finished primary art still stops contributing
-immediately. There is no new shader, texture, pass, clock, simulation state or RNG
-consumer. This short flash is the one terrain response.
+immediately. The short-flash change introduced no shader, texture, pass, clock,
+simulation state or RNG consumer. Its envelope also governs the bounded
+terrain response of §31.8.
 
 ### 31.7 Sparks, the family share of the terrain gain, and the rim
 
@@ -6777,8 +6782,8 @@ constrains the same symbols the table uses.
 
 **The family share.** `groundKindScale` declares every family's share of the
 terrain gain in one table: explosion keeps §31.6's 0.375 and its envelope, fire
-takes 0.3, spark 0.15, and nanolathe, projectile and wreck stay at 1. Fire and
-spark were tuned AFTER the receiver height below landed — measured from the sea
+takes 0.3 and spark 0.15. Section 31.8 subsequently sets nanolathe to 0.45
+and projectile and wreck to 0.65. Fire and spark were tuned AFTER the receiver height below landed — measured from the sea
 datum a pool on high ground carried a large standing attenuation, and a share
 chosen against that reads bleached once the attenuation is gone. Model and
 smoke receivers are untouched and still read the source's own colour, exactly as
@@ -6802,18 +6807,13 @@ whose producer carries no fade are unaffected, which today includes the burning
 FEATURE: its light comes from the feature blit, not from a strip, so its pool
 still ends with its art rather than ahead of it.
 
-**The hue.** Pure `base × light` is a coloured filter, and a filter amplifies
-whatever the surface already is: warm light over saturated grass multiplies the
-one channel that is already high, meets the `1 − base` clamp there first, and the
-pool reads as poison green rather than as firelight. A lit surface physically
-returns the LIGHT's spectrum scaled by its own reflectance, so the fragment mixes
-the albedo product with `luma(base) × light` — the same quantity on a neutral
-surface, the light's own hue on a coloured one — at `groundHueMix` 0.75. Luma
-varies pixel to pixel exactly as the albedo does, so the map's painted structure
-survives; only its hue stops being amplified. The `1 − base` clamp is unchanged
-and still measured against the true albedo.
+**The hue.** The earlier response mixed 75% of the base colour's luma into its
+per-source colour product to restrain excessive surface tint. That was artistic
+colour tuning, not a physical reflectance reconstruction. Section 31.8 replaces
+both that mix and the clipped display-space addition with a linear-light
+response; the painted map still supplies the surface colour.
 
-**The receiver height.** §31.3 attenuated a pool by the source's height above the
+**The receiver height.** The original ground pass attenuated a pool by the source's height above the
 SEA DATUM, because the pass has no terrain receiver height, and §31.5 recorded the
 consequence: a small pool on high ground is suppressed outright. A spark's reach is
 small by construction, so that limit discarded every spark pool on any map that
@@ -6846,14 +6846,159 @@ Every constant here is artistic, and both the gain and the hue mix reach the
 fragment by formatting the Go constants into the shader source once at package
 init, so there is no second hand-written copy of either number to drift. The
 classic executor composes identical pixels — no field it reads changed value — the
-player's light switches still gate the gather and pass, and there is no new
-shader, texture, pass, clock, RNG consumer or authoritative state.
+player's light switches still gate the gather and pass. This earlier tuning
+added no shader, texture or pass; the bounded field of §31.8 now does. Neither
+change adds a clock, RNG consumer or authoritative state.
 
 One wording caution, since the paragraphs above are read separately: "model and
 smoke receivers are untouched" is a statement about the family SHARE, which is a
 terrain-only multiplier. A source that was reclassified from fire to spark does
 reach those receivers differently — a smaller radius, a lower energy, no flicker —
 because it is a different family now, not because the receivers changed.
+
+### 31.8 Bounded terrain illumination
+
+**Nanolathe presentation policy**, user-approved 2026-10-05 after reviewing
+matched terrain captures. The field and resolve are retained; the same day the
+field moved to half resolution inside the read surface ("Field storage"). This
+is a presentation choice, not a retail finding or gameplay policy, and applies
+through the existing Enhanced ground-light control in every gameplay mode.
+Original, GPU Classic, Enhanced with ground light disabled, model/smoke lighting,
+glow, simulation, RNG streams and content remain unchanged. No map-name or biome
+special cases.
+
+**Response.** Keep the source budget, projection, height attenuation, smoothstep
+spatial falloff and per-source fade. Normalize each source colour by its largest
+channel, decode that hue with the sRGB transfer function, and restore its peak
+and ground gain. This treats source strength as authored emission energy while
+converting hue separately; the palette is not a radiometric measurement.
+For each source's resulting nonnegative linear energy `E`, write `1 - exp(-E)`
+to a cleared field with screen blending. In exact arithmetic overlapping sources
+produce `Q = 1 - exp(-sum(E))`. RGBA8 storage rounds intermediate blends, so
+reversed source order is checked within two display-byte units, not claimed
+bit-identical. Source ordering itself remains the existing deterministic order.
+The field uses valid premultiplied alpha; its alpha is not a coverage mask for
+terrain.
+
+Decode the copied opaque terrain colour to linear `B`. Its surface response is
+`R = mix(B, luma(B), 0.25)`, using linear luminance weights
+`(0.2126, 0.7152, 0.0722)`. Lift that response to `H = R * (2 - R)` so light on
+darker painted surfaces remains legible. Resolve once as
+`C = B + (1 - B) * H * Q`, then encode to display colour. These are artistic
+constants: the source textures already contain painted lighting and are not
+unlit albedo. The response remains bounded for every number of overlapping
+lights. Under neutral light the grayscale ramp stays monotonic; even a full
+field retains midtone texture instead of making a white plateau. The lift was
+added after the first matched metal/desert captures showed too little light.
+A zero field returns the original pixel directly, preserving unlit bytes. The
+resolve preserves alpha and runs before objects and ordinary fog as before.
+
+**Field storage.** The field is stored at half resolution in the read surface,
+beside or below the frame-sized read copy (`groundFieldLayout`). Every pool
+ends in the smoothstep of §31.7, so the field is smooth at the scale of its
+texels: the resolve reconstructs it bilinearly, and on synthetic one-, 17- and
+64-light scenes at 1920×1080 the composite stays within one display byte of a
+full-resolution field. Single pools of 24 device pixels' radius and more stay
+within two; smaller pools, which appear when zoomed out, differ by up to two,
+three, four and six display levels at radii of 16, 12, 8 and 6 pixels. Each disc is drawn at half scale (centre, height and
+radius together, so the ratio test is unchanged) with its quad rounded outward
+to whole texels, so a disc clipped at an odd frame's right or bottom edge still
+writes the last texel. Every bilinear tap is clamped to the field's own
+rectangle, so the frame's edges never blend with the read copy or with the
+texture beyond the field. Before the batch, the pass zeroes every field texel
+the resolve rectangle's taps can reach. The copy, that clear and the batch share
+one destination, so the whole step is two passes.
+
+Ebitengine stores each image in a texture whose extents are rounded up to
+powers of two. The read surface takes whichever placement keeps that texture
+smaller, below the copy on a tie. At 1280×720, 1920×1080, 2560×1440 and
+3840×2160 one placement fits in space the copy's texture already has, so the
+field costs no GPU memory. Where neither fits (1366×768, 1440×900) the read
+surface's texture doubles in one dimension, which is the memory a separate
+frame-sized field would have taken. A placement must also fit the device's
+largest texture side (`ebiten.MaxImageSize`); a frame for which neither does
+keeps a frame-sized read surface and receives no terrain pools, while models
+and smoke keep their light. Because the read surface now extends past
+the frame, a layer that samples the read copy clamps to the frame: the water
+refraction clamps to its destination's size, which is the frame, rather than to
+the read surface's (§26).
+
+**Family tuning.** Ground optical-density gain remains 2.0. The family shares
+are explosion `0.75 / 2.0` before its existing short envelope, nanolathe 0.45,
+fire 0.3, projectile 0.65, wreck 0.65 and spark 0.15. Existing strength and
+content-family multipliers scale the input energy; the visible response is
+nonlinear. Models and smoke still read the unchanged source. The terrain art,
+sampling and zoom controls are unchanged: texture filtering is a separate
+question outside this lighting change.
+
+**Acceptance.** `checkGroundHighlightResponseDevicePixels` renders the real
+field and resolve over a grayscale ramp with one and a full budget of lights.
+It checks retained highlight detail, monotonicity, neutral hue/opaque alpha,
+black/white anchors, empty-frame identity, clearing between frames and bounded
+colour-order sensitivity. Its clearing check samples a pixel more than four
+pixels outside the new pool, beyond the reach of the half-resolution field's
+taps; a second corner, on the rectangle's even right and bottom edges, fails
+without the clear's one-texel outer margin on either axis.
+`checkGroundFieldEdgesDevicePixels` lights odd and even frames in both
+placements with one frame-wide light and requires the last row and column to
+match the centre within one byte; removing the tap clamp or the outward
+rounding each fails it. `TestGroundFieldLayout` locks the placement, the
+no-growth frame sizes and the texture-limit fallback, and
+`TestReadCopyShadersClampToTheFrame` rejects any of the listed read-copy shaders
+sizing its samples by the read surface. Existing device fixtures preserve projected centring,
+flash decay and independent ground/model controls. Matched retail film captures
+cover desert, snow, ice, metal, grass, forest, rock and lava, with construction
+and combat, using the same fixed scripts and camera in both builds. Artifacts
+and measurements remain outside the repository; no retail bytes are committed.
+The renderer still has no terrain normals or light occlusion (§31.5); this
+change adjusts colour response, not geometric illumination.
+
+**Visual and performance validation, 2026-10-05.** The fixed 30 fps, three-second film pairs use
+Painted Desert, Polar Range, Ice Scream, Metal Heck, Greenhaven, Gasbag Forests,
+Comet Catcher and Lava Run. Snow/ice retain their painted texture through large
+flashes; metal/desert retain softer coloured pools. A supplemental Painted
+Desert builder/factory sequence compares both builds with a ground-light-disabled
+diagnostic: the candidate still casts blue light. The existing elevated-nano
+receiver limitation in §31.7 is unchanged; the first elevated construction-only
+ice view had no terrain light in either build, so it is not evidence for the
+new response. The main ice comparison was reframed on active combat.
+
+Fast, retail short-tier, amd64 fingerprint and real-device gates passed. A
+read-only specialist review checked the bounded-response arithmetic, Kage
+coordinates/alpha and lifecycle; its stale-field test correction was applied
+and rerun on device. The coastal live benchmark ran before/after on both
+executors, plus a reverse-order Modern repeat, with identical metadata and
+per-frame simulation census. Classic's final PNG was byte-identical. Modern
+added exactly one pass, one draw and one quad. Median total host work was
+12.62→10.81 ms on the first pair and 11.04→11.34 ms on the repeat; median
+submission was 4.24→3.82 and 3.87→3.87 ms. These short runs do not establish a
+speedup, and GPU execution timing is unavailable. Total measured allocation
+was 0.928→1.054 MB/frame initially and 0.913→0.926 on the repeat; the extra
+pass has a small allocation cost and the first pair had substantial run
+variance. That separate field was a 2048×2048 RGBA8 texture at 1080p, 16 MiB
+rather than the 7.9 MiB first recorded here, since Ebitengine rounds texture
+extents up to powers of two (32 MiB at 1440p, 64 MiB at 4K).
+
+**Field storage validation, 2026-10-05.** A device micro-benchmark timed the
+ground-light step alone, including GPU execution: interleaved rounds of 30
+repetitions per variant, each followed by a one-pixel readback, over synthetic
+scenes with one, 17 and 64 visible lights. On an otherwise idle M3 Pro at
+1920×1080 the separate full-resolution field cost 77, 79 and 130 µs per lit
+frame more than the original additive pass (121, 118 and 192 µs at
+2560×1440). Most of that was the third pass itself: even one small light paid
+it, and a half-resolution field in its own image still did. A prototype of the
+packed field with the same draws measured +14, +21 and −34 µs at 1920×1080
+(+21, +55 and +50 µs at 2560×1440). The final code was measured while another
+process shared the GPU, which inflated every time two- to fourfold; across two
+repeats the separate field measured +95 to +120, +333 to +354 and +416 to
++424 µs at 1920×1080, and the packed field −5 to +12, +39 to +114 and −82 µs.
+The remaining cost over the original pass is the resolve's per-pixel transfer
+functions; with the full budget the quarter-size field is cheaper than the
+original full-resolution discs. In the coastal live benchmark (Modern, seed 7,
+1920×1080) every frame carried 7 to 32 pools; passes fell from 22 to 21, host
+draw work and submission were unchanged (11.82→11.70 and 4.06→4.07 ms), and the
+final frame matched the separate field's except for rounding speckle inside one
+large explosion pool (12,094 pixels, 11,545 of them by one level, at most five).
 
 ## 32. Reflected explosions, shoreline band, and the removed sun glitter
 

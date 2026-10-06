@@ -319,8 +319,10 @@ func TestGroundLightQuadsCulledToViewport(t *testing.T) {
 }
 
 func TestGroundLightShaderCompiles(t *testing.T) {
-	if _, err := ebiten.NewShader([]byte(groundLightShaderSource)); err != nil {
-		t.Fatal(err)
+	for _, src := range []string{groundResolveShaderSource, groundLightShaderSource, groundClearShaderSource} {
+		if _, err := ebiten.NewShader([]byte(src)); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

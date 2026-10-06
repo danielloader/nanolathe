@@ -8,27 +8,21 @@ import (
 )
 
 // Ground illumination for the Enhanced battle lights
-// (docs/DESIGN_GPU_RENDERER.md §31). Until now a light reached model faces and
-// smoke only, so an explosion over open terrain left the ground it stood on
-// exactly as the map painted it. This pass gives every selected source a pool
-// of light on the composite the terrain pass has just finished.
+// (docs/DESIGN_GPU_RENDERER.md §31.8). Selected sources accumulate into a
+// bounded field before one linear-light resolve brightens the painted terrain.
 //
 // It is presentation only, Enhanced only, and gated by the ground light switch
 // alone (§30): with the switch off nothing is copied, nothing is batched and
 // the composite is byte-identical to the executor without it, whatever the
 // model light switch says.
 
-// groundLightGain is the pool's peak strength as a multiple of the ground's own
-// albedo. It stays well below the model-face gain of §23.2 — terrain already
-// carries the map's painted lighting, and the clamp against 1 − base keeps that
-// detail — but it has to be far enough above zero for the pool to read without
-// amplification, which the first 0.9 was not. It is an artistic choice.
-// Explosion receivers now apply their separate lower gain and short fade (§31.6).
+// groundLightGain scales the optical density of the bounded light field.
+// This is authored Enhanced presentation, not retail lighting (§31.8).
 const groundLightGain = 2.0
 
 // groundKindScale is each family's share of groundLightGain at the TERRAIN
 // receiver; model and smoke receivers keep the full colour they always had
-// (§31.6, §31.7). Terrain is the receiver that reads as a shape — a pool on
+// (§31.6–§31.8). Terrain is the receiver that reads as a shape — a pool on
 // open ground is a circle the eye finds — so the families that stand for a
 // small, moving, short-lived source are held well below the standing ones.
 //
@@ -38,10 +32,10 @@ const groundLightGain = 2.0
 // a share picked against that reads bleached once the attenuation is gone.
 var groundKindScale = [lightKindCount]float32{
 	lightExplosion:  0.75 / groundLightGain, // §31.6's peak, before its envelope
-	lightNano:       1,
+	lightNano:       0.45,
 	lightFire:       0.3, // a burning place still lights the ground it stands on
-	lightProjectile: 1,
-	lightWreck:      1,
+	lightProjectile: 0.65,
+	lightWreck:      0.65,
 	lightSpark:      0.15, // a burning fragment lights almost nothing
 }
 
@@ -79,15 +73,69 @@ func groundScale(light *battleLight) float32 {
 }
 
 type groundLighting struct {
-	shader  *ebiten.Shader
-	verts   []ebiten.Vertex
-	indices []uint32
-	opts    ebiten.DrawTrianglesShaderOptions
-	// read is the union of the discs' clipped quads. The shader samples the
-	// fragment's own pixel and nothing else, so the quads are exactly the
-	// region the copy has to carry: a couple of explosions no longer cost a
-	// full-frame blit (readcopy.go).
+	shader        *ebiten.Shader
+	resolveShader *ebiten.Shader
+	clearShader   *ebiten.Shader
+	resolveOpts   ebiten.DrawTrianglesShaderOptions
+	clearOpts     ebiten.DrawTrianglesShaderOptions
+	// verts are the frame's discs in screen space; fieldVerts are the same
+	// discs mapped into the field's region of the read surface (§31.8).
+	verts      []ebiten.Vertex
+	fieldVerts []ebiten.Vertex
+	indices    []uint32
+	opts       ebiten.DrawTrianglesShaderOptions
+	// clearVerts and resolveVerts are the pass's two single-quad draws.
+	clearVerts, resolveVerts [4]ebiten.Vertex
+	// fieldRect is the field's x, y, width and height in the read surface,
+	// set with the surfaces (ensureSize). fieldFits is false when neither
+	// placement fits the device's largest texture; the pass then draws nothing.
+	fieldRect [4]int
+	fieldFits bool
+	// read is the union of the discs' clipped quads. The resolve samples the
+	// fragment's own pixel and the field under it and nothing else, so the
+	// quads are exactly the region the copy has to carry: a couple of
+	// explosions no longer cost a full-frame blit (readcopy.go).
 	read readRect
+}
+
+// groundFieldDivisor is the light field's resolution divisor. Every pool ends
+// in §31.7's smoothstep, so the field is smooth at the scale of its texels: a
+// half-resolution field reconstructed bilinearly stays within a display byte
+// or two of a full-resolution one for pools a few dozen pixels wide, at a
+// quarter of the texels. The smallest pools, seen zoomed out, differ by a few
+// bytes more (§31.8).
+const groundFieldDivisor = 2
+
+// groundFieldLayout sizes the read surface for a w×h frame: the read copy
+// occupies its top-left w×h, and the field sits beside or below it. Of the
+// placements within maxSide (the device's largest texture side; 0 means no
+// limit), it takes the one whose texture is smaller, below on a tie.
+// Ebitengine stores each image in a texture rounded up to powers of two, so at
+// most frame sizes one placement fits in space that texture already has, and
+// the field costs no memory of its own (§31.8). field is x, y, width, height.
+// When neither placement fits, ok is false and the read surface is the frame.
+func groundFieldLayout(w, h, maxSide int) (readW, readH int, field [4]int, ok bool) {
+	fw, fh := (w+groundFieldDivisor-1)/groundFieldDivisor, (h+groundFieldDivisor-1)/groundFieldDivisor
+	fits := func(a, b int) bool { return maxSide <= 0 || (a <= maxSide && b <= maxSide) }
+	below, beside := fits(w, h+fh), fits(w+fw, h)
+	if below && (!beside || texturePow2(w)*texturePow2(h+fh) <= texturePow2(w+fw)*texturePow2(h)) {
+		return w, h + fh, [4]int{0, h, fw, fh}, true
+	}
+	if beside {
+		return w + fw, h, [4]int{w, 0, fw, fh}, true
+	}
+	return w, h, [4]int{}, false
+}
+
+// texturePow2 is the power-of-two texture extent Ebitengine allocates for an
+// image extent of n. It only ranks the two placements above; a different
+// backend rounding would cost memory, not correctness.
+func texturePow2(n int) int {
+	p := 1
+	for p < n {
+		p <<= 1
+	}
+	return p
 }
 
 // drawGroundLighting runs at the end of the terrain pass, after the water
@@ -95,21 +143,86 @@ type groundLighting struct {
 // too, which is intended — and before objects, wakes and scorch, so units are
 // drawn over it and the ordinary fog composite covers it (§26.3, §31).
 //
-// It costs two submissions in a frame with a light in view and nothing at all
-// in a frame without one: the scheduler barrier plus the composite copy, then
-// one batch holding every light's clipped disc.
+// It costs two passes in a lit frame and nothing in a frame without a visible
+// light (§31.8): one into the read surface carrying the composite copy, the
+// field clear and the field batch, and the resolve back onto the composite.
 func (r *Renderer) drawGroundLighting() {
 	g := &r.ground
-	if r.lighting.groundDisabled || 1+r.lighting.groundStrengthOffset <= 0 || len(r.lighting.lights) == 0 || g.shader == nil || r.surfaces[0] == nil || r.surfaces[1] == nil {
+	if r.lighting.groundDisabled || 1+r.lighting.groundStrengthOffset <= 0 || len(r.lighting.lights) == 0 || g.shader == nil || g.resolveShader == nil || g.clearShader == nil || !g.fieldFits || r.surfaces[0] == nil || r.surfaces[1] == nil {
 		return
 	}
 	r.appendGroundLights()
 	if len(g.indices) == 0 {
 		return
 	}
-	// Additive, so overlapping pools sum: the composite becomes
-	// base × (1 + sum of the discs' contributions), clamped per channel.
-	r.drawOverComposite(g.read, g.verts, g.indices, g.shader, &g.opts, ebiten.BlendLighter)
+	// The resolve rewrites the composite it reads, so everything under the
+	// pools has to be on the composite before the copy is taken.
+	r.submitSchedule()
+	read, f := r.surfaces[1], g.fieldRect
+	r.copyComposite(read, r.surfaces[0], g.read.x0, g.read.y0, g.read.x1, g.read.y1)
+
+	// The field region keeps the previous frame's light, so zero every texel
+	// the resolve's bilinear taps can reach, then accumulate: screen(1-exp(-E))
+	// yields 1-exp(-sum(E)) without an HDR target or a per-light ceiling. The
+	// copy, clear and batch share one destination, so they are one pass.
+	d := groundFieldDivisor
+	x0, y0 := max(g.read.x0/d-1, 0), max(g.read.y0/d-1, 0)
+	x1, y1 := min((g.read.x1+d-1)/d+1, f[2]), min((g.read.y1+d-1)/d+1, f[3])
+	setQuad(&g.clearVerts, float32(f[0]+x0), float32(f[1]+y0), float32(f[0]+x1), float32(f[1]+y1), [4]float32{})
+	g.clearOpts.Blend = ebiten.BlendCopy
+	r.recordSubmission(len(g.clearVerts), len(r.copyIdx))
+	read.DrawTrianglesShader32(g.clearVerts[:], r.copyIdx[:], g.clearShader, &g.clearOpts)
+	r.frameDraws++
+	g.appendFieldVerts(f)
+	g.opts.Blend = groundFieldBlend
+	r.recordSubmission(len(g.fieldVerts), len(g.indices))
+	read.DrawTrianglesShader32(g.fieldVerts, g.indices, g.shader, &g.opts)
+	r.frameDraws++
+
+	// Every terrain pixel under the pools is resolved once, regardless of the
+	// number of lights. The quad's custom lanes carry the field's rectangle.
+	setQuad(&g.resolveVerts, float32(g.read.x0), float32(g.read.y0), float32(g.read.x1), float32(g.read.y1),
+		[4]float32{float32(f[0]), float32(f[1]), float32(f[2]), float32(f[3])})
+	g.resolveOpts.Images = [4]*ebiten.Image{read}
+	g.resolveOpts.Blend = ebiten.BlendCopy
+	r.beginPass(r.surfaces[0])
+	r.recordSubmission(len(g.resolveVerts), len(r.copyIdx))
+	r.surfaces[0].DrawTrianglesShader32(g.resolveVerts[:], r.copyIdx[:], g.resolveShader, &g.resolveOpts)
+	r.frameDraws++
+}
+
+// setQuad fills a corner-ordered quad matching r.copyIdx, with matching
+// destination and source positions and the given custom lanes.
+func setQuad(q *[4]ebiten.Vertex, x0, y0, x1, y1 float32, custom [4]float32) {
+	for i, c := range [4][2]float32{{x0, y0}, {x1, y0}, {x0, y1}, {x1, y1}} {
+		q[i] = ebiten.Vertex{DstX: c[0], DstY: c[1], SrcX: c[0], SrcY: c[1],
+			Custom0: custom[0], Custom1: custom[1], Custom2: custom[2], Custom3: custom[3]}
+	}
+}
+
+// appendFieldVerts maps the screen-space discs into the field: a 1/divisor
+// scale about the frame origin, then the field's offset in the read surface.
+// The disc test is a ratio of squared distances, so scaling the centre, height
+// and radius together leaves every pool's shape unchanged. Each quad is
+// rounded outward to whole field texels, so a disc clipped at the frame's
+// right or bottom edge still writes the field's last texel there.
+func (g *groundLighting) appendFieldVerts(f [4]int) {
+	const inv = 1 / float32(groundFieldDivisor)
+	fx, fy := float32(f[0]), float32(f[1])
+	g.fieldVerts = append(g.fieldVerts[:0], g.verts...)
+	for i := 0; i+3 < len(g.fieldVerts); i += 4 {
+		q := g.fieldVerts[i : i+4 : i+4]
+		x0, y0 := float32(math.Floor(float64(q[0].DstX*inv))), float32(math.Floor(float64(q[0].DstY*inv)))
+		x1 := min(float32(math.Ceil(float64(q[3].DstX*inv))), float32(f[2]))
+		y1 := min(float32(math.Ceil(float64(q[3].DstY*inv))), float32(f[3]))
+		for j, c := range [4][2]float32{{x0, y0}, {x1, y0}, {x0, y1}, {x1, y1}} {
+			v := &q[j]
+			v.DstX, v.DstY = fx+c[0], fy+c[1]
+			v.SrcX, v.SrcY = v.DstX, v.DstY
+			v.Custom0, v.Custom1 = fx+v.Custom0*inv, fy+v.Custom1*inv
+			v.Custom2, v.Custom3 = v.Custom2*inv, v.Custom3*inv
+		}
+	}
 }
 
 // appendGroundLights builds the frame's clipped discs. A light whose disc falls
@@ -176,44 +289,32 @@ func newGroundLightShader() (*ebiten.Shader, error) {
 	return compileShader(groundLightShaderSource)
 }
 
-// The fragment is base × light, not a flat additive wash: multiplying by the
-// albedo under the pixel keeps every painted detail of the map — a dark rock
-// stays darker than the sand beside it — and the per-channel clamp against
-// 1 − base is what stops a bright source from flattening the ground to white.
-//
-// Pure base × light is a coloured FILTER, though, and a filter amplifies
-// whatever the surface already is: a warm fire over saturated grass multiplies
-// the one channel that is already high, drives it into the clamp, and the pool
-// reads as poison green rather than as firelight. The physical answer is that a
-// lit surface returns the LIGHT's spectrum scaled by its own reflectance, so the
-// fragment mixes the albedo product with luma(base) × light — the same quantity
-// on a neutral surface, and the light's own hue on a coloured one. At
-// groundHueMix the pool keeps the map's painted structure (luma varies pixel to
-// pixel exactly as the albedo does) and stops inheriting its hue (§31.7).
-//
-// The falloff is the model faces' radial law of §23.2 with the square dropped:
-// a face is a small target and wants a tight core, while a ground pool is read
-// as a shape and wants a body. Squared, the pool was a bright point inside a
-// wide invisible skirt; linear in d²/r² it carries light out to most of its
-// radius and still reaches zero at the edge. Distance stays three-dimensional.
-//
-// That linear law reaches zero with a slope, and a brightening that stops at a
-// slope is a rim: the eye reads the termination as the outline of a disc, which
-// is what made a pool on open ground look like a drawn circle. Smoothstepping
-// it — f²(3 − 2f) — lands at zero with zero slope at the rim and at full with
-// zero slope at the core, so the pool ends in nothing at all while keeping the
-// body the linear law was chosen for (§31.7). Two multiplies and a subtract.
-// The source is BUILT from the Go constants rather than carrying literals that
-// restate them. A coupling assertion can only constrain the side it names, so a
-// pair of hand-written numbers lets the shader ship a value the design document
-// does not describe; formatting them once at package init removes the second
-// copy entirely. It is one allocation for the life of the process, not per
-// frame, so §13's CPU/allocation policy is unaffected.
-var groundLightShaderSource = fmt.Sprintf(groundLightShaderTemplate, groundHueMix, groundLightGain)
+// The field is colour data with opaque alpha wherever a disc writes. Keeping
+// its alpha valid avoids relying on non-premultiplied image storage (§31.8).
+var groundFieldBlend = ebiten.Blend{
+	BlendFactorSourceRGB:        ebiten.BlendFactorOne,
+	BlendFactorDestinationRGB:   ebiten.BlendFactorOneMinusSourceColor,
+	BlendFactorSourceAlpha:      ebiten.BlendFactorOne,
+	BlendFactorDestinationAlpha: ebiten.BlendFactorOneMinusSourceAlpha,
+	BlendOperationRGB:           ebiten.BlendOperationAdd,
+	BlendOperationAlpha:         ebiten.BlendOperationAdd,
+}
 
-const groundLightShaderTemplate = `//kage:unit pixels
+// Shared transfer functions apply to palette display colours, not to already
+// linear energy. The recorded light's peak retains its authored strength;
+// converting its normalized hue cannot change the strength slider's meaning.
+const groundTransferSource = `
+func groundLinear(c vec3) vec3 {
+ return mix(c/12.92, pow((c+vec3(0.055))/1.055, vec3(2.4)), step(vec3(0.04045),c))
+}
+func groundDisplay(c vec3) vec3 {
+ return mix(c*12.92, 1.055*pow(c,vec3(1.0/2.4))-vec3(0.055), step(vec3(0.0031308),c))
+}
+`
+
+var groundLightShaderSource = `//kage:unit pixels
 package main
-
+` + groundTransferSource + fmt.Sprintf(`
 func Fragment(dst vec4, src vec2, color vec4, light vec4) vec4 {
  p := dst.xy-imageDstOrigin()
  d := p-light.xy
@@ -222,16 +323,60 @@ func Fragment(dst vec4, src vec2, color vec4, light vec4) vec4 {
  if d2 >= r*r { discard() }
  falloff := 1.0-d2/(r*r)
  falloff = falloff*falloff*(3.0-2.0*falloff)
- base := imageSrc0At(p+imageSrc0Origin()).rgb
- lit := mix(base, vec3(dot(base,vec3(0.299,0.587,0.114))), %[1]v)*color.rgb
- return vec4(min(lit*(falloff*%[2]v), vec3(1.0)-base), 0.0)
+ peak := max(color.r,max(color.g,color.b))
+ energy := groundLinear(color.rgb/max(peak,0.000001))*peak
+ return vec4(vec3(1.0)-exp(-energy*(falloff*%v)), 1.0)
 }
+`, groundLightGain)
+
+// Painted map colour is a reflectance proxy, not an unlit material. A bounded
+// reflected contribution leaves its authored shadows and highlights intact:
+// Lift the reflectance proxy R to R*(2-R), then resolve in linear light as
+// out = base + (1-base)*liftedReflectance*field. Even a saturated
+// field cannot turn a grey ramp into a flat white patch (§31.8).
+const groundHueMix = 0.25
+
+// The resolve reads both inputs from the read surface: the copy at the
+// fragment's own pixel, and the field (rectangle x, y, width, height in the
+// custom lanes) reconstructed bilinearly at 1/divisor scale. Each tap is
+// clamped to the field's own rectangle, so the frame's edges never blend with
+// the read copy beside it or with the texture beyond it.
+var groundResolveShaderSource = `//kage:unit pixels
+package main
+` + groundTransferSource + fmt.Sprintf(`
+func Fragment(dst vec4, src vec2, color vec4, region vec4) vec4 {
+ p := dst.xy-imageDstOrigin()
+ o := imageSrc0Origin()
+ original := imageSrc0At(p+o)
+ q := p/%d.0-vec2(0.5)
+ i := floor(q)
+ f := q-i
+ hi := region.zw-vec2(0.5)
+ a := o+region.xy+clamp(i+vec2(0.5),vec2(0.5),hi)
+ b := o+region.xy+clamp(i+vec2(1.5),vec2(0.5),hi)
+ field := mix(mix(imageSrc0At(a).rgb,imageSrc0At(vec2(b.x,a.y)).rgb,f.x),
+  mix(imageSrc0At(vec2(a.x,b.y)).rgb,imageSrc0At(b).rgb,f.x),f.y)
+ if max(field.r,max(field.g,field.b)) <= 0.0 { return original }
+ base := groundLinear(original.rgb/max(original.a,0.000001))
+ reflected := mix(base,vec3(dot(base,vec3(0.2126,0.7152,0.0722))),%v)
+ reflected = reflected*(vec3(2.0)-reflected)
+ lit := base+(vec3(1.0)-base)*reflected*field
+ return vec4(groundDisplay(lit)*original.a,original.a)
+}
+`, groundFieldDivisor, groundHueMix)
+
+func newGroundResolveShader() (*ebiten.Shader, error) {
+	return compileShader(groundResolveShaderSource)
+}
+
+// groundClearShaderSource zeroes the field texels a frame's resolve can
+// sample, inside the same pass as the copy and the field batch.
+const groundClearShaderSource = `//kage:unit pixels
+package main
+
+func Fragment(dst vec4, src vec2, color vec4) vec4 { return vec4(0) }
 `
 
-// groundHueMix is how far the fragment moves from the albedo filter toward the
-// neutral-surface response: 0 is the pure base × light of §31.3, 1 discards the
-// surface's hue entirely and keeps only its brightness. It is an artistic
-// choice. Both it and the gain reach the shader through the template above
-// rather than as a uniform: this pass compiles once and submits one batch, so a
-// uniform map would allocate per frame for a constant (§13).
-const groundHueMix = 0.75
+func newGroundClearShader() (*ebiten.Shader, error) {
+	return compileShader(groundClearShaderSource)
+}

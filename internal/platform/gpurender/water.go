@@ -681,7 +681,9 @@ func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
  broad, fine, gust := waterField(pattern, drift*surfaceMotion, t*surfaceMotion)
  deep := smoothstep(0.05,0.55,mask.y)
  offset := waterOffset(broad, fine, gust)*custom.y*deep*coverage*surfaceMotion
- sample := clamp(screen+offset,vec2(0.5),imageSrc0Size()-vec2(0.5))
+ // Clamp to the frame, not the read surface: beyond the frame that surface
+ // holds the ground light field (GPU design §31.8).
+ sample := clamp(screen+offset,vec2(0.5),imageDstSize()-vec2(0.5))
  // Subpixel filtering prevents nearest-neighbour displacement from snapping.
  warped := terrainLinear(sample)
  result := warped.rgb

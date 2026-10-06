@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
@@ -76,6 +77,12 @@ func TestElevatedExplosionAndNanoGroundSources(t *testing.T) {
 // Read the real ground pass at native and doubled recording scales. Equal
 // samples above/below the projected source must match, despite its elevation.
 func checkProjectedGroundLightDevicePixels() error {
+	if err := checkGroundHighlightResponseDevicePixels(); err != nil {
+		return err
+	}
+	if err := checkGroundFieldEdgesDevicePixels(); err != nil {
+		return err
+	}
 	if err := checkExplosionGroundFlashDevicePixels(); err != nil {
 		return err
 	}
@@ -347,4 +354,187 @@ func TestGroundPoolMeasuresHeightAboveTheGroundUnderIt(t *testing.T) {
 	if r.lighting.lights[0] != lifted {
 		t.Fatal("the ground measurement mutated the physical source")
 	}
+}
+
+// Enhanced presentation §31.8: even a crowd of lights must retain the painted
+// grey ramp. A per-source clamp followed by addition used to erase its upper
+// half. This exercises the real blend target and resolve, including byte storage.
+func checkGroundHighlightResponseDevicePixels() error {
+	const w, h = 256, 24
+	pal := fixturePalette()
+	r, err := NewChecked(&pal, w, h)
+	if err != nil {
+		return err
+	}
+	base := make([]byte, w*h*4)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := (y*w + x) * 4
+			base[i], base[i+1], base[i+2], base[i+3] = byte(x), byte(x), byte(x), 255
+		}
+	}
+	read := func(lights []battleLight) []byte {
+		r.surfaces[0].WritePixels(base)
+		r.lighting.lights = lights
+		r.drawGroundLighting()
+		p := make([]byte, len(base))
+		r.surfaces[0].ReadPixels(p)
+		return p
+	}
+	var lights []battleLight
+	for range battleLightLimit {
+		lights = append(lights, battleLight{position: [3]float32{128, 4, 0}, radius: 4096,
+			color: [3]float32{1, 1, 1}, kind: lightNano})
+	}
+	one, many := read(lights[:1]), read(lights)
+	for x := 16; x <= 224; x += 16 {
+		i := (4*w + x) * 4
+		if !(many[i] >= one[i] && one[i] > byte(x) && many[i] < 255) {
+			return fmt.Errorf("ground highlight ramp at %d: one=%d many=%d", x, one[i], many[i])
+		}
+		if many[i] <= many[i-16*4] {
+			return fmt.Errorf("overlapping ground lights flattened texture at %d", x)
+		}
+		if many[i] != many[i+1] || many[i] != many[i+2] || many[i+3] != 255 {
+			return fmt.Errorf("neutral ground light changed hue or alpha at %d", x)
+		}
+	}
+	if many[0] != 0 || many[(w-1)*4] != 255 {
+		return fmt.Errorf("ground response changed black/white anchors")
+	}
+	// An empty field must restore every byte, not just look close. Then a new
+	// small source must not reuse the previous frame's crowded field outside it.
+	if !bytes.Equal(base, read(nil)) {
+		return fmt.Errorf("unlit ground changed after crowded lighting")
+	}
+	small := lights[0]
+	small.radius = 12
+	p := read([]battleLight{small})
+	if !bytes.Equal(base[:64*4], p[:64*4]) {
+		return fmt.Errorf("old light field leaked outside the next frame's pool")
+	}
+	// These corners lie inside the new resolve rectangle [116,140)×[0,16) but
+	// over four pixels outside its circular support, beyond the reach of the
+	// half-resolution field's bilinear taps (§31.8). They sample the field, so
+	// they detect a missing clear. The rectangle's right and bottom edges are
+	// even and inside the frame, so the second corner's taps reach the field
+	// texel just past the rectangle: it fails without the clear's outer margin.
+	for _, corner := range [][2]int{{116, 15}, {139, 15}} {
+		i := (corner[1]*w + corner[0]) * 4
+		if !bytes.Equal(base[i:i+4], p[i:i+4]) {
+			return fmt.Errorf("old light field leaked inside the new resolve rectangle at %v", corner)
+		}
+	}
+	// Byte accumulation can differ by a rounding unit; reversed coloured
+	// sources must not produce a materially different pool.
+	mixed := []battleLight{lights[0], lights[0], lights[0]}
+	mixed[0].color = [3]float32{1, .4, .05}
+	mixed[1].color = [3]float32{.1, 1, .2}
+	mixed[2].color = [3]float32{.2, .4, 1}
+	forward := read(mixed)
+	mixed[0], mixed[2] = mixed[2], mixed[0]
+	reverse := read(mixed)
+	for i := range forward {
+		delta := int(forward[i]) - int(reverse[i])
+		if delta < -2 || delta > 2 {
+			return fmt.Errorf("light order changed ground by %d at byte %d", delta, i)
+		}
+	}
+	return nil
+}
+
+// Enhanced presentation §31.8: the half-resolution field shares the read
+// surface with the w×h read copy. It must never overlap the copy or leave the
+// surface, and at the common frame sizes it must fit in texture space the copy
+// already pays for, which is what makes the field free in GPU memory.
+func TestGroundFieldLayout(t *testing.T) {
+	for _, c := range []struct {
+		w, h int
+		free bool
+	}{
+		{1920, 1080, true}, {2560, 1440, true}, {3840, 2160, true}, {1280, 720, true},
+		{1728, 1117, true}, {121, 67, true}, {161, 91, true}, {1440, 900, false}, {1366, 768, false},
+	} {
+		rw, rh, f, ok := groundFieldLayout(c.w, c.h, 0)
+		if !ok {
+			t.Fatalf("%dx%d has no field placement without a texture limit", c.w, c.h)
+		}
+		if f[2] != (c.w+1)/2 || f[3] != (c.h+1)/2 {
+			t.Fatalf("%dx%d field %v is not half the frame", c.w, c.h, f)
+		}
+		if f[0] < c.w && f[1] < c.h {
+			t.Fatalf("%dx%d field %v overlaps the read copy", c.w, c.h, f)
+		}
+		if rw < c.w || rh < c.h || f[0]+f[2] > rw || f[1]+f[3] > rh {
+			t.Fatalf("%dx%d field %v leaves the %dx%d read surface", c.w, c.h, f, rw, rh)
+		}
+		grew := texturePow2(rw)*texturePow2(rh) > texturePow2(c.w)*texturePow2(c.h)
+		if grew == c.free {
+			t.Fatalf("%dx%d read surface %dx%d grew=%t, want %t", c.w, c.h, rw, rh, grew, !c.free)
+		}
+	}
+	// A device's largest texture overrides the smaller-texture preference: a
+	// tall frame that only fits beside its copy goes there, and a frame with no
+	// fitting placement keeps a frame-sized read surface and no field.
+	if rw, rh, f, ok := groundFieldLayout(1440, 3200, 4096); !ok || rw != 2160 || rh != 3200 || f[0] != 1440 {
+		t.Fatalf("1440x3200 within 4096: %dx%d field %v ok=%t, want beside", rw, rh, f, ok)
+	}
+	if rw, rh, _, ok := groundFieldLayout(3000, 3000, 4096); ok || rw != 3000 || rh != 3000 {
+		t.Fatalf("3000x3000 within 4096: %dx%d ok=%t, want no field", rw, rh, ok)
+	}
+}
+
+// Beyond the frame the read surface holds the ground light field (§31.8), so
+// every layer that samples the read copy clamps to the frame. imageSrc0Size
+// is the read surface's size and would reach into the field at the edges.
+func TestReadCopyShadersClampToTheFrame(t *testing.T) {
+	for _, c := range []struct{ name, src string }{
+		{"water", waterShaderSource}, {"distortion", distortionShaderSource}, {"lens", lensShaderSource},
+		{"arrival", arrivalShaderSource}, {"fog", fogPassShaderSource}, {"ordered fog", fogOrderedShaderSource},
+		{"ground resolve", groundResolveShaderSource}, {"scene", scene2DShaderSource()}, {"scene dest", sceneDestShaderSource()},
+	} {
+		if strings.Contains(c.src, "imageSrc0Size") {
+			t.Errorf("%s shader sizes its samples by the read surface, not the frame", c.name)
+		}
+	}
+}
+
+// Enhanced presentation §31.8: in both of the field's placements, a light
+// covering the whole frame reaches the last row and column as it reaches every
+// other pixel. At odd sizes the last field texel lies past the frame, so a
+// disc clipped there must still write it; at even sizes the last pixel's
+// bilinear taps would leave the field without their clamp. Either defect
+// darkens that edge.
+func checkGroundFieldEdgesDevicePixels() error {
+	for _, c := range []struct {
+		w, h   int
+		beside bool
+	}{{121, 67, false}, {120, 66, false}, {161, 91, true}, {160, 90, true}} {
+		pal := fixturePalette()
+		r, err := NewChecked(&pal, c.w, c.h)
+		if err != nil {
+			return err
+		}
+		if f := r.ground.fieldRect; !r.ground.fieldFits || (f[0] == c.w) != c.beside {
+			return fmt.Errorf("%dx%d field placed at %v, want beside=%t", c.w, c.h, f, c.beside)
+		}
+		base := bytes.Repeat([]byte{128, 128, 128, 255}, c.w*c.h)
+		r.surfaces[0].WritePixels(base)
+		r.lighting.lights = []battleLight{{position: [3]float32{float32(c.w) / 2, float32(c.h) / 2, 0},
+			radius: 4096, color: [3]float32{1, 1, 1}, kind: lightNano}}
+		r.drawGroundLighting()
+		p := make([]byte, len(base))
+		r.surfaces[0].ReadPixels(p)
+		ref := int(p[(c.h/2*c.w+c.w/2)*4])
+		if ref <= 128 {
+			return fmt.Errorf("%dx%d frame-wide light left the centre unlit", c.w, c.h)
+		}
+		for i := 0; i < len(p); i += 4 {
+			if d := int(p[i]) - ref; d < -1 || d > 1 {
+				return fmt.Errorf("%dx%d frame-wide light reached pixel (%d,%d) as %d, centre %d",
+					c.w, c.h, i/4%c.w, i/4/c.w, p[i], ref)
+			}
+		}
+	}
+	return nil
 }

@@ -66,6 +66,7 @@ retail GAF art treats as transparent, is never used for opaque pixels.
 | `-scale` | `2` | Output scale over retail 1x; every size, thickness and wear mark scales with it |
 | `-light` | `bottom-left` | Where light comes from, as in the retail art: rims, recesses, engraved captions, LED highlights, wear and drop shadows all follow it |
 | `-cool` | `0.05` | Shifts the material towards blue |
+| `-grime` | `0.6` | Darkness of the soot, oxide and edge grime; `0` for clean metal |
 | `-pressed-lift` | `1.75` | Pressed face brightness over normal; retail roughly doubles it |
 | `-recess-soft` | `0.35` | Blur on the LED recesses, in 1x pixels |
 | `-material`, `-caption-font`, `-label-font` | | Any material or font: a brass or painted plate, another typeface |

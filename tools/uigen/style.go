@@ -23,6 +23,7 @@ type Style struct {
 	Scale    float64
 	Light    Light
 	Cool     float64 // shifts the material towards blue
+	Grime    float64 // darkness of soot, oxide and edge grime, 0 for none
 	Material *Layer  // seamless gunmetal texture
 
 	CaptionFont, LabelFont *opentype.Font
@@ -554,7 +555,7 @@ func (s *Style) Wear(l *Layer, seed string, right int) {
 	for i, v := range grime.V {
 		grime.V[i] = math.Min(v, 0.7)
 	}
-	l.Paint(grime, 0, 0, RGBA{0.06, 0.055, 0.05, 1})
+	l.Paint(grime, 0, 0, RGBA{0.06, 0.055, 0.05, s.Grime})
 	d, f := deep.Resize(l.W, l.H), faint.Resize(l.W, l.H)
 	ax, ay := -s.Light.X, -s.Light.Y
 	l.Paint(d, ax, ay, white.WithA(0.35))

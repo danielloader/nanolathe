@@ -34,7 +34,7 @@ func TestDitherAvoidsColourKey(t *testing.T) {
 // Wear is seeded by the label: the same label wears identically, different
 // labels differently.
 func TestWearIsSeededByLabel(t *testing.T) {
-	s := &Style{Scale: 2, Light: Light{-1, 1}}
+	s := &Style{Scale: 2, Light: Light{-1, 1}, Grime: 0.6}
 	draw := func(seed string) *Layer {
 		l := NewLayer(108, 60)
 		l.Rect(0, 0, 107, 59, RGBA{0.5, 0.5, 0.5, 1})

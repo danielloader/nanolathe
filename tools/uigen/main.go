@@ -32,6 +32,7 @@ func main() {
 	scale := flag.Float64("scale", 2, "output scale over retail 1x")
 	light := flag.String("light", "bottom-left", "light direction: bottom-left, top-left, bottom-right or top-right")
 	cool := flag.Float64("cool", 0.05, "shift the material towards blue by this fraction")
+	grime := flag.Float64("grime", 0.6, "darkness of soot, oxide and edge grime, 0 for none")
 	flag.Float64Var(&recessSoft, "recess-soft", recessSoft, "blur on the light recesses, in 1x pixels")
 	flag.Float64Var(&pressedLift, "pressed-lift", pressedLift, "pressed face brightness over normal")
 	out := flag.String("out", "uigen-out", "output directory")
@@ -41,7 +42,7 @@ func main() {
 
 	mat, err := LoadLayer(*material)
 	check(err)
-	s := &Style{Scale: *scale, Cool: *cool, Material: mat,
+	s := &Style{Scale: *scale, Cool: *cool, Grime: *grime, Material: mat,
 		CaptionFont: loadFont(*captionFont)}
 	s.LabelFont = s.CaptionFont
 	if *labelFont != "" {

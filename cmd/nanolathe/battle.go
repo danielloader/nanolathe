@@ -46,13 +46,19 @@ type battleSession struct {
 	debugCapturePath  string
 	debugCaptureError error
 
-	sess  *session.Session
-	cat   *content.Catalog
-	cam   *camera.Camera
-	hud   *retailBattleHUD
-	cs    *contentSet
-	fs    vfs.FSOps
-	shell *gameShell
+	sess *session.Session
+	cat  *content.Catalog
+	cam  *camera.Camera
+	// chromeK is the sidebar magnification fixed at the last draw, and
+	// chromeFixed holds it at 1 for captures that replay through the classic
+	// executor (DESIGN_INTERFACE_HUD_INPUT "Modern sidebar scale").
+	chromeK     int32
+	chromeFixed bool
+	railEvents  []input.PointerEvent
+	hud         *retailBattleHUD
+	cs          *contentSet
+	fs          vfs.FSOps
+	shell       *gameShell
 
 	// slowSim holds the simulation batches a live trace keeps until its census
 	// takes them (battle_sim_timing.go); always empty without a trace.

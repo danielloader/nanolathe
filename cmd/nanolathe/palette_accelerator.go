@@ -171,9 +171,9 @@ func (h *retailBattleHUD) servicePaletteFrame(b *battleSession, in *input.State,
 	}
 	if result.Fired {
 		if result.FiredButton != 0 {
-			pointer, _ := in.PointerSample()
 			ctx.pointerActivation = true
-			ctx.pointerX, ctx.pointerY = int32(pointer.X), int32(pointer.Y)
+			// Rail coordinates, as the gadget rectangles are.
+			ctx.pointerX, ctx.pointerY = frame.PointerX, frame.PointerY
 		}
 		modifiers := input.Modifiers{Alt: frame.AltHeld}
 		if in.Kbd != nil {

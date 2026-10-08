@@ -2131,8 +2131,12 @@ or a fixed 1, 2 or 3. Auto is the surface height divided by 720, so 1x below
 1440 rows, 2x from 1440 and 3x from 2160. A fixed choice is reduced until the
 rail keeps at least 480 virtual rows, the height every stock page and the
 side panel art are authored for, so 2x needs 960 rows and 3x 1440
-(`hud.ChromeScale`). The Classic executor always uses 1x: it does not replay
-the region markers below. The Nanolathe screen's Sidebar card and the
+(`hud.ChromeScale`). The scale is resolved once per drawn frame, and input
+until the next draw maps the pointer through that value, which is what the
+player sees. It is always 1x when the Classic executor may replay the
+recording, since that executor ignores the region markers below, and for
+captures that crop the chrome at retail's fixed insets: films,
+`--shot-renderer both` and Nanolathe screen previews. The Nanolathe screen's Sidebar card and the
 in-battle Nanolathe page offer the choice, with the usual Undo and
 Restore.
 
@@ -2156,13 +2160,17 @@ pixels thick. Radar circles keep one-pixel lines. Minimap input and world
 mapping keep the canonical 126-pixel layout through the magnified destination
 rectangle, so the retail arithmetic of `[07 §10]` is unchanged.
 
-The camera's left chrome inset becomes 128k (`camera.ChromeInsets`), which
+The camera's left chrome inset becomes 129k-1, the magnified 129-column side
+panel less one column as retail's 128 is (`camera.ChromeInsets`), which
 moves the clamp floor, centring, the battle viewport rectangle, picking
 clamps, wheel-zoom and on-screen tests with it, so every playable column stays
-reachable beside the wider rail. The top and bottom strips, the slide strip,
-the clock and the viewport overlays anchored to the viewport's left edge keep
-their scale and move right by 128(k-1) in a translated region. Centred modals
-and the chat window are placed beside the wider rail.
+reachable beside the wider rail. Changing the inset keeps the point at the
+viewport's centre. The top and bottom strips, the slide strip, the clock and
+the viewport overlays anchored to the viewport's left edge keep their scale
+and move right by 129(k-1) in a translated region; the message column moves
+with the inset. Centred modals, the unit information screen and the chat
+window are placed beside the wider rail. A save's radar thumbnail rebuilds
+the canonical radar, so it is unchanged by the scale.
 
 `TestChromeScale`, `TestChromeInsetWidensTheViewport` and `TestChromeRegion`
 lock the scale rule, the insets and the region mapping. Magnifying the top and

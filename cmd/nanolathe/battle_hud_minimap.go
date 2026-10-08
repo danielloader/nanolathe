@@ -54,31 +54,16 @@ func radarGAFFrameCount(entry *formats.GAFEntry) int {
 // pixels are already PALETTE.PAL indexes; transparent bytes are skipped and
 // no GUI remap is applied [03 §3.9][fmt gaf].
 func blitRadarGAF(dst *render.RadarSurface, anchorX, anchorY int32, f *formats.GAFFrame) {
-	if dst == nil || f == nil {
-		return
-	}
-	left, top := int(anchorX)-int(f.XOffset), int(anchorY)-int(f.YOffset)
-	for y := 0; y < int(f.Height); y++ {
-		for x := 0; x < int(f.Width); x++ {
-			p, ok := f.At(x, y)
-			if ok {
-				dst.Set(left+x, top+y, p)
-			}
-		}
-	}
+	blitRadarGAFScaled(dst, anchorX, anchorY, f, 1)
 }
 
 // blitRadarGAFScaled is blitRadarGAF with each art pixel drawn scale×scale,
 // its authored offsets magnified with it.
 func blitRadarGAFScaled(dst *render.RadarSurface, anchorX, anchorY int32, f *formats.GAFFrame, scale int32) {
-	if scale <= 1 {
-		blitRadarGAF(dst, anchorX, anchorY, f)
-		return
-	}
 	if dst == nil || f == nil {
 		return
 	}
-	k := int(scale)
+	k := int(max(scale, 1))
 	left, top := int(anchorX)-int(f.XOffset)*k, int(anchorY)-int(f.YOffset)*k
 	for y := 0; y < int(f.Height); y++ {
 		for x := 0; x < int(f.Width); x++ {

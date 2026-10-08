@@ -26,7 +26,7 @@ func (s *nlScreen) sidebarCard() nlCard {
 			get:   func(d *nlDraft) int { return onOff(d.pres.SidebarOrders == 0) },
 			set:   func(d *nlDraft, v int) { d.pres.SidebarOrders = onOff(v == 0) }},
 		nlPart{key: "scale", label: "Sidebar size", sub: "2x needs 960 rows, 3x 1440; Auto picks 2x from 1440", choices: true,
-			steps: []string{"Auto", "1x", "2x", "3x"},
+			steps: chromeScaleSteps(),
 			get:   func(d *nlDraft) int { return d.pres.SidebarScale },
 			set:   func(d *nlDraft, v int) { d.pres.SidebarScale = v }})
 	card.demo, card.compare = "sidebar", nil

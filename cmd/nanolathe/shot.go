@@ -388,6 +388,8 @@ func runShot(opts Options, cs *contentSet) error {
 	}
 
 	shotRenderer := effectiveShotRenderer(opts)
+	// Classic replays the same recording for "both" and ignores chrome regions.
+	b.chromeFixed = shotRenderer == "both"
 	// The renderer switch is the one sanctioned presentation choice [I11]: both
 	// executors replay the same committed frame, and the capture picks which one
 	// writes the --shot PNG [DESIGN_GPU_RENDERER.md §2.5]. classic is the

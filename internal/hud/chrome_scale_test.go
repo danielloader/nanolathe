@@ -17,7 +17,7 @@ func TestChromeScale(t *testing.T) {
 		{4, 2160, 3},
 	}
 	for _, c := range cases {
-		if got := ChromeScale(c.pref, c.screenH); got != c.want {
+		if got := ChromeScale(c.pref, c.screenH, 3); got != c.want {
 			t.Errorf("ChromeScale(%d, %d) = %d, want %d", c.pref, c.screenH, got, c.want)
 		}
 	}

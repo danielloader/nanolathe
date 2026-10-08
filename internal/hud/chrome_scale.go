@@ -13,19 +13,14 @@ const AutoChromeScaleHeight = 720
 // so a fixed scale that would leave fewer is reduced.
 const MinChromeScaleHeight = 480
 
-// MaxChromeScale is the largest integer magnification offered.
-const MaxChromeScale = 3
-
 // ChromeScale resolves a sidebar scale preference — zero for Auto, otherwise a
-// fixed factor — against a surface screenH rows tall.
-func ChromeScale(pref int, screenH int32) int32 {
+// fixed factor — against a surface screenH rows tall, never above maxScale.
+func ChromeScale(pref int, screenH, maxScale int32) int32 {
 	k := int32(pref)
 	if k <= 0 {
 		k = screenH / AutoChromeScaleHeight
 	}
-	if k > MaxChromeScale {
-		k = MaxChromeScale
-	}
+	k = min(k, maxScale)
 	for k > 1 && screenH/k < MinChromeScaleHeight {
 		k--
 	}

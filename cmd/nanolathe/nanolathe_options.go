@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"os"
+	"strings"
 
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
@@ -340,7 +341,7 @@ func nanolatheOptionsPage(window *gui.Window) error {
 	}{
 		{"NFPS", "FPS: 30|FPS: 60|FPS: 120", 3},
 		{"NSIDEBAR", "Sidebar: 6|Sidebar: Flow", 2},
-		{"NSIDESCALE", "Sidebar: Auto|Sidebar: 1x|Sidebar: 2x|Sidebar: 3x", 4},
+		{"NSIDESCALE", chromeScaleLabels("Sidebar: "), settings.MaxChromeScale + 1},
 		{"NZOOM", "Zoom: Smooth|Zoom: Steps|Zoom: Off", 3},
 		{"NICONS", "Icons: Modern|Icons: Comm 3.9", 2},
 		{"NRADARDOTS", "No dots|Visible dots|Attackable dots", 3},
@@ -544,7 +545,7 @@ func (g *gameShell) activateNanolatheOption(name string) bool {
 	case "NRADARDOTS":
 		p.RadarDots = g.retailOptionsStage(name, 3, p.RadarDots)
 	case "NSIDESCALE":
-		p.SidebarScale = g.retailOptionsStage(name, 4, p.SidebarScale)
+		p.SidebarScale = g.retailOptionsStage(name, settings.MaxChromeScale+1, p.SidebarScale)
 	case "NRENDER":
 		stage := g.retailOptionsStage(name, 2, boolInt(p.Renderer == "modern"))
 		p.Renderer = "classic"
@@ -631,4 +632,22 @@ func (g *gameShell) setNanolathePreferences(p settings.Presentation) {
 		f.restore(&next, p)
 	}
 	g.setPresentation(next)
+}
+
+// chromeScaleLabels lists Auto and every fixed scale for a stage control.
+func chromeScaleLabels(prefix string) string {
+	labels := []string{prefix + "Auto"}
+	for _, step := range chromeScaleSteps()[1:] {
+		labels = append(labels, prefix+step)
+	}
+	return strings.Join(labels, "|")
+}
+
+// chromeScaleSteps names the scale preference's values in stored order.
+func chromeScaleSteps() []string {
+	steps := []string{"Auto"}
+	for k := 1; k <= settings.MaxChromeScale; k++ {
+		steps = append(steps, fmt.Sprintf("%dx", k))
+	}
+	return steps
 }

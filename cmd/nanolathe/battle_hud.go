@@ -560,7 +560,7 @@ func (h *retailBattleHUD) applyDisplaySize(w, height int) {
 		return
 	}
 	h.screenW, h.screenH, h.placedScale = int32(w), int32(height), scale
-	rail := camera.OriginX * scale
+	rail := railInset(scale)
 	placeBattleModalBeside(h.exitWin, w, height, rail)
 	placeBattleModalBeside(h.confirmWin, w, height, rail)
 	placeBattleModalBeside(h.restartWin, w, height, rail)
@@ -593,7 +593,7 @@ func (h *retailBattleHUD) placeTalkWindow(w, height int) {
 	if h == nil || h.talkWin == nil || w <= 0 || height <= 0 {
 		return
 	}
-	x, y := camera.OriginX*max(h.chromeScale, 1), int32(height)-h.talkWin.Rect.H
+	x, y := railInset(max(h.chromeScale, 1)), int32(height)-h.talkWin.Rect.H
 	h.talkWin.Rect.X, h.talkWin.Rect.Y = x, y
 	h.talkWin.OriginX, h.talkWin.OriginY = x, y
 	if len(h.talkWin.Gadgets) != 0 {
@@ -928,6 +928,7 @@ func (h *retailBattleHUD) draw(c *client.Client, b *battleSession, presented cli
 	// with PANELBOT throughout — each stamp advancing by its frame width until
 	// the running x reaches the surface width [07 R-HUD-03 §1][07 R-HUD-03 §4].
 	// At 640x480 every stock frame reaches the edge in one stamp.
+	b.resolveChromeScale()
 	b.syncChromeInsets()
 	rail, strip := b.railRegion(), b.stripRegion()
 	h.chromeScale = rail.Scale

@@ -270,7 +270,7 @@ func (h *retailBattleHUD) overWorld(x, y int32) bool {
 	}
 	// The authored rail boundary, matching the PANELSIDE blit, magnified with
 	// the rail (DESIGN_INTERFACE_HUD_INPUT "Modern sidebar scale").
-	railX := int32(hud.ChromeRailX) * max(h.chromeScale, 1)
+	railX := railInset(max(h.chromeScale, 1)) + 1
 	if x < railX {
 		return false
 	}

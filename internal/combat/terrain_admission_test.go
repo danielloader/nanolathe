@@ -104,7 +104,7 @@ func TestModernTerrainUnknownTrajectoriesRemainAdmitted(t *testing.T) {
 		name   string
 		change func(*content.WeaponDef)
 	}{
-		{"burst", func(w *content.WeaponDef) { w.Burst = 2 }},
+		{"self-propelled burst", func(w *content.WeaponDef) { w.Burst = 2; w.SelfProp = true }},
 		{"ballistic arc", func(w *content.WeaponDef) { w.LineOfSight = false; w.Turret = true; w.Ballistic = true }},
 		{"guided missile", func(w *content.WeaponDef) { w.SelfProp = true; w.Guidance = true }},
 		{"vertical launch", func(w *content.WeaponDef) { w.VLaunch = true }},

@@ -88,7 +88,7 @@ func (s *Service) FiringPositionClear(shooter, target *units.Unit, tick uint32, 
 	weapon := launch.Weapon
 	// Predict only the initial projectile. Later burst pellets retain their
 	// own real admission, including inherited spray and refreshed muzzle.
-	if weapon.Burst != 0 {
+	if weapon.Burst != 0 && (liveCreationFamilyForWeapon(weapon) != CreationOrdinary || MotionFamilyForWeapon(weapon) != MotionDirect) {
 		initial := *weapon
 		initial.Burst = 0
 		weapon = &initial

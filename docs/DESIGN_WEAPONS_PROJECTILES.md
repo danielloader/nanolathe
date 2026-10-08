@@ -298,6 +298,7 @@ remain behind the same mode and preserve Strict 3.1's path.
 | Family | Strict 3.1 | Modern |
 |---|---|---|
 | Ordinary direct, including Annihilator | Retail range/medium/aim admission, no terrain preflight | Preview actual launch and discrete movement; reject proven terrain obstruction before the resolved target |
+| Ordinary direct burst, including Brawler EMG | Retail burst scheduling and inherited pellet velocities, no terrain preflight | Preview the first pellet before starting the burst; check each due pellet from its refreshed muzzle and inherited velocity |
 | Ballistic | Retail feasibility solution, no hill clearance check | Preview the actual spread-adjusted launch, slot distance word, gravity and known wind; allow clear arcs and potentially useful splash |
 | Guided ordinary launch, immobile target | Retail pursuit steering, no clearance check | Preview the whole pursuit with the real guidance kernel; reject proven terrain obstruction before the resolved target |
 | Guided ordinary launch, any other target | Retail pursuit steering, no launch clearance check | Reject only when every possible first-step turn endpoint is blocked before the resolved target |
@@ -364,10 +365,31 @@ This changes launch admission only; it does not add terrain avoidance steering.
 Target-independent launch portions use the existing self-propelled motion
 kernel and stop before uncertain guidance/phase behavior.
 
+**Direct bursts — Nanolathe Modern policy, user-authorized 2026-10-07.**
+Ordinary direct bursts use the same terrain proof as single shots. Before
+starting a burst, preview its first pellet from the current resolved muzzle
+and aim. This checks current geometry; it does not predict the shooter's
+position at a later burst deadline. On each due emission, check again after
+the ordinary muzzle refresh, copying the anchor's actual position and
+inherited velocity, including the preceding spray. Never re-aim that pellet
+at its stored target point. Its lifetime is the burst clone's timer, or the
+unsigned stored-distance-plus-one-cell divided by scalar speed [06 §4.3],
+and its first movement sample is the tick after emission [06 §5.1].
+
+A refused initial launch keeps the target and orders and spends no reload,
+ammunition, resource charge, accuracy draw or Fire/Rock callback. A refused
+due pellet silently cancels the unlaunched remainder before deadline,
+allocation, sound or RNG work, using the existing burst obstruction path.
+Earlier pellets continue, and the original resource charge is retained.
+This adds no state or rule seam; rebinding affects the next launch or pellet,
+and Strict 3.1 and Community preserve their burst scheduling and side effects.
+Random-decay bursts and burst families other than ordinary direct motion
+remain outside this terrain proof, as do wrapped or invalid clone lifetimes.
+
 **Limits.** Proof is relative to the currently resolved target geometry, not a
 prediction of future target movement or interception by other units/features.
-Bursts, bounce, units-only and non-exploding projectiles, unsupported medium,
-interceptor/cruise cases, burn-blow guided steering, uncertain phase/expiry
+Unsupported bursts, bounce, units-only and non-exploding projectiles,
+unsupported medium, interceptor/cruise cases, burn-blow guided steering, uncertain phase/expiry
 effects, prior water contact, malformed geometry,
 arithmetic wrap and work-budget exhaustion remain admitted. Guided turn
 coverage and flight sampling use a bounded Modern work budget of 4,096;
@@ -378,8 +400,12 @@ below owns replacement decisions.
 **Verification.** Lock clear ballistic arcs versus ridges, exact spread and
 RNG commit/abandon, raw wind drift and phase-8 cutoff, target contact/splash,
 guided turn alternatives and uncertainty, no wasted energy/reload/ammunition,
-and identical Strict bypass behavior. Run the weapon/session tests, both full
-repository gates, simulation-cost and classic/modern live battle benchmarks.
+and identical Strict bypass behavior. Direct burst checks lock inherited
+velocity, refreshed muzzle, clone lifetime and first-movement boundaries,
+blocked-root costs, silent remainder cancellation and unchanged admitted/Strict
+spray draws. Run the weapon/session tests and both full repository gates.
+For authoritative-only changes, run the simulation-cost benchmark; presentation
+changes also require classic/modern live battle benchmarks.
 Compare Strict runs against the baseline; Modern census changes from refused
 shots must be reported separately from performance differences.
 

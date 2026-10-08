@@ -67,7 +67,7 @@ func (*ModernRules) AdmitShot(q *ShotQuery) bool {
 			}
 		}
 	}
-	q.Blocked = modernTerrainAdmission(q.Launch, q.Muzzle, q.Aim, q.Tick, q.Terrain, q.Target, q.Wind) == terrainShotBlocked
+	q.Blocked = modernTerrainFlightAdmission(q.Launch, q.Muzzle, q.Aim, q.Tick, q.Terrain, q.Target, q.Wind, q.Burst) == terrainShotBlocked
 	return !q.Blocked
 }
 

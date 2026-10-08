@@ -26,11 +26,22 @@ const modernTerrainSampleBudget = 4096
 // [06 §6.6][06 §6.7][06 §8.1]. Only the resolved current target geometry is
 // protected; this makes no promise about future movement or interceptions.
 func modernTerrainAdmission(launch Slot, muzzle, aim Vec3, tick uint32, terrain *world.Terrain, target *units.Unit, wind *world.Wind) terrainShotResult {
+	return modernTerrainFlightAdmission(launch, muzzle, aim, tick, terrain, target, wind, nil)
+}
+
+func modernTerrainFlightAdmission(launch Slot, muzzle, aim Vec3, tick uint32, terrain *world.Terrain, target *units.Unit, wind *world.Wind, burst *Projectile) terrainShotResult {
 	weapon := launch.Weapon
-	if weapon == nil || terrain == nil || weapon.Burst != 0 || weapon.UnitsOnly || weapon.GroundBounce || weapon.NoExplode ||
+	if weapon == nil || terrain == nil || weapon.UnitsOnly || weapon.GroundBounce || weapon.NoExplode ||
 		weapon.Interceptor || weapon.Cruise || weapon.WaterWeapon || weapon.Range < 0 || weapon.Range >= 32768 ||
 		weapon.WeaponVelocity < 0 || weapon.StartVelocity < 0 || weapon.WeaponAcceleration < 0 ||
 		!terrainPointValid(muzzle) || !terrainPointValid(aim) {
+		return terrainShotUnknown
+	}
+	creation, motion := liveCreationFamilyForWeapon(weapon), MotionFamilyForWeapon(weapon)
+	isBurst := weapon.Burst != 0 || burst != nil
+	// Modern direct-burst policy: DESIGN_WEAPONS_PROJECTILES §2.3.1. Other
+	// burst families and random-decay lifetimes remain outside this proof.
+	if isBurst && (creation != CreationOrdinary || motion != MotionDirect || weapon.Burst <= 0 || weapon.Burst > 32767 || weapon.RandomDecay != 0) {
 		return terrainShotUnknown
 	}
 	// Launch helpers narrow deltas and planar distances to signed words. Avoid
@@ -51,8 +62,12 @@ func modernTerrainAdmission(launch Slot, muzzle, aim Vec3, tick uint32, terrain 
 	}
 	sample := terrainAdmissionSample{weapon: weapon, terrain: terrain, target: target, box: box, muzzle: muzzle, aim: aim}
 	var preview Projectile
-	creation, motion := liveCreationFamilyForWeapon(weapon), MotionFamilyForWeapon(weapon)
 	switch {
+	case burst != nil:
+		// A due pellet inherits the template's velocity after the previous
+		// spray and current muzzle refresh; re-aiming would preview another
+		// shot [06 §4.3]. Copying keeps the live anchor untouched.
+		preview = *burst
 	case creation == CreationOrdinary && (motion == MotionDirect || motion == MotionSelfProp):
 		InitOrdinary(&preview, weapon, tick, muzzle, aim, 0)
 	case creation == CreationVertical && motion == MotionSelfProp:
@@ -75,6 +90,25 @@ func modernTerrainAdmission(launch Slot, muzzle, aim Vec3, tick uint32, terrain 
 		InitBallistic(&preview, weapon, tick, muzzle, aim, 0, pitch, yaw, launch.DistanceWord, terrain.Gravity)
 	default:
 		return terrainShotUnknown
+	}
+	if isBurst {
+		// Both the initial first-pellet proof and a real due pellet use the
+		// clone lifetime, never the anchor's ordinary expiry [06 §4.3]. The
+		// initial proof holds today's muzzle fixed; due emissions recheck it.
+		if tick == ^uint32(0) || weapon.WeaponTimer < 0 || preview.Speed <= 0 || !terrainPointValid(preview.Velocity) ||
+			preview.Speed.Raw() > max || preview.StoredPlanarDistance < 0 || preview.StoredPlanarDistance.Raw() > max {
+			return terrainShotUnknown
+		}
+		preview.CreationTick = tick
+		preview.BurstRemaining = 0
+		if weapon.WeaponTimer != 0 {
+			preview.ExpiryTick = tick + uint32(weapon.WeaponTimer)
+		} else {
+			preview.ExpiryTick = tick + (uint32(preview.StoredPlanarDistance)+uint32(numeric.FixedFromInt(16)))/uint32(preview.Speed)
+		}
+		// Phase-3 appends wait until the next captured span [06 §5.1]. This
+		// also preserves the expiry-equality refusal in AdvanceDirect.
+		tick++
 	}
 	if motion == MotionDirect && preview.Velocity.X == 0 && preview.Velocity.Z == 0 {
 		return terrainShotUnknown

@@ -649,10 +649,11 @@ func (s *Service) advanceBurstsRange(start, entry int, tick uint32, simRNG *rng.
 				}
 			}
 		}
-		// Modern holds the unlaunched remainder if the current pellet would
-		// cross a friendly footprint or feature. Check its inherited velocity
-		// after muzzle refresh, before allocation, deadline/count writes or RNG.
-		// Nanolathe Modern policy: DESIGN_WEAPONS_PROJECTILES §2.3.2.
+		// Modern cancels the unlaunched remainder if the current pellet would
+		// hit blocking terrain or cross a friendly footprint or feature. Check
+		// its inherited velocity after muzzle refresh, before allocation,
+		// deadline/count writes or RNG.
+		// Nanolathe Modern policy: DESIGN_WEAPONS_PROJECTILES §2.3.1/§2.3.2.
 		if unitsWorld != nil && previewsShot(s.rules()) && wDef != nil {
 			saved := s.shotQuery
 			s.shotQuery = ShotQuery{Service: s, World: unitsWorld, Shooter: unitsWorld.Unit(p.Shooter),

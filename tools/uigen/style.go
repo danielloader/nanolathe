@@ -509,18 +509,28 @@ func (s *Style) Wear(l *Layer, seed string, right int) {
 	// Soot and black oxide: soft dark smudges of powder residue, denser
 	// speckled patches of oxide, and grime gathered towards the edges.
 	grime := NewMask(l.W, l.H)
+	// Smudges: clusters of small offset blots, broken up by value noise, so
+	// each has a ragged, irregular outline rather than an oval one.
+	noise := valueNoise(r, l.W, l.H, 3*k)
 	for range 2 + r.Intn(3) {
 		cx, cy := r.Float64()*limit, r.Float64()*float64(l.H)
-		rx, ry := (5+9*r.Float64())*k, (3+4*r.Float64())*k
-		a := 0.28 + 0.22*r.Float64()
-		for y := 0; y < l.H; y++ {
-			for x := 0; x < l.W; x++ {
-				dx, dy := (float64(x)-cx)/rx, (float64(y)-cy)/ry
-				if v := a * math.Exp(-(dx*dx+dy*dy)/2); v > 0.005 {
-					grime.V[y*l.W+x] += v
+		spread := (4 + 6*r.Float64()) * k
+		a := 0.22 + 0.2*r.Float64()
+		for range 4 + r.Intn(5) {
+			bx := cx + (r.Float64()*2-1)*spread
+			by := cy + (r.Float64()*2-1)*spread*0.6
+			br := (1.2 + 2.8*r.Float64()) * k
+			for y := max(0, int(by-3*br)); y < min(l.H, int(by+3*br)+1); y++ {
+				for x := max(0, int(bx-3*br)); x < min(l.W, int(bx+3*br)+1); x++ {
+					dx, dy := (float64(x)-bx)/br, (float64(y)-by)/br
+					grime.V[y*l.W+x] += a * math.Exp(-(dx*dx+dy*dy)/2)
 				}
 			}
 		}
+	}
+	for i := range grime.V {
+		// Noise eats into the smudges unevenly.
+		grime.V[i] *= math.Max(0, noise[i]*1.6-0.3)
 	}
 	for range 1 + r.Intn(2) {
 		cx, cy := r.Float64()*limit, r.Float64()*float64(l.H)
@@ -656,4 +666,28 @@ func hslToRGB(h, s, l float64) (float64, float64, float64) {
 		return p
 	}
 	return f(h + 1.0/3), f(h), f(h - 1.0/3)
+}
+
+// valueNoise is smooth random noise in 0..1 with features about cell pixels
+// across, from a seeded grid of values interpolated bicubically.
+func valueNoise(r *rand.Rand, w, h int, cell float64) []float64 {
+	gw, gh := int(float64(w)/cell)+3, int(float64(h)/cell)+3
+	grid := make([]float64, gw*gh)
+	for i := range grid {
+		grid[i] = r.Float64()
+	}
+	at := func(x, y int) float64 { return grid[min(max(y, 0), gh-1)*gw+min(max(x, 0), gw-1)] }
+	fade := func(t float64) float64 { return t * t * (3 - 2*t) }
+	out := make([]float64, w*h)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			fx, fy := float64(x)/cell, float64(y)/cell
+			ix, iy := int(fx), int(fy)
+			tx, ty := fade(fx-float64(ix)), fade(fy-float64(iy))
+			top := at(ix, iy) + (at(ix+1, iy)-at(ix, iy))*tx
+			bot := at(ix, iy+1) + (at(ix+1, iy+1)-at(ix, iy+1))*tx
+			out[y*w+x] = top + (bot-top)*ty
+		}
+	}
+	return out
 }

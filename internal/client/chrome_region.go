@@ -102,6 +102,7 @@ func (c *Client) ChromeSize() (int, int) {
 func (c *Client) chromeSpace(begin bool) drawlist.WorldSpace {
 	return drawlist.WorldSpace{
 		Begin:    begin,
+		Chrome:   true,
 		Zoom:     camera.ZoomUnit,
 		Step:     camera.ViewScaleNative,
 		Factor:   float32(c.chrome.scale),

@@ -215,7 +215,8 @@ func (r *Renderer) Glyphs(g drawlist.Glyphs) {
 	// World text keeps native glyphs, centering and outline pixels. Project and
 	// snap its anchor once, then compile framebuffer geometry in the existing
 	// schedule so strip/fog ordering and batching remain intact (§14.2, §16.3).
-	if r.sched.worldOn {
+	// Magnified chrome is the exception: its glyphs scale with the region.
+	if r.sched.worldOn && !r.chromeRegion {
 		g.X = int32(math.Floor(float64(r.sched.txx(float32(g.X))) + .5))
 		g.Y = int32(math.Floor(float64(r.sched.txy(float32(g.Y))) + .5))
 		if g.HasClip {

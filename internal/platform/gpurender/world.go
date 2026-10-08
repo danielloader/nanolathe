@@ -40,6 +40,7 @@ func (r *Renderer) World(w drawlist.WorldSpace) {
 		r.resolveArrival()
 	}
 	r.submitSchedule()
+	r.chromeRegion = w.Begin && w.Chrome
 	if !w.Begin {
 		r.worldW, r.worldH = r.w, r.h
 		r.worldFilter = false

@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"math"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
@@ -113,10 +114,61 @@ func TestCloakPreviewDetailGeometry(t *testing.T) {
 		t.Fatal(err)
 	}
 	n, d := native.List.ModelCommands()[0].Geometry, detail.List.ModelCommands()[0].Geometry
-	// Composition includes two margin pixels at each edge; those fixed image
-	// margins do not magnify with the geometry [03 R-REN-03A §1].
-	if d.Width < n.Width*2-4 || d.Height < n.Height*2-4 {
-		t.Fatalf("detail geometry %dx%d did not magnify native %dx%d", d.Width, d.Height, n.Width, n.Height)
+	// Enhanced floors after the shear and scale (GPU design §22), so the
+	// detail extent is not twice the already-floored native extent. Measure
+	// both independently from the transformed vertices, including vertices
+	// omitted by material dispatch, with the fixed two-pixel composition
+	// margin [03 R-REN-03A §1]. This checks the actual bounds, not a tolerance
+	// on their dimensions that could hide a clipped edge.
+	_, x, z := previewCamera(opts)
+	draw, ok := preview.client.unitDrawFor(previewUnitView(opts, previewRenderName(opts.Model), x, z))
+	if !ok {
+		t.Fatal("preview has no transformed geometry")
+	}
+	for i, g := range []*drawlist.ModelGeometry{n, d} {
+		scale := float64(i + 1)
+		var minX, minY, maxX, maxY int32
+		for _, piece := range draw.Pieces {
+			for _, v := range piece.WorldVertices {
+				x := int32(math.Floor(float64(v[0]-draw.WorldPos[0]) / 65536 * scale))
+				y := int32(math.Floor((-float64(v[2]-draw.WorldPos[2]) - float64(v[1]-draw.WorldPos[1])/2) / 65536 * scale))
+				minX, minY = min(minX, x), min(minY, y)
+				maxX, maxY = max(maxX, x), max(maxY, y)
+			}
+		}
+		want := [4]int32{maxX - minX + 4, maxY - minY + 4, 2 - minX, 2 - minY}
+		if got := [4]int32{g.Width, g.Height, g.OriginX, g.OriginY}; got != want {
+			t.Fatalf("scale %.0f composition bounds = %v, want %v", scale, got, want)
+		}
+		if g.Supersample == nil {
+			t.Fatal("preview omitted doubled geometry")
+		}
+		for _, raster := range []*drawlist.ModelGeometry{g, g.Supersample} {
+			for _, face := range raster.Faces {
+				for _, v := range face.Vertices {
+					if v.X < 0 || v.Y < 0 || v.X >= raster.Width || v.Y >= raster.Height {
+						t.Fatalf("scale %.0f corner (%d,%d) escapes %dx%d raster", scale, v.X, v.Y, raster.Width, raster.Height)
+					}
+				}
+			}
+		}
+	}
+	// The native preview's doubled corners and the detail preview's native
+	// corners represent the same raster scale. They must coincide exactly
+	// after removing each packet's composition origin.
+	if len(n.Supersample.Faces) != len(d.Faces) {
+		t.Fatal("detail scale changed admitted faces")
+	}
+	for i, face := range n.Supersample.Faces {
+		if len(face.Vertices) != len(d.Faces[i].Vertices) {
+			t.Fatal("detail scale changed face corners")
+		}
+		for j, a := range face.Vertices {
+			b := d.Faces[i].Vertices[j]
+			if a.X-n.Supersample.OriginX != b.X-d.OriginX || a.Y-n.Supersample.OriginY != b.Y-d.OriginY || a.Key != b.Key {
+				t.Fatal("detail corner differs from independently projected doubled corner")
+			}
+		}
 	}
 	if !n.Cloaked || !d.Cloaked {
 		t.Fatal("preview dropped cloak")

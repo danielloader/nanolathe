@@ -1923,17 +1923,76 @@ matches on `PresentationID` when nonzero, else on `ID`, `EventSeq` and
 presentation constant chosen above any retail movement rate; it is not a retail
 datum.
 
+**Held walk axes — Nanolathe Enhanced policy (user-authorized 2026-10-06).**
+The renderer and regular unit viewer share `internal/poseblend`. A complete,
+unattached ground/surface mobile observed moving between the committed pair
+may retain four distinct values per piece transform axis. Each value retains
+its first tick, so repeated values are holds, not new endpoints. An axis that
+exhibits a two- or three-tick hold samples `current tick + fraction
+− 3`, linearly between known values, with the existing fixed-point truncation
+and shortest signed angle arc. This is a three-tick (100 ms at normal speed)
+visual delay relative to the current tick, two ticks beyond ordinary adjacent
+tick interpolation. It is a host preference, independent of gameplay mode,
+not a change to COB sleeps or simulation execution.
+
+Axes that change every tick without short holds retain ordinary adjacent-tick
+interpolation: aiming, spinning, and gait axes do not select each other's
+sampling cadence. Once a short hold is observed, its axis keeps the delayed
+phase through later dense keys until a longer hold or an existing lifecycle
+reset. Switching back at every dense key would make variable-cadence gaits jump
+backward. On first activation, sampling cannot precede the held endpoint
+that selected the policy, so a two-tick hold cannot rewind earlier continuous
+motion while the delayed clock catches up. A hold longer than three ticks lets the delayed view reach the last
+known value before another key, and that new key returns to the ordinary blend; this bounded first release
+does not predict a future keyframe or promise to smooth every authored cadence.
+The temporal classifier does not identify callback names: a weapon axis with
+the same short held cadence can qualify too. Projectile origins, damage,
+weapon timing and all authoritative piece transforms remain unchanged. Cargo
+composition uses its parent's presented pose through the existing attachment
+path. There is no name-based unit allowlist.
+
+Histories belong to presentation identities and are cleared on movement stop,
+carrier/mover/build-state change, capture, teleport, instance replacement,
+rollback, missing publications, or switching presentation modes. Removed units
+release their history. Only available committed samples are recorded; repeated
+presentation and paused frames cannot advance it. Piece membership, visibility
+and render flags are discrete boundaries. Continuous and held outputs own their
+storage; no committed frame is changed. The recorder prepares histories before
+its parallel blend, and speculative/repeated recording remains idempotent.
+
+Original keeps its committed poses and no history. The viewer enables this
+policy for Move with Enhanced selected; other actions keep their existing
+sampling. Tests cover per-axis separation, wrap/truncation, bounded storage,
+owned endpoints, lifetime boundaries, missing ticks, repeat/pause and parallel
+recording. Retail Fido captures verify intermediate poses; both renderer battle
+benchmarks and the unchanged simulation fingerprint locks gate landing.
+
+**Late model projection — Nanolathe Enhanced policy (2026-10-06).**
+During Enhanced geometry recording, transformed model-relative fixed-point
+vertices retain their fractions through the Z mirror, height shear and record
+scale: `x = floor(s × rx)`, `y = floor(s × (−rz − ry/2))`. The doubled raster
+projects independently with `2s`; it never doubles already-rounded corners.
+Cached and direct live lanes share this local projection and the existing
+subject placement, including its half-pixel offset. Extents and outlines use
+the same coordinates. Height keys, nanoframe bands, waterline decisions and
+structure shadow shear remain unchanged; mobile silhouette shadows follow the
+body. Original software composition and the classic `RecordModel` reference retain
+[03 R-RAST-01 §2]'s earlier rounding; modern-only `RecordGeometry` previews
+inherit Enhanced projection at their selected record scale. This prevents that rounding from throwing
+away the intermediate motion supplied by the pose smoother.
+
 **Never interpolated.** Sprite and animation frame indices, the nanoframe reveal
 band, damage flashes, palette rows, fog, visibility, selection, the cursor and
 the HUD. A piece hidden in either tick is drawn as the current tick says. A COB
-`turn` with no speed sweeps over one tick instead of jumping; this is accepted.
+`turn` with no speed normally sweeps over one tick; a qualifying held walk axis
+uses the longer presentation span described above.
 
 **Benchmark.** `--benchmark-tps=120` runs one authoritative step every fourth
 Draw and presents the four frames at fractions 0, ¼, ½ and ¾, so the report
 measures the interpolated presentation; 30 and 60 keep one step per Draw.
 
 **I6.** Amended for Enhanced only: the presentation may read the two most recent
-committed ticks and the clock's carry; it writes nothing back and consumes no
+committed ticks and the clock's carry, and retain bounded copied walk-axis history; it writes nothing back and consumes no
 simulation RNG. `--shot` and Original never blend.
 
 ### 13.7 Outcome of the true-colour round

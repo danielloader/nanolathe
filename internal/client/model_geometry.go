@@ -36,14 +36,15 @@ type doubledPlacement struct {
 	shearX                          bool
 	// exact takes each corner's own doubled coordinates (screenPoly.x2, y2)
 	// instead of doubling the native ones: the direct projection, whose
-	// corners are projected one by one and carry no shared subject offset.
+	// corners are projected one by one. Enhanced local geometry also uses
+	// these corners, with its shared subject half-pixel offset added below.
 	exact bool
 }
 
 // doubledPlacement builds the placement for a lane doubled from the local
 // projection at this frame's view scale.
 func (c *Client) doubledPlacement(originX, originY, hx, hy int32, shearX bool) doubledPlacement {
-	return doubledPlacement{originX: originX, originY: originY, hx: hx, hy: hy, oddPx: c.modelScale().Px(1), shearX: shearX}
+	return doubledPlacement{originX: originX, originY: originY, hx: hx, hy: hy, oddPx: c.modelScale().Px(1), shearX: shearX, exact: !shearX && c.smoothModelProjection()}
 }
 
 func fillModelPacket(g *drawlist.ModelGeometry, vertices []drawlist.ModelVertex, polys []screenPoly, width, height, originX, originY, anchorX, anchorY, scale int32, keyPlane bool, fallback drawlist.ModelFallbackReason, place *doubledPlacement) *drawlist.ModelGeometry {
@@ -74,7 +75,7 @@ func fillModelPacket(g *drawlist.ModelGeometry, vertices []drawlist.ModelVertex,
 		for j := 0; j < n; j++ {
 			x, y := p.x[j], p.y[j]
 			if place != nil && place.exact {
-				x, y = 2*place.originX+p.x2[j], 2*place.originY+p.y2[j]
+				x, y = 2*place.originX+p.x2[j]+place.hx, 2*place.originY+p.y2[j]+place.hy
 			} else if place != nil {
 				odd := boolToInt32(p.oddHeight[j]) * place.oddPx
 				x = 2*(x+place.originX) + place.hx
@@ -182,6 +183,7 @@ func (c *Client) modelOutlineGeometry(draw *presentationrender.UnitDraw, originX
 	s := c.borrowOutline()
 	faces, verts, spans := s.faces[:0], s.verts[:0], s.spans[:0]
 	oddPx := c.modelScale().Px(1)
+	smooth := c.smoothModelProjection()
 	for pi := len(draw.Pieces) - 1; pi >= 0; pi-- {
 		if pi >= len(draw.Model.Pieces) {
 			continue
@@ -200,12 +202,24 @@ func (c *Client) modelOutlineGeometry(draw *presentationrender.UnitDraw, originX
 					break
 				}
 				v := piece.WorldVertices[vi]
-				x, y, ry := modelLocalVertex(v, draw.WorldPos)
-				x, y = c.scaleModelLocal(x, y)
-				if scale == 2 {
-					x, y = 2*(x+originX)+hx, 2*(y+originY)-(ry&1)*oddPx+hy
+				var x, y int32
+				if smooth {
+					var x2, y2 int32
+					x, y, x2, y2 = c.smoothModelLocalVertex(v, draw.WorldPos)
+					if scale == 2 {
+						x, y = x2+2*originX+hx, y2+2*originY+hy
+					} else {
+						x, y = x+originX, y+originY
+					}
 				} else {
-					x, y = x+originX, y+originY
+					var ry int32
+					x, y, ry = modelLocalVertex(v, draw.WorldPos)
+					x, y = c.scaleModelLocal(x, y)
+					if scale == 2 {
+						x, y = 2*(x+originX)+hx, 2*(y+originY)-(ry&1)*oddPx+hy
+					} else {
+						x, y = x+originX, y+originY
+					}
 				}
 				verts = append(verts, drawlist.ModelVertex{X: x, Y: y, Key: modelHeightKey(v[1].Sub(draw.WorldPos[1]), draw.DiggerClip)})
 			}

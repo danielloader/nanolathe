@@ -140,6 +140,7 @@ func (s *toolsScreen) show(g *gameShell) {
 	s.cs = g.cs
 	s.opts, s.fieldGameplay = g.opts, g.gameplay.Normalize()
 	s.fieldRender = unitViewerFieldRender(g.presentation, g.display)
+	s.model.walkEnabled, s.model.walkSmooth = !s.fieldRender.classic, !s.fieldRender.classic
 	s.contentName = "Total Annihilation"
 	if g.cs != nil && g.cs.mod != nil {
 		s.contentName = g.cs.mod.Name

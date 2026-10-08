@@ -14,6 +14,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/model"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/gpurender"
+	"github.com/nanolathe-gg/nanolathe/internal/poseblend"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
@@ -22,23 +23,29 @@ import (
 // Its frozen Create-pose pivot keeps framing independent of changing bounds.
 // No battle cache or source vertex is changed (DESIGN_DEVELOPER_TOOLS §7).
 type unitViewerModel struct {
-	preview  *client.ModelPreviewRenderer
-	gpu      *gpurender.Renderer
-	image    *ebiten.Image
-	err      error
-	radius   float64
-	pivot    [3]numeric.Fixed // root-local center of the frozen Create fit
-	fitRoot  model.PieceState
-	key      unitViewerModelKey
-	poses    []frame.PieceView
-	poseNote string
-	def      *content.UnitDef
-	geometry *model.Model
-	anim     *unitViewerAnimation
-	action   unitViewerAction
-	weapon   int
-	severity int32
-	power    int8
+	// Enhanced Move smoothing; the standalone comparison can show raw poses.
+	walkEnabled                         bool
+	walkSmooth                          bool
+	walkAnim                            *unitViewerAnimation
+	walkHistory                         poseblend.History
+	walkPrevious, walkCurrent, walkView []frame.PieceView
+	preview                             *client.ModelPreviewRenderer
+	gpu                                 *gpurender.Renderer
+	image                               *ebiten.Image
+	err                                 error
+	radius                              float64
+	pivot                               [3]numeric.Fixed // root-local center of the frozen Create fit
+	fitRoot                             model.PieceState
+	key                                 unitViewerModelKey
+	poses                               []frame.PieceView
+	poseNote                            string
+	def                                 *content.UnitDef
+	geometry                            *model.Model
+	anim                                *unitViewerAnimation
+	action                              unitViewerAction
+	weapon                              int
+	severity                            int32
+	power                               int8
 	// features is the immutable catalog's feature table, through which the
 	// Wreck view resolves corpses [06 §12.2].
 	features map[string]*content.FeatureDef
@@ -93,6 +100,8 @@ func (m *unitViewerModel) selectUnit() {
 	m.pivot, m.fitRoot = [3]numeric.Fixed{}, model.PieceState{}
 	m.poses, m.poseNote = nil, ""
 	m.def, m.geometry, m.anim = nil, nil, nil
+	m.walkAnim, m.walkHistory = nil, poseblend.History{}
+	m.walkPrevious, m.walkCurrent, m.walkView = nil, nil, nil
 	m.action, m.weapon, m.severity, m.power = unitViewerIdle, 1, 0, 0
 	m.wreck = unitViewerWreckModel{}
 	m.builds, m.view = nil, unitViewerView{}

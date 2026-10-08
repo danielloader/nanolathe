@@ -196,6 +196,10 @@ func run(opts Options, out, errOut *os.File) error {
 		return &missingProductError{what: "gameplay mode is below the mod's minimum", logical: "<command line>", providers: []string{"--gameplay", "--mod"}, expected: gameplayLabel(minimum) + " or Modern for " + content.mod.Name}
 	}
 
+	if opts.WalkPreview != "" {
+		return runUnitViewerWalkPreview(opts, content)
+	}
+
 	if opts.Film != "" {
 		return runFilm(opts, content)
 	}

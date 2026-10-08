@@ -147,6 +147,9 @@ func (c *Client) SetInterpolation(enabled bool) {
 	if c == nil {
 		return
 	}
+	if c.interpolation != enabled {
+		c.interp.resetWalk()
+	}
 	c.interpolation = enabled
 }
 
@@ -159,10 +162,16 @@ func (c *Client) presentationFrame() *frame.Frame {
 	}
 	cur := c.committedFrame()
 	if cur == nil || !c.interpolation {
+		c.interp.resetWalk()
 		return cur
+	}
+	if c.interp.walkBuffer != c.buffer {
+		c.interp.resetWalk()
+		c.interp.walkBuffer = c.buffer
 	}
 	prev := c.committedPrevious()
 	if prev == nil {
+		c.interp.resetWalk()
 		return cur
 	}
 	fraction := c.sampleTickFraction()
@@ -365,6 +374,7 @@ func (c *Client) hasCameraBlend() bool {
 // interpolator owns the blended view and retained buffers. Unchanged paused
 // views reuse their blend; running views rebuild it on every presentation.
 type interpolator struct {
+	walkState
 	pausedInputs pausedBlendInputs
 	pausedValid  bool
 	view         frame.Frame
@@ -447,6 +457,7 @@ func (in *interpolator) blendUnits(prev, cur *frame.Frame, f16 int64) []frame.Un
 	for len(in.pieces) < len(cur.Units) {
 		in.pieces = append(in.pieces, nil)
 	}
+	in.prepareWalk(prev, cur)
 	in.blendPrev, in.blendCur, in.blendF16 = prev, cur, f16
 	if in.each == nil || len(cur.Units) < parallelBlendFloor {
 		in.blendUnitRange(0, len(cur.Units))
@@ -473,7 +484,12 @@ func (in *interpolator) blendUnitRange(lo, hi int) {
 			u.Heading = lerpAngle(p.Heading, u.Heading, f16)
 			u.Pitch = lerpAngle(p.Pitch, u.Pitch, f16)
 			u.Bank = lerpAngle(p.Bank, u.Bank, f16)
-			u.Pieces = in.blendPieces(i, p.Pieces, u.Pieces, f16)
+			if h := in.walkForUnit[i]; h != nil {
+				in.pieces[i] = h.pose.Blend(in.pieces[i], p.Pieces, u.Pieces, cur.Tick, f16)
+				u.Pieces = in.pieces[i]
+			} else {
+				u.Pieces = in.blendPieces(i, p.Pieces, u.Pieces, f16)
+			}
 		}
 		in.units[i] = u
 	}
@@ -499,7 +515,14 @@ func (in *interpolator) previousUnit(prev *frame.Frame, u frame.UnitView) *frame
 	if len(p.Pieces) != len(u.Pieces) {
 		return nil
 	}
-	dx, dz := u.X-p.X, u.Z-p.Z
+	if !continuousUnitPosition(p.X, p.Z, u.X, u.Z) {
+		return nil
+	}
+	return p
+}
+
+func continuousUnitPosition(px, pz, x, z numeric.Fixed) bool {
+	dx, dz := x-px, z-pz
 	if dx < 0 {
 		dx = -dx
 	}
@@ -509,12 +532,12 @@ func (in *interpolator) previousUnit(prev *frame.Frame, u frame.UnitView) *frame
 	// The per-axis test comes first so the squared distance below cannot
 	// overflow on a map-crossing teleport.
 	if dx > snapDistance || dz > snapDistance {
-		return nil
+		return false
 	}
 	if int64(dx)*int64(dx)+int64(dz)*int64(dz) > int64(snapDistance)*int64(snapDistance) {
-		return nil
+		return false
 	}
-	return p
+	return true
 }
 
 // blendPieces blends one unit's COB piece transforms into this unit index's

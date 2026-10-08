@@ -22,13 +22,14 @@ type ModelPreviewProjection struct {
 // RecordProjectedGeometry records a complete model with transformed vertex
 // fractions retained through projection at the final raster scale. Its Image
 // is nil and Projected supplies unrounded screen positions and depth. The
-// legacy List keeps independently rounded native and doubled corners.
+// companion List keeps independently rounded native and doubled corners.
 //
 // Scale must be zero: PixelsPerUnit supplies the entire projection scale.
 // Construction, attached children, cloak, digger and waterline options are
-// unsupported for the model itself. RecordModel and RecordGeometry retain
-// those ordinary contracts and the retail projection arithmetic
-// [03 R-RAST-01 §2]. opts.Attachment alone composes a second model, which may
+// unsupported for the model itself. RecordModel retains classic projection
+// [03 R-RAST-01 §2]; RecordGeometry follows Enhanced late rounding at its
+// integer record scale (DESIGN_GPU_RENDERER §13.5). opts.Attachment alone
+// composes a second model, which may
 // be a nanoframe, into the same record (DESIGN_GPU_RENDERER §22.5).
 func (r *ModelPreviewRenderer) RecordProjectedGeometry(opts ModelPreviewOptions, projection ModelPreviewProjection) (ModelPreviewRecord, error) {
 	if err := validateProjectedPreview(opts, projection); err != nil {

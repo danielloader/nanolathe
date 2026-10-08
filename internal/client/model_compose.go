@@ -187,6 +187,11 @@ func (c *Client) collectDrawPolysProjection(draw *presentationrender.UnitDraw, s
 	if c == nil || c.cam == nil || draw == nil || draw.Model == nil {
 		return nil
 	}
+	smooth := preview == nil && c.smoothModelProjection()
+	var anchorX, anchorY, halfX, halfY int32
+	if smooth && direct {
+		anchorX, anchorY, halfX, halfY = c.modelPlacement(draw)
+	}
 	faces, corners := 0, 0
 	for i := range draw.Pieces {
 		prims := draw.Pieces[i].Primitives
@@ -384,13 +389,21 @@ func (c *Client) collectDrawPolysProjection(draw *presentationrender.UnitDraw, s
 				if c.recordModelGeometry {
 					poly.heights[corner] = float32(v[1].Sub(draw.WorldPos[1]).Raw()) / 65536 * float32(c.modelScale().Float())
 				}
-				// Local cached projection floors model-relative coordinates before
-				// placement. Direct live projection adds the world offset first;
-				// the two differ by a pixel for fractional coordinates
-				// [03 R-RAST-01 §2].
+				// Original's cached projection floors before placement; its
+				// direct lane adds the world offset first [03 R-RAST-01 §2].
+				// Enhanced retains fractions through the final raster scale.
 				var lx, ly, ry int32
 				if preview != nil {
 					lx, ly, poly.x2[corner], poly.y2[corner] = preview.vertex(v, draw.WorldPos)
+				} else if smooth {
+					lx, ly, poly.x2[corner], poly.y2[corner] = c.smoothModelLocalVertex(v, draw.WorldPos)
+					if direct {
+						// Both Enhanced lanes share local rounding and placement,
+						// so a live corner stays aligned with the cached body.
+						lx, ly = lx+anchorX, ly+anchorY
+						poly.x2[corner] += 2*anchorX + halfX
+						poly.y2[corner] += 2*anchorY + halfY
+					}
 				} else if direct {
 					lx, ly = c.modelDirectVertex(v, draw.WorldPos)
 					poly.x2[corner], poly.y2[corner] = c.modelDirectVertexDoubled(v, draw.WorldPos)
@@ -520,6 +533,7 @@ func (c *Client) projectedModelExtent(draw *presentationrender.UnitDraw, lane pr
 	if draw == nil || draw.Model == nil {
 		return
 	}
+	smooth := !shadow && c.smoothModelProjection()
 	for i := range draw.Pieces {
 		piece := &draw.Pieces[i]
 		if !lane.Includes(piece.DontCache, draw.UnderConstruction) {
@@ -527,11 +541,20 @@ func (c *Client) projectedModelExtent(draw *presentationrender.UnitDraw, lane pr
 		}
 		for _, vertex := range piece.WorldVertices {
 			visible = true
-			x, y, _ := modelLocalVertex(vertex, draw.WorldPos)
-			if shadow {
-				x, y, _ = shadowLocalVertex(vertex, draw.WorldPos)
+			var x, y int32
+			if smooth {
+				var x2, y2 int32
+				x, y, x2, y2 = c.smoothModelLocalVertex(vertex, draw.WorldPos)
+				// Include the independently projected doubled corners too.
+				minX, minY = min(minX, x2>>1), min(minY, y2>>1)
+				maxX, maxY = max(maxX, x2>>1), max(maxY, y2>>1)
+			} else {
+				x, y, _ = modelLocalVertex(vertex, draw.WorldPos)
+				if shadow {
+					x, y, _ = shadowLocalVertex(vertex, draw.WorldPos)
+				}
+				x, y = c.scaleModelLocal(x, y)
 			}
-			x, y = c.scaleModelLocal(x, y)
 			minX, minY = min(minX, x), min(minY, y)
 			maxX, maxY = max(maxX, x), max(maxY, y)
 		}

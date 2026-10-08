@@ -176,6 +176,7 @@ package implements.
 | `internal/ui` | Screen-level state of the authored front-end panels shared by the desktop binary and its tests | DESIGN_INTERFACE_HUD_INPUT |
 | `internal/client` | The window-side frame loop: samples the committed frame, draws terrain, units, effects, HUD and text into a software framebuffer, resolves art | DESIGN_PRESENTATION_CLIENT |
 | `internal/render` | Presentation helpers: the strip composer, debris trail containers, projectile render types, GAF cursors, fog presentation, shake, the model rasterizer, minimap | DESIGN_PRESENTATION_CLIENT |
+| `internal/poseblend` | Renderer-owned per-axis held-pose history shared by Enhanced battle presentation and the unit viewer; never simulation inputs | DESIGN_GPU_RENDERER §13.5 |
 | `internal/palette` | Palette, SHD, ALP and LHT tables and logical→physical lookups | DESIGN_PRESENTATION_CLIENT |
 | `internal/audio` | The eight-slot cue queue, sample decode and cache, positional attenuation, music, briefing speech | DESIGN_PRESENTATION_CLIENT |
 | `internal/audiobackend` | The desktop PCM device boundary behind `internal/audio` | DESIGN_PRESENTATION_CLIENT |
@@ -328,7 +329,8 @@ then the session **publishes** the committed frame. Publication is outside
 the phase registry and follows every completed sub-tick; nothing presents
 between phases. Original presentation samples the committed tick without
 interpolation `[03 §2.4]`; Enhanced may blend the last two committed ticks
-under DESIGN_GPU_RENDERER §13.5 [I6]. The executor tail runs once per host pump
+and retain bounded copied held walk-axis history under DESIGN_GPU_RENDERER
+§13.5 [I6]. The executor tail runs once per host pump
 after the whole catch-up batch, including a pump that ran zero sub-ticks, and in
 this order: the three barrier routines, then the message-ring retire, then the
 temporary-sight expiry sweep as its last step

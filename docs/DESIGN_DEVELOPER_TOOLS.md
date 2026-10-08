@@ -754,6 +754,32 @@ does not arise because the preview builds on the ground. Neither the battle's
 local-player coverage gate nor team-coloured nanolathe (DESIGN_GPU_RENDERER
 §37.1) applies to the viewer.
 
+**Walk smoothing (user-authorized 2026-10-06).** With Enhanced presentation,
+the regular viewer's Move action uses `internal/poseblend`, the same bounded
+per-axis policy as battle presentation (DESIGN_GPU_RENDERER §13.5). Each
+completed detached-VM tick is recorded, including catch-up ticks, and fractional
+refreshes sample held axes three ticks behind the current preview tick. Axes
+without short holds retain adjacent-tick interpolation; once a held axis is
+recognized its phase persists across dense keys until a longer hold or reset,
+as the shared policy specifies. Other actions and Original presentation
+retain raw poses. The VM and its 30 Hz arithmetic [04 §4.6] never receive
+interpolated values or changed sleeps. The projected viewer geometry already
+retains fractions through final projection.
+
+Selecting a unit or restarting/changing an action resets history. Pause freezes
+the clock. The regular viewer inherits its presentation choice from settings;
+no new setting or unit-name allowlist is added. The diagnostic
+`--walk-preview armfido` window starts Move and lets **I** compare Original and
+Smooth without restarting the VM. `--walk-preview-original` starts raw. With
+`--shot`, `--walk-preview-frames N` captures N numbered PNGs at deterministic
+120 Hz after `--shot-ticks` warmup ticks (one output file when N is one).
+This diagnostic never writes settings.
+
+Verification covers owned endpoints, discrete boundaries, held/continuous axis
+separation, angle wrapping, bounded history, and unchanged VM playback at
+30/60/120 Hz. The installed Fido test checks changing poses per displayed frame;
+actual Original/Smooth captures verify the intermediate leg poses.
+
 The preview runs at 30 Hz with at most five ticks per host update, dropping
 excess elapsed time. Each thread retains the existing 4,096-instruction
 execution bound. An aim that has not completed after 300 preview ticks, a build

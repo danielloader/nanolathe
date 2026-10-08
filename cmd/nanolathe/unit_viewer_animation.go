@@ -277,10 +277,14 @@ func (m *unitViewerModel) loadAnimation(def *content.UnitDef, mdl *model.Model) 
 }
 
 func (m *unitViewerModel) updateAnimation(dt float64) {
-	if m.anim == nil || !m.anim.update(dt) {
+	if m.anim == nil {
 		return
 	}
-	m.refreshPose()
+	m.prepareWalkPreview()
+	advanced := m.anim.update(dt)
+	if advanced || m.walkPreviewFractionChanged(dt) {
+		m.refreshPose()
+	}
 }
 
 // refreshPose republishes the current pose after a tick or a toggle. A
@@ -290,6 +294,11 @@ func (m *unitViewerModel) refreshPose() {
 		return
 	}
 	m.poses, m.poseNote = m.anim.poses(), m.anim.note
+	if m.walkPreviewActive() && m.walkSmooth {
+		m.prepareWalkPreview()
+		m.walkView = m.walkHistory.Blend(m.walkView, m.walkPrevious, m.walkCurrent, uint32(m.anim.ticks), int64(m.anim.carry*65536))
+		m.poses = m.walkView
+	}
 	m.key = unitViewerModelKey{}
 }
 
@@ -315,6 +324,7 @@ type unitViewerAnimationOptions struct {
 }
 
 type unitViewerAnimation struct {
+	afterTick   func() // optional isolated-viewer pose observer; never a battle VM
 	script      *unitViewerScript
 	def         *content.UnitDef
 	geometry    *model.Model
@@ -575,6 +585,9 @@ func (a *unitViewerAnimation) tick() {
 		p.current.anim.tick()
 	}
 	a.spray.update(uint32(a.ticks))
+	if a.afterTick != nil {
+		a.afterTick()
+	}
 }
 
 func (a *unitViewerAnimation) startAim() {

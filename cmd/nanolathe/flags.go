@@ -165,6 +165,10 @@ type Options struct {
 	Stats              bool        // opt-in terminal presentation statistics
 	FPS                int         // cap on presented frames per second for the modern renderer; 0 = the display's refresh rate
 
+	WalkPreview         string // unit ID for the standalone walk smoothing preview
+	WalkPreviewOriginal bool   // start the preview with its original pose sampling
+	WalkPreviewFrames   int    // numbered 120 fps captures when greater than one
+
 	// ShotRenderer selects which executor --shot captures through:
 	// "classic" (explicit software composer), "modern" (the GPU executor,
 	// captured through a hidden one-frame Ebitengine loop), or "both" (classic
@@ -289,6 +293,9 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	set.StringVar(&opts.FilmOut, "film-out", "", "where --film writes: a directory of PNG frames, or \"-\" for a raw RGBA stream on stdout")
 	set.IntVar(&opts.FilmFrames, "film-frames", 0, "stop a --film capture after this many frames (0 captures the whole script)")
 	set.StringVar(&opts.NLShot, "nl-shot", "", "render every card of the Nanolathe screen to PNGs in this directory, with no visible window")
+	set.StringVar(&opts.WalkPreview, "walk-preview", "", "open the standalone walk smoothing preview for this unit ID; I compares Original/Smooth")
+	set.BoolVar(&opts.WalkPreviewOriginal, "walk-preview-original", false, "start the walk preview with original pose sampling")
+	set.IntVar(&opts.WalkPreviewFrames, "walk-preview-frames", 1, "with --walk-preview and --shot, capture this many 120 fps frames (numbered PNGs when greater than one)")
 	set.StringVar(&opts.ShotUnitViewer, "shot-unit-viewer", "", "with --shot, capture the unit viewer for this unit ID (or @tools for the Tools menu)")
 	set.StringVar(&opts.NLShotSize, "nl-shot-size", "1920x1080", "canvas size for --nl-shot, as WxH")
 	set.StringVar(&opts.NLShotOnly, "nl-shot-only", "", "comma-separated card keys (or page:card) --nl-shot captures; empty captures every card")

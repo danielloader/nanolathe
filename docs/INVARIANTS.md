@@ -299,7 +299,8 @@ presentation `[06 §5.2]`.
 state. Presentation never writes sim state. The only channel is the committed
 frame, published once after every completed sub-tick and sampled at the
 current committed tick by the renderer, or by Enhanced presentation the two
-most recent committed ticks (DESIGN_GPU_RENDERER §13.5). The active runtime
+most recent committed ticks and bounded renderer-owned copies of held walk-axis
+endpoints (DESIGN_GPU_RENDERER §13.5). The active runtime
 has one authoritative session implementation, hosted by the Ebitengine window
 or the graphical command's headless mode and dedicated headless command
 (ARCHITECTURE §5). A host may measure elapsed time or profile execution, but
@@ -334,11 +335,11 @@ the current tick; no interpolation between updates exists `[03 §2.4]`.
 Original preserves that sampling. Enhanced presentation
 (DESIGN_GPU_RENDERER §13.5) is the one path allowed to read the two most
 recent committed ticks and the clock's carry, blending them in retained
-presentation buffers; it writes nothing back, consumes no simulation RNG, and
+presentation buffers and retaining bounded copies of held walk-axis endpoints; it writes nothing back, consumes no simulation RNG, and
 the simulation still publishes only after the complete phase sequence
 [01 §4.4]. `--shot` and Original never blend.
 
-**Check.** `grep -rn "time.Now\|time.Since" internal/{clock,units,orders,cob,movement,path,economy,construction,features,combat,visibility,ai,mission,triggers}` returns nothing. `internal/client` imports sim packages; no sim package imports `internal/client`. Outside `internal/client/interpolate.go` the frame path has no `Lerp`, `alpha`, or previous-frame blend. `frame.Buffer.Previous` has exactly two production callers: that file, which performs the Enhanced blend, and the live battle benchmark's census in `cmd/nanolathe`, which only counts which units moved between two committed ticks and feeds nothing back. The older frame of a pinned pair (`frame.Buffer.PinTick`/`PinLatest`, DESIGN_GPU_RENDERER §13.13) is likewise read only in that file.
+**Check.** `grep -rn "time.Now\|time.Since" internal/{clock,units,orders,cob,movement,path,economy,construction,features,combat,visibility,ai,mission,triggers}` returns nothing. `internal/client` imports sim packages; no sim package imports `internal/client`. The frame blend is owned by `internal/client/interpolate.go`, its walk-history adapter and `internal/poseblend`; none writes a committed frame. `frame.Buffer.Previous` has exactly two production callers: that file, which performs the Enhanced blend, and the live battle benchmark's census in `cmd/nanolathe`, which only counts which units moved between two committed ticks and feeds nothing back. The older frame of a pinned pair (`frame.Buffer.PinTick`/`PinLatest`, DESIGN_GPU_RENDERER §13.13) is likewise read only in that file.
 
 ## I7 — Tick phase order
 

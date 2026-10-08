@@ -2127,18 +2127,19 @@ comparisons against the retail path must match outside the rail columns.
 independent of gameplay selection. Retail draws the rail at one framebuffer
 pixel per authored pixel `[07 R-HUD-05]`, which is small on a 1440- or
 2160-row surface. `presentation.sidebarScale` stores Auto (0, the default)
-or a fixed 1 or 2. Auto is 2x from 1440 rows and 1x below, which always leaves
-the rail at least
-the 480 rows every stock page and the side panel art are authored for. A fixed
-choice applies as chosen even when it leaves fewer; the bottom of a page may
-then fall off the rail (`hud.ChromeScale`). The scale is resolved once per drawn frame, and input
-until the next draw maps the pointer through that value, which is what the
-player sees. It is always 1x when the Classic executor may replay the
+or a fixed 1 or 2; a larger stored value reads as 2. Auto is 2x from 1440 rows
+and 1x below, which always leaves the rail at least the 480 rows every stock
+page and the side panel art are authored for. A fixed 2x applies as chosen
+even when it leaves fewer; the bottom of a page may then fall off the rail
+(`hud.ChromeScale`), and a centred modal too wide for the space beside the
+rail is kept on the surface. The scale is resolved once per drawn frame, and
+input until the next draw maps the pointer through that value, which is what
+the player sees. It is always 1x when the Classic executor may replay the
 recording, since that executor ignores the region markers below, and for
 captures that crop the chrome at retail's fixed insets: films,
-`--shot-renderer both` and Nanolathe screen previews. The Nanolathe screen's Sidebar card and the
-in-battle Nanolathe page offer the choice, with the usual Undo and
-Restore.
+`--shot-renderer both` and Nanolathe screen previews. The Nanolathe screen's
+Sidebar card and the in-battle Nanolathe page offer the choice, with the usual
+Undo and Restore.
 
 At scale k the rail — backdrop, side page and the community rotation menu —
 is laid out on a virtual surface of the framebuffer size divided by k and

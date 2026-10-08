@@ -178,7 +178,7 @@ type Options struct {
 	ShotSpace          bool        // hold Space for --shot captures, so the bottom slide strip is fully raised
 	RendererSet        bool        // explicit command-line override
 	FPSSet             bool        // explicit command-line override
-	SidebarScale       int         // -1 keeps the saved preference; 0 Auto, 1..3 fixed
+	SidebarScale       int         // -1 keeps the saved preference; 0 Auto, 1 or 2 fixed
 	Renderer           string      // start-up presentation executor: "classic" or "modern" (default)
 	Fullscreen         bool        // host desktop fullscreen override
 	FullscreenSet      bool        // distinguishes an omitted flag from --fullscreen=false

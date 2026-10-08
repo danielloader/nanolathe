@@ -64,3 +64,14 @@ func TestModalPlacement(t *testing.T) {
 		t.Fatalf("confirm window at 800x600 = (%d,%d), want (264,250)", x, y)
 	}
 }
+
+// Beside a magnified rail a modal too wide for the remaining width stays on
+// the surface; beside retail's rail the placement is unchanged.
+func TestModalPlacementBesideMagnifiedRail(t *testing.T) {
+	if x, _ := ModalPlacement(640, 480, 400, 100, 257); x != 240 {
+		t.Fatalf("x = %d, want 240", x)
+	}
+	if x, _ := ModalPlacement(640, 480, 520, 100, 128); x != 124 {
+		t.Fatalf("retail x = %d, want 124", x)
+	}
+}

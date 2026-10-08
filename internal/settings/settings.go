@@ -836,9 +836,10 @@ func (p *Presentation) Normalize() {
 	if p.RadarDots < RadarDotsNone || p.RadarDots > RadarDotsAttackable {
 		p.RadarDots = RadarDotsVisible
 	}
-	if p.SidebarScale < ChromeScaleAuto || p.SidebarScale > MaxChromeScale {
+	if p.SidebarScale < ChromeScaleAuto {
 		p.SidebarScale = ChromeScaleAuto
 	}
+	p.SidebarScale = min(p.SidebarScale, MaxChromeScale)
 	if p.NanoframePreview < 0 || p.NanoframePreview > 3 {
 		p.NanoframePreview = 0
 	}

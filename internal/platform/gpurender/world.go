@@ -41,6 +41,7 @@ func (r *Renderer) World(w drawlist.WorldSpace) {
 	}
 	r.submitSchedule()
 	r.chromeRegion = w.Begin && w.Chrome
+	r.chromeW, r.chromeH = int(w.RecordW), int(w.RecordH)
 	if !w.Begin {
 		r.worldW, r.worldH = r.w, r.h
 		r.worldFilter = false

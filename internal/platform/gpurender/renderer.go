@@ -94,6 +94,9 @@ type Renderer struct {
 	// chromeRegion is true inside a magnified interface region, whose text
 	// scales with it (World, Glyphs).
 	chromeRegion bool
+	// chromeW, chromeH are that region's virtual surface, which bounds its
+	// text as the framebuffer bounds unmagnified text [03 R-FONT-01 §3].
+	chromeW, chromeH int
 	// The current terrain's framebuffer coverage. Overview border space must
 	// remain void after sprites and effects have drawn (§16.7).
 	worldMap      image.Rectangle

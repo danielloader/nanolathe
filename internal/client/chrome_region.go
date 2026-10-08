@@ -97,8 +97,8 @@ func (c *Client) ChromeSize() (int, int) {
 }
 
 // chromeSpace reuses the world-space marker: the executor applies its Factor
-// and offsets to every command between the pair, with the framebuffer as the
-// clip extent.
+// and offsets to every command between the pair. The record extent is the
+// virtual surface, which bounds the region's text.
 func (c *Client) chromeSpace(begin bool) drawlist.WorldSpace {
 	return drawlist.WorldSpace{
 		Begin:    begin,
@@ -108,8 +108,8 @@ func (c *Client) chromeSpace(begin bool) drawlist.WorldSpace {
 		Factor:   float32(c.chrome.scale),
 		OffsetX:  float32(c.chrome.offX),
 		OffsetY:  float32(c.chrome.offY),
-		RecordW:  int32(c.width),
-		RecordH:  int32(c.height),
+		RecordW:  int32(c.chrome.w),
+		RecordH:  int32(c.chrome.h),
 		Viewport: c.battleViewportRect(),
 	}
 }

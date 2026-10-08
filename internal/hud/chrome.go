@@ -69,5 +69,12 @@ func RailGap(screenH, sideW, sideH int32) (r Rect, ok bool) {
 // is retail's 128 pixels unless the sidebar is magnified
 // (DESIGN_INTERFACE_HUD_INPUT "Modern sidebar scale").
 func ModalPlacement(screenW, screenH, w, h, rail int32) (x, y int32) {
-	return (screenW-rail-w)/2 + rail, (screenH - h) / 2
+	x, y = (screenW-rail-w)/2+rail, (screenH-h)/2
+	// Beside a magnified rail a wide modal may not fit the remaining width;
+	// keep it on the surface so its controls stay reachable. Retail's own
+	// placement is left as authored.
+	if rail > 128 && x+w > screenW {
+		x = max(screenW-w, 0)
+	}
+	return x, y
 }

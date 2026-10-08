@@ -15,6 +15,7 @@ the output is PNGs.
 | Top resource bar (`topbar`) | 513×32 | METAL and ENERGY labels, +/− signs, bar grooves fitted to the side data's bar anchors; the game draws the fill and numbers over it |
 | Command buttons (`move`, `stop`, `attack`, `patrol`, `guard`, `repair`, `reclaim`, `capture`, `load`, `unload`, `dgun`) | 54×30 | `normal`, `pressed`, `greyed` |
 | Order selectors (`fireorders`, `moveorders`) | 113×21 | one file per state, its light lit |
+| Build menu page arrows (`prev`, `next`) | 45×17 | `normal`, `pressed`, `greyed` |
 
 `preview.png` lays the whole set out in a grid.
 
@@ -69,9 +70,11 @@ retail GAF art treats as transparent, is never used for opaque pixels.
 | `-recess-soft` | `0.35` | Blur on the LED recesses, in 1x pixels |
 | `-material`, `-caption-font`, `-label-font` | | Any material or font: a brass or painted plate, another typeface |
 
-Wear (gouges, dents, scratches) is seeded by each button's label, so a button
-always wears the same way and neighbours differ. A selector's states share its
-wear.
+Wear is seeded by each button's label, so a button always wears the same way
+and neighbours differ; a selector's states share its wear. It combines gouges
+running in from an edge, dents, faint scratches, and dark blemishes: soft soot
+smudges like powder residue, speckled patches like black oxide, and grime
+gathered towards the edges.
 
 ## Why a separate module
 

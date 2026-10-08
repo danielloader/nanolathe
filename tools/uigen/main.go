@@ -87,6 +87,13 @@ func main() {
 		}
 		rows = append(rows, row)
 	}
+	var arrows []*Layer
+	for _, dir := range []string{"prev", "next"} {
+		for _, st := range []string{"normal", "pressed", "greyed"} {
+			arrows = append(arrows, save(dir+"-"+st, s.PageArrow(dir == "next", st)))
+		}
+	}
+	rows = append(rows, arrows)
 	for _, t := range selectors {
 		var row []*Layer
 		for i, text := range t.states {
@@ -235,6 +242,30 @@ func (s *Style) Toggle(seed, text string, lit int) *Layer {
 func (s *Style) captionWidth(text string, limit float64) float64 {
 	ratio := func(t string) float64 { m := TextMask(s.CaptionFont, t, 0); return float64(m.W) / float64(m.H) }
 	return math.Min(limit, math.Round(42*ratio(text)/ratio("RECLAIM")))
+}
+
+// PageArrow is the build menu's 45x17 previous or next page button: a plate
+// with a 45-degree point at one end, in its normal, pressed or greyed state.
+func (s *Style) PageArrow(next bool, state string) *Layer {
+	w, h := s.px(45), s.px(17)
+	mult, sunken := faceBright, false
+	switch state {
+	case "pressed":
+		mult, sunken = faceBright*pressedLift, true
+	case "greyed":
+		mult = faceBright * 0.6
+	}
+	l := s.Face(w, h, mult)
+	seed := "PREV"
+	if next {
+		seed = "NEXT"
+	}
+	s.Wear(l, seed, w-s.px(10))
+	// The point: inside where the distance from the pointed end exceeds the
+	// distance from the vertical centre line, so it closes at 45 degrees.
+	mask, edge := ArrowMask(w, h, next), float64(s.px(2))
+	s.BevelShape(l, mask, edge, 0.40, 0.65, 0.12, sunken)
+	return l
 }
 
 // placeCaption centres a taller caption on its 8px authored box.

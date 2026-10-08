@@ -98,6 +98,97 @@ func (s *Style) Bevel(l *Layer, steps int, lightA, darkA, curve float64, sunken 
 	l.Rect(l.W-1, 0, l.W-1, l.H-1, o)
 }
 
+// ArrowMask is the coverage of a w x h plate whose left (or right, when next)
+// end comes to a 45-degree point over its full height, supersampled 8x8.
+func ArrowMask(w, h int, next bool) *Mask {
+	m := NewMask(w, h)
+	half := float64(h) / 2
+	const ss = 8
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			n := 0
+			for sy := 0; sy < ss; sy++ {
+				for sx := 0; sx < ss; sx++ {
+					px, py := float64(x)+(float64(sx)+0.5)/ss, float64(y)+(float64(sy)+0.5)/ss
+					from := px // distance from the pointed end
+					if next {
+						from = float64(w) - px
+					}
+					if from >= math.Abs(py-half) {
+						n++
+					}
+				}
+			}
+			m.V[y*w+x] = float64(n) / ss / ss
+		}
+	}
+	return m
+}
+
+// BevelShape bevels a plate of any outline: each pixel within edge of the
+// outline takes the rim shade of the direction it faces, lit on the sides
+// facing the light, dark on the far sides (swapped when sunken), fading
+// inwards. The face is cut to the mask and gets a dark one-pixel outline.
+func (s *Style) BevelShape(l *Layer, mask *Mask, edge, lightA, darkA, curve float64, sunken bool) {
+	lit, shade := white, black
+	if sunken {
+		lit, shade = black, white
+	}
+	// Face curve towards the light.
+	for y := 0; y < l.H; y++ {
+		t := float64(y) / float64(l.H-1)
+		if s.Light.Y < 0 {
+			t = 1 - t
+		}
+		c := lerp(shade.WithA(curve), lit.WithA(curve), t)
+		for x := 0; x < l.W; x++ {
+			l.Blend(x, y, c, 1)
+		}
+	}
+	// Distance inside the outline and the outward normal, sampled locally.
+	in := mask.Threshold(0.5)
+	r := int(math.Ceil(edge)) + 1
+	lx, ly := float64(s.Light.X), float64(s.Light.Y)
+	ln := math.Hypot(lx, ly)
+	for y := 0; y < l.H; y++ {
+		for x := 0; x < l.W; x++ {
+			if in.Get(x, y) == 0 {
+				continue
+			}
+			best, nx, ny := math.Inf(1), 0.0, 0.0
+			for dy := -r; dy <= r; dy++ {
+				for dx := -r; dx <= r; dx++ {
+					qx, qy := x+dx, y+dy
+					outside := qx < 0 || qy < 0 || qx >= l.W || qy >= l.H || in.Get(qx, qy) == 0
+					if !outside {
+						continue
+					}
+					if d := math.Hypot(float64(dx), float64(dy)); d < best {
+						best, nx, ny = d, float64(dx)/d, float64(dy)/d
+					}
+				}
+			}
+			if best > edge {
+				continue
+			}
+			f := 1 - (best-1)/edge
+			// Facing the light when the outward normal points towards it.
+			d := (nx*lx + ny*ly) / ln
+			if d > 0 {
+				l.Blend(x, y, lit.WithA(lightA*f*d), 1)
+			} else {
+				l.Blend(x, y, shade.WithA(darkA*f*-d), 1)
+			}
+			if best <= 1 {
+				l.Blend(x, y, black.WithA(0.9), 1)
+			}
+		}
+	}
+	for i := range mask.V {
+		l.Pix[i*4+3] *= mask.V[i]
+	}
+}
+
 // InnerShadow is the shadow a raised rim casts onto a sunken face: a soft band
 // along the edges nearest the light, fading over width pixels.
 func (s *Style) InnerShadow(l *Layer, width, alpha float64) {
@@ -325,8 +416,8 @@ func (s *Style) Place(dst, src *Layer, pad, x, y int, shadow float64) {
 
 // Wear adds damage seeded by seed (a button's label), so the same button always
 // wears the same way and neighbours differ: up to two tapering gouges running
-// in from seeded edges, a few round dents and faint scratches, all left of
-// right (output pixels). It is drawn at 4x and reduced so edges are smooth.
+// in from seeded edges, a few round dents, faint scratches, and dark soot and
+// oxide blemishes, all left of right (output pixels). It is drawn at 4x and reduced so edges are smooth.
 // Gouges and dents are concave: dark, with a lit rim one output pixel towards
 // the far side from the light.
 func (s *Style) Wear(l *Layer, seed string, right int) {
@@ -415,6 +506,45 @@ func (s *Style) Wear(l *Layer, seed string, right int) {
 		sy := (5 + float64(r.Intn(max(1, int(float64(l.H)/k)-10)))) * k
 		stroke(faint, [][2]float64{{sx, sy}, {sx + (8+10*r.Float64())*k, sy + (r.Float64()*4-2)*k}}, 0.35*k, 0.25*k, 1, 0.6)
 	}
+	// Soot and black oxide: soft dark smudges of powder residue, denser
+	// speckled patches of oxide, and grime gathered towards the edges.
+	grime := NewMask(l.W, l.H)
+	for range 2 + r.Intn(3) {
+		cx, cy := r.Float64()*limit, r.Float64()*float64(l.H)
+		rx, ry := (5+9*r.Float64())*k, (3+4*r.Float64())*k
+		a := 0.28 + 0.22*r.Float64()
+		for y := 0; y < l.H; y++ {
+			for x := 0; x < l.W; x++ {
+				dx, dy := (float64(x)-cx)/rx, (float64(y)-cy)/ry
+				if v := a * math.Exp(-(dx*dx+dy*dy)/2); v > 0.005 {
+					grime.V[y*l.W+x] += v
+				}
+			}
+		}
+	}
+	for range 1 + r.Intn(2) {
+		cx, cy := r.Float64()*limit, r.Float64()*float64(l.H)
+		rad := (2 + 3*r.Float64()) * k
+		for range int(30 * k * k) {
+			ang, d := r.Float64()*2*math.Pi, rad*math.Sqrt(r.Float64())
+			x, y := int(cx+d*math.Cos(ang)), int(cy+d*math.Sin(ang))
+			if x >= 0 && y >= 0 && x < l.W && y < l.H {
+				grime.V[y*l.W+x] += 0.3 + 0.3*r.Float64()
+			}
+		}
+	}
+	edgeGrime := 0.16 + 0.12*r.Float64()
+	for y := 0; y < l.H; y++ {
+		for x := 0; x < l.W; x++ {
+			e := math.Min(math.Min(float64(x), float64(l.W-1-x)), math.Min(float64(y), float64(l.H-1-y)))
+			grime.V[y*l.W+x] += edgeGrime * math.Exp(-e/(3*k))
+		}
+	}
+	grime = grime.Blur(0.4 * k)
+	for i, v := range grime.V {
+		grime.V[i] = math.Min(v, 0.7)
+	}
+	l.Paint(grime, 0, 0, RGBA{0.06, 0.055, 0.05, 1})
 	d, f := deep.Resize(l.W, l.H), faint.Resize(l.W, l.H)
 	ax, ay := -s.Light.X, -s.Light.Y
 	l.Paint(d, ax, ay, white.WithA(0.35))

@@ -44,6 +44,9 @@ func LoadPalette(path string) (color.Palette, error) {
 	if err != nil {
 		return nil, err
 	}
+	if l.W != 16 || l.H != 16 {
+		return nil, fmt.Errorf("%s is %dx%d, want a 16x16 palette swatch", path, l.W, l.H)
+	}
 	pal := make(color.Palette, 0, 256)
 	for i := range 256 {
 		c := l.At(i%16, i/16)

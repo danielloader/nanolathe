@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"image/color"
+	_ "image/jpeg" // materials often arrive as JPEG
 	"image/png"
 	"math"
 	"os"

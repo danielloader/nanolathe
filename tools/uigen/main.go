@@ -181,8 +181,10 @@ func (s *Style) TopBar() *Layer {
 var captionNormal = CaptionStyle{Fill: hex("#dfdfb7"), NearLight: hex("#b9b996"), FarLight: hex("#f6f6e2"),
 	Outline: hex("#070f00"), OutlineR: 0.75, SX: 0.85, SY: 1.15}
 
-var captionGreyed = CaptionStyle{Fill: hex("#5a5a52"), NearLight: hex("#4a4a44"), FarLight: hex("#6c6c64"),
-	Outline: hex("#070f00"), OutlineR: 0.75, SX: 0.85, SY: 1.15}
+// captionGreyed follows retail's disabled art: the lettering loses its cream
+// for neutral greys and its outline fades from near-black to dark grey.
+var captionGreyed = CaptionStyle{Fill: hex("#6b6b6b"), NearLight: hex("#4b4b4b"), FarLight: hex("#7b7b7b"),
+	Outline: hex("#2b2b2b"), OutlineR: 0.75, SX: 0.85, SY: 1.15}
 
 const faceBright = 2.0
 

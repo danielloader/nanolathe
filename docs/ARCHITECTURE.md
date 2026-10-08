@@ -119,6 +119,7 @@ package implements.
 
 | Package | Responsibility | Design document |
 |---|---|---|
+| `internal/sim/checkpoint` | Standard-library-only canonical diagnostic encoder, full/owner digest framing, typed reference IDs and weighted summaries; owner writers and session capture are staged separately | DESIGN_MULTIPLAYER §16.3 |
 | `internal/clock` | The 30 Hz fixed-step budget: scaled host time, the `0..5` sub-tick clamp, speed and pause, the scheduler save box | DESIGN_RUNTIME_DETERMINISM |
 | `internal/sim/numeric` | `Fixed` 16.16, `uint16` angles, the 512-entry sine table, truncation toward zero | DESIGN_RUNTIME_DETERMINISM |
 | `internal/sim/rng` | The two random streams: Park-Miller simulation stream and the CRT stream | DESIGN_RUNTIME_DETERMINISM |
@@ -251,12 +252,12 @@ simulation    mission ─► triggers, movement, orders, units, content, formats
               world ─► content, formats, vfs, numeric, rng
               path ─► pool                     audio ─► frame, content, pool, numeric, rng, vfs
 
-content       content ─► cob, model, palette, formats, vfs
+content       content ─► cob, model, palette, formats, vfs, sim/checkpoint
               cob ─► model, numeric, rng, vfs        model ─► formats, numeric, vfs
               gui ─► formats, vfs               palette ─► vfs           formats ─► vfs
 
 leaves        vfs, clock, pool, frame(pool, numeric), camera(pool, numeric), input,
-              settings, version(netproto), netproto, sim/numeric, sim/rng
+              settings, version(netproto), netproto, sim/numeric, sim/rng, sim/checkpoint
 ```
 
 Four boundaries in this graph are enforced by tests in `internal/architecture`

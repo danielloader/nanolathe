@@ -74,6 +74,7 @@ Allowed floating point, exhaustively:
 | AI class-vector working intermediates — the net-energy query return, first-pass cost sums and the later C0/C1/C2 coefficient arithmetic, at retail’s 53-bit working precision; each explicitly stored intermediate retains its single-precision boundary | `float64` transient, never authoritative stored state; narrow only at the established single-precision stores, then truncate toward zero at the integer conversions; authored fields retain their existing storage types | `[05 R-PROD-01 §1]`, `[08 "Arithmetic and clamping"]`, `[08 R-P0-05 §5]` |
 | AI metal-spot records and exhaustive-placement heap keys | authored feature-metal copy and helper-local negative squared-distance key, both `float32` | `[08 R-AI-03 §1]`, `[08 R-AI-03 §3]` |
 | Survival authored cost and reward conversions | `float64` only for exact widening of a stored `float32` into the defined signed-64 conversion; no floating arithmetic is added | DESIGN_SURVIVAL §5 and §6.9; DESIGN_MULTIPLAYER §16.1 M1-C4–C5 |
+| Canonical checkpoint encoder | `float32`/`float64` parameters copied to exact IEEE integer bits, with integer-mask NaN rejection; no floating arithmetic or new authoritative storage | DESIGN_MULTIPLAYER §16.3.6 |
 | Portable numeric kernel: retail distance and its bounded truncation shortcut, unfused radian functions, immutable 65,536-angle table, and defined integer conversions | `float64` API values and working transients; integer significands implement distance rounding; radian coefficients and the angle table are immutable binary64 data; conversions narrow at their documented stores | `[01 R-DET-01 §1]`, `[01 R-DET-01 §2]`, `[01 R-DET-01 §7]`; DESIGN_MULTIPLAYER §16.1 M1-C1–C4 |
 | Leash, construction/work reach and air-order planar distances, including footprint pads | `float64` transient through the portable distance kernel; signed input words and raw differences, scaled pads and output narrowing follow each caller | `[01 R-DET-01 §7]`, `[04 R-STANCE-01 §4]`, `[04 R-AIR-01 §8]`, `[05 R-WORK-01 §2]` |
 | Simulation trig-table construction at initialization | `float64` transient; authoritative table entries are integers | `[04 §5.1]` |
@@ -602,6 +603,9 @@ mover save record — which carries no route state of its own, because the
 retail image rebuilds the route object instead of persisting it
 `[08 R-SAVE-02 §8]`. The active save boundary is retail account parsing and staged battle
 restoration. There is no alternate Nanolathe save codec.
+The Nanolathe canonical checkpoint stream is also an explicit byte boundary
+(DESIGN_MULTIPLAYER §16.3.6): diagnostic hashing and byte capture, with no
+restore reader or alternate save codec. Its schema never dictates Go layout.
 Everything else is a Go struct.
 
 **Why.** Pool capacities (300 projectiles, 8 COB threads, 86-byte order nodes)

@@ -56,11 +56,14 @@ type SimulationInputRequest struct {
 // Filesystem is the sealed view of the capture, which never falls through to
 // the live providers.
 type SimulationInputs struct {
-	sources    *SimulationSources
-	view       vfs.FSOps
-	catalog    *Catalog
-	simArt     *SimArt
-	models     map[string]*model.Model
+	sources *SimulationSources
+	view    vfs.FSOps
+	catalog *Catalog
+	simArt  *SimArt
+	models  map[string]*model.Model
+	// Captured definition-loader heights complete the parsed-model identity;
+	// checkpoint validation must not reload bytes (DESIGN_MULTIPLAYER §16.3.6).
+	modelTops  map[string]int32
 	manifest   []SimulationInput
 	provenance []SimulationInputProvenance
 	digest     [32]byte
@@ -275,6 +278,7 @@ func FreezeSimulationInputs(sources *SimulationSources, r SimulationInputRequest
 		inputs:    &SimulationInputs{sources: sources, catalog: r.Catalog, models: make(map[string]*model.Model)},
 	}
 	f.freezeModels()
+	f.inputs.modelTops = f.modelTops
 	if err := f.checkCatalogCapture(r); err != nil {
 		return nil, err
 	}

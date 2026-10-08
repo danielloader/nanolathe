@@ -633,6 +633,7 @@ var float64FieldAllowances = map[string]string{
 // names the precise retail operation that needs binary64; all other float64
 // occurrences still use the shrink-only per-file baseline.
 var float64ScopeAllowances = map[string]float64Allowance{
+	"internal/sim/checkpoint/encoder.go func *Encoder.F64":             {1, "I2 exact stored binary64 bits for canonical diagnostics; no floating arithmetic (DESIGN_MULTIPLAYER §16.3.6)"},
 	"internal/orders/scans.go func patrolResourceAtLeastTwenty":        {3, "I2 patrol stored stock/capacity and binary64 threshold constant compared at working precision [04 R-ORD-01 §4]"},
 	"internal/orders/scans.go func resourceFits":                       {3, "I2 patrol stored stock plus stored feature value compared without narrowing [04 R-ORD-01 §4]"},
 	"internal/ai/strategic.go func classify":                           {8, "I2 net-energy query stored inputs and working-precision return [05 R-PROD-01 §1]"},

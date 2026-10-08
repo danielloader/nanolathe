@@ -7,13 +7,16 @@ Only player commands travel: a relay puts them in one order, tells every
 client which tick each one runs on, and decides how far the battle may
 advance. The model is **relayed deterministic lockstep**.
 
-**Status: adopted 2026-10-01; M1 verified; M2 design preparation.** The maintainer accepted
+**Status: adopted 2026-10-01; M1 verified; M2 implemented; M3 U1 implemented.** The maintainer accepted
 this design and decided its original questions on 2026-10-01, after two
 revisions of the 2026-09-30 proposal. Networking, replays and the multiplayer
 lobby are in scope (ARCHITECTURE §1), and implementation is authorized in the
 order of §16, each milestone behind the one before it. §16.1 records M1's
 implementation and verification; its native-platform gate is complete.
-§16.2 prepares M2's schemas and work units. The original audit measurements were taken on
+§16.2 records M2's schemas, implemented work units and carried gaps.
+§16.3 records M3's reviewed schema and implemented encoder/reference keys;
+U2's unit, order and COB writers are next.
+The original audit measurements were taken on
 2026-09-30 and 2026-10-01 against
 main `193abfde`. Co-op is the first delivery, not the architecture's limit:
 an eventual competitive mode is required. The interoperability target is
@@ -2902,7 +2905,7 @@ every single-player battle bit-identical except where it says so.
 | **M0 Adoption** | The §15 decisions; scope changes in ARCHITECTURE and the agent instructions; the online authorization and view policies; the invariant amendments (§5.4). | Done 2026-10-01: the maintainer decided §15 and the documents agree. |
 | **M1 One simulation on every host** | Effect holds in `SimArt`, the pool timed from them on every host and the resolver seam removed (L9). The retail-defined distance routine, the angle tables, the in-repository `Atan2`/`Acos`/`Tan`, the defined conversions, their moved call sites and the two I2 source guards (L1). Two standing ratchets in the retail gate: the fingerprint locks from an amd64 build as well as an arm64 one, and a lock scene long enough to fill the Strict effect pool. | The distance routine implements `[01 R-DET-01 §7]`. Bit-pattern and engine-narrowing vectors agree on native darwin/arm64, linux/amd64 and windows/amd64. The fifteen existing locks are unchanged on both architectures, or each move is explained. A new Strict lock past the tick at which the pool fills equals, at M1 landing, the step-4,500 fingerprint of the 2026-10-01 window-like probe on the seed-7 scene — a headless run with the old timing resolver installed, supplying the per-frame holds the window read; no windowed run was made. After O22 the lock moved to seed 5, whose pool fills (M1-C9). With the resolver seam removed no host can supply timing, and the guard forbidding authoritative packages, `internal/effects` included, from importing `internal/render` (`TestAuthoritativePackagesDoNotImportHostOrNondeterministicRuntime`) holds that. A windowed run against a headless one is §17's host-kind test, after M4. Complete cross-platform world equivalence is tested after M3, not claimed from these vectors alone. |
 | **M2 Commands, configuration and identity** | Seat-attributed commands, receiver-side permissions, allocation serials, local interface state, explicit wire schemas with the payload audit of §7.4, complete content/build/configuration identities and match view policy fields. | Codec fuzz/round-trip and hostile-input tests; script/model/SimArt mismatches refused; every effective match field changes identity as intended. Existing fingerprints move only by removed interface bits, demonstrated with those bits masked, and by any single-player change declared with its evidence under M2-C7 (§7.4.3). |
-| **M3 Canonical checkpoints and digest** | Reviewed state inventory with the effect pool in it, canonical writer and sub-digests, the tick ring, pump ends and the computer seats' applied-command hashes (§9). | Scripted single-seat scenes agree per checkpoint across supported platforms, host schedules and host kinds; a seeded one-field fault is located to its tick and owner from two rings alone; a checkpoint costs the same with AI workers idle and busy; state-owner checks and measured encoding budgets pass. Exact restore is not yet promised. |
+| **M3 Canonical checkpoints and digest** | Reviewed state inventory with the effect pool in it, canonical writer and sub-digests, the tick ring, pump ends and the computer seats' applied-command hashes (§9). | Scripted single-seat scenes agree per checkpoint across supported platforms and host kinds, with host schedules replaying the same explicit pump boundaries (§16.3); a seeded one-field fault is located to its tick and owner from two rings alone; a checkpoint costs the same with AI workers idle and busy; state-owner checks and measured encoding budgets pass. Exact restore is not yet promised. |
 | **M4 Replays** | Recorder, playback, pump ends, pacing notes, digest checks and a headless replay command. | Long Strict and Modern replays agree across platforms and between a windowed recording and headless playback, through pauses, speed changes and late AI workers. Reproducible desync diagnostics retain common-boundary evidence. |
 | **M5 One world per player** | Perspective slots, per-seat blocks, latches and countdowns, the union gate ahead of the strips and the effect pool, and every other generalization in §6; the tail after every tick in lockstep battles (§4.5); the multi-seat harness (§17). | The harness passes for two to four human seats with computer seats under every registered rule set; single-seat fingerprint locks unchanged. |
 | **M6 LAN and room codes** | Embedded relay; `cmd/nanolathe-server` hosting the same relay, reached by room code over TLS with rate and size limits and no accounts; sealed grants, relay pacing at fixed normal speed, the agreed summary, LAN/direct lobby, chat, departures with removal votes and the mode's final-removal rule (§11.1), shared view restrictions, desync detection, bundles and the casual desync policy. | Mixed-platform battles finish on a LAN and through the hosted relay from behind ordinary home routers; hostile commands are refused; a resignation and a drop made while the relay holds its grants for a lagging seat are handled correctly; §11.1's removal-vote and hosted-computer tests pass in every reserved mode; a seeded desync in a three-seat battle leaves two seats playing; all zoom entry routes honor match restrictions. Impaired-network and CPU-stall runs meet declared budgets, set before acceptance. |
@@ -3648,6 +3651,929 @@ presentation changes additionally require both renderer captures and local
 input checks, per ARCHITECTURE §6. Report unsupported/deferred commands and
 pending native-platform or later-milestone gates separately from tests that actually passed.
 
+### 16.3 M3 preparation and work units
+
+**Status: U0 published; U1 encoder and reference keys implemented, 2026-10-06.**
+M1's native gate is complete and all M2 units are implemented (§16.1–§16.2).
+M3 is the next milestone. U0's reviewed field dispositions, encoding and
+public API are in §16.3.5–§16.3.8. U1 provides the shared encoder and
+reference keys; a whole-battle canonical digest still requires U2–U7. These
+are Nanolathe implementation contracts under §9, not new retail findings or gameplay policies.
+
+**Scope.** Deliver the writer, digest, owner sub-digests, tick ring and
+single-seat verification. Leave the existing partial fingerprint and its
+locks unchanged. Exact restore is M8; recorder/playback is M4; perspective
+generalization and a multi-seat constructor are M5; network transport and
+relay desync decisions are M6. A retail save, committed frame, debug capture
+or `PartialStateFingerprint` is not a complete checkpoint. In particular,
+`RecordAIControllers` is a save operation that joins workers, so it cannot
+be reused by the regular checkpoint.
+
+#### 16.3.1 State-owner inventory
+
+This overview is refined by the reviewed field dispositions in §16.3.5,
+including nested records, interface-held state and exclusions. It is not
+permission to serialize every Go field. Every future change to an
+authoritative type updates its disposition.
+
+| Owner and current source surfaces | State the inventory must account for |
+|---|---|
+| Session/runtime — `session.go`, `step.go`, `result.go`, `community_schema.go`, `sim/rng/rng.go` | Global tick; battle lifecycle and pending result/commander-death/respawn state; active rule-set name and effective rule inputs, including single-player live switches; builder options; wind, meteor and shake drivers; both RNG states, initialization and draw counts. Classify single-player local/viewing identities by their current consumers; M3 must not erase the M5 dependencies by excluding them. |
+| Units and allocation — `units/units.go`, `units/types.go`, `pool/pool.go` | Player slice bounds, occupancy and definition identities, live/created counters, the successful allocation-serial counter and every live serial; complete unit/weapon-slot/attachment state. Include the freed-slot residuals accessible through `rawUnits`, not only the live walk. Temporary serial reservations must be zero at a legal checkpoint. Retain raw internal references as raw references: M2 serials do not change retail aliasing. |
+| Orders — `orders/pump.go`, `node.go`, `binding.go` and owned handler state | Both queues in their actual traversal order; node parameters, flags, wait/return state and per-unit handler state, including Modern and Community additions. Define logical identity for shared/referenced nodes rather than encoding pointers. A queued unit order is world state; an unconsumed external input is not. |
+| COB/model — `cob/vm.go`, `bridge.go`, `units.ScriptState`, `model` | Thread slots, execution/call/value stacks, waits, signals, statics, animation lanes and piece state; thread allocation/return identities and outstanding completion bindings. Audit callback closures: write the logical continuation and its operands, never a function address. Model/program definitions are frozen content references; pose and animation progress are mutable state. Classify render flags by their consumers rather than their names. |
+| Movement and paths — `movement/integrate.go`, `layer.go`, `route.go`, `path/queue.go`, `search.go`, `heap.go`, `workspace.go` | Occupancy, filing order, class-layer cells and age/revision gates; routes including readable residual storage, steering/collision/flight state and callback edge memories; scheduler cursors, allowances and requests; every suspended search's frontier, nodes, parent links, tie order and result progress. Include Modern learned terrain, traffic claims/arrival places and repair reservations wherever future reads depend on them, even if retail saves rebuild or omit them. |
+| World/features — `world/terrain.go`, `features/service.go`, `active.go`, `cursor.go` | Mutable terrain/plot and feature-reference state, relevant revisions, feature instances and animation/burn/reclaim/reproduction progress; the active list in its actual LIFO order, arena occupancy and global scan cursor. Immutable map inputs use the admitted identity. A sorted instance lookup does not replace the active list. |
+| Visibility — `visibility/grids.go`, `sensors.go`, `session/visibility.go`, `eyeball.go`, `post_loop.go` | Explored masks, current refcounts, observer footprints and throttle/stamp state, completed sensor status and its cadence, mode/team/viewer-dependent inputs, and temporary-sight records in list order. The temporary-sight list is authoritative although its owner is the executor tail. Fog/minimap caches and their presentation revisions are excluded after checking their consumers. |
+| Economy/construction — `economy/ledger.go`, `construction/factory.go` and per-unit work state | Every player's resources, accounting buckets, deadlines, control/alliance/share/end-condition fields; construction and production progress, factory products/queues, and Community repair banks. References to units and orders do not cause those owners' records to be written twice. Configuration values are not silently replaced by host defaults. |
+| Combat — `combat/pool.go`, `service.go`, `autonomous.go`, `target.go` and rule-owned state | Projectile count/capacity/dead flags and residual records in pool order; aim readiness/continuations, persistent scan cursors and periodically rebuilt target/base lists; damage-option gates, death-notification identity and deferred transport deaths; Modern incoming-shot and other retained predictions where future admission reads them. Do not reconstruct a deliberately stale registry from today's units. |
+| Effects — `effects/effects.go`, `effect_service.go`, `fragment.go`, `debris.go`, `session/strips.go`, `publicationState` | Fixed-pool occupancy/order and animation players, fragment geometry, debris arena allocation/linkage, all ten strip families and their particles. Audit effect event admission, sequence suppression, pending records and identity exhaustion before excluding any publication/event fields. Pixel/material caches stay local only when their values cannot affect admission, lifetime, geometry or RNG. |
+| Computer players — `ai/manager.go`, `strategic.go`, `groups.go`, `build.go`, `aikit/host.go`, `cmd.go` | Classic planner records, deadlines, ordered groups and engine upkeep for both controller kinds. Add the per-seat applied-command history and next reaction deadline of §9.1 on the simulation thread. Explicitly classify the Modern executor's APM bucket/refill time and retained placement reservations; the worker-memory exception is not a blanket exclusion of everything behind `Manager.Ext`. |
+| Mission/scenario — `mission`, `triggers`, `session/mission.go`, `survival.go`, `internal/survival` | Trigger progress and event latches, scheduled schema spawns, Survival accounts, phase/deadlines/wave plan/spawn cursors/retarget state and unit membership; score state where it affects the result. Pure report history may be excluded with its readers recorded. Survival's ban on saves does not exclude it from digests. |
+
+A field belongs to one canonical section even when several services hold
+its pointer. U0 records the ownership edges, including the scheduler shared
+by session/movement, COB state held by units, temporary sight held by the
+session but affecting visibility, and effect storage beside publication.
+Sub-digest labels name logical owners, not a reflection dump of packages.
+The immutable keys already used by `content.SimulationInput` distinguish
+family, record ordinal and key; use that identity rather than a name alone.
+A dynamic definition or continuation that has no such key needs an explicit
+logical representation before its writer can land.
+
+**Exclusions require evidence.** Host clock anchors/carry/speed hysteresis,
+network/input queues, local interface state, audio playback, frame buffers,
+renderer caches, tracing and profiling are outside world state (§4.4, §9.1).
+Keep consumed stream position and pump information with the checkpoint as
+external metadata, without hashing unconsumed inputs. A scratch field is
+excluded only if overwritten before every read; a derived field only if its
+reconstruction preserves all values and iteration/tie order. Do not infer
+this from a `Save` omission or a comment calling it a cache. The Modern
+brain, private generator, observation and unapplied command contents retain
+§9.1's explicit exclusion; M8 owns the coordinated restart.
+
+#### 16.3.2 Capture and encoding contracts
+
+**M3-C1 Boundary.** Capture on the simulation thread after all work belonging
+to the checkpoint tick, before any next-tick input or paused-input mutation.
+For single-player, an interior tick of a multi-tick pump is captured after
+its publication; its final executed tick is captured after
+`runRetailPostLoopTail`. A pump shortened by battle termination uses its
+actual final tick. `publicationObserver` currently runs before that tail,
+so installing the writer there alone is insufficient. Use the same boundary
+for full digests and the tick ring. Capture entry state separately, after
+battle-entry initialization, without labeling it a completed runtime tick.
+Zero-tick pumps do not append or replace a tick checkpoint (§4.5).
+
+M3 keeps single-player pump semantics. Tests compare different host schedules
+while replaying **the same explicit pump boundaries and input positions**;
+arbitrary regrouping of single-player ticks can legitimately change sight
+expiry. A targeted test with a temporary-sight expiry inside a multi-tick
+pump must expose that difference. M5 later gives each granted online tick
+its own pump. A known pre-M5 host-kind dependency remains a reported gate;
+M3 cannot make it disappear by leaving the affected state out of the hash.
+
+**M3-C2 Canonical values.** One versioned byte schema, independent of Go
+layout, native integer width, memory address and map iteration. Specify
+section IDs/order, field widths, signed representation, lengths, presence
+and definition/reference keys before writing a codec. Preserve semantic
+sequence order, including heaps and linked lists; canonical sorting is only
+for unordered lookup tables. Every floating field keeps its exact bit
+pattern, including signed zero. Refuse NaNs with the owner and logical
+field path, without returning a usable digest or changing the world (§9.1).
+Do not reuse the online `amount` validator, which normalizes/rejects values
+under a different contract. Do not add a new floating arithmetic operation.
+
+**M3-C3 Identity and failure.** Bind the schema to M2's complete content
+identity and effective configuration; keep build/platform provenance in the
+comparison/bundle metadata. Name any missing admission attestation rather
+than assuming equal initial state proves equal inputs. Missing owners,
+unrepresentable references or non-quiescent transient state fail capture;
+a nil optional owner has an explicit schema representation. No reflection,
+`unsafe`, retail-save encoding or renderer accessor supplies the schema.
+
+**M3-C4 One writer.** Stream the canonical encoding to an `io.Writer` so
+hashing need not allocate a full snapshot. The complete digest is SHA-256
+over those exact bytes; only its first 16 bytes go on the wire (§9.1).
+Sub-digests use the same owner encodings and an explicit owner/schema domain,
+not a second hand-maintained field list. Diagnostic byte capture and digest
+capture must agree. Writer errors return failure, never a digest of a
+silently truncated state. Capturing, repeating a capture or enabling history
+changes no world value, RNG draw, queue, pending callback or worker state.
+
+**M3-C5 Modern AI boundary.** Regular capture never calls `Join`,
+`Generator`, `RecordAIControllers`, a brain method or a worker-owned reader.
+The simulation thread publishes a value-only record for every computer seat:
+controller kind, applied-command chain and next-deadline presence/tick, plus
+any engine-side fields the inventory classifies as authoritative. Distinguish
+an absent/pending deadline from tick zero. Record the actual application
+order and allocation references, not Go unit pointers or the worker's batch
+storage. U0 fixes the applied-command encoding and the precise commit sites,
+including accepted no-ops and failed/partially applied actions, before U5
+instruments them; hashing emitted intents or aggregate success counts alone
+does not satisfy §9.1. Do not route Classic AI through a new command path
+or change Modern AI's scheduling/APM behavior to make it easier to observe.
+
+**M3-C6 Bounded diagnosis.** Initially retain the last 64 owner-digest
+checkpoints at the 30-tick cadence and a 600-tick ring (§9.2). A ring row
+contains its tick, both RNG states/draw counts, pool counts and per-owner
+fixed-width summaries. Computing the row must not call the canonical writer
+or retain a whole snapshot. U0 specifies the summary algorithm, included
+fields and explicit blind spots; a cheap rolling sum is diagnostic evidence,
+not a complete equality proof. Compare only overlapping ticks and report
+when the first divergence predates the retained window or the owner is not
+covered. Host reads copy records without draining data needed by a later
+bundle. Measure both the per-tick cost and retained memory; bounded row count
+alone does not establish a useful memory bound.
+
+#### 16.3.3 Public API gate and work sequence
+
+**The U0 API is published in §16.3.6–§16.3.7.** Session owns checkpoint
+boundaries, capture configuration and bounded report/history access.
+Each state owner writes its logical section through a shared encoder; it
+must not export mutable internals or import session to do so. A value-only
+Modern AI checkpoint record belongs at the existing `ai`/`aikit` boundary,
+so session continues to avoid importing the controller implementation.
+Content owns canonical definition-key resolution. Do not add a gameplay
+seam, registry or selectable policy: checkpointing observes the bound rules.
+
+The shared streaming encoder lives in the stdlib-only leaf
+`internal/sim/checkpoint`; typed content keys remain content-owned. The
+published block covers error propagation, graph references, owner methods,
+AI history, boundary metadata, diagnostic byte requests and bounded history.
+Exact snapshot readers and relay APIs remain outside it.
+
+| Unit | Depends on | Deliverable and principal ownership |
+|---|---|---|
+| **U0 Inventory and schema — published** | M2 acceptance evidence reviewed | Reviewed dispositions and schema/API in §16.3.5–§16.3.8. Implementation prerequisites and unsupported cases are explicit; no writer is claimed complete. |
+| **U1 Encoder and reference keys — implemented** | U0 | Streaming primitives, domain/version framing, error propagation, content-owned key resolution, authored byte vectors and a tiny test owner. No whole-world completeness claim. Exact files/new leaf package are named by U0. |
+| **U2 Units, orders and COB** | U1 | Owner writers and focused mutation/exclusion tests in `internal/units`, `pool`, `orders`, `cob` and `model`. Cover slot reuse/residuals, suspended orders, thread reuse and logical callback state. |
+| **U3 World, visibility, movement and paths** | U1 | Owner writers/tests in `internal/world`, `features`, `visibility`, `movement`, `path`. Cover temporary-sight data through the session integration, stale grids/registries, list order, active searches and Modern policy state. This is a sequencing group: split it into bounded, exclusive-file dispatches after their shared key/API needs are resolved. |
+| **U4 Economy, construction, combat and effects** | U1 | Owner writers/tests in `internal/economy`, `construction`, `combat`, `effects`. Session-owned strips and shared event-admission glue are integrated by U6. Include full pools, deferred work and feature/transport effects. Split along existing owners when dispatching. |
+| **U5 Computer-player state** | U1; reference contract from U0 | Classic/engine-upkeep writer in `internal/ai`; Modern simulation-thread application/deadline record in `internal/aikit`. Worker-schedule and application-order tests. No brain-policy edits, worker joins or new commands. |
+| **U6 Session capture and history** | U2–U5 | Session/runtime/mission/trigger/Survival writers; compose each owner once; capture at actual pump/tick boundaries; digest cadence, sub-digests and tick ring. Own shared `internal/session` integration, with exact external owner files assigned separately. No network battle, recording format or restore reader. |
+| **U7 Acceptance and cost** | U6 | Scripted single-seat harness, native-platform and host-kind evidence, two-ring fault diagnosis and measurements. Reuse the existing gates and simulation benchmark; landing owner owns shared gate/CI edits. Record exclusions, unsupported cases and measured budgets here before marking M3 complete. |
+
+These rows are sequencing/ownership groups, not permission for one agent to
+edit every named directory. Every dispatch lists exact files and a reviewed
+API; shared `session` files remain with U6. U2–U5 may proceed independently
+only after U0/U1 are green. New exported staging APIs must have real consumers
+or explicitly justified deadcode-baseline entries; no unused convenience API
+is added for a speculative M8 reader.
+
+#### 16.3.4 Acceptance and carried gaps
+
+**M3-C7 Completeness evidence.** Review each owner's field dispositions
+against its actual readers/writers. Use small authored fixtures to mutate
+representative retained fields and verify the full digest and owning
+sub-digest change; vary excluded caches, allocation addresses, lookup
+insertion order and presentation settings and require no change. Include
+same-name definitions with distinct record identities, a freed/reused unit
+slot, a paused COB return/wait, a suspended search, stale target lists,
+temporary-sight expiry, a capacity-full effect pool and Survival spawn
+progress. Tests of a writer against its own output are insufficient.
+Serialize/restore/serialize and long restored continuations remain M8 tests.
+
+**M3-C8 Equivalence and diagnosis.** Scripted single-seat Strict, Modern
+and Community scenes use the same content/configuration, input positions
+and pump ends on native Darwin/arm64, Linux/amd64 v1/v3 and Windows/amd64.
+Compare every requested checkpoint, including recorded pumps of one to five
+ticks and pauses. Vary Modern worker completion timing while holding its
+reaction contract fixed; checkpoint reads never wait and later application
+histories agree. A seeded fixed-width fault between full-digest ticks must
+be located to its first retained tick and owner from two rings alone. Also
+test ring wrap, absent overlap, owner-summary blind spots and error reporting.
+Exercise windowed/headless hosts and audio/presentation variations; a failure
+owned by the already-staged M5 work is recorded as a remaining gate, not
+"fixed" by omitting state or changing single-player behavior. M4 extends
+these tests to actual replay files and windowed recordings.
+
+**M3-C9 Cost and landing.** Measure bytes, encoding CPU/allocations per
+checkpoint, digest-only versus byte capture, ring CPU per tick and retained
+memory on matching busy scenes. Compare disabled capture with the baseline
+and enabled capture at §9.2's initial cadence. Use sequential `tools/sim-bench`
+runs and the host coordination in ARCHITECTURE §6; report matching scene
+metadata and census. Measure both idle and busy AI workers separately from
+ordinary deadline joins. Set numerical acceptance budgets after exploratory
+measurements and before the acceptance run, rather than declaring whatever
+was measured acceptable. Preserve all existing single-seat fingerprint
+locks and RNG histories. Run affected contracts, then `tools/check` and
+`tools/check-retail` before and after landing; use the full retail tier when
+the change affects the long-run contracts ARCHITECTURE §6 names. This
+U0 documentation and the unwired U1 foundation do not change the tick;
+live capture cost is measured after U6 enables it.
+
+**Carry-forward ledger.** M2's replay-only zero-serial/duplicate-actor
+proposal remains for the maintainer and M4 (`seat_command_codec.go`); M3
+must not silently widen the command schema. The visited-bit meaning remains
+a research question, with no guessed mapping in the checkpoint inventory.
+The frozen-input preparing rule set, cloned content limits and profile
+name/directory attestations remain explicit admission gaps
+(`match_admission.go`); §16.3.8 assigns the bounded fixes and fail-closed
+admission conditions before those identity claims are enabled.
+The mod comparison already added by U6 is not an open item again. Unit
+restrictions added after M2 also need an inventory of their effective content
+and limits; online field-12 admission remains separately staged (§8.6 and
+DESIGN_MODS_MUTATORS §15). None of these is settled merely by producing an
+initial-state digest. O10 remains open until the reviewed inventory and
+cost evidence above exist; exact continuation stays with M8.
+
+#### 16.3.5 U0 field dispositions
+
+**Reviewed implementation inventory, 2026-10-06.** This is a contract for
+writing the state present at `4230f6c36`, not evidence about retail behavior.
+The owner tables below refine §16.3.1. **Retain** means actual stored values,
+even when a supported rule switch is needed to expose a reader; **binding**
+means an admitted immutable identity or a checked composition edge; **exclude**
+means the stated reconstruction or no-reader reason applies. These decisions
+must be reviewed again when the named implementation changes. Existing retail
+gaps are not closed by preserving the implementation's current values.
+
+The field names in these tables are schema names. Within a record, encode
+retained fields in bytewise lexical order of their source spelling; expand
+abbreviated coordinate/array families into their individual named fields.
+Nested records use the same rule unless an explicit framing/order below overrides
+it. Source declaration order, padding and
+pointer layout are irrelevant. Source fixed-width scalar types give the wire
+width; Go `int`/`uint` use 64 bits. Named numeric types use their underlying
+width. Sequences carry their length and preserve their stored order; maps
+sort by their encoded logical key (numeric keys numerically, strings by raw
+bytes, compound keys componentwise). Fixed arrays omit a length. Presence is
+explicit for optional values. Each writer documents its expanded field list
+beside its implementation; a new retained field changes the schema version.
+
+**Session, runtime and scenario.**
+
+| Type/source | Retain or bind | Exclude or boundary condition |
+|---|---|---|
+| `Session`, `session.go`, `state.go`, `result.go` | `State`, `Clock.GlobalTick`; `Gameplay`, active `Rules` identity, effective `Community`, `EntryCommunity`, mutators/restrictions and builder options; RNG initialization, entry seeds, both stream states and draw counts; `LocalOwner`, `EnemyOwner`, `ViewingOwner`; `VictoryDone`, `DefeatDone`, `Latch` (`Countdown`, `Bits`, `Pending`); `resultPending`, winner/loser/reason/draw fields, `resultArmedTick`, commander-death array, all Deathmatch counters, `deathsWithNoRecordedCause`; latched result `Ended`, `Draw`, `Winners`, `Losers`, `Reason`, `Tick`, `ArmedTick`, `Countdown`. | No pending battle transition at capture. `result.Kind`, `WinnerTeam`, score presentation and column maxima are result views; retain their underlying accounting/scenario state instead. `Snapshot`, publication copies, scratch walks, trace/probe/observer fields, diagnostics, `bigBrother` facts, HUD/debug display and audio device state are excluded. |
+| Session configuration | Retain the effective skirmish/player values, mode-independent options, campaign slot/side/known arrays, `Progress` bank fields, and `battleEntryTailDone`; immutable mission/map inputs are admitted bindings. `seatCommands.removed` belongs here when implemented. | Nicknames/colours and source provenance are metadata unless a live consumer affects work; strip colour selection is separately classified below. `rulesDefaultsApplied` is load bookkeeping. Human/network queues, sequences, receipts and last consumed stream position are external metadata; require no command dispatch in progress. Clock anchor, delta, carry, requested/active speed, pause and slew are host pacing (§4.4). |
+| `Wind`, `MeteorState`, camera shake driver | Wind `Strength`, `Heading`, `Scalar`, `DirX`, `DirZ`, `NextChange`, `Changed`, effective `Min`/`Max`; every `MeteorState` scalar plus its weapon identity; shake active/duration/remaining/amplitudes/offsets and `noShake`, because the driver controls CRT work. | Wind `LastChange` has no runtime reader; `BriefingCountdown` is front-end state. Exclude camera/view transforms, not the driver's RNG gates. |
+| `postLoopState`, `eyeballRecord`, visibility stamps | Temporary-sight records in actual list order: `owner`, `sightDistance`, `heightByte`, `x/y/z`, `expiry`, `cx/cz`, `emitter`, `published`. Stamp map by handle, each `cx/cz/radius`. | Message-retirement callbacks, tail traces and publication counts do not control sight. The boundary still distinguishes interior and final pump ticks (C1). |
+| `communitySchemaState`, mission/triggers | `active`, mission binding, `playerByStart`, `neutralOwner`, ordered `deferredPlacements`, `nextDeferred`; ordered victory/defeat trigger lists, each `Kind`, `Type`, `Args`, `Completed`, `Celebrated`, `CenterReady`, `CenterX/Y/Z`. | Mission type, schema/start positions, placements, specials, initial features, wind bounds, authored triggers, difficulty, use-only and campaign selection are immutable input bindings. Diagnostics are excluded. Never replace mutable trigger progress with the authored trigger list. |
+| `survivalState`, `survivalUnit`, `survivalClass` | `attacker`, slot-ordered `team`, `settled`, all account `Stock/Capacity/Earned` pairs; effective `tuning`, `opts`, pool records and indices; centre/start class/region, `classes` in allocation order; phase/end, wave/plan (group/pick order), spawn cursors, last spawn, wave-unit membership, retarget deadline; survived/wave points/clean-loss, per-player stats, removed-health map; each unit's `h`, `wave`, `target`, `infecting`, `shun`, `shunSerial`, shun cell/deadline. Classes retain key, copied profile, region dimensions/labels/sizes and base. | Region caches are created against then-current terrain: do not regenerate them from today's world. Pool definitions use content keys. `walk` is rebuilt scratch. Deposit/report history and coordinates have only setup/report consumers after entry; exclude them. |
+| Survival shared AI input | `info` is one scenario-owned record, including ordered warnings and their data; managers bind that same record. Retain the wave budget, group angles/domains/picks, pool tier/domain/cost data and all effective tuning values. | Worker-owned copies remain under §9.1. Survival's result view is reconstructed from the retained director and stats. |
+
+**Allocation, units, orders and COB.** Raw handles keep existing weak-handle
+semantics; allocation references additionally preserve object identity. A
+stale pointer is not silently redirected to the current occupant of its slot.
+
+| Type/source | Retained logical fields | Exclusions and representation |
+|---|---|---|
+| `pool.Units`, `units.World` | Arena limit, alive/definition arrays, player slice start/end bounds; physical slots tagged never allocated/live/freed residual; live/created counters and last successful allocation serial. A freed raw record retains exactly `Handle`, `Owner`, `Kills`, `Remaining`. | Validate `used` from alive records; `slotIndex` is the identity index. Require zero pending allocation serials. Finalized definition-index maps derive from the admitted catalog; unfinalized fixture maps must be explicitly represented or refused. Iteration hints are scratch. |
+| `units.Unit` | `AllocationSerial`, `Handle`, `Owner`, `X/Y/Z`, `Health`, `MaxHealth`, last damage side/cause, `Alive`, `Dying`, death cause/hooks, `Remaining`; `Flags`, build/busy/yard/bugger-off/armour/building/group/mover/restored-mode/pending state; occupancy/sight cells, footprint, structure facing, reveal deadline; bob phase, engagement target, metal spot, activation/cloak/hidden/kills/paralysis/stun; current/prior samples and move tier; placement index/identity/name. Retain physical piece flags. | Definition, scripts and orders are explicit edges. `LOSByte`, restored AI group and weapon target-fixup words are load staging; minimap `BlinkSuppress` and unit `Move.PendingHeading/PendingSpeed` are presentation/parity bookkeeping. Do not confuse those last two with authoritative movement steering. |
+| Unit nested records | Every weapon slot's `Reload`, `Flags`, desired yaw/pitch, `Ammo`, muzzle/aim-origin pieces, distance, weapon key, target and aim readiness (`IssueBit`, `Ready`, `readyWord`); target kind/raw unit/X/Z. Move mode/mirror/heading/pitch/bank/speed/velocities. Attachment carrier/piece and ordered cargo. | Script/VM/bridge aliases must agree, not be encoded as unrelated copies. `readyWord` is separately restored and cannot be reduced to a Boolean. The unresolved desired-aim initialization question stays open. |
+| `orders.Queue`, `Node` | Primary/secondary order; danger and firing-position state; `lastPumpTick`. Each node retains ID/phase/gates/deadline/owner/target, goal/guard/cache coordinates, parameters, creation/satisfied/flags/move/path state, build key/facing, caption flag, human move sequence, crowded-arrival and automatic-work/attack/next-target state. | Require no detached pump node and no detached-successor context. Installed nodes must have consumed `QueuedIssue`/`GoalSupplied`. Retail subtype words are restore/save staging after payload reconstruction. `secondaryTick` and diagnostics are debug-only. |
+| Queue auxiliary state | Danger impacts/contacts in slot order with every validity, sector, tick, coordinate and failure-deadline field; response/resume/return nodes, anchor/withdrawal/decision/quiet/opportunity state. Contacts preserve unit allocation identity. Firing-position node/owner/target identities, active/attempt/start state. Crowded-arrival active/since/lastTick/X/Z/goal coordinates. | A node or old allocation retained outside the current queue is still a graph root. Queue index is not an object identity. Attested handlers/adapters and their owner bindings replace function pointers. |
+| `cob.VM`, `Thread`, `axisAnim` | All eight thread slots, every stack cell (including cells above SP and in inactive threads), PC/status/SP/sleep/waits/signal mask; statics, pieces, animation lanes, dirty, active count, tick denominator; thread identities, next identity, last-return value/validity/identity arrays. Every move/turn/spin lane target/speed/busy/acceleration/active field. Piece rotations/translations. | Local allocation can reveal old stack cells. Exclude diagnostics, drain/pose caches, cache revisions and scratch busy flags. Piece shading/visibility cache booleans are recomputed; the active unit render-flag store is retained because COB/debris read it. Presentation-only VMs are unsupported (`presentationInstructionLimit` must be zero). |
+| COB binding/bridge | Program/model identities; VM alias, `createInvoked`; pending gameplay return continuations, identified by VM/thread allocation identity, continuation kind/mode, target unit allocation/weapon slot, and captured raw deletion key. | Program code/model data are frozen inputs; piece links derive from those inputs. Lifecycle trace queues, link notes, immediate last-started/last-query scratch and transform caches are excluded. A trace-only return closure is not a gameplay continuation. |
+
+The production asynchronous gameplay return is combat's slot-aim completion.
+U2 adds its value descriptor at the existing callback installation site; it
+does not execute, replace or cancel the callback. Trace-enabled return
+closures must produce the same state as tracing disabled. An unrecognized
+callback with a gameplay effect fails capture. `combat.pendingAims` itself
+has writes/deletes but no reader and is excluded; the actual readiness and
+continuation cannot be excluded with it. Feature sequence/geometry/burn/smoke/
+steam/sound ports, and visibility/movement reader ports, are checked composition bindings;
+non-nil function pointers alone do not establish the admitted binding.
+
+**World, visibility, movement and paths.**
+
+| Type/source | Retained logical fields | Exclusions and representation |
+|---|---|---|
+| Terrain/plots | Row-major occupancy words, metal, feature index/sentinel, anchor/damage, gameplay flags; `metalSeeded`; feature names/definitions in record order, including nil rows and runtime appends. | Immutable geometry/heights, physics/map constants and LOS words bind admitted map inputs. Entry void sweep must be finished. Never-explored marker and placer nibble are presentation-only; retain any otherwise unclassified flag bits. Static obstacle revision is diagnostic today. |
+| `features.Service`, `Instance` | Global reproduction cursor, arena held, instances by sorted anchor index, exact active head-to-tail order; definition, cell/position/velocity/orientation, footprint, burning/animating/countdown/suppression, cursor frame/delay/sequence presence/key, active/arena/runtime-live flags, animation selector, damage accumulator. | `runtimeLive` affects replacement transforms. Lookup caches rebuild from sorted keys; active linkage reconstructs from the separately retained active order. Reject active-walk/pending-burn handoffs. Last reproduction index, reclaim/status/sinking/settled/shadow presentation and saved anchor staging are excluded. |
+| `visibility.Service` | Semantic mode bits, dimensions, row-major word mask; byte grids by player then row; local/team/viewer-defeated; footprints by observer ID, retaining owner/cells/height/radius/quantized/live/stored cells/stored byte; effective Community inputs. | Fog caches, mode cache-valid bit, publication versions/identities and rebuild flags are excluded. Spokes derive from immutable ray tables. Sensor index rebuilds every sensor tick; `sensorInputs` and `sensorStatusByID` are diagnostics without production readers. Actual contact bits live in unit flags; cadence lives in session/ledger. |
+| Movement base state | Per-handle routes, steers, collisions, flights, copied profiles/names, working sets, previous move tier/SFX band; layer registry, learned terrain, pending layers, active orders/next activation, arrival handles, move/record goals, provider, first requests, unreachable/jam/traffic/pocket state, work tick/smoothing budget, pilots, repair landings, air-base lists. Retain effective fallback/Community/path-player/unit-limit inputs and current tick. | Require tick ended, overlap scan inactive and provider eligibility cache invalid. Diagnostics, path failures, history/lab counters and per-call scratch walks are excluded. `passAlliance`/`trafficNow` are replaced at BeginTick for the recognized pure rules; unknown stateful rules cannot claim that exclusion. |
+| Route/profile/steer | Entire route `Points[20]`, count/active/dirty/repath/request/status/first-hold/pending; all eight profile footprint/water/slope fields; steer X/Z, heading/pending heading, dirty/speed/max velocity/turn rate/height/sea-level/definition flags/acceleration/brake. | Inactive route storage remains readable. `Route.StaticRevision` has only diagnostic readers. |
+| Collision/flight | All collision scalar fields, yard values, half-bias state, filing, saved/proposal/stamp/blocker/lean/turn fields; all flight scalar fields, including mode mirror, targets, gravity/bank/pitch, plus unit/command edges. Filing retains `Filed`, `OffMap`, `SX`, `SZ`, `Seq`, including cargo. Selected air sector is nil/record index/sentinel and is not recomputed from position. | Flight-command `Flags` is stream/publication bookkeeping. Flight command otherwise retains payload/owner/unit, position, velocity and heading. Immutable air-sector records bind terrain. Conservative retained collision residuals are not reconstructed from current transforms. |
+| Occupancy/layers | Row-major ground/air cells, plane dimensions, link sequence, off-map and sector heads, all link next/prev/cell/linked/off-map values; pending filing rows and duplicate-suppression rows. Layer names in allocation order, membership, each copied profile/dimensions/packed cells/watermark and per-handle commit tick/set. | Encode logical occupants, not identity-plus-one storage. Ground/air counts derive from occupied entries. Grid revision is diagnostic. Plot occupancy and mover occupancy may differ legitimately. Class stamp buffers are overwritten scratch. |
+| Movement goals/state | Active order/token, arrival order/goal/threshold/payload/border, move order/coordinates/goal, record goals in installation order; working-set search/goal/activation/through. Learned-grid dimensions/words. Clearance route order/cells; unreachable order/activation/since/goal; jam run/replan/until/limit/cooldown/pocket; traffic side/deadline/round/steering/ahead/through/routeless/start/goal presence/coordinates; pocket order/since/grants/token. | Goal pointer sharing affects working-set reuse. Preserve aliases. Repair landings retain admission order, exact unit/node/pad, piece/reserved/holding/anchor. Movement owns the stale combat air-base lists once. |
+| Claim/arrival pilots | Claim dimensions/have/serial/own rows; nullable owner grids, all/slow directional counters and written lists. Arrival move-ground/standby, per-handle rows (all seen/node/place/footprint/coordinate/check/exchange/member/best/stood fields), claim/generation/reservation grids. Composite pilot has four ordered nullable child states. | Claim trail and arrival live/fresh/member walks reset before use. Counter wrap is not permission to discard marks: captured claim serials and arrival row membership tags remain readable. |
+| Path provider/scheduler | Requests by player/handle with raw unit, player, start, goal and activation; provider cursors/started/tick/players/limit. Scheduler base/set/scales/call count/have-last, optional active request/player/scale, player cursor/service counts/accumulators/allowance/unit limit/player count. | Staged indexes derive from keys; sweep polls reset per call. Inactive request residual, traces and diagnostics are excluded. |
+| Goals/searches | Point centre/radius/**radiusSq**; annulus centre/inner/outer/**innerSq/outerSq**; rectangle. Saved forms reconstruct those same three variants. Search config descriptor and scale; logical entries sorted `(Z,X)` with status/direction/node; nearest/distance/presence, tolerance/presence, notified/seeded/done/result points/status, popped/setup/expanded counts; nodes in allocation order with cell/G/H/F/terrain/run/parent/direction/open/closed/hSet; heap **array order** `(id,f)` and spent state. | Thresholds are independently stored, not recomputed. Heap positions/node index back-references are validated derivations. Workspace generation/capacity/lending/dense-versus-sparse storage is excluded after extracting every logically visible entry, including rays/terminal entries without nodes. Search fan is scratch. |
+| Search wrappers/payloads | Straighten/smooth variant, wrapped search, config, probes, done/status/out. Air marker flags/radius/altitude/heading/attach piece/unit/raw target/goal/radial; velocity marker saved flags/aux/trailing, unit/position/velocity/commanded/steer. | Wrapper finishing buffers are synchronous scratch. Payloads preserve sharing with record goals and flight commands. Unknown goal/search/kernel/pilot/payload variants fail capture. |
+
+Suspended path closures require metadata at their creation sites in U3:
+selected class/layer and copied profile; requester/owner/footprint; captured
+revision tick; base/learned/through/jam/static/hostile view variants and
+bindings; wedge override's captured start and bounds; optional finishing-leg
+view; claim owner grid, **all versus slow** row, shared own-row identity,
+captured serial, dimensions/footprint/per/against; and the revision callback's
+registry/class/profile/requester/tick. These are operands of the existing
+closures, not a new rule interface. Current units cannot reconstruct them.
+Capture neither invokes the closures nor snapshots mutable claim rows in
+place of the shared references. Retail, Straighten and Smooth kernels are
+the initial closed set; unsupported laboratory/custom variants return an
+explicit error until their own disposition is reviewed.
+
+**Economy, construction, combat and effects.**
+
+| Type/source | Retained logical fields | Exclusions and representation |
+|---|---|---|
+| `economy.Player`, ledger | Slot-ordered stock/capacity/mirror/AI production/consumption/update/waste/totals/pass counters, kills/losses/commander counters, archived mirrors; all bucket production/requested/accepted/carry and archived production/requested pairs, Metal before Energy. Per-unit buckets by physical handle. Player exists/control/observer/option/full-income/ended/countdown, directed allies, autoshares/thresholds/storage bonus, side/watcher/rejection/result auxiliary. Service reference player, networked, optional selector and effective Community. | Archived accounting is deliberately retained as battle accounting, though some consumers are reports. Names/logos/rank/timers/sensor-call counts are presentation/diagnostic. `aiAggregatesPrepared` is reset before the next settlement consumer. Callbacks bind session/unit/world operands. |
+| Construction | Builder links by product; placements by product with rectangle/definition/creation-oriented yard; two repair-bank entries per builder in slot order, target/remainder; repair-world binding; kick records X/Y/Z/valid; effective Community/rules/mode/limit/special-state bindings. | Rotation cache derives from immutable definition/facing; row-registration caches from immutable descriptor registry. Reject active reclaim/VTOL/completion pump contexts. Diagnostic admission/message/command/permanent/kill records and builder debug identity are excluded. Progress/products/queues are unit/order state. |
+| Combat pool | Count/capacity/dead flags and **every projectile record through capacity**, including residual records beyond count; all stored record fields: weapon, position/start/target, unit/projectile/shooter/side/muzzle references, velocity/speed/distance/angles, creation/burst/expiry/smoke deadlines, burst flags/count, beam/two-phase/dead, orientation and cached cell/floor/state/marker values. | Reservation clears only part of a reused record. Do not serialize just the live prefix. Pool diagnostic payload and compaction scratch are excluded. Full projectile residuals are a deliberate conservative inclusion. |
+| Combat service | Double/half shot, opaque liquid, effective Community/rules; target last-rebuild/gate and primary/secondary lists in stored order, scan cursors; death-notified map with allocation identities; Modern incoming live-span target/shooter/weapon/motion/beam-invalid, modern tick/next-projectile tick; ordered transport captures (allocation/handle/type/health), tick/presence. | Air-base lists belong to movement. Impact stack and transport pending handoff must be empty. Query/candidate scratch and one-visit firing observations are excluded. Model box centres and weapon lookup derive from immutable content. Process-global projectile presentation IDs are excluded. |
+| Community area damage | Cells with stamp/head/tail/count; nodes in insertion order with unit/next; width/height/limit/built tick/built/stamp; hit-generation array and counter. | Require current generation zero outside a damage transaction. Counter wrap skips zero without clearing marks and admission uses `>=`; these are not disposable scratch. Rebuild walk and saturation count are excluded. |
+| Effect admission | `EffectService.max`, `nextID`, `lastSequence`; bound fixed-pool identity. Event-buffer effective limits, next ID/sequence and exhausted flag. | Zero/exhausted identity can refuse future events. Diagnostics are excluded. Bound production service must have no ownerless pending fallback; unsupported nonempty fallback fails capture. Event-window handling and the current host-kind gap are below. |
+| Fixed effects/fragments | Capacity, ordered records, fragment slots/cursors/round-robin, gravity/sea level and effective fragment step inputs; record source/target/kind, XYZ/velocity/gravity/expiry/model-presence/fragment slot/explode-on-hit; both complete animation players (index/countdown/loop/active/frame count/durations). Fragment live/base velocity/angles/angular rates/vertices. | Durations are stored values, including producer overrides. Record graphic/presentation identity/flash/material metadata is excluded after lifecycle operands are retained. In particular `FrozenFragmentMaterial` is host artwork and differs in headless fallback; it never controls admission, physics or RNG. |
+| Debris | Storage charge/count/cursor/serial; ordered partition occupied/start/charge/slot/generation; each slot's live flag and live generation/point span/position/angles/velocity/angular rates/lifetime/fall/explode-on-hit; occupied geometry spans. | Dead-slot payload and free point spans are overwritten before reuse. Expired slots can leave charged partitions: retain those partition-generation links. Model/piece/material/smoke/fire drawing metadata is excluded. |
+| Strips | Ten lists in strip order, container insertion order, live/capacity/steady limits; family/window/spawn deadlines/interval, source/destination/extents, particle life, phase modulus, frame-delay/count inputs, smoke selector; particles in order with coordinates/velocities/expiry/frame/delay/phase/last-frame and deferred frame-draw state. | Recycled particle capacity is scratch. Colour-only fields are classified below; do not omit a cursor that controls a later lifetime or draw merely because publication also reads it. |
+
+**Computer players.** Manager and executor state is retained even for a
+Modern seat; the exception covers only the worker-owned planner material.
+
+| Owner | Retain | Exclude or bind |
+|---|---|---|
+| `ai.Manager`, `Strategic` | Player/passive/controller/modern-wave-air, deadlines/origin/surface metal/mission gate/factory allocation/countdown/loss deadline; all nine ordered groups; wave engagement/rally initialization, best/probe/drift coordinates/score/targets. Strategic centre/radius, ordered metal spots, land/water region dimensions/offsets, refresh/build-capable/live count/unit limit/max wind and bound/readiness flags. Sorted counts/class/init/single vectors. Effective controller parameters, battle seed, start positions/owners. | Sorted catalog type cache and per-pass unit walks rebuild deterministically. Strategic initialization draw ledgers/intermediates are not future state; retain their resulting regions and readiness. Shared analysis and Modern resume-generator material fall under §9.1/M8. Survival input binds the scenario record. |
+| AI profile | Presence, plan, effective weight/limit maps and per-record maps; name, directive stream/text-loaded, all-plan and fixture tables; applied-catalog presence/key and record-ID mapping. | Encode these **values** until profile name/directory admission is complete. Do not call profile application during capture. Record IDs use admitted definition identity; equal names do not collapse. |
+| `aikit.Host`, executor | Simulation-thread initialized/next-think/deadline presence/ticks, effective execution persona, batch serial, application chain; APM tokens/last fill; pending reservation ring and next index; four guard-grid slots with origin/factory/sealed/cost/seeds/built/seen/stamp/reach/reachStamp; self-grid seen/stamp; dedupe unit/cell stamps/indexes/generation; three free-cache slots, free sequence/slot/last tick and each cache's stamp/value/generation/tick/class/used/asked/component/region/seen fields. | Cache TTLs deliberately expose old placement pictures. Keep free caches conservatively; their tick-equality reuse is not unconditional overwrite. Grid search queues/distances/heaps, rebuilt blocking/placement walks, reset-valid row scratch, immutable placement geometry and aggregate stats are excluded. |
+| Modern exception | Controller presence and pending deadline are mirrored on the simulation thread at existing assignments. | Never inspect brain/private generator/kit/observation/unapplied command arrays or map analysis. Map analysis includes initial observed live-world information, so it is an explicit worker exception, not an immutable-content claim. Flight/ready/probe/worker counters are scheduling or diagnostics. Unknown `Manager.Ext` fails capture. |
+
+Generation-tagged arrays are retained wherever wrap can expose an old tag.
+In particular AI dedupe/exit-grid marks and Community hit generations skip
+zero without clearing all old marks. A reset that seems harmless for a short
+match is not an exclusion proof. U0 specifies existing behavior, not a fix
+for any wrap behavior.
+
+#### 16.3.6 Canonical format and public API
+
+**Leaf and files.** U1 implements `internal/sim/checkpoint/{encoder,format,refs}.go`
+and focused tests, plus `internal/content/checkpoint_refs.go` and its tests.
+The leaf imports only the standard library. Owners can import it without
+pointing back to session/content; it performs no rule selection. It does not
+reuse `netproto.Writer`, whose buffered varints and online-amount contract are
+different. ARCHITECTURE §2–§3 records the leaf and content dependency.
+The encoder, references, summaries and content-key APIs are implemented by U1.
+Owner writers and session capture APIs below remain planned until U2–U6.
+
+```go
+// internal/sim/checkpoint
+const SchemaVersion uint16 = 1
+const OwnerCount = 13
+
+type Owner uint16
+type Digest [32]byte
+type Definition struct { Family uint8; Ordinal uint32; Key string }
+type Allocation struct { Handle uint32; Serial uint64 }
+type ObjectID uint32 // zero is absent; IDs are local to a typed object table
+
+type Encoder struct { /* sticky error, logical field path, streaming sink */ }
+func NewEncoder(w io.Writer) *Encoder
+func (e *Encoder) Field(path string) // error context only, emits no bytes
+func (e *Encoder) Bool(v bool)
+func (e *Encoder) U8(v uint8)
+func (e *Encoder) U16(v uint16)
+func (e *Encoder) U32(v uint32)
+func (e *Encoder) U64(v uint64)
+func (e *Encoder) I8(v int8)
+func (e *Encoder) I16(v int16)
+func (e *Encoder) I32(v int32)
+func (e *Encoder) I64(v int64)
+func (e *Encoder) F32(v float32)
+func (e *Encoder) F64(v float64)
+func (e *Encoder) Bytes(v []byte) // u32 byte length then bytes
+func (e *Encoder) String(v string) // same framing; no normalization
+func (e *Encoder) Count(n int) // checked u32, negative/overflow fails
+func (e *Encoder) Definition(v Definition)
+func (e *Encoder) Allocation(v Allocation)
+func (e *Encoder) Fail(err error)
+func (e *Encoder) Err() error
+
+type Identity struct { Content, Config Digest }
+type Digests struct { Full Digest; Owners [OwnerCount]Digest }
+type Capture struct { /* section order, streaming hashes, optional sink */ }
+func NewCapture(identity Identity, out io.Writer) (*Capture, error)
+func (c *Capture) Section(owner Owner, present bool) (*Encoder, error)
+func (c *Capture) Finish() (Digests, error)
+
+// Typed, capture-local interners; never iterate a pointer-keyed map.
+type References[T comparable] struct { /* lookup plus encounter-order list */ }
+func (r *References[T]) Add(value T) (ObjectID, error)
+func (r *References[T]) Find(value T) (ObjectID, bool)
+func (r *References[T]) Values() []T // detached list in assigned-ID order
+```
+
+The all-zero value of `T` is absent; callers use only the reviewed pointer
+types below. `Add` detects ID exhaustion; `Find` never adds. No address is
+encoded. `Values` is for simulation-thread composition only, not host access.
+Errors carry owner and logical field path; all writes stop after the first
+failure, including short writes. Failed capture returns zero digest values
+and invalidates any partial diagnostic bytes. NaNs fail; infinities and signed
+zero retain their exact IEEE bits. Fixed-width integers are little-endian;
+signed integers use two's complement. Floats use bit copies, not arithmetic.
+Boolean bytes are exactly 0/1. Definition fields are Family, Ordinal, Key,
+with M2 numerical family IDs;
+allocation fields are Handle, Serial. Optional records emit presence then
+payload. A raw handle is u32, not an allocation reference.
+
+The stream header is the eight ASCII bytes `NLCPSTAT`, schema u16, content
+SHA-256, configuration SHA-256, then section count u16. Sections appear once
+in this exact order, each prefixed by owner u16 and present u8. Payloads are
+self-delimiting from this schema; there is no padded record or trailing
+section length requiring a second encoding pass. An absent section has no
+payload. Entry/tick distinction and tick number are runtime payload fields.
+
+| ID | Section | Ownership edges |
+|---|---|---|
+| 1 | runtime | Session configuration, tick/RNG/lifecycle/result/drivers; no scenario internals |
+| 2 | units | Arena, current/freed slots, reachable allocation records; no order/VM bodies |
+| 3 | orders | Unit-to-queue roots, queue/node tables and auxiliary order state |
+| 4 | scripts | Unit-to-VM/bridge roots, VM tables, continuations and active piece flags once |
+| 5 | world | Mutable plots, feature table, feature instances/active order |
+| 6 | visibility | Visibility service, session stamps and temporary sight |
+| 7 | movement | Occupancy/layers/movers/pilots/goals/payloads; nested air-base registry |
+| 8 | paths | Provider/scheduler, goal/search tables and suspended accessor descriptors |
+| 9 | economy | Player and unit accounts |
+| 10 | construction | Placement links, repair/kick state |
+| 11 | combat | Projectiles, targeting, damage/death and prediction state |
+| 12 | effects | Event admission, effect service/pools, debris and session strips |
+| 13 | computers-scenario | Computer managers/executors/application history, mission/schema/Survival |
+
+The full digest is SHA-256 of the complete stream. Each owner digest is
+SHA-256 of ASCII `NLCPSECT`, schema u16, content/configuration digests, then
+that section's exact owner/presence/payload bytes. Absent owners therefore
+still have a defined digest. `Capture.Section` tees one encoding to the full
+hash, current owner hash and optional sink. `Finish` rejects missing/repeated/
+out-of-order sections and returns no usable result after any error. Only
+`Full[:16]` is the future wire digest; histories retain all 32 bytes.
+
+**Content keys.** Content owns the typed resolver, with these exact entry
+points (all reject values without an admitted identity):
+
+```go
+// internal/content; constructed from the already-frozen battle inputs
+func (in *SimulationInputs) CheckpointKeys() (*CheckpointKeys, error)
+func (k *CheckpointKeys) Unit(v *UnitDef) (checkpoint.Definition, error)
+func (k *CheckpointKeys) Weapon(v *WeaponDef) (checkpoint.Definition, error)
+func (k *CheckpointKeys) Feature(v *FeatureDef) (checkpoint.Definition, error)
+func (k *CheckpointKeys) Model(v *model.Model) (checkpoint.Definition, error)
+func (k *CheckpointKeys) ProgramForUnit(unit *UnitDef, v *cob.Program) (checkpoint.Definition, error)
+type CheckpointFeature struct {
+    Variant uint8 // 1 admitted definition, 2 normalized copy
+    Base checkpoint.Definition
+    FootprintX, FootprintZ, Damage, Metal, Energy int32 // variant 2 only
+}
+func (k *CheckpointKeys) NormalizedFeature(base, value *FeatureDef) (CheckpointFeature, error)
+```
+
+Nil is encoded by the caller's presence flag, not resolved as an invented
+record. Keys use M2 manifest family/record ordinal/key. A normalized feature
+copy records variant 2, its admitted base key and the exact
+resulting footprint X/Z, damage, metal and energy values. U3 records that
+provenance at `NormalizeDef` consumers. `Feature` resolves only admitted base
+records; a feature edge writes tag 1 plus that key, or tag 2 plus the
+`CheckpointFeature` payload (Base then the five values in the API order).
+The normalized resolver verifies exactly the existing five-field transform
+and unchanged remaining semantic fields, rather than trusting the caller.
+`ProgramForUnit` resolves the unit's admitted COB manifest record and verifies
+the program against its semantic digest. Fallback binding recompiles from the
+sealed input and can have a new pointer; pointer membership alone would
+incorrectly reject it. Validation never rereads a live provider. Other dynamic
+definitions fail until a reviewed value variant exists. No name-only match, current filesystem read
+or pointer-to-string fallback is allowed.
+
+**Owner APIs and graph discovery.** Each stateful owner exposes
+`WriteCheckpoint(e *checkpoint.Encoder, c *CheckpointContext) error` on its
+existing state type. `CheckpointContext` is an owner-local type containing
+only admitted keys and the typed reference tables it needs; lower packages
+never import an upper context. Scalar leaf owners (`pool`, `rng`, `clock`,
+wind, event buffer, trigger, animation player) instead use
+`WriteCheckpoint(e *checkpoint.Encoder) error`. The exact shared context
+constructors are:
+
+```go
+// In units, orders, path, movement respectively.
+func NewCheckpointContext(keys *content.CheckpointKeys) *CheckpointContext
+func NewCheckpointContext(u *units.CheckpointContext) *CheckpointContext
+func NewCheckpointContext() *CheckpointContext
+func NewCheckpointContext(o *orders.CheckpointContext, p *path.CheckpointContext) *CheckpointContext
+```
+
+The contexts expose these typed tables for simulation-thread composition;
+none are host APIs:
+
+```go
+// units.CheckpointContext
+Keys *content.CheckpointKeys
+Allocations checkpoint.References[*Unit]
+VMs checkpoint.References[*cob.VM]
+// orders.CheckpointContext
+Units *units.CheckpointContext
+Queues checkpoint.References[*Queue]
+Nodes checkpoint.References[*Node]
+// path.CheckpointContext
+Goals checkpoint.References[Goal]
+Searches checkpoint.References[Search]
+// movement.CheckpointContext
+Orders *orders.CheckpointContext
+Paths *path.CheckpointContext
+Layers checkpoint.References[*ClassLayer]
+Payloads checkpoint.References[GoalPayload]
+// private typed tables: claim/arrival/composite pilots and claim-row holders
+```
+
+Interface tables admit only the closed pointer variants below; reject unknown
+or typed-nil concrete values before calling the generic interner. Higher
+services' contexts borrow the applicable lower contexts and keys. They add no
+second interner for the same kind. COB's value context has resolved program
+identity and continuation values; it does not import content. Session owns
+the context composition. Every state owner above implements
+`CollectCheckpointReferences(c *CheckpointContext) (added int, err error)`
+alongside its writer. The receiver is its existing `World`, `Service`,
+`System`, `Scheduler`, `Manager` or `Session`, as applicable. A collector both
+adds its own roots and scans already-discovered objects in its tables. It
+calls the exposed `Add` tables for lower-owner edges. Internal movement roots
+and private pilot/row-holder tables are discovered by `System` itself.
+
+Session first adds arena allocations in physical order, then calls owner
+collectors in section-ID order. It repeats in the same order until a pass adds
+zero. Within an object, outgoing edges use field order and retained sequence
+order. IDs are per typed table, starting at 1; reference cycles terminate
+through lookup. `added` counts only newly registered objects, never repeated
+edges. Overflow or unsupported state fails the collection. The world cannot
+mutate during collection/write. Writers use `Find` and fail on an undiscovered
+reference; only collectors call `Add`. Table storage is discarded after the
+capture, never retained as authoritative state.
+
+Object tables have fixed u16 IDs: allocations 1, queues 2, nodes 3, VMs 4,
+class layers 5, pilots 6, claim-row holders 7, payloads 8, goals 9, searches 10.
+Each section writes its non-table record, then its ordered root-link sequences,
+then its tables in ascending table ID. A table is ID u16, record count u32,
+then records in assigned-ID order; record ID is the implicit 1-based ordinal.
+A reference is target table ID u16 plus ObjectID u32; an absent edge is target
+table ID plus zero. Root links follow physical-unit order and use allocation
+object IDs, including additional retired allocations after arena roots. Any
+other root uses the owner's retained sequence/key order. Present sections emit
+their assigned tables, including empty ones: units 1; orders 2–3; scripts 4;
+movement 5–8; paths 9–10. An absent section implicitly has empty tables and
+emits no table bytes. Unknown table tags fail capture.
+
+Union tags are u8 and precede the variant payload. Unit-slot tags are never
+allocated 0, live 1, freed residual 2. Goals: point 1, annulus 2, rectangle 3.
+Searches: retail session 1, straightener 2, smoother 3. Pilots: no-pilot 1,
+claims 2, arrival 3, ordered composite 4 (nil is reference zero). Payloads:
+air marker 1, air velocity 2. COB gameplay continuation: none 0, slot-aim 1;
+slot-aim carries thread-slot u8, thread allocation identity u64, captured raw
+unit key u32, target allocation, weapon slot u8 and existing aim-mode value.
+Descriptor metadata is installed/cleared atomically with `onReturn`, including
+thread claim/kill/return and program replacement. Trace-only wrappers carry
+no gameplay descriptor. Known binding identities are absent 0 or the canonical
+composed owner 1; any callback with different behavior needs a reviewed variant.
+
+**Path accessor boundary.** Movement keeps construction-time value metadata
+beside each suspended closure, then supplies this path-owned value type:
+
+```go
+// internal/path
+// Nodes are topologically ordered; input index zero means absent.
+type CheckpointAccessor struct {
+    Kind uint8
+    Inputs []uint32
+    Layer, Learned, ClaimCounts, ClaimOwn checkpoint.ObjectID
+    Requester uint32
+    Owner uint8
+    Profile [8]int32
+    Tick, Serial uint32
+    Width, Height, FootprintX, FootprintZ int32
+    Start Cell
+    Bounds Rect
+    Through uint8
+    Wall uint8
+    Row uint8
+    Per, Against int32
+}
+type CheckpointAccessors struct {
+    Nodes []CheckpointAccessor
+    Passable, Leg, Cost, Revise uint32
+}
+func (c *CheckpointContext) SetAccessors(search Search, values CheckpointAccessors) error
+```
+
+Kinds are class view 1, learned overlay 2, through-movers 3, static view 4,
+hostile/keeps-ground 5, wedge override 6, claims cost 7, class revision 8.
+Each writes every field in lexical field order, with irrelevant fields zero
+and validated. Inputs use 1-based indexes into the preceding node records.
+Profile order is footprint X/Z, max/min water depth, max/bad slope, max/bad
+water slope. The kind-specific operands are:
+
+| Kind | Inputs and meaningful operands |
+|---|---|
+| 1 class view | No inputs; Layer, Requester, Owner, Profile, Tick, footprint |
+| 2 learned overlay | One base-view input; Learned (owner+1, zero absent), footprint |
+| 3 through movers | One base-view input; Owner, footprint, Through |
+| 4 static view | One base-view input; Layer, footprint |
+| 5 hostile/keeps-ground | One base-view input; Owner; Wall 1 hostile-only, 2 keeps-ground |
+| 6 wedge override | One base-view input and one override-view input; Start, Bounds, footprint |
+| 7 claims cost | No inputs; ClaimCounts, ClaimOwn, Owner, Serial, Width/Height, footprint, Per/Against; Row 2 all, 3 slow |
+| 8 class revision | No inputs; Layer, Profile, Requester, Tick |
+
+Layer refers to movement's layer table. ClaimCounts and ClaimOwn refer to
+separate private comparable row-holder objects in table 7: holder tag 1 is an
+own row (`[]uint32`), tag 2 is a count row (`[][8]uint8`). Pilot grids/own
+state and suspended accessors reference the **same** holders. U3 attaches
+holders when rows/closures are created and preserves the actual backing rows,
+including older rows after replacement. Holders do not copy counts or intern
+uncomparable slices. This retains independent aliasing of count and own rows.
+The row selector records whether the captured count row was all or slow.
+`SetAccessors` validates local node indexes/kinds and rejects conflicting
+repeated registrations; movement/session validates cross-table IDs before
+writing. Neither validation invokes a closure. Path writers read only these
+values. Fixture callbacks without a reviewed descriptor are unsupported,
+not an all-zero passability view.
+
+Unit-owned `any` orders are checked by the orders collector and written as
+unit-to-queue roots there; units need not import orders. Similarly, the
+scripts section writes unit-to-VM roots and the VM table once. A reference to
+a retired allocation keeps its own allocation identity and reachable logical
+record; it is not required to resolve to a live arena slot. Retain detached
+nodes reachable from danger, repair or movement even when absent from queues.
+This typed discovery is diagnostic plumbing, not a new gameplay registry or
+reflection walker. Unknown concrete values fail in the owning type switch.
+
+**Session access.** U6 exposes the following on a composed session; methods
+are called between pumps on its owning thread, not concurrently with a tick.
+
+```go
+// internal/session
+const CheckpointOwnerCount = checkpoint.OwnerCount
+
+type CheckpointBoundary uint8 // 1 entry, 2 interior tick, 3 final pump tick
+type CheckpointPosition struct {
+    Tick uint32
+    Boundary CheckpointBoundary
+    Pump uint64
+    ConsumedInput uint64
+}
+type OwnerSummary struct { Words, Sum uint64 }
+type CheckpointRingRow struct {
+    Position CheckpointPosition
+    SimulationState, CRTState uint32
+    SimulationDraws, CRTDraws uint64
+    UnitCount, ProjectileCount, EffectCount, FragmentCount, DebrisCount, StripCount uint32
+    Owners [CheckpointOwnerCount]OwnerSummary
+}
+type CheckpointRecord struct {
+    Position CheckpointPosition
+    Digests checkpoint.Digests
+}
+type CheckpointHistory struct {
+    Records []CheckpointRecord // at most 64; detached, oldest first
+    Ticks []CheckpointRingRow  // at most 600; detached, oldest first
+}
+type CheckpointCaptureResult struct {
+    Pending bool
+    Record CheckpointRecord
+    Err error
+}
+func (s *Session) EnableCheckpoints() error
+func (s *Session) DisableCheckpoints()
+func (s *Session) RequestCheckpointCapture(out io.Writer) error
+func (s *Session) CheckpointCaptureResult() CheckpointCaptureResult
+func (s *Session) CheckpointHistory() CheckpointHistory
+```
+
+Enable performs/records an entry capture only at completed battle entry;
+otherwise it fails (no guessed partial history). It retains the constructor's
+admitted identities, checks supported bindings, and enables the fixed cadence.
+Disabled sessions execute no traversal/hash/history work. Disable clears
+retained history and cancels a pending request with an explicit error.
+Only one byte request may be pending; a nil sink, disabled session or second
+request fails. A request runs at the next C1 boundary (not a zero-tick pump),
+even off cadence, and replaces the previous capture result. The sink is used
+synchronously and must not reenter the session. It receives bytes only, no
+world reference; blocking I/O belongs to a host-owned memory spool followed
+by an out-of-tick file write. Failure is reported through the result/history
+status, never a simulation log or a world mutation. Regular cadence failures
+are retained as the latest capture error even without a pending byte request;
+failed records are not added. Off-cadence requests do not shift cadence or
+consume one of the 64 cadence slots. Repeated history/result reads do not drain.
+Pump/consumed-input position and build/platform provenance are metadata,
+excluded from the canonical stream; boundary kind and world tick are included.
+
+Initial whole-session admission uses `NewAdmittedSkirmish`, with one human and
+Classic/Modern computers or Survival. U6 must retain its frozen inputs and
+resolved configuration; it must not synthesize a zero identity for the older
+constructors. Ordinary campaign/retail-load constructors currently lack that
+binding: their owner records are covered above, but enabling capture on those
+sessions returns an explicit unsupported-admission error until a constructor
+supplies equivalent immutable identity. This does not block single-seat M3
+acceptance or authorize multiplayer campaign/save support.
+
+#### 16.3.7 AI application records and the tick ring
+
+**Application history.** Both controller kinds retain one per-player chain
+and application count on the simulation thread. U5 adds the following
+value boundary in `internal/ai`, implemented by the Modern host through the
+existing manager extension. Session never imports a controller implementation.
+
+```go
+// internal/ai
+type ControllerCheckpoint struct {
+    Present, Initialized bool
+    NextThinkPresent bool
+    NextThinkTick uint32
+    DeadlinePresent bool
+    DeadlineTick uint32
+    NextBatchSerial, ApplicationCount uint64
+    ApplicationHash checkpoint.Digest
+    Tokens int64
+    LastFill uint32
+}
+type ControllerCheckpointProvider interface {
+    ControllerCheckpoint() ControllerCheckpoint
+    WriteControllerCheckpoint(*checkpoint.Encoder, *CheckpointContext) error
+}
+```
+
+The provider reads only simulation-thread fields and the executor values
+listed above. Assign batch serials when the simulation thread marks a batch
+pending/due, not when a worker finishes. Classic synchronous decisions use a
+simulation-thread decision serial. Zero identifies no batch; incrementing a
+serial/count at exhaustion fails checkpoint reporting rather than wrapping
+an identity. Existing commands still execute normally if diagnostics fail.
+Enabling checkpoints at entry initializes the chain as SHA-256 of ASCII
+`NLCPAIST`, schema u16, content/configuration hashes, player u8 and controller
+kind u8 (Classic 1, Modern 2). After each attempt, replace it with SHA-256 of
+ASCII `NLCPAIAP`, schema u16, previous hash and the canonical attempt below.
+Counts and serials use u64; this is Nanolathe diagnostic framing, not retail.
+
+An attempt record contains player/controller, tick, batch/decision serial,
+command ordinal, typed intent and operands, ordered observed actors as
+allocation references, optional observed target, optional product definition,
+APM verdict, ordered operations and terminal outcome. Actor order is emission
+order, not sorted. Command kinds and resolved order IDs use the existing
+vocabularies and retain their current numerical values. All ordinary scalar
+encoding uses §16.3.6. The APM tag is unlimited 1, debited 2, rejected 3;
+Classic uses unlimited. Each operation has a u16 tag and these operands:
+
+| Tag | Operation | Operand payload |
+|---|---|---|
+| 1 | Queue purge | Actor allocation; actual purge invocation, including an empty queue |
+| 2 | Drop leading automatic | Actor allocation; actual invocation |
+| 3 | Insert order | Actor allocation; actual inserted node's retained value fields, with target raw-handle semantics |
+| 4 | Coalesce stockpile | Actor allocation, resolved row, actual capped count and whether an existing node was changed |
+| 5 | Typed build attempt | Actor allocation, product key, resolved site/facing/count, stable admission verdict |
+| 6 | Activation | Actor allocation, requested Boolean, including an already-equal value |
+| 7 | Placement reservation | Actual pending-ring slot and complete new reservation value |
+| 8 | Guard-grid mutation | Cache slot, affected cell/index and new stored value, in mutation order |
+
+Stable typed-build verdicts are success 1, rejected product 2, rejected site 3,
+rejected owner/actor 4, rejected limit 5, unavailable binding 6, other failure
+7. These classify existing return paths; they must not change admission or
+expose error strings. The terminal tag is accepted no-op 1, success 2,
+stale/rejected with no committed operation 3, partial application 4. A rejected
+APM attempt has no world operation, but remains in the chain; APM debit happens
+before later stale validation. New executor mutation kinds require a schema
+update rather than reusing an unrelated tag. Graph IDs are capture-local and
+never enter the long-lived chain: inserted node values use their command
+operands, allocation identities and content keys.
+
+Instrument existing commit sites: `executor.apply/exec` for attempt/APM and
+per-actor disposition; `execBuild` for reservation/grid mutations **before**
+a possible failed typed build; `execProduce` for normalized count; `execReplace`
+for purge/reclaim preceding a failed replacement; `execStockpile` for actual
+coalescing; `execUnblock` for accepted no-op and chosen blockers;
+`execClear/reclaimFeature/reclaimUnit` for ordered partial work. Classic uses
+`constructionPlacePass`, `doResourceGroup`, `queueExactResult`,
+`issueMobileBuild`, `submitResolvedOrder`: retain purge/insertion even when
+resolution gives row zero, and actual activation calls. Do not introduce a
+new command dispatcher or include ordinary strategic/group upkeep in this
+chain. Those owners are already encoded in full. Unknown error text is never
+a protocol value; a new unclassified state makes checkpoint reporting fail.
+
+**Cheap ring algorithm.** Each owner separately starts `Words=0, Sum=0`.
+For each selected scalar word in the order below, increment Words and add
+`Words * word` to Sum modulo 2^64. Signed scalars are sign-extended to 64 bits;
+unsigned/bools are zero-extended; binary32/binary64 contribute their exact
+bits. An optional record contributes its presence first; a variable list
+contributes its length first. Iterate arrays/slots/lists in their existing
+order. No strings, pointer values, map iteration, canonical encoder or SHA
+work is used. A NaN selected by a summary reports the same capture
+failure as C2. Metadata and the six pool counts have their own row fields.
+
+| Owner | Ring words, in this order (coordinates expand X, Y, Z) |
+|---|---|
+| runtime | Tick; lifecycle state; RNG initialization and both stream state/draw pairs; end latch fields; pending/ended/draw result bits; commander-death slots; wind strength/heading/scalar/next-change; meteor active/next-strike/end/next-hit; shake active/remaining |
+| units | Physical slot tag, raw handle, allocation serial, owner, health/remaining/flags, XYZ, heading/speed, pending/stun/paralysis; each weapon slot reload/ammo/readiness; live/created counters in player order |
+| orders | Per physical live unit: queue presence, primary then secondary lengths and node ID/phase/target/goal/deadline/parameters/flags in traversal order; last pump tick |
+| scripts | Per physical live unit: VM presence; each thread status/PC/SP/sleep/waits/signal mask and all 32 stack words; statics; active count, next identity and thread identities |
+| world | Feature count, reproduction cursor, arena held; row-major plots' occupancy words/metal/feature index/anchor-damage/gameplay flags |
+| visibility | Mode semantic bits/local/team/viewer-defeated; word mask then player byte grids row-major; temporary-sight list length and owner/coordinates/expiry/published |
+| movement | Per-handle route count/active/dirty/status/request tick and all point coordinates; steer X/Z/heading/speed/dirty; collision stamp/plane/blocker/blocked; flight mode/XYZ/velocity; work tick/budget |
+| paths | Scheduler base/set/scales/call count/player cursor/allowance, service counts/accumulators; active request presence/player/unit/start/activation; per-handle working-search presence, popped/setup/expanded counts, node count and heap count |
+| economy | Player stock/capacity/mirror/production/consumption/carry/update time, ended/countdown and alliance rows; per-unit production/requested/accepted/carry buckets by handle, Metal then Energy |
+| construction | Per-handle repair-bank target/remainders and kick XYZ/valid; placement count and builder-link count |
+| combat | Pool count/capacity; all projectile records' dead/weapon/XYZ/target/shooter/velocity/expiry/burst remaining; target rebuild gates/cursors, Modern next-projectile tick, area generation counter |
+| effects | Event next ID/sequence/exhausted; service next ID/last sequence; ordered effect XYZ/velocity/expiry and both animation indices/countdowns; fragment/debris/strip counts; each strip's family/spawn/window and each particle XYZ/expiry/frame/delay/phase |
+| computers-scenario | Slot manager presence/controller/deadlines/countdown; group lengths; application count and four little-endian u64 words of its chain; next-think/deadline presence/ticks, APM tokens/refill; trigger completed/celebrated; Survival phase/end/wave/spawn cursors/next-retarget/score and accounts |
+
+These are direct read-only summary methods, with owner signature
+`AppendCheckpointSummary(s *checkpoint.Summary) error`, called on existing
+owner state; session walks live unit queues/VMs directly for their owners.
+They must not collect the full reference graph each tick. Nested owners
+append into the section's same accumulator, so word numbering continues
+across owner fragments. U1 provides the leaf `Summary` type with methods
+`Word(uint64)` and `Result() (words uint64, sum uint64)`; its zero value is
+ready to use. No byte writer is involved.
+
+Blind spots are deliberate and tested: unlisted fields, equal-length string
+changes, detached order/VM objects not rooted in live slots, deep path frontier
+changes without count changes, geometric/effect residuals omitted above and
+weighted-sum collisions can escape a row. Thus a matching ring does not prove
+equality or locate every possible fault. Full owner digests cover the retained
+schema; diagnosis reports unresolved intervals/owners instead of inventing a
+first divergence. The required seeded-fault test changes a selected field.
+Row storage is fixed-size: at most 600 rows, 64 records and one capture result;
+no geometry, nodes, strings or worker state is retained in history. U7 measures
+actual struct sizes plus slice overhead and collection cost. Reference discovery
+and full hashes run only on full-capture ticks or explicit byte requests.
+
+#### 16.3.8 U0 decisions and remaining implementation gates
+
+U0 is complete as an implementation inventory and schema/API decision.
+U1 implements the encoder and admitted content references. Owner writers,
+runtime reference metadata, application instrumentation and session captures
+remain unimplemented; U2–U5 may start after U1 verification. This is not M3
+acceptance evidence.
+
+- **Quiescence:** entry capture follows opening publication; runtime capture
+  follows successful tick publication and C1's tail. Event staging must be
+  empty. `publishFrame` can return before reset if no writable frame exists;
+  such a boundary fails capture. A tail/observer that adds events also fails.
+  Never invent a pending next-tick queue: the current effect phase consumes
+  its event window before later phases, and publication resets the window.
+- **Event admission host dependency:** `emitPositional` admits audio only with
+  an audio service and an audible viewer; those events share effect admission
+  limits and IDs/sequences. Preserve the counters. U6/U7 must expose this
+  mismatch, then resolve it under the staged host-equivalence work before
+  claiming that gate passed. Viewport pan/volume alone does not gate admission.
+  Direct strip producers remain independent of event-buffer acceptance.
+- **Strip exclusions:** table nano-colour cursors, object owner colour/known/
+  infected/cursor/colour selector, particle colour/sample/sequence and the
+  write-only reserved word are presentation-only. Keep animation and deferred
+  frame-draw state listed above. The existing zero-sentinel tick-wrap question
+  in `readyToSpawn` remains open; encoding its words does not settle parity.
+- **Admission fixes before enable:** U1 resolves keys from actual frozen input
+  records; U6 verifies preparing rule identity, effective cloned catalog limits
+  and restriction inputs. Profile values are explicitly encoded while profile
+  name/directory attestation remains a pre-online identity gap. An attestation
+  that is required but absent fails enable; a matching first digest is not a
+  substitute. Ordinary unadmitted constructors remain unsupported as stated.
+- **Metadata prerequisites:** U2 owns slot-aim completion descriptors and
+  script alias checks; U3 owns captured path accessor descriptors and normalized
+  feature provenance; U5 owns simulation-thread deadline/application records.
+  These additions observe existing operands and do not choose new behavior.
+- **Existing gaps:** feature physical-slot reuse (EC-G2), prior SFX-band retail
+  save persistence, desired-aim initialization and visited-bit interpretation
+  remain in their owning research/design documents. Preserve actual runtime
+  values. The replay-only actor relaxation remains a maintainer/M4 question.
+  O10 stays open through owner-writer review and measured U7 acceptance.
+
+U2–U6 compare every added writer against this inventory and account for any
+newly encountered field before claiming coverage. A missing disposition fails
+that owner's review; it is not an implicit exclusion. Unknown custom callbacks,
+searches, pilots, rules or extensions remain explicit unsupported states, not
+silently empty canonical records. No gameplay policy, retail research claim,
+module dependency, save format or existing fingerprint changes in U0.
+
+#### 16.3.9 U1 implementation and verification
+
+The stdlib-only `internal/sim/checkpoint` leaf streams the exact schema into
+SHA-256 and an optional diagnostic sink. Independent authored byte/hash vectors
+cover all thirteen owner domains, identity binding and hash-only equivalence.
+Primitive tests cover integer widths, IEEE signed zero/subnormal/infinity bits,
+NaN rejection, count bounds and sticky short-write errors. Lifecycle checks
+reject missing, repeated, reordered, absent-payload and closed-section writes.
+Typed references preserve encounter order and pointer aliasing; weighted
+summary tests pin modulo-2^64 accumulation. These exercise authored test owners,
+not live simulation state.
+
+`SimulationInputs.CheckpointKeys` uses frozen manifest records and admitted
+objects, retaining equal-name unit ordinals and rejecting foreign objects.
+Fallback COB instances are checked against the owning unit's admitted semantic
+digest even when compiled into a fresh pointer. Model admission retains the
+already-computed definition-loader heights, so key validation needs no file
+reads and does not change the content digest. Feature references validate the
+existing malformed-definition gate and precisely its five normalized fields;
+U3 still needs to retain each runtime copy's base relation.
+
+Focused tests pin these reference boundaries, including lookups against a
+filesystem wrapper that cannot perform reads. The declaration-scoped I2 guard
+allows only `Encoder.F64`'s bit-copy parameter. The new production-unreachable
+entries in `tools/deadcode-baseline.txt` are explicit U1 staging: owners begin
+consuming the published APIs in U2–U5, and U6 makes capture reachable from a
+battle. Remove those entries as their consumers land. No synthetic production
+caller is added to bypass the staging gate. U1 changes no tick, gameplay rule,
+existing partial fingerprint, save codec or module dependency; live capture
+cost and whole-state/native-platform acceptance remain U7 work.
+
+U1 package, architecture and citation checks pass. The authored encoder
+vectors also pass in the Darwin/amd64 build on this Darwin/arm64 host; that
+additional build check is not the native multi-platform U7 acceptance gate.
+
 ## 17. Verification
 
 - **The multi-seat harness.** One test process composes the same battle N
@@ -3769,7 +4695,7 @@ invent a retail rule while implementing an independent transport feature.
 | O7 | Four pairs of research statements that conflicted: which host option the overlay's `Watching:` row reads; whether the lobby's command-line words preset the host's options; whether the Tab strip exists outside multiplayer; and which step makes a defeated player a watcher | **Settled 2026-10-01.** Bit 15 is *game closed* and the `Watching:` row reads bit 7 `[08 R-SKIR-01 §12]`. No command-line word presets the lobby; an online service's configuration file does `[01 R-PLAT-01 §2]` `[08 R-SKIR-01 §7]`. The Tab strip and the `h` key are multiplayer-only `[07 R-CAM-01 §2]`. The elimination block makes the watcher, and neither answer to the question changes that `[07 R-FE-01 §9]`. |
 | O8 | `[04 R-COB-03 §6]` placed the effect gate outside the deterministic contract because a failed gate does nothing, while I4 counts the passing path's CRT draws as behaviour | **Settled 2026-10-01.** The section now says the failing branch is inert, the passing branch reaches the CRT stream and the strip pool, and the gate breaks no contract between retail's machines. |
 | O9 | Floating-point results under `GOAMD64=v3` and on native amd64 hardware; only Rosetta was measured in the initial audit | **M1 gate settled 2026-10-02:** native Linux/amd64 v1/v3, Windows/amd64 v1 and Darwin/arm64 pass the kernel's independent vectors and digests (§16.1). The v3 standard library differs because it permits fusion; the reference is explicitly unfused v1. Full-world equivalence remains M3. |
-| O10 | Checkpoint and tick-ring cost, and a complete state inventory | M3's measurements and owner review; M8's exact-restore and continuation evidence. |
+| O10 | Checkpoint and tick-ring cost, and a complete state inventory | M3's reviewed field inventory, checkpoint/ring measurements and acceptance budgets (§16.3); M8's exact-restore and continuation evidence. |
 | O11 | Rejoin time on the largest/late battles and whether snapshot recovery must precede hosted release | Live-target catch-up measurements before promising M7 rejoin; advance M8 if the supported window cannot be met. |
 | O12 | Kind-3 branches beyond those §6.4 lists | Each implementation unit audits the code it touches against the research. |
 | O13 | Competitive scheduling, input/view age limits and acceptable latency advantage | Compare arrival scheduling and a shared-horizon candidate under unequal RTT/jitter and malicious reports; approve the concrete policy before M9. |

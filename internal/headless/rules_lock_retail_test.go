@@ -195,6 +195,13 @@ import (
 // records and their route dirty flags. An observation-only diagnostic omitting
 // just those fields reproduces every preceding Ashap lock without changing
 // simulation. All benchmark locks and the Modern 6000-tick lock stay unchanged.
+//
+// Modern automatic direct fire now prefers a clear alternative to a retained
+// wreck-, friendly- or terrain-obstructed contact (issue 97), completing
+// DESIGN_WEAPONS_PROJECTILES "Modern threat targeting and incoming fire".
+// The combat benchmark's Modern warm/final locks move with its changed targets
+// and shots. The pre-fix build reproduces both preceding locks; the initial
+// composition and both Modern Ashap trajectories remain unchanged.
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
@@ -218,10 +225,10 @@ const (
 	lockBenchModernInitial           = "partial-v1:55165c066f8b6eaa"
 	lockBenchStrictWarm              = "partial-v1:c7460e184c2737b9"
 	lockBenchCommunityWarm           = "partial-v1:44a89fe91c0b44cb"
-	lockBenchModernWarm              = "partial-v1:4106ea203d08ae7d"
+	lockBenchModernWarm              = "partial-v1:fa0ffa1be5dcc8ee"
 	lockBenchStrictFinal             = "partial-v1:72b7e14bd65c2ee0"
 	lockBenchCommunityFinal          = "partial-v1:550966a31f52a311"
-	lockBenchModernFinal             = "partial-v1:5762eecdf523bf33"
+	lockBenchModernFinal             = "partial-v1:94418a7be6d56e78"
 )
 
 // The expanded retail audit corrects active-search budget continuation

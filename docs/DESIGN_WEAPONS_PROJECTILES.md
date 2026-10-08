@@ -427,7 +427,9 @@ Strict mode does not undo shots or state changes made earlier in Modern.
 **Nanolathe Modern policy — user-authorized 2026-09-29.** Units hold fire
 when the current launch trajectory crosses an own or allied unit's stamped
 footprint, or a feature (including a wreck) whose height obstructs it. They
-retain their target and orders and retry as geometry changes. Eligible mobile
+retain their target and orders at the firing gate and retry as geometry changes.
+Automatic targeting may choose a clear alternative through the physical-ranking
+boundary below. Eligible mobile
 attackers also seek a nearby clear firing position through the order-owned
 [Modern firing positions](DESIGN_UNITS_ORDERS_COB.md#modern-firing-positions)
 policy. The launch gate itself never installs movement.
@@ -619,6 +621,59 @@ it. Explicit commands remain protected by the maintenance scan admission and
 the order policy's provenance checks. Thus a factory is a usable opportunity
 until a real threat enters range, and equivalent threats do not cause aim churn. Modern acquisition
 consumes no sampling or scoring RNG; Strict keeps the exact retail draw order.
+
+**Direct-fire obstruction preference (issue #97).** Automatic ranking prefers
+a candidate without a demonstrated current direct-flight obstruction over a
+candidate whose preview meets terrain, a friendly footprint or a feature. This
+physical preference precedes threat score and bypasses the 25% retention margin
+when the current target is obstructed and an alternative is clear. Within each
+group the existing threat, overage, distance and handle ranking remains. If
+every eligible candidate is obstructed, the normal ranking and retention margin
+still apply: a lone blocked target stays installed and the firing gate continues
+to retry without spending resources. A wreck appearing in front of a retained
+solar therefore no longer pins a Sentinel while a construction vehicle has a
+clear trajectory. Strict and Community keep their acquisition and retention
+algorithms; retail retention does not recheck physical admission [06 §3.2], and
+retail firing does not preflight intervening objects [06 R-WPN-05 §9][06 §8.1].
+
+This completes the existing Nanolathe Modern physical-suitability policy. It is
+bounded to ordinary direct motion, including its initial burst shot. The
+request uses the slot's already retained muzzle-piece identity, composed at the
+current pose, and a query-free target-piece box centre with the existing
+pre-fire lead. An absent `SweetSpot` supplies the established piece-zero seed;
+a literal callback can also supply its constant output cell without execution.
+The recognized form is exactly an optional single local allocation, a constant
+push and store to local zero, then a constant push and return [04 §4.3]. Q
+queries return the argument cells, not that final return scalar [04 R-COB-01 §1].
+No preceding instructions, branches, state reads or side effects are accepted.
+An existing literal callback also requires its current bridge and matching VM
+to be present, with an idle query thread. An unavailable bridge/query VM or full
+thread pool leaves an ordinary Q query's zero seed untouched [04 R-COB-01 §1].
+The forecast keeps the ordinary rank in those cases, and for an unproved owner
+link, instead of treating the literal as its current piece. The absent-callback
+piece-zero answer needs no thread allocation.
+Unrecognized callbacks and unresolved bound piece centres keep their ordinary
+rank. A target without any binding retains the ordinary unit-position fallback
+[06 R-WPN-04 §1]. The request runs the existing terrain and friendly/feature
+previews; their height boundaries and uncertainty admission remain unchanged.
+Other projectile families likewise keep their ordinary rank.
+The forecast cannot promise clearance after a muzzle query chooses another
+piece, after aiming changes the current pose, or after a target moves; actual
+launch admission remains authoritative. Candidate examination runs no `Query*`,
+`SweetSpot`, Aim or Fire callback, draws no RNG and changes no reload,
+ammunition, resources, orders or projectile state. It adds only request-local
+preview scratch, with no retained targeting state or new rule seam.
+
+`modern_obstruction_targeting_test.go` locks clear-alternative selection despite
+equal scores and retained-target hysteresis, registry-order independence,
+no-alternative preservation, terrain/friendly/feature boundaries, ordered-slot
+protection, all-blocked retention, uncertainty admission, constant-cell
+equivalence to ordinary Q queries and malformed/nonconstant callback refusal,
+literal-query availability and full-pool seed preservation without thread/RNG
+effects, unchanged Strict/Community retention and RNG/resources, and recovery
+after removing a wreck using installed Sentinel, solar and construction-vehicle
+definitions, models and scripts. The existing obstruction and terrain tests
+continue to lock launch costs and the Strict bypass.
 
 **Weaponless kamikaze searches are not claimed by this policy and use the
 strict search under both rule sets.** Everything above is scoped to an armed

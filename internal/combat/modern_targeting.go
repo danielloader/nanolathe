@@ -1,6 +1,7 @@
 package combat
 
 import (
+	"github.com/nanolathe-gg/nanolathe/internal/cob"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
@@ -26,6 +27,8 @@ type TargetQuery struct {
 	// secondary (seen-bit) list: the visible scan was empty and the scanning
 	// player's targeting-upgrade gate was open [06 §3.1][04 R-SPEC-01 §8].
 	FromSecondary bool
+	// Attempt-local physical ranking scratch; no script query or live shot.
+	obstruction ShotQuery
 }
 
 // All tuning in this file is Nanolathe Modern policy, documented in
@@ -358,6 +361,93 @@ func (s *Service) threatScore(q *TargetQuery, target *units.Unit) int64 {
 	return score
 }
 
+// modernTargetObstructed applies the existing Modern physical previews to an
+// automatic direct-fire candidate. Use the retained muzzle identity and the
+// default target-piece centre without running Query* or SweetSpot callbacks.
+// Only a constant SweetSpot output cell supplies a query-free scripted point;
+// any other callback or projectile family keeps its ordinary rank. Actual
+// launch admission remains authoritative (DESIGN_WEAPONS_PROJECTILES
+// "Modern threat targeting and incoming fire").
+func (s *Service) modernTargetObstructed(q *TargetQuery, target *units.Unit) bool {
+	weapon := q.Slot.Weapon
+	if q.Terrain == nil || liveCreationFamilyForWeapon(weapon) != CreationOrdinary || MotionFamilyForWeapon(weapon) != MotionDirect {
+		return false
+	}
+	muzzle := Vec3{X: q.Shooter.X, Y: q.Shooter.Y, Z: q.Shooter.Z}
+	if q.Shooter.COBBinding() != nil {
+		var ok bool
+		muzzle, ok = muzzleWorldPosResolved(q.Shooter, q.Slot.MuzzlePiece)
+		if !ok {
+			return false
+		}
+	}
+	aim := Vec3{X: target.X, Y: target.Y, Z: target.Z}
+	if binding := target.COBBinding(); binding != nil {
+		piece, known := modernConstantSweetSpotPiece(binding.Program)
+		if !known {
+			return false
+		}
+		if _, scripted := binding.Program.Scripts["SweetSpot"]; scripted {
+			// A full pool or missing callback owner leaves the Q query's zero
+			// seed untouched [04 R-COB-01 §1]. The literal is therefore not a
+			// usable current aim point unless this exact VM can allocate it.
+			if binding.Callbacks == nil || binding.VM == nil || binding.Callbacks.VM != binding.VM || binding.VM.Program() != binding.Program {
+				return false
+			}
+			free := false
+			for idx := range binding.VM.Threads {
+				if binding.VM.Threads[idx].Status == cob.ThreadIdle {
+					free = true
+					break
+				}
+			}
+			if !free {
+				return false
+			}
+		}
+		centre, resolved := pieceVertexBoxCentre(binding, piece)
+		if !resolved {
+			return false
+		}
+		aim.X, aim.Y, aim.Z = aim.X.Add(centre[0]), aim.Y.Add(centre[1]), aim.Z.Add(centre[2])
+	}
+	aim = PreFireLeadPoint(q.Shooter, target, q.Slot, weapon, aim, s)
+	q.obstruction = ShotQuery{Service: s, World: q.World, Shooter: q.Shooter, Target: target,
+		Launch: Slot{Weapon: weapon, Flags: units.SlotFlagAutonomous, Target: Target{Kind: TargetUnit, Unit: target.Handle}},
+		Muzzle: muzzle, Aim: aim, Tick: s.modernTick, Terrain: q.Terrain, Wind: s.ProjectileWind}
+	return modernObstructedShot(&q.obstruction) ||
+		modernTerrainAdmission(q.obstruction.Launch, muzzle, aim, s.modernTick, q.Terrain, target, s.ProjectileWind) == terrainShotBlocked
+}
+
+// modernConstantSweetSpotPiece recognizes only a literal query-cell assignment:
+// optional one-local allocation, constant push, store to local zero, constant
+// push and return [04 §4.3]. A Q callback returns its four argument cells, not
+// the RETURN scalar [04 R-COB-01 §1]. Nothing before that assignment may have
+// side effects, branches or state-dependent reads; all other bodies are unknown.
+// This is a bounded immutable-content inspection, never another VM execution.
+func modernConstantSweetSpotPiece(program *cob.Program) (int32, bool) {
+	if program == nil {
+		return 0, false
+	}
+	pc, exists := program.Scripts["SweetSpot"]
+	if !exists {
+		return 0, true // the ordinary query's zero seed [06 R-WPN-03 §6]
+	}
+	code := program.Code
+	if pc < 0 || pc >= len(code) {
+		return 0, false
+	}
+	if code[pc] == 0x10022000 { // allocate-local [04 §4.3]
+		pc++
+	}
+	if len(code)-pc < 7 || code[pc] != 0x10021001 || // push constant
+		code[pc+2] != 0x10023002 || code[pc+3] != 0 || // store local zero
+		code[pc+4] != 0x10021001 || code[pc+6] != 0x10065000 { // constant RETURN
+		return 0, false
+	}
+	return int32(code[pc+1]), true
+}
+
 func (*ModernRules) SelectTarget(s *Service, q *TargetQuery) (pool.Handle, bool) {
 	if q == nil || q.Shooter == nil || q.Slot == nil || q.World == nil {
 		return 0, false
@@ -395,6 +485,7 @@ func (*ModernRules) SelectTarget(s *Service, q *TargetQuery) (pool.Handle, bool)
 	var bestScore, retainedScore int64
 	var bestDistance int64
 	var bestOverage, retainedOverage bool
+	var bestBlocked, retainedBlocked bool
 	for _, c := range q.Candidates {
 		target := q.World.Unit(c.Handle)
 		if target == nil || target.Def == nil || !c.Hostile || s.allied(q.Shooter.Owner, target.Owner, q.Economy) ||
@@ -442,13 +533,17 @@ func (*ModernRules) SelectTarget(s *Service, q *TargetQuery) (pool.Handle, bool)
 		}
 		dx, dz := q.Shooter.X.Int()-target.X.Int(), q.Shooter.Z.Int()-target.Z.Int()
 		distance := int64(dx)*int64(dx) + int64(dz)*int64(dz)
-		if best == 0 || score > bestScore || (score == bestScore && (distance < bestDistance || (distance == bestDistance && c.Handle < best))) {
+		blocked := s.modernTargetObstructed(q, target)
+		if best == 0 || (bestBlocked && !blocked) || (bestBlocked == blocked &&
+			(score > bestScore || (score == bestScore && (distance < bestDistance || (distance == bestDistance && c.Handle < best))))) {
 			best, bestScore, bestDistance = c.Handle, score, distance
 			bestOverage = overage
+			bestBlocked = blocked
 		}
 		if q.Slot.Target.Kind == units.TargetUnit && q.Slot.Target.Unit == c.Handle {
 			retained, retainedScore = c.Handle, score
 			retainedOverage = overage
+			retainedBlocked = blocked
 		}
 	}
 	// A 25% improvement is required to leave a still-eligible automatic target.
@@ -457,7 +552,9 @@ func (*ModernRules) SelectTarget(s *Service, q *TargetQuery) (pool.Handle, bool)
 	// this query returns a choice without installing it.
 	// Avoid cancelling the 20% overage preference with the 25% retention
 	// margin: an otherwise preferred non-overage alternative may take over.
-	if retained != 0 && !(retainedOverage && !bestOverage) && bestScore*4 <= retainedScore*5 {
+	// A physically obstructed target likewise cannot pin a clear alternative;
+	// when both are blocked, the ordinary retention margin still prevents churn.
+	if retained != 0 && retainedBlocked == bestBlocked && !(retainedOverage && !bestOverage) && bestScore*4 <= retainedScore*5 {
 		return retained, true
 	}
 	return best, best != 0

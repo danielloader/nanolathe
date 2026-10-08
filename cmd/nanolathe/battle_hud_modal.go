@@ -5,7 +5,6 @@ package main
 
 import (
 	"github.com/nanolathe-gg/nanolathe/formats"
-	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
@@ -15,15 +14,10 @@ import (
 )
 
 // placeBattleModal applies the established 0x1000 modal placement at the
-// negotiated display size. The battle rail occupies x=0..127; modal centering
-// therefore uses the remaining width and adds 128 [07 "Tab options menu and
-// manual exit"][07 R-HUD-05].
-func placeBattleModal(window *gui.Window, screenW, screenH int) {
-	placeBattleModalBeside(window, screenW, screenH, camera.OriginX)
-}
-
-// placeBattleModalBeside centres beside a rail of the given width.
-func placeBattleModalBeside(window *gui.Window, screenW, screenH int, rail int32) {
+// negotiated display size beside a rail of the given width: retail's rail
+// occupies x=0..127, so modal centering uses the remaining width and adds 128
+// [07 "Tab options menu and manual exit"][07 R-HUD-05].
+func placeBattleModal(window *gui.Window, screenW, screenH int, rail int32) {
 	if window == nil {
 		return
 	}

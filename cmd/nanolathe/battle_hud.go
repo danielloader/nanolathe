@@ -561,14 +561,14 @@ func (h *retailBattleHUD) applyDisplaySize(w, height int) {
 	}
 	h.screenW, h.screenH, h.placedScale = int32(w), int32(height), scale
 	rail := railInset(scale)
-	placeBattleModalBeside(h.exitWin, w, height, rail)
-	placeBattleModalBeside(h.confirmWin, w, height, rail)
-	placeBattleModalBeside(h.restartWin, w, height, rail)
+	placeBattleModal(h.exitWin, w, height, rail)
+	placeBattleModal(h.confirmWin, w, height, rail)
+	placeBattleModal(h.restartWin, w, height, rail)
 	// GAMEOPTIONS and HELP carry the same centring flag; the in-battle
 	// briefing opens with no flags and keeps its authored origin
 	// [07 R-FE-01 §7].
-	placeBattleModalBeside(h.info.gameOptionsWin, w, height, rail)
-	placeBattleModalBeside(h.info.helpWin, w, height, rail)
+	placeBattleModal(h.info.gameOptionsWin, w, height, rail)
+	placeBattleModal(h.info.helpWin, w, height, rail)
 	h.placeTalkWindow(w, height)
 }
 

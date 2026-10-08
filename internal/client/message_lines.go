@@ -75,7 +75,7 @@ func (c *Client) drawMessageLines() {
 			// R-HUD-03 §14.4]. Missing art must not change the text geometry.
 			a := int(float64(c.messageFNT.Height) * 0.8)
 			c.UIBlitFrameScaled(c.messageLogo(line.SpeakerSlot), x, y, a+1, a+1)
-			x = int(138.0 + 1.5*float64(a))
+			x = int(float64(x) + 1.5*float64(a))
 		}
 		if c.messageGAF != nil {
 			c.drawMessageGAFText(line.Text, x, y)

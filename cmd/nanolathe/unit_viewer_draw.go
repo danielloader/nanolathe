@@ -107,6 +107,9 @@ func (s *toolsScreen) drawViewer(dst *ebiten.Image) {
 		k := min(1, 2048/max(stage.W, stage.H))
 		if img := s.model.draw(s.cs, s.selected, s.yaw, s.pitch, s.zoom, max(1, int(stage.W*k)), max(1, int(stage.H*k))); img != nil {
 			screenkit.Image(dst, img, stage, 1, false)
+			if clipped := s.clip(dst, s.viewRect); clipped != nil {
+				s.model.drawSpray(clipped, stage)
+			}
 		}
 	}
 	if s.art.frame != nil {
@@ -248,11 +251,8 @@ func (s *toolsScreen) drawLibrary(dst *ebiten.Image, index int, g gui.Gadget, r 
 	if target == nil {
 		return
 	}
-	for i := top; i < len(rows) && i < len(s.filtered); i++ {
+	for i := top; i < len(rows) && i < len(s.filtered) && i-top < unitViewerListRows(g); i++ {
 		y := r.Y + 2 + float64(i-top)*float64(g.ItemHeight)
-		if y+unitViewerTextMetric > r.Y+r.H {
-			break
-		}
 		row := screenkit.Rect{X: r.X, Y: y, W: r.W, H: float64(g.ItemHeight) - 4}
 		name, id, _ := strings.Cut(rows[i], "\r")
 		c := nlBody
@@ -340,11 +340,8 @@ func (s *toolsScreen) drawInfo(dst *ebiten.Image, index int, g gui.Gadget, r scr
 		start-- // keep a link's picture when only its second row is in view
 	}
 	body := screenkit.Style{Size: unitViewerBodySize, Top: nlBody}
-	for i := start; i < len(s.infoRows); i++ {
+	for i := start; i < len(s.infoRows) && i-top < unitViewerListRows(g); i++ {
 		y := r.Y + 2 + float64(i-top)*h
-		if y+unitViewerTextMetric > r.Y+r.H {
-			break
-		}
 		row := s.infoRows[i]
 		if row.Card {
 			screenkit.Fill(target, s.deviceRect(screenkit.Rect{X: r.X + 2, Y: y, W: r.W - 4, H: h}), color.RGBA{255, 255, 255, 7})

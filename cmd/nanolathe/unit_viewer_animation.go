@@ -11,6 +11,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/model"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
+	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
 type unitViewerAction string
@@ -19,7 +20,6 @@ const (
 	unitViewerIdle     unitViewerAction = "Idle"
 	unitViewerMoving   unitViewerAction = "Move"
 	unitViewerFlying   unitViewerAction = "Fly"
-	unitViewerAiming   unitViewerAction = "Aim"
 	unitViewerFiring   unitViewerAction = "Fire"
 	unitViewerBuilding unitViewerAction = "Build"
 	unitViewerHit      unitViewerAction = "Hit"
@@ -80,12 +80,14 @@ func unitViewerAnimationAvailable(def *content.UnitDef, action unitViewerAction,
 		// The flight integrator divides by MaxVelocity without a guard; retail
 		// faults on zero [04 §10.1], so the preview refuses it.
 		return def.CanFly && def.MaxVelocity > 0
-	case unitViewerAiming, unitViewerFiring:
+	case unitViewerFiring:
+		// One action aims and fires. Only the aim is required: a weapon
+		// script without its Fire callback still fires in battle, where the
+		// start simply misses [04 R-CB-01 §2].
 		if content.IsWeaponInactive(unitViewerWeapon(def, weapon)) {
 			return false
 		}
-		return unitViewerHasCallback(def, unitViewerWeaponCallback("Aim", weapon)) &&
-			(action != unitViewerFiring || unitViewerHasCallback(def, unitViewerWeaponCallback("Fire", weapon)))
+		return unitViewerHasCallback(def, unitViewerWeaponCallback("Aim", weapon))
 	case unitViewerBuilding:
 		if !def.Builder {
 			return false
@@ -114,7 +116,7 @@ func unitViewerActionShown(def *content.UnitDef, action unitViewerAction) bool {
 		return def.BMCode != 0 && !def.CanFly
 	case unitViewerFlying:
 		return def.CanFly
-	case unitViewerAiming, unitViewerFiring:
+	case unitViewerFiring:
 		for weapon := 1; weapon <= 3; weapon++ {
 			if !content.IsWeaponInactive(unitViewerWeapon(def, weapon)) {
 				return true
@@ -184,15 +186,11 @@ func unitViewerUnavailableReason(def *content.UnitDef, action unitViewerAction, 
 			return "not an aircraft"
 		}
 		return "maxvelocity is zero"
-	case unitViewerAiming, unitViewerFiring:
+	case unitViewerFiring:
 		if content.IsWeaponInactive(unitViewerWeapon(def, weapon)) {
 			return fmt.Sprintf("weapon %d is inactive or missing", weapon)
 		}
-		name := unitViewerWeaponCallback("Aim", weapon)
-		if action == unitViewerFiring && unitViewerHasCallback(def, name) {
-			name = unitViewerWeaponCallback("Fire", weapon)
-		}
-		return "no " + name + " callback"
+		return "no " + unitViewerWeaponCallback("Aim", weapon) + " callback"
 	case unitViewerBuilding:
 		if def == nil || !def.Builder {
 			return "not a builder"
@@ -225,7 +223,31 @@ func (m *unitViewerModel) setAnimation(action unitViewerAction, weapon int) {
 }
 
 func (m *unitViewerModel) options() unitViewerAnimationOptions {
-	return unitViewerAnimationOptions{action: m.action, weapon: m.weapon, severity: m.severity, power: m.power, features: m.features}
+	o := unitViewerAnimationOptions{action: m.action, weapon: m.weapon, severity: m.severity, power: m.power, features: m.features, speed: m.speed, reach: m.radius}
+	if m.action == unitViewerBuilding && unitViewerFactory(m.def) {
+		// Product models load from the running content as the cycle reaches
+		// them, on this update thread.
+		mount := m.mount
+		o.products = newUnitViewerProducts(m.builds, m.hidden, func(def *content.UnitDef) (*model.Model, error) {
+			if mount == nil {
+				return nil, fmt.Errorf("nanolathe: unit viewer product: logical path objects3d/%s.3do, providers searched [], expected mounted content", def.ObjectName)
+			}
+			return model.Load(mount, vfs.ResourcePath("objects3d", def.ObjectName, "3do"))
+		})
+	}
+	return o
+}
+
+// setSpeed changes the product cycle's preview speed in place.
+func (m *unitViewerModel) setSpeed(speed int) {
+	m.speed = max(1, speed)
+	if a := m.anim; a != nil {
+		a.build.speed = m.speed
+		if a.build.products != nil && a.build.state != unitViewerBuildIdle {
+			a.note = a.productStatus()
+		}
+		m.refreshPose()
+	}
 }
 
 // Fit once from the creation pose, before a requested action can move the
@@ -272,17 +294,31 @@ func (m *unitViewerModel) refreshPose() {
 // unitViewerAnimationOptions carries the viewer's selections into a fresh
 // preview. power is the explicit On/Off choice: 0 keeps the creation state,
 // +1 and -1 raise or lower the activation bit after creation.
+//
+// A factory's Build action carries its product cycle and preview speed; a
+// mobile Build carries the reach of its stand-in work target, in world units.
+// nanoframe marks a factory product's own script: it reads its remaining
+// fraction through BUILD_PERCENT_LEFT and is created without the
+// completion-time activation (DESIGN_DEVELOPER_TOOLS §7).
 type unitViewerAnimationOptions struct {
-	action   unitViewerAction
-	weapon   int
-	severity int32
-	power    int8
-	features map[string]*content.FeatureDef
+	action    unitViewerAction
+	weapon    int
+	severity  int32
+	power     int8
+	features  map[string]*content.FeatureDef
+	products  *unitViewerProducts
+	speed     int
+	reach     float64
+	nanoframe *float32
 }
 
 type unitViewerAnimation struct {
 	script      *unitViewerScript
 	def         *content.UnitDef
+	geometry    *model.Model
+	spray       unitViewerSpray
+	reach       float64
+	nanoframe   bool
 	action      unitViewerAction
 	weapon      int
 	severity    int32
@@ -315,15 +351,21 @@ func newUnitViewerAnimation(def *content.UnitDef, mdl *model.Model, opts unitVie
 	if weapon == 0 {
 		weapon = 1
 	}
-	a := &unitViewerAnimation{def: def, action: action, weapon: weapon, severity: opts.severity, features: opts.features}
+	a := &unitViewerAnimation{def: def, geometry: mdl, action: action, weapon: weapon, severity: opts.severity, features: opts.features, reach: opts.reach}
 	if a.severity < 1 || a.severity > 100 {
 		a.severity = unitViewerSeverities[0]
 	}
 	a.build.nano, a.build.pad = -1, -1
+	a.build.speed = max(1, opts.speed)
+	a.spray = newUnitViewerSpray()
 	a.script = newUnitViewerScript(def, mdl)
 	if a.script == nil {
 		a.stopped, a.note = true, "Authored pose / no script"
 		return a
+	}
+	if opts.nanoframe != nil {
+		a.nanoframe = true
+		a.script.remaining = opts.nanoframe
 	}
 	if !a.createCompletedUnit(opts.power) {
 		return a
@@ -346,13 +388,16 @@ func newUnitViewerAnimation(def *content.UnitDef, mdl *model.Model, opts unitVie
 		a.fly = newUnitViewerFlight(def)
 		a.fly.order = unitViewerFlightTakeoff
 		a.note = "Fly / taking off"
-	case unitViewerAiming, unitViewerFiring:
+	case unitViewerFiring:
 		// The loop is a preview policy: retry only after this interval, then
 		// await a fresh aim. It is not a prediction of battle firing cadence.
 		a.reload = uint64(max(1, unitViewerWeapon(def, weapon).ReloadTime))
 		a.startAim()
 	case unitViewerBuilding:
 		a.build.factory = unitViewerFactory(def)
+		if a.build.factory {
+			a.build.products = opts.products
+		}
 		a.build.request = 1
 		a.note = "Build / starting"
 	case unitViewerHit:
@@ -405,12 +450,14 @@ func (a *unitViewerAnimation) createCompletedUnit(power int8) bool {
 	if def.ExtractsMetal > 0 {
 		b.SetSpeedFootprint(unitViewerExtractorSum(def))
 	}
-	if def.ActivateWhenBuilt {
+	// A nanoframe receives its activation at completion instead
+	// [04 R-FAC-02 §3].
+	if def.ActivateWhenBuilt && !a.nanoframe {
 		a.script.setEdge(unitViewerActivated, true)
 	}
 	// An explicit On/Off choice is applied after creation, through the same
 	// edge machine an Activate or Deactivate order uses.
-	if power != 0 {
+	if power != 0 && !a.nanoframe {
 		a.script.setEdge(unitViewerActivated, power > 0)
 	}
 	a.windPending = def.WindGenerator > 0
@@ -468,7 +515,9 @@ func (a *unitViewerAnimation) tick() {
 		if a.aimReady {
 			// Root Fire precedes optional RockUnit [04 R-CB-01 §2]. There
 			// are no projectile, burst, sound, resource or effect producers.
-			if !b.Fire(cob.WeaponSlot(a.weapon - 1)).Started {
+			// A script without this Fire callback misses the start, as the
+			// battle's spawner does, and RockUnit still follows.
+			if unitViewerHasCallback(a.def, unitViewerWeaponCallback("Fire", a.weapon)) && !b.Fire(cob.WeaponSlot(a.weapon-1)).Started {
 				a.stop("fire callback unavailable")
 				return
 			}
@@ -518,6 +567,12 @@ func (a *unitViewerAnimation) tick() {
 	if !a.invalid && len(a.script.vm.Diagnostics()) != 0 {
 		a.failScript()
 	}
+	// The product is a later unit in the same sweep; the strip pass that
+	// advances the spray follows every unit visit [03 R-STRIP-01 §2].
+	if p := a.build.products; p != nil && p.current != nil && p.current.anim != nil && !p.current.anim.stopped {
+		p.current.anim.tick()
+	}
+	a.spray.update(uint32(a.ticks))
 }
 
 func (a *unitViewerAnimation) startAim() {
@@ -587,9 +642,10 @@ type unitViewerScript struct {
 	modelFlags  []uint8
 	pose        []frame.PieceView
 	interrupted string
-	state       uint8 // activated, armored, building [04 R-UNIT-06 §2]
-	stance      uint8 // in-build stance, busy, yard open, bugger off [04 §4.7]
-	health      int32 // port 4 reading
+	state       uint8    // activated, armored, building [04 R-UNIT-06 §2]
+	stance      uint8    // in-build stance, busy, yard open, bugger off [04 §4.7]
+	health      int32    // port 4 reading
+	remaining   *float32 // a product's construction fraction, or nil when complete
 }
 
 func newUnitViewerScript(def *content.UnitDef, mdl *model.Model) *unitViewerScript {
@@ -661,7 +717,14 @@ func newUnitViewerScript(def *content.UnitDef, mdl *model.Model) *unitViewerScri
 	s.vm.BindPortBinding(cob.Port(4), cob.PortBinding{Read: func([4]int32) int32 { return s.health }})
 	s.vm.BindPortBinding(cob.Port(5), cob.PortBinding{Read: bit(&s.stance, unitViewerStance), Write: set(&s.stance, unitViewerStance)})
 	s.vm.BindPortBinding(cob.Port(6), cob.PortBinding{Read: bit(&s.stance, unitViewerBusy), Write: set(&s.stance, unitViewerBusy)})
-	s.vm.BindPortBinding(cob.Port(17), cob.PortBinding{Read: func([4]int32) int32 { return 0 }})
+	// BUILD_PERCENT_LEFT reads a factory product's own fraction; every other
+	// preview is a completed unit [04 §4.4].
+	s.vm.BindPortBinding(cob.Port(17), cob.PortBinding{Read: func([4]int32) int32 {
+		if s.remaining == nil {
+			return 0
+		}
+		return cob.BuildPercentLeft(*s.remaining)
+	}})
 	s.vm.BindPortBinding(cob.Port(18), cob.PortBinding{Read: bit(&s.stance, unitViewerYardOpen), Write: set(&s.stance, unitViewerYardOpen)})
 	s.vm.BindPortBinding(cob.Port(19), cob.PortBinding{Read: bit(&s.stance, unitViewerBuggerOff), Write: set(&s.stance, unitViewerBuggerOff)})
 	s.vm.BindPortBinding(cob.Port(20), cob.PortBinding{Read: bit(&s.state, unitViewerArmored), Write: func(v int32) { s.setEdge(unitViewerArmored, v&1 != 0) }})

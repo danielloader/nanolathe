@@ -10,7 +10,7 @@ import (
 )
 
 func unitViewerShotSyntax() error {
-	return fmt.Errorf("nanolathe: unit viewer capture: logical path <command line>, providers searched [--shot-unit-viewer], expected <unit ID>[/stats|/weapons|/build][/action=<idle|move|fly|land|aim|fire|build|stop|hit|death|wreck|on|off>][/ticks=N][/severity=N][/weapon=N]")
+	return fmt.Errorf("nanolathe: unit viewer capture: logical path <command line>, providers searched [--shot-unit-viewer], expected <unit ID>[/stats|/weapons|/build][/action=<idle|move|fly|land|aim|fire|build|stop|hit|death|wreck|on|off>][/ticks=N][/severity=N][/weapon=N][/speed=1|4|16]")
 }
 
 // unitViewerShotPlan is a capture's scripted action: the buttons a user
@@ -19,6 +19,7 @@ type unitViewerShotPlan struct {
 	action           string
 	ticks            int
 	severity, weapon int
+	speed            int // index into unitViewerSpeeds, plus one
 }
 
 func (p *unitViewerShotPlan) set(key, value string) bool {
@@ -39,6 +40,13 @@ func (p *unitViewerShotPlan) set(key, value string) bool {
 	case "weapon":
 		p.weapon = n
 		return err == nil && n >= 1 && n <= 3
+	case "speed":
+		for i, speed := range unitViewerSpeeds {
+			if err == nil && n == speed {
+				p.speed = i + 1
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -55,11 +63,15 @@ func (p unitViewerShotPlan) apply(s *toolsScreen) error {
 	if p.weapon > 0 {
 		s.weapon = p.weapon
 	}
+	if p.speed > 0 {
+		s.speed = p.speed - 1
+		s.model.setSpeed(unitViewerSpeeds[s.speed])
+	}
 	ticks := p.ticks
 	if ticks == 0 {
 		ticks = map[string]int{"idle": 90, "on": 90, "off": 90, "move": 60, "fly": 180, "land": 240, "aim": 60, "fire": 60, "build": 120, "stop": 90, "hit": 12, "death": 1, "wreck": 0}[p.action]
 	}
-	press := map[string]string{"idle": "IDLE", "move": "MOVE", "fly": "MOVE", "land": "MOVE", "aim": "AIM", "fire": "FIRE", "build": "BUILD", "stop": "BUILD", "hit": "HIT", "death": "DEATH", "wreck": "WRECK", "on": "IDLE", "off": "IDLE"}[p.action]
+	press := map[string]string{"idle": "IDLE", "move": "MOVE", "fly": "MOVE", "land": "MOVE", "aim": "FIRE", "fire": "FIRE", "build": "BUILD", "stop": "BUILD", "hit": "HIT", "death": "DEATH", "wreck": "WRECK", "on": "IDLE", "off": "IDLE"}[p.action]
 	s.activateTool(press)
 	switch p.action {
 	case "land", "stop":

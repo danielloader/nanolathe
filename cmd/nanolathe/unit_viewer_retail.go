@@ -36,10 +36,10 @@ func (s *toolsScreen) buildPanel() {
 		w.Gadgets[i].MaxChars = 127
 		// Library rows hold a 48-pixel build picture beside the name; stock
 		// pictures are 64x64, so this keeps them legible at every scale.
-		i = add(gui.KindListBox, "UNITS", "", 32, 208, 210, 504)
-		w.Gadgets[i].ItemHeight = 56
+		i = add(gui.KindListBox, "UNITS", "", 32, 208, 210, unitViewerListHeight(unitViewerLibraryRows, unitViewerLibraryRowH))
+		w.Gadgets[i].ItemHeight = unitViewerLibraryRowH
 		w.Gadgets[i].Assoc = 1
-		i = add(gui.KindScrollBar, "UNITSCROLL", "", 248, 208, 18, 504)
+		i = add(gui.KindScrollBar, "UNITSCROLL", "", 248, 208, 18, unitViewerListHeight(unitViewerLibraryRows, unitViewerLibraryRowH))
 		w.Gadgets[i].Assoc, w.Gadgets[i].Attribs = 1, 0
 		button("HISTBACK", "<", 1084, 102, 40)
 		button("HISTFWD", ">", 1128, 102, 40)
@@ -50,10 +50,10 @@ func (s *toolsScreen) buildPanel() {
 			i = add(gui.KindButton, tab.name, tab.text, tab.x, 142, tab.w, 32)
 			w.Gadgets[i].Attribs = 0x20
 		}
-		i = add(gui.KindListBox, "INFO", "", 862, 184, 284, 520)
-		w.Gadgets[i].ItemHeight = 20
+		i = add(gui.KindListBox, "INFO", "", 862, 184, 284, unitViewerListHeight(unitViewerInfoRows, unitViewerInfoRowH))
+		w.Gadgets[i].ItemHeight = unitViewerInfoRowH
 		w.Gadgets[i].Assoc, w.Gadgets[i].Attribs = 2, 0x101
-		i = add(gui.KindScrollBar, "INFOSCROLL", "", 1150, 184, 18, 520)
+		i = add(gui.KindScrollBar, "INFOSCROLL", "", 1150, 184, 18, unitViewerListHeight(unitViewerInfoRows, unitViewerInfoRowH))
 		w.Gadgets[i].Assoc, w.Gadgets[i].Attribs = 2, 0
 		// The action row holds only the actions that apply to the selected
 		// unit; refreshControls places them left to right at their caption
@@ -77,8 +77,8 @@ func (s *toolsScreen) buildPanel() {
 				w.Gadgets = append(w.Gadgets, arrows...)
 			}
 		}
-		s.listRect = screenkit.Rect{X: 32, Y: 208, W: 234, H: 504}
-		s.infoRect = screenkit.Rect{X: 862, Y: 184, W: 306, H: 520}
+		s.listRect = screenkit.Rect{X: 32, Y: 208, W: 234, H: float64(unitViewerListHeight(unitViewerLibraryRows, unitViewerLibraryRowH))}
+		s.infoRect = screenkit.Rect{X: 862, Y: 184, W: 306, H: float64(unitViewerListHeight(unitViewerInfoRows, unitViewerInfoRowH))}
 		s.viewRect = screenkit.Rect{X: 306, Y: 180, W: 528, H: 418}
 	}
 	s.panel = ui.NewPanel(w)
@@ -94,6 +94,27 @@ func (s *toolsScreen) buildPanel() {
 	s.widgetHeld = false
 }
 
+// The native list service hit-tests (height - 2) / row height whole rows,
+// below a two-pixel top inset, while its fill admits a row whenever the
+// height still holds it [07 R-WGT-01 §4]. Sizing each list to exactly that
+// many rows plus the inset keeps the rows the viewer paints, the rows a click
+// can select and the furthest scroll in agreement; otherwise the last painted
+// row could be scrolled into view but never clicked.
+const (
+	unitViewerLibraryRows, unitViewerLibraryRowH = 9, 56
+	unitViewerInfoRows, unitViewerInfoRowH       = 25, 20
+)
+
+func unitViewerListHeight(rows, rowH int32) int32 { return rows*rowH + 2 }
+
+// unitViewerListRows is the native service's whole-row count for a list.
+func unitViewerListRows(g gui.Gadget) int {
+	if g.ItemHeight <= 0 {
+		return 1
+	}
+	return max(1, (int(g.Rect.H)-2)/int(g.ItemHeight))
+}
+
 func (s *toolsScreen) refreshLists() {
 	if s.panel == nil || !s.viewer {
 		return
@@ -104,7 +125,7 @@ func (s *toolsScreen) refreshLists() {
 	}
 	s.panel.FillTextListAt(s.panel.Index("UNITS"), rows, nil, unitViewerTextMetric)
 	list := s.panel.Window.Gadgets[s.panel.Index("UNITS")]
-	s.visible = max(1, int(list.Rect.H)/int(list.ItemHeight))
+	s.visible = unitViewerListRows(list)
 	s.panel.SetListSelection("UNITS", s.selectionIndex(), s.visible)
 	s.refreshInfo()
 }
@@ -151,7 +172,7 @@ func (s *toolsScreen) infoLinkAt(x, y float64) *content.UnitDef {
 	}
 	row := top + int((y-r.Y-2)/float64(g.ItemHeight))
 	rowY := r.Y + 2 + float64(row-top)*float64(g.ItemHeight)
-	if row < 0 || row >= len(s.infoRows) || rowY+unitViewerTextMetric > r.Y+r.H {
+	if row < 0 || row >= len(s.infoRows) || row-top >= unitViewerListRows(g) || rowY+unitViewerTextMetric > r.Y+r.H {
 		return nil
 	}
 	return s.infoRows[row].Link
@@ -222,7 +243,7 @@ func (s *toolsScreen) activateTool(name string) {
 		s.resetView()
 	case "PAUSE":
 		s.animationPaused = !s.animationPaused
-	case "IDLE", "AIM", "FIRE", "HIT", "DEATH", "WRECK":
+	case "IDLE", "FIRE", "HIT", "DEATH", "WRECK":
 		s.chooseAnimation(string(unitViewerButtonAction(name, s.selected)))
 	case "MOVE":
 		// An aircraft's button takes off and lands within one preview, as
@@ -255,6 +276,10 @@ func (s *toolsScreen) activateTool(name string) {
 			a.setActivation(on)
 			s.model.refreshPose()
 		}
+	case "SPEED":
+		// The product cycle's preview speed; scripts keep 30 Hz.
+		s.speed = (s.speed + 1) % len(unitViewerSpeeds)
+		s.model.setSpeed(unitViewerSpeeds[s.speed])
 	case "WEAPON":
 		s.weapon = s.weapon%3 + 1
 		s.model.setAnimation(unitViewerAction(s.action), s.weapon)
@@ -289,9 +314,9 @@ var unitViewerActionButtons = []struct {
 }{
 	{"IDLE", []string{"Idle"}},
 	{"MOVE", []string{"Move", "Fly", "Land"}},
-	{"AIM", []string{"Aim"}},
 	{"FIRE", []string{"Fire"}},
 	{"BUILD", []string{"Build", "Stop"}},
+	{"SPEED", []string{"Speed 1x", "Speed 4x", "Speed 16x"}},
 	{"HIT", []string{"Hit"}},
 	{"DEATH", []string{"Death"}},
 	{"WRECK", []string{"Wreck"}},
@@ -314,7 +339,7 @@ func unitViewerButtonAction(name string, def *content.UnitDef) unitViewerAction 
 			return unitViewerFlying
 		}
 		return unitViewerMoving
-	case "POWER":
+	case "POWER", "SPEED":
 		return ""
 	}
 	return unitViewerAction(strings.ToUpper(name[:1]) + strings.ToLower(name[1:]))
@@ -326,6 +351,8 @@ func (s *toolsScreen) buttonSelected(name string) bool {
 		return s.spinning
 	case "POWER":
 		return s.model.anim.activated()
+	case "SPEED":
+		return false
 	case "MOVE":
 		return s.action == string(unitViewerMoving) || s.action == string(unitViewerFlying)
 	}
@@ -347,6 +374,7 @@ func (s *toolsScreen) refreshControls() {
 	}
 	s.panel.SetText("PAUSE", pause)
 	s.panel.SetText("WEAPON", fmt.Sprintf("Weapon %d", s.weapon))
+	s.panel.SetText("SPEED", fmt.Sprintf("Speed %dx", unitViewerSpeeds[s.speed]))
 	s.panel.SetText("SEVERITY", fmt.Sprintf("Severity %d", unitViewerSeverities[s.severity]))
 	grey := func(name string, off bool) {
 		s.panel.Window.Gadgets[s.panel.Index(name)].GrayedOut = 0
@@ -357,7 +385,7 @@ func (s *toolsScreen) refreshControls() {
 	grey("HISTBACK", len(s.histBack) == 0)
 	grey("HISTFWD", len(s.histForward) == 0)
 	def := s.selected
-	grey("WEAPON", !unitViewerActionShown(def, unitViewerAiming))
+	grey("WEAPON", !unitViewerActionShown(def, unitViewerFiring))
 	grey("SEVERITY", def == nil || def.Script == nil)
 	move, build := "Move", "Build"
 	if def != nil && def.CanFly {
@@ -383,14 +411,19 @@ func (s *toolsScreen) refreshControls() {
 		i := s.panel.Index(b.name)
 		action := unitViewerButtonAction(b.name, def)
 		shown := def != nil && def.Script != nil && unitViewerActionShown(def, action)
-		if b.name == "POWER" {
+		available := b.name == "POWER" || unitViewerAnimationAvailable(def, action, s.weapon)
+		switch b.name {
+		case "POWER":
 			shown = unitViewerHasPower(def)
+		case "SPEED":
+			// The product cycle's speed belongs to a factory's Build.
+			shown = def != nil && def.Script != nil && unitViewerFactory(def) && unitViewerActionShown(def, unitViewerBuilding)
+			available = unitViewerAnimationAvailable(def, unitViewerBuilding, s.weapon)
 		}
 		s.panel.SetActiveAt(i, shown)
 		if !shown {
 			continue
 		}
-		available := b.name == "POWER" || unitViewerAnimationAvailable(def, action, s.weapon)
 		grey(b.name, !available)
 		width := 0.0
 		for _, label := range b.labels {

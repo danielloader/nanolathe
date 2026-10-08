@@ -88,7 +88,7 @@ type retailBattleHUD struct {
 	// classification that has no session (DESIGN_INTERFACE_HUD_INPUT
 	// "Modern sidebar scale").
 	chromeScale int32
-	placedRail  int32
+	placedScale int32
 	modalFont   *formats.GAFEntry
 	// modalFontSmall is GAF-font slot 1, anims/hattfont11.gaf — the face the
 	// composer selects for the slide strip's three readouts and the kind-13
@@ -555,11 +555,12 @@ func (h *retailBattleHUD) applyDisplaySize(w, height int) {
 	if h == nil || w <= 0 || height <= 0 {
 		return
 	}
-	rail := camera.OriginX * max(h.chromeScale, 1)
-	if int32(w) == h.screenW && int32(height) == h.screenH && rail == h.placedRail {
+	scale := max(h.chromeScale, 1)
+	if int32(w) == h.screenW && int32(height) == h.screenH && scale == max(h.placedScale, 1) {
 		return
 	}
-	h.screenW, h.screenH, h.placedRail = int32(w), int32(height), rail
+	h.screenW, h.screenH, h.placedScale = int32(w), int32(height), scale
+	rail := camera.OriginX * scale
 	placeBattleModalBeside(h.exitWin, w, height, rail)
 	placeBattleModalBeside(h.confirmWin, w, height, rail)
 	placeBattleModalBeside(h.restartWin, w, height, rail)

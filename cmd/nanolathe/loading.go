@@ -148,6 +148,10 @@ type loadingState struct {
 	// unitLimitText is the selection line's resolved unit-limit field
 	// (docs/DESIGN_MODS_MUTATORS.md §8.3), filled on first draw.
 	unitLimitText string
+	// restrictionLines are the unit-restriction lines under the mutators
+	// (loadingRestrictionLines), resolved on first draw.
+	restrictionLines     []string
+	restrictionLinesRead bool
 
 	// Renderer-side only.
 	remasterElapsed float64
@@ -268,10 +272,12 @@ func (g *gameShell) loadRetailSavePath(path string) error {
 	}
 	if hasSidecar {
 		// The recorded rule set, Community sources and entry table, unit
-		// limit and mutators replace the host's (§7.3 steps 3–6). The
-		// configured word is set before staging, so Strict sizes its pool
-		// from it exactly as it would from a configured limit.
+		// limit, unit restrictions and mutators replace the host's (§7.3
+		// steps 3–6, §15.5). The configured word is set before staging, so
+		// Strict sizes its pool from it exactly as it would from a
+		// configured limit.
 		deps.Gameplay, deps.CommunitySources, deps.Mutators = selection.gameplay, selection.sources, selection.mutators
+		deps.Restrictions = selection.restrictions
 		deps.EntryCommunity = &selection.entry.Entry
 		deps.UnitLimit = sidecar.UnitLimit
 		// The Modern AI controllers resume their generators (DESIGN_SESSIONS_AI_SAVE
@@ -288,6 +294,9 @@ func (g *gameShell) loadRetailSavePath(path string) error {
 		return err
 	}
 	if loaded.Route == session.RetailLoadRouteCampaignContinuation {
+		if err := continuationRestrictionsRefusal(selection); err != nil {
+			return err
+		}
 		if err := g.applyRetailContinuation(loaded.Continuation); err != nil {
 			return err
 		}
@@ -296,7 +305,7 @@ func (g *gameShell) loadRetailSavePath(path string) error {
 		// the mutators, the rule set and the unit limit.
 		if hasSidecar {
 			g.setup.UnitLimit = sidecar.UnitLimit
-			g.selectFromSidecar(selection, modPlan.selection)
+			g.selectFromSidecar(selection, modPlan.selection, nil)
 		}
 		return nil
 	}
@@ -355,7 +364,7 @@ func (g *gameShell) loadRetailSavePath(path string) error {
 	}
 	g.importedRetailBattle = true
 	if hasSidecar {
-		g.selectFromSidecar(selection, modPlan.selection)
+		g.selectFromSidecar(selection, modPlan.selection, sess)
 	}
 	g.commitBattleCandidate(battle)
 	clPtr.PrepareBattlePresentation()
@@ -500,6 +509,10 @@ func (g *gameShell) drawLoadingScreen(c *client.Client) {
 	// §8.3), a Nanolathe addition to the authored screen.
 	{
 		lines := g.loadingSelectionLines()
+		if !l.restrictionLinesRead {
+			l.restrictionLines, l.restrictionLinesRead = g.loadingRestrictionLines(), true
+		}
+		lines = append(lines, l.restrictionLines...)
 		screenW, screenH := c.Size()
 		step := g.retailTextHeight() + 3
 		base := int(math.Trunc(float64(screenH)-float64(g.retailTextHeight())*1.5)) - step*(len(lines)+1)
@@ -544,6 +557,44 @@ func (g *gameShell) drawLoadingScreen(c *client.Client) {
 		}
 	}
 	g.drawRemasterProgress(c)
+}
+
+// loadingRestrictionLines are the loading screen's unit-restriction lines
+// (docs/DESIGN_MODS_MUTATORS.md §8.3, §15.9), under the mutators: the set a
+// skirmish or Survival battle enters with, as "Restrictions: 3 removed, 2
+// capped", then the notice naming the saved entries the running content
+// leaves out. A campaign mission takes no set and draws neither (§15.1).
+func (g *gameShell) loadingRestrictionLines() []string {
+	if g.loading == nil || g.loading.mapName == "" {
+		return nil
+	}
+	var lines []string
+	if r := g.opts.Restrictions; !r.IsZero() {
+		removed, capped := 0, 0
+		for _, e := range r.Entries() {
+			if e.Count == 0 {
+				removed++
+			} else {
+				capped++
+			}
+		}
+		lines = append(lines, "Restrictions: "+restrictionTallyText(removed, capped))
+	}
+	if g.restrictionNotice() != "" {
+		lines = append(lines, fitRestrictionNotice(g.restrictions.omitted, g.retailTextWidth, retailScreenW-80))
+	}
+	return lines
+}
+
+// fitRestrictionNotice is the notice of restrictionNoticeLine on one line of
+// width: as many entries as fit, then how many more. The lines above the map
+// line share the space over the last bar, so the notice never wraps.
+func fitRestrictionNotice(omitted []restrictionOmission, measure func(string) int, width int) string {
+	text := restrictionNoticeLine(omitted)
+	for k := len(omitted) - 1; k >= 1 && measure(text) > width; k-- {
+		text = restrictionNoticeLine(omitted[:k]) + fmt.Sprintf(" and %d more", len(omitted)-k)
+	}
+	return text
 }
 
 // retailLightBarFrame is the common LIGHTBAR entry's frame 0: a 351x21 metal

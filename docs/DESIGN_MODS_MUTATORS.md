@@ -18,8 +18,9 @@ mod which is not installed is refused with a message naming it and saying
 whether *Get more mods* offers it; the load does not start the download
 itself (§7.3 step 2). The maintainer's decisions of 2026-09-23 are in §2. The
 proposals this document made were confirmed the same day and are listed in
-§12. **Unit restrictions (§15) are designed and approved, not implemented
-(2026-10-05)**; their proposals, approved the same day, are in §15.10.
+§12. **Unit restrictions (§15) are implemented (2026-10-06)**, apart from
+the follow-ups at the end of §15.12; their proposals, approved on
+2026-10-05, are in §15.10.
 
 This document owns the mod library, the mod config every mod ships in its
 own `nanolathe-mod.json` (§4.2), the remote catalogue, the mutator transform,
@@ -1485,8 +1486,8 @@ fingerprint. Units 1–8 are implemented.
 10. **Follow-ups.** Manifest signatures (§5.4); fuzz targets for the exposed
    readers, recommended before the catalogue is advertised widely;
    `minimumEngine` once releases are stamped.
-11. **Unit restrictions.** Designed, not implemented; its own units are
-   §15.12.
+11. **Unit restrictions.** Implemented as the four units of §15.12; the
+   follow-ups listed there remain.
 
 ## 14. Research map
 
@@ -1517,7 +1518,8 @@ fingerprint. Units 1–8 are implemented.
 
 ## 15. Unit restrictions
 
-**User-authorized 2026-10-05; design approved the same day, not implemented.** On 2026-10-05 the
+**User-authorized 2026-10-05; design approved the same day; all four units
+of §15.12 implemented 2026-10-06.** On 2026-10-05 the
 user chose *Retail restrictions, every mode*: implement retail's multiplayer
 restriction rules once, offer them in
 skirmish and Survival beside the mutators, edit them in the unit viewer, and
@@ -1601,9 +1603,9 @@ restricted: retail's screen does not offer it, and the bit has no other
 reader [05 R-SHARE-01 §9] [08 R-SKIR-01 §10]. An entry naming one is refused
 (§15.3). The reference install has fourteen such definitions, both
 commanders among them, and no stock definition authors `wacky`
-[05 R-SHARE-01 §9]. A `wacky` definition is restricted like any other; it
-differs only under the editor's *Reset*, which gives it 0 as retail's does
-(§15.9).
+[05 R-SHARE-01 §9]. A `wacky` definition is restricted like any other;
+retail's lobby treats it differently only in its seed and its *Reset*, and the
+editor's *Reset* returns it to *No limit* with every other unit (§15.9).
 
 **Nothing is seeded.** The empty set is the default and changes nothing:
 battle entry hands the compiled catalog through unaltered — the same catalog
@@ -1942,12 +1944,13 @@ player's set for that mod, layered as §4.6 describes. It is atomic, like
 rather than merging with it, and a mod with no set of its own plays the base
 set, whose names it lacks are left out with the notice of §15.3
 (proposal R-P5). A mod's config cannot recommend restrictions: `restrictions`
-joins the match-selection keys its `settings` section refuses (§4.2). A
+joins the match-selection keys its `settings` section refuses (§4.2), and
+its `locks` may not name it. A
 manual root stack and the original game play the base set.
 
 **The Nanolathe screen card.** The Mutators tab of the Nanolathe screen
 ([DESIGN_INTERFACE_HUD_INPUT §3.17](DESIGN_INTERFACE_HUD_INPUT.md#317-the-nanolathe-screen))
-gains a *Unit restrictions* card after the mutator cards. Its control is a
+leads with a *Unit restrictions* card, before the mutator cards. Its control is a
 summary, not the editor, so it never grows with the catalogue: *No
 restrictions*, or the numbers removed and capped and up to four names with
 their states, then *and N more*; *Edit…* opens the unit viewer's editor over
@@ -1976,15 +1979,20 @@ a battle catalog or reaches the simulation.
   record carrying a name shows that name's state, and a record hidden by a
   duplicate name says the entry covers every record so named.
 - *Selected unit.* An *On/Off* switch, *On* being *No limit* and *Off* being 0,
-  and a count stepper over 0…100 with *No limit* above 100, as retail's slider
-  runs [08 R-SKIR-01 §10]: stepping down from *No limit* gives 100, and up from
-  100 gives *No limit*. A `norestrict` unit's controls are disabled, and a
-  commander's *Off* and 0, each saying why.
+  and a count stepper over retail's slider range, 0…100 with *No limit* above
+  100 [08 R-SKIR-01 §10]: stepping down from *No limit* gives 100, and up from
+  100 gives *No limit*. Unlike the slider, stepping up from *No limit* starts a
+  cap at 1 (user decision 2026-10-06), so a cap of five is five presses rather
+  than a count down from 100, and the plus button cycles. A `norestrict`
+  unit's controls are disabled, and a commander's *Off* and 0, each saying
+  why.
 - *Restricted only* narrows the library to names with an entry, together with
   the search.
-- *Reset* gives every name that is not locked 100, and 0 when the name is
-  `wacky`, as retail's *Reset* does [08 R-SKIR-01 §10]; a name that cannot be
-  removed keeps 100. *Clear all* empties the set.
+- *Reset* empties the set: every unit returns to *No limit*, `wacky` names
+  and entries the running content leaves out included (user decision
+  2026-10-06). Retail's *Reset* instead gives every row 100, and 0 to a
+  `wacky` definition [08 R-SKIR-01 §10], a board that reads as a cap on every
+  unit; the editor does not copy it.
 - A footer counts the names removed and capped.
 - *Entry and exit* (proposal R-P8). Opened from the card, the editor edits the
   Nanolathe screen's draft, and *Back* returns to the screen with it. Opened
@@ -2042,7 +2050,7 @@ checked under Strict 3.1 and under Modern unless the row says otherwise.
 | Sidecar: schema 2 with restrictions and schema 1 without; a save and load restores the restricted index space and selects the set; an unknown recorded unit refuses the load | `save`, `main` (retail tier) |
 | Settings: the per-mod layer replaces the base set whole; a name the content lacks is left out with the notice; a mod config naming `restrictions` is refused | `settings`, `modlibrary`, `main` |
 | Flags: `--restrict` replaces the saved set, `none`, the refusals of §15.5; capture and benchmark modes never read the key | `main`, `nanolathe-headless` |
-| Editor and card: row states, stepper ends, Reset with a `wacky` and a commander name, Clear all, *Restricted only*, draft and *Apply*/*Back* from both entries; captures of the card and the editor reviewed | `main`, `--shot` |
+| Editor and card: row states, stepper ends and the start at 1 from *No limit*, Reset emptying the set, *Restricted only*, draft and *Apply*/*Back* from both entries; captures of the card and the editor reviewed | `main`, `--shot` |
 
 ### 15.12 Work units
 
@@ -2081,7 +2089,8 @@ Units 2 and 3 can run in parallel after unit 1; unit 4 follows unit 2.
    *Done when* the Survival, Classic and Modern AI rows of §15.11 pass and
    the arena's synchronous and asynchronous runs agree.
 4. **Editor, card and lines.** Owns `cmd/nanolathe/unit_viewer*.go`,
-   `nlscreen_pages.go`, `nlscreen.go` and `loading.go`, and the pointer
+   `nlscreen_pages.go`, `nlscreen.go`, `nlscreen_presets.go` (presets leave
+   `restrictions` out) and `loading.go`, and the pointer
    paragraphs in DESIGN_INTERFACE_HUD_INPUT §3.17 and DESIGN_DEVELOPER_TOOLS
    §7. Delivers the card, the editor and the loading-screen lines of §15.9.
    *Done when* the editor row of §15.11 passes and captures of the card and

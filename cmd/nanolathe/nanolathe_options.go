@@ -453,7 +453,7 @@ func nanolatheConfigurationHelp(name string) string {
 	case "NICONS":
 		return "Modern strategic icons: generated symbols or the running content's Community 3.9 art. Missing art keeps generated symbols."
 	case "NSIDESCALE":
-		return "Magnifies the battle sidebar and minimap in the Enhanced renderer. Auto uses 2x from 1440 rows and 3x from 2160."
+		return "Magnifies the battle sidebar and minimap in the Enhanced renderer. Auto uses 2x from 1440 rows and 3x from 2160. A fixed size needs 480 rows per step (2x from 960, 3x from 1440); a shorter window uses the largest that fits."
 	case "NRADARDOTS":
 		return "Radar dots in the main view require Modern gameplay and the Enhanced renderer: hidden, display only, or attack hostile contacts without unit details. Minimap contacts are unchanged."
 	}

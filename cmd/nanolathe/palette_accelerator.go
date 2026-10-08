@@ -131,7 +131,7 @@ func (h *retailBattleHUD) servicePaletteFrame(b *battleSession, in *input.State,
 	restore := h.preparePalettePanel(p, ctx, tokens)
 	defer restore()
 
-	frame := pointerFrame(in, nil, false)
+	frame := b.railPointerFrame(pointerFrame(in, nil, false))
 	frame.DisableQuickKeys = b != nil && b.developer.quickkeysDisabled
 	// The earlier GUI fetch consumes an inside down before it tests gadgets.
 	// Blank, hidden and greyed window space therefore also owns that down;

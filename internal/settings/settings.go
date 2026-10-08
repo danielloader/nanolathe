@@ -620,6 +620,12 @@ const (
 	RadarDotsAttackable = 2
 )
 
+// Chrome scale preferences (DESIGN_INTERFACE_HUD_INPUT "Modern sidebar scale").
+const (
+	ChromeScaleAuto = 0
+	MaxChromeScale  = 3
+)
+
 // Presentation holds Nanolathe's host presentation preferences
 // (DESIGN_GPU_RENDERER §13.5, §14.6). FPS zero follows the display refresh;
 // positive values cap modern presentation without changing the simulation.
@@ -654,6 +660,10 @@ type Presentation struct {
 	// Modern gameplay (DESIGN_INTERFACE_HUD_INPUT "Modern radar dots").
 	// Visible dots is the default; zero explicitly disables them.
 	RadarDots int `json:"radarDots"`
+	// SidebarScale magnifies the Modern renderer's battle sidebar
+	// (DESIGN_INTERFACE_HUD_INPUT "Modern sidebar scale"): ChromeScaleAuto,
+	// the default, follows the window height; 1 to MaxChromeScale is fixed.
+	SidebarScale int `json:"sidebarScale"`
 
 	Renderer string `json:"renderer"`
 	FPS      int    `json:"fps"`
@@ -825,6 +835,9 @@ func DefaultPresentation() Presentation {
 func (p *Presentation) Normalize() {
 	if p.RadarDots < RadarDotsNone || p.RadarDots > RadarDotsAttackable {
 		p.RadarDots = RadarDotsVisible
+	}
+	if p.SidebarScale < ChromeScaleAuto || p.SidebarScale > MaxChromeScale {
+		p.SidebarScale = ChromeScaleAuto
 	}
 	if p.NanoframePreview < 0 || p.NanoframePreview > 3 {
 		p.NanoframePreview = 0

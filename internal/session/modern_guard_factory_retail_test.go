@@ -17,8 +17,8 @@ import (
 // A commander guarding a vehicle plant stays with the plant while it has
 // production queued, the gaps between products included, even with a
 // construction vehicle building solar collectors inside its sight radius. Once
-// the plant's queue empties it helps unfinished work placed at its current
-// post. The play-test report of 2026-09-25 was a commander leaving the plant
+// the plant's queue empties it helps unfinished work within the ward's
+// 128-unit circle. The play-test report of 2026-09-25 was a commander leaving the plant
 // in those gaps.
 func TestModernGuardStaysWithAProducingFactoryRetail(t *testing.T) {
 	sess := aiE2ESkirmishAtMode(t, "ashap plateau", aiE2ESeed, SkirmishDefaultDifficulty, gameplay.Modern)
@@ -107,6 +107,13 @@ func TestModernGuardStaysWithAProducingFactoryRetail(t *testing.T) {
 		}
 		return false
 	}
+	// Keep one unfinished collector inside the ward's circle throughout
+	// production. No other builder works this frame, so the test demonstrates
+	// both refusal while busy and assistance once the factory becomes idle.
+	x, z := plant.X+world.CellToWorld(6), plant.Z
+	if _, err := sess.Units.CreateNanoframe(solarDef, uint8(local), x, sess.World.HeightAt(x, z), z); err != nil {
+		t.Fatalf("place collector within the ward's circle: %v", err)
+	}
 	drained := -1
 	observedProduction := false
 	for tick := 0; tick < 4000; tick++ {
@@ -119,15 +126,7 @@ func TestModernGuardStaysWithAProducingFactoryRetail(t *testing.T) {
 				t.Fatal("fixture: production drained before the guard observation")
 			}
 			drained = tick
-			// Direct factory assistance can move the guard to the other side
-			// of the plant. The original row may then be outside sight, or
-			// completed before production drains. Supply visible unfinished
-			// work here so the idle-factory assertion tests guard assistance
-			// independently of those movement and construction timings.
-			x, z := com.X+world.CellToWorld(6), com.Z
-			if _, err := sess.Units.CreateNanoframe(solarDef, uint8(local), x, sess.World.HeightAt(x, z), z); err != nil {
-				t.Fatalf("place nearby unfinished collector: %v", err)
-			}
+
 		}
 		head := orders.QueueForUnit(com).Head()
 		if head == nil {

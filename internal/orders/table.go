@@ -338,31 +338,33 @@ func buildTable() {
 // spelled as an explicit `!= 0` guard; a zero row can never equal a live
 // node's id, so those guards keep their meaning unchanged.
 var (
-	rowSelfDestruct    ID
-	rowVTOLSeekAttack  ID
-	rowMobileBuild     ID
-	rowVTOLMobileBuild ID
-	rowBuildingBuild   ID
-	rowHelpBuild       ID
-	rowVTOLSeekGuard   ID
-	rowAttackChase     ID
-	rowFollowGround    ID
-	rowVTOLFollow      ID
-	rowVTOLMove        ID
-	rowPark            ID
-	rowMoveGround      ID
-	rowStop            ID
-	rowVTOLLanding     ID
-	rowParalyze        ID
-	rowVTOLLandIfCan   ID
-	rowVTOLHelpBuild   ID
-	rowBuildWeapon     ID
-	rowRepairUnit      ID
-	rowReclaim         ID
-	rowReclaimUnit     ID
-	rowVTOLRepairUnit  ID
-	rowVTOLReclaim     ID
-	rowVTOLReclaimUnit ID
+	rowSelfDestruct     ID
+	rowVTOLSeekAttack   ID
+	rowMobileBuild      ID
+	rowVTOLMobileBuild  ID
+	rowBuildingBuild    ID
+	rowHelpBuild        ID
+	rowVTOLSeekGuard    ID
+	rowAttackChase      ID
+	rowFollowGround     ID
+	rowVTOLFollow       ID
+	rowVTOLMove         ID
+	rowPark             ID
+	rowMoveGround       ID
+	rowStop             ID
+	rowVTOLLanding      ID
+	rowParalyze         ID
+	rowVTOLLandIfCan    ID
+	rowVTOLHelpBuild    ID
+	rowBuildWeapon      ID
+	rowRepairUnit       ID
+	rowReclaim          ID
+	rowReclaimUnit      ID
+	rowVTOLRepairUnit   ID
+	rowVTOLReclaim      ID
+	rowVTOLReclaimUnit  ID
+	rowRepairPatrol     ID
+	rowVTOLRepairPatrol ID
 )
 
 func resolveRows() {
@@ -391,6 +393,8 @@ func resolveRows() {
 	rowVTOLRepairUnit = Lookup("VTOL_RepairUnit")
 	rowVTOLReclaim = Lookup("VTOL_Reclaim")
 	rowVTOLReclaimUnit = Lookup("VTOL_ReclaimUnit")
+	rowRepairPatrol = Lookup("RepairPatrol")
+	rowVTOLRepairPatrol = Lookup("VTOL_RepairPatrol")
 }
 
 // handlerInstallers is the ordered list of per-family handler installers — the

@@ -202,6 +202,11 @@ type Node struct {
 	// automaticWork identifies a patrol/guard producer, never inherited flags.
 	// It is transient: unknown/direct/restored repairs are protected by default.
 	automaticWork bool
+	// workAssignment identifies only newly selected Modern nearby guard/patrol
+	// work. Direct ward assistance and unknown/restored producers leave it nil.
+	// The retail save schema has no producer receipt; see DESIGN_UNITS_ORDERS_COB
+	// "Modern patrol work". The retained queue records own route geometry.
+	workAssignment *Node
 	// Only autoEngage marks an attack; restored or direct attacks stay explicit.
 	automaticAttack         bool
 	nextAutomaticTargetTick uint32
@@ -895,6 +900,14 @@ func (q *Queue) pumpPrimary(u *units.Unit, tick uint32) {
 			return
 		}
 		n := q.primary[0]
+		// A moving target or ward can invalidate borrowed work while its ordinary
+		// approach gate is blocked. Validate before that gate, then remove through
+		// normal cleanup so the original assignment and successors resume.
+		// Nanolathe Modern policy: DESIGN_UNITS_ORDERS_COB "Modern patrol work".
+		if !q.Binding().rules().AutomaticWorkValid(u, n) {
+			q.unlinkPrimary(n)
+			continue
+		}
 		if n.Deadline != -1 && tick >= uint32(n.Deadline) {
 			n.Deadline = -1
 			n.Satisfied |= 1 // ordinary deadline expiry raises only bit 0 [04 R-ORD-01 §0]

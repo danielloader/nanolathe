@@ -2,6 +2,8 @@ package session
 
 import (
 	"encoding/binary"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/clock"
@@ -139,5 +141,27 @@ func TestP28ParityHashDoesNotMutateClock(t *testing.T) {
 				t.Fatalf("hash mutated clock: before=%+v after=%+v", before, *clockState)
 			}
 		})
+	}
+}
+
+// The same ordinary work order can obey different continuation boundaries when
+// it is borrowed from a patrol/guard. The fingerprint must include that proven
+// assignment identity without adding a host pointer or changing legacy states.
+func TestP28ParityHashIncludesBorrowedWorkAssignment(t *testing.T) {
+	var projections []string
+	for _, ordinal := range []int{0, 2, 3, -1} {
+		var out strings.Builder
+		writeParityUnit(func(format string, args ...interface{}) { fmt.Fprintf(&out, format, args...) },
+			ParityUnit{Orders: []OrderTrace{{ID: 1, Target: 2, WorkAssignmentOrdinal: ordinal}}})
+		got := out.String()
+		for _, previous := range projections {
+			if got == previous {
+				t.Fatalf("assignment %d is absent from the fingerprint stream", ordinal)
+			}
+		}
+		if ordinal == 0 && strings.Contains(got, "work-assignment:") {
+			t.Fatal("an ordinary/legacy order gained a provenance record")
+		}
+		projections = append(projections, got)
 	}
 }

@@ -42,6 +42,12 @@ type Rules interface {
 	GuardHome(GuardHomeRequest) (numeric.Fixed, numeric.Fixed)
 	// PatrolWork selects which automatic work branches a repair patrol visits.
 	PatrolWork(PatrolWorkRequest) PatrolWorkOption
+	// DefaultBuilderOptions supplies this rule set's per-player defaults.
+	DefaultBuilderOptions() BuilderOptions
+	// PatrolWorkVisit replaces only automatic work selection at patrol maintenance.
+	PatrolWorkVisit(u *units.Unit, n *Node, tick uint32) (Code, bool)
+	// AutomaticWorkValid bounds a borrowed job to its retained assignment.
+	AutomaticWorkValid(u *units.Unit, n *Node) bool
 
 	// CrowdedMoveArrival admits bounded Modern completion near a friendly crowd.
 	CrowdedMoveArrival(u *units.Unit, n *Node, tick uint32) bool
@@ -174,6 +180,10 @@ func (StrictRules) GuardHome(req GuardHomeRequest) (numeric.Fixed, numeric.Fixed
 // branches in their established order [04 R-ORD-01 §4][04 R-ORD-01 §7].
 // Strict ignores all Community metadata carried by the request's unit binding.
 func (StrictRules) PatrolWork(PatrolWorkRequest) PatrolWorkOption { return PatrolBoth }
+
+func (StrictRules) DefaultBuilderOptions() BuilderOptions                   { return DefaultBuilderOptions() }
+func (StrictRules) PatrolWorkVisit(*units.Unit, *Node, uint32) (Code, bool) { return 0, false }
+func (StrictRules) AutomaticWorkValid(*units.Unit, *Node) bool              { return true }
 
 // HoldsFire is retail's answer: the standing-order fields are read by the
 // caller's own gates, a forced join bypasses them, and the standing-fire

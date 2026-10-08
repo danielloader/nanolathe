@@ -228,6 +228,7 @@ func TestHealthyRepairPatrolFeatureBranchDiffersForAir(t *testing.T) {
 func TestModernGuardRetainsSinglePrecisionThreshold(t *testing.T) {
 	for _, modern := range []bool{false, true} {
 		f := newGuardFixture(t, 1, 1)
+		f.ward.X, f.ward.Z = f.guard.X, f.guard.Z
 		f.guard.Def.Builder, f.guard.Def.CanReclamate = true, true
 		f.guard.Def.BMCode, f.guard.Def.SightDistance = 1, 128
 		b := QueueForUnit(f.guard).Binding()

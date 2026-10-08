@@ -400,7 +400,7 @@ func TestMatchSkirmishSetupInvertsTheLocalAdapter(t *testing.T) {
 		if computers && got.Difficulty != local.Difficulty {
 			t.Fatalf("%s: difficulty %d, want %d", c.name, got.Difficulty, local.Difficulty)
 		}
-		human := orders.DefaultBuilderOptions()
+		human := RuleSetForMode(local.Gameplay).Orders.DefaultBuilderOptions()
 		if c.options.BuilderOptions != nil {
 			human = *c.options.BuilderOptions
 		}

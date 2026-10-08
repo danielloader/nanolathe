@@ -586,6 +586,11 @@ func vtolRepairPatrolHandler(u *units.Unit, n *Node, satisfied uint32, tick uint
 					}
 				}
 			}
+		}
+		if code, handled := rulesOfUnit(u).PatrolWorkVisit(u, n, tick); handled {
+			return code
+		}
+		if work != PatrolReclaimOnly {
 			if resources, ok := playerResources(u); ok && patrolResourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1]) {
 				candidates := scanRepairCandidates(u, u.Def.SightDistance)
 				// Admission follows the bounded pick. The visitor keeps submerged

@@ -84,9 +84,16 @@ func TestStockConstructorsShareWaterAdmissionRetail(t *testing.T) {
 								id := orders.Resolve(9, aircraft, nil, nil)
 								n := orders.NewNodeForOrder(id, 0, x, y, z, 0, aircraft.Handle, false)
 								n.Phase = 1
-								code := orders.DescriptorFor(id).Handler(aircraft, &n, 0, 1)
+								node := &n
+								if mode == gameplay.Modern {
+									// Modern selection measures against the retained route;
+									// this fixture supplies its actual queued patrol leg.
+									q.Push(id, n)
+									node = q.Head()
+								}
+								code := orders.DescriptorFor(id).Handler(aircraft, node, 0, 1)
 								want := orders.Code(2)
-								if tc.assist {
+								if tc.assist && mode != gameplay.Modern {
 									want = 3
 								}
 								if code != want {

@@ -26,6 +26,8 @@ func (s stubNames) Names() []string {
 	return append([]string{string(Modern), string(Community39), string(Strict31)}, s.registered...)
 }
 
+func (s stubNames) Base(string) Mode { return Community39 }
+
 // useNames installs a registry for one test and restores the previous one.
 func useNames(t *testing.T, r NameRegistry) {
 	t.Helper()
@@ -66,6 +68,9 @@ func TestWithoutARegistryOnlyTheReservedWordsAreSelectable(t *testing.T) {
 // through the host's options to the session that resolves it.
 func TestARegisteredNameParsesAndSurvivesNormalization(t *testing.T) {
 	useNames(t, stubNames{registered: []string{"example"}})
+	if got := Mode("example").ReservedBase(); got != Community39 {
+		t.Fatalf("registered host base = %q, want Community", got)
+	}
 	mode, err := Parse("example")
 	if err != nil {
 		t.Fatalf("Parse(%q): %v", "example", err)

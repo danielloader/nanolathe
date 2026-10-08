@@ -259,7 +259,7 @@ func TestMatchConfigAdapterEquivalentDefaults(t *testing.T) {
 	base := func() (SkirmishConfig, SkirmishEntryOptions, MatchRoomInputs) {
 		return DirectSkirmishConfig("Great Divide"), SkirmishEntryOptions{}, matchTestRoom()
 	}
-	defaults := orders.DefaultBuilderOptions()
+	defaults := RuleSetForMode(gameplay.Modern).Orders.DefaultBuilderOptions()
 	mainlineVeterancy := true
 	for _, c := range []struct {
 		name   string

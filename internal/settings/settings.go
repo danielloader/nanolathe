@@ -1293,7 +1293,8 @@ func LoadFrom(path string) (Settings, error) {
 	// defaults and would otherwise supply a valid version to a file that
 	// carries none.
 	var wire struct {
-		Version *int `json:"version"`
+		Version        *int            `json:"version"`
+		BuilderOptions json.RawMessage `json:"builderOptions"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return Defaults(), fmt.Errorf("settings: parse %s: %w", path, err)
@@ -1322,6 +1323,15 @@ func LoadFrom(path string) (Settings, error) {
 		return Defaults(), fmt.Errorf("settings: parse %s: %w", path, err)
 	}
 	s.Normalize()
+	// Seed missing members from the selected base, while every supplied
+	// member remains authoritative, including a saved zero-valued choice.
+	s.BuilderOptions = DefaultBuilderOptionsForMode(s.Gameplay)
+	if len(wire.BuilderOptions) != 0 {
+		if err := json.Unmarshal(wire.BuilderOptions, &s.BuilderOptions); err != nil {
+			return Defaults(), fmt.Errorf("settings: parse %s: %w", path, err)
+		}
+		s.BuilderOptions.Normalize()
+	}
 	// This is a load-only substitution; write-all preserves +Gamma 10 until
 	// the next startup [07 R-FE-01 §11].
 	if s.Display.Gamma == 10 {

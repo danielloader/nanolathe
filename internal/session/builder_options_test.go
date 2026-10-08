@@ -6,6 +6,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/clock"
 	"github.com/nanolathe-gg/nanolathe/internal/construction"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 )
 
@@ -52,5 +53,30 @@ func TestBuilderOptionsBelongToThePlayerAndChangeAtTheBoundary(t *testing.T) {
 	}
 	if b.BuilderOptions(2) != orders.DefaultBuilderOptions() {
 		t.Fatal("new battle retained old preferences")
+	}
+}
+
+func TestBuilderOptionsDefaultsComeFromTheBoundRules(t *testing.T) {
+	for _, mode := range []gameplay.Mode{gameplay.Strict31, gameplay.Community39, gameplay.Modern} {
+		s := &Session{Rules: RuleSetForMode(mode), LocalOwner: 2, Econ: &economy.Service{}}
+		s.Econ.Players[2] = economy.Player{Exists: true, ControllerState: 1}
+		if err := s.initializeBuilderOptions(nil); err != nil {
+			t.Fatal(err)
+		}
+		want := orders.DefaultBuilderOptions()
+		if mode == gameplay.Modern {
+			want.Patrol[0] = orders.PatrolBoth
+		}
+		if s.builderOptionsForOwner(2) != want || s.builderOptionsForOwner(3) != want || s.builderOptionsForOwner(10) != want {
+			t.Fatalf("%s did not supply the bound default %+v", mode, want)
+		}
+		// An explicit human preference overrides the default only for its owner.
+		explicit := orders.DefaultBuilderOptions()
+		if err := s.initializeBuilderOptions(&explicit); err != nil {
+			t.Fatal(err)
+		}
+		if s.builderOptionsForOwner(2) != explicit || s.builderOptionsForOwner(3) != want {
+			t.Fatalf("%s replaced an explicit preference or changed a computer", mode)
+		}
 	}
 }

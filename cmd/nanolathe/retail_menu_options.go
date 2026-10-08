@@ -1449,7 +1449,7 @@ func (g *gameShell) restoreRetailOptionsDefaults() {
 		g.setCommunityHUDPreferences(settings.DefaultPresentation())
 		g.setCommunityHealthBars(settings.DefaultDamageBars != 0)
 	case "builders":
-		g.setBuilderOptions(settings.DefaultBuilderOptions())
+		g.setBuilderOptions(settings.DefaultBuilderOptionsForMode(g.configurationMode()))
 		g.setSelectionPreferences(settings.DefaultPresentation())
 		g.setSwitchAlt(settings.DefaultSwitchAlt != 0)
 	case "nanolathe":

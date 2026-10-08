@@ -65,6 +65,9 @@ func TestPatrolAssistsNewBuildingNanoframe(t *testing.T) {
 					if air {
 						patrolName, assistName, wantCode = "VTOL_RepairPatrol", "VTOL_HelpBuild", 3
 					}
+					if mode == gameplay.Modern {
+						wantCode = 2
+					}
 					q := orders.QueueForUnit(helper)
 					id := orders.Lookup(patrolName)
 					q.Push(id, orders.Node{Owner: helper.Handle, Phase: 1, Deadline: -1, GoalX: helper.X, GoalZ: helper.Z})

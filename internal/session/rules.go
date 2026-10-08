@@ -290,6 +290,8 @@ func (ruleSetNameView) Known(name string) bool {
 
 func (ruleSetNameView) Names() []string { return RuleSetNames() }
 
+func (ruleSetNameView) Base(name string) gameplay.Mode { return BaseModeOf(gameplay.Mode(name)) }
+
 // The vocabulary is installed before any word is parsed: a package's init runs
 // after every package it imports has been initialized, and both commands, the
 // settings reader and the mod list all sit above this package.

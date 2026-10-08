@@ -109,6 +109,7 @@ func TestModernGuardNearbyWorkPriorityAndBypass(t *testing.T) {
 		for _, modern := range []bool{false, true} {
 			t.Run(fmt.Sprintf("air=%v/modern=%v", air, modern), func(t *testing.T) {
 				f := newGuardFixture(t, 1, 1)
+				f.ward.X, f.ward.Z = f.guard.X, f.guard.Z
 				q := QueueForUnit(f.guard)
 				b := q.Binding()
 				b.Rules = modeRules(modern)
@@ -194,6 +195,7 @@ func TestModernGuardLowEnergyStillResurrectsOnlyEligibleNearbyWreck(t *testing.T
 	for _, capable := range []bool{false, true} {
 		t.Run(fmt.Sprintf("resurrect=%v", capable), func(t *testing.T) {
 			f := newGuardFixture(t, 1, 1)
+			f.ward.X, f.ward.Z = f.guard.X, f.guard.Z
 			q := QueueForUnit(f.guard)
 			b := q.Binding()
 			b.Rules = &ModernRules{}
@@ -317,13 +319,17 @@ func TestModernGuardFailedLandingWaitsForMaintenanceRetry(t *testing.T) {
 // factory's build record has no target yet. Once that production drains, the
 // factory is idle and the nearby-work branch applies again. Strict never scans.
 func TestModernGuardStaysWithAFactoryThatHasProductionQueued(t *testing.T) {
-	for _, modern := range []bool{false, true} {
-		t.Run(fmt.Sprintf("modern=%v", modern), func(t *testing.T) {
+	for _, tc := range []struct{ modern, air bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		modern, air := tc.modern, tc.air
+		t.Run(fmt.Sprintf("modern=%v/air=%v", modern, air), func(t *testing.T) {
 			f := newGuardFixture(t, 1, 1)
+			f.ward.X, f.ward.Z = f.guard.X, f.guard.Z
 			q := QueueForUnit(f.guard)
 			b := q.Binding()
 			b.Rules = modeRules(modern)
 			f.guard.Def.Builder, f.guard.Def.CanReclamate, f.guard.Def.BMCode, f.guard.Def.SightDistance = true, true, 1, 128
+			f.guard.Def.CanFly = air
+			b.Movement.InstallAir = func(AirGoalRequest) bool { return true }
 			f.ward.Def.Builder = true
 			b.World = &WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}
 			patient := &units.Unit{Handle: 3, Alive: true, Def: &content.UnitDef{MaxDamage: 100}, Health: 50, MaxHealth: 100, X: f.guard.X + numeric.Fixed(64<<16), Z: f.guard.Z}
@@ -345,7 +351,11 @@ func TestModernGuardStaysWithAFactoryThatHasProductionQueued(t *testing.T) {
 			wq.primary = []*Node{{ID: build, StaticGate: DescriptorFor(build).StaticGate, Owner: f.ward.Handle, Phase: 2, Param2: 3}, rally}
 			n := guardNode(f)
 			n.Phase = 1
+			if air {
+				n.ID, n.Phase = Lookup("VTOL_Follow"), 2
+			}
 			q.primary = []*Node{n}
+			random := *f.sim
 			if code := guardHandler(f.guard, n, 0, 100); code != 2 || len(q.primary) != 1 || q.primary[0] != n || unitScans != 0 {
 				t.Fatalf("guard of a producing factory left it: code=%d queue=%d scans=%d", code, len(q.primary), unitScans)
 			}
@@ -353,11 +363,18 @@ func TestModernGuardStaysWithAFactoryThatHasProductionQueued(t *testing.T) {
 			wq.primary = []*Node{rally}
 			code := guardHandler(f.guard, n, 0, 130)
 			if modern {
-				if code != 2 || len(q.primary) != 2 || q.primary[0].ID != Lookup("RepairUnit") || q.primary[0].Target != patient.Handle || q.primary[1] != n {
+				want := Lookup("RepairUnit")
+				if air {
+					want = Lookup("VTOL_RepairUnit")
+				}
+				if code != 2 || len(q.primary) != 2 || q.primary[0].ID != want || q.primary[0].Target != patient.Handle || q.primary[1] != n {
 					t.Fatalf("guard of an idle factory did not take nearby work: code=%d queue=%v", code, q.primary)
 				}
 			} else if code != 2 || len(q.primary) != 1 || unitScans != 0 {
 				t.Fatal("Strict guard performed Modern scans")
+			}
+			if *f.sim != random {
+				t.Fatal("factory guard work selection changed RNG")
 			}
 		})
 	}

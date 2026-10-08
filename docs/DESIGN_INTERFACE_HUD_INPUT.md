@@ -5136,13 +5136,17 @@ Hold Position, Maneuver and Roam. Guard choices are Stay / Cavedog / Scatter;
 patrol choices are Reclaim / Both / Assist. These are the per-player policies
 of [DESIGN_COMMUNITY_PATCH §4.3](DESIGN_COMMUNITY_PATCH.md#43-construction),
 not new unit stances. Defaults are Cavedog for every guard stance and
-Reclaim / Both / Both for patrol. Strict ignores the preferences.
+Reclaim / Both / Both for patrol under Community. Modern defaults to Both for
+all three patrol stances and keeps those controls usable independently of the
+Community filter flag (DESIGN_UNITS_ORDERS_COB "Modern patrol work"). Explicit
+saved choices remain; Restore Defaults uses the selected rule set's base.
+Strict ignores the preferences.
 
 The settings `builderOptions` block holds two three-element arrays in that
 stance order. Each choice is its zero-based position in the labels above.
 Invalid values fall back to Cavedog or Both. Every battle entry and retail
 save load copies the current human preference into session state; computer
-players receive the patch defaults. The retail save format is unchanged.
+players receive the bound orders rules' defaults. The retail save format is unchanged.
 
 The page participates in the existing options transaction: a live edit sends
 `HumanBuilderOptions` through the phase-1 boundary, Undo and Cancel send the

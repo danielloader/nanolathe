@@ -18,7 +18,9 @@ import (
 
 // The factory allocator really attaches its unfinished product in mode 1.
 // It would pass the repair visitor, but the radius population must omit it
-// before that visitor runs [04 R-COLL-01 §11][04 R-ORD-02 §4].
+// before that visitor runs in Strict/Community [04 R-COLL-01 §11][04 R-ORD-02 §4].
+// Modern separately selects unfinished products through its all-unit work scan
+// (DESIGN_UNITS_ORDERS_COB "Modern patrol work").
 func TestFactoryProductExcludedFromRepairRadius(t *testing.T) {
 	for _, mode := range []gameplay.Mode{gameplay.Strict31, gameplay.Community39, gameplay.Modern} {
 		t.Run(string(mode), func(t *testing.T) {
@@ -95,18 +97,30 @@ func TestFactoryProductExcludedFromRepairRadius(t *testing.T) {
 				before, crtBefore := s.SimRNG().Draws(), s.CrtRNG().Draws()
 				stock := s.Econ.Players[0].Stock
 				code := orders.DescriptorFor(id).Handler(builder, q.Head(), 0, 100)
-				wantDraws := uint64(0)
-				if detached {
-					wantDraws = 1
-				}
-				if !slices.Contains(visited, patient.Handle) || slices.Contains(visited, product.Handle) != detached {
-					t.Fatalf("detached=%v: radius population %v, patient=%d product=%d", detached, visited, patient.Handle, product.Handle)
-				}
-				if got := s.SimRNG().Draws() - before; got != wantDraws || s.CrtRNG().Draws() != crtBefore {
-					t.Fatalf("detached=%v: sim draws=%d want %d; CRT changed=%v", detached, got, wantDraws, s.CrtRNG().Draws() != crtBefore)
-				}
-				if code != 6 || q.Head().ID == id || (!detached && q.Head().Target != patient.Handle) {
-					t.Fatalf("detached=%v: repair result=%d head=%+v", detached, code, q.Head())
+				if mode == gameplay.Modern {
+					if len(visited) != 0 || code != 2 || q.Head().ID != orders.Lookup("HelpBuild") || q.Head().Target != product.Handle {
+						t.Fatalf("detached=%v: Modern product assistance code=%d head=%+v radius population=%v", detached, code, q.Head(), visited)
+					}
+					if s.SimRNG().Draws() != before || s.CrtRNG().Draws() != crtBefore {
+						t.Fatal("Modern work selection changed either RNG")
+					}
+					if got := s.parityUnit(builder).Orders[0].WorkAssignmentOrdinal; got != 2 {
+						t.Fatalf("borrowed work lost its retained patrol identity in the parity projection: %d", got)
+					}
+				} else {
+					wantDraws := uint64(0)
+					if detached {
+						wantDraws = 1
+					}
+					if !slices.Contains(visited, patient.Handle) || slices.Contains(visited, product.Handle) != detached {
+						t.Fatalf("detached=%v: radius population %v, patient=%d product=%d", detached, visited, patient.Handle, product.Handle)
+					}
+					if got := s.SimRNG().Draws() - before; got != wantDraws || s.CrtRNG().Draws() != crtBefore {
+						t.Fatalf("detached=%v: sim draws=%d want %d; CRT changed=%v", detached, got, wantDraws, s.CrtRNG().Draws() != crtBefore)
+					}
+					if code != 6 || q.Head().ID == id || (!detached && q.Head().Target != patient.Handle) {
+						t.Fatalf("detached=%v: repair result=%d head=%+v", detached, code, q.Head())
+					}
 				}
 				if s.Econ.Players[0].Stock != stock {
 					t.Fatal("selection spent resources before repair work")

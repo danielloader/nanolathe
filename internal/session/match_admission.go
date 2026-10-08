@@ -368,8 +368,8 @@ func matchSkirmishSetup(r *MatchConfigRequest) (SkirmishConfig, SkirmishEntryOpt
 		case MatchRoleHuman:
 			p.Controller = SkirmishControllerHuman
 			// Battle entry gives the local human its preference and every
-			// other seat the patch defaults, which resolution requires them
-			// to carry.
+			// other seat the bound rules' defaults. Non-human wire rows keep
+			// their canonical padding, which is not a preference override.
 			human := seat.BuilderOptions
 			options.BuilderOptions = &human
 		case MatchRoleWatcher:

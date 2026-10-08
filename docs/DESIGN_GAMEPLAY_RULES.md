@@ -70,6 +70,10 @@ that can report an unknown name; `SetGameplay` is the same selection for a
 word already known to be selectable, and it is what the phase-1 command
 boundary calls.
 
+The existing `gameplay.NameRegistry` view also answers the registered set's
+reserved base for load-time settings defaults (`Mode.ReservedBase`). Simulation
+decisions continue to use the bound package seams.
+
 A whole set is bound at once. There is no partial binding and no per-seam
 override on a bound session: a caller that wants one different answer
 registers a set that composes the shipped implementations (§8), so a session

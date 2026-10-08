@@ -42,6 +42,9 @@ type NameRegistry interface {
 	Known(name string) bool
 	// Names lists every selectable name for a diagnostic, reserved first.
 	Names() []string
+	// Base answers the reserved base for host defaults. It describes the same
+	// registered set; simulation decisions still use the bound RuleSet seams.
+	Base(name string) Mode
 }
 
 // names is the installed view, written once before any word is parsed and
@@ -84,6 +87,17 @@ func (m Mode) Normalize() Mode {
 		return m
 	}
 	return Modern
+}
+
+// ReservedBase resolves a host selection through the existing registry view.
+// This load-time query lets leaf settings seed defaults for registered sets
+// without owning another registry or importing session.
+func (m Mode) ReservedBase() Mode {
+	m = m.Normalize()
+	if m == Modern || m == Community39 || m == Strict31 {
+		return m
+	}
+	return names.Base(string(m))
 }
 
 // Parse accepts a reserved word or the name of a rule set this build

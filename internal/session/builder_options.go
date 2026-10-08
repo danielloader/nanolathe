@@ -53,9 +53,16 @@ func (s *Session) validateBuilderOptionsFor(c HumanBuilderOptionsCommand, issuer
 
 func (s *Session) builderOptionsForOwner(owner uint8) orders.BuilderOptions {
 	if s == nil || !s.builderOptionsReady || owner >= 10 {
-		return orders.DefaultBuilderOptions()
+		return s.defaultBuilderOptions()
 	}
 	return s.playerBuilderOptions[owner]
+}
+
+func (s *Session) defaultBuilderOptions() orders.BuilderOptions {
+	if s != nil && s.Rules.Orders != nil {
+		return s.Rules.Orders.DefaultBuilderOptions()
+	}
+	return orders.DefaultBuilderOptions()
 }
 
 // initializeBuilderOptions is called after service composition and before any
@@ -63,7 +70,7 @@ func (s *Session) builderOptionsForOwner(owner uint8) orders.BuilderOptions {
 // preference; the retail bank carries no builder-option state.
 func (s *Session) initializeBuilderOptions(human *orders.BuilderOptions) error {
 	for i := range s.playerBuilderOptions {
-		s.playerBuilderOptions[i] = orders.DefaultBuilderOptions()
+		s.playerBuilderOptions[i] = s.defaultBuilderOptions()
 	}
 	s.builderOptionsReady = true
 	if human != nil {

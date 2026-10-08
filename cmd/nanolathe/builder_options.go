@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
@@ -138,7 +139,7 @@ func (g *gameShell) builderOptionUnavailable(name string) string {
 			if group == 0 && !features.GuardingBuildersHold {
 				return "The selected rules do not enable builder guard preferences."
 			}
-			if group == 1 && !features.PatrollingBuilderFilters {
+			if group == 1 && session.BaseModeOf(g.configurationMode()) != gameplay.Modern && !features.PatrollingBuilderFilters {
 				return "The selected rules do not enable builder patrol preferences."
 			}
 		}

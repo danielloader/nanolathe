@@ -12,6 +12,13 @@ type DebugState struct {
 	Diagnostics                        []string
 	OwnedHandlerCount                  int
 	Danger                             DebugDangerState
+	WorkAssignments                    []DebugWorkAssignment
+}
+
+// DebugWorkAssignment names both records by queue ordinal, never host address.
+// Explicit/unknown work has no entry; a missing retained assignment is -1.
+type DebugWorkAssignment struct {
+	PrimaryOrdinal, AssignmentOrdinal int
 }
 
 // DebugDangerState copies transient Modern policy state without aging contacts,
@@ -81,6 +88,11 @@ func (q *Queue) DebugSnapshot(unit pool.Handle) *DebugState {
 	}
 	for i, p := range d.impacts {
 		out.Danger.Impacts[i] = DebugDangerImpact{p.valid, p.sector, p.tick, p.x, p.z}
+	}
+	for i, n := range q.primary {
+		if ordinal := q.WorkAssignmentOrdinal(n); ordinal != 0 {
+			out.WorkAssignments = append(out.WorkAssignments, DebugWorkAssignment{i + 1, ordinal})
+		}
 	}
 	return out
 }

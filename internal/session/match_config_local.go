@@ -188,6 +188,7 @@ func matchSeatsFromSetup(cfg SkirmishConfig, options SkirmishEntryOptions, room 
 		case p.IsHuman():
 			s.Role = MatchRoleHuman
 			s.Participant = room.Participants[i]
+			s.BuilderOptions = RuleSetForMode(cfg.Gameplay).Orders.DefaultBuilderOptions()
 			if options.BuilderOptions != nil {
 				s.BuilderOptions = *options.BuilderOptions
 			}

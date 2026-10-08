@@ -668,10 +668,10 @@ func validateMatchSeat(path string, seat *MatchSeat) error {
 			return matchFieldError(path+".aiParams", "none for a seat that is not an added computer")
 		}
 	}
-	// Battle entry gives every seat but the local human the patch defaults,
-	// and only a human's own command changes them (builder_options.go).
+	// Non-human rows carry canonical unused padding. Battle entry supplies
+	// their bound orders rules' defaults (builder_options.go).
 	if seat.Role != MatchRoleHuman && seat.BuilderOptions != orders.DefaultBuilderOptions() {
-		return matchFieldError(path+".builderOptions", "the patch defaults for a seat that is not human")
+		return matchFieldError(path+".builderOptions", "canonical builder-option padding for a seat that is not human")
 	}
 	// The attacker has no economy, so its starting resources are read by
 	// nothing (DESIGN_SURVIVAL §4.1).

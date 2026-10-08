@@ -66,16 +66,21 @@ func (*ModernRules) GuardWorksNearby(u *units.Unit, n *Node, tick uint32) bool {
 	if b == nil || !canRepairGuard(u) || !hasMover(u) || !rulesOfUnit(u).AllowAutomaticRepair(u, tick) {
 		return false
 	}
-	if wardHasQueuedProduction(getLookupForWard(n, u)) {
+	ward := getLookupForWard(n, u)
+	if ward == nil || wardHasQueuedProduction(ward) {
 		return false
 	}
 	q := QueueOfUnit(u)
 	if resources, ok := playerResources(u); ok && resourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1]) {
 		for _, target := range scanModernGuardRepairCandidates(u) {
+			if !modernWithinPoint(ward.X, ward.Z, target.X, target.Z, modernWorkRadius) {
+				continue
+			}
 			if id := Resolve(8, u, target, nil); id != 0 {
 				releaseGoalPayload(u, n)
 				work := NewNodeForOrder(id, target.Handle, target.X, target.Y, target.Z, tick, u.Handle, false)
 				work.automaticWork = true
+				work.workAssignment = n
 				q.PushHead(id, work)
 				modernGuardWorkRetry(n, tick)
 				return true
@@ -88,7 +93,7 @@ func (*ModernRules) GuardWorksNearby(u *units.Unit, n *Node, tick uint32) bool {
 	var candidate FeatureView
 	found := false
 	b.ForEachFeature(func(feature FeatureView) bool {
-		if !feature.Reclaimable || !withinPlanarRadius(u, feature.X, feature.Z, u.Def.SightDistance) || !b.Work.CanResurrectFeature(feature) {
+		if !feature.Reclaimable || !withinPlanarRadius(u, feature.X, feature.Z, u.Def.SightDistance) || !modernWithinPoint(ward.X, ward.Z, feature.X, feature.Z, modernWorkRadius) || !b.Work.CanResurrectFeature(feature) {
 			return scanNext
 		}
 		candidate, found = feature, true
@@ -99,7 +104,9 @@ func (*ModernRules) GuardWorksNearby(u *units.Unit, n *Node, tick uint32) bool {
 	}
 	id := Lookup("Resurrect")
 	releaseGoalPayload(u, n)
-	q.PushHead(id, NewNodeForOrder(id, 0, candidate.X, candidate.Y, candidate.Z, tick, u.Handle, false))
+	work := NewNodeForOrder(id, 0, candidate.X, candidate.Y, candidate.Z, tick, u.Handle, false)
+	work.automaticWork, work.workAssignment = true, n
+	q.PushHead(id, work)
 	modernGuardWorkRetry(n, tick)
 	return true
 }

@@ -85,6 +85,7 @@ type SlotTrace struct {
 }
 
 type OrderTrace struct {
+	WorkAssignmentOrdinal                                              int `json:"workAssignmentOrdinal,omitempty"`
 	ID, Target, Owner                                                  uint32
 	Phase                                                              uint8
 	DynamicGate                                                        uint32
@@ -301,7 +302,8 @@ func (s *Session) parityUnit(u *units.Unit) ParityUnit {
 			pu.Orders = append(pu.Orders, OrderTrace{ID: uint32(node.ID), Target: uint32(node.Target), Owner: uint32(node.Owner),
 				Phase: node.Phase, DynamicGate: node.DynamicGate, Deadline: node.Deadline, GoalX: node.GoalX.Raw(), GoalY: node.GoalY.Raw(), GoalZ: node.GoalZ.Raw(),
 				GuardX: node.GuardX, GuardY: node.GuardY, CachedX: node.CachedX, CachedY: node.CachedY, Param1: node.Param1, Param2: node.Param2, Param3: node.Param3,
-				StaticGate: node.StaticGate, CreationTick: node.CreationTick, Satisfied: node.Satisfied, Flags: node.Flags, MoveState: node.MoveState, PathStatus: node.PathStatus, BuildDefKey: node.BuildDefKey})
+				StaticGate: node.StaticGate, CreationTick: node.CreationTick, Satisfied: node.Satisfied, Flags: node.Flags, MoveState: node.MoveState, PathStatus: node.PathStatus, BuildDefKey: node.BuildDefKey,
+				WorkAssignmentOrdinal: q.WorkAssignmentOrdinal(node)})
 		}
 	}
 	if u.GetScript() != nil {
@@ -498,6 +500,9 @@ func writeParityUnit(w func(string, ...interface{}), u ParityUnit) {
 		w("slot:%d:%d:%s:%d:%d:%d:%d:%d:%t:%t:%d:%d:%d:%d:%d|", u.Slot, i, slot.WeaponKey, slot.Reload, slot.Flags, slot.DesiredYaw, slot.DesiredPitch, slot.Ammo, slot.AimIssue, slot.AimReady, slot.TargetKind, slot.TargetUnit, slot.TargetX, slot.TargetZ, slot.MuzzlePiece)
 	}
 	for _, o := range u.Orders {
+		if o.WorkAssignmentOrdinal != 0 {
+			w("work-assignment:%d|", o.WorkAssignmentOrdinal)
+		}
 		w("order:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%s|", o.ID, o.Owner, o.Target, o.Phase, o.DynamicGate, o.Deadline, o.GoalX, o.GoalY, o.GoalZ, o.Param1, o.Param2, o.Param3, o.StaticGate, o.CreationTick, o.Satisfied, o.Flags, o.MoveState, o.PathStatus, o.GuardX, o.GuardY, o.CachedX, o.CachedY, o.BuildDefKey)
 	}
 	for _, p := range u.Pieces {

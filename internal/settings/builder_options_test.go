@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 )
 
 func TestBuilderOptionsDefaultsNormalizationAndPersistence(t *testing.T) {
@@ -12,6 +14,11 @@ func TestBuilderOptionsDefaultsNormalizationAndPersistence(t *testing.T) {
 		want BuilderOptions
 	}{
 		{`{"version":1}`, DefaultBuilderOptions()},
+		{`{"version":1,"gameplay":"community-3.9"}`, DefaultBuilderOptionsForMode(gameplay.Community39)},
+		{`{"version":1,"gameplay":"community-3.9","builderOptions":{"guard":[2,2,2]}}`, BuilderOptions{Guard: [3]int{2, 2, 2}, Patrol: [3]int{0, 1, 1}}},
+		{`{"version":1,"gameplay":"community-3.9","builderOptions":{}}`, DefaultBuilderOptionsForMode(gameplay.Community39)},
+		{`{"version":1,"gameplay":"strict-3.1","builderOptions":null}`, DefaultBuilderOptionsForMode(gameplay.Strict31)},
+		{`{"version":1,"gameplay":"modern","builderOptions":{"guard":[1,1,1],"patrol":[0,1,1]}}`, DefaultBuilderOptionsForMode(gameplay.Community39)},
 		{`{"version":1,"builderOptions":{"guard":[0,2,9],"patrol":[2,0,-1]}}`, BuilderOptions{Guard: [3]int{0, 2, 1}, Patrol: [3]int{2, 0, 1}}},
 	} {
 		path := filepath.Join(t.TempDir(), "settings.json")

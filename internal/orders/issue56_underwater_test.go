@@ -87,7 +87,8 @@ func TestVTOLPatrolChecksPickedRepairAdmission(t *testing.T) {
 						return ResourceView{Stock: [2]float32{100, 100}, Capacity: [2]float32{100, 100}}, true
 					}
 					b.World = &WorldQueryAdapter{
-						SeaLevel: func() uint8 { return 40 },
+						SeaLevel:    func() uint8 { return 40 },
+						ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) { visit(target.Handle, target) },
 						ForEachUnitInRadius: func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
 							visit(target.Handle, target)
 						},
@@ -96,9 +97,17 @@ func TestVTOLPatrolChecksPickedRepairAdmission(t *testing.T) {
 						t.Fatal("the visitor must keep this candidate until the post-pick admission")
 					}
 					n := &Node{ID: Lookup("VTOL_RepairPatrol"), Owner: actor.Handle, Phase: 1, Deadline: -1}
+					var retained *Node
+					if mode.name == "modern" {
+						// Modern work is bounded to its retained assignment. Give this
+						// water-admission fixture a waypoint at the offered target.
+						n.GoalX, n.GoalZ = target.X, target.Z
+						q.primary, retained = []*Node{n}, n
+						actor.Def.Builder = true
+					}
 					code := vtolRepairPatrolHandler(actor, n, 0, 100)
 					if tc.want == "" {
-						if code != 2 || q.Head() != nil {
+						if code != 2 || q.Head() != retained {
 							t.Fatalf("rejected pick: code %d head %v, want feature-work hold with no order", code, q.Head())
 						}
 					} else if head := q.Head(); head == nil || DescriptorFor(head.ID).Name != tc.want || head.Target != target.Handle {

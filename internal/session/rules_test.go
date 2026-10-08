@@ -573,6 +573,9 @@ func TestBaseModeOfReducesASelectionToAReservedWord(t *testing.T) {
 		if got := BaseModeOf(tc.mode); got != tc.want {
 			t.Fatalf("BaseModeOf(%q) = %q, want %q", tc.mode, got, tc.want)
 		}
+		if got := tc.mode.ReservedBase(); got != tc.want {
+			t.Fatalf("host registry base of %q = %q, want %q", tc.mode, got, tc.want)
+		}
 	}
 }
 

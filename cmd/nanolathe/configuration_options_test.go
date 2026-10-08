@@ -152,6 +152,12 @@ func TestConfigurationBuilderFeatureGatesKeepSelectionUsable(t *testing.T) {
 	if panel.Window.Gadgets[panel.Index("BGHOLD")].GrayedOut == 0 || panel.Window.Gadgets[panel.Index("BPHOLD")].GrayedOut != 0 || panel.Window.Gadgets[panel.Index("NOVERVIEW")].GrayedOut != 0 {
 		t.Fatal("Community ignored per-feature builder gates or disabled the host overview choice")
 	}
+	g.gameplay = gameplay.Modern
+	patrolOn = false
+	g.syncBuilderOptions()
+	if panel.Window.Gadgets[panel.Index("BPHOLD")].GrayedOut != 0 {
+		t.Fatal("Modern hid its patrol preference behind the Community feature flag")
+	}
 }
 
 func TestCommunityConfigurationCanLeaveMegamapForCameraZoom(t *testing.T) {

@@ -266,6 +266,9 @@ func repairPatrolHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) 
 		installPointGoal(u, n, n.GoalX, n.GoalY, n.GoalZ, repairPatrolGoalRadius)
 		armDeadline(n, tick, 60)
 		n.DynamicGate |= gateMoveOutcomes // ORed: the 60-tick deadline survives
+		if code, handled := rulesOfUnit(u).PatrolWorkVisit(u, n, tick); handled {
+			return code
+		}
 		work := rulesOfUnit(u).PatrolWork(PatrolWorkRequest{Builder: u})
 		if work != PatrolReclaimOnly {
 			if resources, ok := playerResources(u); ok && patrolResourceAtLeastTwenty(resources.Stock[1], resources.Capacity[1]) {

@@ -989,6 +989,17 @@ cargo retains the carried-guard rejection. There is no extra return-move record
 or standing move gate, matching the guard's direct ward-assistance behavior. The guard
 can select another nearby job on resumption before following again.
 
+**Nanolathe Modern policy — user-authorized 2026-10-08, issue #100.** Nearby
+guard work is bounded by an inclusive 128-world-unit circle centred on the
+ward's current position, as well as the builder's authored sight distance.
+Repair and resurrection candidates must satisfy both tests. A moving ward or
+work target cannot extend an ongoing borrowed job beyond that circle: the
+borrowed work ends and the original Guard resumes. Direct assistance to the
+ward, its current production, combat support and repair-pad seeking keep their
+own contracts. This bounds the work assignment, not terrain detours or the
+guard's ordinary follow offset. The Community Guard home preference still
+controls follow offsets, independently of the nearby-work leash.
+
 Selection changes neither resources, health, feature state nor worker state.
 Nearby repair and resurrection selection consume no RNG; pad selection keeps
 patrol's one bounded pick (no draw for fewer than two candidates). Existing
@@ -1017,10 +1028,75 @@ the drained factory and the Strict bypass.
 `session.TestModernGuardStaysWithAProducingFactoryRetail` locks the play-test
 scene on retail content: a commander guarding an ARMVP with six Flashes queued,
 beside an ARMCV building a row of solar collectors, never works on a collector
-while the plant has production queued. Once the queue empties, the fixture
-allocates an unfinished collector beside the guard's current post and checks
-that it takes nearby work. This keeps the idle-work assertion independent of
-where factory assistance leaves the guard or how soon the original row finishes.
+while the plant has production queued. An additional unfinished collector
+stays inside the ward's 128-unit circle throughout production, and the test
+checks that the guard takes it once the queue empties. This keeps the idle-work
+assertion independent of where factory assistance leaves the guard or how soon
+the original row finishes.
+
+### Modern patrol work
+
+**Nanolathe Modern policy — user-authorized 2026-10-08, issue #98.** A mobile
+construction patrol assists unfinished units, including a factory's current
+product, repairs damaged friendly units near its route, and reclaims authored
+automatic-reclaim features when at least one resource they yield is below its
+storage capacity. Trees, rocks and metal-bearing wrecks use the same authored
+feature predicates and ordinary reclaim executor; resource type is never
+inferred from the feature name. A full store cannot motivate reclaim for that
+resource, but a mixed-resource feature may supply the other, non-full store.
+Assist remains subject to the ordinary energy admission and capabilities.
+
+The existing per-player Builders preferences select Reclaim / Both / Assist
+by Hold Position, Maneuver or Roam. Modern uses these choices even when a
+content table disables the Community filter. Its default is Both in all three
+stances. A fresh host settings file and a stored file omitting the Builders
+block receive that selected mode's defaults; explicit saved choices remain.
+Restore Defaults uses the selected rule set's base. Battle entry asks the
+bound orders rules for every player's default, then applies any explicit human
+preference. Online non-human configuration rows retain their canonical unused
+padding; they do not override the bound simulation default.
+Strict retains retail selection,
+resource thresholds, ordering and RNG. Community retains its sourced branch
+filters and defaults. The current engine line's stance-based options are not
+evidence that the original 2012–2013 3.9 releases behaved identically.
+
+Modern candidates must be within the builder's authored sight distance and an
+inclusive 128-world-unit corridor around the queued patrol route. Side jobs do
+not redefine that route. Factory assistance resolves the currently allocated
+product through ordinary factory work; an empty queue or inter-product gap
+adds no invented product or polling state. Candidate selection prioritizes
+construction assistance, then repair, then reclaim, with deterministic
+distance and handle/feature-identity tie breaks. Selection draws no RNG. Work
+executes through the existing rows, preserves the patrol and queued successors,
+and resumes the original route after completion or abandonment. A failed job
+cannot be retried repeatedly in a single pump visit. Work outside the retained
+route corridor is released rather than followed indefinitely.
+
+**Public API and ownership.** Extend the existing `orders.Rules` only:
+`DefaultBuilderOptions() BuilderOptions` supplies mode defaults;
+`PatrolWorkVisit(u, n, tick) (Code, bool)` selects the Modern automatic work at
+the existing patrol maintenance boundary (Strict and Community return
+unhandled); `AutomaticWorkValid(u, n) bool` checks borrowed work against its
+retained guard or patrol assignment (Strict and Community return true).
+Keep assignment bookkeeping in the existing queue/records and compose through
+the same session RuleSet. Do not add a gameplay registry, per-tick settings
+reads, resource ledger, or worker controller. The retail save format stays
+unchanged. New borrowed jobs reference their retained queue assignment; the
+state fingerprint includes that assignment's queue ordinal, never its host
+pointer. Unknown producer provenance is handled conservatively. A restored
+work head whose automatic producer cannot be established is exempt from these
+bounds until it ends: a queued patrol or guard alone cannot prove that the
+player did not issue the work explicitly. New automatic selections after load
+receive the ordinary bounds. Preserving bounds across such ambiguous saves
+requires Nanolathe-owned producer metadata; it is a follow-up save-format
+decision, not a reason to cancel an unknown explicit order.
+
+Verification must cover the circle/corridor equality boundary, moving ward and
+target, factory nanoframes and queue gaps, unchanged direct ward assistance,
+air and ground constructors, all three work choices, full versus deficient
+metal/energy including mixed yields, retained route/successors, failed-job
+resumption, restored queues, and Strict/Community RNG/resource bypass. The
+landing owner runs both whole-tree gates and the simulation-cost benchmark.
 
 ### 2.3 `internal/cob`
 
@@ -1696,8 +1772,8 @@ Notes the table cannot carry:
   the text "I can't reach the construction site" `[04 R-ORDER-02 §1]`
   `[04 R-ORD-01 §5]`.
 
-`RepairPatrol` runs the bound repair-candidate scan and resource-gated feature
-pairing; `VTOL_Patrol` runs pad selection and its opportunity scan. These use
+Under Strict and Community, `RepairPatrol` runs the bound repair-candidate
+scan and resource-gated feature pairing; `VTOL_Patrol` runs pad selection and its opportunity scan. These use
 the queue binding's enumerators and simulation RNG, including the no-candidate
 arms [04 R-ORD-01 §4][04 R-ORD-02 §2] [I4]. Both repair patrols gather through
 movement's existing spatial-sector index: Z rows before X columns, each sector
@@ -1706,6 +1782,14 @@ circular comparison [04 R-ORD-02 §4]. The random candidate index refers to
 that order. The visitor adds no death-pending exclusion. Modern guard assistance
 keeps its separately approved first candidate in unit-slot order and existing
 whole-position sight test; correcting patrol gathering changes no guard policy.
+An undamaged, complete factory is not a repair candidate merely because it has
+production queued: the shared visitor requires damage or unfinished
+construction [04 R-ORD-02 §4]. Guard's direct ward assistance instead copies
+the factory's current work [04 R-UNIT-06 §1]. Modern replaces automatic work
+selection at the same maintenance boundary, as described in "Modern patrol
+work" above. It retains the ordinary movement and work executors and air
+repair-pad opportunity; its priority, corridor and selection RNG follow that
+Modern contract.
 `TestPatrolScansKeepSuppliedOrderAndDrawOnlyAfterGates`,
 `TestRepairRadiusSquaresFullFixedDeltas`, `TestRepairRadiusUsesSectorRowsAndRelinkOrder`,
 `TestPatrolAcceptedAssistanceKeepsMovementGate` and the primary deadline tests lock
@@ -1717,7 +1801,7 @@ move keeps the actor's exact departure position [04 R-STANCE-01 §4].
 The patrol resource helpers follow the stored-input and working-precision
 boundaries in [04 R-ORD-01 §4, §7], including inclusive and unordered admission.
 They are separate from Modern guard assistance's existing single-precision
-gate. Feature sampling preserves raw fixed-point coordinates, odd-diameter
+gate. Strict/Community feature sampling preserves raw fixed-point coordinates, odd-diameter
 halves, Z-before-X traversal and tournament tie order. Ground patrol alone has
 the healthy-stores early hold; an aircraft that reaches feature pairing runs
 its tournaments before the reclaim decision. Community assist-only still stops

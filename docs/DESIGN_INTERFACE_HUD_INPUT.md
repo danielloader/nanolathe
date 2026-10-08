@@ -2128,10 +2128,10 @@ independent of gameplay selection. Retail draws the rail at one framebuffer
 pixel per authored pixel `[07 R-HUD-05]`, which is small on a 1440- or
 2160-row surface. `presentation.sidebarScale` stores Auto (0, the default)
 or a fixed 1, 2 or 3. Auto is the surface height divided by 720, so 1x below
-1440 rows, 2x from 1440 and 3x from 2160. A fixed choice is reduced until the
-rail keeps at least 480 virtual rows, the height every stock page and the
-side panel art are authored for, so 2x needs 960 rows and 3x 1440
-(`hud.ChromeScale`). The scale is resolved once per drawn frame, and input
+1440 rows, 2x from 1440 and 3x from 2160, which always leaves the rail at least
+the 480 rows every stock page and the side panel art are authored for. A fixed
+choice applies as chosen even when it leaves fewer; the bottom of a page may
+then fall off the rail (`hud.ChromeScale`). The scale is resolved once per drawn frame, and input
 until the next draw maps the pointer through that value, which is what the
 player sees. It is always 1x when the Classic executor may replay the
 recording, since that executor ignores the region markers below, and for

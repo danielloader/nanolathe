@@ -1279,6 +1279,112 @@ Session tests cover command-boundary mode changes and existing/new queues.
 Run `tools/check`, `tools/check-retail` and the live battle performance checks
 from [BATTLE_BENCHMARK.md](BATTLE_BENCHMARK.md).
 
+### 3.4.2 Modern aircraft tactics — design proposal for issue 101
+
+**Status: design first, requested 2026-10-08; implementation and tuning pending.**
+The goal is useful firing opportunities with less time in avoidable danger.
+This proposal changes decisions about flight goals, not unit speed, turning,
+weapon reload, burst count, damage, ammunition or resource costs. It is a
+proposed **Nanolathe Modern policy**, disabled by Strict 3.1 and Community 3.9.
+The already approved bomber pass completion and repair-pad queue remain their
+own contracts. No new aircraft behavior is enabled by this section.
+
+**Baseline and falsification.** Retail has separate bombing, strafing, hover
+and dogfight executors [04 R-AIR-01 §8]. Strafers already alternate attack and
+break legs; hover attackers already alternate standoff points; dogfight has
+intercept and give-up transitions. The traced ordinary dogfight give-up does
+not retain a target for its inserted evasion record, so that record ends before
+its sideways break phases. This is an established producer/consumer result,
+not evidence that every retail aircraft never evades. Issue 101's bomber miss
+also reproduced in the reporter's OTA test. These facts falsify a blanket
+parity-bug classification; they do not make the requested improvement
+unnecessary. Implementation starts with the real-session `internal/airdiag`
+harness and role-specific observations, so an aiming, projectile, content or
+order wiring defect is corrected at its owner before adding tactics. Retail
+physics remain described by [04 §10.1], [04 R-AIR-01 §2–§4] and the weapon
+contracts in DESIGN_WEAPONS_PROJECTILES. Zero-gravity cancellation remains
+SC23 until a separate policy is approved.
+
+**Orders and knowledge.** An explicit attack commits to attacking its issued
+unit or position; tactics may change the approach and recovery, and interrupt
+briefly for evasion, but may not silently retarget or abandon it. Explicit move,
+transport, construction and pad landing keep their assignment. Autonomous
+engagements retain the existing Hold Fire and movement-stance admission and
+return contracts. Hold Position does not acquire a roaming attack; Maneuver
+returns to its existing anchor; Roam permits continued pursuit. Stance does
+not grant hidden information. Approach scoring may read the existing
+owner-visible danger contacts and anonymous impact cues described in
+DESIGN_UNITS_ORDERS_COB "Modern danger response". A radar-only contact is not
+a precise firing solution. Hidden AA positions, reload timers, projectile
+targets and future paths are not inputs. A later pre-impact projectile dodge
+needs a separately documented observation port; current impact cues support
+reacting to fire already received, not knowing an unseen incoming missile.
+
+**Proposed role decisions.** Select roles from the existing command resolver
+and authored capabilities, never unit names:
+
+| Executor | Modern objective | Proposed change |
+|---|---|---|
+| `AirStrike` | Release a useful bomb pass and get clear | Choose an approach aligned with the existing release calculation and actual flight state; prefer the less exposed approach when both admit a pass. Finish admitted burst release and overflight, then choose a shorter feasible recovery to the next pass. |
+| `AirToGround` | Keep a useful firing window while passing | Bind the target early enough for ordinary aiming, preserve the existing weapon gates, and choose recovery from actual turn/speed constraints rather than an unnecessarily long fixed excursion. |
+| `AirToGroundHover` | Maintain aim from useful standoff positions | Rank feasible standoff points by weapon admission and visible exposure; use deterministic lateral motion when under fire, while maintaining authored tolerance and target-facing requirements. |
+| `AirToAir` | Intercept without a repeated dead give-up loop | Derive the intercept from observed position/velocity and feasible turn time. Insert an actual bounded evasion leg when pursuit geometry fails or received fire warrants a break, retaining the original attack for resumption. |
+
+"Attack faster" means reducing unproductive approach/recovery time and target
+binding delay. It never means firing through a denied aiming gate, spending a
+burst twice, shortening reload or accelerating a unit beyond its definition.
+Bomb release changes need traces of the launch point, aircraft velocity,
+projectile gravity, impact point and damage outcome for moving and stationary
+targets. Hit rate alone cannot distinguish a release bug from the authored
+accuracy and ordinary misses. Recovery must let the admitted burst finish or
+use the ordinary cancellation semantics; changing goals cannot restart it.
+
+**Candidate search and evasion.** Use a fixed, bounded candidate sequence,
+integer/fixed-point scoring and stable identity ties. Candidate courses must
+be reachable under current velocity, authored turn rate, acceleration and
+altitude constraints; an aircraft cannot teleport, stop instantly or make a
+right-angle turn by changing its marker. Rank weapon-admitted courses first,
+then visible exposure and time to the next admitted firing window. Received
+fire may select a short lateral break with hysteresis to avoid changing sides
+every tick. The break's lifetime, observation expiry, prediction horizon,
+candidate count and evaluation cadence are **open tuning decisions**, to be
+settled by the authored scenarios below and reviewed before implementation.
+No default constants or projectile-specific dodge guarantees are approved
+here. A poor forecast may still lose an aircraft to homing missiles, area
+damage or dense AA; the policy provides feasible choices, not immunity.
+
+**Composition and state.** The air executors live in orders, so extend their
+existing `orders.Rules` seam with a bounded air-tactics decision there, through
+the current `session.RuleSet`. Both reserved bypass implementations preserve
+the current handlers and RNG order. Movement continues owning goal updates,
+flight integration, occupancy and the repair-pad queue; combat continues owning
+aiming, projectile admission and resource/reload effects. Add a movement seam
+only if an identified integrator decision cannot be expressed by ordinary goal
+installation, and justify it under DESIGN_GAMEPLAY_RULES §9. Do not introduce
+a flight controller registry, per-unit random generator, background planner or
+new gameplay booleans. Any tactical state belongs to the session/order owner,
+has explicit cancellation, mode-switch and save/load rules, and makes no direct
+RNG draws. Ordinary newly reached flight and weapon branches may naturally
+change Modern draw order and resource use; Strict fingerprints must remain.
+
+**Delivery and acceptance.** First capture baseline traces for each executor
+with stationary and moving targets, low/high turn rates, long/short bursts,
+out-of-range or unaffordable weapons and targets removed mid-pass. Then
+implement approach/recovery separately from evasion, so each change has an
+independent cause and measurable result. Use authored scenarios for a visible
+AA screen, no visible AA, unseen fire, homing and unguided projectiles,
+crossfire, map edges, terrain altitude, repeated explicit orders, all fire and
+move stances, and return to a patrol/guard/repair assignment. Compare launch
+opportunities, first-shot latency, cycle time, hits, time in visible firing
+range and losses over identical seeds; also compare target-binding and burst
+traces. Require repeated deterministic hashes, stable bounded work, unchanged
+Strict/Community decisions and RNG, ordinary resource costs, and no mode-switch
+or save/load loss of an explicit assignment. Run the applicable focused tests,
+`tools/check`, `tools/check-retail`, the air diagnostic scenarios and
+`tools/sim-bench`. Inspect flight captures for implausible steering as well as
+the measurements. A throughput gain that comes from suppressing legitimate
+weapon or movement work does not satisfy this design.
+
 ### 3.5 Goal-family wiring — `[OW-3-P]`
 
 `[OW-3-P]` is the seam between an order and a path goal: which order produces

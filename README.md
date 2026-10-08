@@ -1,1 +1,1 @@
-Screenshots for nanolathe-gg/nanolathe#95 PRs. In-game captures; not part of the codebase.
+Screenshots for nanolathe-gg/nanolathe#103 and #104. In-game captures; not part of the codebase.

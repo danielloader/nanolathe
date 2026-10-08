@@ -3139,6 +3139,44 @@ and undocumented for ProTA's. It is not adopted: under AGENTS.md, evidence that
 a patch implements a behaviour is not authorization to enable it, so an Insert
 replay would need the user's approval as a new Modern policy.
 
+To activate replay in the current battle, open TALK with Enter, submit
+`+Now Film Chris Include Reload Assert`, then submit the command to retain
+(for example `+atm`). Press or hold `\` to repeat it. Modern also accepts
+`+dev` as the activation shorthand. Replay drains ordinary character tokens
+and adds no TALK echo. `TestBackslashReplayThroughBattleInput` locks activation,
+access gating, repeat order and editor ownership across all gameplay modes.
+
+**Command history (Nanolathe host input policy, user-authorized 2026-10-08).**
+Every battle keeps up to 64 submitted `+` command lines, in submission order,
+with exact consecutive duplicates suppressed and the oldest line evicted at
+the limit. The existing dispatcher's leading-space admission determines
+whether a line is a command; unknown or refused commands remain recallable.
+Plain chat and cancelled lines never enter history. This is a host input
+extension in every gameplay mode, Strict 3.1 included; retail research does
+not establish an Up/Down command history `[07 §2]` `[07 §5 "Chat"]`.
+
+While TALK has editor capture, Up recalls older commands and Down recalls
+newer ones. The first Up saves the current draft after any earlier tokens in
+that frame. Down past the newest restores that draft exactly. Each recalled
+line passes the ordinary editor's byte and font-width admission, with its
+caret at the end; subsequent edits use the existing editor. Editing a recall
+does not overwrite its stored line. Returning to the draft ends recall, and
+closing or reopening TALK clears the recall position and draft. History
+remains local to that battle and is never written to settings or simulation
+state. Up/Down outside captured TALK keep their existing behavior.
+
+Recall only fills the editor. Enter submits through the original command
+dispatcher and access checks, and cancellation discards the edited line.
+Ordered tokens keep the existing final-consumed-token Enter behavior and
+Escape stop `[07 R-WGT-01 §6]`; TALK owns the entire closing frame as before.
+Recall neither executes a command nor replaces the separate retail
+`lastCommand` copy; only submitting a `+` line updates that copy.
+`TestTalkHistoryOrderedRecallEditsAndDraft`, `TestTalkHistoryBoundDuplicateAndCancel`,
+`TestTalkHistoryUsesCurrentEditorAdmission`, `TestTalkHistoryKeepsWorldInputOwnership`
+and `TestTalkHistoryAccessAndCommandBoundaryAllModes` lock admission, ordering,
+the bounded battle lifetime, world input ownership, access checks, backslash
+replay and unchanged resource/RNG state before the command boundary.
+
 **Retail cheat and visibility commands.** The mask-2 set (`Radar`, `ATM`,
 `View`, `LOS`, `Mapping`, `DoubleShot`, `HalfShot`, `NowISee`, `Meteor`) and
 the mask-1 settings commands are dispatched in

@@ -856,8 +856,15 @@ it because film mode has just been cleared.
 The runnable display gates, including film information, are described in
 [03 §2.4] and [R-HUD-03 §1]; film mode is not synonymous with either probe.
 
-**Established — replay is not another console window.** `\` re-tokenises
-and dispatches the retained last-command text with every route bit enabled.
+**Established — replay is not another console window.** `\` requires
+developer access, independently of the entry-time cheat permission. Typing an
+ordinary cheat such as `+ATM` does not enable that access; the settings pair
+or exact `Now` phrase above does. Each admitted backslash character token
+re-tokenises and dispatches the retained last-command text with every route
+bit enabled.
+Holding the key repeats through the ordinary operating-system character
+events, with one token drained per battle host pass (§2); the shortcut has no
+separate held-key or repeat timer. The shifted `|` character has no replay case.
 The text excludes the leading `+`. Replaying does not submit another TALK
 message and does not replace the retained command. The mask-8 AI-profile
 commands are therefore eligible through replay although ordinary developer

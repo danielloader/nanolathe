@@ -1,16 +1,26 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
 )
 
+const talkCommandHistoryLimit = 64
+
 type battleChatState struct {
 	active      bool
 	ownsFrame   bool
 	lastCommand string
+
+	// Battle-local host input policy; see DESIGN_INTERFACE_HUD_INPUT §3.9.
+	commandHistory   []string
+	historyIndex     int
+	historyDraft     string
+	historyRecalling bool
 }
 
 func talkOpenToken(in *input.State) bool {
@@ -44,6 +54,7 @@ func (b *battleSession) openTalk(in *input.State, cl *client.Client) bool {
 		return false
 	}
 	b.chat.active, b.chat.ownsFrame = true, true
+	b.chat.resetHistoryRecall()
 	if b.dragScrollActive {
 		b.endDragScroll(cl)
 	}
@@ -58,6 +69,7 @@ func (b *battleSession) closeTalk() {
 	b.hud.talkPanel.SetText("TALK", "")
 	b.hud.talkPanel.ResetPress()
 	b.chat.active = false
+	b.chat.resetHistoryRecall()
 	b.developer.quickkeysDisabled = false
 }
 
@@ -100,7 +112,7 @@ func (b *battleSession) serviceTalk(in *input.State) {
 		frame.PointerEvents = nil
 	}
 	frame.DisableQuickKeys = b.developer.quickkeysDisabled
-	result := b.hud.talkPanel.ServiceFrame(frame, ui.WidgetHooks{Measure: b.talkMeasure})
+	result := b.serviceTalkHistory(frame)
 	if result.Fired && result.FiredIndex == b.hud.talkPanel.Index("TALK") {
 		text := b.hud.talkPanel.TextOf("TALK")
 		if text != "" && !cancel {
@@ -115,6 +127,93 @@ func (b *battleSession) serviceTalk(in *input.State) {
 	// The dialog owns the complete input frame, including records after its
 	// closing Enter/Escape. None may reach a battle child opened later.
 	in.DiscardTokens(in.PendingTokens())
+}
+
+// serviceTalkHistory intercepts history arrows only in the captured TALK
+// editor. Each prefix ends with its arrow, so an earlier Enter stays inert as
+// it does in the ordinary ordered editor batch [07 R-WGT-01 §6]. Pointer
+// service runs once, after the remaining editor tokens, through the same panel.
+func (b *battleSession) serviceTalkHistory(frame ui.WidgetFrame) ui.ServiceResult {
+	p := b.hud.talkPanel
+	index := p.Index("TALK")
+	measure := func(text string) int { return b.talkMeasure(index, text) }
+	for len(b.chat.commandHistory) != 0 && p.EditorIndex() == index && p.EditorCaptured() {
+		arrow := -1
+		for i, token := range frame.Tokens {
+			if token.Kind == input.TokenEdit && (token.Key == input.KeyUp || token.Key == input.KeyDown) {
+				arrow = i
+				break
+			}
+		}
+		if arrow < 0 {
+			break
+		}
+		result := p.ApplyEditorTokens(frame.Tokens[:arrow+1], measure)
+		if result.Action.Kind == ui.ActionActivate {
+			return ui.ServiceResult{Fired: true, FiredIndex: result.Action.Index}
+		}
+		b.recallTalkCommand(index, frame.Tokens[arrow].Key, measure)
+		frame.Tokens = frame.Tokens[arrow+1:]
+	}
+	return p.ServiceFrame(frame, ui.WidgetHooks{Measure: b.talkMeasure})
+}
+
+func (c *battleChatState) resetHistoryRecall() {
+	c.historyIndex = len(c.commandHistory)
+	c.historyDraft = ""
+	c.historyRecalling = false
+}
+
+func (c *battleChatState) rememberCommand(text string) {
+	command := strings.TrimLeft(text, " ")
+	if command == "" || command[0] != '+' {
+		return
+	}
+	if len(c.commandHistory) != 0 && c.commandHistory[len(c.commandHistory)-1] == text {
+		return
+	}
+	if len(c.commandHistory) == talkCommandHistoryLimit {
+		copy(c.commandHistory, c.commandHistory[1:])
+		c.commandHistory[len(c.commandHistory)-1] = text
+	} else {
+		c.commandHistory = append(c.commandHistory, text)
+	}
+}
+
+func (b *battleSession) recallTalkCommand(index int, key input.Key, measure func(string) int) {
+	c, p := &b.chat, b.hud.talkPanel
+	if key == input.KeyUp {
+		if !c.historyRecalling {
+			c.historyDraft = p.TextAt(index)
+			c.historyIndex = len(c.commandHistory)
+			c.historyRecalling = true
+		}
+		if c.historyIndex == 0 {
+			return
+		}
+		c.historyIndex--
+	} else {
+		if !c.historyRecalling {
+			return
+		}
+		c.historyIndex++
+		if c.historyIndex == len(c.commandHistory) {
+			// The draft already passed the editor's admission (including paste).
+			// Restore it exactly, with the caret at the end, and end recall.
+			p.SetTextAt(index, c.historyDraft)
+			c.resetHistoryRecall()
+			return
+		}
+	}
+	// Reuse ordinary typing admission for the current authored byte limit and
+	// font width [07 R-WGT-01 §6][07 R-WGT-01 §12], then leave the caret at
+	// the end. This host policy does not extend the editor or execute the line.
+	p.SetTextAt(index, "")
+	tokens := make([]input.Token, 0, len(c.commandHistory[c.historyIndex]))
+	for _, r := range c.commandHistory[c.historyIndex] {
+		tokens = append(tokens, input.Token{Kind: input.TokenText, Rune: r})
+	}
+	p.ApplyEditorTokens(tokens, measure)
 }
 
 // talkRightPress reports a right-button down, single or double, in the frame
@@ -132,6 +231,7 @@ func (b *battleSession) commitLocalChat(text string) {
 	if b == nil || b.sess == nil || b.sess.Econ == nil || int(b.sess.LocalOwner) >= len(b.sess.Econ.Players) {
 		return
 	}
+	b.chat.rememberCommand(text)
 	b.dispatchLocalCommand(text)
 	name := b.sess.Econ.Players[b.sess.LocalOwner].Name
 	if ring := b.messageRing(); ring != nil {

@@ -623,7 +623,7 @@ const (
 // Chrome scale preferences (DESIGN_INTERFACE_HUD_INPUT "Modern sidebar scale").
 const (
 	ChromeScaleAuto = 0
-	MaxChromeScale  = 3
+	MaxChromeScale  = 2
 )
 
 // Presentation holds Nanolathe's host presentation preferences

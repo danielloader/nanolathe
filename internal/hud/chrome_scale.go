@@ -5,7 +5,7 @@ package hud
 // draws the rail at one framebuffer pixel per authored pixel [07 R-HUD-05].
 
 // AutoChromeScaleHeight is the surface height per step of the Auto scale:
-// 1x below 1440 rows, 2x from 1440, 3x from 2160.
+// 1x below 1440 rows, 2x from 1440.
 const AutoChromeScaleHeight = 720
 
 // ChromeScale resolves a sidebar scale preference — zero for Auto, otherwise a

@@ -177,12 +177,19 @@ func TestPreferredLockOverviewAndLegacyBoundary(t *testing.T) {
 	for _, mode := range []gameplay.Mode{gameplay.Strict31, gameplay.Community39} {
 		b := preferredZoomTestBattle(120)
 		b.sess = &session.Session{Gameplay: mode}
+		b.hostPresentation.Overview = settings.OverviewMegamap
 		b.syncCameraControls()
 		if b.zoomLock() != camera.ZoomUnit || b.zoom.LockZoom != camera.ZoomUnit {
 			t.Fatalf("%s adopted the Modern lock", mode)
 		}
 	}
-	b := preferredZoomTestBattle(1)
+	b := preferredZoomTestBattle(120)
+	b.sess = &session.Session{Gameplay: gameplay.Community39}
+	b.syncCameraControls()
+	if b.zoomLock() != 1229 || b.zoom.LockZoom != 1229 {
+		t.Fatal("Community camera zoom ignored the host's preferred lock")
+	}
+	b = preferredZoomTestBattle(1)
 	if b.zoomLock() != b.cam.MinZoom() || b.hostPresentation.ZoomLockPercent != 1 {
 		t.Fatal("map floor did not clamp the active lock independently of the preference")
 	}

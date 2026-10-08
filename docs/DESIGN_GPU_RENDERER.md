@@ -3521,10 +3521,15 @@ community megamap with this camera overview. `presentation.zoomStyle` selects
 wheel together. No zoom returns to fixed native 1×, cancels active zoom and
 disables pinch, wheel, F9 and whole-map Tab zoom; ordinary panning remains,
 and Tab keeps its Options binding. It does not enable the community megamap
-or change the independently stored icon style. Community
-3.9 disables these camera zoom bindings and uses its separate megamap
-(DESIGN_INTERFACE_HUD_INPUT §3.15). Strict 3.1 retains the earlier three
-presets, fixed 500 ms wheel cooldown and 0.30 ease; its overview preference
+or change the independently stored icon style. Community 3.9 honors the same
+camera preferences when `presentation.overview = 0` (Tab: Options, default).
+Selecting `1` (Overview) instead uses its separate megamap and disables camera
+zoom (DESIGN_INTERFACE_HUD_INPUT §3.15). This preserves ProTA's authored
+megamap recommendation without treating another content set's Community
+gameplay requirement as a zoom restriction. The player can change the overview
+through Controls → Mouse or Options → Orders without changing gameplay.
+Strict 3.1 retains the earlier three presets, fixed 500 ms wheel cooldown and
+0.30 ease; its overview preference
 still selects the optional megamap. Registered rule sets inherit their base
 layer's host policy through the existing registry. This is presentation only:
 no new gameplay seam, RNG draws, resources, orders or save state [I6].
@@ -3534,12 +3539,12 @@ no new gameplay seam, RNG draws, resources, orders or save state [I6].
 with 1% choices from `1` to `200`. Old files and unsupported values adopt 100.
 The active lock is the percentage rounded to the nearest 1/1024 and clamped to
 the battle's full-map floor; the stored preference is retained when a small map
-needs a higher floor. It replaces the native detent in Modern smooth zoom and
-the native stop in Modern stepped zoom. It adds no independent stop at 1×.
+needs a higher floor. It replaces the native detent in smooth camera zoom and
+the native stop in stepped camera zoom. It adds no independent stop at 1×.
 For example, 120 selects approximately 1.2×, keeping the fractional filtering
 of §16.3; it does not change the record scales or make that factor pixel-exact.
-Strict and Community controls ignore this preference. It changes neither the
-default battle-entry factor nor explicit `--zoom` framing (§16.8).
+Strict and the separate Community megamap ignore this preference. It changes
+neither the default battle-entry factor nor explicit `--zoom` framing (§16.8).
 
 `camera.ZoomController` is the state machine, driven once per host Update from
 the battle's camera pass. Easing uses host Updates and the lock's wheel hold uses the
@@ -3679,9 +3684,10 @@ cameras and legacy controls retain their existing bounds.
 Targets below the floor are clamped at the controller and
 camera. The viewport span is taken in framebuffer pixels, because the chrome
 does not move with the zoom. The host sets `Camera.ViewportZoomFloor` for legacy
-and Community controls: the greater axis ratio rounded upward, bounded to
-1/16..2×, with the earlier clamp. Modern alone uses the full-map fit. These
-presentation choices change no simulation, RNG or resource behavior [I6].
+and the separate Community megamap: the greater axis ratio rounded upward,
+bounded to 1/16..2×, with the earlier clamp. Modern and Community camera zoom
+use the full-map fit. These presentation choices change no simulation, RNG or
+resource behavior [I6].
 
 **Overview margins (issue #90).** Border space outside the projected terrain
 raster stays at PAL[0]. Features and effects can extend farther beyond the map
@@ -3737,10 +3743,14 @@ free passage through native, settings changes, overview return and mode bypass.
   like the megamap, only when `presentation.overview = 1` (Overview); with
   `0` (Options, default), Tab opens and closes Options without changing the
   camera. Changing the choice to Options cancels a pending Tab release. F2
-  opens Options. Community 3.9 takes Tab for its megamap and ignores F9 and explicit battle-entry zoom; Strict 3.1
-  retains its 1× → 2× → 0.25× F9 cycle. Classic keeps its 1× ↔ 2× F9 cycle in
-  Modern and Strict, and Tab's options binding in Modern.
-  Modern No zoom disables F9 in both renderers and retains Tab for Options.
+  opens Options. Community 3.9 with `presentation.overview = 0` keeps Tab for
+  Options and honors camera zoom preferences, F9 and explicit battle-entry
+  zoom. With `1` it takes Tab for its megamap and ignores F9 and explicit
+  battle-entry zoom; Strict 3.1 retains its 1× → 2× → 0.25× F9 cycle. Classic
+  keeps its 1× ↔ 2× F9 cycle in
+  Modern, Community camera zoom and Strict, and Tab's options binding in
+  Modern and Community camera zoom. No zoom disables F9 in both renderers and
+  retains Tab for Options.
   `TestModernTabOptionsPreference` locks the menu toggle without camera movement
   in Continuous and Steps, and F9's independent overview action;
   `TestModernTabOptionsCancelsPendingOverview` locks cancellation across a preference change.
@@ -4215,13 +4225,13 @@ before designing any.
 
 **Nanolathe Modern policy (user-authorized 2026-09-30).**
 `presentation.strategicIconStyle` selects `0` (Modern, default) or `1`
-(Community 3.9) in Modern. Modern symbols ignore the optional path and mod
-auto-discovery; Community icons use the authored mapping below. The Controls
+(Community 3.9) in Modern and Community camera zoom. Modern symbols ignore the
+optional path and mod auto-discovery; Community icons use the authored mapping below. The Controls
 screen's Mouse tab exposes this independently of Smooth/Steps. A live change
 joins speculative recording, invalidates the paused world and accepted icon
 projection, and rebuilds the battle catalog once. Missing community art retains
 the generated fallback; no substitute historical art is invented. Community
-3.9's megamap keeps its own icon bank regardless of this Modern preference;
+3.9's separate megamap keeps its own icon bank regardless of this preference;
 Strict retains its existing optional custom-icon resolution.
 
 `settings.Presentation.StrategicIconConfig` is an optional host path to the

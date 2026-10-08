@@ -29,14 +29,14 @@ func TestConfigurationKeepsIndependentHostControls(t *testing.T) {
 					t.Fatalf("%s/%s %s available=%v", mode, renderer, key, got)
 				}
 			}
-			if got := configurationUnavailable("zoomstyle", mode, p) == ""; got != (mode == gameplay.Modern) {
+			if got := configurationUnavailable("zoomstyle", mode, p) == ""; got != (mode != gameplay.Strict31) {
 				t.Fatalf("%s/%s zoom style available=%v", mode, renderer, got)
 			}
 			if got := configurationUnavailable("radardots", mode, p) == ""; got != (mode == gameplay.Modern && renderer == "modern") {
 				t.Fatalf("%s/%s radar dots available=%v", mode, renderer, got)
 			}
 			p.ZoomStyle = settings.ZoomNone
-			if got := configurationUnavailable("tab", mode, p) == ""; got != (mode == gameplay.Strict31) {
+			if got := configurationUnavailable("tab", mode, p) == ""; got != (mode != gameplay.Modern) {
 				t.Fatalf("%s/%s no-zoom Tab choice available=%v", mode, renderer, got)
 			}
 			for _, key := range []string{"zoomlock", "iconstyle"} {
@@ -149,8 +149,27 @@ func TestConfigurationBuilderFeatureGatesKeepSelectionUsable(t *testing.T) {
 	guardOff, patrolOn := false, true
 	g.gameplayFeatures = community.Overrides{GuardingBuildersHold: &guardOff, PatrollingBuilderFilters: &patrolOn}
 	g.syncBuilderOptions()
-	if panel.Window.Gadgets[panel.Index("BGHOLD")].GrayedOut == 0 || panel.Window.Gadgets[panel.Index("BPHOLD")].GrayedOut != 0 || panel.Window.Gadgets[panel.Index("NOVERVIEW")].GrayedOut == 0 {
-		t.Fatal("Community ignored the resolved per-feature or forced-megamap boundaries")
+	if panel.Window.Gadgets[panel.Index("BGHOLD")].GrayedOut == 0 || panel.Window.Gadgets[panel.Index("BPHOLD")].GrayedOut != 0 || panel.Window.Gadgets[panel.Index("NOVERVIEW")].GrayedOut != 0 {
+		t.Fatal("Community ignored per-feature builder gates or disabled the host overview choice")
+	}
+}
+
+func TestCommunityConfigurationCanLeaveMegamapForCameraZoom(t *testing.T) {
+	g, panel, cl := syntheticOptionsPage(t, "builders", builderOptionsPage)
+	g.gameplay = gameplay.Community39
+	g.presentation.Overview = settings.OverviewMegamap
+	g.syncBuilderOptions()
+	if reason := configurationUnavailable("zoomstyle", g.gameplay, g.presentation); reason == "" {
+		t.Fatal("megamap offered an inactive camera preference")
+	}
+	clickRowGadget(t, g, panel, cl, "NOVERVIEW", input.MouseButtonLeft)
+	if g.presentation.Overview != settings.OverviewZoom || g.gameplay != gameplay.Community39 {
+		t.Fatal("overview change missed the host preference or changed gameplay")
+	}
+	for _, key := range []string{"zoomstyle", "zoomlock", "iconstyle"} {
+		if reason := configurationUnavailable(key, g.gameplay, g.presentation); reason != "" {
+			t.Fatalf("Community camera %s remained unavailable: %s", key, reason)
+		}
 	}
 }
 

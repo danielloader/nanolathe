@@ -445,7 +445,7 @@ func nanolatheConfigurationKey(name string) string {
 func nanolatheConfigurationHelp(name string) string {
 	switch name {
 	case "NZOOM":
-		return "Modern camera zoom: continuous, stepped, or off at 1x. Classic offers native 1x/2x or Off. Free zoom requires the Enhanced renderer."
+		return "Camera zoom: continuous, stepped, or off at 1x. Classic offers native 1x/2x or Off. Free zoom requires the Enhanced renderer. Community uses camera zoom with Tab: Options."
 	case "NICONS":
 		return "Modern strategic icons: generated symbols or the running content's Community 3.9 art. Missing art keeps generated symbols."
 	case "NRADARDOTS":

@@ -2336,7 +2336,7 @@ No retail asset is copied into the repository or changed on disk.
 
 The page contains a captioned Gameplay (Strict 3.1 / Community 3.9 / Modern)
 row. Compact Renderer (Classic / Modern), FPS (30 / 60 / 120), Sidebar (6 / Flow),
-Modern Zoom (Smooth / Steps / Off), Modern Icons (Modern / Community 3.9),
+Camera Zoom (Smooth / Steps / Off), Modern Icons (Modern / Community 3.9),
 Radar dots (No dots / Visible dots / Attackable dots), Glow, Water, Lights,
 Metal, Heat and Marks controls carry their own names.
 The icon button abbreviates Community as Comm to fit the authored font; its
@@ -2345,9 +2345,11 @@ switches sit directly together at their authored height, so the
 page fits the in-battle column as well as the front-end one. Restore Defaults
 and Undo Changes retain their authored dimensions with a clear gap after the
 preferences and between each other. Zoom, icons and radar dots preview live and share the
-ordinary page Undo, defaults, Cancel and persistence transactions. Their Modern
-mode boundary is DESIGN_GPU_RENDERER §16.6 and §18.7. The main-menu Controls
-screen's Mouse table scrolls when these and the existing rows exceed its height.
+ordinary page Undo, defaults, Cancel and persistence transactions. Camera zoom
+and icons are available under Modern and Community camera controls; radar dots
+retain their rule boundary. DESIGN_GPU_RENDERER §16.6 and §18.7 own the camera
+controls. The main-menu Controls screen's Mouse table scrolls when these and
+the existing rows exceed its height.
 
 Gameplay defaults to Modern, independently of the renderer, and follows
 DESIGN_WEAPONS_PROJECTILES §2.3.1. The remaining controls default to Modern,
@@ -2798,12 +2800,12 @@ by a simulation phase, and is not saved [I6].
   land immediately on the preferred stop, defaulting to exactly 1×. Controls →
   Mouse owns Zoom lock (`presentation.zoomLockPercent`, default 100); 120
   chooses approximately 1.2× and replaces the native stop in both Smooth and
-  Steps. Modern zoom also offers No zoom: fixed native 1×, no pinch, wheel,
+  Steps. Camera zoom also offers No zoom: fixed native 1×, no pinch, wheel,
   F9 or whole-map Tab zoom, with panning intact and Tab opening Options.
-  The choice is Modern host policy and is ignored by Strict and
-  Community controls. Wheel input then needs 180 host milliseconds of quiet
-  before a new burst can leave the stop; pinch needs a fresh gesture.
-  The world point under the pointer stays put within the camera bounds. Modern
+  The choice is host policy under Modern and Community camera controls; Strict
+  and the separate Community megamap ignore it. Wheel input then needs 180 host
+  milliseconds of quiet before a new burst can leave the stop; pinch needs a
+  fresh gesture. The world point under the pointer stays put within the camera bounds. Camera zoom
   centres an axis while the whole map fits on it, then limits panning to its
   edges; those bounds take precedence over cursor anchoring and are applied
   continuously during zooming (DESIGN_GPU_RENDERER §16.7). Fractional wheel travel banks
@@ -3911,8 +3913,14 @@ instead of this megamap (DESIGN_GPU_RENDERER §16.6–16.8); F9 fits the
 whole map and returns, with F2 opening Options. Modern also honors the stored
 Tab choice (user-authorized 2026-10-01): `presentation.overview = 0` (Options, default) opens and closes
 Options; `1` (Overview) fits the whole map and returns on Tab release. Modern
-No zoom keeps Tab for Options. Community 3.9 always uses the
-megamap and disables pinch/wheel camera zoom and F9. Strict 3.1 retains the
+No zoom keeps Tab for Options. Community 3.9 honors `presentation.overview`:
+`0` (Tab: Options, default) enables the same host camera preferences as Modern,
+including pinch, wheel, F9 and explicit battle-entry zoom; `1` selects the
+separate megamap and disables those camera zoom bindings. ProTA's config
+recommends `1`, while Escalation declares no overview preference. A Community
+gameplay floor therefore does not impose ProTA's recommended presentation.
+Both configuration surfaces let the player return to camera zoom by selecting
+Tab: Options without changing the rules. Strict 3.1 retains the
 `presentation.overview` preference: `0` (Options, default) keeps Tab/F2 options and
 the earlier three camera presets; `1` (Overview) installs the megamap below.
 Modern with the Classic renderer keeps its earlier Tab/F9 controls.
@@ -3926,7 +3934,7 @@ with ProTA 4.8's `ProTA.ini` values as defaults except where noted:
 
 | Key | Default | Patch key |
 |---|---|---|
-| `overview` (Modern and Strict 3.1; Community 3.9 always uses Megamap) | 0 (Tab opens Options); 1 selects the mode's overview | `FullScreenMinimap` |
+| `overview` | 0 (Tab opens Options); 1 selects the mode's overview: camera zoom under Modern, megamap under Community and Strict | `FullScreenMinimap` |
 | `megamapWheel` | 1 | `WheelZoom` |
 | `megamapWheelMove` | 1 | `WheelMoveMegaMap` |
 | `megamapDoubleClickMove` | 0 | `DoubleClickMoveMegamap` |
@@ -4394,7 +4402,7 @@ modifiers, and names a hovered key's actions plain, with Shift and with
 Ctrl. The Mouse tab explains the two Interface Types on a drawn mouse (§3.5)
 and holds the behaviour switches: mouse buttons, selection rules,
 double-click, factory ×100, digit keys, order drag, build drag, the Tab key
-and the snap-override key. It also owns Modern zoom style (No zoom, Steps or
+and the snap-override key. It also owns camera zoom style (No zoom, Steps or
 Continuous), Zoom lock and
 strategic-icon style (DESIGN_GPU_RENDERER §§16.6 and 18.7). Zoom lock displays
 the preferred factor, with one-percent minus/plus buttons, a draggable track
@@ -4738,9 +4746,15 @@ verify composition-key isolation, paused clocks, eviction of paired/exhausted
 scenes and complete retirement; the placement contract validates each moved site
 and the fixed camera.
 `--nl-shot-only availability` captures disabled settings under Classic, Strict,
-Community and No zoom, alongside enabled Modern controls. The configuration
-regressions cover inactive input, dependent amounts, raw-value preservation,
+the Community megamap and No zoom, alongside enabled Modern and Community
+camera controls. The configuration regressions cover inactive input, dependent
+amounts, raw-value preservation,
 pending preset export, target-content locks and detached sidebar preferences.
+`TestCommunityContentCameraPreferences` loads the shipped Escalation and ProTA
+configs to lock the separate gameplay-floor and overview recommendations.
+`TestCommunityConfigurationCanLeaveMegamapForCameraZoom` and
+`TestNLScreenCommunityCanRestoreCameraZoom` lock both configuration surfaces and
+the saved host choice; camera mode/lock tests preserve Strict and megamap controls.
 
 **Open.** Mouse buttons are not rebindable: the Mouse tab offers the
 retail Interface Types and the existing switches. A mod's own key profile is

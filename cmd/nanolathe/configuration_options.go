@@ -17,8 +17,11 @@ func configurationUnavailable(key string, mode gameplay.Mode, p settings.Present
 	enhanced := p.Renderer != "classic"
 	switch key {
 	case "zoomstyle", "zoomlock", "iconstyle":
-		if base != gameplay.Modern {
-			return "Requires Modern gameplay."
+		if base == gameplay.Strict31 {
+			return "Strict 3.1 keeps legacy camera controls."
+		}
+		if base == gameplay.Community39 && p.Overview == settings.OverviewMegamap {
+			return "Select Tab: Options first."
 		}
 		// Classic still honors No zoom; Smooth and Steps both retain its
 		// native F9 scale cycle. Only the other two rows require free zoom.
@@ -27,19 +30,16 @@ func configurationUnavailable(key string, mode gameplay.Mode, p settings.Present
 				return "Requires the Enhanced renderer."
 			}
 			if p.ZoomStyle == settings.ZoomNone {
-				return "Enable Modern zoom first."
+				return "Enable camera zoom first."
 			}
 		}
 	case "tab":
-		if base == gameplay.Community39 {
-			return "Tab always opens the megamap."
-		}
 		if base == gameplay.Modern {
 			if !enhanced {
 				return "Tab is fixed to Options."
 			}
 			if p.ZoomStyle == settings.ZoomNone {
-				return "Enable Modern zoom first."
+				return "Enable camera zoom first."
 			}
 		}
 	case "radardots":

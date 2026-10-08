@@ -90,8 +90,8 @@ func builderOptionsPage(window *gui.Window) error {
 		// build pages (retail's default) or recall groups. `+switchalt`
 		// changes the same value from the message line.
 		{"NSWITCHALT", "Digits: Pages|Digits: Groups", 2},
-		// Overview fits the map through Modern zoom or the optional Strict
-		// megamap (DESIGN_INTERFACE_HUD_INPUT §3.15).
+		// Overview fits the map through Modern zoom or the optional Strict/
+		// Community megamap (DESIGN_INTERFACE_HUD_INPUT §3.15).
 		{"NOVERVIEW", "Tab: Options|Tab: Overview", 2},
 	} {
 		control := button

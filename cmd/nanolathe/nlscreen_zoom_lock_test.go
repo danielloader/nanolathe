@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 )
@@ -104,6 +105,37 @@ func TestNLScreenZoomStyleAndIconsApplyIndependently(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestNLScreenCommunityCanRestoreCameraZoom(t *testing.T) {
+	t.Setenv(settings.EnvPath, filepath.Join(t.TempDir(), "settings.json"))
+	file := settings.Defaults()
+	file.Gameplay = gameplay.Community39
+	file.Presentation.Overview = settings.OverviewMegamap
+	g, s := settingsRegressionScreen(nil, file)
+	g.settingsWritable = true
+	if s.cardUnavailable(configurationCard(t, s, "zoomstyle")) == "" {
+		t.Fatal("megamap camera control should explain its inactive consumer")
+	}
+	s.setCard(configurationCard(t, s, "tab"), settings.OverviewZoom)
+	for _, key := range []string{"zoomstyle", "zoomlock", "iconstyle"} {
+		if reason := s.cardUnavailable(configurationCard(t, s, key)); reason != "" {
+			t.Fatalf("Community %s stayed unavailable: %s", key, reason)
+		}
+	}
+	s.setCard(configurationCard(t, s, "zoomstyle"), settings.ZoomStepped)
+	s.setCard(configurationCard(t, s, "zoomlock"), 120-settings.ZoomLockMinPercent)
+	s.apply()
+	stored, err := settings.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.gameplay != gameplay.Community39 || stored.Gameplay != gameplay.Community39 ||
+		g.presentation.Overview != settings.OverviewZoom || stored.Presentation.Overview != settings.OverviewZoom ||
+		g.presentation.ZoomStyle != settings.ZoomStepped || stored.Presentation.ZoomStyle != settings.ZoomStepped ||
+		g.presentation.ZoomLockPercent != 120 || stored.Presentation.ZoomLockPercent != 120 {
+		t.Fatalf("camera preference did not apply and persist independently: %+v", stored)
 	}
 }
 

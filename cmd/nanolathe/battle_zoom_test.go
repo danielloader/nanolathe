@@ -6,6 +6,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
+	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
@@ -23,9 +24,9 @@ func TestBattleCameraModeBoundary(t *testing.T) {
 				b.syncCameraControls()
 				want := battleZoomLegacy
 				mega := overview == settings.OverviewMegamap
-				if mode == gameplay.Community39 {
+				if mode == gameplay.Community39 && mega {
 					want, mega = battleZoomDisabled, true
-				} else if mode == gameplay.Modern {
+				} else if mode == gameplay.Modern || mode == gameplay.Community39 {
 					want, mega = battleZoomSmooth, false
 					if zoom == settings.ZoomStepped {
 						want = battleZoomStepped
@@ -41,18 +42,92 @@ func TestBattleCameraModeBoundary(t *testing.T) {
 	}
 }
 
-func TestCommunityCameraZoomIsDisabled(t *testing.T) {
+// The content's gameplay floor does not select its presentation controls.
+// Escalation declares no camera preference; ProTA recommends its separate
+// megamap (DESIGN_INTERFACE_HUD_INPUT §3.15, DESIGN_MODS_MUTATORS §4.2).
+func TestCommunityContentCameraPreferences(t *testing.T) {
+	for _, tc := range []struct {
+		dir     string
+		megamap bool
+	}{{"escalation-10.2.0", false}, {"prota-4.8", true}} {
+		t.Run(tc.dir, func(t *testing.T) {
+			meta, err := modlibrary.ReadConfigFile(shippedConfigPath(t, tc.dir))
+			if err != nil {
+				t.Fatal(err)
+			}
+			file := settings.Defaults()
+			if err := meta.Config.ApplySettings(&file); err != nil {
+				t.Fatal(err)
+			}
+			b := zoomTestBattle()
+			b.sess = &session.Session{Gameplay: meta.Config.Rules.Gameplay}
+			b.hostPresentation = &file.Presentation
+			if b.sess.Gameplay != gameplay.Community39 || meta.Config.Rules.MinimumGameplay != gameplay.Community39 {
+				t.Fatal("fixture no longer requires Community gameplay")
+			}
+			applyEntryZoom(Options{Renderer: "modern", Zoom: camera.ZoomMax}, b)
+			want := camera.ZoomMax
+			if tc.megamap {
+				want = camera.ZoomUnit
+			}
+			if b.cam.EffectiveZoom() != want || b.megamapMode() != tc.megamap {
+				t.Fatalf("entry zoom=%d megamap=%v, want %d/%v", b.cam.EffectiveZoom(), b.megamapMode(), want, tc.megamap)
+			}
+			// The recommended megamap remains a host preference the player
+			// can change without changing the content's gameplay floor.
+			b.hostPresentation.Overview = settings.OverviewZoom
+			b.syncCameraControls()
+			b.cam.SetZoomAbout(400, 250, camera.ZoomUnit)
+			b.wheelZoom(400, 250, 1)
+			if b.zoom.Target(b.cam) != camera.ZoomUnit*5/4 || b.megamapMode() || b.sess.Gameplay != gameplay.Community39 {
+				t.Fatal("Community content could not enable camera zoom independently")
+			}
+		})
+	}
+}
+
+func TestCommunityMegamapDisablesCameraZoom(t *testing.T) {
 	for _, size := range [][4]int32{{640, 480, 8192, 8192}, {1920, 1080, 1600, 3968}} {
 		b := zoomTestBattle()
 		b.cam.ViewW, b.cam.ViewH, b.cam.MapW, b.cam.MapH = size[0], size[1], size[2], size[3]
 		b.sess = &session.Session{Gameplay: gameplay.Community39}
+		p := settings.DefaultPresentation()
+		p.Overview = settings.OverviewMegamap
+		b.hostPresentation = &p
 		applyEntryZoom(Options{Renderer: "modern", Zoom: camera.ZoomMax}, b)
 		b.wheelZoom(400, 250, -8)
 		b.applyTrackpadGestures(&input.MouseState{Pinches: []input.PinchEvent{{Began: true, Delta: 2, Ended: true}}}, true, 400, 250)
 		b.toggleViewScale(true)
 		b.toggleViewScale(false)
 		if b.cam.EffectiveZoom() != camera.ZoomUnit || b.zoom.Active(b.cam) || !b.megamapMode() {
-			t.Fatal("Community controls admitted camera zoom")
+			t.Fatal("Community megamap admitted camera zoom")
+		}
+	}
+}
+
+func TestCommunityCameraPinchAndF9Return(t *testing.T) {
+	for _, style := range []int{settings.ZoomSmooth, settings.ZoomStepped} {
+		b := zoomTestBattle()
+		b.sess = &session.Session{Gameplay: gameplay.Community39}
+		p := settings.DefaultPresentation()
+		p.ZoomStyle = style
+		b.hostPresentation = &p
+		b.syncCameraControls()
+		b.applyTrackpadGestures(&input.MouseState{Pinches: []input.PinchEvent{{Began: true, Delta: .4, Ended: true}}}, true, 400, 250)
+		for range 100 {
+			b.zoom.Step(b.cam)
+		}
+		view, factor := b.cam.PresentationView(), b.cam.EffectiveZoom()
+		if factor <= camera.ZoomUnit {
+			t.Fatalf("style=%d: Community pinch did not magnify the camera", style)
+		}
+		b.toggleViewScale(true)
+		if b.cam.EffectiveZoom() != b.cam.MinZoom() || b.megamapShown() {
+			t.Fatalf("style=%d: F9 did not use the camera overview", style)
+		}
+		b.toggleViewScale(true)
+		if b.cam.EffectiveZoom() != factor || b.cam.PresentationView() != view || b.sess.Gameplay != gameplay.Community39 {
+			t.Fatalf("style=%d: F9 did not restore the Community combat view", style)
 		}
 	}
 }
@@ -228,15 +303,18 @@ func TestChangingZoomPolicyCancelsOldInput(t *testing.T) {
 	b.gestures.pinchActive = true
 	b.toggleViewScale(true)
 	b.sess.Gameplay = gameplay.Community39
+	p := settings.DefaultPresentation()
+	p.Overview = settings.OverviewMegamap
+	b.hostPresentation = &p
 	b.syncCameraControls()
 	if b.cam.EffectiveZoom() != camera.ZoomUnit || b.zoom.Active(b.cam) || b.gestures.pinchActive || b.zoomReturn.factor != 0 {
 		t.Fatal("Community inherited Modern's gesture or overview return")
 	}
-	b.sess.Gameplay = gameplay.Modern
+	p.Overview = settings.OverviewZoom
 	b.syncCameraControls()
 	b.wheelZoom(400, 250, 1)
 	if b.zoom.Target(b.cam) != camera.ZoomUnit*5/4 {
-		t.Fatal("switching back left the Modern wheel blocked")
+		t.Fatal("switching back left the Community camera wheel blocked")
 	}
 }
 

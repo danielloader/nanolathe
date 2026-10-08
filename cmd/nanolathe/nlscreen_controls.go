@@ -761,7 +761,7 @@ func (s *nlScreen) drawZoomLockRow(screen *ebiten.Image, c nlCard, r screenkit.R
 	reason := s.cardUnavailable(c)
 	disabled := reason != ""
 	bf.Draw(screen, c.label, r.X+16*u, r.Y+max(11, 22*u), screenkit.Style{Size: max(8, 13.5*u), Top: nlCream, Shadow: 0.1})
-	sub := "Modern; reset to 1.00×"
+	sub := "Camera; reset to 1.00×"
 	if disabled {
 		sub = reason
 	}
@@ -847,11 +847,11 @@ func (s *nlScreen) drawMouse(screen *ebiten.Image, r screenkit.Rect) {
 	}
 	row(top+10*u, "Left button", leftText)
 	row(top+90*u, "Right button", rightText)
-	wheelText := "Modern smooth zoom pauses at Zoom lock."
+	wheelText := "Smooth camera zoom pauses at Zoom lock."
 	if s.draft.pres.ZoomStyle == settings.ZoomStepped {
-		wheelText = "Modern zoom steps include Zoom lock."
+		wheelText = "Camera zoom steps include Zoom lock."
 	} else if s.draft.pres.ZoomStyle == settings.ZoomNone {
-		wheelText = "Modern camera zoom is disabled."
+		wheelText = "Camera zoom is disabled."
 	}
 	if reason := configurationUnavailable("zoomlock", s.draft.gameplay, s.draft.pres); reason != "" {
 		wheelText = reason

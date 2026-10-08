@@ -1023,22 +1023,22 @@ func (s *nlScreen) controlCards() []nlCard {
 		},
 		half("tab", "Tab key", []string{"armrad", "armmark"}, []string{"Options", "Overview"}, []string{"Opens the battle menu", "Shows the whole map"},
 			func(p *settings.Presentation) *int { return &p.Overview },
-			"Tab opens Options or the overview: whole-map zoom and back in Modern, the megamap in Strict 3.1. Modern with No zoom or the Classic renderer keeps Options; Community 3.9 always uses its megamap. F2 opens Options."),
-		half("zoomstyle", "Modern zoom", []string{"armfav", "armrad"}, []string{"Continuous", "Steps", "No zoom"}, []string{"Continuous with Zoom lock", "Detail, lock, tactical, map", "Fixed at 1x"},
+			"Tab opens Options or the overview: whole-map zoom and back in Modern, the megamap in Strict 3.1 and Community 3.9. Community enables camera zoom with Options selected. Modern with No zoom or the Classic renderer keeps Options. F2 opens Options."),
+		half("zoomstyle", "Camera zoom", []string{"armfav", "armrad"}, []string{"Continuous", "Steps", "No zoom"}, []string{"Continuous with Zoom lock", "Detail, lock, tactical, map", "Fixed at 1x"},
 			func(p *settings.Presentation) *int { return &p.ZoomStyle },
-			"Modern camera controls: Continuous pinch and wheel zoom pauses at Zoom lock; Steps includes that stop alongside 2x, 0.25x and the whole map; No zoom fixes the view at 1x and disables pinch, wheel and F9 zoom. F9 shows the whole map and returns with zoom enabled; Tab follows the Tab key setting and opens Options with No zoom. F2 always opens Options. Free zoom requires the Modern renderer."),
+			"Camera controls: Continuous pinch and wheel zoom pauses at Zoom lock; Steps includes that stop alongside 2x, 0.25x and the whole map; No zoom fixes the view at 1x and disables pinch, wheel and F9 zoom. F9 shows the whole map and returns with zoom enabled. Community uses camera zoom with Tab: Options. F2 always opens Options. Free zoom requires the Modern renderer."),
 		{
 			key: "zoomlock", label: "Zoom lock", pics: []string{"armfav", "armrad"}, kind: nlStepper, steps: zoomLockSteps,
 			get: func(d *nlDraft) int { return d.pres.ZoomLockPercent - settings.ZoomLockMinPercent },
 			set: func(d *nlDraft, v int) { d.pres.ZoomLockPercent = v + settings.ZoomLockMinPercent },
 			desc: func(*nlDraft, int) string {
-				return "The preferred stop for Modern pinch and wheel zoom, in 1% increments. Smooth pauses there; Steps includes it as a stop. A battle clamps it to the whole-map floor through 2x. Reset returns to 1.00x. Strict 3.1 and Community 3.9 keep their own camera controls. Requires the Modern renderer."
+				return "The preferred stop for pinch and wheel camera zoom, in 1% increments. Smooth pauses there; Steps includes it as a stop. A battle clamps it to the whole-map floor through 2x. Reset returns to 1.00x. Strict 3.1 and the Community megamap keep their own controls. Requires the Modern renderer."
 			},
 			scene: func(*nlDraft, int) string { return "controls" },
 		},
 		half("iconstyle", "Modern icons", []string{"armrad", "armmark"}, []string{"Modern", "Community 3.9"}, []string{"Nanolathe symbols", "Community icon art"},
 			func(p *settings.Presentation) *int { return &p.StrategicIconStyle },
-			"Which icons Modern shows when zoomed out. Community art comes from the running mod or strategicIconConfig; missing art uses Nanolathe symbols. Community 3.9's megamap keeps its own icons."),
+			"Which icons camera zoom shows when zoomed out. Community art comes from the running mod or strategicIconConfig; missing art uses Nanolathe symbols. Community 3.9's megamap keeps its own icons."),
 		{
 			key: "snapkey", label: "Snap override", pics: []string{"armmex", "armmoho"}, kind: nlStepper, steps: []string{"Alt", "Ctrl", "Shift"},
 			get: func(d *nlDraft) int {

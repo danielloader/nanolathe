@@ -22,9 +22,10 @@ const (
 	battleZoomNone
 )
 
-// cameraControlStyle is the host's single mode boundary (§16.6). Registered
-// rule sets inherit their base layer's presentation controls; this selects no
-// gameplay rule and never changes an authoritative command or fingerprint.
+// cameraControlStyle is the host's single camera boundary (§16.6). Community
+// content can recommend its separate megamap through the overview preference;
+// its gameplay floor alone does not disable camera zoom. Registered rule sets
+// inherit their base layer's controls without changing an authoritative rule.
 func (b *battleSession) cameraControlStyle() battleCameraStyle {
 	mode := gameplay.Modern
 	if b != nil && b.sess != nil {
@@ -32,7 +33,10 @@ func (b *battleSession) cameraControlStyle() battleCameraStyle {
 	}
 	switch mode {
 	case gameplay.Community39:
-		return battleZoomDisabled
+		if b.hostPreferences().Overview == settings.OverviewMegamap {
+			return battleZoomDisabled
+		}
+		fallthrough
 	case gameplay.Modern:
 		switch b.hostPreferences().ZoomStyle {
 		case settings.ZoomNone:
@@ -54,9 +58,9 @@ func (s battleCameraStyle) disabled() bool {
 	return s == battleZoomDisabled || s == battleZoomNone
 }
 
-// zoomLock resolves the Modern preference onto this battle's usable range.
-// Strict and Community keep their original controls regardless of the host
-// preference (DESIGN_GPU_RENDERER §16.6).
+// zoomLock resolves the host preference onto this battle's usable range.
+// Strict and the separate Community megamap retain their original controls
+// (DESIGN_GPU_RENDERER §16.6).
 func (b *battleSession) zoomLock() camera.Zoom {
 	style := b.cameraControlStyle()
 	if !style.modern() || style.disabled() {
@@ -74,7 +78,7 @@ func (b *battleSession) zoomLock() camera.Zoom {
 }
 
 // syncCameraControls cancels an input burst across a mode/settings change.
-// Switching to Community returns to native before its separate megamap opens.
+// Selecting the separate Community megamap returns to native before it opens.
 func (b *battleSession) syncCameraControls() {
 	if b == nil || b.cam == nil {
 		return
@@ -143,7 +147,7 @@ func (b *battleSession) serviceZoomOverviewTab(pressed bool, in *input.State, cl
 	return pressed
 }
 
-// Strategic symbols are independently selectable in Modern. Community's
+// Strategic symbols are independently selectable with camera zoom. Community's
 // separate megamap always keeps its authored icon bank (§18.7, interface §3.15).
 func (b *battleSession) syncStrategicIcons(cl *client.Client) {
 	if b == nil || cl == nil || b.cat == nil {

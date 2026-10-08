@@ -103,18 +103,19 @@ func nlShotSteps(s *nlScreen, only string) []nlShotStep {
 	if only == "availability" {
 		var steps []nlShotStep
 		for _, sample := range []struct {
-			name, key      string
-			mode           gameplay.Mode
-			renderer       string
-			bottom, noZoom bool
+			name, key               string
+			mode                    gameplay.Mode
+			renderer                string
+			bottom, noZoom, megamap bool
 		}{
-			{"classic-effects", "water", gameplay.Modern, "classic", false, false},
-			{"strict-radar", "radardots", gameplay.Strict31, "modern", false, false},
-			{"strict-controls", "zoomlock", gameplay.Strict31, "modern", true, false},
-			{"community-controls", "tab", gameplay.Community39, "modern", true, false},
-			{"classic-controls", "zoomstyle", gameplay.Modern, "classic", true, false},
-			{"no-zoom-controls", "zoomlock", gameplay.Modern, "modern", true, true},
-			{"modern-controls", "zoomlock", gameplay.Modern, "modern", true, false},
+			{"classic-effects", "water", gameplay.Modern, "classic", false, false, false},
+			{"strict-radar", "radardots", gameplay.Strict31, "modern", false, false, false},
+			{"strict-controls", "zoomlock", gameplay.Strict31, "modern", true, false, false},
+			{"community-controls", "zoomlock", gameplay.Community39, "modern", true, false, false},
+			{"community-megamap-controls", "zoomstyle", gameplay.Community39, "modern", true, false, true},
+			{"classic-controls", "zoomstyle", gameplay.Modern, "classic", true, false, false},
+			{"no-zoom-controls", "zoomlock", gameplay.Modern, "modern", true, true, false},
+			{"modern-controls", "zoomlock", gameplay.Modern, "modern", true, false, false},
 		} {
 			for pi, page := range s.pages() {
 				for ci, card := range page.cards {
@@ -123,6 +124,10 @@ func nlShotSteps(s *nlScreen, only string) []nlShotStep {
 					}
 					step := nlShotStep{name: sample.name, page: pi, card: ci, draft: func(d *nlDraft) {
 						d.gameplay, d.pres.Renderer = sample.mode, sample.renderer
+						d.pres.Overview = settings.OverviewZoom
+						if sample.megamap {
+							d.pres.Overview = settings.OverviewMegamap
+						}
 						if sample.noZoom {
 							d.pres.ZoomStyle = settings.ZoomNone
 						}

@@ -63,15 +63,11 @@ func RailGap(screenH, sideW, sideH int32) (r Rect, ok bool) {
 
 // ModalPlacement is the window initializer's placement for a battle modal
 // opened with the "centre in the view" flag: centred in the surface width
-// left over to the right of the 128-pixel rail, and centred in the full
-// surface height, both by truncating divides, at the live surface size rather
-// than the authored one [07 "Tab options menu and manual exit"][07 R-HUD-05].
-func ModalPlacement(screenW, screenH, w, h int32) (x, y int32) {
-	return ModalPlacementBeside(screenW, screenH, w, h, 128)
-}
-
-// ModalPlacementBeside is ModalPlacement beside a rail of the given width, for
-// the magnified sidebar (DESIGN_INTERFACE_HUD_INPUT "Modern sidebar scale").
-func ModalPlacementBeside(screenW, screenH, w, h, rail int32) (x, y int32) {
+// left over to the right of the rail, and centred in the full surface height,
+// both by truncating divides, at the live surface size rather than the
+// authored one [07 "Tab options menu and manual exit"][07 R-HUD-05]. The rail
+// is retail's 128 pixels unless the sidebar is magnified
+// (DESIGN_INTERFACE_HUD_INPUT "Modern sidebar scale").
+func ModalPlacement(screenW, screenH, w, h, rail int32) (x, y int32) {
 	return (screenW-rail-w)/2 + rail, (screenH - h) / 2
 }

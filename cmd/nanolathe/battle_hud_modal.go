@@ -27,7 +27,7 @@ func placeBattleModalBeside(window *gui.Window, screenW, screenH int, rail int32
 	if window == nil {
 		return
 	}
-	px, py := hud.ModalPlacementBeside(int32(screenW), int32(screenH), window.Rect.W, window.Rect.H, rail)
+	px, py := hud.ModalPlacement(int32(screenW), int32(screenH), window.Rect.W, window.Rect.H, rail)
 	x, y := int(px), int(py)
 	window.Rect.X, window.Rect.Y = int32(x), int32(y)
 	window.OriginX, window.OriginY = int32(x), int32(y)

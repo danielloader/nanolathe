@@ -906,8 +906,8 @@ exists, it never reaches a tick, and it is orthogonal to Modern and Strict 3.1
 [I11]; a mod config keeps its gameplay declarations in a separate `rules`
 section that never passes through `internal/content/profiles`. The settings
 key `contentProfile` is the saved form of `--mod-config` and applies only
-when no mod is selected; the precedence is the selected mod's own config,
-then the explicit flag, then the saved path, then the base game's profile. A
+when no mod is selected; the precedence is the explicit flag, then the selected
+mod's own config, then the saved path, then the base game's profile. A
 saved value naming a removed built-in profile is ignored with the notice, and
 mounting never writes the preference. No named-mod check selects simulation
 behavior.

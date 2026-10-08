@@ -8,8 +8,9 @@ reimplemented as switches, listed below.
 
 ## Installing
 
-Install ProTA from **Get more mods**, or drop Nanolathe's ProTA zip onto the
-window at the main menu, then choose it on the **Mods & Mutators** screen.
+Install ProTA from **Get more mods**, then choose it on the **Mods & Mutators**
+screen. This is currently the supported installation route for mods that
+modify `TotalA.exe` or DLL files upstream; automatic recognition is deferred.
 The zip carries ProTA's Nanolathe config — its renamed directories, content
 limits, main-menu version, Community table and recommended settings — in
 `nanolathe-mod.json` (`modconfigs/prota-4.8/` in this repository;
@@ -17,11 +18,11 @@ limits, main-menu version, Community table and recommended settings — in
 The upstream ProTA 4.8 package has no such file: dropped as it is, it
 installs as a *Local* mod that mounts as plain content and does not load
 correctly ([DESIGN_MODS_MUTATORS §4.5](DESIGN_MODS_MUTATORS.md#45-manual-installs)).
-The desktop command's `--install-mod <path>` does the same from a shell, and
 `--mod <id>` selects an installed mod for one run.
 
-A manual stack of roots still works, and takes precedence over the saved mod
-choice:
+For development and diagnosis, a manual stack with an explicit researched
+config takes precedence over the saved mod choice. It remains a diagnostic
+tool rather than the supported installation route:
 
 ```sh
 go build -o nanolathe ./cmd/nanolathe

@@ -74,12 +74,23 @@ back. This also
 works with direct `--map`, `--headless`, and `nanolathe-headless`. Campaign
 missions retain their authored unit limits.
 
+To install a supported mod, open **Nanolathe** at the top of the welcome
+screen, open the **Content** card on the **Game** page, choose **Get more mods**,
+download the package, then select it in that card. This
+includes the engine configuration needed by full mods such as Escalation;
+copying their upstream files over a retail installation does not supply that
+configuration. Mods whose upstream installers modify `TotalA.exe` or DLL files
+must currently be installed through **Get more mods**; automatic recognition
+of manual installations is deferred. Keep the original TA installation as the
+base content.
+
 Downloaded mods live in `$XDG_DATA_HOME/nanolathe/mods` (default
 `~/.local/share/nanolathe/mods`). Automatically remastered map tiles and feature
 sprites live in `$XDG_CACHE_HOME/nanolathe/upscale/1` (default
 `~/.cache/nanolathe/upscale/1`).
 
-Mods can live in separate directories. Repeat `--root` in load order:
+Content-only overrides can live in separate directories. Repeat `--root` in
+load order:
 
 ```sh
 ./nanolathe --root "$HOME/TotalAnnihilation" --root "$HOME/TA-Mods/MyMod"

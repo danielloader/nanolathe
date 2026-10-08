@@ -285,6 +285,30 @@ Community 3.9, names no keyboard preset and locks no settings. Its version is
 `2.0-beta98`; full historical runtime equivalence remains unverified
 ([Twilight package](../research/extensions/twilight-engine.md)).
 
+### 4.2.1 Upstream installations that modify the engine
+
+**Current policy — user-authorized 2026-10-07.** Mods whose upstream
+installation modifies `TotalA.exe` or DLL files must be installed through
+**Get more mods** in Nanolathe. The prepared download carries the researched
+`nanolathe-mod.json` needed for its content layout, limits and supported
+extension behavior. Nanolathe supplies the engine; it does not execute those
+Windows binaries or discover their changes from their presence.
+
+Automatic recognition of manually installed upstream packages is deferred.
+D15's explicit config policy remains in force, and the catalogue stays schema
+1 at its existing URL. Folder names, renamed resource directories, archive
+names and version markers select no config or gameplay features. The existing
+`--mod-config` path remains a development/diagnostic tool, not the supported
+installation route for these mods.
+
+The Escalation investigation established that its original content archives
+are byte-identical to the prepared download, while the upstream package lacks
+our config. Without that config, retail readers miss its renamed content
+families even when startup succeeds. See
+[ESCALATION_SUPPORT](ESCALATION_SUPPORT.md#unconfigured-upstream-installations)
+for the observed comparison and its limits. This evidence does not establish
+a general detection contract or authorize a catalogue change.
+
 ### 4.3 Selection and precedence
 
 - **Flags and settings.** `--mod <id>[@<version>]` and `--mod none` on both
@@ -304,7 +328,8 @@ Community 3.9, names no keyboard preset and locks no settings. Its version is
   stack: the `mod` setting is ignored, `--mod` is rejected with the standard
   diagnostic, the chip reads *Custom content*, and the Mods & Mutators screen
   explains why it cannot switch. [PROTA_SUPPORT](PROTA_SUPPORT.md) remains
-  valid.
+  valid for content-only overlays and explicit development diagnostics. Mods
+  that modify the upstream engine use the installation route in §4.2.1.
 - **Config.** A selected mod applies its own config (§4.2); a
   `--mod-config` file named beside it stands in for it. With no mod, the
   config is `--mod-config`, else the saved `contentProfile` path, else none.

@@ -13,19 +13,12 @@ and several documented host controls still need implementation.
 
 ## Install and select
 
-Obtain Base, Alpha 5 and Map Pack 1f from the
-[TA Zero downloads page](https://zero.tauniverse.com/ta-zero/). Keep the
-original Total Annihilation installation separate. Expansion archives supply
-additional maps when installed.
-
-For a library installation, combine the packages in one folder in this order:
-
-1. Start with the `TA Zero` folder inside Base.
-2. Extract Alpha 5 into that folder.
-3. Extract Map Pack 1f into that folder.
-4. Drop the combined folder onto Nanolathe's main menu, or run
-   `nanolathe --install-mod "/path/to/TA Zero"`.
-5. Select the installed package in **Mods & Mutators**.
+Install TA Zero through **Get more mods** in Nanolathe, then select it in
+**Mods & Mutators**. The prepared package combines Base, Alpha 5 and Map Pack
+1f with their researched Nanolathe configuration. Keep the original Total
+Annihilation installation separate as the base content. This is currently the
+supported installation route for mods whose upstream setup modifies
+`TotalA.exe` or DLL files; automatic recognition is deferred.
 
 Nanolathe's TA Zero zip carries its Nanolathe config in `nanolathe-mod.json`
 (`modconfigs/ta-zero-alpha5-20241224/` in this repository): the renamed
@@ -45,7 +38,9 @@ folder. This is specific to these releases; future package combinations must
 repeat the winner/hash check
 ([DESIGN_MODS_MUTATORS §5.5](DESIGN_MODS_MUTATORS.md#55-the-hosted-zip-contract)).
 
-Separate roots also work without installing into the library:
+For development and diagnosis, the same content can be mounted as separate
+roots with an explicit researched config. This is a diagnostic tool rather
+than the supported installation route:
 
 ```sh
 ./nanolathe --root "/path/to/Total Annihilation" \

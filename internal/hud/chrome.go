@@ -19,7 +19,7 @@ const ChromeRailX = 129
 // world viewport's top inset is 32 [03 §4.1][07 R-HUD-05].
 const ChromeStripHeight = 32
 
-// StripStamps returns the x origins at which a horizontal chrome strip is
+// StripStamps appends to dst the x origins at which a horizontal chrome strip is
 // stamped across a surface of width screenW: the first stamp at the rail
 // boundary with a frame of width firstW, then further stamps each advancing
 // by restW, for as long as the running x is still left of the surface edge
@@ -31,8 +31,8 @@ const ChromeStripHeight = 32
 //
 // A non-positive restW would never advance; retail has no such frame, so the
 // loop stops after the first stamp rather than spin.
-func StripStamps(screenW, firstW, restW int32) []int32 {
-	xs := []int32{ChromeRailX}
+func StripStamps(dst []int32, screenW, firstW, restW int32) []int32 {
+	xs := append(dst, ChromeRailX)
 	x := int32(ChromeRailX) + firstW
 	for x < screenW && restW > 0 {
 		xs = append(xs, x)

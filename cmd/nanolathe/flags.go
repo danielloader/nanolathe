@@ -29,6 +29,11 @@ import (
 // Options is the command-line surface for the retail runtime and its host
 // configuration. Developer probes and capture modes are separate tools.
 type Options struct {
+	Metal                                  bool
+	MetalReport, MetalSize                 string
+	MetalModelCapture                      string
+	MetalFrames, MetalQuads, MetalTextures int
+
 	// excludedMapRoot belongs only to a prepared map-removal mount; never saved.
 	excludedMapRoot   string
 	Gameplay          gameplay.Mode
@@ -90,6 +95,9 @@ type Options struct {
 	BenchmarkFrames    int
 	BenchmarkTPS       int
 	BenchmarkPreTicks  int
+	BenchmarkScene     string
+	BenchmarkArmySize  int
+	BenchmarkRenderer  string // optional benchmark-only executor; metal uses the modern client
 	// BenchmarkScale scales the coastal scene's mobile rosters; zero or one is
 	// the fixture as documented. BenchmarkCaptureCopies stages a capture more
 	// than once.
@@ -211,7 +219,7 @@ var ErrHelp = errors.New("help requested")
 
 func parseFlags(args []string, out io.Writer) (Options, error) {
 	var opts Options
-	var unitLimitSet, liveSecondsSet bool
+	var unitLimitSet, liveSecondsSet, benchmarkPreTicksSet bool
 	set := flag.NewFlagSet("nanolathe", flag.ContinueOnError)
 	set.BoolVar(&opts.Arrival, "arrival", true, "modern battle opening: commander arrival for new games, map reveal for saves")
 	set.Float64Var(&opts.ShotArrivalTime, "shot-arrival-time", -1, "capture the arrival prototype at these presentation seconds (requires --shot --shot-ticks=0)")
@@ -228,6 +236,13 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	})
 	set.BoolVar(&opts.ListInstalls, "list-installs", false, "print selected or discovered content roots, one per line, without mounting")
 	set.BoolVar(&opts.CheckInstall, "check-install", false, "validate selected content roots without opening a game window")
+	set.BoolVar(&opts.Metal, "metal", false, "experimental, macOS: play the --map or --mission battle in the native Metal renderer (docs/DESIGN_METAL_RENDERER.md)")
+	set.StringVar(&opts.MetalReport, "metal-report", "", "with --metal: write timing rows, a final capture and a report to this new directory on exit")
+	set.StringVar(&opts.MetalModelCapture, "metal-model-capture", "", "with --metal and --metal-report: capture armsolar, armcom, armcom-ground/tree/air, armcom-cloaked/underlay or armflash-wreck[-sink] offscreen")
+	set.StringVar(&opts.MetalSize, "metal-size", "2880x1800", "with --metal: drawable pixels, with a 2x logical HUD")
+	set.IntVar(&opts.MetalFrames, "metal-frames", 0, "with --metal: frame limit; zero plays until the window closes")
+	set.IntVar(&opts.MetalQuads, "metal-quads", 1, "Metal battle benchmark stress: mesh subdivisions, 1, 2 or 5")
+	set.IntVar(&opts.MetalTextures, "metal-textures", 1, "Metal battle benchmark stress: model texture scale, 1 or 2")
 	set.StringVar(&opts.SaveDir, "save-dir", "", "exact save/load directory (omitted uses savegame beneath the installation)")
 	set.StringVar(&opts.Map, "map", "", "map name without extension, e.g. \"ashap plateau\"")
 	set.BoolVar(&opts.Survival, "survival", false, "start a Survival battle on --map (docs/DESIGN_SURVIVAL.md)")
@@ -266,6 +281,9 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	set.StringVar(&opts.ShotBuild, "shot-build", "", "preview this unit beside the first selection or at viewport centre in --shot (no construction order)")
 	set.BoolVar(&opts.ShotSelect, "shot-select", false, "select the viewing player's units before --shot captures, so the side rail's command page is open")
 	set.StringVar(&opts.BattleBenchmark, "battle-benchmark", "", "run the seeded live battle benchmark into a new output directory")
+	set.StringVar(&opts.BenchmarkScene, "benchmark-scene", "coastal", "battle benchmark fixture: coastal or field (Town & Country's three armies)")
+	set.IntVar(&opts.BenchmarkArmySize, "benchmark-army-size", 500, "field benchmark units per computer army, excluding its commander (250..1000)")
+	set.StringVar(&opts.BenchmarkRenderer, "benchmark-renderer", "", "battle benchmark executor: classic, modern or metal; omitted follows --renderer")
 	set.StringVar(&opts.BenchmarkCapture, "benchmark-capture", "", "stage a battle benchmark from a Ctrl+Shift+F11 diagnostic directory")
 	set.BoolVar(&opts.BenchmarkFactories, "benchmark-factories", true, "queue factory production in the battle benchmark")
 	set.IntVar(&opts.BenchmarkFrames, "benchmark-frames", 180, "measured battle benchmark frames after two seconds of renderer warmup")
@@ -417,8 +435,30 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 			opts.FPSSet = true
 		case "live-seconds":
 			liveSecondsSet = true
+		case "benchmark-pre-ticks":
+			benchmarkPreTicksSet = true
 		}
 	})
+	if opts.BattleBenchmark != "" {
+		if opts.BenchmarkRenderer == "" && opts.Renderer == "metal" {
+			opts.BenchmarkRenderer = "metal"
+		}
+		switch opts.BenchmarkRenderer {
+		case "":
+		case "classic", "modern":
+			opts.Renderer, opts.RendererSet = opts.BenchmarkRenderer, true
+		case "metal":
+			opts.Renderer, opts.RendererSet = "modern", true
+		default:
+			return opts, fmt.Errorf("nanolathe: benchmark renderer must be classic, modern or metal")
+		}
+		if opts.BenchmarkScene != "coastal" && opts.BenchmarkScene != "field" {
+			return opts, fmt.Errorf("nanolathe: benchmark scene must be coastal or field")
+		}
+		if opts.BenchmarkScene == "field" && !benchmarkPreTicksSet {
+			opts.BenchmarkPreTicks = int(headless.SimBenchDefaultWarmupTicks)
+		}
+	}
 	if opts.Survival {
 		if _, err := survival.ParsePace(opts.SurvivalPace); err != nil {
 			fmt.Fprintln(out, err)
@@ -470,6 +510,12 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 		}
 	}
 	if opts.BattleBenchmark != "" {
+		if opts.Metal || opts.MetalModelCapture != "" {
+			return opts, fmt.Errorf("nanolathe: battle benchmark cannot be combined with --metal or model capture")
+		}
+		if opts.BenchmarkScene == "field" && (opts.BenchmarkArmySize < headless.SimBenchMinArmySize || opts.BenchmarkArmySize > headless.SimBenchMaxArmySize || opts.BenchmarkCapture != "" || opts.Survival || !opts.BenchmarkFactories || opts.BenchmarkScale != 1 || len(opts.ComputerAI) != 0) {
+			return opts, fmt.Errorf("nanolathe: field benchmark requires 250..1000 units per army, Classic computer players and the ordinary fixture production, without capture, Survival or coastal scaling")
+		}
 		if opts.BenchmarkCapture != "" && (!opts.Survival || opts.Map == "") {
 			return opts, fmt.Errorf("nanolathe: capture benchmark requires --survival and --map")
 		}
@@ -478,7 +524,7 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 		// benchmark exists to measure (DESIGN_GPU_RENDERER §14.6). The scale
 		// is recorded in the scene metadata, so two runs are only compared
 		// when they were captured at the same one.
-		if opts.Shot != "" || opts.ShotModel != "" || opts.Headless || opts.LoadSave != "" || opts.Mission != "" || opts.CPUProfile != "" || opts.MemProfile != "" || opts.ProfileSeconds != 0 || opts.ShotRenderer != "" || opts.ShotGPUProfileFrames != 0 || (opts.BenchmarkCapture == "" && opts.ShotSize != "" && opts.ShotSize != "1920x1080") {
+		if opts.Shot != "" || opts.ShotModel != "" || opts.Headless || opts.LoadSave != "" || opts.Mission != "" || opts.CPUProfile != "" || opts.MemProfile != "" || opts.ProfileSeconds != 0 || opts.ShotRenderer != "" || opts.ShotGPUProfileFrames != 0 || (opts.BenchmarkScene != "field" && opts.BenchmarkCapture == "" && opts.ShotSize != "" && opts.ShotSize != "1920x1080") {
 			return opts, fmt.Errorf("nanolathe: battle benchmark requires a standalone 1920x1080 battle")
 		}
 		if opts.BenchmarkPreTicks < 0 || opts.BenchmarkPreTicks > 18000 {
@@ -492,6 +538,9 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 		}
 		if opts.Map == "" {
 			opts.Map = "expanded confluence"
+			if opts.BenchmarkScene == "field" {
+				opts.Map = headless.SimBenchDefaultMap
+			}
 		}
 		if opts.Seed < 0 {
 			opts.Seed = 7
@@ -540,5 +589,35 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 			return opts, err
 		}
 	}
+	if err := validateMetalOptions(opts); err != nil {
+		return opts, err
+	}
 	return opts, nil
+}
+
+// validateMetalOptions keeps the Metal flags to the routes that read them: the
+// --metal battle and the Metal battle benchmark (docs/DESIGN_METAL_RENDERER.md).
+func validateMetalOptions(opts Options) error {
+	metalBenchmark := opts.BattleBenchmark != "" && opts.BenchmarkRenderer == "metal"
+	if !opts.Metal && (opts.MetalReport != "" || opts.MetalModelCapture != "" || opts.MetalFrames != 0) {
+		return fmt.Errorf("nanolathe: --metal-report, --metal-model-capture and --metal-frames require --metal")
+	}
+	if opts.Metal {
+		if opts.Map == "" && opts.Mission == "" {
+			return fmt.Errorf("nanolathe: --metal plays one battle and requires --map or --mission")
+		}
+		if opts.Shot != "" || opts.ShotModel != "" || opts.Headless || opts.LoadSave != "" {
+			return fmt.Errorf("nanolathe: --metal cannot be combined with --shot, --headless or --load-save")
+		}
+		if opts.MetalModelCapture != "" && opts.MetalReport == "" {
+			return fmt.Errorf("nanolathe: --metal-model-capture requires --metal-report")
+		}
+	}
+	if (opts.MetalQuads != 1 || opts.MetalTextures != 1) && !metalBenchmark {
+		return fmt.Errorf("nanolathe: --metal-quads and --metal-textures apply only to the Metal battle benchmark")
+	}
+	if (opts.MetalQuads != 1 && opts.MetalQuads != 2 && opts.MetalQuads != 5) || (opts.MetalTextures != 1 && opts.MetalTextures != 2) {
+		return fmt.Errorf("nanolathe: Metal benchmark requires geometry 1, 2 or 5 and textures 1 or 2")
+	}
+	return nil
 }

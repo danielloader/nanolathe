@@ -98,9 +98,18 @@ type Client struct {
 	presentationPaused  bool
 	pausedWorldRevision uint64
 	pausedLayer         pausedRecordLayer
-	communityHUD        CommunityHUDOptions
-	communityColors     communityColorState
-	infectionNanoRamp   [7]uint8
+	retainedForeground  bool
+	// externalSelection hands selected-unit quads to the retained host, which
+	// draws them in each unit's paint slot (RetainedSelections).
+	externalSelection       bool
+	retainedSelections      []RetainedSelection
+	retainedSelectionWS     drawlist.WorldSpace
+	retainedLightBuckets    worldBuckets               // tall-feature order for retained light sources
+	effectOptions           EffectDrawOptions          // bound once; method values would allocate per strip
+	retainedProjectileOrder *[]RetainedProjectileModel // active only during the source-only projectile batch
+	communityHUD            CommunityHUDOptions
+	communityColors         communityColorState
+	infectionNanoRamp       [7]uint8
 
 	// debugDeviceCapture is a host-owned, on-demand diagnostics bridge. It is
 	// invoked only after the frame recorder has joined, outside simulation.
@@ -533,6 +542,7 @@ type Client struct {
 	// rebuilt only from committed semantic events and never read by simulation
 	// [07 R-HUD-03 §14][I6].
 	messages          frame.MessageRing
+	messageLines      []frame.MessageLine // MessageLines' storage, reused per draw
 	messageEventsTick uint32
 	// captionsDeferred holds the captions the audio queue resolves while a
 	// batch runs on the simulation goroutine; DeferCaptions(false) appends
@@ -701,6 +711,7 @@ func New(opts Options) (*Client, error) {
 		c.base[i][2] = byte(i)
 		c.base[i][3] = 255
 	}
+	c.effectOptions = EffectDrawOptions{TerrainCoverage: c.terrainScreenCoverage, ResolveFrame: c.resolveEffectFrame, BlastSize: c.resolveBlastSize}
 	return c, nil
 }
 

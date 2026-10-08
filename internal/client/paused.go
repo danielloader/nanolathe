@@ -31,7 +31,7 @@ func (c *Client) SetPresentationPaused(paused bool) {
 	if c != nil {
 		c.presentationPaused = paused
 		if !paused {
-			c.interp.pausedValid = false
+			c.interp.blendValid = false
 		}
 	}
 }

@@ -285,11 +285,11 @@ func TestNanolatheColorConstant(t *testing.T) {
 func TestBeamSingleVsDualP2(t *testing.T) {
 	head := [2]int32{0, 0}
 	tail := [2]int32{10, 10}
-	single := BeamStrokes(head, tail, 5, 0)
+	single := BeamStrokes(new([2]BeamStroke), head, tail, 5, 0)
 	if len(single) != 1 || single[0].Color != 5 {
 		t.Fatalf("single stroke failed %v", single)
 	}
-	dual := BeamStrokes(head, tail, 5, 7)
+	dual := BeamStrokes(new([2]BeamStroke), head, tail, 5, 7)
 	if len(dual) != 2 {
 		t.Fatalf("dual len %d want 2", len(dual))
 	}

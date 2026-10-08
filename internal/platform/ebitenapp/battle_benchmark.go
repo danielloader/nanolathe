@@ -31,6 +31,9 @@ type BenchmarkOptions struct {
 	Metadata map[string]any
 	// Diagnostic snapshots run outside the measured profile/counter window.
 	BeforeMeasure, AfterMeasure func() error
+	// Frozen reports a diagnostic render-only measurement: the harness stops
+	// stepping after warmup, so the presented pair and epoch stay fixed.
+	Frozen func() bool
 }
 type benchmarkRow struct {
 	Frame int
@@ -252,7 +255,7 @@ func (g *battleBenchmark) Draw(screen *ebiten.Image) {
 	phase, drawsPerTick := g.tickPhase()
 	stepped := phase == 0
 	step := 0.0
-	if stepped {
+	if stepped && (g.options.Frozen == nil || !g.options.Frozen()) {
 		g.step()
 		g.c.BumpPresentationEpoch()
 		step = benchmarkMS(start)
@@ -376,7 +379,17 @@ func BattleBenchmark(c *client.Client, step func(), census func() any, options B
 	defer g.stopProfile()
 	ebiten.SetWindowVisible(true)
 	ebiten.SetRunnableOnUnfocused(true)
-	ebiten.SetWindowSize(options.Width, options.Height)
+	if os.Getenv("NANOLATHE_BENCH_PHYSICAL_WINDOW") == "1" {
+		scale := ebiten.Monitor().DeviceScaleFactor()
+		if scale < 1 {
+			scale = 1
+		}
+		ebiten.SetWindowSize(int(float64(options.Width)/scale), int(float64(options.Height)/scale))
+		options.Metadata["window_units"] = "physical pixels"
+		options.Metadata["display_scale"] = scale
+	} else {
+		ebiten.SetWindowSize(options.Width, options.Height)
+	}
 	ebiten.SetVsyncEnabled(true)
 	// A separate fixed Update clock caused zero-update callbacks to skip Draw,
 	// producing a beat pattern against the host's presentation loop. Every

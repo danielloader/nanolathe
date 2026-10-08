@@ -432,6 +432,14 @@ func (c *Client) collectDrawPolysProjection(draw *presentationrender.UnitDraw, s
 				// sampling [R-RAST-01 §1][R-REN-03A §5].
 				u := [4]int32{0, int32(texFrame.Width) - 1, int32(texFrame.Width) - 1, 0}
 				vv := [4]int32{0, 0, int32(texFrame.Height) - 1, int32(texFrame.Height) - 1}
+				if mp := draw.Model.Pieces[pi].Primitives; pri < len(mp) && mp[pri].UV != nil {
+					uv := mp[pri].UV
+					// Authored corners map part of the texture.
+					for corner := range 4 {
+						u[corner] = quadUV(uv[corner][0], int32(texFrame.Width)-1)
+						vv[corner] = quadUV(uv[corner][1], int32(texFrame.Height)-1)
+					}
+				}
 				for corner := 0; corner < n && corner < 4; corner++ {
 					poly.attr[spanU][corner], poly.attr[spanV][corner] = u[corner], vv[corner]
 				}
@@ -1060,4 +1068,10 @@ func (c *Client) modelAnchor(draw *presentationrender.UnitDraw) (int32, int32) {
 	}
 	sx, sy := c.cam.WorldToScreen(draw.WorldPos[0], draw.WorldPos[1], draw.WorldPos[2])
 	return sx - camera.OriginX, sy - camera.OriginY
+}
+
+// quadUV resolves one authored corner at a w×h texture: the fraction of the
+// default corner extent, rounded to the nearest whole texel.
+func quadUV(frac uint16, extent int32) int32 {
+	return int32((int64(frac)*int64(extent) + 32767) / 65535)
 }

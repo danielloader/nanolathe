@@ -36,12 +36,12 @@ func TestBeamStrokes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			primary := BeamStroke{tc.a[0], tc.a[1], tc.b[0], tc.b[1], 5}
 			for _, pair := range [][2][2]int32{{tc.a, tc.b}, {tc.b, tc.a}} {
-				got := BeamStrokes(pair[0], pair[1], 5, 9)
+				got := BeamStrokes(new([2]BeamStroke), pair[0], pair[1], 5, 9)
 				if len(got) != 2 || got[0] != tc.secondary || got[1] != primary {
 					t.Fatalf("strokes = %+v, want secondary %+v then primary %+v", got, tc.secondary, primary)
 				}
 			}
-			got := BeamStrokes(tc.b, tc.a, 5, 0)
+			got := BeamStrokes(new([2]BeamStroke), tc.b, tc.a, 5, 0)
 			if len(got) != 1 || got[0] != (BeamStroke{tc.b[0], tc.b[1], tc.a[0], tc.a[1], 5}) {
 				t.Fatalf("absent secondary changed primary geometry: %+v", got)
 			}

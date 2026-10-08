@@ -599,3 +599,12 @@ func (g *glowLayer) lastVertex() (ebiten.Vertex, bool) {
 	v := g.runs[g.last].verts
 	return v[len(v)-1], true
 }
+
+// rect appends one axis-aligned quad whose custom lanes are the same at every
+// corner.
+func (g *glowLayer) rect(imgs [4]*ebiten.Image, dx0, dy0, dx1, dy1, sx0, sy0, sx1, sy1 float32, col, custom [4]float32) {
+	g.quad(imgs,
+		[4]float32{dx0, dx1, dx0, dx1}, [4]float32{dy0, dy0, dy1, dy1},
+		[4]float32{sx0, sx1, sx0, sx1}, [4]float32{sy0, sy0, sy1, sy1},
+		col, [4][4]float32{custom, custom, custom, custom})
+}

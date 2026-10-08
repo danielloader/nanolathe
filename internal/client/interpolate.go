@@ -2,6 +2,7 @@ package client
 
 import (
 	"math"
+	"slices"
 
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
@@ -175,8 +176,11 @@ func (c *Client) presentationFrame() *frame.Frame {
 		return cur
 	}
 	fraction := c.sampleTickFraction()
-	key := pausedBlendInputs{prev, cur, prev.Tick, cur.Tick, fraction}
-	if c.presentationPaused && c.interp.pausedValid && c.interp.pausedInputs == key {
+	key := blendInputs{prev, cur, prev.Tick, cur.Tick, fraction}
+	// The blend is a function of this key, and nothing writes the view, so
+	// every repeat reuses it: while paused, and when several recorders read
+	// one presented frame (effects, light sources, foreground, projections).
+	if c.interp.blendValid && c.interp.blendKey == key {
 		return &c.interp.view
 	}
 	// The modern recorder blends the units over its §13.9 pool. The pool
@@ -187,7 +191,7 @@ func (c *Client) presentationFrame() *frame.Frame {
 	}
 	blended := c.interp.blend(prev, cur, fraction)
 	c.interp.each = nil
-	c.interp.pausedInputs, c.interp.pausedValid = key, c.presentationPaused
+	c.interp.blendKey, c.interp.blendValid = key, true
 	// The effect strip buckets are keyed by frame pointer and committed tick,
 	// and they hold copies of the views. The blended frame keeps both across the
 	// several presented frames of one tick, so the classification has to be
@@ -343,8 +347,9 @@ func (c *Client) endCameraBlend(applied bool) {
 	c.camBlending = false
 }
 
-// pausedBlendInputs identifies the frozen committed pose blend.
-type pausedBlendInputs struct {
+// blendInputs identifies a committed pose blend: the frozen one while
+// paused, or the presented frame's.
+type blendInputs struct {
 	previous, current         *frame.Frame
 	previousTick, currentTick uint32
 	fraction                  int64
@@ -371,17 +376,18 @@ func (c *Client) hasCameraBlend() bool {
 		c.cam != nil && c.camSamples >= 2 && c.cameraFractionSet
 }
 
-// interpolator owns the blended view and retained buffers. Unchanged paused
-// views reuse their blend; running views rebuild it on every presentation.
+// interpolator owns the blended view and retained buffers. A blend is reused
+// while its inputs (the pair, their ticks and the fraction) are unchanged:
+// while paused, and when several recorders read one presented frame.
 type interpolator struct {
 	walkState
-	pausedInputs pausedBlendInputs
-	pausedValid  bool
-	view         frame.Frame
-	units        []frame.UnitView
-	pieces       [][]frame.PieceView
-	projectiles  []frame.ProjectileView
-	effects      []frame.EffectView
+	blendKey    blendInputs
+	blendValid  bool
+	view        frame.Frame
+	units       []frame.UnitView
+	pieces      [][]frame.PieceView
+	projectiles []frame.ProjectileView
+	effects     []frame.EffectView
 	// unitAt is the previous tick's pool-slot lookup. projAt and effectAt are
 	// presentation-identity lookups, used only on the frame path and never
 	// ranged [I1].
@@ -475,7 +481,10 @@ func (in *interpolator) blendUnits(prev, cur *frame.Frame, f16 int64) []frame.Un
 func (in *interpolator) blendUnitRange(lo, hi int) {
 	prev, cur, f16 := in.blendPrev, in.blendCur, in.blendF16
 	for i := lo; i < hi; i++ {
-		u := cur.Units[i]
+		// Blend in place: a unit view is a few hundred bytes, and a frame
+		// blends every unit.
+		u := &in.units[i]
+		*u = cur.Units[i]
 		p := in.previousUnit(prev, u)
 		if p != nil {
 			u.X = lerpFixed(p.X, u.X, f16)
@@ -487,11 +496,12 @@ func (in *interpolator) blendUnitRange(lo, hi int) {
 			if h := in.walkForUnit[i]; h != nil {
 				in.pieces[i] = h.pose.Blend(in.pieces[i], p.Pieces, u.Pieces, cur.Tick, f16)
 				u.Pieces = in.pieces[i]
-			} else {
+			} else if !slices.Equal(p.Pieces, u.Pieces) {
+				// Equal lanes blend to themselves, so a unit whose script held
+				// still keeps the current tick's pieces without a copy.
 				u.Pieces = in.blendPieces(i, p.Pieces, u.Pieces, f16)
 			}
 		}
-		in.units[i] = u
 	}
 }
 
@@ -500,7 +510,7 @@ func (in *interpolator) blendUnitRange(lo, hi int) {
 // the fixture exception. Every matching identity still requires the same slot,
 // definition, owner, carrier, mode mirror, piece count, and a horizontal step
 // within the snap bound. Pool slots carry no generation [01 §6.1].
-func (in *interpolator) previousUnit(prev *frame.Frame, u frame.UnitView) *frame.UnitView {
+func (in *interpolator) previousUnit(prev *frame.Frame, u *frame.UnitView) *frame.UnitView {
 	slot := int(u.Slot)
 	if slot >= len(in.unitAt) || in.unitAt[slot] == 0 {
 		return nil

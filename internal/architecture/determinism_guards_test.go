@@ -33,6 +33,8 @@ var presentationDirs = []string{
 	"internal/gui",
 	"internal/ui",
 	"internal/camera",
+	"internal/meshscene",
+	"internal/metalhud",
 }
 
 // presentationRNGAllowlist is the (a) exception list: files that still import

@@ -21,13 +21,13 @@ func TestStripStamps(t *testing.T) {
 		{640, 513, 0, []int32{129}},
 	}
 	for _, c := range cases {
-		got := StripStamps(c.screenW, c.firstW, c.restW)
+		got := StripStamps(nil, c.screenW, c.firstW, c.restW)
 		if len(got) != len(c.want) {
-			t.Fatalf("StripStamps(%d,%d,%d) = %v, want %v", c.screenW, c.firstW, c.restW, got, c.want)
+			t.Fatalf("StripStamps(nil, %d,%d,%d) = %v, want %v", c.screenW, c.firstW, c.restW, got, c.want)
 		}
 		for i := range got {
 			if got[i] != c.want[i] {
-				t.Fatalf("StripStamps(%d,%d,%d) = %v, want %v", c.screenW, c.firstW, c.restW, got, c.want)
+				t.Fatalf("StripStamps(nil, %d,%d,%d) = %v, want %v", c.screenW, c.firstW, c.restW, got, c.want)
 			}
 		}
 	}

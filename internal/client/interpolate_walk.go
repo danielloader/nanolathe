@@ -48,7 +48,7 @@ func (in *interpolator) resetWalk() {
 	clear(in.walk)
 	clear(in.walkForUnit)
 	in.walkValid = false
-	in.pausedValid = false
+	in.blendValid = false
 }
 
 // prepareWalk consumes only the available adjacent publications. An older
@@ -69,7 +69,7 @@ func (in *interpolator) prepareWalk(prev, cur *frame.Frame) {
 	}
 	for i := range cur.Units {
 		u := &cur.Units[i]
-		p := in.previousUnit(prev, *u)
+		p := in.previousUnit(prev, u)
 		if p == nil || !walkEligible(u) || !walkEligible(p) || (p.X == u.X && p.Y == u.Y && p.Z == u.Z) {
 			continue
 		}

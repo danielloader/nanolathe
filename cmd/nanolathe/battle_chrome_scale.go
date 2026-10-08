@@ -71,7 +71,9 @@ func (b *battleSession) stripPointer(x, y int32) (int32, int32) {
 }
 
 // syncChromeInsets widens the camera's left inset to the magnified rail, so
-// the clamp keeps every playable column reachable beside it [03 §4.1].
+// the clamp keeps every playable column reachable beside it [03 §4.1]. The
+// point at the viewport's centre stays there, which also re-centres the
+// battle-start placement made before the first draw knew the scale.
 func (b *battleSession) syncChromeInsets() {
 	if b == nil || b.cam == nil {
 		return
@@ -80,8 +82,11 @@ func (b *battleSession) syncChromeInsets() {
 	if k := b.chromeScale(); k > 1 {
 		want.Left = camera.OriginX * k
 	}
-	if b.cam.Chrome != want {
-		b.cam.Chrome = want
-		b.cam.Clamp()
+	if b.cam.Chrome == want {
+		return
 	}
+	ox, oz := b.cam.BattleViewOrigin()
+	w, h := b.cam.BattleView()
+	b.cam.Chrome = want
+	b.cam.JumpToBattleViewCenter(ox+w/2, oz+h/2)
 }

@@ -48,6 +48,9 @@ func startupPresentation(opts Options, saved settings.Presentation) settings.Pre
 	if opts.ArrivalSet {
 		saved.Arrival = boolInt(opts.Arrival)
 	}
+	if opts.SidebarScale >= 0 {
+		saved.SidebarScale = opts.SidebarScale
+	}
 	saved.Normalize()
 	return saved
 }

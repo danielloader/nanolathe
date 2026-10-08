@@ -202,6 +202,12 @@ func runShot(opts Options, cs *contentSet) error {
 	if err := b.configureDeveloperShot(opts); err != nil {
 		return err
 	}
+	if opts.SidebarScale >= 0 {
+		p := b.hostPreferences()
+		p.SidebarScale = opts.SidebarScale
+		p.Normalize()
+		b.hostPresentation = &p
+	}
 
 	// `--shot-megamap` composes the megamap overview over this frame, and over
 	// the battle benchmark's measured frames, with the Megamap overview

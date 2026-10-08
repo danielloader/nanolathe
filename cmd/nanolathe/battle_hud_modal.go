@@ -5,6 +5,7 @@ package main
 
 import (
 	"github.com/nanolathe-gg/nanolathe/formats"
+	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
@@ -18,10 +19,15 @@ import (
 // therefore uses the remaining width and adds 128 [07 "Tab options menu and
 // manual exit"][07 R-HUD-05].
 func placeBattleModal(window *gui.Window, screenW, screenH int) {
+	placeBattleModalBeside(window, screenW, screenH, camera.OriginX)
+}
+
+// placeBattleModalBeside centres beside a rail of the given width.
+func placeBattleModalBeside(window *gui.Window, screenW, screenH int, rail int32) {
 	if window == nil {
 		return
 	}
-	px, py := hud.ModalPlacement(int32(screenW), int32(screenH), window.Rect.W, window.Rect.H)
+	px, py := hud.ModalPlacementBeside(int32(screenW), int32(screenH), window.Rect.W, window.Rect.H, rail)
 	x, y := int(px), int(py)
 	window.Rect.X, window.Rect.Y = int32(x), int32(y)
 	window.OriginX, window.OriginY = int32(x), int32(y)
@@ -50,7 +56,7 @@ func (h *retailBattleHUD) drawPausedTitle(c *client.Client) {
 	if h == nil || c == nil || h.pausedFrame == nil {
 		return
 	}
-	w, height := c.Size()
+	w, height := c.ChromeSize()
 	// In-game titles use the view centre as their GAF hotspot. The anchored
 	// blitter subtracts the authored offsets [07 R-HUD-05 "Centred in the view"].
 	c.UIBlitAnchor(h.pausedFrame, (w+128)/2, height/2)

@@ -1528,6 +1528,7 @@ func (b *battleSession) overBattleViewport(x, y int32) bool {
 	if b == nil || b.cam == nil {
 		return false
 	}
-	return x > camera.OriginX && x < b.cam.ViewW &&
-		y >= camera.OriginY && y < b.cam.ViewH-camera.OriginY
+	left, top, bottom := b.cam.ChromeInset()
+	return x > left && x < b.cam.ViewW &&
+		y >= top && y < b.cam.ViewH-bottom
 }

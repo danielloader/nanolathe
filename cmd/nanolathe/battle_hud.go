@@ -88,6 +88,7 @@ type retailBattleHUD struct {
 	// classification that has no session (DESIGN_INTERFACE_HUD_INPUT
 	// "Modern sidebar scale").
 	chromeScale int32
+	placedRail  int32
 	modalFont   *formats.GAFEntry
 	// modalFontSmall is GAF-font slot 1, anims/hattfont11.gaf — the face the
 	// composer selects for the slide strip's three readouts and the kind-13
@@ -554,18 +555,19 @@ func (h *retailBattleHUD) applyDisplaySize(w, height int) {
 	if h == nil || w <= 0 || height <= 0 {
 		return
 	}
-	if int32(w) == h.screenW && int32(height) == h.screenH {
+	rail := camera.OriginX * max(h.chromeScale, 1)
+	if int32(w) == h.screenW && int32(height) == h.screenH && rail == h.placedRail {
 		return
 	}
-	h.screenW, h.screenH = int32(w), int32(height)
-	placeBattleModal(h.exitWin, w, height)
-	placeBattleModal(h.confirmWin, w, height)
-	placeBattleModal(h.restartWin, w, height)
+	h.screenW, h.screenH, h.placedRail = int32(w), int32(height), rail
+	placeBattleModalBeside(h.exitWin, w, height, rail)
+	placeBattleModalBeside(h.confirmWin, w, height, rail)
+	placeBattleModalBeside(h.restartWin, w, height, rail)
 	// GAMEOPTIONS and HELP carry the same centring flag; the in-battle
 	// briefing opens with no flags and keeps its authored origin
 	// [07 R-FE-01 §7].
-	placeBattleModal(h.info.gameOptionsWin, w, height)
-	placeBattleModal(h.info.helpWin, w, height)
+	placeBattleModalBeside(h.info.gameOptionsWin, w, height, rail)
+	placeBattleModalBeside(h.info.helpWin, w, height, rail)
 	h.placeTalkWindow(w, height)
 }
 
@@ -590,7 +592,7 @@ func (h *retailBattleHUD) placeTalkWindow(w, height int) {
 	if h == nil || h.talkWin == nil || w <= 0 || height <= 0 {
 		return
 	}
-	x, y := int32(128), int32(height)-h.talkWin.Rect.H
+	x, y := camera.OriginX*max(h.chromeScale, 1), int32(height)-h.talkWin.Rect.H
 	h.talkWin.Rect.X, h.talkWin.Rect.Y = x, y
 	h.talkWin.OriginX, h.talkWin.OriginY = x, y
 	if len(h.talkWin.Gadgets) != 0 {
@@ -925,10 +927,10 @@ func (h *retailBattleHUD) draw(c *client.Client, b *battleSession, presented cli
 	// with PANELBOT throughout — each stamp advancing by its frame width until
 	// the running x reaches the surface width [07 R-HUD-03 §1][07 R-HUD-03 §4].
 	// At 640x480 every stock frame reaches the edge in one stamp.
-	h.applyDisplaySize(c.Size())
 	b.syncChromeInsets()
 	rail, strip := b.railRegion(), b.stripRegion()
 	h.chromeScale = rail.Scale
+	h.applyDisplaySize(c.Size())
 	c.BeginChromeRegion(strip)
 	screenW, screenH := c.ChromeSize()
 	blitBattlePanel(c, h.panelTop, hud.ChromeRailX, 0)

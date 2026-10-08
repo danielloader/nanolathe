@@ -67,5 +67,11 @@ func RailGap(screenH, sideW, sideH int32) (r Rect, ok bool) {
 // surface height, both by truncating divides, at the live surface size rather
 // than the authored one [07 "Tab options menu and manual exit"][07 R-HUD-05].
 func ModalPlacement(screenW, screenH, w, h int32) (x, y int32) {
-	return (screenW-128-w)/2 + 128, (screenH - h) / 2
+	return ModalPlacementBeside(screenW, screenH, w, h, 128)
+}
+
+// ModalPlacementBeside is ModalPlacement beside a rail of the given width, for
+// the magnified sidebar (DESIGN_INTERFACE_HUD_INPUT "Modern sidebar scale").
+func ModalPlacementBeside(screenW, screenH, w, h, rail int32) (x, y int32) {
+	return (screenW-rail-w)/2 + rail, (screenH - h) / 2
 }

@@ -337,6 +337,7 @@ func nanolatheOptionsPage(window *gui.Window) error {
 	}{
 		{"NFPS", "FPS: 30|FPS: 60|FPS: 120", 3},
 		{"NSIDEBAR", "Sidebar: 6|Sidebar: Flow", 2},
+		{"NSIDESCALE", "Sidebar: Auto|Sidebar: 1x|Sidebar: 2x|Sidebar: 3x", 4},
 		{"NZOOM", "Zoom: Smooth|Zoom: Steps|Zoom: Off", 3},
 		{"NICONS", "Icons: Modern|Icons: Comm 3.9", 2},
 		{"NRADARDOTS", "No dots|Visible dots|Attackable dots", 3},
@@ -401,6 +402,7 @@ func (g *gameShell) syncNanolatheOptions() {
 	g.syncNanolatheZoomStage()
 	optionsPanel.SetStageAt(optionsPanel.Index("NICONS"), g.presentation.StrategicIconStyle)
 	optionsPanel.SetStageAt(optionsPanel.Index("NRADARDOTS"), g.presentation.RadarDots)
+	optionsPanel.SetStageAt(optionsPanel.Index("NSIDESCALE"), g.presentation.SidebarScale)
 	// The Enhanced switches. Glow reads the display block; the others
 	// read the presentation block (DESIGN_GPU_RENDERER §30).
 	optionsPanel.SetStageAt(optionsPanel.Index("NGLOW"), boolInt(g.display.Glow != 0))
@@ -420,6 +422,8 @@ func nanolatheConfigurationKey(name string) string {
 		return "fps"
 	case "NSIDEBAR":
 		return "sidebar"
+	case "NSIDESCALE":
+		return "sidebarscale"
 	case "NZOOM":
 		return "zoomstyle"
 	case "NICONS":
@@ -448,6 +452,8 @@ func nanolatheConfigurationHelp(name string) string {
 		return "Camera zoom: continuous, stepped, or off at 1x. Classic offers native 1x/2x or Off. Free zoom requires the Enhanced renderer. Community uses camera zoom with Tab: Options."
 	case "NICONS":
 		return "Modern strategic icons: generated symbols or the running content's Community 3.9 art. Missing art keeps generated symbols."
+	case "NSIDESCALE":
+		return "Magnifies the battle sidebar and minimap in the Enhanced renderer. Auto uses 2x from 1440 rows and 3x from 2160."
 	case "NRADARDOTS":
 		return "Radar dots in the main view require Modern gameplay and the Enhanced renderer: hidden, display only, or attack hostile contacts without unit details. Minimap contacts are unchanged."
 	}
@@ -459,7 +465,7 @@ func (g *gameShell) syncNanolatheAvailability() {
 		return
 	}
 	mode := g.configurationMode()
-	for _, name := range []string{"NFPS", "NSIDEBAR", "NZOOM", "NICONS", "NRADARDOTS", "NGLOW", "NWATER", "NLIGHTS", "NFINISH", "NHEAT", "NMARKS"} {
+	for _, name := range []string{"NFPS", "NSIDEBAR", "NSIDESCALE", "NZOOM", "NICONS", "NRADARDOTS", "NGLOW", "NWATER", "NLIGHTS", "NFINISH", "NHEAT", "NMARKS"} {
 		reason := configurationUnavailable(nanolatheConfigurationKey(name), mode, g.presentation)
 		syncConfigurationOption(optionsPanel, name, reason, nanolatheConfigurationHelp(name))
 	}
@@ -534,6 +540,8 @@ func (g *gameShell) activateNanolatheOption(name string) bool {
 		p.StrategicIconStyle = g.retailOptionsStage(name, 2, p.StrategicIconStyle)
 	case "NRADARDOTS":
 		p.RadarDots = g.retailOptionsStage(name, 3, p.RadarDots)
+	case "NSIDESCALE":
+		p.SidebarScale = g.retailOptionsStage(name, 4, p.SidebarScale)
 	case "NRENDER":
 		stage := g.retailOptionsStage(name, 2, boolInt(p.Renderer == "modern"))
 		p.Renderer = "classic"
@@ -615,7 +623,7 @@ func (g *gameShell) setNanolathePreferences(p settings.Presentation) {
 	next.Renderer, next.FPS, next.ExpandedSidebar = p.Renderer, p.FPS, p.ExpandedSidebar
 	next.SidebarOrders, next.BuildMenuPageSize = p.SidebarOrders, p.BuildMenuPageSize
 	next.ZoomStyle, next.StrategicIconStyle = p.ZoomStyle, p.StrategicIconStyle
-	next.RadarDots = p.RadarDots
+	next.RadarDots, next.SidebarScale = p.RadarDots, p.SidebarScale
 	for _, f := range effectFamilies {
 		f.restore(&next, p)
 	}

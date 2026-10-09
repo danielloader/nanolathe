@@ -146,8 +146,9 @@ func (f *Foreground) Glyphs(g drawlist.Glyphs) {
 		return
 	}
 	// Only the anchor follows world zoom. Glyph metrics, baseline and screen
-	// offsets retain native size (GPU design §16.3).
-	if f.world {
+	// offsets retain native size (GPU design §16.3). Magnified chrome keeps
+	// the transform active so its glyph metrics scale with neighboring art.
+	if f.world && !f.chrome {
 		g.X, g.Y = f.project(g.X, g.Y)
 		if g.HasClip {
 			c := g.Clip
@@ -157,22 +158,22 @@ func (f *Foreground) Glyphs(g drawlist.Glyphs) {
 			y1 := int32(math.Ceil(float64(c.Y+c.H)*float64(f.scale) + float64(f.oy)))
 			g.Clip = drawlist.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}
 		}
+		cw, ch := f.cw, f.ch
+		f.world = false
+		f.cw = f.w
+		f.ch = f.h
+		defer func() { f.world = true; f.cw = cw; f.ch = ch }()
 	}
-	wasWorld, cw, ch := f.world, f.cw, f.ch
-	f.world = false
-	f.cw = f.w
-	f.ch = f.h
-	defer func() { f.world = wasWorld; f.cw = cw; f.ch = ch }()
 	g.X += g.ScreenOffsetX
 	g.Y += g.ScreenOffsetY
 	text := client.TruncateToWidth(font, g.Text, int(g.MaxWidth))
 	x, y := int(g.X), int(g.Y)
-	x0, y0, x1, y1 := 0, 0, f.w, f.h
+	x0, y0, x1, y1 := 0, 0, f.cw, f.ch
 	if g.HasClip {
 		x0 = max(int(g.Clip.X), 0)
 		y0 = max(int(g.Clip.Y), 0)
-		x1 = min(int(g.Clip.X+g.Clip.W), f.w)
-		y1 = min(int(g.Clip.Y+g.Clip.H), f.h)
+		x1 = min(int(g.Clip.X+g.Clip.W), f.cw)
+		y1 = min(int(g.Clip.Y+g.Clip.H), f.ch)
 	}
 	// Admission is a whole-string baseline test with strict one-past edges.
 	// After admission only framebuffer safety clips the descender [03 R-FONT-01 §3].

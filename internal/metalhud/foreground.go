@@ -32,6 +32,7 @@ type Foreground struct {
 	effectLayers  []meshscene.EffectLayer
 	err           error
 	world         bool
+	chrome        bool
 	scale, ox, oy float32
 	cw, ch        int
 	images        map[imageKey]region
@@ -88,6 +89,7 @@ func (f *Foreground) beginPrepare() {
 	}
 	f.err = nil
 	f.world = false
+	f.chrome = false
 	f.scale = 1
 	f.ox = 0
 	f.oy = 0
@@ -165,6 +167,7 @@ func (f *Foreground) solid(x0, y0, x1, y1 int, color [4]float32, multiply bool) 
 }
 
 func (f *Foreground) World(w drawlist.WorldSpace) {
+	f.chrome = w.Begin && w.Chrome
 	if !w.Begin {
 		f.world = false
 		f.cw = f.w
@@ -174,6 +177,11 @@ func (f *Foreground) World(w drawlist.WorldSpace) {
 	f.world = true
 	f.cw = max(f.w, int(w.RecordW))
 	f.ch = max(f.h, int(w.RecordH))
+	if f.chrome {
+		// Magnified interface commands are clipped on their smaller virtual
+		// surface (DESIGN_INTERFACE_HUD_INPUT "Modern UI scale").
+		f.cw, f.ch = int(w.RecordW), int(w.RecordH)
+	}
 	step := float32(camera.ZoomOf(w.Step)) / float32(camera.ZoomUnit)
 	f.scale = 1
 	if step > 0 {

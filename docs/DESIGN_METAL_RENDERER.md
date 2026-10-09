@@ -70,6 +70,11 @@ required.
   camera. Model poses blend the pair in float32 on the CPU (user-approved,
   2026-10-07: captures differ from fixed-point composition in about one face
   edge per scene).
+- **Chrome text.** Magnified chrome regions use their virtual bounds for
+  text admission and scale glyph dimensions, baseline and advance with the
+  region's sprites and primitives (DESIGN_INTERFACE_HUD_INPUT "Modern UI
+  scale"). World text continues to project only its anchor and keeps native
+  glyph dimensions and screen offsets (DESIGN_GPU_RENDERER §16.3).
 - **No allocation churn.** Steady-state frames reuse their publication and
   upload storage; a few hundred allocations per draw remain, mostly the
   simulation's.

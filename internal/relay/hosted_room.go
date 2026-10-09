@@ -367,7 +367,7 @@ func (r *hostedRoom) run() {
 	// match's progress and restarts the interval (§16.5.2). Version-5 seats
 	// receive exactly the stream they always did.
 	report := func() {
-		body := encodeHostedProgress(&progress, func(slot int) time.Duration { return players[slot].rtt() })
+		body := encodeHostedProgress(&progress, tick, func(slot int) time.Duration { return players[slot].rtt() })
 		for slot := range progress.n {
 			if p := players[slot]; progress.active[slot] && p.version >= hostedProgressVersion && p.report(body) {
 				stats.bytesOut += uint64(len(body))

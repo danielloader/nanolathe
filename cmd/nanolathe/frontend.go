@@ -902,15 +902,6 @@ func (g *gameShell) openMenuWithTokenFlush(mode shellMode, flushTokens bool) {
 			}
 			g.installRetailWindowButtonArt(window, p.art)
 			g.installRetailListScrollbars(window, p.art)
-			if mode == modeMenuMain && !onlinePlayAvailable() {
-				// MULTI opens the online screen (DESIGN_MULTIPLAYER §16.6.2).
-				// The browser build has no relay transport, so there the widget
-				// grey bit darkens it and prevents pointer and key activation
-				// [07 R-WGT-01 §13].
-				if i := window.GadgetIndex("MULTI"); i >= 0 {
-					window.Gadgets[i].GrayedOut |= 1
-				}
-			}
 			g.disableUnavailableFrontendEntries(window, mode)
 			g.initializeRetailLabels(window)
 			panel = ui.NewPanel(window)

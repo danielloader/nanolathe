@@ -15,6 +15,14 @@ Windowed `--mission` entry now uses the existing headless mission request and
 ordinary battle view. It skips menu navigation; the mission, triggers,
 orders, campaign result and save codec retain their existing owners.
 
+With imported retail content the browser build plays online: `MULTI`, its
+lobby and its battles are the native ones (DESIGN_MULTIPLAYER §16.6), and the
+relay client reaches the relay through the browser's WebSocket — a
+`wss://host/relay` URL, or `ws://` on a numeric loopback address for a relay
+on the same computer; native `host:port` TLS and a custom trust root are
+unavailable there. Hidden-page play and the clipboard are host policy
+(§4 contracts 9–10); neither changes what a tick computes.
+
 ## 2. Owned pieces
 
 - `web/folder.js`: recursively drains every directory-reader batch; failed reads
@@ -25,6 +33,10 @@ orders, campaign result and save codec retain their existing owners.
   binding, command-line host options and tagged diagnostic messages.
 - `web/gestures.js`, `internal/platform/ebitenapp/scroll_js.go`: browser camera
   gestures, event ownership and the presentation-input bridge.
+- `web/clipboard.js`, `internal/platform/ebitenapp/clipboard_js.go`: paste
+  events and the asynchronous clipboard (contract 9).
+- `web/frames.js`, `cmd/nanolathe/online_browser_js.go`: the frame gate and the
+  online background step of a hidden page (contract 10).
 - `web/fs.js`: Node-style filesystem adapter consumed by Go's js/wasm runtime.
 - `web/storage.js`: committed IndexedDB settings/save transactions.
 - `web/launcher.js`, `index.html`, `style.css`: player-facing launcher and diagnostics.
@@ -39,8 +51,10 @@ The supplied extracted demo's own `TADemoReadme.txt` says it contains three
 single-player missions. Inspection of this archive through the existing VFS
 and the landed demo compatibility work finds no skirmish maps. The launcher
 therefore starts its first campaign mission; quick skirmish and stress entry
-are unavailable for this source. Retail folder import exposes the normal
-game menus and those development entries. No new demo-only catalog, rules,
+are unavailable for this source, and the main menu greys `MULTI`, whose rooms
+are skirmish or Survival battles, by the same mounted-content check that greys
+those entries. Retail folder import exposes the normal game menus, online play and those
+development entries. No new demo-only catalog, rules,
 replacement units or authored maps are introduced.
 
 The default build contains engine/host code only. `--demo-root` is explicit
@@ -133,6 +147,53 @@ original demo distribution agreement would settle it.
    Classic retains its existing camera controls. This adds no gameplay seam,
    simulation state, RNG draws, resources or orders. Listener/timer cleanup runs
    on engine exit; iframe replacement destroys the whole adapter.
+9. **Clipboard.** A page receives clipboard text only in a paste event, which
+   the browser fires for its paste shortcut unless the key-down was cancelled,
+   and Ebitengine cancels every key-down its canvas receives. The child page
+   sets that cancellation aside for the engine's own paste keys (Ctrl+V and
+   Shift+Insert, not repeated), so the engine still receives them and the
+   browser still pastes. It keeps Command+V from the engine, which reads
+   Command as no modifier in a browser and would type a V. Each paste event's
+   plain text reaches the engine before its next update; a paste the engine
+   has no key for — Command+V, or a browser menu — then reaches it as a
+   synthetic Insert, its other paste key. The next paste token takes the text
+   once, so the shared editor's paste fills the focused field, the room code
+   included (DESIGN_INTERFACE_HUD_INPUT §3.2); a paste event without a text
+   format leaves the field unchanged, and a paste key without a paste event
+   finds the clipboard unavailable. **Copy** writes with
+   `navigator.clipboard.writeText`. It is offered where the page has the
+   asynchronous clipboard (secure origins, loopback included) and reports the
+   browser's verdict, waited for at most 2 s inside the frame that pressed it.
+10. **Online play in a hidden page.** The relay holds every seat within 30
+   ticks of the slowest acknowledgement and ends a match after 10 seconds
+   without progress (DESIGN_MULTIPLAYER §16.5.1–§16.5.2), and a browser makes
+   no animation frames, so no Update or Draw, while its page is hidden or
+   occluded. Before the Go runtime starts, the child page wraps
+   `requestAnimationFrame` in a frame gate: an engine frame counts as running
+   from its callback until it requests the next one, the gate records when
+   the last one ended, and a held gate defers a frame's start to the next
+   animation frame. While a room is opening or open, or an online battle
+   runs, a js-only goroutine runs the shell's online step whenever no frame
+   is running and the page is hidden (`document.visibilityState`) or has
+   started no frame for 200 ms. The step holds the gate for its whole
+   duration, including any wait inside it, so it never overlaps an Update or
+   Draw. An online battle runs and acknowledges its granted ticks through the
+   ordinary paced driver, exactly as the host step does; an open room is
+   followed, so a Start the host makes meanwhile enters the prepared battle.
+   The committed events of those ticks are dropped, so a page shown again
+   resumes at its latest committed tick without replaying their cues or
+   notices. A hidden page's timers are throttled to about one wake a second,
+   but every grant's WebSocket message wakes the Go runtime, so the goroutine,
+   sleeping 4 ms between steps, runs at each grant's arrival and keeps the
+   relay's pace and reads every grant. While frames are presented it checks
+   every 100 ms, and it ends once no room or online battle remains.
+   Single-player battles keep today's behaviour, and native hosts have no
+   background step. The step adds no simulation state, RNG draws or
+   configuration. Measured in desktop Chromium against a native seat on a
+   loopback relay: a page hidden before the host's Start entered the battle
+   in the background, and pages hidden for 30 seconds to six and a half
+   minutes mid-battle, kept the native seat at 30 ticks a second with no
+   stall and every checksum agreed.
 
 ## 5. Delivery and measurements
 
@@ -181,7 +242,11 @@ not fingerprint comparisons.
 and integrity, corrupt-cache recovery, failed acquisition, source/run message
 isolation, lock admission/restart cancellation, Blob range reads, read-only
 content, atomic persistence and retry behavior, gesture channel separation,
-touch geometry and pinch lifetime/cancellation. Authored fixtures contain no
+touch geometry and pinch lifetime/cancellation, paste-key handling and paste
+delivery, and the frame gate's running and held states. Go tests lock the
+background step's hand-off (it runs only between frames, holding them), its
+battle pump and dropped events, its lobby following, and paste into the room
+code field. Authored fixtures contain no
 retail bytes. Packaging checks preserve an older launcher's child/engine pairing.
 The CI browser job runs these checks with Node 24/Python 3 and builds the
 asset-free artifact and executes the existing numeric kernel vectors on Wasm
@@ -197,8 +262,13 @@ are in [web/README](../web/README.md). Builds alone do not establish playability
 The browser host includes engine/host code and local preview tooling. Public demo
 asset distribution still needs the evidence in §3. Website hosting and demo
 assets are not part of the merge. Desktop save downloads include the existing
-sidecar; importing desktop saves, persistent installation access, mods and
-multiplayer browser transport remain follow-ups. Full retail animation memory,
-longer matches, other browsers and mobile input/memory budgets need further
-measurement. The paused WebGL snapshot discrepancy remains the explicit
+sidecar; importing desktop saves, persistent installation access and mods
+remain follow-ups, so a browser seat joins only rooms without a mod. Full
+retail animation memory, longer matches, other browsers and mobile
+input/memory budgets need further measurement. Online play is verified in
+desktop Chromium only. Unverified: Safari's and Firefox's paste events on a
+non-editable canvas, their clipboard-write activation rules and their
+hidden-page WebSocket delivery; mobile browsers; and a page hidden long
+enough for the browser to freeze or discard it (Chrome's Energy Saver and
+Memory Saver), which stops every goroutine, so the relay ends the match. The paused WebGL snapshot discrepancy remains the explicit
 unknown in §5; the browser uses full composition until it is resolved.

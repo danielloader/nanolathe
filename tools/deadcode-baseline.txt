@@ -8,6 +8,9 @@
 # or deleting one means dropping its row in the same commit.
 #
 # Regenerate with: tools/lint --update-baseline
+github.com/nanolathe-gg/nanolathe/cmd/nanolathe battleSession.pumpBackground
+github.com/nanolathe-gg/nanolathe/cmd/nanolathe gameShell.onlineBackgroundStep
+github.com/nanolathe-gg/nanolathe/cmd/nanolathe serviceOnlineBackground
 github.com/nanolathe-gg/nanolathe/formats EncodeGAF
 github.com/nanolathe-gg/nanolathe/formats EncodeThreeDO
 github.com/nanolathe-gg/nanolathe/formats EncodeWAV

@@ -47,6 +47,23 @@ func (c *Client) MessageRing() *frame.MessageRing {
 	return &c.messages
 }
 
+// MessageColumnBottom is the y just below the message column's visible
+// lines, or 0 while it shows none, so a host overlay at the top left of the
+// world view can start below it. Presentation-only [I6].
+func (c *Client) MessageColumnBottom() int {
+	if c == nil || c.messageFNT == nil {
+		return 0
+	}
+	n := len(c.MessageLines())
+	if n == 0 {
+		return 0
+	}
+	return messageColumnTop + n*int(c.messageFNT.Height)
+}
+
+// messageColumnTop is the first message line's y [07 R-HUD-03 §14.4].
+const messageColumnTop = 52
+
 // drawMessageLines is the master-composer message column. Unit captions use
 // the no-speaker sentinel, so they draw directly at x=138; the same consumer
 // also handles chat and announcement lines [07 R-HUD-03 §14.4].
@@ -65,7 +82,7 @@ func (c *Client) drawMessageLines() {
 		return
 	}
 	for i, line := range c.MessageLines() {
-		y := 52 + i*int(c.messageFNT.Height)
+		y := messageColumnTop + i*int(c.messageFNT.Height)
 		x := 138
 		if line.SpeakerSlot < frame.PlayerRowSlots {
 			// The rectangle includes both endpoints. The logo height and text

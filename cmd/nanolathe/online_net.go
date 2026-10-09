@@ -323,10 +323,13 @@ func (n *onlineNetStats) overlay(sess *session.Session) onlineNetOverlay {
 	}
 	o.lines = append(o.lines, fmt.Sprintf("Checksums agreed through tick %d", progress.Agreed))
 	o.heading = []string{"", "State", "Ping", "Behind"}
-	// The relay seals ahead of the slowest playing seat's acknowledgement by
+	// A seat's lag is the report's sealed tick less its acknowledgement, both
+	// read by the relay at one moment; this client's newest grant would add
+	// the report's age. The relay seals ahead of the slowest playing seat by
 	// at most its lead bound; at the bound everyone waits for that seat. When
 	// every playing seat is as far behind, as while the opening holds them
 	// all, no seat holds the others back.
+	sealed := progress.Sealed
 	slowest, fastest, playing := uint32(0), uint32(0), false
 	for slot := 0; slot < n.humans && slot < len(progress.Seats); slot++ {
 		if s := progress.Seats[slot]; s.Playing {
@@ -336,7 +339,7 @@ func (n *onlineNetStats) overlay(sess *session.Session) onlineNetOverlay {
 			slowest, fastest, playing = min(slowest, s.Acked), max(fastest, s.Acked), true
 		}
 	}
-	holding := playing && fastest > slowest && received >= slowest && received-slowest >= onlineRelayLead
+	holding := playing && fastest > slowest && sealed >= slowest && sealed-slowest >= onlineRelayLead
 	for slot := range n.humans {
 		row := onlineNetSeat{cells: []string{onlineSeatName(slot, n.slot), onlineSeatResult(sess, slot), "--", "--"}}
 		if slot < len(progress.Seats) {
@@ -348,7 +351,7 @@ func (n *onlineNetStats) overlay(sess *session.Session) onlineNetOverlay {
 				if s.RTT > 0 {
 					row.cells[2] = onlinePing(s.RTT)
 				}
-				row.cells[3] = strconv.FormatUint(uint64(received-min(s.Acked, received)), 10)
+				row.cells[3] = strconv.FormatUint(uint64(sealed-min(s.Acked, sealed)), 10)
 				if holding && s.Acked == slowest {
 					row.cells[1], row.holding = "holding", true
 				}
@@ -359,9 +362,13 @@ func (n *onlineNetStats) overlay(sess *session.Session) onlineNetOverlay {
 	return o
 }
 
-// onlinePing is a relay ping in whole milliseconds, or in tenths of a second
-// from one second, so the column stays narrow.
+// onlinePing is a relay ping in whole milliseconds, under a millisecond as
+// "<1 ms", or in tenths of a second from one second, so the column stays
+// narrow.
 func onlinePing(rtt time.Duration) string {
+	if rtt < time.Millisecond {
+		return "<1 ms"
+	}
 	if ms := math.Round(onlineMillis(rtt)); ms < 1000 {
 		return fmt.Sprintf("%.0f ms", ms)
 	}
@@ -549,9 +556,12 @@ func (l onlineNetLayout) blockGap() int { return 2 * l.space }
 // beside the panel when it fits there, and otherwise goes below it, its seat
 // rows then in two blocks when one block is too tall for the space left.
 // Cells are two spaces apart, closing to one where the width is short.
-func (l onlineNetLayout) place(screenW, screenH int, fps bool) onlineNetLayout {
+func (l onlineNetLayout) place(screenW, screenH int, fps bool, messages int) onlineNetLayout {
 	const clearance = 2
 	left, top := hud.ChromeRailX+2, hud.ChromeStripHeight+4
+	// The message column shares the corner; its visible lines stay readable
+	// above the overlay, which moves down while they show.
+	top = max(top, messages+clearance)
 	right, bottom := screenW-clearance, int(hud.BottomStripY(int32(screenH)))-clearance
 	type candidate struct{ y, blocks, right int }
 	candidates := []candidate{{top, 1, right}, {top, 2, right}}
@@ -598,7 +608,7 @@ func (h *retailBattleHUD) drawOnlineNetwork(c *client.Client, b *battleSession) 
 	}
 	o := b.multiplayer.net.overlay(b.sess)
 	screenW, screenH := c.Size()
-	l := onlineNetMeasure(h.console, o).place(screenW, screenH, b.fpsShown())
+	l := onlineNetMeasure(h.console, o).place(screenW, screenH, b.fpsShown(), c.MessageColumnBottom())
 	r := l.backdrop
 	c.UIFillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), h.guiColor(0))
 	for i, line := range o.lines {

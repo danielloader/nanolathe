@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -225,10 +226,10 @@ func TestOnlineNetTrafficRates(t *testing.T) {
 }
 
 // reportingStats is slot 0 of three human seats on a connection carrying a
-// relay report, with the newest grant at tick 1240.
+// relay report sealed at tick 1240, with the newest grant at tick 1240.
 func reportingStats(t *testing.T, seats []relay.HostedSeatProgress) (*onlineNetStats, *fakeReportingClient) {
 	t.Helper()
-	c := &fakeReportingClient{reported: true, progress: relay.HostedMatchProgress{Agreed: 1230, Seats: seats}}
+	c := &fakeReportingClient{reported: true, progress: relay.HostedMatchProgress{Agreed: 1230, Sealed: 1240, Seats: seats}}
 	n, _ := netTestStats(&c.fakeNetClient, len(seats))
 	n.Client = c
 	c.grants = []relay.LocalGrant{{Tick: 1240}}
@@ -239,8 +240,9 @@ func reportingStats(t *testing.T, seats []relay.HostedSeatProgress) (*onlineNetS
 }
 
 // The relay's report drives the checksum line and each seat's row: a seat
-// the relay no longer compares has left, and the slowest playing seat holds
-// the match once it is the relay's lead bound behind the newest grant.
+// the relay no longer compares has left, a seat's lag is measured from the
+// report's sealed tick, and the slowest playing seat holds the match once it
+// is the relay's lead bound behind it.
 func TestOnlineNetRelayReportRows(t *testing.T) {
 	sess := netTestSession()
 	n, c := reportingStats(t, []relay.HostedSeatProgress{
@@ -256,6 +258,14 @@ func TestOnlineNetRelayReportRows(t *testing.T) {
 	}
 	if strings.Contains(text, "Checksum sent") || strings.Contains(text, "No match report") {
 		t.Fatalf("a reported match claims no report: %q", text)
+	}
+	// Grants newer than the report are not lag: a report up to a second old
+	// would otherwise read as everyone falling 30 ticks behind.
+	n.mu.Lock()
+	n.received = 1275
+	n.mu.Unlock()
+	if text := netOverlayText(n, sess); !strings.Contains(text, "Player 1 (You)  playing  38 ms  2") || strings.Contains(text, "holding") {
+		t.Fatalf("lag measured from the newest grant: %q", text)
 	}
 	c.progress.Agreed = 1260
 	if text := netOverlayText(n, sess); !strings.Contains(text, "Checksums agreed through tick 1260") {
@@ -279,12 +289,16 @@ func TestOnlineNetRelayReportRows(t *testing.T) {
 		t.Fatalf("seats tied at the bound: %q", o.String())
 	}
 	c.progress.Seats[0].Acked = 1238
-	// An unmeasured ping reads as no value, not zero; a ping of a second or
-	// more reads in seconds.
+	// An unmeasured ping reads as no value, not zero; one under a
+	// millisecond reads "<1 ms"; a ping of a second or more reads in seconds.
 	c.progress.Seats[0].RTT = 0
 	c.progress.Seats[2].RTT = 1300 * time.Millisecond
 	if text := netOverlayText(n, sess); !strings.Contains(text, "Player 1 (You)  playing  --  2") || !strings.Contains(text, "Player 3  holding  1.3 s  30") {
 		t.Fatalf("unmeasured or long ping: %q", text)
+	}
+	c.progress.Seats[0].RTT = 300 * time.Microsecond
+	if text := netOverlayText(n, sess); !strings.Contains(text, "Player 1 (You)  playing  <1 ms  2") {
+		t.Fatalf("loopback ping: %q", text)
 	}
 }
 
@@ -352,7 +366,7 @@ func TestOnlineNetOverlayPlacement(t *testing.T) {
 		world := image.Rect(hud.ChromeRailX, hud.ChromeStripHeight, w, int(hud.BottomStripY(int32(h))))
 		for _, fps := range []bool{false, true} {
 			for _, seats := range []int{2, 10} {
-				l := onlineNetMeasure(font, netWidestOverlay(seats)).place(w, h, fps)
+				l := onlineNetMeasure(font, netWidestOverlay(seats)).place(w, h, fps, 0)
 				if !l.fits || !l.backdrop.In(world) || fps && l.backdrop.Overlaps(panel) {
 					t.Errorf("%dx%d fps %v, %d seats: backdrop %v in world %v, panel %v", w, h, fps, seats, l.backdrop, world, panel)
 				}
@@ -361,11 +375,15 @@ func TestOnlineNetOverlayPlacement(t *testing.T) {
 	}
 	// Ten seats sit beside the panel where it leaves room, and below it in
 	// two blocks where it does not.
-	if l := onlineNetMeasure(font, netWidestOverlay(10)).place(1024, 768, true); l.blocks != 1 || l.backdrop.Min.Y > hud.ChromeStripHeight+4 {
+	if l := onlineNetMeasure(font, netWidestOverlay(10)).place(1024, 768, true, 0); l.blocks != 1 || l.backdrop.Min.Y > hud.ChromeStripHeight+4 {
 		t.Fatalf("1024x768: %d blocks at %v", l.blocks, l.backdrop)
 	}
-	if l := onlineNetMeasure(font, netWidestOverlay(10)).place(640, 480, true); l.blocks != 2 || l.backdrop.Min.Y < onlineFPSPanelMargin+onlineFPSPanelH {
+	if l := onlineNetMeasure(font, netWidestOverlay(10)).place(640, 480, true, 0); l.blocks != 2 || l.backdrop.Min.Y < onlineFPSPanelMargin+onlineFPSPanelH {
 		t.Fatalf("640x480: %d blocks at %v", l.blocks, l.backdrop)
+	}
+	// Visible message lines keep the top left; the overlay starts below them.
+	if l := onlineNetMeasure(font, netWidestOverlay(2)).place(1024, 768, false, 94); l.backdrop.Min.Y < 94 || !l.fits {
+		t.Fatalf("below three message lines: %v", l.backdrop)
 	}
 }
 
@@ -376,6 +394,7 @@ type netCaptureCase struct {
 	fps, reported bool
 	humans        int
 	local         uint8
+	messages      int // message-column lines showing
 }
 
 // netCaptureStats is a running match's measurements for c: humans seats,
@@ -386,7 +405,7 @@ func netCaptureStats(c netCaptureCase, tick uint32, clock *netClock) *onlineNetS
 	n := newOnlineNetStats(conn, c.local, c.humans)
 	n.now = clock.now
 	n.received = tick + 2
-	conn.progress.Agreed = tick / 30 * 30
+	conn.progress.Agreed, conn.progress.Sealed = tick/30*30, tick+2
 	for slot := range c.humans {
 		seat := relay.HostedSeatProgress{Playing: true, Acked: tick + 2 - uint32(1+slot%3), RTT: time.Duration(24+17*slot) * time.Millisecond}
 		switch {
@@ -445,20 +464,21 @@ func TestOnlineNetOverlayCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, size := range [][2]int{{640, 480}, {800, 600}, {1024, 768}} {
-		if l := onlineNetMeasure(h.console, netWidestOverlay(10)).place(size[0], size[1], true); !l.fits {
+		if l := onlineNetMeasure(h.console, netWidestOverlay(10)).place(size[0], size[1], true, 0); !l.fits {
 			t.Errorf("%dx%d: the widest ten-seat overlay does not fit beside or below the +fps panel: %v", size[0], size[1], l.backdrop)
 		}
 	}
 	clock := &netClock{at: time.Unix(1000, 0)}
 	cases := []netCaptureCase{
-		{"2seat", 640, 480, false, true, 2, 0},
-		{"2seat-fps", 640, 480, true, true, 2, 1},
-		{"10seat", 640, 480, false, true, 10, 9},
-		{"10seat-fps", 640, 480, true, true, 10, 9},
-		{"10seat-fps-800", 800, 600, true, true, 10, 0},
-		{"10seat-fps-1024", 1024, 768, true, true, 10, 0},
-		{"noreport", 640, 480, false, false, 2, 0},
-		{"noreport-10seat-fps", 640, 480, true, false, 10, 9},
+		{"2seat", 640, 480, false, true, 2, 0, 0},
+		{"2seat-fps", 640, 480, true, true, 2, 1, 0},
+		{"10seat", 640, 480, false, true, 10, 9, 0},
+		{"10seat-fps", 640, 480, true, true, 10, 9, 0},
+		{"10seat-fps-800", 800, 600, true, true, 10, 0, 0},
+		{"10seat-fps-1024", 1024, 768, true, true, 10, 0, 0},
+		{"noreport", 640, 480, false, false, 2, 0, 0},
+		{"noreport-10seat-fps", 640, 480, true, false, 10, 9, 0},
+		{"2seat-messages", 640, 480, false, true, 2, 0, 2},
 	}
 	const tick = 5400
 	for _, c := range cases {
@@ -469,7 +489,6 @@ func TestOnlineNetOverlayCapture(t *testing.T) {
 		executed := sess.Clock.GlobalTick
 		sess.Clock.GlobalTick = tick
 		o := b.multiplayer.net.overlay(sess)
-		l := onlineNetMeasure(h.console, o).place(c.width, c.height, c.fps)
 		cl, err := client.New(client.Options{Buffer: sess.Snapshot, Width: c.width, Height: c.height})
 		if err != nil {
 			t.Fatal(err)
@@ -478,6 +497,14 @@ func TestOnlineNetOverlayCapture(t *testing.T) {
 		cl.SetCamera(cam)
 		cl.SetPalette(pal)
 		cl.SetFNT(h.console)
+		cl.ConfigureMessageLines(10, 0)
+		for i := range c.messages {
+			cl.MessageRing().Append(fmt.Sprintf("<Player> message line %d", i+1), 1, 0, 10, tick)
+		}
+		l := onlineNetMeasure(h.console, o).place(c.width, c.height, c.fps, cl.MessageColumnBottom())
+		if c.messages > 0 && l.backdrop.Min.Y < cl.MessageColumnBottom() {
+			t.Errorf("%s: the overlay covers the message column", c.name)
+		}
 		cl.SetModelFS(cs.unmappedMount)
 		cl.SetUIStage(battleHUDUIStage{hud: h, battle: b})
 		img := cl.ComposeFrame()

@@ -184,14 +184,16 @@ func TestHostedClientRefusesAnotherWelcomeVersion(t *testing.T) {
 func TestHostedProgressReportEncoding(t *testing.T) {
 	p := hostedProgress{n: 2, compared: 41}
 	p.active[0], p.final[1], p.acked[0], p.acked[1] = true, true, 44, 41
-	body := encodeHostedProgress(&p, func(slot int) time.Duration { return time.Duration(slot+1) * 1500 * time.Microsecond })
+	body := encodeHostedProgress(&p, 50, func(slot int) time.Duration { return time.Duration(slot+1) * 1500 * time.Microsecond })
 	got, err := decodeHostedProgress(body)
-	if err != nil || got.Agreed != 41 || len(got.Seats) != 2 ||
+	if err != nil || got.Agreed != 41 || got.Sealed != 50 || len(got.Seats) != 2 ||
 		got.Seats[0] != (HostedSeatProgress{Playing: true, Acked: 44, RTT: 1500 * time.Microsecond}) ||
 		got.Seats[1] != (HostedSeatProgress{Final: true, Acked: 41, RTT: 3 * time.Millisecond}) {
 		t.Fatalf("round trip: %+v %v", got, err)
 	}
-	for _, bad := range [][]byte{append(body, 0), body[:len(body)-1], {hostedProgressMessage, 0, 0}, {hostedProgressMessage, 0, 1, 4, 0, 0}} {
+	early := encodeHostedProgress(&p, 43, func(int) time.Duration { return 0 })
+	late := encodeHostedProgress(&p, 40, func(int) time.Duration { return 0 })
+	for _, bad := range [][]byte{append(body, 0), body[:len(body)-1], {hostedProgressMessage, 0, 0}, {hostedProgressMessage, 0, 1, 4, 0, 0}, early, late} {
 		if _, err := decodeHostedProgress(bad); err == nil {
 			t.Fatalf("accepted malformed report %v", bad)
 		}

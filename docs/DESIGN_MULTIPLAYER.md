@@ -1744,7 +1744,7 @@ refusal.
 | relay → client | Configuration | the room's latest base configuration, to each joiner and after every host change |
 | relay → client | Started | the match has started, with the sender's slot; grants follow |
 | relay → client | Grant | a sealed tick and its commands `{seat, sequence, position, payload}` |
-| relay → client | Progress | version 6 only, after Started: the last tick compared across playing seats, and per slot whether it still plays, whether its result is final, its last acknowledged tick and the relay's ping round trip (§16.5.2) |
+| relay → client | Progress | version 6 only, after Started: the last tick compared across playing seats, the newest sealed tick, and per slot whether it still plays, whether its result is final, its last acknowledged tick and the relay's ping round trip (§16.5.2) |
 | relay → client | Refused, Failed, Done | a refused hello, join, description or command, with its reason; a room failure with its reason; explicit normal completion |
 
 **Later messages:** a resume with seat credential and connection epoch
@@ -5561,7 +5561,8 @@ discrepancy fails the room instead of awarding a result.
 seat a Progress message (§12.2) about once a second, and at once when a
 seat leaves or its result becomes final. It carries the agreed tick — the
 last tick whose ended bits, and at every 30th tick unit checksums, the
-relay has compared across every playing seat — and per slot whether it
+relay has compared across every playing seat — the newest tick it had
+sealed, against which each seat's lag is measured, and per slot whether it
 still plays, whether its result is final, its last acknowledged tick and
 the relay's latest WebSocket ping round trip, zero when unmeasured (over
 native TLS, or before the first pong). A seat holds at most one unwritten
@@ -5570,8 +5571,8 @@ receives the latest state rather than a backlog; a report that does not fit
 the seat's queue bounds is dropped and never fails a room. Reports are host
 diagnostics and never reach a simulation. `relay.LocalClient` consumes them
 inside ReadGrant and returns the latest from `Progress()
-(HostedMatchProgress, bool)`: `Agreed` and per slot `Playing`, `Final`,
-`Acked` and `RTT`. `Traffic() LocalTraffic` counts the client's relay
+(HostedMatchProgress, bool)`: `Agreed`, `Sealed` and per slot `Playing`,
+`Final`, `Acked` and `RTT`. `Traffic() LocalTraffic` counts the client's relay
 messages and their bytes, length prefixes included, in each direction since
 it connected, the hello and lobby included. Both may be called from any
 goroutine.
@@ -5591,7 +5592,9 @@ tick never waits forever for a second grant. Catch-up runs at most 33 ticks
 a second when more than two grants are waiting.
 
 The window host calls Pump once per 30 Hz host step, and its steps land on
-display refreshes, so they arrive unevenly. Deadlines therefore keep their
+display refreshes, so they arrive unevenly. A hidden browser page makes no
+host steps; its background step pumps instead, at each grant's arrival
+(DESIGN_BROWSER_HOST §4 contract 10). Deadlines therefore keep their
 phase through lateness of up to two normal intervals and discard only
 lateness beyond that. One Pump runs every due tick, at most three, each
 through its own `StepGranted`. The normal interval equals the host step
@@ -5838,9 +5841,10 @@ sides' names in index order.
 
 #### 16.6.2 Client flow
 
-- **MULTI** is enabled in every build, the browser one included, with
-  imported retail content; the browser reaches the relay through its own
-  WebSocket (§16.5.1). It opens a small chooser over the main menu: one
+- **MULTI** is enabled wherever the mounted content can play a skirmish, the
+  browser build included; it greys only where Skirmish does, such as the
+  browser's demo, which has no skirmish maps. The browser reaches the relay
+  through its own WebSocket (§16.5.1). It opens a small chooser over the main menu: one
   sentence saying how online play works, Create Game and Join Game, and
   Cancel.
   Join Game asks for the room code in a popup (pasted or typed; case,

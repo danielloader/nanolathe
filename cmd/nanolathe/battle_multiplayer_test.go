@@ -294,3 +294,121 @@ func TestLocalMultiplayerLocalResultWaitsForSharedEnd(t *testing.T) {
 		t.Fatal("ordinary local result was suppressed")
 	}
 }
+
+// fakeBackgroundFrames is a browser page's frame gate.
+type fakeBackgroundFrames struct {
+	idle, held bool
+	holds      []bool
+}
+
+func (f *fakeBackgroundFrames) Idle() bool { return f.idle && !f.held }
+func (f *fakeBackgroundFrames) Hold(held bool) {
+	f.held = held
+	f.holds = append(f.holds, held)
+}
+
+// The background step runs only while the page's frames are idle, and holds
+// them for exactly its own duration, so no Update or Draw can start inside it
+// (DESIGN_BROWSER_HOST §4 contract 10).
+func TestOnlineBackgroundStepsOnlyBetweenHeldFrames(t *testing.T) {
+	frames := &fakeBackgroundFrames{}
+	steps := 0
+	step := func() {
+		steps++
+		if !frames.held {
+			t.Fatal("the background step ran with the frames free to start")
+		}
+	}
+	if serviceOnlineBackground(frames, step) || steps != 0 || len(frames.holds) != 0 {
+		t.Fatal("a presenting page ran the background step")
+	}
+	frames.idle = true
+	if !serviceOnlineBackground(frames, step) || steps != 1 || !reflect.DeepEqual(frames.holds, []bool{true, false}) || frames.held {
+		t.Fatalf("idle page: steps %d, holds %v", steps, frames.holds)
+	}
+	if serviceOnlineBackground(nil, step) || steps != 1 {
+		t.Fatal("a page without a frame gate ran the background step")
+	}
+}
+
+// A hidden page runs the online battle's granted ticks as the host step does,
+// and drops their presentation events rather than playing them all once the
+// page is shown again; the host step itself keeps them for its frame.
+func TestOnlineBackgroundPumpsTheBattleAndDropsItsEvents(t *testing.T) {
+	b := newTestBattle(testCatalogON05(), testWorldON05(20, 20))
+	d := &testLocalBattleDriver{}
+	b.multiplayer = &battleMultiplayer{driver: d}
+	cl, err := client.New(client.Options{Buffer: b.sess.Snapshot, Width: 640, Height: 480})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.cl = cl
+	g := &gameShell{battle: b}
+	b.shell = g
+	raise := func(tick uint32) {
+		staging := b.sess.Snapshot.BeginWrite()
+		staging.Events = []frame.EventView{{Tick: tick}}
+		if err := b.sess.Snapshot.Publish(tick); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raise(1)
+	if !g.onlineBackgroundStep(cl) || d.pumps != 1 || b.sess.Snapshot.PendingCommittedEvents() != 0 {
+		t.Fatalf("background step: pumps %d, events kept %d", d.pumps, b.sess.Snapshot.PendingCommittedEvents())
+	}
+	raise(2)
+	b.pumpLocalMultiplayer(cl)
+	if d.pumps != 2 || b.sess.Snapshot.PendingCommittedEvents() != 1 {
+		t.Fatal("the host step dropped events its frame presents")
+	}
+	// A failed transport leaves nothing to keep in step.
+	d.failure = errors.New("test disconnect")
+	if g.onlineBackgroundStep(cl) || d.pumps != 3 {
+		t.Fatal("a failed battle still asks for background steps")
+	}
+	if g.onlineBackgroundStep(cl) || d.pumps != 3 {
+		t.Fatal("a failed battle was pumped again")
+	}
+}
+
+// Single-player battles and an idle menu keep waiting for the page's frames.
+func TestOnlineBackgroundLeavesOtherGamesAlone(t *testing.T) {
+	b := newTestBattle(testCatalogON05(), testWorldON05(20, 20))
+	before := b.sess.Clock.GlobalTick
+	g := &gameShell{battle: b}
+	if g.onlineBackgroundStep(nil) || b.sess.Clock.GlobalTick != before {
+		t.Fatal("a single-player battle advanced in the background")
+	}
+	g = onlineTestShell(t)
+	if g.onlineBackgroundStep(nil) {
+		t.Fatal("the main menu asked for background steps")
+	}
+	if err := g.openOnlineScreen(); err != nil {
+		t.Fatal(err)
+	}
+	if g.onlineBackgroundStep(nil) {
+		t.Fatal("the chooser, with no room opening, asked for background steps")
+	}
+}
+
+// An open room is followed while the page is hidden: a Start the host makes
+// meanwhile reaches this seat without waiting for its frames.
+func TestOnlineBackgroundFollowsTheLobby(t *testing.T) {
+	useOnlineSessionSeams(t, 4)
+	g := onlineTestShell(t)
+	stream := &fakeGrantStream{}
+	fake := newFakeOnlineLobby(1, 0, 1)
+	fake.battle = stream
+	openTestLobby(t, g, fake, onlineTestCatalog())
+	fake.state.Seats[2].Present = true
+	if !g.onlineBackgroundStep(nil) || !g.online.room.state.Seats[2].Present {
+		t.Fatal("a hidden lobby did not follow the room")
+	}
+	fake.state.Started, fake.state.Slot = true, 1
+	if !g.onlineBackgroundStep(nil) || stream.closes != 1 || g.online == nil || !strings.Contains(g.online.status, "without your prepared battle") {
+		t.Fatal("a hidden lobby did not take the host's Start")
+	}
+	if g.onlineBackgroundStep(nil) {
+		t.Fatal("the chooser after leaving still asks for background steps")
+	}
+}

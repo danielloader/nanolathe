@@ -13,8 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
+	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/lockstep"
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/relay"
@@ -301,12 +304,23 @@ func TestMainMenuMultiOpensTheOnlineChooser(t *testing.T) {
 	g := onlineTestShell(t)
 	main := g.activePanel()
 	multi := main.Index("MULTI")
-	if !onlinePlayAvailable() {
-		if main.Window.Gadgets[multi].GrayedOut&1 == 0 || main.Fires(multi) {
-			t.Fatal("the browser build offered MULTI")
-		}
-		return
+	// The shell has no skirmish map yet, and MULTI greys as Skirmish does.
+	if main.Window.Gadgets[multi].GrayedOut&1 == 0 || main.Fires(multi) {
+		t.Fatal("MULTI was offered without skirmish content")
 	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "maps"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "maps", "Test Map.tnt"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.cs.unmappedMount.MountDirectory(root, 20); err != nil {
+		t.Fatal(err)
+	}
+	g.assets.panel[modeMenuMap] = &retailPanelAssets{window: &gui.Window{Rect: gui.Rect{W: 640, H: 480}, Gadgets: []gui.Gadget{{Kind: gui.KindPanel, Active: 1}}}}
+	g.openMenu(modeMenuMain)
+	main = g.activePanel()
 	if main.Window.Gadgets[multi].GrayedOut != 0 || !main.Fires(multi) {
 		t.Fatal("MULTI is not enabled")
 	}
@@ -603,5 +617,37 @@ func TestOnlineJoinRequestsTheRoomsMod(t *testing.T) {
 	g.adoptOnlineRoom(room, true)
 	if pendingContentReload != nil || !strings.Contains(g.online.status, "could not be selected") {
 		t.Fatalf("remounted mismatch: %q", g.online.status)
+	}
+}
+
+// A browser hands a pasted code to the engine as a paste key's token
+// (web/clipboard.js): Ctrl+V as pressed, and Insert for Command+V and its
+// menus. Either fills the focused code field, shown as the relay spells codes;
+// a paste with no text leaves the field alone [07 §2].
+func TestOnlineCodeFieldTakesAPastedCode(t *testing.T) {
+	g := onlineTestShell(t)
+	g.activateGadget("MULTI")
+	g.activateGadget("JOIN")
+	cl, err := client.New(client.Options{Buffer: &frame.Buffer{}, Width: 640, Height: 480})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paste := func(token input.Token) string {
+		cl.Input().EnqueueToken(token)
+		g.menuInput(cl)
+		g.pollOnline()
+		return g.online.panel.TextOf("ADDRESS")
+	}
+	if got := paste(input.Token{Kind: input.TokenEdit, Key: input.KeyInsert, Clipboard: input.ClipboardText{Text: "k7m-2px", Available: true}}); got != "K7M-2PX" {
+		t.Fatalf("Insert paste: %q", got)
+	}
+	if got := paste(input.Token{Kind: input.TokenEdit, Key: input.KeyV, Ctrl: true, Clipboard: input.ClipboardText{Text: "cfh 234", Available: true}}); got != "CFH 234" {
+		t.Fatalf("Ctrl+V paste: %q", got)
+	}
+	if got := paste(input.Token{Kind: input.TokenEdit, Key: input.KeyInsert}); got != "CFH 234" {
+		t.Fatalf("a paste with no text changed the field: %q", got)
+	}
+	if g.online.view != onlineCodeEntry || !g.online.panel.EditorCaptured() {
+		t.Fatal("pasting left the code entry")
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"runtime"
 	"strings"
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
@@ -26,10 +25,6 @@ import (
 // defaultOnlineServer is the server online play uses until the player names
 // another (DESIGN_MULTIPLAYER §16.6).
 const defaultOnlineServer = "relay.nanolathe.gg"
-
-// onlinePlayAvailable reports whether this build has a relay transport. The
-// browser build has none, so MULTI stays greyed there (§16.6.2).
-func onlinePlayAvailable() bool { return runtime.GOOS != "js" }
 
 // onlineClipboardAvailable reports whether the lobby can offer Copy.
 func onlineClipboardAvailable() bool { return ebitenapp.HostClipboardWritable() }
@@ -398,9 +393,15 @@ func (g *gameShell) refreshOnlinePanel() {
 }
 
 // syncOnlineCodeField shows a typed or pasted room code in capitals, as the
-// relay spells codes; spaces and dashes stay until Join normalizes them.
+// relay spells codes; spaces and dashes stay until Join normalizes them. It
+// runs every shell step the online screen is open, which is also when a room
+// opening or open asks a browser page to keep following it while hidden
+// (onlineBackgroundStep).
 func (g *gameShell) syncOnlineCodeField() {
 	s := g.online
+	if s != nil && (s.job != nil || s.room.lobby != nil) {
+		watchOnlineBackground(g, clPtr)
+	}
 	if s == nil || s.panel == nil || s.view != onlineCodeEntry {
 		return
 	}

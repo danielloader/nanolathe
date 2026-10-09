@@ -3000,9 +3000,9 @@ excluded with multiplayer `[07 R-CAM-01 §6]` `[07 R-FE-02 §12]`.
   transport remain out of scope; the single-player skirmish setup screen is a
   different surface and is implemented `[07 §12]` `[07 R-FE-02 §1]`. The
   authored `MAINMENU` `MULTI` button opens Nanolathe's own online screen
-  instead ([Online games](#online-games)). Only the browser build, which has
-  no relay transport, still greys it so it cannot be activated by pointer or
-  key.
+  instead ([Online games](#online-games)). Where the mounted content has no
+  skirmish map, such as the browser's demo, it is greyed with Skirmish so it
+  cannot be activated by pointer or key.
 * **The front-end movie stage.** Normal launches play the original startup
   logo `Data/1.zrb` once, then open `MAINMENU` `[07 R-FE-01 §3]`. Playback
   is deferred to the first shell update so the platform PCM device is ready;
@@ -3054,8 +3054,9 @@ excluded with multiplayer `[07 R-CAM-01 §6]` `[07 R-FE-02 §12]`.
   The front-end `DRDEATH` cheat sequence also lacks its token-history consumer
   `[07 R-FE-02 §10]`.
 * **Clipboard portability.** macOS Insert, Ctrl+V and the host Cmd+V alias read
-  AppKit plain text on the initial paste key transition. Other native hosts and
-  VM guests still lack a clipboard bridge. Translating non-ASCII Unicode text
+  AppKit plain text on the initial paste key transition. The browser build
+  takes the text of the page's paste event (DESIGN_BROWSER_HOST §4 contract
+  9). Other native hosts and VM guests still lack a clipboard bridge. Translating non-ASCII Unicode text
   into the retail code page remains unresolved; an unavailable format, failed
   read or unmapped text preserves the current editor `[07 §2]`.
 * **Never-opened GUIs.** The windows retail's own code never opens are not
@@ -4342,7 +4343,8 @@ and **Cancel** (or Escape).
 (`guis/tcp.gui`), captioned "Enter the room code your friend sent you", with
 **Join** and **Cancel**. Its field takes focus at once; the code may be typed
 or pasted (Ctrl+V, Cmd+V or Shift+Insert where the host has a clipboard
-bridge, which is macOS only for now), is shown in capitals, and ignores case,
+bridge: macOS and the browser build, DESIGN_BROWSER_HOST §4 contract 9), is
+shown in capitals, and ignores case,
 spaces and dashes. Enter joins. Escape clears the field and a second Escape
 cancels. Each refusal — no game with that code, a full or started game, a mod
 that is missing or cannot be mounted, a server that cannot be reached —
@@ -4385,7 +4387,8 @@ click one back, past every colour another present player holds. Each arrival
 takes the lowest free colour, so every player's is their own.
 The room code is drawn beside the title in `HATT14`, in two groups of three,
 with **Copy** where the host has a clipboard bridge (macOS writes AppKit plain
-text; other hosts hide it).
+text and the browser build `navigator.clipboard.writeText` on secure pages;
+other hosts hide it).
 
 The host's settings stay open until Start: the game type (Skirmish or
 Survival, in Difficulty's place), **Select Map** through the ordinary map

@@ -18,6 +18,10 @@ type HostedMatchProgress struct {
 	// Agreed is the last tick whose ended bits, and at every 30th tick unit
 	// checksums, the relay has compared across every playing seat.
 	Agreed uint32
+	// Sealed is the newest tick the relay had sealed when it made the
+	// report. A seat's lag is Sealed less its Acked, and the relay seals no
+	// further while the slowest playing seat lags by its 30-tick lead bound.
+	Sealed uint32
 	// Seats holds one entry per slot, in slot order.
 	Seats []HostedSeatProgress
 }
@@ -46,7 +50,9 @@ func (c *LocalClient) Progress() (HostedMatchProgress, bool) {
 	if c.progress == nil {
 		return HostedMatchProgress{}, false
 	}
-	return HostedMatchProgress{Agreed: c.progress.Agreed, Seats: slices.Clone(c.progress.Seats)}, true
+	p := *c.progress
+	p.Seats = slices.Clone(p.Seats)
+	return p, true
 }
 
 // Traffic returns the client's relay message counts so far, the hello and
@@ -65,13 +71,14 @@ const (
 	progressFlagsMask = progressPlaying | progressFinal
 )
 
-// encodeHostedProgress is one report: the agreed tick and the slot count,
-// then per slot its flags, last acknowledged tick and round trip in
-// microseconds.
-func encodeHostedProgress(p *hostedProgress, rtt func(slot int) time.Duration) []byte {
+// encodeHostedProgress is one report: the agreed and sealed ticks and the
+// slot count, then per slot its flags, last acknowledged tick and round trip
+// in microseconds.
+func encodeHostedProgress(p *hostedProgress, sealed uint32, rtt func(slot int) time.Duration) []byte {
 	var w netproto.Writer
 	w.U8(hostedProgressMessage)
 	w.U32(p.compared)
+	w.U32(sealed)
 	w.U8(uint8(p.n))
 	for slot := range p.n {
 		var flags uint8
@@ -93,7 +100,10 @@ func decodeHostedProgress(body []byte) (HostedMatchProgress, error) {
 	if r.U8() != hostedProgressMessage {
 		r.Abort(hostedError("progress report", "a progress report"))
 	}
-	p := HostedMatchProgress{Agreed: r.U32()}
+	p := HostedMatchProgress{Agreed: r.U32(), Sealed: r.U32()}
+	if p.Agreed > p.Sealed {
+		r.Abort(hostedError("progress report", "an agreed tick no later than the sealed tick"))
+	}
 	n := int(r.U8())
 	if n < 1 || n > HostedMaxSeats {
 		r.Abort(hostedError("progress report", "1 to 10 slots"))
@@ -105,6 +115,9 @@ func decodeHostedProgress(body []byte) (HostedMatchProgress, error) {
 			r.Abort(hostedError("progress report", "the playing and final bits"))
 		}
 		p.Seats[i] = HostedSeatProgress{Playing: flags&progressPlaying != 0, Final: flags&progressFinal != 0, Acked: r.U32(), RTT: time.Duration(r.U32()) * time.Microsecond}
+		if p.Seats[i].Acked > p.Sealed {
+			r.Abort(hostedError("progress report", "acknowledged ticks no later than the sealed tick"))
+		}
 	}
 	if err := r.End(); err != nil {
 		return HostedMatchProgress{}, err

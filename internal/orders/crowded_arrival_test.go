@@ -13,7 +13,7 @@ import (
 func crowdedOrderFixture(modern bool) (*Queue, *units.Unit, *Node) {
 	q, u, _ := dangerFixture(modern)
 	q.Push(Lookup("Move_Ground"), Node{Owner: u.Handle, GoalX: u.X + numeric.FixedFromInt(48), GoalZ: u.Z, GoalSupplied: true})
-	q.Binding().Movement = &MovementGoalAdapter{CrowdedMoveBlocked: func(*units.Unit, *Node) (int32, int32, bool) { return 30, 30, true }}
+	q.Binding().Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{CrowdedMoveBlocked: func(*units.Unit, *Node) (int32, int32, bool) { return 30, 30, true }})
 	return q, u, q.Head()
 }
 
@@ -86,13 +86,13 @@ func TestCrowdedArrivalRestartsAfterProgressOrUnobservedInterval(t *testing.T) {
 			}
 			switch change {
 			case "anchor":
-				q.Binding().Movement.CrowdedMoveBlocked = func(*units.Unit, *Node) (int32, int32, bool) { return 31, 30, true }
+				q.Binding().Movement.SetCrowdedMoveBlocked(func(*units.Unit, *Node) (int32, int32, bool) { return 31, 30, true })
 			case "goal":
 				n.GoalZ++
 			case "crowd clears":
-				q.Binding().Movement.CrowdedMoveBlocked = func(*units.Unit, *Node) (int32, int32, bool) { return 30, 30, false }
+				q.Binding().Movement.SetCrowdedMoveBlocked(func(*units.Unit, *Node) (int32, int32, bool) { return 30, 30, false })
 				CrowdedMoveArrival(u, n, 90)
-				q.Binding().Movement.CrowdedMoveBlocked = func(*units.Unit, *Node) (int32, int32, bool) { return 30, 30, true }
+				q.Binding().Movement.SetCrowdedMoveBlocked(func(*units.Unit, *Node) (int32, int32, bool) { return 30, 30, true })
 			}
 			// The missing observation also models returning from Strict/control tasks.
 			for tick := uint32(91); tick <= 181; tick++ {

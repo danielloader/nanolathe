@@ -205,7 +205,7 @@ func (s *Service) sharedStep(builder, target *units.Unit, quantum float32, tick 
 	// [05 "Cancel-current and stop interrupts"]. With no ledger there is no
 	// bucket to credit and the refund is simply not paid; it is never diverted
 	// to another field.
-	special := s.IsSpecialSecondState != nil && s.IsSpecialSecondState(target.Owner)
+	special := s.IsSpecialSecondStateHook() != nil && s.IsSpecialSecondStateHook()(target.Owner)
 	if bucket != nil {
 		ReverseRefund(bucket, refund, special, s.ModeSelector)
 	}

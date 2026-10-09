@@ -60,7 +60,7 @@ func communityProjectileWithinMargin(p *Projectile, terrain *world.Terrain, marg
 // whether the projectile overlaps one; that distinction decides whether an
 // off-map round remains alive [CP-ENV-1].
 func (s *Service) communityScanOffMapAircraft(p *Projectile, w *units.World, terrain *world.Terrain, margin int32) (any bool, victim pool.Handle) {
-	if s == nil || p == nil || w == nil || terrain == nil || s.VisitOffMapFiled == nil {
+	if s == nil || p == nil || w == nil || terrain == nil || s.VisitOffMapFiledHook() == nil {
 		return false, 0
 	}
 	if margin <= 0 {
@@ -69,7 +69,7 @@ func (s *Service) communityScanOffMapAircraft(p *Projectile, w *units.World, ter
 	projectileX, projectileZ := world.WorldToCell(p.Pos.X), world.WorldToCell(p.Pos.Z)
 	projectileY := int32(p.Pos.Y.Raw())
 	scanned := 0
-	s.VisitOffMapFiled(func(h pool.Handle, _ uint64) bool {
+	s.VisitOffMapFiledHook()(func(h pool.Handle, _ uint64) bool {
 		if scanned >= communityOffMapWalkLimit {
 			return false
 		}
@@ -139,7 +139,7 @@ func communityOffMapFalloff(distance, radius int32, edge float32) float32 {
 // deliberately has no air filter; canonical off-map filing and the margin
 // make its victims disjoint from the later tile walk [CP-ENV-1].
 func (s *Service) communityOffMapSplash(feedback *impactFeedback, w *units.World, terrain *world.Terrain, weapon *content.WeaponDef, impact Vec3, shooter pool.Handle, shooterSide uint8, tick uint32, observedVelocity Vec3, radius int32) {
-	if s == nil || feedback == nil || w == nil || terrain == nil || weapon == nil || radius <= 0 || s.VisitOffMapFiled == nil {
+	if s == nil || feedback == nil || w == nil || terrain == nil || weapon == nil || radius <= 0 || s.VisitOffMapFiledHook() == nil {
 		return
 	}
 	margin := s.rules().OffMapAircraftMargin(s)
@@ -147,7 +147,7 @@ func (s *Service) communityOffMapSplash(feedback *impactFeedback, w *units.World
 		return
 	}
 	scanned := 0
-	s.VisitOffMapFiled(func(h pool.Handle, _ uint64) bool {
+	s.VisitOffMapFiledHook()(func(h pool.Handle, _ uint64) bool {
 		if scanned >= communityOffMapWalkLimit {
 			return false
 		}

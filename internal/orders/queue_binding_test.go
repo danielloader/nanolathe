@@ -21,7 +21,7 @@ func TestQueueBindingKeepsSessionInputsInterleaved(t *testing.T) {
 	target2 := &units.Unit{Handle: 42}
 	sim1 := rng.NewSimulation(1)
 	sim2 := rng.NewSimulation(2)
-	q1 := BindQueueBinding(u1, &QueueBinding{
+	q1 := BindQueueBinding(u1, NewQueueBinding(QueueBindingConfig{
 		Lookup: func(h pool.Handle) *units.Unit {
 			if h == target1.Handle {
 				return target1
@@ -30,8 +30,8 @@ func TestQueueBindingKeepsSessionInputsInterleaved(t *testing.T) {
 		},
 		Hostility: func(a, b *units.Unit) bool { return a == u1 && b == target1 },
 		SimRNG:    &sim1,
-	})
-	q2 := BindQueueBinding(u2, &QueueBinding{
+	}))
+	q2 := BindQueueBinding(u2, NewQueueBinding(QueueBindingConfig{
 		Lookup: func(h pool.Handle) *units.Unit {
 			if h == target2.Handle {
 				return target2
@@ -40,11 +40,11 @@ func TestQueueBindingKeepsSessionInputsInterleaved(t *testing.T) {
 		},
 		Hostility: func(a, b *units.Unit) bool { return a == u2 && b == target2 },
 		SimRNG:    &sim2,
-	})
+	}))
 	if q1.Binding() == q2.Binding() {
 		t.Fatal("two sessions must not share a queue binding")
 	}
-	if got := q1.Binding().Lookup(target1.Handle); got != target1 || q2.Binding().Lookup(target1.Handle) != nil {
+	if got := q1.Binding().LookupHook()(target1.Handle); got != target1 || q2.Binding().LookupHook()(target1.Handle) != nil {
 		t.Fatal("target lookup crossed queue binding")
 	}
 	if !isHostile(u1, target1) || isHostile(u2, target1) {
@@ -144,7 +144,7 @@ func TestPumpUnitDoesNotMaterializeAbsentQueue(t *testing.T) {
 func TestQueueBindingTraversalPreservesAdapterOrder(t *testing.T) {
 	var unitsSeen []pool.Handle
 	var featuresSeen []int32
-	b := &QueueBinding{World: &WorldQueryAdapter{
+	b := &QueueBinding{World: NewWorldQueryAdapter(WorldQueryAdapterConfig{
 		ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
 			for _, h := range []pool.Handle{7, 3, 9} {
 				if visit(h, &units.Unit{Handle: h}) {
@@ -159,7 +159,7 @@ func TestQueueBindingTraversalPreservesAdapterOrder(t *testing.T) {
 				}
 			}
 		},
-	}}
+	})}
 	b.ForEachUnit(func(h pool.Handle, _ *units.Unit) bool {
 		unitsSeen = append(unitsSeen, h)
 		return h == 3
@@ -178,11 +178,11 @@ func TestQueueBindingTraversalPreservesAdapterOrder(t *testing.T) {
 
 func TestQueueBindingValidationRejectsMissingProductionAdapters(t *testing.T) {
 	sim := rng.NewSimulation(1)
-	b := &QueueBinding{SimRNG: &sim,
+	b := NewQueueBinding(QueueBindingConfig{SimRNG: &sim,
 		Economy:   &economy.Service{},
 		Lookup:    func(pool.Handle) *units.Unit { return nil },
 		Hostility: func(*units.Unit, *units.Unit) bool { return false },
-	}
+	})
 	if err := b.Validate(); err == nil {
 		t.Fatal("missing single-player adapters accepted by composition seam")
 	}

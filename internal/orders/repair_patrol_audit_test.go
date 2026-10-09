@@ -62,17 +62,17 @@ func TestRepairPatrolStoredStockBelowWorkingThreshold(t *testing.T) {
 	for _, air := range []bool{false, true} {
 		actor, _, sim, q := repairPatrolRefusalFixture(t, air)
 		resources := ResourceView{Stock: p.Stock, Capacity: p.Capacity}
-		q.binding.Resources = func(uint8) (ResourceView, bool) { return resources, true }
+		q.binding.SetResources(func(uint8) (ResourceView, bool) { return resources, true })
 		// The next stored stock admits two candidates and one bounded draw.
 		// Stance three then refuses the issue without adding a work record.
 		actor.Flags = actor.Flags&^(stanceFieldMask<<stanceMoveShift) | 3<<stanceMoveShift
 		scans := 0
-		scan := q.binding.World.ForEachUnitInRadius
-		q.binding.World.ForEachUnitInRadius = func(x, z, radius numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
+		scan := q.binding.World.ForEachUnitInRadiusHook()
+		q.binding.World.SetForEachUnitInRadius(func(x, z, radius numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
 			scans++
 			scan(x, z, radius, visit)
-		}
-		q.binding.World.LookupFeature = func(int32, int32) (FeatureView, bool) { return FeatureView{}, false }
+		})
+		q.binding.World.SetLookupFeature(func(int32, int32) (FeatureView, bool) { return FeatureView{}, false })
 		handler := repairPatrolHandler
 		if air {
 			handler = vtolRepairPatrolHandler
@@ -99,11 +99,11 @@ func TestRepairPatrolFitDoesNotRoundAwayFeatureValue(t *testing.T) {
 		var p economy.Player
 		p.InstallStorageBonus(0, 16777216)
 		resources := ResourceView{Stock: [2]float32{0, stock}, Capacity: p.StorageBonus}
-		q.binding.Resources = func(uint8) (ResourceView, bool) { return resources, true }
-		q.binding.World.ForEachUnitInRadius = func(_, _, _ numeric.Fixed, _ func(pool.Handle, *units.Unit) bool) {}
-		q.binding.World.LookupFeature = func(int32, int32) (FeatureView, bool) {
+		q.binding.SetResources(func(uint8) (ResourceView, bool) { return resources, true })
+		q.binding.World.SetForEachUnitInRadius(func(_, _, _ numeric.Fixed, _ func(pool.Handle, *units.Unit) bool) {})
+		q.binding.World.SetLookupFeature(func(int32, int32) (FeatureView, bool) {
 			return FeatureView{Energy: feature.Energy, Reclaimable: feature.Reclaimable, Autoreclaimable: feature.Autoreclaimable}, true
-		}
+		})
 		n := &Node{Owner: actor.Handle, Phase: 1}
 		code := repairPatrolHandler(actor, n, 0, 100)
 		wantCode, wantQueue := Code(2), 0
@@ -155,7 +155,7 @@ func TestRepairFeatureLatticeKeepsRawHalvesAndBoundsWork(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			actor := &units.Unit{Handle: 1, Alive: true, X: tc.centre, Z: tc.centre}
 			calls := 0
-			BindQueue(actor, &Queue{binding: &QueueBinding{World: &WorldQueryAdapter{
+			BindQueue(actor, &Queue{binding: &QueueBinding{World: NewWorldQueryAdapter(WorldQueryAdapterConfig{
 				LookupFeature: func(int32, int32) (FeatureView, bool) {
 					calls++
 					if calls > tc.count {
@@ -163,7 +163,7 @@ func TestRepairFeatureLatticeKeepsRawHalvesAndBoundsWork(t *testing.T) {
 					}
 					return FeatureView{Energy: 1, Reclaimable: true, Autoreclaimable: true}, true
 				},
-			}}})
+			})}})
 			energy, _ := scanFeatureLists(actor, tc.diameter)
 			if len(energy) != tc.count {
 				t.Fatalf("samples=%d want %d", len(energy), tc.count)
@@ -180,7 +180,7 @@ func TestRepairFeatureLatticeKeepsRawHalvesAndBoundsWork(t *testing.T) {
 func TestRepairFeatureEqualValuesKeepFirstTournamentPick(t *testing.T) {
 	actor := &units.Unit{Handle: 1, Alive: true, X: 64 << 16, Z: 64 << 16}
 	sim := rng.SimulationFromState(1)
-	BindQueue(actor, &Queue{binding: &QueueBinding{SimRNG: &sim, World: &WorldQueryAdapter{
+	BindQueue(actor, &Queue{binding: &QueueBinding{SimRNG: &sim, World: NewWorldQueryAdapter(WorldQueryAdapterConfig{
 		LookupFeature: func(x, z int32) (FeatureView, bool) {
 			id := uint16(0)
 			if x == 4 && z == 1 {
@@ -191,7 +191,7 @@ func TestRepairFeatureEqualValuesKeepFirstTournamentPick(t *testing.T) {
 			}
 			return FeatureView{ID: id, Energy: 1, Reclaimable: true, Autoreclaimable: true}, id != 0
 		},
-	}}})
+	})}})
 	list, _ := scanFeatureLists(actor, 96)
 	got, ok := pickFeatureTournament(actor, list, false)
 	if len(list) != 2 || list[0].ID != 1 || list[1].ID != 2 || !ok || got.ID != 2 || sim.Draws() != 3 {
@@ -203,11 +203,11 @@ func TestHealthyRepairPatrolFeatureBranchDiffersForAir(t *testing.T) {
 	for _, air := range []bool{false, true} {
 		actor, _, sim, q := repairPatrolRefusalFixture(t, air)
 		resources := ResourceView{Stock: [2]float32{100, 100}, Capacity: [2]float32{200, 200}}
-		q.binding.Resources = func(uint8) (ResourceView, bool) { return resources, true }
-		q.binding.World.ForEachUnitInRadius = func(_, _, _ numeric.Fixed, _ func(pool.Handle, *units.Unit) bool) {}
-		q.binding.World.LookupFeature = func(int32, int32) (FeatureView, bool) {
+		q.binding.SetResources(func(uint8) (ResourceView, bool) { return resources, true })
+		q.binding.World.SetForEachUnitInRadius(func(_, _, _ numeric.Fixed, _ func(pool.Handle, *units.Unit) bool) {})
+		q.binding.World.SetLookupFeature(func(int32, int32) (FeatureView, bool) {
 			return FeatureView{Energy: 1, Reclaimable: true, Autoreclaimable: true}, true
-		}
+		})
 		n := &Node{Owner: actor.Handle, Phase: 1}
 		handler, wantCode, wantDraws, wantQueue := repairPatrolHandler, Code(2), uint64(0), 0
 		if air {
@@ -235,9 +235,9 @@ func TestModernGuardRetainsSinglePrecisionThreshold(t *testing.T) {
 		b.Rules = modeRules(modern)
 		patient := &units.Unit{Handle: 3, Alive: true, Def: &content.UnitDef{MaxDamage: 100}, Health: 50, X: f.guard.X, Z: f.guard.Z}
 		patient.Move.Mode, patient.Move.ModeMirror = 1, 1
-		b.World = &WorldQueryAdapter{ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) { visit(patient.Handle, patient) }}
+		b.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) { visit(patient.Handle, patient) }})
 		resources := ResourceView{Stock: [2]float32{0, 40.6}, Capacity: [2]float32{200, 203}}
-		b.Resources = func(uint8) (ResourceView, bool) { return resources, true }
+		b.SetResources(func(uint8) (ResourceView, bool) { return resources, true })
 		before := *f.sim
 		if got := b.Rules.GuardWorksNearby(f.guard, guardNode(f), 100); got != modern {
 			t.Fatalf("modern=%v assistance=%v", modern, got)

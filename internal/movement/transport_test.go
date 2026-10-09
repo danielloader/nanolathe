@@ -80,18 +80,18 @@ func transportFixture(t *testing.T) (*System, *units.World, *units.Unit, *units.
 	kinds := &[]uint8{}
 	econ := &economy.Service{}
 	econ.Players[0].ControllerState = 1
-	binding := &orders.QueueBinding{
+	binding := orders.NewQueueBinding(orders.QueueBindingConfig{
 		Economy: econ,
 		SimRNG:  &sim,
 		Lookup:  w.Unit,
-		Presentation: &orders.PresentationAdapter{
+		Presentation: orders.NewPresentationAdapter(orders.PresentationAdapterConfig{
 			Ready: func() bool { return true },
 			Status: func(_ *units.Unit, kind uint8, _ string) bool {
 				*kinds = append(*kinds, kind)
 				return true
 			},
-		},
-	}
+		}),
+	})
 	orders.QueueForUnit(carrier).SetBinding(binding)
 	orders.QueueForUnit(cargo).SetBinding(binding)
 	sys.BindAirOrderLegs()

@@ -157,7 +157,7 @@ func (s *System) goalSealedFrom(u *units.Unit, goal path.Goal, frontier int32) b
 	if reg == nil {
 		return false
 	}
-	reg.BindMappingWord(s.mappingWordSource(u.Handle))
+	reg.BindMappingWordWithCheckpointBinding(s.checkpointMappingWordSource(u.Handle))
 	layer := reg.For(s.classKeyFor(u.Handle), profile)
 	if layer == nil {
 		return false

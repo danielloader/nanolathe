@@ -50,7 +50,7 @@ func throughFixture(t *testing.T, tr Traffic, going bool, other uint8) (sys *Sys
 		u := w.Unit(h)
 		u.Flags |= 1 << units.StandingMoveShift
 		sys.EnsureUnit(u)
-		orders.QueueForUnit(u).SetBinding(&orders.QueueBinding{Lookup: w.Unit, World: &orders.WorldQueryAdapter{}})
+		orders.QueueForUnit(u).SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: w.Unit, World: &orders.WorldQueryAdapter{}}))
 	}
 	move := func(h pool.Handle, x, z int32) *orders.Node {
 		q := orders.QueueOfUnit(w.Unit(h))

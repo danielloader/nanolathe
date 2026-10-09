@@ -142,11 +142,11 @@ func TestPT5_OrderedUnitsStillFire(t *testing.T) {
 	if before <= 0 {
 		t.Fatalf("target starts with no health")
 	}
-	priorEvents := sess.Combat.Events
+	priorEvents := sess.Combat.EventsHook()
 	orderedImpacts := 0
 	orderedVictimImpacts := 0
 	orderedDamagePackets := 0
-	sess.Combat.Events = func(ev combat.Event) {
+	sess.Combat.SetEvents(func(ev combat.Event) {
 		if ev.Kind == combat.EventProjectileImpact && isParkedShooter(ev.Source, parkedHandles) {
 			orderedImpacts++
 			if ev.Target == victim.Handle {
@@ -159,7 +159,7 @@ func TestPT5_OrderedUnitsStillFire(t *testing.T) {
 		if priorEvents != nil {
 			priorEvents(ev)
 		}
-	}
+	})
 	orderBound := false
 	orderedProjectiles := 0
 	victimDamageTicks := 0

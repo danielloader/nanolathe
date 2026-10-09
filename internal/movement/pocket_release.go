@@ -365,7 +365,7 @@ func (s *System) preparePocketWindow(u *units.Unit, coll *CollisionState, goal C
 	if reg == nil {
 		return win, false
 	}
-	reg.BindMappingWord(s.mappingWordSource(u.Handle))
+	reg.BindMappingWordWithCheckpointBinding(s.checkpointMappingWordSource(u.Handle))
 	win.layer = reg.For(s.classKeyFor(u.Handle), s.ProfileFor(u.Handle))
 	if win.layer == nil {
 		return win, false

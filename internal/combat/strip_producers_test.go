@@ -30,7 +30,7 @@ func TestTrailPuffAdditiveDeadlineAndExpiryPuff(t *testing.T) {
 	p.Pos = wantPos
 
 	var events []Event
-	svc.Events = func(ev Event) { events = append(events, ev) }
+	svc.SetEvents(func(ev Event) { events = append(events, ev) })
 	sim := rng.NewSimulation(1)
 	for tick := uint32(1); tick <= 12; tick++ {
 		svc.TickProjectiles(tick, nil, nil, nil, nil, nil, nil, cat, &sim, nil)
@@ -83,7 +83,7 @@ func TestTrailPuffAdditiveDeadlineAndExpiryPuff(t *testing.T) {
 	parent.Pos = wantPos
 
 	var parentEvents []Event
-	parentSvc.Events = func(ev Event) { parentEvents = append(parentEvents, ev) }
+	parentSvc.SetEvents(func(ev Event) { parentEvents = append(parentEvents, ev) })
 	parentSim := rng.NewSimulation(1)
 	for tick := uint32(1); tick <= 12; tick++ {
 		parentSvc.TickProjectiles(tick, nil, nil, nil, nil, nil, nil, cat, &parentSim, nil)

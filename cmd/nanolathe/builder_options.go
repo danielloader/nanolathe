@@ -23,7 +23,7 @@ func (g *gameShell) setBuilderOptions(options settings.BuilderOptions) {
 		command := session.HumanCommand{Kind: session.HumanBuilderOptions, BuilderOptions: session.HumanBuilderOptionsCommand{
 			Owner: g.battle.sess.LocalOwner, Options: *sessionBuilderOptions(options),
 		}}
-		if err := g.battle.sess.EnqueueHumanCommand(command); err != nil {
+		if err := g.battle.enqueueHumanCommand(command); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}

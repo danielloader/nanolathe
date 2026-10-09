@@ -20,7 +20,7 @@ func TestBuilderOptionsBelongToThePlayerAndChangeAtTheBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := s.Build.OrderBinding
-	if b.BuilderOptions(2) != preferred || b.BuilderOptions(3) != orders.DefaultBuilderOptions() {
+	if b.BuilderOptionsHook()(2) != preferred || b.BuilderOptionsHook()(3) != orders.DefaultBuilderOptions() {
 		t.Fatal("human preference crossed the player boundary")
 	}
 	next := preferred
@@ -30,11 +30,11 @@ func TestBuilderOptionsBelongToThePlayerAndChangeAtTheBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.applyHumanCommands(10)
-	if b.BuilderOptions(2) != preferred {
+	if b.BuilderOptionsHook()(2) != preferred {
 		t.Fatal("preference changed before the input boundary")
 	}
 	s.applyHumanCommands(11)
-	if b.BuilderOptions(2) != next || b.BuilderOptions(3) != orders.DefaultBuilderOptions() {
+	if b.BuilderOptionsHook()(2) != next || b.BuilderOptionsHook()(3) != orders.DefaultBuilderOptions() {
 		t.Fatal("command did not update only its player through the existing binding")
 	}
 	for _, owner := range []uint8{3, 10} {
@@ -51,7 +51,7 @@ func TestBuilderOptionsBelongToThePlayerAndChangeAtTheBoundary(t *testing.T) {
 	if err := s.initializeBuilderOptions(nil); err != nil {
 		t.Fatal(err)
 	}
-	if b.BuilderOptions(2) != orders.DefaultBuilderOptions() {
+	if b.BuilderOptionsHook()(2) != orders.DefaultBuilderOptions() {
 		t.Fatal("new battle retained old preferences")
 	}
 }

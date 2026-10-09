@@ -17,7 +17,7 @@ func TestAlliedJammerDecisionAndStrictBypass(t *testing.T) {
 	alliedCalls := 0
 	s := &Service{Community: CommunityState{
 		AlliedJammingIgnored: true,
-		Allied: func(gotViewer, gotOwner PlayerID) bool {
+		allied: func(gotViewer, gotOwner PlayerID) bool {
 			alliedCalls++
 			return gotViewer == viewer && gotOwner == alliedOwner
 		},
@@ -56,7 +56,7 @@ func TestAlliedJammerDoesNotClearSensorContact(t *testing.T) {
 		s.Rules = r
 		s.Community = CommunityState{
 			AlliedJammingIgnored: ignored,
-			Allied: func(viewer, other PlayerID) bool {
+			allied: func(viewer, other PlayerID) bool {
 				return viewer == 0 && other == 1
 			},
 		}

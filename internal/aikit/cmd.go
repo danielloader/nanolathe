@@ -1,6 +1,8 @@
 package aikit
 
 import (
+	"math"
+
 	"github.com/nanolathe-gg/nanolathe/internal/ai"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
@@ -106,12 +108,16 @@ const (
 
 // executor applies batches on the simulation thread.
 type executor struct {
-	m        *ai.Manager
-	table    *Table
-	mapInfo  *MapInfo
-	obs      *Obs // latest observation (own factory lanes)
-	places   []*placeDef
-	stats    ApplyStats
+	m       *ai.Manager
+	table   *Table
+	mapInfo *MapInfo
+	obs     *Obs // latest observation (own factory lanes)
+	places  []*placeDef
+	stats   ApplyStats
+	// Temporary simulation-thread diagnostic scope; never checkpoint payload.
+	checkpointApplication *checkpointCommand
+	checkpointBatchSerial uint64
+
 	tokens   int64 // APM bucket, thousandths of an action
 	lastFill uint32
 
@@ -390,6 +396,7 @@ func (e *executor) capReached(c *Command, w *units.World) bool {
 	}
 	e.stats.Stale++
 	e.stats.Capped++
+	e.checkpointReject()
 	return true
 }
 
@@ -450,16 +457,36 @@ func (e *executor) apply(b *batch, tick uint32, w *units.World, persona *Persona
 	e.refreshFeatures(tick)
 	for i := range b.cmds {
 		c := &b.cmds[i]
-		if persona.APM > 0 {
-			if e.tokens < 1000 {
-				e.stats.DroppedAPM++
-				continue
+		func() {
+			if uint64(i) > math.MaxUint32 {
+				e.m.CheckpointApplicationHistory().Fail(executorCheckpointError("aikit.application.ordinal", "a representable command ordinal"))
 			}
-			e.tokens -= 1000
-		}
-		if e.exec(c, b, tick, w) {
-			e.stats.Applied++
-		}
+			state := e.newCheckpointCommand(c, b, tick, e.checkpointBatchSerial, uint32(i))
+			previous := e.checkpointApplication
+			e.checkpointApplication = state
+			restore := e.observeCheckpointLayout(e.checkpointAttempt())
+			apm, returned := uint8(1), false
+			defer func() {
+				restore()
+				e.checkpointApplication = previous
+				if returned {
+					state.finish(apm)
+				}
+			}()
+			if persona.APM > 0 {
+				if e.tokens < 1000 {
+					e.stats.DroppedAPM++
+					apm, returned = 3, true
+					return
+				}
+				e.tokens -= 1000
+				apm = 2
+			}
+			if e.exec(c, b, tick, w) {
+				e.stats.Applied++
+			}
+			returned = true
+		}()
 	}
 }
 
@@ -484,6 +511,7 @@ func (e *executor) exec(c *Command, b *batch, tick uint32, w *units.World) bool 
 	if c.Kind == CmdAttack || c.Kind == CmdGuard || c.Kind == CmdRepair || c.Kind == CmdReclaim {
 		target = e.targetOK(w, c)
 		if target == nil {
+			e.checkpointReject()
 			e.stats.Stale++
 			e.stats.Reasons[FailTarget]++
 			return false
@@ -503,39 +531,52 @@ func (e *executor) exec(c *Command, b *batch, tick uint32, w *units.World) bool 
 	for i := c.first; i < c.first+c.count; i++ {
 		u := e.actorOK(w, b.actors[i], b.inst[i])
 		if u == nil {
+			e.checkpointReject()
 			continue
 		}
 		actors++
 		q := orders.BindQueueBinding(u, e.m.OrderBinding)
 		if q == nil {
+			e.checkpointReject()
 			continue
 		}
-		if c.Kind == CmdStop {
-			q.PurgeUnprotected()
-			q.DropLeadingAutoOps()
+		func() {
+			restore := e.checkpointAttempt().ObserveQueue(q, u)
+			actor := e.checkpointActor(u)
+			defer restore()
+			if c.Kind == CmdStop {
+				q.PurgeUnprotected()
+				q.DropLeadingAutoOps()
+				issued = true
+				e.checkpointAccept()
+				return
+			}
+			if c.Kind == CmdAttack && !e.canChase(u, target) {
+				e.checkpointReject()
+				return // keeps its current order
+			}
+			id := orders.Resolve(orderCodes[c.Kind], u, target, &orders.ResolvePos{X: x, Y: y, Z: z})
+			if id == 0 {
+				e.checkpointReject()
+				return
+			}
+			if !c.Queued {
+				q.PurgeUnprotected()
+				q.DropLeadingAutoOps()
+			}
+			var th pool.Handle
+			if target != nil {
+				th = target.Handle
+			}
+			node := orders.NewNodeForOrder(id, th, x, y, z, tick, u.Handle, c.Queued)
+			mark := e.checkpointAttempt().InsertionIndex()
+			q.Push(id, node)
+			e.checkpointOrderOutcome(mark, actor, 1)
 			issued = true
-			continue
-		}
-		if c.Kind == CmdAttack && !e.canChase(u, target) {
-			continue // keeps its current order
-		}
-		id := orders.Resolve(orderCodes[c.Kind], u, target, &orders.ResolvePos{X: x, Y: y, Z: z})
-		if id == 0 {
-			continue
-		}
-		if !c.Queued {
-			q.PurgeUnprotected()
-			q.DropLeadingAutoOps()
-		}
-		var th pool.Handle
-		if target != nil {
-			th = target.Handle
-		}
-		node := orders.NewNodeForOrder(id, th, x, y, z, tick, u.Handle, c.Queued)
-		q.Push(id, node)
-		issued = true
+		}()
 	}
 	if !issued {
+		e.checkpointReject()
 		e.stats.Failed++
 		if actors == 0 {
 			e.stats.Reasons[FailNoActor]++
@@ -563,12 +604,14 @@ func (e *executor) canChase(u, target *units.Unit) bool {
 }
 
 func (e *executor) execBuild(c *Command, b *batch, tick uint32, w *units.World) bool {
-	if c.count < 1 || c.Product == nil || e.m.QueueBuildTyped == nil {
+	if c.count < 1 || c.Product == nil || e.m.QueueBuildTypedHook() == nil {
+		e.checkpointReject()
 		e.stats.Failed++
 		return false
 	}
 	u := e.actorOK(w, b.actors[c.first], b.inst[c.first])
 	if u == nil {
+		e.checkpointReject()
 		e.stats.Stale++
 		e.stats.Reasons[FailNoActor]++
 		return false
@@ -591,6 +634,7 @@ func (e *executor) execBuild(c *Command, b *batch, tick uint32, w *units.World) 
 		cx, cz, ok = e.findSite(c.Product, c.X, c.Z, c.Spacing, w, tick)
 	}
 	if !ok {
+		e.checkpointReject()
 		e.stats.Failed++
 		e.stats.Reasons[FailNoSite]++
 		return false
@@ -600,10 +644,15 @@ func (e *executor) execBuild(c *Command, b *batch, tick uint32, w *units.World) 
 	wz := numeric.Fixed(int64(p.footZ+2*cz) << 19)
 	q := orders.BindQueueBinding(u, e.m.OrderBinding)
 	if q == nil {
+		e.checkpointReject()
 		e.stats.Failed++
 		return false
 	}
+	restore := e.checkpointAttempt().ObserveQueue(q, u)
+	actor := e.checkpointActor(u)
+	defer restore()
 	if orders.Resolve(14, u, nil, &orders.ResolvePos{X: wx, Z: wz}) == 0 {
+		e.checkpointReject()
 		e.stats.Failed++
 		e.stats.Reasons[FailBuildGate]++
 		return false
@@ -612,7 +661,10 @@ func (e *executor) execBuild(c *Command, b *batch, tick uint32, w *units.World) 
 		q.PurgeUnprotected()
 		q.DropLeadingAutoOps()
 	}
-	err := e.m.QueueBuildTyped(ai.BuildRequest{Builder: u.Handle, UnitKey: c.Product.Key, X: wx, Z: wz, Count: 1, Kind: ai.BuildKindMobileSite})
+	req := ai.BuildRequest{Builder: u.Handle, UnitKey: c.Product.Key, X: wx, Z: wz, Count: 1, Kind: ai.BuildKindMobileSite}
+	mark := e.checkpointAttempt().InsertionIndex()
+	err := e.m.QueueBuildTypedHook()(req)
+	e.checkpointBuildOutcome(mark, actor, req, err)
 	if err != nil {
 		e.stats.Failed++
 		e.stats.Reasons[FailQueue]++
@@ -622,12 +674,14 @@ func (e *executor) execBuild(c *Command, b *batch, tick uint32, w *units.World) 
 }
 
 func (e *executor) execProduce(c *Command, b *batch, w *units.World) bool {
-	if c.count < 1 || c.Product == nil || e.m.QueueBuildTyped == nil {
+	if c.count < 1 || c.Product == nil || e.m.QueueBuildTypedHook() == nil {
+		e.checkpointReject()
 		e.stats.Failed++
 		return false
 	}
 	u := e.actorOK(w, b.actors[c.first], b.inst[c.first])
 	if u == nil {
+		e.checkpointReject()
 		e.stats.Stale++
 		e.stats.Reasons[FailNoActor]++
 		return false
@@ -639,7 +693,12 @@ func (e *executor) execProduce(c *Command, b *batch, w *units.World) bool {
 	if n < 1 {
 		n = 1
 	}
-	if err := e.m.QueueBuildTyped(ai.BuildRequest{Builder: u.Handle, UnitKey: c.Product.Key, Count: int(n), Kind: ai.BuildKindFactoryQueue}); err != nil {
+	req := ai.BuildRequest{Builder: u.Handle, UnitKey: c.Product.Key, Count: int(n), Kind: ai.BuildKindFactoryQueue}
+	actor := e.checkpointActor(u)
+	mark := e.checkpointAttempt().InsertionIndex()
+	err := e.m.QueueBuildTypedHook()(req)
+	e.checkpointBuildOutcome(mark, actor, req, err)
+	if err != nil {
 		e.stats.Failed++
 		e.stats.Reasons[FailQueue]++
 		return false
@@ -663,18 +722,21 @@ func (k *Kit) Replace(builder, old pool.Handle, product *UnitInfo, spot int32) {
 // old building still covers it.
 func (e *executor) execReplace(c *Command, b *batch, tick uint32, w *units.World) bool {
 	m := e.mapInfo
-	if c.count < 1 || c.Product == nil || e.m.QueueBuildTyped == nil || m == nil || c.Spot < 0 || int(c.Spot) >= len(m.Spots) {
+	if c.count < 1 || c.Product == nil || e.m.QueueBuildTypedHook() == nil || m == nil || c.Spot < 0 || int(c.Spot) >= len(m.Spots) {
+		e.checkpointReject()
 		e.stats.Failed++
 		return false
 	}
 	u := e.actorOK(w, b.actors[c.first], b.inst[c.first])
 	if u == nil {
+		e.checkpointReject()
 		e.stats.Stale++
 		e.stats.Reasons[FailNoActor]++
 		return false
 	}
 	old := e.targetOK(w, c)
 	if old == nil || old.Owner != e.m.Player {
+		e.checkpointReject()
 		e.stats.Stale++
 		e.stats.Reasons[FailTarget]++
 		return false
@@ -684,6 +746,7 @@ func (e *executor) execReplace(c *Command, b *batch, tick uint32, w *units.World
 	}
 	p := e.placement(c.Product)
 	if !p.ok {
+		e.checkpointReject()
 		e.stats.Failed++
 		e.stats.Reasons[FailNoSite]++
 		return false
@@ -691,32 +754,45 @@ func (e *executor) execReplace(c *Command, b *batch, tick uint32, w *units.World
 	sp := &m.Spots[c.Spot]
 	cx, cz := sp.X/16-p.footX/2, sp.Z/16-p.footZ/2
 	if !e.terrainFits(p, cx, cz) {
+		e.checkpointReject()
 		e.stats.Failed++
 		e.stats.Reasons[FailNoSite]++
 		return false
 	}
 	q := orders.BindQueueBinding(u, e.m.OrderBinding)
 	if q == nil {
+		e.checkpointReject()
 		e.stats.Failed++
 		return false
 	}
+	restore := e.checkpointAttempt().ObserveQueue(q, u)
+	actor := e.checkpointActor(u)
+	defer restore()
 	wx := numeric.Fixed(int64(p.footX+2*cx) << 19)
 	wz := numeric.Fixed(int64(p.footZ+2*cz) << 19)
 	if orders.Resolve(14, u, nil, &orders.ResolvePos{X: wx, Z: wz}) == 0 {
+		e.checkpointReject()
 		e.stats.Failed++
 		e.stats.Reasons[FailBuildGate]++
 		return false
 	}
 	id := orders.Resolve(orderCodes[CmdReclaim], u, old, &orders.ResolvePos{X: old.X, Y: old.Y, Z: old.Z})
 	if id == 0 {
+		e.checkpointReject()
 		e.stats.Failed++
 		e.stats.Reasons[FailResolve]++
 		return false
 	}
 	q.PurgeUnprotected()
 	q.DropLeadingAutoOps()
+	mark := e.checkpointAttempt().InsertionIndex()
 	q.Push(id, orders.NewNodeForOrder(id, old.Handle, old.X, old.Y, old.Z, tick, u.Handle, false))
-	if err := e.m.QueueBuildTyped(ai.BuildRequest{Builder: u.Handle, UnitKey: c.Product.Key, X: wx, Z: wz, Count: 1, Kind: ai.BuildKindMobileSite}); err != nil {
+	e.checkpointOrderOutcome(mark, actor, 1)
+	req := ai.BuildRequest{Builder: u.Handle, UnitKey: c.Product.Key, X: wx, Z: wz, Count: 1, Kind: ai.BuildKindMobileSite}
+	mark = e.checkpointAttempt().InsertionIndex()
+	err := e.m.QueueBuildTypedHook()(req)
+	e.checkpointBuildOutcome(mark, actor, req, err)
+	if err != nil {
 		e.stats.Failed++
 		e.stats.Reasons[FailQueue]++
 		return false

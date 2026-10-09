@@ -54,7 +54,7 @@ func airBaseSeekFixture(t *testing.T) (*System, *units.World, *units.Unit, *rng.
 	t.Helper()
 	sys, w, u := airFixture(t)
 	sim := rng.NewSimulation(0x2f6b1c05)
-	orders.QueueForUnit(u).SetBinding(&orders.QueueBinding{SimRNG: &sim, Lookup: w.Unit})
+	orders.QueueForUnit(u).SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{SimRNG: &sim, Lookup: w.Unit}))
 	return sys, w, u, &sim
 }
 
@@ -350,13 +350,13 @@ func TestAirBaseRegistryFilesAlliedPads(t *testing.T) {
 
 	// Row A of `from` indexed by `toward`: only player 1 declares toward the
 	// aircraft's group 0.
-	orders.QueueForUnit(u).SetBinding(&orders.QueueBinding{
+	orders.QueueForUnit(u).SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{
 		SimRNG: sim,
 		Lookup: w.Unit,
-		World: &orders.WorldQueryAdapter{
+		World: orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{
 			DeclaresAlliance: func(from, toward uint8) bool { return from == 1 && toward == 0 },
-		},
-	})
+		}),
+	}))
 	sys.BeginTick(30)
 
 	got := sys.airBaseCandidates(u)

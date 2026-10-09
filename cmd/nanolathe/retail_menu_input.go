@@ -282,6 +282,11 @@ func (g *gameShell) activateGadget(name string) {
 	if g.activateModsGadget(name) {
 		return
 	}
+	// The online screen and its lobby are children over MAINMENU too
+	// (DESIGN_MULTIPLAYER §16.6.2).
+	if g.activateOnlineGadget(name) {
+		return
+	}
 	// The save/load dialog is a child window over the screen that opened it,
 	// so its controls are resolved before the underlying screen's [07 R-FE-01 §8].
 	if g.activateSaveLoadGadget(name) {
@@ -321,6 +326,10 @@ func (g *gameShell) activateGadget(name string) {
 			// the Mods & Mutators window (DESIGN_INTERFACE_HUD_INPUT §3.17).
 			if !g.openNLScreen() {
 				g.openModsScreenReporting()
+			}
+		case "MULTI":
+			if onlinePlayAvailable() {
+				g.openOnlineScreenReporting()
 			}
 		case "INTRO":
 			reportRetailMessageError(g.startIntro(clPtr))
@@ -397,12 +406,12 @@ func (g *gameShell) activateGadget(name string) {
 				reportRetailMessageError(g.showRetailMessage(err.Error()))
 			}
 		case "PREVMENU":
-			g.openMenu(g.mapReturn)
+			g.leaveMapPicker()
 		case "LOAD", "MAPNAMES":
 			if len(g.maps) != 0 && g.mapIdx >= 0 && g.mapIdx < len(g.maps) {
 				g.setup.MapName = g.maps[g.mapIdx]
 				g.saveSettings()
-				g.openMenu(g.mapReturn)
+				g.leaveMapPicker()
 			}
 		}
 	case modeMenuSkirmish:

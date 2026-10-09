@@ -47,13 +47,22 @@ func (e *executor) reclaimFeature(u *units.Unit, q *orders.Queue, ax, az int32, 
 	}
 	id := orders.Resolve(orderCodes[CmdReclaim], u, nil, &orders.ResolvePos{X: x, Y: y, Z: z, HasFeature: true})
 	if id == 0 {
+		e.checkpointReject()
 		return false
 	}
+	// The caller already bound q. Capture identity before purge/preparation
+	// callbacks, and observe only this selected target (DESIGN_MULTIPLAYER §16.3.32).
+	a := e.checkpointAttempt()
+	actor := e.checkpointActor(u)
+	restore := a.ObserveQueue(q, u)
+	defer restore()
 	if replace {
 		q.PurgeUnprotected()
 		q.DropLeadingAutoOps()
 	}
+	mark := a.InsertionIndex()
 	q.Push(id, orders.NewNodeForOrder(id, 0, x, y, z, tick, u.Handle, !replace))
+	e.checkpointOrderOutcome(mark, actor, 1)
 	return true
 }
 
@@ -61,13 +70,22 @@ func (e *executor) reclaimFeature(u *units.Unit, q *orders.Queue, ax, az int32, 
 func (e *executor) reclaimUnit(u *units.Unit, q *orders.Queue, target *units.Unit, tick uint32, replace bool) bool {
 	id := orders.Resolve(orderCodes[CmdReclaim], u, target, &orders.ResolvePos{X: target.X, Y: target.Y, Z: target.Z})
 	if id == 0 {
+		e.checkpointReject()
 		return false
 	}
+	// The caller already bound q. Capture identity before purge/preparation
+	// callbacks, and observe only this selected target (DESIGN_MULTIPLAYER §16.3.32).
+	a := e.checkpointAttempt()
+	actor := e.checkpointActor(u)
+	restore := a.ObserveQueue(q, u)
+	defer restore()
 	if replace {
 		q.PurgeUnprotected()
 		q.DropLeadingAutoOps()
 	}
+	mark := a.InsertionIndex()
 	q.Push(id, orders.NewNodeForOrder(id, target.Handle, target.X, target.Y, target.Z, tick, u.Handle, !replace))
+	e.checkpointOrderOutcome(mark, actor, 1)
 	return true
 }
 

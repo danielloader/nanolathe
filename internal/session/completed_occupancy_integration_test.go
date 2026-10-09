@@ -85,9 +85,9 @@ func TestCompletedBuildingPreviewAndDirectPlacementAgreeAcrossDeath(t *testing.T
 		t.Fatal("direct or preview placement accepted the live completed building")
 	}
 
-	unitWorld.OnDeathExtra = func(handle pool.Handle, _ units.DeathCause, _ *units.Unit) {
+	unitWorld.SetDeathExtraHook(func(handle pool.Handle, _ units.DeathCause, _ *units.Unit) {
 		build.ReleasePlacement(handle)
-	}
+	})
 	unitWorld.Destroy(h, units.DeathKilled)
 	if result := unitWorld.FinalizeDeath(h, 1); !result.Freed {
 		t.Fatalf("death finalization = %#v", result)

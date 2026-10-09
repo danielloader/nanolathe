@@ -221,9 +221,9 @@ func TestMatchAdmissionReportsEachMismatch(t *testing.T) {
 		}, []error{ErrMatchContentMismatch}},
 		{"a side the content lacks", func(r *MatchConfigRequest) { r.Seats[1].Side = 2 }, []error{ErrMatchContentMismatch}},
 		{"other content limits", func(r *MatchConfigRequest) { r.ContentProfile.Units = 4096 }, []error{ErrMatchContentMismatch}},
-		{"a unit restriction", func(r *MatchConfigRequest) {
+		{"unit restrictions the content was not restricted with", func(r *MatchConfigRequest) {
 			r.UnitRestrictions = []MatchUnitRestriction{{DefinitionID: 1, Unit: "armcom", Limit: 1}}
-		}, []error{ErrMatchConfigurationRejected}},
+		}, []error{ErrMatchContentMismatch}},
 		{"two at once", func(r *MatchConfigRequest) {
 			r.MapSchema = 1
 			r.Mutators.Damage = content.Factor{Num: 2, Den: 1}
@@ -236,9 +236,6 @@ func TestMatchAdmissionReportsEachMismatch(t *testing.T) {
 		}
 		err := ValidateMatchInputs(resolveMatch(t, r), inputs)
 		requireAdmissionKinds(t, c.name, err, c.want...)
-		if c.name == "a unit restriction" && !strings.Contains(err.Error(), "Q16") {
-			t.Fatalf("the restriction refusal does not name Q16: %v", err)
-		}
 	}
 	requireAdmissionKinds(t, "no configuration", ValidateMatchInputs(EffectiveMatchConfig{}, inputs), ErrMatchConfigurationRejected)
 	requireAdmissionKinds(t, "no inputs", ValidateMatchInputs(base, nil), ErrMatchContentMismatch)

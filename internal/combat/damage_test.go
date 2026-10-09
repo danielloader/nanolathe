@@ -19,7 +19,7 @@ import (
 // so a fixture whose subject is not aiming still fires. Every row here reads as
 // a locally controlled human [05 R-SHARE-01 §1].
 func bindFixtureControlBytes(s *Service) {
-	s.ControlByte = func(uint8) uint8 { return ControlByteHuman }
+	s.SetControlByte(func(uint8) uint8 { return ControlByteHuman })
 }
 
 func TestPacketNoGenerationStaleReuse(t *testing.T) {
@@ -406,13 +406,13 @@ func TestDamageGateOnProjectileSide(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var svc Service
 			if tc.rows != nil {
-				svc.ControlByte = table(tc.rows...)
+				svc.SetControlByte(table(tc.rows...))
 			}
 			w, terrain, shooter, target := newTestWorldAndUnits(t)
 			target.Health = 100
 			target.MaxHealth = 100
 			var kinds []EventKind
-			svc.Events = func(ev Event) { kinds = append(kinds, ev.Kind) }
+			svc.SetEvents(func(ev Event) { kinds = append(kinds, ev.Kind) })
 			weapon := wu1913Weapon(40)
 			weapon.ShakeMagnitude = 4
 			weapon.ShakeDuration = 2
@@ -453,12 +453,12 @@ func TestDeathLatchOnVictimControlByte(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var svc Service
-			svc.ControlByte = func(owner uint8) uint8 {
+			svc.SetControlByte(func(owner uint8) uint8 {
 				if owner == 0 { // the shooter's slot must pass gate 1
 					return ControlByteHuman
 				}
 				return tc.control
-			}
+			})
 			w, terrain, shooter, target := newTestWorldAndUnits(t)
 			target.Health = 10
 			target.MaxHealth = 10
@@ -516,8 +516,8 @@ func TestParalyzerHitCreditsTheStunTaskAndTouchesNothingElse(t *testing.T) {
 	}
 	// The seam is a package variable installed by internal/orders in a real
 	// build; a fixture composing internal/combat alone installs its own.
-	prior := ParalyzeTaskPush
-	t.Cleanup(func() { ParalyzeTaskPush = prior })
+	prior, proof := paralyzeTaskPush, checkpointParalyzeTaskInstallation
+	t.Cleanup(func() { paralyzeTaskPush, checkpointParalyzeTaskInstallation = prior, proof })
 
 	// damagemodifier 0.5 in 16.16, so an armored victim is stunned for half as
 	// long as an unarmored one.
@@ -525,11 +525,11 @@ func TestParalyzerHitCreditsTheStunTaskAndTouchesNothingElse(t *testing.T) {
 	run := func(t *testing.T, armored, immune bool, controlByte uint8) ([]push, int32, bool) {
 		t.Helper()
 		var pushes []push
-		ParalyzeTaskPush = func(v *units.Unit, credit uint32, tick uint32) {
+		paralyzeTaskPush = func(v *units.Unit, credit uint32, tick uint32) {
 			pushes = append(pushes, push{victim: v.Handle, credit: credit, tick: tick})
 		}
 		var svc Service
-		svc.ControlByte = func(uint8) uint8 { return controlByte }
+		svc.SetControlByte(func(uint8) uint8 { return controlByte })
 		w, terrain, shooter, target := newTestWorldAndUnits(t)
 		target.Def = &content.UnitDef{
 			UnitName: "stuntest", MaxDamage: 100, Limit: -1,

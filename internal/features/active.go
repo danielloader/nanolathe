@@ -114,6 +114,11 @@ func (s *Service) activeWalk(tick uint32) {
 	if s == nil || s.Terrain == nil {
 		return
 	}
+	// Keep the prior value so reentrant callbacks cannot clear an outer walk
+	// marker (DESIGN_MULTIPLAYER §16.3.11); traversal semantics stay unchanged.
+	wasWalking := s.activeWalking
+	s.activeWalking = true
+	defer func() { s.activeWalking = wasWalking }()
 	// One smoke flag per call, true when the global tick is a multiple of
 	// three, shared across every burning instance in the pass
 	// [05 "Feature burning"].
@@ -264,7 +269,7 @@ func (s *Service) emitBurnSmoke(inst *Instance) {
 		drawX = crt.Rand()
 		drawY = crt.Rand()
 	}
-	if s.BurnSmoke == nil {
+	if s.BurnSmokeHook() == nil {
 		return
 	}
 	// The base is the footprint centre at the sampled terrain height — the
@@ -273,13 +278,13 @@ func (s *Service) emitBurnSmoke(inst *Instance) {
 	px := footprintCentreWorld(inst.CX, inst.FootprintX)
 	pz := footprintCentreWorld(inst.CZ, inst.FootprintZ)
 	py := s.Terrain.HeightAt(px, pz) // sample before jitter [05 R-FEAT-01 §16]
-	if s.BurnFrameGeometry != nil {
+	if s.BurnFrameGeometryHook() != nil {
 		// The frame the cursor is on, asked for by the first visit of that
 		// frame so the resolver's cadence walk lands on it exactly.
-		w, h, xoff, yoff := s.BurnFrameGeometry(inst.Def, inst.cursor.visitIndex())
+		w, h, xoff, yoff := s.BurnFrameGeometryHook()(inst.Def, inst.cursor.visitIndex())
 		dx, dy := burnSmokeJitter(burnFrameGeometry{W: w, H: h, XOff: xoff, YOff: yoff}, drawX, drawY)
 		px = px.Add(numeric.FixedFromInt(int64(dx)))
 		py = py.Add(numeric.FixedFromInt(int64(dy)))
 	}
-	s.BurnSmoke([3]numeric.Fixed{px, py, pz})
+	s.BurnSmokeHook()([3]numeric.Fixed{px, py, pz})
 }

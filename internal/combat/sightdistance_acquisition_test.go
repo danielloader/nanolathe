@@ -63,7 +63,7 @@ func sightScanFixture(t *testing.T, reach int32, weaponRange int32) (*Service, *
 	shooter.Flags |= units.ArmedStatus
 	shooter.InstallWeapon(0, &content.WeaponDef{ID: 77, Range: weaponRange, Turret: true, LineOfSight: true, WeaponVelocity: 100 * 65536 / 30})
 
-	s := &Service{Visibility: func(visibility.PlayerID, visibility.Target) bool { return true }}
+	s := NewService(ServiceConfig{Visibility: func(visibility.PlayerID, visibility.Target) bool { return true }})
 	// The registry is filled directly: the cadence, not the candidate set, is
 	// what a rebuild would decide here [06 §3.1].
 	s.targets.primary[shooter.Owner] = []pool.Handle{hostile.Handle}
@@ -174,7 +174,7 @@ func TestModernSightDistanceCallerKeepsNoChaseAndWeaponRange(t *testing.T) {
 	fixture := func(reach, weaponRange int32) (*Service, *units.World, *world.Terrain, *units.Unit, *units.Unit) {
 		s, w, terrain, shooter, hostile := sightScanFixture(t, reach, weaponRange)
 		s.Rules = &ModernRules{}
-		s.Reaction = &ReactionSeams{Allied: func(a, b uint8) bool { return a == b }}
+		s.Reaction = NewReactionSeams(ReactionSeamsConfig{Allied: func(a, b uint8) bool { return a == b }})
 		// Modern admits only a candidate this weapon can actually damage.
 		hostile.Def.DamageModifier = 65536
 		weapon := *shooter.SlotAt(0).Weapon

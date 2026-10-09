@@ -17,13 +17,13 @@ func TestPatrolInsertedAttackDispatchesSamePass(t *testing.T) {
 	u.Flags = (u.Flags &^ (stanceFieldMask << stanceMoveShift)) | (2 << stanceMoveShift)
 	u.Flags = (u.Flags &^ (stanceFieldMask << stanceFireShift)) | (2 << stanceFireShift)
 	enemy := &units.Unit{Handle: 2, Def: &content.UnitDef{BMCode: 1, MaxDamage: 100}, Alive: true, X: 120 << 16, Z: 90 << 16, Health: 100, MaxHealth: 100}
-	q.binding.Lookup = func(h pool.Handle) *units.Unit {
+	q.binding.SetLookup(func(h pool.Handle) *units.Unit {
 		if h == enemy.Handle {
 			return enemy
 		}
 		return nil
-	}
-	q.binding.Weapons = &WeaponAdapter{Acquire: func(_ *units.Unit, slot int, _ uint32) (pool.Handle, bool) { return enemy.Handle, slot == 0 }}
+	})
+	q.binding.Weapons = NewWeaponAdapter(WeaponAdapterConfig{Acquire: func(_ *units.Unit, slot int, _ uint32) (pool.Handle, bool) { return enemy.Handle, slot == 0 }})
 	attack := Resolve(3, u, enemy, nil)
 	called := false
 	q.SetOwnedHandler(attack, func(*units.Unit, *Node, uint32, uint32) (Code, bool) { called = true; return 0, false })

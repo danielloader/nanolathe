@@ -25,13 +25,13 @@ func moveGoalFixture() (*Queue, *units.Unit, *[]PointGoalRequest, *[]*Node) {
 	}
 	q := &Queue{binding: &QueueBinding{
 		SimRNG: rng.Global.Sim,
-		Movement: &MovementGoalAdapter{
+		Movement: NewMovementGoalAdapter(MovementGoalAdapterConfig{
 			InstallPoint: func(req PointGoalRequest) bool {
 				*installs = append(*installs, req)
 				return true
 			},
 			Release: func(n *Node) bool { *releases = append(*releases, n); return true },
-		},
+		}),
 	}}
 	BindQueue(u, q)
 	return q, u, installs, releases
@@ -116,10 +116,10 @@ func TestMoveGroundArrivalCompletesAfterTheInstall(t *testing.T) {
 	}
 	q, u, spy := arrivedFixture(nil)
 	var installs []PointGoalRequest
-	q.binding.Movement = &MovementGoalAdapter{
+	q.binding.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{
 		InstallPoint: func(req PointGoalRequest) bool { installs = append(installs, req); return true },
 		Release:      func(*Node) bool { return true },
-	}
+	})
 	q.Push(id, Node{Owner: u.Handle, GoalX: numeric.Fixed(300 << 16), GoalZ: numeric.Fixed(420 << 16), GoalSupplied: true})
 	q.Pump(u, 40)
 	if len(installs) != 1 {

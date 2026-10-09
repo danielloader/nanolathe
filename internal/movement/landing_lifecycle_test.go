@@ -28,10 +28,10 @@ func TestLandingPadRemovalInterruptsDescent(t *testing.T) {
 	n.Deadline = 15
 	sys.BindAirOrderLegs()
 	var messages []string
-	q.Binding().Presentation = &orders.PresentationAdapter{Status: func(_ *units.Unit, _ uint8, message string) bool {
+	q.Binding().Presentation = orders.NewPresentationAdapter(orders.PresentationAdapterConfig{Status: func(_ *units.Unit, _ uint8, message string) bool {
 		messages = append(messages, message)
 		return true
-	}}
+	}})
 	orders.TargetRemoved(w, pad.Handle)
 	pad.Alive = false
 	for tick := uint32(1); tick <= 3; tick++ {

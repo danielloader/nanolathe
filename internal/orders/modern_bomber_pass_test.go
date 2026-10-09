@@ -19,7 +19,7 @@ func TestModernBomberLeashBoundary(t *testing.T) {
 					q, u := gateFixture()
 					b := q.Binding()
 					b.Rules = modeRules(modern)
-					b.Lookup = func(pool.Handle) *units.Unit { return u }
+					b.SetLookup(func(pool.Handle) *units.Unit { return u })
 					ledger := &economy.Service{}
 					b.Economy = ledger
 					q.Push(Lookup(name), Node{Owner: u.Handle, Target: 7, Phase: phase, GuardX: 70, GuardY: 60, Param3: 30})
@@ -53,7 +53,7 @@ func TestModernBomberPassStillCancels(t *testing.T) {
 	for _, reason := range []uint32{pendTargetRemoved, pendTargetCloaked, gateCancelCurrent, 0} {
 		q, u := gateFixture()
 		q.Binding().Rules = &ModernRules{}
-		q.Binding().Lookup = func(pool.Handle) *units.Unit { return u }
+		q.Binding().SetLookup(func(pool.Handle) *units.Unit { return u })
 		q.Push(Lookup("AirStrike"), Node{Owner: u.Handle, Target: 7, Phase: 2, GuardX: 70, GuardY: 60, Param3: 30})
 		n := q.Head()
 		q.Push(Lookup("VTOL_Move"), Node{Owner: u.Handle})
@@ -74,7 +74,7 @@ func TestModernBomberLeashResumesReturnAfterOverflight(t *testing.T) {
 	q, u := gateFixture()
 	b := q.Binding()
 	b.Rules = &ModernRules{}
-	b.Lookup = func(pool.Handle) *units.Unit { return u }
+	b.SetLookup(func(pool.Handle) *units.Unit { return u })
 	q.Push(Lookup("AirStrike"), Node{Owner: u.Handle, Target: 7, Phase: 6, GuardX: 70, GuardY: 60, Param3: 30})
 	attack := q.Head()
 	attack.DynamicGate = 0xE2

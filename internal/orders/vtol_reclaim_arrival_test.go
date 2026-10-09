@@ -12,7 +12,7 @@ func TestVTOLReclaimUnreachableMarkerEndsTheOrder(t *testing.T) {
 	n := q.Primary()[0]
 	n.Phase = 1
 	var installs int
-	q.binding.Movement.InstallAir = func(AirGoalRequest) bool { installs++; return true }
+	q.binding.Movement.SetInstallAir(func(AirGoalRequest) bool { installs++; return true })
 	q.Pump(builder, 100)
 	if n.Phase != 2 || n.DynamicGate != gateMoveOutcomes || n.Deadline != -1 || installs != 1 {
 		t.Fatalf("marker wait: phase=%d gate=%#x deadline=%d installs=%d", n.Phase, n.DynamicGate, n.Deadline, installs)

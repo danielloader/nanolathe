@@ -450,9 +450,10 @@ type Unit struct {
 	// Typed per-unit state introduced for P0-I02 real pipeline [04 §1.1][04 §4][06][GAP T15].
 	// These fields own the authoritative per-unit data that the phase-2 sweep
 	// visits in players-asc then slots-asc order [01 §6.2] C2 [P0-16].
-	ScriptState *ScriptState   // per-unit COB VM/thread/piece state [04 §4.1][04 §4.2][GAP T15]; nil if not yet wired
-	Slots       [NumSlots]Slot // three weapon slots [06 §1.2] C1 P0-10; local Slot avoids units→combat→economy→units cycle
-	Move        MoveState      // movement status shared with movement.System [04 §8.1][04 §9.1] (movement imports units)
+	ScriptState      *ScriptState                     // per-unit COB VM/thread/piece state [04 §4.1][04 §4.2][GAP T15]; nil if not yet wired
+	checkpointScript checkpointUnitScriptInstallation // local receipt ownership, never wire state
+	Slots            [NumSlots]Slot                   // three weapon slots [06 §1.2] C1 P0-10; local Slot avoids units→combat→economy→units cycle
+	Move             MoveState                        // movement status shared with movement.System [04 §8.1][04 §9.1] (movement imports units)
 	// BobPhase is the hover bob's per-unit phase word: a signed 16-bit angle
 	// added to the four-corner bob angle so hovercraft rock out of phase with
 	// one another [04 R-MOV-01 §5]. Its single writer is the common unit
@@ -551,6 +552,9 @@ type Unit struct {
 	// into [03 R-AUD-01 §7]. Like yardTransaction it is runtime topology and is
 	// deliberately absent from authoritative snapshots and save records.
 	statusCue StatusCueSink
+
+	// Installation proofs are diagnostics only, excluded from checkpoint bytes.
+	checkpointCallbacks [2]checkpointCallbackProof
 
 	// MoveTier is the movement-rate classifier's CACHED category — the two bits
 	// the classifier writes as its final act on every run, which retail keeps in
@@ -813,6 +817,7 @@ func (u *Unit) SetActivated(on bool) {
 func (u *Unit) SetYardOpenTransaction(transaction YardOpenTransaction) {
 	if u != nil {
 		u.yardTransaction = transaction
+		u.checkpointCallbacks[checkpointYardTransaction] = checkpointCallbackProof{}
 	}
 }
 
@@ -886,6 +891,7 @@ type StatusCueSink func(u *Unit, code uint8)
 func (u *Unit) SetStatusCueSink(sink StatusCueSink) {
 	if u != nil {
 		u.statusCue = sink
+		u.checkpointCallbacks[checkpointStatusCue] = checkpointCallbackProof{}
 	}
 }
 
@@ -1041,17 +1047,19 @@ type World struct {
 
 	// OnDeath is the death-notification hook [08 "Evaluation"]; nil means no
 	// consumer. It fires exactly once per unit at slot-end finalization.
-	OnDeath DeathHook
+	onDeath         DeathHook
+	deathDispatches uint64 // diagnostic only: primary finalizer hook invocations
 	// OnDeathExtra is a narrow composition observer that survives replacement
 	// of the primary session hook. It fires at the same finalizer boundary,
 	// independently deduplicated, and must not emit duplicate notifications.
-	OnDeathExtra DeathHook
+	onDeathExtra DeathHook
 	// OnCreate is the creation-notification hook [08 "Evaluation"] slot 3;
 	// nil means no consumer. It fires exactly once per unit after Create inserts.
-	OnCreate CreateHook
+	onCreate CreateHook
 	// OnCapture is the capture-transfer hook [08 "Evaluation"] slot 2; nil means
 	// no consumer. It fires exactly once per ownership transfer.
-	OnCapture CaptureHook
+	onCapture           CaptureHook
+	checkpointLifecycle [4]checkpointLifecycleProof
 	// readinessObserver is the sweep's step-7 observation sink
 	// (SetReadinessObserver, pipeline.go); nil means no observer.
 	readinessObserver ReadinessObserver
@@ -1099,6 +1107,10 @@ type World struct {
 	// is retained only for small unit-package fixtures, which receive the
 	// deterministic zero-sample heading and consume no draws [R-P28-ANG-01R §2].
 	simulationRNG *rng.Simulation
+
+	// Installation proof is local diagnostic metadata, never checkpoint data.
+	checkpointBindings     [7]checkpointWorldProof
+	checkpointBinderSource vfs.FSOps
 }
 
 // NewSliced creates the unit world over a retail sliced pool sized from the
@@ -1153,6 +1165,8 @@ func (w *World) SetCOBSource(fs vfs.FSOps, loader *cob.CachedLoader) {
 	}
 	w.cobFS = fs
 	w.cobLoader = loader
+	w.checkpointBindings[checkpointWorldSource] = checkpointWorldProof{}
+	w.checkpointBindings[checkpointWorldLoader] = checkpointWorldProof{}
 }
 
 // COBSource returns the VFS and loader configured for production attachment.
@@ -1172,6 +1186,8 @@ func (w *World) SetCOBBinder(binder COBBinder) {
 		return
 	}
 	w.cobBinder = binder
+	w.checkpointBindings[checkpointWorldBinder] = checkpointWorldProof{}
+	w.checkpointBinderSource = nil
 }
 
 // HasCOBBinder reports whether strict composition owns future allocations.
@@ -1193,6 +1209,7 @@ func (w *World) SetExtractionSampler(s ExtractionSampler) {
 		return
 	}
 	w.extraction = s
+	w.checkpointBindings[checkpointWorldExtraction] = checkpointWorldProof{}
 }
 
 // CreationPose is the post-move Y, pitch and roll correction as the allocator
@@ -1214,6 +1231,7 @@ func (w *World) SetCreationPose(p CreationPose) {
 		return
 	}
 	w.pose = p
+	w.checkpointBindings[checkpointWorldPose] = checkpointWorldProof{}
 }
 
 // allocatorMoverTail is what the allocator does after the initializer and the
@@ -1314,18 +1332,23 @@ func bindTransportQueries(u *Unit) {
 	if vm == nil {
 		return
 	}
-	vm.BindTransportQueries(
-		func(id int32) bool {
-			// A slice walk in link order, never a map range (I1).
-			for i := range u.Attachment.Cargo {
-				if int32(uint16(u.Attachment.Cargo[i])) == id {
-					return true
-				}
+	cargo := func(id int32) bool {
+		// A slice walk in link order, never a map range (I1).
+		for i := range u.Attachment.Cargo {
+			if int32(uint16(u.Attachment.Cargo[i])) == id {
+				return true
 			}
-			return false
-		},
-		func() int32 { return int32(uint16(u.Attachment.Carrier)) },
-	)
+		}
+		return false
+	}
+	carrier := func() int32 { return int32(uint16(u.Attachment.Carrier)) }
+	if authority := u.checkpointScriptAuthority(vm); authority != nil {
+		for _, receipt := range vm.BindTransportQueriesWithPendingCheckpointBinding(cargo, carrier, authority) {
+			u.RetainCheckpointVMInstallation(receipt)
+		}
+	} else {
+		vm.BindTransportQueries(cargo, carrier)
+	}
 }
 
 // hasLoadableCOB verifies the program that the production path will bind
@@ -1391,6 +1414,7 @@ func (w *World) missingCOBError(def *content.UnitDef) error {
 func (w *World) SetSimulationRNG(sim *rng.Simulation) {
 	if w != nil {
 		w.simulationRNG = sim
+		w.checkpointBindings[checkpointWorldRNG] = checkpointWorldProof{}
 	}
 }
 
@@ -1871,6 +1895,7 @@ func (w *World) create(def *content.UnitDef, owner uint8, x, y, z numeric.Fixed,
 	// can publish a command reference (DESIGN_MULTIPLAYER §16.2 M2-C1).
 	w.lastAllocationSerial++
 	u.AllocationSerial = w.lastAllocationSerial
+	u.sealCheckpointScriptInstallations()
 	w.pendingAllocationSerials--
 	serialPending = false
 	// Step 5 of the creation-time callback sequence [04 R-CB-01 §4]: the
@@ -1935,8 +1960,8 @@ func (w *World) create(def *content.UnitDef, owner uint8, x, y, z numeric.Fixed,
 	}
 	w.liveCounters[player]++
 	w.createdCounters[player]++
-	if w.OnCreate != nil {
-		w.OnCreate(h, u)
+	if w.CreateHook() != nil {
+		w.CreateHook()(h, u)
 	}
 	return h, nil
 }
@@ -2196,6 +2221,7 @@ func (w *World) createWithForcedSlotFacing(def *content.UnitDef, owner uint8, x,
 	// can publish a command reference (DESIGN_MULTIPLAYER §16.2 M2-C1).
 	w.lastAllocationSerial++
 	u.AllocationSerial = w.lastAllocationSerial
+	u.sealCheckpointScriptInstallations()
 	w.pendingAllocationSerials--
 	serialPending = false
 	// Same creation-time sample as the ordinary allocator, at the same step 5
@@ -2225,8 +2251,8 @@ func (w *World) createWithForcedSlotFacing(def *content.UnitDef, owner uint8, x,
 	// the save image does not record.
 	w.liveCounters[player]++
 	w.createdCounters[player]++
-	if w.OnCreate != nil {
-		w.OnCreate(h, u)
+	if w.CreateHook() != nil {
+		w.CreateHook()(h, u)
 	}
 	return h, nil
 }
@@ -2235,7 +2261,7 @@ func (w *World) createWithForcedSlotFacing(def *content.UnitDef, owner uint8, x,
 // [08 "Evaluation"] slot 2. Caller must have already changed u.Owner and
 // republished visibility.
 func (w *World) NotifyCapture(h pool.Handle, oldOwner, newOwner uint8) {
-	if w == nil || w.OnCapture == nil {
+	if w == nil || w.CaptureHook() == nil {
 		return
 	}
 	if int(h) >= len(w.units) {
@@ -2245,7 +2271,7 @@ func (w *World) NotifyCapture(h pool.Handle, oldOwner, newOwner uint8) {
 	if u == nil || !u.Alive {
 		return
 	}
-	w.OnCapture(h, oldOwner, newOwner, u)
+	w.CaptureHook()(h, oldOwner, newOwner, u)
 }
 
 // Destroy marks death; the slot stays alive and visible until the next phase-2

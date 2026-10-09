@@ -81,8 +81,8 @@ func (s *Session) initializeBuilderOptions(human *orders.BuilderOptions) error {
 			s.playerBuilderOptions[s.LocalOwner] = *human
 		}
 	}
-	if s.Build != nil && s.Build.OrderBinding != nil && s.Build.OrderBinding.BuilderOptions == nil {
-		s.Build.OrderBinding.BuilderOptions = s.builderOptionsForOwner
+	if s.Build != nil && s.Build.OrderBinding != nil && s.Build.OrderBinding.BuilderOptionsHook() == nil {
+		s.Build.OrderBinding.SetBuilderOptionsWithCheckpointBinding(s.builderOptionsForOwner, s.checkpointBindingAuthority())
 	}
 	return nil
 }

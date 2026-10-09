@@ -12,12 +12,12 @@ func captureAdmissionFixture(t *testing.T) (*units.Unit, *units.Unit, *[]string)
 	t.Helper()
 	q, builder, target := workFixture()
 	var texts []string
-	q.Binding().Presentation = &PresentationAdapter{
+	q.Binding().Presentation = NewPresentationAdapter(PresentationAdapterConfig{
 		Status: func(_ *units.Unit, _ uint8, text string) bool {
 			texts = append(texts, text)
 			return true
 		},
-	}
+	})
 	return builder, target, &texts
 }
 

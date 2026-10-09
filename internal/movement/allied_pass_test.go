@@ -53,7 +53,7 @@ func runPassCase(t *testing.T, c passCase) (blocked bool, sys *System) {
 	q := orders.QueueForUnit(w.Unit(a))
 	q.Push(move, orders.Node{Owner: a, GoalX: world.CellToWorld(c.moverEndCell), GoalZ: row, GoalSupplied: true})
 	if c.allied {
-		q.SetBinding(&orders.QueueBinding{Lookup: w.Unit, World: &orders.WorldQueryAdapter{DeclaresAlliance: func(from, toward uint8) bool { return true }}})
+		q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: w.Unit, World: orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{DeclaresAlliance: func(from, toward uint8) bool { return true }})}))
 	}
 	head := q.Head()
 	sys.InstallPointGoal(orders.PointGoalRequest{Owner: head.Owner, Node: head, X: head.GoalX, Z: head.GoalZ, Radius: 4})

@@ -41,7 +41,7 @@ func TestNearestHostileUnitSkipsImmuneAndCloakedInstance(t *testing.T) {
 
 	e := runtimeEconomy(0, 2)
 	e.Players[1].Exists, e.Players[1].ControllerState = true, 1
-	m := &Manager{Player: 0, IsAlliance: func(uint8, uint8) bool { return false }}
+	m := NewManager(ManagerConfig{Player: 0, IsAlliance: func(uint8, uint8) bool { return false }})
 
 	got := m.nearestHostileUnit(w, e, numeric.FixedFromInt(10), 0, numeric.FixedFromInt(10))
 	if got == nil || got.Handle != dying {
@@ -84,11 +84,11 @@ func TestRallyVectorSkipsMissionImmuneUnits(t *testing.T) {
 
 	e := runtimeEconomy(0, 2)
 	e.Players[1].Exists, e.Players[1].ControllerState = true, 1
-	m := &Manager{
+	m := NewManager(ManagerConfig{
 		Player:       0,
 		IsAlliance:   func(uint8, uint8) bool { return false },
 		RallyVisible: func(uint8, *units.Unit) bool { return true },
-	}
+	})
 
 	m.refreshRallyTargets(w, e)
 	if len(m.rallyTargets) != 1 || m.rallyTargets[0] != plain {

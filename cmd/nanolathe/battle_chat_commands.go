@@ -159,6 +159,17 @@ func (b *battleSession) dispatchLocalCommand(text string) {
 	if len(words) == 0 {
 		return
 	}
+	if b.onlineBattle() {
+		// The play test has no cheat permission or chat transport. Keep the
+		// established local interface gestures; refuse every other +command
+		// before developer dispatch and exact-unit spawn fallbacks.
+		switch strings.ToLower(words[0]) {
+		case "bigbrother", "noshake", "logo", "switchalt":
+		default:
+			b.onlineNotice("This +command is unavailable in multiplayer games")
+			return
+		}
+	}
 	if b.developerCommand(words) {
 		return
 	}

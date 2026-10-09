@@ -122,7 +122,7 @@ func setupJamCase(t *testing.T, c jamCase) (*System, pool.Handle, pool.Handle, f
 	q := orders.QueueForUnit(w.Unit(a))
 	q.Push(orders.Lookup(name), orders.Node{Owner: a, GoalX: world.CellToWorld(c.moverEndCell), GoalZ: row, GoalSupplied: true})
 	if c.oneWayAlly {
-		q.SetBinding(&orders.QueueBinding{Lookup: w.Unit, World: &orders.WorldQueryAdapter{DeclaresAlliance: func(from, toward uint8) bool { return from == 0 && toward == c.ownerB }}})
+		q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: w.Unit, World: orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{DeclaresAlliance: func(from, toward uint8) bool { return from == 0 && toward == c.ownerB }})}))
 	}
 	head := q.Head()
 	if c.routeless {

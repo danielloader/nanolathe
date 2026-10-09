@@ -31,7 +31,7 @@ func (r *recordSink) EmitExplosion(gaf, art string, isWater bool) {
 func runImpactPresentation(w *content.WeaponDef, directTarget, water bool) *recordSink {
 	sink := &recordSink{}
 	var svc Service
-	svc.Events = func(ev Event) {
+	svc.SetEvents(func(ev Event) {
 		switch ev.Kind {
 		case EventShake:
 			sink.Shake(ev.Magnitude, ev.Duration)
@@ -46,7 +46,7 @@ func runImpactPresentation(w *content.WeaponDef, directTarget, water bool) *reco
 		case EventWaterExplosion:
 			sink.EmitExplosion(ev.Bank+"/"+ev.Graphic, "", true)
 		}
-	}
+	})
 	p := &Projectile{Pos: Vec3{}}
 	var terrain *world.Terrain
 	if water {

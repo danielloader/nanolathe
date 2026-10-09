@@ -80,7 +80,7 @@ func approachFixtureAt(t *testing.T, siteCellX, siteCellZ int32, startX, startZ 
 	}
 	// The queue is restored with its session context explicitly attached. The
 	// movement lifecycle must never synthesize context from legacy queue fields.
-	binding := &orders.QueueBinding{SimRNG: rng.Global.Sim, Lookup: w.Unit}
+	binding := orders.NewQueueBinding(orders.QueueBindingConfig{SimRNG: rng.Global.Sim, Lookup: w.Unit})
 	orders.QueueForUnit(builder).SetBinding(binding)
 	node := orders.QueueForUnit(builder).Primary()[0]
 	// The record is left in the state the approach phase's own first visit
@@ -548,12 +548,12 @@ func TestNoRouteWakeOutOfReachAbandons(t *testing.T) {
 	var captions []caption
 	q := orders.QueueOfUnit(builder)
 	binding := q.Binding()
-	binding.Presentation = &orders.PresentationAdapter{
+	binding.Presentation = orders.NewPresentationAdapter(orders.PresentationAdapterConfig{
 		Status: func(_ *units.Unit, kind uint8, text string) bool {
 			captions = append(captions, caption{kind: kind, text: text})
 			return true
 		},
-	}
+	})
 	q.SetBinding(binding)
 	node.Satisfied |= 0x40
 	pumpApproach(svc, builder, 0)

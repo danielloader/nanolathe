@@ -44,7 +44,7 @@ func arriveBind(sys *System, w *units.World, h pool.Handle) {
 	u := w.Unit(h)
 	u.Flags |= 1 << units.StandingMoveShift
 	sys.EnsureUnit(u)
-	orders.QueueForUnit(u).SetBinding(&orders.QueueBinding{Lookup: w.Unit, World: &orders.WorldQueryAdapter{}})
+	orders.QueueForUnit(u).SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: w.Unit, World: &orders.WorldQueryAdapter{}}))
 }
 
 // order gives each unit a plain move to cell (x, z) created on tick.
@@ -273,7 +273,7 @@ func arriveBenchFixture(b *testing.B, pilot ArrivePilot, n int) (*System, *units
 		u := w.Unit(h)
 		u.Flags |= 1 << units.StandingMoveShift
 		sys.EnsureUnit(u)
-		orders.QueueForUnit(u).SetBinding(&orders.QueueBinding{Lookup: w.Unit, World: &orders.WorldQueryAdapter{}})
+		orders.QueueForUnit(u).SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: w.Unit, World: &orders.WorldQueryAdapter{}}))
 	}
 	return sys, w, hs
 }

@@ -35,7 +35,7 @@ import (
 const ArenaSet = "aikit"
 
 func init() {
-	session.RegisterModernAI(utilTacPlanner{})
+	session.RegisterModernAIWithCheckpointBinding(utilTacPlanner{}, aikit.CheckpointControllerSource())
 }
 
 // ArenaRuleSet is the arena's research set: Modern rules whose think step is

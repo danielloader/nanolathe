@@ -235,6 +235,10 @@ type Queue struct {
 	// [AGENTS.md §Diagnostics].
 	diagnostics []string
 
+	// checkpointObserver is a scoped simulation-thread application observer.
+	// It is diagnostic only and must be absent at full checkpoint capture.
+	checkpointObserver CheckpointOrderObserver
+
 	// secondaryTick is the per-queue tick published by the secondary walk. It
 	// remains queue-owned state for handlers that need the most recent rear
 	// segment visit; callers obtain session inputs from binding instead of
@@ -262,6 +266,8 @@ type Queue struct {
 	// primary walk without introducing package-global session state
 	// [04 R-FAC-02 §4][P0-I16].
 	ownedHandlers []OwnedHandler
+	// Immutable handler values transfer with the existing row copy (§16.3.62).
+	checkpointOwnedHandlers []CheckpointOwnedHandler
 }
 
 // [P2-03][P1-I09] Queue storage is dynamic, matching retail's heap-linked list
@@ -1534,6 +1540,7 @@ func BindQueue(u *units.Unit, q *Queue) {
 		// until the next bind.
 		if prior := QueueOfUnit(u); prior != nil && prior.ownedHandlers != nil {
 			q.ownedHandlers = append([]OwnedHandler(nil), prior.ownedHandlers...)
+			q.checkpointOwnedHandlers = append([]CheckpointOwnedHandler(nil), prior.checkpointOwnedHandlers...)
 		}
 	}
 	u.Orders = q

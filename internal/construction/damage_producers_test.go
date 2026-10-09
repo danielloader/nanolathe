@@ -15,9 +15,9 @@ import (
 // receiver that session composition binds in a battle. Producer tests must not
 // replace the shared packet path with a local health or death substitute.
 func bindConstructionCombat(s *Service) {
-	s.Combat = &combat.Service{
+	s.Combat = combat.NewService(combat.ServiceConfig{
 		ControlByte: func(uint8) uint8 { return combat.ControlByteHuman },
-	}
+	})
 }
 
 // The fixed kind-9 nominal bypasses armor at 30000 but still passes through
@@ -67,10 +67,10 @@ func TestUnitReclaimPulseUsesCommonDamageIntake(t *testing.T) {
 
 	var reactionCount int
 	var sawFlash, sawSide, sawCause uint8
-	s.Combat.Reaction = &combat.ReactionSeams{ObserverNotice: func(v *units.Unit) {
+	s.Combat.Reaction = combat.NewReactionSeams(combat.ReactionSeamsConfig{ObserverNotice: func(v *units.Unit) {
 		reactionCount++
 		sawFlash, sawSide, sawCause = uint8(v.BlinkSuppress), v.LastDamageSide, v.LastDamageCause
-	}}
+	}})
 
 	s.stepUnitReclaim(builder, node, 61)
 
@@ -113,16 +113,16 @@ func TestGetBuiltReverseDeliversCurrentTickAfterRefund(t *testing.T) {
 	var sawRefund float32
 	var sawHealth int32
 	var sawSide, sawCause uint8
-	s.Combat.Reaction = &combat.ReactionSeams{ObserverNotice: func(v *units.Unit) {
+	s.Combat.Reaction = combat.NewReactionSeams(combat.ReactionSeamsConfig{ObserverNotice: func(v *units.Unit) {
 		sawRefund = (*s.Economy.UnitBuckets(frame.Handle))[economy.Metal].Production
 		sawHealth, sawSide, sawCause = v.Health, v.LastDamageSide, v.LastDamageCause
-	}}
+	}})
 	var flash combat.Event
-	s.Combat.Events = func(ev combat.Event) {
+	s.Combat.SetEvents(func(ev combat.Event) {
 		if ev.Kind == combat.EventDamageFlash {
 			flash = ev
 		}
-	}
+	})
 
 	const tick = 73
 	if code := s.handleGetBuiltOrder(frame, q.Primary()[0], 0, tick); code != 2 {

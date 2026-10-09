@@ -187,9 +187,9 @@ func (s *System) takeoffPreamble(u *units.Unit, rec *orders.Node) bool {
 	// Step 1 — each air takeoff releases all three manual-target latches in
 	// numeric slot order. The queue binding owns the combat state; a missing
 	// adapter is an unbound fixture and leaves that state untouched.
-	if q := orders.QueueOfUnit(u); q != nil && q.Binding() != nil && q.Binding().Weapons != nil && q.Binding().Weapons.ReleaseSlot != nil {
+	if q := orders.QueueOfUnit(u); q != nil && q.Binding() != nil && q.Binding().Weapons != nil && q.Binding().Weapons.ReleaseSlotHook() != nil {
 		for idx := 0; idx < units.NumSlots; idx++ {
-			q.Binding().Weapons.ReleaseSlot(u, idx)
+			q.Binding().Weapons.ReleaseSlotHook()(u, idx)
 		}
 	}
 	// Step 2 — the self-detach requests mode 2 directly: the detach's apply

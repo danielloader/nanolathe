@@ -107,8 +107,8 @@ func dropFromCarrier(u *units.Unit) bool {
 		return true
 	}
 	if q := QueueOfUnit(u); q != nil {
-		if b := q.Binding(); b != nil && b.Movement != nil && b.Movement.DetachTakeoff != nil {
-			return b.Movement.DetachTakeoff(u)
+		if b := q.Binding(); b != nil && b.Movement != nil && b.Movement.DetachTakeoffHook() != nil {
+			return b.Movement.DetachTakeoffHook()(u)
 		}
 	}
 	// An incomplete host binding cannot perform a spatial mutation. The
@@ -259,8 +259,8 @@ func vtolHelpBuildHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32)
 		// Movement constructs the due orbit marker before this visit's work,
 		// including its finishing quantum [04 §10.3].
 		if q := QueueForUnit(u); q != nil && q.Binding() != nil {
-			if movement := q.Binding().Movement; movement != nil && movement.RunAir != nil {
-				movement.RunAir(u, n, satisfied, tick)
+			if movement := q.Binding().Movement; movement != nil && movement.RunAirHook() != nil {
+				movement.RunAirHook()(u, n, satisfied, tick)
 			}
 		}
 		// The work step, quantum `workertime/30` [05 R-WORK-01 §1]. Corrected

@@ -51,7 +51,7 @@ func TestRetaliationOrderIssuesWhenSlotZeroAdmits(t *testing.T) {
 // existing fail-closed reading in the same routine.
 func TestRetaliationOrderFailsClosedWithoutTheAdmissionSeam(t *testing.T) {
 	f := newReactionFixture(t)
-	f.svc.Reaction.SlotAcquisitionAdmits = nil
+	f.svc.Reaction.SetSlotAcquisitionAdmits(nil)
 
 	f.svc.ReactToDamage(f.w, f.victim, f.attacker, 5)
 

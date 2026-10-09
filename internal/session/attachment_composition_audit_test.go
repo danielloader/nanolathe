@@ -31,7 +31,7 @@ func TestProductionOrderDetachUsesAttachmentIndexOwner(t *testing.T) {
 	}
 	before := s.Movement.Collisions[other.Handle].Filing.Seq
 	port := orders.QueueForUnit(child).Binding().Movement
-	if port.DetachTakeoff == nil || !port.DetachTakeoff(child) {
+	if port.DetachTakeoffHook() == nil || !port.DetachTakeoffHook()(child) {
 		t.Fatal("production detach adapter absent/refused")
 	}
 	f := s.Movement.Collisions[child.Handle].Filing

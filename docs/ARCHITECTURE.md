@@ -114,13 +114,22 @@ package implements.
 | `internal/settings` | Front-end preferences that survive a restart (last skirmish setup, per-slot side/colour/ally, difficulty, the selected mod and mutators) | DESIGN_CONTENT_VFS |
 | `internal/modlibrary` | The installed-mod library: data directory, `nanolathe-mod.json` metadata and the mod's Nanolathe config (content, rules, settings, keys, locks), mod selection, and zip or folder install with extraction and validation. No network | DESIGN_MODS_MUTATORS §4 |
 | `internal/maplibrary` | Installed community maps and shared feature packages: map-only validation and deterministic library roots, reusing modlibrary atomic installs; no network | DESIGN_MODS_MUTATORS §5.6 |
-| `internal/modfetch` | The nanolathe.gg mod and map manifests and resumable, SHA-256-verified downloads. The only package that imports `net/http`, and only `cmd/nanolathe` imports it | DESIGN_MODS_MUTATORS §5 |
+| `internal/modfetch` | The nanolathe.gg mod and map manifests and resumable, SHA-256-verified downloads. The content HTTP boundary; only `cmd/nanolathe` imports it. Multiplayer WebSocket HTTP is isolated in `internal/relay` (DESIGN_MULTIPLAYER §16.5.6) | DESIGN_MODS_MUTATORS §5 |
+
+The two-human loopback and hosted play tests add `internal/relay`
+(standard library and `netproto` only) and `internal/lockstep` (host composition
+of `relay` and `session`). The relay handles opaque commands; the driver alone
+turns sealed grants into session ticks. No authoritative package imports either
+transport owner. DESIGN_MULTIPLAYER §16.4–§16.5 own these bounded slices.
+`cmd/nanolathe-server` hosts invitation rooms using native TLS or WebSockets
+behind App Platform HTTPS, without importing simulation or presentation.
+Reconnect, replays and general multiplayer lobby entry remain later work.
 
 ### Runtime core
 
 | Package | Responsibility | Design document |
 |---|---|---|
-| `internal/sim/checkpoint` | Standard-library-only canonical diagnostic encoder, full/owner digest framing, typed reference IDs and weighted summaries; owner writers and session capture are staged separately | DESIGN_MULTIPLAYER §16.3 |
+| `internal/sim/checkpoint` | Standard-library-only canonical diagnostic encoder, full/owner digest framing, typed reference IDs and weighted summaries; all thirteen owner sections, admitted session capture and bounded histories are implemented; M3 acceptance awaits native platform comparison | DESIGN_MULTIPLAYER §16.3 |
 | `internal/clock` | The 30 Hz fixed-step budget: scaled host time, the `0..5` sub-tick clamp, speed and pause, the scheduler save box | DESIGN_RUNTIME_DETERMINISM |
 | `internal/sim/numeric` | `Fixed` 16.16, `uint16` angles, the 512-entry sine table, truncation toward zero | DESIGN_RUNTIME_DETERMINISM |
 | `internal/sim/rng` | The two random streams: Park-Miller simulation stream and the CRT stream | DESIGN_RUNTIME_DETERMINISM |
@@ -208,7 +217,7 @@ package implements.
 
 | Package | Responsibility | Design document |
 |---|---|---|
-| `internal/architecture` | Repository guards that inspect source rather than importing it: the platform boundary, the network boundary (`net/http` only in `internal/modfetch`), random-stream ownership, retail-only content, shrink-only parity ratchets | this document, §6 |
+| `internal/architecture` | Repository guards that inspect source rather than importing it: the platform boundary, the network boundary (`net/http` only in `internal/modfetch` and `internal/relay`), random-stream ownership, retail-only content, shrink-only parity ratchets | this document, §6 |
 | `internal/cleanroom` | The clean-room lint and its per-file debt baseline | this document, §6 |
 | `internal/docs` | The citation resolver: every research citation in `docs/` and in Go comments resolves | this document, §6 |
 | `internal/compat/spec03` | Black-box checks of the published presentation boundary | DESIGN_PRESENTATION_CLIENT |
@@ -243,29 +252,30 @@ composition   session ─► every simulation package below, plus frame, hud, re
               headless ─► session, ai, aikit, orders, units, content, pool, vfs
               airdiag ─► session, movement, orders, units, content, pool, vfs
 
-planner       ai ─► economy, orders, units, world, content, pool, numeric, rng, vfs
+planner       ai ─► economy, orders, units, world, content, pool, numeric, rng, vfs, sim/checkpoint
               aikit ─► ai, construction, orders, economy, features, units, world, content, pool, numeric
               aikit/core ─► aikit, pool         aikit/brains/* ─► aikit/core, aikit, content, pool
 
 simulation    mission ─► triggers, movement, orders, units, content, formats, pool, numeric, vfs
-              construction ─► movement, orders, combat, economy, frame, model, units, world, content, pool, rng
-              movement ─► path, orders, combat, cob, model, units, world, content, pool, rng
-              orders ─► combat, economy, features, save, cob, units, world, content, pool, rng
-              combat ─► economy, features, visibility, cob, units, world, content, pool, rng
+              construction ─► movement, orders, combat, economy, frame, model, units, world, content, pool, rng, sim/checkpoint
+              movement ─► path, orders, combat, cob, model, units, world, content, pool, rng, sim/checkpoint
+              orders ─► combat, economy, features, save, cob, units, world, content, pool, rng, sim/checkpoint
+              combat ─► economy, features, visibility, cob, units, world, content, pool, rng, sim/checkpoint
               triggers ─► save, units          save ─► clock, economy
-              features ─► units, world, content, rng
-              economy ─► units, world, pool
-              units ─► cob, model, world, content, pool, numeric, rng, vfs
-              visibility ─► world, content, numeric
-              world ─► content, formats, vfs, numeric, rng
-              path ─► pool                     audio ─► frame, content, pool, numeric, rng, vfs
+              features ─► units, world, content, rng, sim/checkpoint
+              economy ─► units, world, pool, sim/checkpoint
+              units ─► cob, model, world, content, pool, numeric, rng, vfs, sim/checkpoint
+              visibility ─► world, content, numeric, sim/checkpoint
+              world ─► content, formats, vfs, numeric, rng, sim/checkpoint
+              path ─► pool, sim/checkpoint     audio ─► frame, content, pool, numeric, rng, vfs
 
 content       content ─► cob, model, palette, formats, vfs, sim/checkpoint
-              cob ─► model, numeric, rng, vfs        model ─► formats, numeric, vfs
+              cob ─► model, numeric, rng, vfs, sim/checkpoint
+              model ─► formats, numeric, vfs, sim/checkpoint
               gui ─► formats, vfs               palette ─► vfs           formats ─► vfs
 
-leaves        vfs, clock, pool, frame(pool, numeric), camera(pool, numeric), input,
-              settings, version(netproto), netproto, sim/numeric, sim/rng, sim/checkpoint
+leaves        vfs, clock, pool(sim/checkpoint), frame(pool, numeric, sim/checkpoint), camera(pool, numeric), input,
+              community(sim/checkpoint), settings, version(netproto), netproto, sim/numeric, sim/rng, sim/checkpoint
 ```
 
 Four boundaries in this graph are enforced by tests in `internal/architecture`

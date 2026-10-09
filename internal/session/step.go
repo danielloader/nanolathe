@@ -461,7 +461,7 @@ func (s *Session) stepUnitPhase(tick uint32) {
 	// Begin movement's per-tick occupancy transaction for the phase-2 unit sweep.
 	if s.Movement != nil {
 		if s.Units != nil {
-			s.Movement.BindWorld(s.Units)
+			s.Movement.BindWorldWithCheckpointBinding(s.Units, s.checkpointBindingAuthority())
 		}
 		s.Movement.BeginTick(tick)
 	}
@@ -634,8 +634,8 @@ func (s *Session) stepUnitPhase(tick uint32) {
 					} else if activeMove || activeWork || activeGoal {
 						if activeMove && active.Target != 0 {
 							var target *units.Unit
-							if binding := qActive.Binding(); binding != nil && binding.Lookup != nil {
-								target = binding.Lookup(active.Target)
+							if binding := qActive.Binding(); binding != nil && binding.LookupHook() != nil {
+								target = binding.LookupHook()(active.Target)
 							}
 							if target == nil && s.Units != nil {
 								target = s.Units.Unit(active.Target)
@@ -750,7 +750,7 @@ func (s *Session) stepEffectPhase(tick uint32) {
 	s.stepDebris(tick)
 	var presentationEvents []frame.Event
 	if s.publication != nil && s.publication.events != nil {
-		presentationEvents = s.publication.events.StagingEvents()
+		presentationEvents = s.publication.events.EffectEvents()
 	}
 	if s.publication != nil && s.publication.effects != nil {
 		s.bindFragmentStepContext(tick)
@@ -838,6 +838,9 @@ func (s *Session) stepResultPhase(tick uint32) {
 	// [08 R-SKIR-01 §3], so only a skirmish can have a pending sweep to run.
 	if s.Mission != nil && s.Mission.Type == mission.TypeSkirmish && s.Skirmish.NumPlayers > 0 {
 		s.processPendingCommanderDeaths(tick)
+	}
+	if s.onlineResults != nil && s.onlineBattleEnded() && s.State == StateBattle {
+		_ = s.TransitionTo(StatePostBattle)
 	}
 }
 
@@ -1006,7 +1009,7 @@ func (s *Session) tickPlayers(tick uint32) {
 		return
 	}
 	localPlayer, hasLocalPlayer := s.triggerLocalPlayer()
-	if hasLocalPlayer {
+	if hasLocalPlayer && s.onlineResults == nil {
 		s.LocalOwner = uint8(localPlayer)
 	}
 	// The end-condition block is bound onto the ledger, not passed per call,
@@ -1014,8 +1017,8 @@ func (s *Session) tickPlayers(tick uint32) {
 	// at the before-hook position [08 R-TRIG-01 §6]. Binding here rather than
 	// at service wiring keeps every session that ticks — including the ones
 	// tests construct directly — on the one settlement order.
-	if s.Econ.EndCondition == nil {
-		s.Econ.EndCondition = s.endConditionBlock
+	if s.Econ.EndConditionHook() == nil {
+		s.Econ.SetEndConditionWithCheckpointBinding(s.endConditionBlock, s.checkpointBindingAuthority())
 	}
 	for player := 0; player < 10; player++ {
 		mgr := s.AI[player] // direct player-indexed access per RS-02 [08] I1
@@ -1039,13 +1042,13 @@ func (s *Session) tickPlayers(tick uint32) {
 		// from the weapons step on its own cadence word and the two clocks
 		// could drift apart by up to thirty ticks.
 		if mgr != nil && !mgr.Strategic.TargetRegistryRebuildBound() {
-			mgr.Strategic.BindTargetRegistryRebuild(s.rebuildTargetRegistryForSlot)
+			mgr.Strategic.BindTargetRegistryRebuildWithCheckpointBinding(s.rebuildTargetRegistryForSlot, s.checkpointBindingAuthority())
 		}
-		if mgr != nil && mgr.WeaponMaintenance == nil {
-			mgr.WeaponMaintenance = s.maintainPlayerWeapons
+		if mgr != nil && mgr.WeaponMaintenanceHook() == nil {
+			mgr.SetWeaponMaintenanceWithCheckpointBinding(s.maintainPlayerWeapons, s.checkpointBindingAuthority())
 		}
-		if mgr != nil && mgr.CanPursueAir == nil {
-			mgr.CanPursueAir = s.aiCanPursueAir
+		if mgr != nil && mgr.CanPursueAirHook() == nil {
+			mgr.SetCanPursueAirWithCheckpointBinding(s.aiCanPursueAir, s.checkpointBindingAuthority())
 		}
 		// Every manager of this battle holds the battle's one slot for the
 		// map knowledge a Modern controller would otherwise derive for
@@ -1065,9 +1068,16 @@ func (s *Session) tickPlayers(tick uint32) {
 		// The sensor pass follows the settlement gates inside the same
 		// deadline block, even if those later gates refuse settlement
 		// [03 R-SENSOR-01][05 "Authoritative settlement order"].
-		if due && player == int(s.ViewingOwner) {
-			s.stepSensorPhase(tick)
+		if due {
+			if s.onlineResults != nil && s.onlineResults.seats[player].present {
+				s.stepSensorPhaseFor(tick, player)
+			} else if s.onlineResults == nil && player == int(s.ViewingOwner) {
+				s.stepSensorPhase(tick)
+			}
 		}
+	}
+	if s.onlineResults != nil {
+		s.stepOnlineNoHumanEnd(tick)
 	}
 }
 
@@ -1104,6 +1114,10 @@ func (s *Session) rebuildTargetRegistryForSlot(tick uint32, player uint8) {
 // exactly one of them per due [08 R-TRIG-01 §6].
 func (s *Session) endConditionBlock(player int, tick uint32) {
 	if s == nil {
+		return
+	}
+	if s.onlineResults != nil {
+		s.evaluateOnlineSeatResult(player, tick)
 		return
 	}
 	if local, ok := s.triggerLocalPlayer(); !ok || local != player {
@@ -1249,6 +1263,10 @@ func (p StepPlan) Runs() bool { return p.run }
 // tick budget. It decides, and advances the clock's anchor and carry for, the
 // pump's sub-ticks without running any of them [01 §4.2][01 §4.3].
 func (s *Session) PrepareStep(scaledNow int32) StepPlan {
+	if c := s.checkpoints; c != nil && (c.inCapture || c.inPump) {
+		_ = s.checkpointReentry("step")
+		return StepPlan{}
+	}
 	if s.Clock == nil {
 		s.Clock = &clock.State{Requested: 10, Active: 10}
 	}
@@ -1287,9 +1305,24 @@ func (s *Session) PrepareStep(scaledNow int32) StepPlan {
 // publishing after each, and the executor tail once for the pump. A plan that
 // never reached the tick loop does nothing.
 func (s *Session) ExecuteStep(plan StepPlan) {
+	if c := s.checkpoints; c != nil && (c.inCapture || c.inPump) {
+		_ = s.checkpointReentry("execute")
+		return
+	}
+
 	if !plan.run {
 		return
 	}
+	if c := s.checkpoints; c != nil && c.enabled {
+		c.inPump = true
+		if c.pump == ^uint64(0) {
+			c.scopeErr = runtimeCheckpointError("capture.pump", "a representable pump ordinal")
+		} else {
+			c.pump++
+		}
+		defer func() { c.inPump = false }()
+	}
+	executed := false
 	ticks := plan.ticks
 	if ticks == 0 {
 		// The paused-input boundary stands exactly where the sub-ticks would
@@ -1303,7 +1336,11 @@ func (s *Session) ExecuteStep(plan StepPlan) {
 		}
 		// BeginSubTick increments GlobalTick before phase 1 [01 §4.4] C6.
 		tick := s.Clock.BeginSubTick()
+		if s.checkpointAdmission != nil {
+			s.checkpointAdmission.ticked = true
+		}
 		s.stepOneSubTick(tick)
+		executed = true
 		// Publication is outside the phase registry and follows sharing/result
 		// work for every completed sub-tick [01 §4.4][03 §2.4][I6].
 		s.publishSnapshot(tick)
@@ -1314,9 +1351,15 @@ func (s *Session) ExecuteStep(plan StepPlan) {
 		if s.State != StateBattle {
 			break // latch armed->ending transitioned to postbattle same tick [P1-01 §2.2]
 		}
+		if i+1 < ticks {
+			s.checkpointCompletedTick(CheckpointInteriorTick)
+		}
 	}
 	// The executor tail is once per host pump after the whole catch-up batch,
 	// including a zero-runnable pump. It cannot interpose between a phase-12
 	// result and that tick's publication [01 §4.4][01 R-PLAT-02 §7].
 	s.runRetailPostLoopTail(s.Clock.GlobalTick)
+	if executed {
+		s.checkpointCompletedTick(CheckpointFinalPumpTick)
+	}
 }

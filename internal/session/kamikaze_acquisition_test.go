@@ -123,10 +123,10 @@ func newKamikazeFixture(t *testing.T, mode gameplay.Mode, shooterDef *content.Un
 func acquireThroughProductionBinding(t *testing.T, u *units.Unit) (pool.Handle, bool) {
 	t.Helper()
 	q := orders.QueueOfUnit(u)
-	if q == nil || q.Binding() == nil || q.Binding().Weapons == nil || q.Binding().Weapons.Acquire == nil {
+	if q == nil || q.Binding() == nil || q.Binding().Weapons == nil || q.Binding().Weapons.AcquireHook() == nil {
 		t.Fatal("fixture lost the production weapon binding")
 	}
-	return q.Binding().Weapons.Acquire(u, 0, uint32(u.Def.SightDistance))
+	return q.Binding().Weapons.AcquireHook()(u, 0, uint32(u.Def.SightDistance))
 }
 
 func createKamikazeUnit(t *testing.T, s *Session, def *content.UnitDef, owner uint8, x, z numeric.Fixed) *units.Unit {

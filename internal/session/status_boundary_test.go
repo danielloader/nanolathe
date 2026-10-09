@@ -72,15 +72,15 @@ func TestDeathAcrossHealthSampleBoundaryUsesRolledPrior(t *testing.T) {
 	u.SetScript(vm)
 	severity := int32(-1)
 	vm.BindPortBinding(5, cob.PortBinding{Write: func(v int32) { severity = v; u.InBuildStance = v != 0 }})
-	original := s.Units.OnDeath
+	original := s.Units.DeathHook()
 	calls := 0
-	s.Units.OnDeath = func(h pool.Handle, c units.DeathCause, dead *units.Unit) {
+	s.Units.SetDeathHook(func(h pool.Handle, c units.DeathCause, dead *units.Unit) {
 		calls++
 		if dead.PriorSample != 80 {
 			t.Errorf("death prior sample = %d, want rolled 80", dead.PriorSample)
 		}
 		original(h, c, dead)
-	}
+	})
 	s.Units.Destroy(u.Handle, units.DeathKilled)
 	s.stepOneSubTick(30)
 	if calls != 1 || severity != 45 {

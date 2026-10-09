@@ -26,13 +26,13 @@ func TestDeathFinalizationPreservesSentinelExplosion(t *testing.T) {
 			victim.Health, victim.MaxHealth, victim.Remaining = -1, 100, 0
 			victim.LastDamageCause = uint8(cause)
 			var events []combat.Event
-			sink := s.Combat.Events
-			s.Combat.Events = func(ev combat.Event) {
+			sink := s.Combat.EventsHook()
+			s.Combat.SetEvents(func(ev combat.Event) {
 				events = append(events, ev)
 				if sink != nil {
 					sink(ev)
 				}
-			}
+			})
 			s.Units.DestroyBy(victim.Handle, units.DeathCauseFromKind(uint8(cause)), 0)
 			s.stepUnitPhase(1)
 			if s.Units.Unit(victim.Handle) != nil {

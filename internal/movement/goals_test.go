@@ -327,7 +327,7 @@ func TestFeatureWorkGoalIsTheFootprintRectangle(t *testing.T) {
 	// to an anchored feature view carrying the definition's footprint.
 	q := orders.QueueForUnit(u)
 	binding := &orders.QueueBinding{
-		World: &orders.WorldQueryAdapter{
+		World: orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{
 			LookupFeature: func(cx, cz int32) (orders.FeatureView, bool) {
 				if cx < 12 || cx > 14 || cz < 9 || cz > 10 {
 					return orders.FeatureView{}, false
@@ -336,7 +336,7 @@ func TestFeatureWorkGoalIsTheFootprintRectangle(t *testing.T) {
 				// way the terrain's fringe hop does [05 R-ECO-02 §2].
 				return orders.FeatureView{CX: 12, CZ: 9, FootprintX: 3, FootprintZ: 2}, true
 			},
-		},
+		}),
 	}
 	q.SetBinding(binding)
 

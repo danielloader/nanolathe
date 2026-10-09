@@ -34,3 +34,22 @@ func TestNativeClipboardReadsPrivatePasteboard(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeClipboardWritesPrivatePasteboard(t *testing.T) {
+	pool := objc.ID(objc.GetClass("NSAutoreleasePool")).Send(objc.RegisterName("new"))
+	defer pool.Send(objc.RegisterName("drain"))
+	// A unique pasteboard keeps the user's clipboard untouched.
+	board := objc.ID(objc.GetClass("NSPasteboard")).Send(objc.RegisterName("pasteboardWithUniqueName"))
+	if board == 0 {
+		t.Skip("native pasteboard service unavailable")
+	}
+	defer board.Send(objc.RegisterName("releaseGlobally"))
+	for _, text := range []string{"ABC234", ""} {
+		if !clipboardTextToPasteboard(board, text) {
+			t.Fatalf("write of %q refused", text)
+		}
+		if got := clipboardTextFromPasteboard(board); got != (input.ClipboardText{Text: text, Available: true}) {
+			t.Fatalf("read back %+v, want %q", got, text)
+		}
+	}
+}

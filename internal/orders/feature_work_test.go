@@ -56,7 +56,7 @@ func newFeatureWorkFixture(t *testing.T, defs []*content.FeatureDef, cx, cz int)
 		X: numeric.Fixed(70 << 16), Y: numeric.Fixed(40 << 16), Z: numeric.Fixed(90 << 16),
 	}
 	f.econ = &economy.Service{Terrain: reclaimFixtureTerrain(defs, cx, cz)}
-	binding := &QueueBinding{
+	binding := NewQueueBinding(QueueBindingConfig{
 		Economy: f.econ,
 		Lookup: func(h pool.Handle) *units.Unit {
 			if h == f.builder.Handle {
@@ -64,8 +64,8 @@ func newFeatureWorkFixture(t *testing.T, defs []*content.FeatureDef, cx, cz int)
 			}
 			return nil
 		},
-	}
-	binding.Movement = &MovementGoalAdapter{
+	})
+	binding.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{
 		InstallPoint: func(req PointGoalRequest) bool {
 			f.points = append(f.points, req)
 			return true
@@ -74,11 +74,11 @@ func newFeatureWorkFixture(t *testing.T, defs []*content.FeatureDef, cx, cz int)
 		InstallRectangle: func(req RectangleGoalRequest) bool { f.rects = append(f.rects, req); return true },
 		InstallAir:       func(AirGoalRequest) bool { return true },
 		Release:          func(*Node) bool { return true },
-	}
+	})
 	// The world adapter is what featureViewAtGoal reads for the spray target;
 	// it resolves the anchored feature exactly as internal/session composes it
 	// over the terrain's own fringe hop [05 R-ECO-02 §2].
-	binding.World = &WorldQueryAdapter{
+	binding.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{
 		LookupFeature: func(cellX, cellZ int32) (FeatureView, bool) {
 			def, ax, az, ok := features.FeatureAt(f.econ.Terrain, world.CellToWorld(cellX), world.CellToWorld(cellZ))
 			if !ok {
@@ -91,10 +91,10 @@ func newFeatureWorkFixture(t *testing.T, defs []*content.FeatureDef, cx, cz int)
 				Metal:         def.Metal, Energy: def.Energy, Reclaimable: def.Reclaimable,
 			}, true
 		},
-	}
-	binding.Presentation = &PresentationAdapter{
+	})
+	binding.Presentation = NewPresentationAdapter(PresentationAdapterConfig{
 		NanolatheFeature: func(*units.Unit, *Node, FeatureView, uint32) bool { f.segments++; return true },
-	}
+	})
 	f.q = &Queue{binding: binding}
 	f.q.SetBinding(binding)
 	BindQueue(f.builder, f.q)
@@ -296,7 +296,7 @@ func TestFeatureReclaimTakesOneHeightDrawAndTheAirTwinNone(t *testing.T) {
 // `resolve` reporting false is "the corpse name resolved to no definition";
 // `allocate` reporting nil is a refused allocation.
 func bindResurrectSeam(f *featureWorkFixture, resolved *content.UnitDef, allocate func() *units.Unit) {
-	f.q.Binding().Work = &WorkAdapter{
+	f.q.Binding().Work = NewWorkAdapter(WorkAdapterConfig{
 		Resurrect: func(builder *units.Unit, n *Node, _ uint32) bool {
 			f.resurrectPhases = append(f.resurrectPhases, n.Phase)
 			if resolved == nil {
@@ -323,7 +323,7 @@ func bindResurrectSeam(f *featureWorkFixture, resolved *content.UnitDef, allocat
 			}
 			return false
 		},
-	}
+	})
 }
 
 // TestResurrectionProducesTheUnitAndRemovesTheCorpse walks the whole row.
@@ -349,21 +349,21 @@ func TestResurrectionProducesTheUnitAndRemovesTheCorpse(t *testing.T) {
 	// The successor `RepairUnit` refuses any target whose mover mode is not
 	// grounded [04 R-ORD-01 §5]; a resurrected building is grounded.
 	product.Move.Mode, product.Move.ModeMirror = 1, 1 // committed mover mode [04 R-MOV-01 §8]
-	prior := f.q.Binding().Lookup
-	f.q.Binding().Lookup = func(h pool.Handle) *units.Unit {
+	prior := f.q.Binding().LookupHook()
+	f.q.Binding().SetLookup(func(h pool.Handle) *units.Unit {
 		if h == product.Handle {
 			return product
 		}
 		return prior(h)
-	}
+	})
 	bindResurrectSeam(f, productDef, func() *units.Unit { return product })
 
 	f.q.Push(Lookup("Resurrect"), Node{Owner: f.builder.Handle, GoalX: world.CellToWorld(4), GoalZ: world.CellToWorld(5), GoalSupplied: true})
 	var captions []string
-	f.q.Binding().Presentation.Status = func(_ *units.Unit, kind uint8, text string) bool {
+	f.q.Binding().Presentation.SetStatus(func(_ *units.Unit, kind uint8, text string) bool {
 		captions = append(captions, text)
 		return true
-	}
+	})
 
 	completed := false
 	// Complete the approach before measuring the work visits.
@@ -432,12 +432,12 @@ func TestResurrectionOfAnUnresolvableCorpseUsesRetailsMisspelling(t *testing.T) 
 	bindResurrectSeam(f, nil, nil) // the catalogue resolves nothing
 
 	var captions []string
-	f.q.Binding().Presentation = &PresentationAdapter{
+	f.q.Binding().Presentation = NewPresentationAdapter(PresentationAdapterConfig{
 		Status: func(_ *units.Unit, _ uint8, text string) bool {
 			captions = append(captions, text)
 			return true
 		},
-	}
+	})
 	f.q.Push(Lookup("Resurrect"), Node{Owner: f.builder.Handle, GoalX: world.CellToWorld(4), GoalZ: world.CellToWorld(5), GoalSupplied: true})
 	// Complete the approach before measuring the work visits.
 	f.q.Pump(f.builder, 0)
@@ -460,9 +460,9 @@ func TestResurrectionOfAnUnresolvableCorpseUsesRetailsMisspelling(t *testing.T) 
 	// The single-s spelling belongs to the OTHER failure: no feature at all.
 	g := newFeatureWorkFixture(t, []*content.FeatureDef{corpse}, 4, 5)
 	var other []string
-	g.q.Binding().Presentation = &PresentationAdapter{
+	g.q.Binding().Presentation = NewPresentationAdapter(PresentationAdapterConfig{
 		Status: func(_ *units.Unit, _ uint8, text string) bool { other = append(other, text); return true },
-	}
+	})
 	g.q.Push(Lookup("Resurrect"), Node{Owner: g.builder.Handle, GoalX: world.CellToWorld(12), GoalZ: world.CellToWorld(12), GoalSupplied: true})
 	g.q.Pump(g.builder, 1)
 	if len(other) != 1 || other[0] != "Resurrection failed" {

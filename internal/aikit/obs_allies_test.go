@@ -50,11 +50,11 @@ func TestObsListsAlliedUnitsInSight(t *testing.T) {
 	if u := w.Unit(seen); u != nil {
 		u.Health = 40
 	}
-	m := &ai.Manager{
+	m := ai.NewManager(ai.ManagerConfig{
 		Player: 0, Catalog: cat,
 		IsAlliance:  func(a, b uint8) bool { return a == b || a+b == 1 },
 		UnitVisible: func(_ uint8, u *units.Unit) bool { return u.Handle != hidden },
-	}
+	})
 	b := &obsBrain{}
 	h := NewHost(m, b, PersonaMax)
 	defer h.Close()

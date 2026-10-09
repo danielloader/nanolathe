@@ -358,12 +358,12 @@ func (stage *RetailBattleStage) restoreFeatures() error {
 	// A failed detached stage never drains these cues [08 R-SAVE-FEATURE-01].
 	var burnSounds [][3]numeric.Fixed
 	if s.Features != nil {
-		emit := s.Features.BurnSound
+		emit := s.Features.BurnSoundHook()
 		if emit != nil {
-			s.Features.BurnSound = func(pos [3]numeric.Fixed) {
+			s.Features.SetBurnSound(func(pos [3]numeric.Fixed) {
 				burnSounds = append(burnSounds, pos)
-			}
-			defer func() { s.Features.BurnSound = emit }()
+			})
+			defer func() { s.Features.SetBurnSound(emit) }()
 		}
 		s.Features.ResetForRestore()
 		if err := restoreRetailFeatures(s.Features, s.Catalog, image.Features); err != nil {

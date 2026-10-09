@@ -20,7 +20,7 @@ func TestImpactStackRecordUsesCentralPresentationBranches(t *testing.T) {
 
 	t.Run("land", func(t *testing.T) {
 		var events []Event
-		svc := &Service{Events: func(ev Event) { events = append(events, ev) }}
+		svc := NewService(ServiceConfig{Events: func(ev Event) { events = append(events, ev) }})
 		svc.ImpactStackRecord(StackImpactRecord{
 			Weapon: weapon, Point: point, SecondPoint: point, ShooterSide: 4,
 		}, nil, nil, nil, 17)
@@ -41,7 +41,7 @@ func TestImpactStackRecordUsesCentralPresentationBranches(t *testing.T) {
 	t.Run("water", func(t *testing.T) {
 		terrain := &world.Terrain{CellW: 1, CellH: 1, SeaLevel: 1, Plot: make([]world.PlotCell, 1)}
 		var events []Event
-		svc := &Service{Events: func(ev Event) { events = append(events, ev) }}
+		svc := NewService(ServiceConfig{Events: func(ev Event) { events = append(events, ev) }})
 		svc.ImpactStackRecord(StackImpactRecord{Weapon: weapon, Point: point, SecondPoint: point}, nil, terrain, nil, 18)
 		if len(events) != 4 || events[0].Kind != EventShake || events[1].Kind != EventWaterSound || events[2].Kind != EventWaterExplosion || events[3].Kind != EventProjectileImpact {
 			t.Fatalf("water stack events = %#v, want shake/water-sound/water-effect/impact [06 R-WFX-01 §3]", events)
@@ -53,14 +53,14 @@ func TestImpactStackRecordUsesCentralPresentationBranches(t *testing.T) {
 
 	t.Run("end-smoke-and-record-zero", func(t *testing.T) {
 		var smoke []Event
-		svc := &Service{Events: func(ev Event) { smoke = append(smoke, ev) }}
+		svc := NewService(ServiceConfig{Events: func(ev Event) { smoke = append(smoke, ev) }})
 		svc.ImpactStackRecord(StackImpactRecord{Weapon: &content.WeaponDef{EndSmoke: true}, Point: point, SecondPoint: point}, nil, nil, nil, 19)
 		if len(smoke) != 2 || smoke[0].Kind != EventEndSmoke || smoke[1].Kind != EventProjectileImpact {
 			t.Fatalf("end-smoke stack events = %#v, want end-smoke then impact [06 R-WFX-01 §2]", smoke)
 		}
 
 		var zero []Event
-		svc.Events = func(ev Event) { zero = append(zero, ev) }
+		svc.SetEvents(func(ev Event) { zero = append(zero, ev) })
 		svc.ImpactStackRecord(StackImpactRecord{Weapon: &content.WeaponDef{}, Point: point, SecondPoint: point}, nil, nil, nil, 20)
 		if len(zero) != 2 || zero[0].Kind != EventExplosion || !zero[0].HasCalculatedFlash || zero[0].CalculatedTable != impactFlashTable {
 			t.Fatalf("record-zero stack events = %#v, want calculated table-zero flash [06 §12.2][06 R-WFX-01 §2]", zero)
@@ -88,13 +88,13 @@ func TestStackImpactRoutesOwnerAndFeatureDamage(t *testing.T) {
 	svc, _, terrain := featureBlastFixture(t, def, 8, 8, &sim)
 	w := newCombatFixtureWorld(4, nil)
 	var events []Event
-	svc.Events = func(ev Event) { events = append(events, ev) }
-	svc.ControlByte = func(owner uint8) uint8 {
+	svc.SetEvents(func(ev Event) { events = append(events, ev) })
+	svc.SetControlByte(func(owner uint8) uint8 {
 		if owner == 4 {
 			return ControlByteRemote
 		}
 		return ControlByteHuman
-	}
+	})
 	point := featureCellCentre(8, 8)
 	record := StackImpactRecord{Weapon: blastWeapon(64, 7, 0), Point: point, SecondPoint: point, ShooterSide: 4}
 	svc.ImpactStackRecord(record, w, terrain, nil, 1)

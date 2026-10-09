@@ -28,8 +28,8 @@ func TestBomberPointAttackReleasesBombs(t *testing.T) {
 				if modern {
 					q.Binding().Rules = &orders.ModernRules{}
 				}
-				q.Binding().World = &orders.WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}
-				q.Binding().Weapons = &orders.WeaponAdapter{InhibitSlot: combat.InhibitWeaponSlot, ReleaseSlot: combat.ReleaseWeaponSlot, FirePoint: combat.FireWeaponPoint, StopFiring: combat.StopWeaponFiring}
+				q.Binding().World = orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 0 }})
+				q.Binding().Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{InhibitSlot: combat.InhibitWeaponSlot, ReleaseSlot: combat.ReleaseWeaponSlot, FirePoint: combat.FireWeaponPoint, StopFiring: combat.StopWeaponFiring})
 				pos := orders.ResolvePos{X: numeric.FixedFromInt(480), Z: numeric.FixedFromInt(256), HasFeature: feature}
 				id := orders.Resolve(3, u, nil, &pos)
 				if id != orders.Lookup("AirStrike") {

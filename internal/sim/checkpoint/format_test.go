@@ -277,3 +277,45 @@ func TestCaptureFailuresInvalidateAllDigests(t *testing.T) {
 		t.Fatal("NaN allowed a later payload")
 	}
 }
+
+func TestCaptureHashBuffersPreserveSectionBytes(t *testing.T) {
+	var out, expected bytes.Buffer
+	identity := authoredIdentity()
+	c, err := NewCapture(identity, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected.WriteString("NLCPSTAT")
+	expected.Write([]byte{1, 0})
+	expected.Write(identity.Content[:])
+	expected.Write(identity.Config[:])
+	expected.Write([]byte{13, 0})
+	var want Digests
+	for owner := OwnerRuntime; owner <= OwnerComputersScenario; owner++ {
+		e, err := c.Section(owner, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var section bytes.Buffer
+		section.Write([]byte{byte(owner), 0, 1})
+		// Sizes on both sides of the hash buffer boundary, in one-byte writes.
+		for i := 0; i < 4090+int(owner); i++ {
+			value := byte(i*7 + int(owner))
+			e.U8(value)
+			section.WriteByte(value)
+		}
+		expected.Write(section.Bytes())
+		var domain bytes.Buffer
+		domain.WriteString("NLCPSECT")
+		domain.Write([]byte{1, 0})
+		domain.Write(identity.Content[:])
+		domain.Write(identity.Config[:])
+		domain.Write(section.Bytes())
+		want.Owners[owner-1] = sha256.Sum256(domain.Bytes())
+	}
+	want.Full = sha256.Sum256(expected.Bytes())
+	got, err := c.Finish()
+	if err != nil || got != want || !bytes.Equal(out.Bytes(), expected.Bytes()) {
+		t.Fatalf("buffered canonical digest/bytes differ: %v", err)
+	}
+}

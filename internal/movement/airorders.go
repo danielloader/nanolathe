@@ -565,9 +565,9 @@ func (s *System) legVTOLStandby(u *units.Unit, n *orders.Node, tick uint32) orde
 		if !s.airMoverReady(u) {
 			return 7
 		}
-		if weapons := orderWeapons(u); weapons != nil && weapons.ReleaseSlot != nil {
+		if weapons := orderWeapons(u); weapons != nil && weapons.ReleaseSlotHook() != nil {
 			for slot := 0; slot < units.NumSlots; slot++ {
-				weapons.ReleaseSlot(u, slot)
+				weapons.ReleaseSlotHook()(u, slot)
 			}
 		}
 		n.DynamicGate |= 0x10000
@@ -654,8 +654,8 @@ func (s *System) VisitAirBuildApproach(u *units.Unit, n *orders.Node, _ uint32, 
 		// The marker is centered on the PRODUCT's footprint. The retained
 		// order goal remains the authored request [04 R-ORD-02 §2]
 		// [04 R-PATH-01 §13]. An unbound resolver preserves that request.
-		if s.ProductFootprint != nil {
-			if fx, fz, ok := s.ProductFootprint(n.Param1); ok {
+		if s.ProductFootprintHook() != nil {
+			if fx, fz, ok := s.ProductFootprintHook()(n.Param1); ok {
 				goalX, goalZ = snapToOwnFootprint(goalX, goalZ, fx, fz)
 			}
 		}
@@ -1115,11 +1115,11 @@ func (s *System) landingMappingWord(u *units.Unit, cellX, cellZ int32, fx int16)
 		return 0, false
 	}
 	b := airBinding(u)
-	if b == nil || b.World == nil || b.World.MappingWord == nil {
+	if b == nil || b.World == nil || b.World.MappingWordHook() == nil {
 		return 0, false
 	}
 	tileX, tileZ := airMappingTile(cellX, cellZ, fx)
-	return b.World.MappingWord(tileX, tileZ)
+	return b.World.MappingWordHook()(tileX, tileZ)
 }
 
 // terrainAndSea returns the terrain height byte at a position and the map's sea
@@ -1360,7 +1360,7 @@ func (s *System) BindAirOrderLegs() {
 		if binding.Movement == nil {
 			binding.Movement = &orders.MovementGoalAdapter{}
 		}
-		binding.Movement.RunAir = runner
+		binding.Movement.SetRunAir(runner)
 		s.RegisterOrderHandlers(q)
 	}
 }
@@ -1378,8 +1378,15 @@ func (s *System) RegisterOrderHandlers(q *orders.Queue) {
 	}
 	if s.airLegHandler == nil {
 		s.airLegHandler = s.runAirOrderLeg
+		if s.hasCheckpointOrderHandlerSource() {
+			s.checkpointAirLegHandler = orders.NewCheckpointOwnedHandler(s.airLegHandler, orders.CheckpointAirStandby, s.checkpointOrderHandlers.source)
+		}
 	}
-	q.SetOwnedHandler(airStandbyRowID, s.airLegHandler)
+	if s.hasCheckpointOrderHandlerSource() && s.checkpointAirLegHandler.Handler() != nil {
+		q.SetOwnedHandlerWithCheckpointBinding(airStandbyRowID, s.checkpointAirLegHandler)
+	} else {
+		q.SetOwnedHandler(airStandbyRowID, s.airLegHandler)
+	}
 }
 
 // AirLegRunner returns this system's executor for installation on a
@@ -1518,32 +1525,32 @@ func orderWeapons(u *units.Unit) *orders.WeaponAdapter {
 // later, primary-slot operation [04 R-AIR-01 §8][04 R-ORD-01 §7].
 func inhibitAirWeapons(u *units.Unit) {
 	w := orderWeapons(u)
-	if w == nil || w.InhibitSlot == nil {
+	if w == nil || w.InhibitSlotHook() == nil {
 		return
 	}
 	for idx := 0; idx < units.NumSlots; idx++ {
-		w.InhibitSlot(u, idx)
+		w.InhibitSlotHook()(u, idx)
 	}
 }
 
 func releaseWeapon(u *units.Unit, idx int) bool {
 	w := orderWeapons(u)
-	return w != nil && w.ReleaseSlot != nil && w.ReleaseSlot(u, idx)
+	return w != nil && w.ReleaseSlotHook() != nil && w.ReleaseSlotHook()(u, idx)
 }
 
 func firePrimaryTarget(u *units.Unit, target pool.Handle, tick uint32) bool {
 	w := orderWeapons(u)
-	return w != nil && w.FireTarget != nil && target != 0 && w.FireTarget(u, 0, target, tick)
+	return w != nil && w.FireTargetHook() != nil && target != 0 && w.FireTargetHook()(u, 0, target, tick)
 }
 
 func firePrimaryPoint(u *units.Unit, x, z numeric.Fixed, tick uint32) bool {
 	w := orderWeapons(u)
-	return w != nil && w.FirePoint != nil && w.FirePoint(u, 0, x, z, tick)
+	return w != nil && w.FirePointHook() != nil && w.FirePointHook()(u, 0, x, z, tick)
 }
 
 func stopPrimaryWeapon(u *units.Unit) {
-	if w := orderWeapons(u); w != nil && w.StopFiring != nil {
-		w.StopFiring(u, 0)
+	if w := orderWeapons(u); w != nil && w.StopFiringHook() != nil {
+		w.StopFiringHook()(u, 0)
 	}
 }
 
@@ -1552,7 +1559,7 @@ func stopPrimaryWeapon(u *units.Unit) {
 // now. `AirToGroundHover` phase 3 counts its refusals [04 R-AIR-01 §8].
 func weaponCanEngage(u *units.Unit, target pool.Handle, idx int) bool {
 	w := orderWeapons(u)
-	return w != nil && w.CanEngage != nil && target != 0 && w.CanEngage(u, target, idx)
+	return w != nil && w.CanEngageHook() != nil && target != 0 && w.CanEngageHook()(u, target, idx)
 }
 
 // airOffMap reports whether the unit's air-sector link is the off-map sentinel
@@ -1631,10 +1638,10 @@ func (s *System) airUnitLookup(u *units.Unit) func(pool.Handle) *units.Unit {
 		return s.world.Unit
 	}
 	b := airBinding(u)
-	if b == nil || b.Lookup == nil {
+	if b == nil || b.LookupHook() == nil {
 		return nil
 	}
-	return b.Lookup
+	return b.LookupHook()
 }
 
 // airBinding is the session-owned order binding for this aircraft, the same
@@ -1852,9 +1859,9 @@ func (s *System) legVTOLSeekAttack(u *units.Unit, n *orders.Node, satisfied uint
 		}
 		// Inhibit before repair and acquisition; the slot-control verb owns
 		// the guarded target clear [04 R-AIR-01 §7][04 R-ORD-01 §7].
-		if weapons := orderWeapons(u); weapons != nil && weapons.InhibitSlot != nil {
+		if weapons := orderWeapons(u); weapons != nil && weapons.InhibitSlotHook() != nil {
 			for slot := 0; slot < units.NumSlots; slot++ {
-				weapons.InhibitSlot(u, slot)
+				weapons.InhibitSlotHook()(u, slot)
 			}
 		}
 		if airBelowThreeQuarters(u) && s.airFindBaseAndLand(u, n, sim, tick) {

@@ -166,8 +166,8 @@ func (s *Service) Settle(p int, tick uint32, w *units.World) {
 	// 2. Cloak upkeep debits live stock BEFORE the pool is formed, in unit slot
 	// order, so an earlier unit's debit can starve a later one [05 "Cloak
 	// debit"] C13.
-	if s.CloakCost != nil {
-		ApplyCloakDebits(s, w, p, s.CloakCost, nil, nil)
+	if s.CloakCostHook() != nil {
+		ApplyCloakDebits(s, w, p, s.CloakCostHook(), nil, nil)
 	}
 	// 3. Gather both resource totals, then commit pass counters before either
 	// resource forms its pool [R-ECO-01 §6].

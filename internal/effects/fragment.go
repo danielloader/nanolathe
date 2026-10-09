@@ -150,6 +150,7 @@ func (p *FixedEffectPool) SetFragmentStepContext(ctx FragmentStepContext) {
 	if p == nil {
 		return
 	}
+	p.checkpointFragment = checkpointFragmentBinding{}
 	p.fragmentContext = ctx
 	p.fragmentStepping = ctx.TerrainHeight != nil
 }

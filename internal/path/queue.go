@@ -2,6 +2,7 @@ package path
 
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/checkpoint"
 )
 
 // DefaultBase is the compiled-in heuristic base [04 R-PATH-01 §10].
@@ -132,6 +133,12 @@ type Scheduler struct {
 	baseSet bool
 	search  SearchFunc
 	publish PublishFunc
+
+	// Installation provenance is diagnostic only and emits no bytes. Each
+	// ordinary setter clears its own slot (DESIGN_MULTIPLAYER §16.3.30).
+	checkpointSearchAuthority   *checkpoint.BindingAuthority
+	checkpointPublishAuthority  *checkpoint.BindingAuthority
+	checkpointProviderAuthority *checkpoint.BindingAuthority
 
 	scales [10]int32
 
@@ -333,6 +340,7 @@ func (s *Scheduler) SetPlayerCount(count int) {
 // SetCandidateProvider binds the production candidate poll and explicit
 // session limits. A nil provider disables provider polling.
 func (s *Scheduler) SetCandidateProvider(p CandidateProvider) {
+	s.checkpointProviderAuthority = nil
 	s.provider = p
 	if p != nil {
 		s.playerCount = p.PlayerCount()
@@ -385,11 +393,13 @@ func (s *Scheduler) SetBase(b int32) {
 
 // SetSearch sets the injected search function.
 func (s *Scheduler) SetSearch(fn SearchFunc) {
+	s.checkpointSearchAuthority = nil
 	s.search = fn
 }
 
 // SetPublish sets the publish callback.
 func (s *Scheduler) SetPublish(fn PublishFunc) {
+	s.checkpointPublishAuthority = nil
 	s.publish = fn
 }
 

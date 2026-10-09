@@ -791,10 +791,9 @@ func hasASCIIUpper(s string) bool {
 }
 
 // validateRestrictions checks field 12's schema. Whether each key names the
-// definition its identifier does, and whether a restriction can be enforced
-// at all, is admission against frozen content: until the restriction table
-// is implemented (§15 Q16), admission refuses any record rather than ignore
-// it.
+// definition its identifier does is RestrictionsFromMatch's question against
+// the unrestricted catalog, which FreezeMatchInputs asks, and admission
+// compares the set with the frozen inputs' (§16.6, DESIGN_MODS_MUTATORS §15.3).
 func (r *MatchConfigRequest) validateRestrictions() error {
 	if len(r.UnitRestrictions) > matchMaxRestrictions {
 		return matchFieldError("unitRestrictions", fmt.Sprintf("at most %d records", matchMaxRestrictions))

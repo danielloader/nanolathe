@@ -7,15 +7,18 @@ Only player commands travel: a relay puts them in one order, tells every
 client which tick each one runs on, and decides how far the battle may
 advance. The model is **relayed deterministic lockstep**.
 
-**Status: adopted 2026-10-01; M1 verified; M2 implemented; M3 U1 implemented.** The maintainer accepted
+**Status: adopted 2026-10-01; M1 verified; M2 implemented; M3 U2 and the first U3 owner group implemented on the multiplayer worktree.** The maintainer accepted
 this design and decided its original questions on 2026-10-01, after two
 revisions of the 2026-09-30 proposal. Networking, replays and the multiplayer
 lobby are in scope (ARCHITECTURE §1), and implementation is authorized in the
 order of §16, each milestone behind the one before it. §16.1 records M1's
 implementation and verification; its native-platform gate is complete.
 §16.2 records M2's schemas, implemented work units and carried gaps.
-§16.3 records M3's reviewed schema and implemented encoder/reference keys;
-U2's unit, order and COB writers are next.
+§16.3 records M3's complete owner writers, capture lifecycle, fault diagnosis
+and local cost evidence. Its native-platform comparison remains pending;
+recorder/playback is the next implementation milestone (M4).
+Per maintainer direction, further multiplayer work stays on the
+`multiplayer-m3-u2` worktree branch until play testing, without merging to main.
 The original audit measurements were taken on
 2026-09-30 and 2026-10-01 against
 main `193abfde`. Co-op is the first delivery, not the architecture's limit:
@@ -216,7 +219,7 @@ open product decisions authorize no departure. Established unless marked:
 | Mapping, line of sight | Mapped or unmapped; permanent, circular or true `[03 R-VIS-01 §1]`. | Configuration, already modelled. |
 | Unit limit | The battleroom's maximum, an equal slice per player `[08 R-SKIR-01 §6]` `[05 R-SHARE-01 §7]`. | Configuration, already modelled. |
 | Starting resources | Every player's storage bonus is the host's value times 100, and at least 200 `[08 R-ENTRY-01 §5]`. | Per-row metal and energy, already modelled. |
-| Unit restrictions | Multiplayer only: a per-unit count of 0–100 or none, edited by the host. At lobby exit a count of 0 clears the definition's creatable bit and the battle-entry compile removes it; a positive count survives as each player's cap, enforced only by the allocator at creation; no planner reads either. A lobby seeds `wacky` definitions at 0 — removed once the host closes the screen, kept and refused at every creation if it never does; `norestrict` definitions are never offered `[08 R-SKIR-01 §10]` `[05 R-SHARE-01 §8]` `[05 R-SHARE-01 §9]` `[05 R-SHARE-01 §10]`. | Modelled for single-player skirmish and Survival in every mode as `content.Restrictions` on the battle's catalog clone, nothing seeded ([DESIGN_MODS_MUTATORS §15](DESIGN_MODS_MUTATORS.md#15-unit-restrictions)). Online it is field 12 (§8.6) and a lobby screen after the first networked release (Q16), which must also decide retail's seeded-but-never-closed `wacky` state; no field value expresses it. |
+| Unit restrictions | Multiplayer only: a per-unit count of 0–100 or none, edited by the host. At lobby exit a count of 0 clears the definition's creatable bit and the battle-entry compile removes it; a positive count survives as each player's cap, enforced only by the allocator at creation; no planner reads either. A lobby seeds `wacky` definitions at 0 — removed once the host closes the screen, kept and refused at every creation if it never does; `norestrict` definitions are never offered `[08 R-SKIR-01 §10]` `[05 R-SHARE-01 §8]` `[05 R-SHARE-01 §9]` `[05 R-SHARE-01 §10]`. | Modelled for single-player skirmish and Survival in every mode as `content.Restrictions` on the battle's catalog clone, nothing seeded ([DESIGN_MODS_MUTATORS §15](DESIGN_MODS_MUTATORS.md#15-unit-restrictions)). Online it is field 12 (§8.6), carried from the host since the first online lobby (§16.6). A restriction lobby screen follows later (Q16) and must decide retail's seeded-but-never-closed `wacky` state; no field value expresses it. |
 | Unit roster | Peers keep only units every peer selected and holds compatibly `[08 "Unit-data negotiation and catalog retention"]`. | Identical catalogs are required instead (§8.2); negotiating a common roster is §15 Q15. |
 | Cheats | The typing machine checks the entry-time cheat permission, but the ungated developer phrase unlocks its cheat and developer commands regardless of the host switch. Commands execute only there; received lines are chat text, never dispatched `[07 R-CAM-01 §6]` `[08 "Lockstep advancement"]`. | Agreed cheat permission enforced by every receiving simulation; neither the developer phrase nor a local developer flag expands the allowed stream commands (§7.1, §7.2). |
 | Alliances | Row A holds declarations and row B mirrors declarations toward the seat. A seated non-eliminated, non-watching human can toggle a declaration toward a seated non-eliminated, non-watching remote human outside its team; its own row changes at once and only the target machine is told. Third machines keep stale copies. Computers have no toggle: battleroom teams set mutual rows on every machine and remain locked in battle. Consumers read row A one-sidedly; victory additionally tests mutuality and the survivor's row toward other seats `[05 R-SHARE-01 §1]` `[07 R-FE-01 §7]`. | Declarations are seat commands. Q22 adopts one shared directed matrix, with B its transpose; all replicas apply each declaration on its assigned tick (§6.7). |
@@ -928,7 +931,7 @@ word per machine.
 | Machine option bits | `DoubleShot` and `HalfShot` toggle the double and half damage gates, bits 7 and 8 of one options word whose bit 10 is the `ShootAll` target-admission bit; a fresh battle starts with both gates clear, and the session-settings block that carries the word out to other machines is never copied back over a machine's own word `[06 §9.2]` `[06 §3.2]`. A hit is resolved on the shooter's machine, a death explosion's on the victim owner's, and a shooterless record's on every machine `[06 R-DMG-01 §9]`. | One battle-local gate pair in `combat.Service` (`ToggleDoubleShot`, `ToggleHalfShot`); `ShootAll` is a field nothing sets. | Per seat: each seat's bits govern the work owner-machine equivalence gives its machine (§6.1) — damage from its own and its hosted computers' shots and death explosions, and those units' target admission. Which seat's bits apply to damage retail resolves on several machines (shooterless records) is settled in M5 against `[06 R-DMG-01 §9]`, or left a `TODO(question)` at its code site. |
 | Builder options | The Community builder preference belongs to the host player (DESIGN_COMMUNITY_PATCH §4.3). | Installed only for the local owner (`builder_options.go`). | Each seat's own, as a seat command. |
 | Survival waves | Waves patrol to the nearest unit of the human team (DESIGN_SURVIVAL §6.7). | `survival.go` targets the local owner and its allies. | All human survivors. |
-| Loss statistics | — | Losses of one cause are attributed through the local owner's alliance row (`stats.go`): the scoreboard differs per client. | Each seat's own row. |
+| Loss statistics | — | The old cause-3 implementation incorrectly uses the local alliance row. Current `[06 §12.1]` identifies a requested-snapshot receipt latch. | File the victim owner's loss once; lockstep has no overwrite-sync receipt latch. Preserve the preexisting single-player path pending its separate fingerprint-reviewed correction. |
 | Known-site gate | The placement check consults the viewer's map knowledge `[04 R-P0-08-B §1]`. | Authoritative only through the Community order drag (`placement.go`, `community_order_drag.go`). | The issuing seat's perspective. |
 
 ### 6.4 Session kind
@@ -1857,7 +1860,7 @@ new version, even if its Go zero value would appear harmless.
 | 9. Content profile | Name `text(255)`, at most 64 directory pairs `{From text(255), To text(1024)}` in canonical logical-key order, then effective Units `u32`, Weapons `u32`, TNTBytes `u64`, LOSBytes `u64`. Units 1..65536, Weapons 1..MaxInt32, byte caps 1..MaxInt64; use content defaults 512/256/16 MiB/1 MiB for absent local inputs. Reject redundant identity directory mappings. These are metadata limits, never remote instructions to allocate those sizes. Validate against the locally admitted content profile before loading/allocating. Detect markers and presentation defaults are not simulation fields. |
 | 10. Community | Length `u32` and at most 16 KiB of the existing canonical `community.Features` JSON used by `Features.Digest`; that closed field vocabulary, integer validation and named `RepairRate` subrecord are the version-1 schema. Encode the resolved value, refuse unknown fields and require exact re-encoding. Strict requires exactly the zero feature value, a separate case from non-Strict complete-table validation (whose repair multipliers must be positive). Preserve that existing digest contract; source-layer spelling/provider paths are diagnostic only. |
 | 11. Mutators | Eleven `u8` step indices in this order: BuildSpeed, BuildCost, Health, Damage, AreaOfEffect, Sight, Radar, Income, Salvage, FireRate, UnitSpeed. Indices 0..7 mean ¼, ½, ¾, 1, 1½, 2, 3, 4; missing/zero Factor and 1/1 both encode 3. Apply once to the battle's catalog clone. |
-| 12. Unit restrictions | At most 65535 records `{DefinitionID u16, Unit key, Limit u8}` in ascending nonzero definition-ID order. `DefinitionID` is the record's index in the unrestricted compiled catalog and `Unit` its canonical name key; `Limit` 0 removes the record from the battle catalog and 1..100 caps each player's records of it at the allocator `[05 R-SHARE-01 §8]` `[05 R-SHARE-01 §9]`. Omitted means unrestricted, not zero, and nothing is seeded: a `wacky` definition is restricted only by an explicit record. The value is `content.Restrictions` mapped as [DESIGN_MODS_MUTATORS §15.3](DESIGN_MODS_MUTATORS.md#153-names-and-resolution) states — every record carrying a named key present with one limit — and composition applies it to the catalog clone before the mutators (§15.4 there). Verify each key against its immutable record, preserving duplicate-name identities; reject duplicate IDs, a partial name group, `norestrict` definitions and the removal of a side's commander. Online enforcement remains after the first networked release (Q16); until then admission refuses a nonempty list, never silently ignoring an encoded choice. |
+| 12. Unit restrictions | At most 65535 records `{DefinitionID u16, Unit key, Limit u8}` in ascending nonzero definition-ID order. `DefinitionID` is the record's index in the unrestricted compiled catalog and `Unit` its canonical name key; `Limit` 0 removes the record from the battle catalog and 1..100 caps each player's records of it at the allocator `[05 R-SHARE-01 §8]` `[05 R-SHARE-01 §9]`. Omitted means unrestricted, not zero, and nothing is seeded: a `wacky` definition is restricted only by an explicit record. The value is `content.Restrictions` mapped as [DESIGN_MODS_MUTATORS §15.3](DESIGN_MODS_MUTATORS.md#153-names-and-resolution) states — every record carrying a named key present with one limit — and composition applies it to the catalog clone before the mutators (§15.4 there). Verify each key against its immutable record, preserving duplicate-name identities; reject duplicate IDs, a partial name group, `norestrict` definitions and the removal of a side's commander. Online enforcement begins with the first online lobby (§16.6, Q16 brought forward 2026-10-08), which carries the host's set. |
 | 13. Permissions | CheatsAllowed `bool`, WatchingAllowed `bool`. Neither local developer state nor interface preferences add permissions. GameClosed is room admission and excluded from battle identity. |
 | 14. View | Player, Spectator, Replay view records, each `{MinimumScale u16, MaximumScale u16, FullMap bool}`; 64 ≤ minimum ≤ maximum ≤ 2048 in existing 1/1024 zoom units. Native-no-zoom-out uses minimum 1024 and FullMap=false. Enforce camera's map-dependent feasibility separately in M6; ordinary minimap is unaffected. |
 | 15. Online policies | Policy revision `u16` =1, Scheduling `u8` =1 (casual earliest-unsealed tick), Pacing `u8` =1 (normal speed/no pause), Drop `u8` =1, Audience `u8` =1 (§11.4). Drop policy 1 is: retain a seat out of play idle, allow a removal vote once it has been out of play for a cumulative RejoinGraceMilliseconds, and on a passed vote apply the mode's final-removal rule (§11.1); its vote window, cooldown and other details are fixed protocol values of policy 1, not configuration fields (§15 Q28). Explicit RejoinGraceMilliseconds `u32`, never a removal timer, has three uses (§11.1): the cumulative time a seat must have been out of play — dropped or rejoining — since it was last active before a removal vote may be called against it; the time an admitted rejoin has to complete before the seat returns to the drop state; and the wait before a battle with no active playing human ends without a result (the last two §15 Q28). Then SpectatorDelayMilliseconds `u32`, ReplayReleaseDelayMilliseconds `u32`. No implicit timeout is invented here: the room must supply these values before ready; M6 validates service bounds and enforces them. Competitive or alternative policies are unsupported. |
@@ -1897,7 +1900,10 @@ The row, pair and string bounds above are protocol admission limits, not
 retail claims. Every `SkirmishEntryOptions` member is accounted for:
 BuilderOptions becomes the row's six values; CommunitySources becomes the
 resolved table; ContentLimits and Mutators are explicit above; AIOverrides
-becomes the merged per-row values. AutomatedPlayers is false. Progress is
+becomes the merged per-row values; Restrictions become field 12's records
+through `MatchUnitRestrictions` against the unrestricted catalog, and a set in
+the options must be the set those records describe (§16.6). AutomatedPlayers
+is false. Progress is
 local and excluded. SimArt is in frozen content identity; pointer presence
 is not a configuration distinction. Presentation profile recommendations,
 local provenance and override-layer text do not enter the identity.
@@ -1985,6 +1991,14 @@ These values are package-owned, with private effective storage and copying
 constructors/accessors. No method returns a mutable map/slice alias into a
 frozen value. Catalog/model pointers follow the existing immutable-definition
 convention; instances and mutator transforms use per-battle clones.
+
+Field 12 adds two session functions (§16.6): `MatchUnitRestrictions(cat
+*content.Catalog, r content.Restrictions) ([]MatchUnitRestriction, error)`
+maps a host's set against the unrestricted catalog, and
+`RestrictionsFromMatch(cat *content.Catalog, records []MatchUnitRestriction)
+(content.Restrictions, error)` reads records back, refusing what field 12
+rejects. `FreezeMatchInputs` performs the second against the install's own
+unrestricted catalog.
 
 ```go
 // internal/content
@@ -2880,7 +2894,7 @@ The integer-root fidelity audit O22 is authorized separately after M1.
 | Q13 | What decides a desync? | Casual rooms: a strict majority of participants plays on and each dissenting seat rejoins, or is held in the drop state — idle, removable only by vote (§11.1) — where rejoin is not yet offered; with no strict majority the battle ends without a result until snapshots exist (M8), and afterwards continues from the room creator's state. Rated rooms: no client majority decides, and the match is uncertified until a trusted replayer or referee rules (§9.3, §12.6). |
 | Q14 | May a client that lacks the host's mod fetch it from the nanolathe.gg catalogue in the lobby? | Yes, through the existing verified download path (DESIGN_MODS_MUTATORS §5). |
 | Q15 | Require identical catalogs, or negotiate a common roster as retail does? | Identical catalogs first; roster negotiation later, as a filter over the battle catalog like the restriction table. |
-| Q16 | Implement retail's multiplayer unit-restriction table? | Yes, for Strict 3.1 fidelity, after the first networked release; it is a configuration field and a lobby screen (§3.3). |
+| Q16 | Implement retail's multiplayer unit-restriction table? | Yes, for Strict 3.1 fidelity; it is a configuration field and a lobby screen (§3.3). Brought forward by the maintainer on 2026-10-08: the first online lobby carries the host's restrictions as field 12 (§16.6); a restriction-editing lobby screen, and retail's seeded `wacky` state with it, follow later. |
 | Q17 | Must the architecture support eventual competition? | **Yes, maintainer direction 2026-10-01.** Preserve scheduling/authorization boundaries and add verified results before ranked release: a trusted replayer, and a live referee only where rooms promise recovery mid-match. Who runs them, with the game content they need, and the integrity level, including whether filtered state delivery is required, remain explicit product decisions (§12.6). |
 | Q18 | May a match restrict tactical views for every player? | **Yes, maintainer direction 2026-10-01.** Include shared view policy in the agreed configuration and enforce it in ordinary clients; no-zoom-out is the concrete first example (§8.4). A scale cap does not by itself equalize world viewport area or prevent modified-client bypass. |
 | Q19 | Is cross-play with other engines a delivery goal? | **No planned support, maintainer direction 2026-10-01.** Focus on Nanolathe-to-Nanolathe with matching effective content/mods/settings. Other engines may be reconsidered later or dropped entirely (§8.5). |
@@ -2897,8 +2911,12 @@ The integer-root fidelity audit O22 is authorized separately after M1.
 
 ## 16. Delivery plan
 
-Each milestone is useful on its own, lands behind the previous one, and leaves
-every single-player battle bit-identical except where it says so.
+The original milestone sequence below remains the full delivery and acceptance
+plan. On 2026-10-07 the maintainer approved bringing forward a constrained
+local two-client play test (§16.4), before full M3 platform acceptance and M4
+replays. Prototype work may take the necessary M5/M6 pieces in dependency order;
+it does not claim those milestones complete. Every single-player battle stays
+bit-identical except where an existing contract explicitly says otherwise.
 
 | Milestone | Delivers | Done when |
 |---|---|---|
@@ -3195,8 +3213,8 @@ Survival attacker is last with group 5 and every other row shares one team;
 a nonzero Community unit limit must equal the field; `MapName` is nonempty
 and trimmed with case kept; content-profile `From` is a canonical key,
 `To` lower-case, identity rows rejected, `From` strictly ascending; unit
-restrictions get schema checks only, and `ValidateMatchInputs` must refuse a
-nonempty list until Q16 enforcement exists; the three policy durations
+restrictions get schema checks only, and `ValidateMatchInputs` refused a
+nonempty list until Q16 enforcement (§16.6, 2026-10-08); the three policy durations
 accept any `u32`; the mod triple is all empty or all set; AI parameters are
 canonical tokens in strictly ascending key order with the 8,192-byte bound
 measured on the encoding; the adapter supports one local human hosting every
@@ -3234,7 +3252,7 @@ category — `ErrMatchConfigurationRejected`, `ErrMatchMapMismatch`,
 map-entry selection is re-run on the frozen map file for the configuration's
 seat count and must equal both the recorded and the configured schema; side
 ordinals are checked for every seat, attacker and watchers included; a
-nonempty unit-restriction list is refused naming Q16; permissions, views,
+unit-restriction list was refused naming Q16 until §16.6 admitted it; permissions, views,
 policies and participant identities are not composition inputs and are not
 compared. `NewAdmittedSkirmish` admits first, then composes only the
 single-seat shape — exactly one human, no watcher, one difficulty shared by
@@ -3653,12 +3671,19 @@ pending native-platform or later-milestone gates separately from tests that actu
 
 ### 16.3 M3 preparation and work units
 
-**Status: U0 published; U1 encoder and reference keys implemented, 2026-10-06.**
+**Status: U0 published; U1–U6 implemented; U7 acceptance in progress, 2026-10-07.**
 M1's native gate is complete and all M2 units are implemented (§16.1–§16.2).
 M3 is the next milestone. U0's reviewed field dispositions, encoding and
 public API are in §16.3.5–§16.3.8. U1 provides the shared encoder and
-reference keys; a whole-battle canonical digest still requires U2–U7. These
-are Nanolathe implementation contracts under §9, not new retail findings or gameplay policies.
+reference keys; U2 adds allocation, order and script writers (§16.3.10).
+U3 terrain/features/visibility and path are implemented (§16.3.11–§16.3.12);
+movement writers are integrated (§16.3.14). U4 economy, construction, combat
+and effects/event writers are implemented (§16.3.13, §16.3.15–§16.3.17).
+U5 computer state and application recording are integrated (§16.3.19–§16.3.36).
+U6 composes full battle capture and both histories. U7's local cost measurements
+pass the declared limits (§16.3.83–§16.3.84); native-platform comparison remains
+pending. These are Nanolathe implementation contracts under §9, not new retail
+findings or gameplay policies.
 
 **Scope.** Deliver the writer, digest, owner sub-digests, tick ring and
 single-seat verification. Leave the existing partial fingerprint and its
@@ -3807,9 +3832,9 @@ Exact snapshot readers and relay APIs remain outside it.
 |---|---|---|
 | **U0 Inventory and schema — published** | M2 acceptance evidence reviewed | Reviewed dispositions and schema/API in §16.3.5–§16.3.8. Implementation prerequisites and unsupported cases are explicit; no writer is claimed complete. |
 | **U1 Encoder and reference keys — implemented** | U0 | Streaming primitives, domain/version framing, error propagation, content-owned key resolution, authored byte vectors and a tiny test owner. No whole-world completeness claim. Exact files/new leaf package are named by U0. |
-| **U2 Units, orders and COB** | U1 | Owner writers and focused mutation/exclusion tests in `internal/units`, `pool`, `orders`, `cob` and `model`. Cover slot reuse/residuals, suspended orders, thread reuse and logical callback state. |
-| **U3 World, visibility, movement and paths** | U1 | Owner writers/tests in `internal/world`, `features`, `visibility`, `movement`, `path`. Cover temporary-sight data through the session integration, stale grids/registries, list order, active searches and Modern policy state. This is a sequencing group: split it into bounded, exclusive-file dispatches after their shared key/API needs are resolved. |
-| **U4 Economy, construction, combat and effects** | U1 | Owner writers/tests in `internal/economy`, `construction`, `combat`, `effects`. Session-owned strips and shared event-admission glue are integrated by U6. Include full pools, deferred work and feature/transport effects. Split along existing owners when dispatching. |
+| **U2 Units, orders and COB — implemented** | U1 | Owner writers and focused mutation/exclusion tests in `internal/units`, `pool`, `orders`, `cob` and `model`. Cover slot reuse/residuals, suspended orders, thread reuse and logical callback state. |
+| **U3 World, visibility, movement and paths — owner writers implemented** | U1 | Terrain/features/visibility and path implemented (§16.3.11–§16.3.12); movement metadata and writers integrated (§16.3.14). Owner writers/tests in `internal/world`, `features`, `visibility`, `movement`, `path`. Cover temporary-sight data through the session integration, stale grids/registries, list order, active searches and Modern policy state. This is a sequencing group: split it into bounded, exclusive-file dispatches after their shared key/API needs are resolved. |
+| **U4 Economy, construction, combat and effects — owner writers implemented** | U1 | Owner writers/tests in `internal/economy`, `construction`, `combat`, `effects`. Session-owned strips and shared event-admission glue are integrated by U6. Include full pools, deferred work and feature/transport effects. Split along existing owners when dispatching. |
 | **U5 Computer-player state** | U1; reference contract from U0 | Classic/engine-upkeep writer in `internal/ai`; Modern simulation-thread application/deadline record in `internal/aikit`. Worker-schedule and application-order tests. No brain-policy edits, worker joins or new commands. |
 | **U6 Session capture and history** | U2–U5 | Session/runtime/mission/trigger/Survival writers; compose each owner once; capture at actual pump/tick boundaries; digest cadence, sub-digests and tick ring. Own shared `internal/session` integration, with exact external owner files assigned separately. No network battle, recording format or restore reader. |
 | **U7 Acceptance and cost** | U6 | Scripted single-seat harness, native-platform and host-kind evidence, two-ring fault diagnosis and measurements. Reuse the existing gates and simulation benchmark; landing owner owns shared gate/CI edits. Record exclusions, unsupported cases and measured budgets here before marking M3 complete. |
@@ -3867,10 +3892,10 @@ live capture cost is measured after U6 enables it.
 proposal remains for the maintainer and M4 (`seat_command_codec.go`); M3
 must not silently widen the command schema. The visited-bit meaning remains
 a research question, with no guessed mapping in the checkpoint inventory.
-The frozen-input preparing rule set, cloned content limits and profile
-name/directory attestations remain explicit admission gaps
-(`match_admission.go`); §16.3.8 assigns the bounded fixes and fail-closed
-admission conditions before those identity claims are enabled.
+The preparing rule identity and cloned content limits are now admitted by
+§16.3.34. Profile name/directory attestation remains an explicit admission gap
+(`match_admission.go`); §16.3.8 assigns the fail-closed admission conditions
+before that identity claim is enabled.
 The mod comparison already added by U6 is not an open item again. Unit
 restrictions added after M2 also need an inventory of their effective content
 and limits; online field-12 admission remains separately staged (§8.6 and
@@ -3947,8 +3972,8 @@ non-nil function pointers alone do not establish the admitted binding.
 | `visibility.Service` | Semantic mode bits, dimensions, row-major word mask; byte grids by player then row; local/team/viewer-defeated; footprints by observer ID, retaining owner/cells/height/radius/quantized/live/stored cells/stored byte; effective Community inputs. | Fog caches, mode cache-valid bit, publication versions/identities and rebuild flags are excluded. Spokes derive from immutable ray tables. Sensor index rebuilds every sensor tick; `sensorInputs` and `sensorStatusByID` are diagnostics without production readers. Actual contact bits live in unit flags; cadence lives in session/ledger. |
 | Movement base state | Per-handle routes, steers, collisions, flights, copied profiles/names, working sets, previous move tier/SFX band; layer registry, learned terrain, pending layers, active orders/next activation, arrival handles, move/record goals, provider, first requests, unreachable/jam/traffic/pocket state, work tick/smoothing budget, pilots, repair landings, air-base lists. Retain effective fallback/Community/path-player/unit-limit inputs and current tick. | Require tick ended, overlap scan inactive and provider eligibility cache invalid. Diagnostics, path failures, history/lab counters and per-call scratch walks are excluded. `passAlliance`/`trafficNow` are replaced at BeginTick for the recognized pure rules; unknown stateful rules cannot claim that exclusion. |
 | Route/profile/steer | Entire route `Points[20]`, count/active/dirty/repath/request/status/first-hold/pending; all eight profile footprint/water/slope fields; steer X/Z, heading/pending heading, dirty/speed/max velocity/turn rate/height/sea-level/definition flags/acceleration/brake. | Inactive route storage remains readable. `Route.StaticRevision` has only diagnostic readers. |
-| Collision/flight | All collision scalar fields, yard values, half-bias state, filing, saved/proposal/stamp/blocker/lean/turn fields; all flight scalar fields, including mode mirror, targets, gravity/bank/pitch, plus unit/command edges. Filing retains `Filed`, `OffMap`, `SX`, `SZ`, `Seq`, including cargo. Selected air sector is nil/record index/sentinel and is not recomputed from position. | Flight-command `Flags` is stream/publication bookkeeping. Flight command otherwise retains payload/owner/unit, position, velocity and heading. Immutable air-sector records bind terrain. Conservative retained collision residuals are not reconstructed from current transforms. |
-| Occupancy/layers | Row-major ground/air cells, plane dimensions, link sequence, off-map and sector heads, all link next/prev/cell/linked/off-map values; pending filing rows and duplicate-suppression rows. Layer names in allocation order, membership, each copied profile/dimensions/packed cells/watermark and per-handle commit tick/set. | Encode logical occupants, not identity-plus-one storage. Ground/air counts derive from occupied entries. Grid revision is diagnostic. Plot occupancy and mover occupancy may differ legitimately. Class stamp buffers are overwritten scratch. |
+| Collision/flight | All collision scalar fields, yard values, half-bias state, filing, saved/proposal/stamp/blocker/lean/turn fields; all flight scalar fields, including mode mirror, targets, gravity/bank/pitch, plus unit/command edges. Filing retains `Filed`, `OffMap`, `SX`, `SZ`, `Seq`, including cargo. Selected air sector is nil/record index/sentinel and is not recomputed from position. Wire tags are nil 0, record 1 followed by zero-based u32 index, sentinel 2. | Flight-command `Flags` is stream/publication bookkeeping. Flight command otherwise retains payload/owner/unit, position, velocity and heading. Immutable air-sector records bind terrain. Conservative retained collision residuals are not reconstructed from current transforms. |
+| Occupancy/layers | Row-major ground/air cells, plane dimensions, link sequence, off-map and sector heads, all link next/prev/cell/linked/off-map values; pending filing rows and duplicate-suppression rows. Layer names in allocation order, membership, each copied profile/dimensions/packed cells/watermark and per-handle commit tick/set. | Encode logical occupants as presence plus signed i64 identity, not identity-plus-one storage. Ground/air counts derive from occupied entries. Grid revision is diagnostic. Plot occupancy and mover occupancy may differ legitimately. Class stamp buffers are overwritten scratch. |
 | Movement goals/state | Active order/token, arrival order/goal/threshold/payload/border, move order/coordinates/goal, record goals in installation order; working-set search/goal/activation/through. Learned-grid dimensions/words. Clearance route order/cells; unreachable order/activation/since/goal; jam run/replan/until/limit/cooldown/pocket; traffic side/deadline/round/steering/ahead/through/routeless/start/goal presence/coordinates; pocket order/since/grants/token. | Goal pointer sharing affects working-set reuse. Preserve aliases. Repair landings retain admission order, exact unit/node/pad, piece/reserved/holding/anchor. Movement owns the stale combat air-base lists once. |
 | Claim/arrival pilots | Claim dimensions/have/serial/own rows; nullable owner grids, all/slow directional counters and written lists. Arrival move-ground/standby, per-handle rows (all seen/node/place/footprint/coordinate/check/exchange/member/best/stood fields), claim/generation/reservation grids. Composite pilot has four ordered nullable child states. | Claim trail and arrival live/fresh/member walks reset before use. Counter wrap is not permission to discard marks: captured claim serials and arrival row membership tags remain readable. |
 | Path provider/scheduler | Requests by player/handle with raw unit, player, start, goal and activation; provider cursors/started/tick/players/limit. Scheduler base/set/scales/call count/have-last, optional active request/player/scale, player cursor/service counts/accumulators/allowance/unit limit/player count. | Staged indexes derive from keys; sweep polls reset per call. Inactive request residual, traces and diagnostics are excluded. |
@@ -4079,9 +4104,9 @@ payload. Entry/tick distinction and tick number are runtime payload fields.
 | ID | Section | Ownership edges |
 |---|---|---|
 | 1 | runtime | Session configuration, tick/RNG/lifecycle/result/drivers; no scenario internals |
-| 2 | units | Arena, current/freed slots, reachable allocation records; no order/VM bodies |
+| 2 | units | Arena, current/freed slots, reachable allocation records and physical unit piece flags; no order/VM bodies |
 | 3 | orders | Unit-to-queue roots, queue/node tables and auxiliary order state |
-| 4 | scripts | Unit-to-VM/bridge roots, VM tables, continuations and active piece flags once |
+| 4 | scripts | Unit-to-VM/bridge roots, VM tables, continuations and unbound VM fallback piece flags |
 | 5 | world | Mutable plots, feature table, feature instances/active order |
 | 6 | visibility | Visibility service, session stamps and temporary sight |
 | 7 | movement | Occupancy/layers/movers/pilots/goals/payloads; nested air-base registry |
@@ -4110,6 +4135,10 @@ func (k *CheckpointKeys) Unit(v *UnitDef) (checkpoint.Definition, error)
 func (k *CheckpointKeys) Weapon(v *WeaponDef) (checkpoint.Definition, error)
 func (k *CheckpointKeys) Feature(v *FeatureDef) (checkpoint.Definition, error)
 func (k *CheckpointKeys) Model(v *model.Model) (checkpoint.Definition, error)
+func (k *CheckpointKeys) SightShapes(v *SightShapes) (checkpoint.Definition, error)
+func (k *CheckpointKeys) LOSTables(v *LOSTables) (checkpoint.Definition, error)
+func (k *CheckpointKeys) FeatureSequence(filename, sequence string, delays []int32) (checkpoint.Definition, error)
+func (k *CheckpointKeys) FeatureSequenceAbsent(filename, sequence string) error
 func (k *CheckpointKeys) ProgramForUnit(unit *UnitDef, v *cob.Program) (checkpoint.Definition, error)
 type CheckpointFeature struct {
     Variant uint8 // 1 admitted definition, 2 normalized copy
@@ -4179,11 +4208,12 @@ Interface tables admit only the closed pointer variants below; reject unknown
 or typed-nil concrete values before calling the generic interner. Higher
 services' contexts borrow the applicable lower contexts and keys. They add no
 second interner for the same kind. COB's value context has resolved program
-identity and continuation values; it does not import content. Session owns
+identity; its VM retains value descriptors beside the installed continuations.
+It does not import content. Session owns
 the context composition. Every state owner above implements
 `CollectCheckpointReferences(c *CheckpointContext) (added int, err error)`
 alongside its writer. The receiver is its existing `World`, `Service`,
-`System`, `Scheduler`, `Manager` or `Session`, as applicable. A collector both
+`System`, `Pump`, `Scheduler`, `Manager` or `Session`, as applicable. A collector both
 adds its own roots and scans already-discovered objects in its tables. It
 calls the exposed `Add` tables for lower-owner edges. Internal movement roots
 and private pilot/row-holder tables are discovered by `System` itself.
@@ -4199,7 +4229,8 @@ reference; only collectors call `Add`. Table storage is discarded after the
 capture, never retained as authoritative state.
 
 Object tables have fixed u16 IDs: allocations 1, queues 2, nodes 3, VMs 4,
-class layers 5, pilots 6, claim-row holders 7, payloads 8, goals 9, searches 10.
+class layers 5, pilots 6, claim-row holders 7, payloads 8, goals 9, searches 10,
+and ground move-goal handles 11.
 Each section writes its non-table record, then its ordered root-link sequences,
 then its tables in ascending table ID. A table is ID u16, record count u32,
 then records in assigned-ID order; record ID is the implicit 1-based ordinal.
@@ -4208,7 +4239,7 @@ table ID plus zero. Root links follow physical-unit order and use allocation
 object IDs, including additional retired allocations after arena roots. Any
 other root uses the owner's retained sequence/key order. Present sections emit
 their assigned tables, including empty ones: units 1; orders 2–3; scripts 4;
-movement 5–8; paths 9–10. An absent section implicitly has empty tables and
+movement 5–8 and 11; paths 9–10. An absent section implicitly has empty tables and
 emits no table bytes. Unknown table tags fail capture.
 
 Union tags are u8 and precede the variant payload. Unit-slot tags are never
@@ -4219,7 +4250,8 @@ air marker 1, air velocity 2. COB gameplay continuation: none 0, slot-aim 1;
 slot-aim carries thread-slot u8, thread allocation identity u64, captured raw
 unit key u32, target allocation, weapon slot u8 and existing aim-mode value.
 Descriptor metadata is installed/cleared atomically with `onReturn`, including
-thread claim/kill/return and program replacement. Trace-only wrappers carry
+thread claim/kill/return and nonnil program replacement. Nil-program replacement
+retains the existing receiver semantics and makes capture unsupported. Trace-only wrappers carry
 no gameplay descriptor. Known binding identities are absent 0 or the canonical
 composed owner 1; any callback with different behavior needs a reviewed variant.
 
@@ -4270,6 +4302,14 @@ water slope. The kind-specific operands are:
 | 7 claims cost | No inputs; ClaimCounts, ClaimOwn, Owner, Serial, Width/Height, footprint, Per/Against; Row 2 all, 3 slow |
 | 8 class revision | No inputs; Layer, Profile, Requester, Tick |
 
+Descriptor object operands are plain u32 values: their target tables are
+fixed by this schema (Layer table 5, ClaimCounts/ClaimOwn table 7), so they do
+not add the table tag used by ordinary graph edges. Learned is owner+1.
+Kind 6 Bounds holds the captured strict overlap boundary operands, computed
+with the existing int32 start±clamped-footprint arithmetic, rather than the
+search bounds or a new inclusive rectangle. Its footprint retains the raw
+profile footprint passed to the override view.
+
 Layer refers to movement's layer table. ClaimCounts and ClaimOwn refer to
 separate private comparable row-holder objects in table 7: holder tag 1 is an
 own row (`[]uint32`), tag 2 is a count row (`[][8]uint8`). Pilot grids/own
@@ -4278,6 +4318,12 @@ holders when rows/closures are created and preserves the actual backing rows,
 including older rows after replacement. Holders do not copy counts or intern
 uncomparable slices. This retains independent aliasing of count and own rows.
 The row selector records whether the captured count row was all or slow.
+Only nodes reachable from the final callback roots are emitted: replacing a
+passability or cost callback does not leave its superseded descriptor in the
+DAG, while a wedge retains the immediately preceding view as its base.
+Revision metadata privately retains its actual registry/class key so capture
+can validate the canonical registry and selected layer without calling `For`
+or `Revise`.
 `SetAccessors` validates local node indexes/kinds and rejects conflicting
 repeated registrations; movement/session validates cross-table IDs before
 writing. Neither validation invokes a closure. Path writers read only these
@@ -4349,7 +4395,10 @@ by an out-of-tick file write. Failure is reported through the result/history
 status, never a simulation log or a world mutation. Regular cadence failures
 are retained as the latest capture error even without a pending byte request;
 failed records are not added. Off-cadence requests do not shift cadence or
-consume one of the 64 cadence slots. Repeated history/result reads do not drain.
+consume one of the 64 cadence slots. Successful automatic captures update only
+the cadence history; they do not replace the entry/request result, including
+a later cadence tick in the same pump that delivered requested bytes. A host
+reads cadence records from history. Repeated history/result reads do not drain.
 Pump/consumed-input position and build/platform provenance are metadata,
 excluded from the canonical stream; boundary kind and world tick are included.
 
@@ -4385,6 +4434,7 @@ type ControllerCheckpoint struct {
 type ControllerCheckpointProvider interface {
     ControllerCheckpoint() ControllerCheckpoint
     WriteControllerCheckpoint(*checkpoint.Encoder, *CheckpointContext) error
+    AppendControllerCheckpointSummary(*checkpoint.Summary) error
 }
 ```
 
@@ -4464,7 +4514,7 @@ failure as C2. Metadata and the six pool counts have their own row fields.
 | visibility | Mode semantic bits/local/team/viewer-defeated; word mask then player byte grids row-major; temporary-sight list length and owner/coordinates/expiry/published |
 | movement | Per-handle route count/active/dirty/status/request tick and all point coordinates; steer X/Z/heading/speed/dirty; collision stamp/plane/blocker/blocked; flight mode/XYZ/velocity; work tick/budget |
 | paths | Scheduler base/set/scales/call count/player cursor/allowance, service counts/accumulators; active request presence/player/unit/start/activation; per-handle working-search presence, popped/setup/expanded counts, node count and heap count |
-| economy | Player stock/capacity/mirror/production/consumption/carry/update time, ended/countdown and alliance rows; per-unit production/requested/accepted/carry buckets by handle, Metal then Energy |
+| economy | Ten players in slot order: Stock, Capacity, Mirror (each Production, Requested, Accepted, Carry), AIProduction, AIConsumption, UpdateTime, GameEnded, EndGameCountdown, Allies; resource pairs Metal then Energy. Then unit-bucket count and each physical row's Buckets, Metal then Energy, each Production, Requested, Accepted, Carry |
 | construction | Per-handle repair-bank target/remainders and kick XYZ/valid; placement count and builder-link count |
 | combat | Pool count/capacity; all projectile records' dead/weapon/XYZ/target/shooter/velocity/expiry/burst remaining; target rebuild gates/cursors, Modern next-projectile tick, area generation counter |
 | effects | Event next ID/sequence/exhausted; service next ID/last sequence; ordered effect XYZ/velocity/expiry and both animation indices/countdowns; fragment/debris/strip counts; each strip's family/spawn/window and each particle XYZ/expiry/frame/delay/phase |
@@ -4558,7 +4608,7 @@ digest even when compiled into a fresh pointer. Model admission retains the
 already-computed definition-loader heights, so key validation needs no file
 reads and does not change the content digest. Feature references validate the
 existing malformed-definition gate and precisely its five normalized fields;
-U3 still needs to retain each runtime copy's base relation.
+U3 retains each runtime copy's base relation as described in §16.3.11.
 
 Focused tests pin these reference boundaries, including lookups against a
 filesystem wrapper that cannot perform reads. The declaration-scoped I2 guard
@@ -4573,6 +4623,2477 @@ cost and whole-state/native-platform acceptance remain U7 work.
 U1 package, architecture and citation checks pass. The authored encoder
 vectors also pass in the Darwin/amd64 build on this Darwin/arm64 host; that
 additional build check is not the native multi-platform U7 acceptance gate.
+
+#### 16.3.10 U2 implementation and verification
+
+The unit, allocator, order, COB and model owners now write their assigned
+records. These are staged capture APIs: live-session composition and acceptance
+remain U6–U7. U2 accepts admitted authored fixtures with absent gameplay
+bindings and refuses unverified callbacks, sources and owner adapters. It does
+not enable whole-world capture or claim playable networking. U3 progress is
+recorded in §16.3.11.
+
+**Allocation and graph framing.** Section 2 writes the World record in lexical
+order: `OnCapture`, `OnCreate`, `OnDeath`, `OnDeathExtra`, `attachmentObserver`,
+`cobBinder`, `cobFS`, `cobLoader`, `createdCounters`, `extraction`,
+`lastAllocationSerial`, `liveCounters`, `pool`, `pose`, `simulationRNG`.
+Binding fields use explicit absent u8 tags. Pool fields are `alive`, `defID`,
+`limit`, and player-ordered `slices` (each `end`, `start`); used count,
+identity-index and sliced-state derivations are validated. The physical-slot
+sequence includes the null sentinel, with the three tags in §16.3.6. A live
+slot carries a table-1 reference; a freed residual carries `Handle` u32,
+`Kills` i32, `Owner` u8, `Remaining` f32, in that order. Table 1 follows and
+includes independently retained old allocations after the arena roots.
+Creation must be idle, serials must be distinct successful allocations from
+this battle, and catalog identity maps must match finalized admitted records.
+
+`units.World.CollectCheckpointReferences` registers all physical allocations
+first, then the discovered allocation/VM edges. `orders.Pump` discovers queues,
+nodes and retired allocations from danger and firing-position edges. Repeated
+owner passes reach a fixed point without reading a pointer as an address or
+redirecting an old allocation to a reused slot. Section 3 writes the ordered
+allocation-to-queue roots, then queue table 2 and node table 3. No collector
+creates a missing queue, invokes a handler or advances a script. Writer-time
+reference lookups never register new objects. Detached pump execution and
+unconsumed input-only order fields fail capture.
+
+Unit and nested records use the expanded lexical lists next to their writers.
+Raw handles use the schema's u32 width; `numeric.Fixed` uses its full i64
+storage, including high bits. Unit `RenderPieceFlags` stays in section 2 after
+`Remaining`, with byte-sequence framing. Unit `statusCue` and `yardTransaction`
+are explicit absent binding tags after the death latches. This keeps physical
+unit flags separate from the VM's unbound fallback storage.
+
+**Script roots and callback state.** `units.World.WriteScriptCheckpoint`
+composes section 4 from the shared context. Each allocation root writes its
+table-1 reference, table-4 VM reference, `ScriptState` presence, optional
+`Binding`, then optional `Bridge`. A binding writes its admitted model key
+and absent u8 tags for `PresentationSink`, `SFXSink`, `SFXVisible`,
+`SimulationRNG`; its program/VM/bridge aliases, piece links and creation marker
+are validated derivations. A bridge writes `createInvoked`. VM table 4 follows,
+with an admitted program identity supplied through `cob.CheckpointContext`.
+Each VM must belong to exactly one allocation; sharing a VM across different
+unit owners is explicitly unsupported. A VM without a program is unsupported.
+Neither validation nor writing reads a file or invokes a mutable pose cache.
+
+VM fields are lexical as listed beside `VM.WriteCheckpoint`. All eight thread
+slots and every stack cell are retained, as are animation lanes, return and
+thread allocation identities, and raw aim-ready words. The fixed VM binding
+record has twelve tags: `cargoContains`, `carrierIdentity`, `explosionSink`,
+`portBindings`, `portFuncs`, `renderFlags`, `scriptTouched`, `sfxSink`,
+`sfxVisible`, `simRng`, `transportAttach`, `transportDrop`. U2 accepts only
+absent bindings, even if a nonnil function looks like the normal implementation.
+VM `pieceFlags` writes source tag 1 plus the local byte sequence; source tag 0
+is reserved for the attested external unit store. Presentation-only VMs fail.
+Piece cache booleans, drain counters, trace queues and provenance are excluded.
+
+`CallbackBridge.AimWithCheckpoint` records the existing combat receiver's
+captured allocation, weapon slot and raw cleanup key. It uses the same deferred
+aim path, without running the receiver. Thread slot/identity metadata is armed
+and cleared with the receiver at claim, kill, return and nonnil program replacement;
+on return it clears before the callback executes. Ordinary unknown gameplay
+receivers fail capture, while a trace-only wrapper has the same descriptor as
+no receiver. `VM.CheckpointContinuations` returns these detached values.
+Script composition verifies that each slot-aim target is its VM's own unit
+allocation. This describes the pending work; it does not grant readiness or
+alter RNG draws, scheduling or callback results.
+
+**Remaining binding work.** The `TODO(M3-U6)` refusals are implementation
+staging, not unresolved retail mechanics. U6 must attest the actual production
+composition before it can emit canonical binding tag 1: World hooks/COB source,
+unit yard/status hooks, queue adapters/handlers, script binding and VM ports,
+readers, RNG, render store and sinks. No nonnil-only acceptance or function
+address identity is permitted. New production-unreachable context and owner entry points have explicit
+baseline entries until U6 wires capture to sessions; tests exercise them now. No synthetic caller bypasses that gate.
+
+Authored tests pin independent byte vectors, full-width values, slot reuse and
+residuals, detached/retired references, aliases, suspended orders, inactive COB
+stack storage, thread reuse and completion cleanup. Mutation tests distinguish
+owner sub-digests; exclusion and purity tests vary addresses, caches and traces
+without changing the output. The combat test checks the original captured
+receiver even when another allocation uses its raw handle.
+
+The displayless simulation-cost comparison used scene 1, Town & Country,
+Modern rules, seed 7 for both streams, three 250-unit armies, 1,200 warm-up and
+300 measured ticks, Go 1.27.1 on Darwin/arm64 with two runtime workers. Catalog,
+scene, all seven census rows, RNG draws (15,645 simulation; 985,036 CRT), and
+initial/warm/final partial fingerprints matched the unchanged-main baseline.
+Baseline/candidate median tick time was 2.020/1.685 ms, p95 3.217/2.718 ms,
+and process CPU 2.145/1.824 ms per tick; allocated objects were about 808/tick
+in both. These single-run timings show no observed regression, not a speedup
+claim. This measures the added callback metadata with capture disabled;
+whole-checkpoint cost remains U7.
+
+The integrated worktree passes `tools/check` and `tools/check-retail`,
+including the amd64 fingerprint locks under Rosetta and real-device GPU
+fixtures. Read-only reviews independently ran the affected owner/callback
+contracts. Main remains at `c6f73cbb6`; U2 is committed only on the continuing
+multiplayer branch pending play testing.
+
+#### 16.3.11 U3 terrain, feature and visibility owner group
+
+U3 is split into bounded owner groups. Terrain/features and visibility are
+implemented on the continuing multiplayer worktree; path search/accessor
+metadata and movement follow. The first group uses the published API below.
+Whole-session composition, map admission and canonical callback attestation
+remain U6, as with U2.
+
+```go
+// internal/world
+func NewCheckpointContext(keys *content.CheckpointKeys) *CheckpointContext
+// CheckpointContext exposes Keys *content.CheckpointKeys and Terrain *Terrain.
+func (t *Terrain) CollectCheckpointReferences(c *CheckpointContext) (int, error)
+func (t *Terrain) WriteCheckpoint(e *checkpoint.Encoder, c *CheckpointContext) error
+func (t *Terrain) RecordCheckpointFeatureNormalization(base, value *content.FeatureDef)
+func (t *Terrain) CheckpointFeature(keys *content.CheckpointKeys, value, base *content.FeatureDef) (content.CheckpointFeature, error)
+// internal/features
+func NewCheckpointContext(w *world.CheckpointContext) *CheckpointContext
+// CheckpointContext exposes World *world.CheckpointContext.
+func (s *Service) CollectCheckpointReferences(c *CheckpointContext) (int, error)
+func (s *Service) WriteCheckpoint(e *checkpoint.Encoder, c *CheckpointContext) error
+// internal/visibility
+func NewCheckpointContext(keys *content.CheckpointKeys) *CheckpointContext
+// CheckpointContext exposes Keys *content.CheckpointKeys.
+func (s *Service) CollectCheckpointReferences(c *CheckpointContext) (int, error)
+func (s *Service) WriteCheckpoint(e *checkpoint.Encoder, c *CheckpointContext) error
+```
+
+These owners add no object-reference tables. U6 frames section 5 as terrain
+presence/payload then feature-service presence/payload. Section 6 frames the
+visibility-service presence/payload then the session's retained visibility
+stamps and temporary-sight records. An owner writer emits only its payload;
+it never emits another owner's body or adds section framing on its own.
+
+Terrain retains `ClassRestamp`, `FeatureDefs`, `FeatureNames`, `Movers`, `Plot`,
+`metalSeeded` in lexical order. Binding fields use absent u8 tags until U6
+attests the canonical movement owners. Plot rows write `AnchorWord`, `Feature`,
+`Flags`, `Metal`, `OccupantA`, `OccupantB` (u16, u16, u8, u8, i16, i16).
+`Flags` removes only the unexplored bit and placer nibble; unclassified bits
+remain. Heights and geometry are admitted immutable map inputs. Capture
+requires the entry void sweep complete and no active mission undo/stamp/replay
+transaction, validates plot dimensions, and never runs fixup or recomputes
+immutable LOS data. Feature names and definitions are separate stored sequences; runtime admission can append only definitions.
+A definition edge is presence followed by the §16.3.6 feature variant.
+
+At the existing normalization site, features preserves the original base on
+the created instance; when the normalized object is appended to the terrain's
+retained definition table it also records that exact base relation there.
+The terrain collector binds the context's singleton terrain; features verifies
+its service and instance aliases against that owner. No name lookup infers
+provenance and no diagnostic map keeps an unretained
+failed placement alive. `CheckpointFeature` resolves an optional explicit
+instance base, or the terrain's retained relation, then delegates validation
+to the admitted content keys. A stale/foreign or changed copy fails capture.
+Re-normalizing an already normalized empty-key definition also refuses while
+its base is itself unadmitted; an explicit original-base provenance contract
+and its composition validation must precede support for that edge.
+This metadata neither changes normalization nor selects a replacement.
+
+Features writes `BurnFrameGeometry`, `BurnSmoke`, `BurnSound`, `BurnWeapon`,
+`Crt`, `GeothermalSteam`, `SequenceFrames`, `Sim`, `Terrain`, `Wind`,
+`arenaHeld`, `cursor` in that order, followed by instances in sorted anchor-key
+order and the exact active head-to-tail key sequence. Links, map ownership, arena charge and captured terrain aliases are
+validated without repairing caches or links. Advertised-valid lookup keys and
+value rows must agree with the sorted map; caches marked for rebuilding are
+excluded without refresh. Active-walk and pending-burn handoffs fail capture. Instance fields follow §16.3.5; its cursor writes delay,
+sequence presence/key and frame in lexical order. A live cursor's delay words
+must equal the frozen sequence named by its actual definition and selector.
+Sequence lookup neither invokes `SequenceFrames` nor populates its cache.
+Excluded cache rows validate their sequence key and exact delay values, not
+definition provenance; stale normalized key objects can outlive their instances
+without affecting that immutable timing identity. `FeatureSequenceAbsent`
+validates cached misses against admitted absence/zero-frame metadata or the
+consumer's explicit blank-argument result, refusing unrequested names.
+Unknown callbacks and nonnil RNG/wind bindings remain explicit U6 refusals;
+observation/provenance and shadow-only bindings follow the reviewed exclusions.
+
+Visibility writes Community values/binding tags, dimensions, rule binding,
+byte grids, sorted observer footprints, local player, semantic mode bits,
+ray-table and shape presence/keys, teams, terrain presence and viewer-defeated,
+then word mask in source-field lexical order. The fog-valid mode bit alone is
+excluded. Sprite masks and ray tables resolve as the actual admitted catalog
+objects, including the declared ray-table count. Unknown rules, alliance and
+off-map readers fail until U6 attestation; capture invokes none of them.
+Terrain presence is the single world edge; U6 verifies it refers to the
+same admitted terrain. Derived fog, spokes, sensor indexes and
+diagnostic/publication counters stay excluded, without being rebuilt by the
+writer. The new provenance and in-progress markers are capture metadata and
+boundary checks, excluded from the payload. They add no RNG draws or rules.
+
+Authored byte vectors and retained-field mutations cover plot words, normalized
+definitions, feature positions above 32-bit range, active-list order, sequence
+identity/timing, player grids, inactive observer residuals and the complete mode
+word except its fog-valid bit. Tests vary cache contents, map insertion order,
+object addresses and excluded presentation fields; collection and writing
+neither mutate state nor invoke producers. Invalid lists, arena charges, usable
+lookup caches, foreign definitions and unattested callbacks refuse before
+payload emission. Content tests freeze authored missing and zero-frame GAF
+sequences, and reject empty nonnil delay arrays as present bindings.
+
+The three new context constructors in `tools/deadcode-baseline.txt` are U3
+staging until U6 composes these owners. The visibility key-collection loop and
+its containing numeric sort are pinned by the I1 architecture audit. No new
+module dependency, rule seam, save representation or partial fingerprint is
+introduced.
+
+The displayless comparison used scene 1, Town & Country, Modern rules, seed 7
+for both streams, three 250-unit armies, 1,200 warm-up and 300 measured ticks,
+Go 1.27.1 on Darwin/arm64 with two runtime workers. Baseline `9b438fa2c` and
+the integrated candidate matched the catalog, scene, all seven census rows,
+RNG draws (15,645 simulation; 985,036 CRT), and initial/warm/final partial
+fingerprints. The final census held 6,213 features, 12 burning. Baseline/candidate
+median tick time was 2.029/1.888 ms, p95 3.238/3.003 ms, and process CPU
+2.152/2.030 ms per tick, with about 808 allocated objects per tick in both.
+These single runs show no observed regression and do not establish a speedup.
+They measure runtime provenance/transaction metadata with capture disabled;
+whole-checkpoint cost remains U7.
+
+The integrated worktree passes `tools/check` and `tools/check-retail`, including
+retail static analysis, the amd64 fingerprint locks under Rosetta and real-device
+GPU fixtures. Independent reviews reran the affected content, terrain, feature
+and visibility checkpoint contracts. Main remains at `c6f73cbb6`; this owner
+group is committed only on `multiplayer-m3-u2`, pending play testing.
+
+#### 16.3.12 U3 path-owner framing
+
+The path owner uses the context, descriptor DAG and tables published in
+§16.3.6. Its scheduler record writes retained source fields lexically; the
+optional active request includes `activePlayer` and `activeScale`, whose
+inactive residuals are excluded. `activeReq` storage is not a second request.
+The path writer follows the scheduler payload with goal table 9 and search
+table 10. U6 writes movement's candidate-provider payload before this fragment;
+the provider's state is not an opaque scheduler callback. Unsupported scheduler
+search/publish/provider bindings initially refuse pending composition attestation.
+
+Each search variant writes its descriptor `Nodes` immediately before its
+`cfg` record. The callback fields `CostDir`, `LegValue`, `PassableValue`,
+`Revise` become their corresponding descriptor-root u32 indexes in lexical
+field order. Each wrapper retains its own configuration, which can differ
+from its child's normalized configuration. Descriptor registration neither
+calls nor identifies closures by address. Node-store presence is explicit;
+its `nodes` sequence includes the reserved index-zero row, followed by `scale`.
+Node-store index aliases and heap position/node indexes are checked derivations,
+not separate copies. Dense and sparse workspace representations emit the same
+logical entry sequence sorted by `(Z, X)`, including visible entries without
+allocated nodes. Omit an all-zero logical entry, since an absent sparse entry
+and a stale dense slot both read that value; retain every nonzero direction,
+node or status even when status is zero. `SetAccessors` propagates a registration
+through the closed straighten/smooth child chain because those constructors
+retain the same closure captures. It validates each variant's own callback
+presence and rejects conflicting registrations, without invoking `Config` or
+any callback. The no-terrain fixture's constant-blocked callback has no reviewed
+descriptor and remains unsupported. Unknown concrete goals/searches and
+typed-nil variants refuse. `CheckpointKernelKind(Kernel) (uint8, error)` reads
+only the closed concrete kind: effective Retail (including nil) is 1,
+Straighten 2, Smooth 3; their value and nonnil pointer forms are equivalent.
+Typed-nil or custom variants refuse without invoking `NewSession`.
+
+#### 16.3.13 U4 economy-owner API
+
+The complete resolved `community.Features` value has a shared leaf writer:
+
+```go
+// internal/community: all fields lexically, nested RepairRate lexically;
+// Boolean bytes and signed 64-bit Go ints, with no profile application.
+func (f Features) WriteCheckpoint(e *checkpoint.Encoder) error
+// internal/economy
+func NewCheckpointContext(w *world.CheckpointContext) *CheckpointContext
+// CheckpointContext exposes World *world.CheckpointContext.
+func (s *Service) CollectCheckpointReferences(c *CheckpointContext) (int, error)
+func (s *Service) WriteCheckpoint(e *checkpoint.Encoder, c *CheckpointContext) error
+```
+
+Economy adds no graph objects. Service fields and player/bucket records follow
+§16.3.5's dispositions and §16.3.6's lexical/source-width schema. Fixed arrays
+have no count, variable unit-bucket storage has its exact count including
+unused rows, and resource pairs are Metal then Energy. Preserve every floating
+bit pattern and refuse NaNs through the encoder. The selector is presence plus
+i64, not a default difficulty. Terrain is singleton presence with the world
+context's exact terrain alias; canonical callback/wind attestation follows in
+U6, and until then nonnil callbacks/wind refuse without invocation. Names,
+logos, rank/display timers, sensor diagnostics and the reset-before-use
+`aiAggregatesPrepared` flag retain their reviewed exclusions.
+
+The direct economy summary uses the exact order in §16.3.7 and no count for
+the fixed player array. Pass production/consumption, archived accounting,
+totals and configuration are deliberate summary blind spots retained by the
+full writer. The summary does not inspect or invoke callback/wind bindings;
+it reads only the selected scalars and commits a stack-local accumulator copy
+after their NaN checks succeed, so failure cannot partially append an owner.
+
+#### 16.3.14 U3 movement composition and metadata
+
+Movement keeps the construction-time accessor operands beside each working
+set, and comparable claim-row holders beside the arrays when allocated.
+Replacing a working set drops its descriptors; resuming one retains them.
+The pilot search call borrows a temporary descriptor-root record alongside
+its existing temporary SearchConfig, so ordered composite pilots retain the
+last actual cost callback's operands. No capture reconstructs operands from
+the current unit, calls a rule, or evaluates a callback.
+
+The movement context and tables are those of §16.3.6, with private typed
+table 11 for `*moveGoal`: record cleanup compares the per-handle move goal's
+identity with `recordGoals.ground`, so identical values cannot replace their
+alias relation. Root fields reference table 11, whose records retain their
+ordinary lexical fields and edges; detached retained handles remain roots.
+Movement writes table 11 after its tables 5–8. Its section-7 record
+writes Scheduler and pathProvider presence, while section 8 starts with
+`System.WritePathProviderCheckpoint(e, c) error`, then the path scheduler and
+its tables. Provider requests follow sorted actual player/handle keys; a walk
+of today's unit slices can omit retained requests and is not the serializer.
+Provider system/world/eligibility and scheduler ports require U6 composition
+attestation. Eligibility cache must be invalid at capture. Class-table identity
+is an immutable U6 admission binding; copied profiles alone do not describe
+future class lookups. `unreachableLive` and `pocketLive` retain their source
+i64 values. The closed kernel-kind helper identifies the bound effective
+kernel without opening a search.
+
+The cheap movement section writes separate physical Routes, Steers, Collisions
+and Flights lengths, with each slot presence followed by its selected values.
+Routes retain all twenty point coordinates. Collision stamp expands HasStamp,
+StampedAnchor.X/Z and LastStampTick, followed by StampedPlane, BlockerID and
+Blocked. The section ends with workTick and workSmooth.
+
+The cheap path section appends scheduler words first, then the physical working
+set length and each row in handle order, with search presence. A missing working
+set or missing search is absent. A present search adds
+charged popped count (retail popped plus wrapper probes using the existing
+Go-int arithmetic), retail setupSteps, expanded, allocated node count excluding
+reserved zero (zero for absent/empty storage), and heap-entry count.
+`path.AppendSearchCheckpointSummary(Search, *checkpoint.Summary) error` reads
+the closed search chain directly; typed-nil, unknown and cyclic wrappers fail
+without partially appending. It invokes no Search method. Scheduler summaries
+read only selected scalars and do not inspect their unselected bindings.
+
+#### 16.3.15 U4 construction-owner API
+
+```go
+// internal/construction
+func NewCheckpointContext(o *orders.CheckpointContext, w *world.CheckpointContext) *CheckpointContext
+// Exposes Orders *orders.CheckpointContext, World *world.CheckpointContext.
+func (s *Service) CollectCheckpointReferences(c *CheckpointContext) (int, error)
+func (s *Service) WriteCheckpoint(e *checkpoint.Encoder, c *CheckpointContext) error
+func (s *Service) AppendCheckpointSummary(s *checkpoint.Summary) error
+```
+
+Construction adds no object tables. Builder links and placements retain sorted
+numeric product keys. Placement records write definition presence/key, rectangle
+and the exact creation-oriented yard sequence; do not regenerate a yard from
+today's rules. Repair banks include the full variable per-handle array and both
+fixed slots; their target handles retain weak-slot semantics. Kick records retain
+the complete variable array, including invalid rows' stored XYZ. Lexical field
+order and scalar widths follow §16.3.6. The shared resolved Community writer
+covers its bound feature answers. Terrain validates the world-context singleton;
+`world.FootprintRect.WriteCheckpoint(*checkpoint.Encoder) error` retains
+anchor(cellX,cellZ), extent(depth,initialized,width), maxX, maxZ without
+reconstructing endpoints. The initialization flag distinguishes missing from
+authored empty extents. OnRefresh, StatusText and RepairBankFallbacks are
+excluded presentation/diagnostics. Other owner/content/rule/function bindings require U6 attestation and initially
+refuse when nonnil, with explicit absent tags. Presentation hooks that cause
+strip/RNG work remain bindings; diagnostic-only callbacks stay excluded.
+Active reclaim/VTOL/completion contexts fail capture.
+
+The direct summary writes repair-bank row count then each pair in slot order
+(target, remainder), kick-record count then each record (X, Y, Z, valid), then
+placement and builder-link counts. It inspects no callbacks, keys, map values
+or reference graph; all other retained values are full-digest-only blind spots.
+
+#### 16.3.16 U4 combat-owner API
+
+```go
+// internal/pool: implemented scalar leaf, no allocation or compaction.
+func (p *Projectiles) WriteCheckpoint(e *checkpoint.Encoder) error
+// internal/combat
+func NewCheckpointContext(u *units.CheckpointContext, w *world.CheckpointContext) *CheckpointContext
+// Exposes Units *units.CheckpointContext, World *world.CheckpointContext.
+func (s *Service) CollectCheckpointReferences(c *CheckpointContext) (int, error)
+func (s *Service) WriteCheckpoint(e *checkpoint.Encoder, c *CheckpointContext) error
+func (s *Service) AppendCheckpointSummary(s *checkpoint.Summary) error
+```
+
+Combat adds no graph tables; retained allocation edges use the shared unit
+table and weapon/catalog edges use admitted content keys. The projectile pool
+leaf writes stored capacity, count, then the complete dead-flag row (with its
+count); neither the active prefix nor the diagnostic cookie row substitutes
+for that storage. A lazy zero-value pool keeps its zero capacity word and
+absent dead row without materializing its effective default capacity. Validate
+count and row dimensions against the effective capacity. Compaction scratch
+and diagnostic cookies are excluded.
+
+Service and projectile records follow §16.3.5's dispositions and lexical
+source-width framing. Every record through the initialized arena capacity is
+retained, including residual records after the current count; malformed or
+uninitialized arena storage refuses until composition supplies it. Incoming shots retain the physical count span, including dead-flagged rows,
+in stored order; the overwritten tail beyond count is excluded. Its storage
+must match capacity, except nil is allowed while count is zero. Death-notified keys are sorted
+raw handles and their values retain allocation identity. Target lists retain
+stored order, gates and cursors; movement writes the separate air-base lists.
+Area-damage cells/nodes/generation rows retain their actual stored values.
+Impact stacks, pending transport handoffs and nonzero current damage generation
+refuse. No collector invokes target queries, ports or callbacks. Unverified
+production owner/rule/function bindings remain explicit U6 refusals, with
+absent tag zero in the initial writer.
+
+The direct combat summary writes effective pool count/capacity, record count,
+then each stored projectile's Dead, WeaponID, Pos(X,Y,Z), TargetUnit,
+TargetProjectile, TargetPos(X,Y,Z), Shooter, Velocity(X,Y,Z), ExpiryTick,
+BurstRemaining; then targets.lastRebuild[10], targets.gate[10],
+scanCursor.next[10], modernNextProjectileTick and communityAreaGenCounter.
+WeaponID is the actual signed scalar, not a content lookup; handles remain
+unsigned words. It invokes no binding and collects no graph. Target-list
+contents and modernTick are deliberate cheap-row blind spots retained in full.
+
+#### 16.3.17 U4 effects-owner API
+
+```go
+// internal/frame
+func (b *EventBuffer) WriteCheckpoint(e *checkpoint.Encoder) error
+func (b *EventBuffer) AppendCheckpointSummary(s *checkpoint.Summary) error
+// internal/effects
+func NewCheckpointContext(keys *content.CheckpointKeys, p *FixedEffectPool) *CheckpointContext
+// Exposes Keys *content.CheckpointKeys, Pool *FixedEffectPool.
+func (s *EffectService) CollectCheckpointReferences(c *CheckpointContext) (int, error)
+func (s *EffectService) WriteCheckpoint(e *checkpoint.Encoder, c *CheckpointContext) error
+func (p *FixedEffectPool) CollectCheckpointReferences(c *CheckpointContext) (int, error)
+func (p *FixedEffectPool) WriteCheckpoint(e *checkpoint.Encoder, c *CheckpointContext) error
+func (p *DebrisPool) WriteCheckpoint(e *checkpoint.Encoder) error
+func (a *EffectAnimPlayer) WriteCheckpoint(e *checkpoint.Encoder) error
+// Each service/pool also exposes AppendCheckpointSummary(*checkpoint.Summary) error.
+```
+
+These owners introduce no object tables. Section 12 composes, in order,
+EventBuffer, EffectService, FixedEffectPool, DebrisPool and the session strip
+table, each with explicit presence. Their payloads follow §16.3.5's retained
+fields and lexical source widths; raw handles use the explicit u32 override.
+The event window and its derived effect count must be empty. Event-buffer
+limits, exhausted flag and next identities remain; drop/overflow diagnostics
+do not. A service's owner must be nil or the exact context Pool with the known
+concrete type; an ownerless pending record is unsupported. Immutable art and
+terrain/impact ports need U6 attestation and initially refuse when nonnil.
+The stored fragment-stepping enable flag must equal TerrainHeight presence;
+that existing presence byte represents it (§16.3.68). It is not an active
+traversal marker. Root owns the completed-tick boundary. Stored duration rows and all
+animation cursor fields remain, without advancing or resolving an animation.
+Fragment material is excluded host artwork. Debris retains occupied partition
+geometry and live-slot state; free spans and dead-slot payload remain excluded.
+Only the active block prefix is emitted, with fields charge, generation, occupied,
+slot and start. The slot array has its physical length followed by each live bit
+and, when live, its retained lexical payload. Geometry writes the occupied-span
+count then, in block order, the block index i64, point start i64, point count u32
+and XYZ i64 triples. Point start is the stored block start divided by 12; count
+is `(charge - 110) / 12`. Allocation charges 110 plus 12 per point and absorbs
+only a remainder below 9, so the division recovers the retained span even after
+its slot expired or was reused. A stale occupied block need not share the current
+slot generation; that residual is part of arena state.
+
+The cheap section appends EventBuffer nextID,nextSequence,exhausted; service
+nextID,lastSequence; fixed record count and each record's X,Y,Z,VX,VY,VZ,
+ExpiryTick,AnimA.Idx,AnimA.Countdown,AnimB.Idx,AnimB.Countdown, then live fragment
+count; live debris slot count. The partition count is retained only in the full
+writer. Session appends its strip summary afterward. These direct
+summaries read selected values only and invoke no ports or full graph walk.
+Other retained physics/geometry/animation values remain full-digest blind
+spots of the cheap row. The full owner writer validates quiescence; session
+owns the completed-tick boundary for the direct summary.
+
+
+#### 16.3.18 U3–U4 integration evidence
+
+The reviewed path, economy and construction writers are integrated on
+`multiplayer-m3-u2`. Their authored vectors, alias/residual tests, refusal and
+read-only checks pass independently. Whole-session composition remains U6.
+`world.Wind.WriteCheckpoint` retains Changed, DirX, DirZ, Heading, Max, Min,
+NextChange, Scalar and Strength in lexical source widths. Its direct summary
+writes strength, heading, raw scalar bits and next-change; selected NaNs fail
+atomically. LastChange and BriefingCountdown remain presentation-only.
+
+A displayless comparison of baseline `270c1eca1` and movement-metadata candidate
+`f0d6fe394` used the same scene 1, Town & Country, Modern rules, both seeds 7,
+three 250-unit armies, 1,200 warm-up and 300 measured ticks, Go 1.27.1 on
+Darwin/arm64 with two runtime workers. Catalog/configuration, the complete census,
+all initial/warm/final partial fingerprints and RNG draws matched (15,645
+simulation; 985,036 CRT). Median tick time was 1.988/1.768 ms, p95 4.329/2.919 ms,
+and CPU 2.253/1.914 ms per tick. These shared-host runs do not establish a speedup.
+Allocated bytes per tick increased from 86,992 to 103,326, and objects from
+807.71 to 908.37: about 16.3 KB and 101 objects for captured accessor metadata.
+Neither measured window collected garbage. This cost remains an input to U7's
+explicit checkpoint budget; it is not acceptance evidence for full capture.
+All integration is on the multiplayer worktree branch, pending play testing.
+
+
+The assembled U3/U4 owner group and initial AI manager writer passed the
+whole `tools/check` gate at candidate `fa8463aa` and `tools/check-retail` at
+`202ff959`, after correcting two non-comparable fixture fields and diagnostic
+capitalization caught by lint. The retail gate included the ordinary corpus,
+amd64 fingerprint locks and GPU device fixtures. Logs are outside the repo at
+`/private/tmp/nanolathe-m3-u3-u4-check.log` and
+`/private/tmp/nanolathe-m3-u3-u4-retail.log`. No single-seat lock moved. This is
+owner-group regression evidence, not the still-pending complete M3 gate.
+
+#### 16.3.19 U5 computer-owner API and staging
+
+```go
+// internal/ai: shared U5 boundary implemented before the owner dispatches.
+func NewCheckpointContext(u *units.CheckpointContext, w *world.CheckpointContext) *CheckpointContext
+// Exposes Units *units.CheckpointContext, World *world.CheckpointContext.
+func (m *Manager) CollectCheckpointReferences(c *CheckpointContext) (int, error)
+func (m *Manager) WriteCheckpoint(e *checkpoint.Encoder, c *CheckpointContext) error
+func (m *Manager) AppendCheckpointSummary(s *checkpoint.Summary) error
+```
+
+Managers introduce no graph tables. Factory is an allocation-table edge;
+ordered groups and rally targets retain raw u32 handles. Manager, embedded
+Strategic and profile fields follow lexical source order and §16.3.5. Profile
+maps retain nil/present framing before their sorted key/count/value sequences:
+`fixtureWeights != nil` gates future application, so an absent map and an empty
+map cannot collapse. StartOwners also writes nil/present before its count because
+the observation builder distinguishes an absent public assignment. Profile record-ID mappings sort by admitted definition
+identity rather than pointer or canonical name. Strategic setupDrawsReady is
+retained; the draw ledger and intermediate region draws remain excluded.
+Catalog aliases, Survival input, gameplay rules, callbacks and external
+controllers initially refuse pending explicit composition admission. No writer
+invokes profile application, a rule, lookup producer, planner or worker.
+
+The existing manager-state writer and application instrumentation are separate
+U5 units. The shared ControllerCheckpoint and ControllerCheckpointProvider types
+are those in §16.3.7. The owner writer alone does not claim application history
+or Modern-controller coverage. U5 instrumentation supplies those records before
+U6 admits a live manager. Unknown Manager.Ext values fail; an arbitrary provider
+implementation is not sufficient proof of canonical composition.
+
+The manager's cheap fragment writes Controller, all ten Deadlines, countdown,
+then the nine group lengths in task-slot order (resource through rally). Session
+writes manager presence and appends the controller record after that fragment:
+application count, four little-endian u64 hash words, next-think presence/tick,
+deadline presence/tick, tokens and last fill. Controller kind in the manager
+retains its stored enum; application-chain framing uses Classic 1 and Modern 2.
+Only selected scalars are read, with no graph or binding validation.
+
+
+#### 16.3.20 U5 Modern executor writer API
+
+The private executor writer is separate from host scheduling metadata and the
+application journal. It never reads even the pointers to mapInfo, obs, kit,
+brain, generator or batch; those retain the explicit Modern worker exception.
+It neither joins nor samples worker readiness. The shared context is
+`ai.CheckpointContext` (§16.3.19).
+
+```go
+// internal/aikit/checkpoint_executor.go
+func (e *executor) writeCheckpoint(enc *checkpoint.Encoder, c *ai.CheckpointContext) error
+func (p *Persona) writeCheckpoint(enc *checkpoint.Encoder) error
+// internal/aikit/checkpoint_grids.go
+func (d *gridDedupe) writeCheckpoint(enc *checkpoint.Encoder, path string) error
+func (g *exitGrid) writeGuardCheckpoint(enc *checkpoint.Encoder, path string) error
+func (g *exitGrid) writeSelfCheckpoint(enc *checkpoint.Encoder, path string) error
+func (f *freeCache) writeCheckpoint(enc *checkpoint.Encoder, path string) error
+func (p *pendingSite) writeCheckpoint(enc *checkpoint.Encoder, path string) error
+```
+
+The exact source-lexical records are:
+
+| Record | Retained fields |
+|---|---|
+| executor | dedupe, freeSeq, freeSlot, frees, grids, lastFill, lastTick, m, nextPending, pending, selfGrid, spotCover, table, tokens |
+| gridDedupe | cellIdx, cellStamp, gen, unitIdx, unitStamp |
+| guard exitGrid | built, cost, fac, ox, oz, reach, reachStamp, sealed, seeds, seen, stamp |
+| self exitGrid | cost length as i64, seen, stamp |
+| freeCache | asked, class, comp, compGen, gen, regions, seen, seenStamp, stamp, tick, used, val |
+| MoveClass | FootX, FootZ, MaxDepth, MaxSlope, MaxWaterSlope, MinDepth |
+| freeRegion | wide, x0, x1, z0, z1 |
+| pendingSite | cx, cz, fx, fz, g, tick |
+| Persona | APM, Ambition, Attention, Burst, Omniscient, Reaction, Skill, ThinkEvery |
+
+Fixed arrays have no count: four grids, three free caches and sixteen pending
+reservations. Slices have their exact count and stored order, including old
+slots and generation marks. Guard cost has an additional presence byte: its
+nil test participates in picture reuse. Self-grid cost values are rebuilt,
+but their length controls whether the next ensure clears the retained seen
+array; encode that shape gate without walking cost. Executor spotCover is a
+persistent simulation-thread bool slice reused by length, so it is retained;
+the exception for MapInfo does not extend to this cache. Persona Name is a
+label and Async is scheduling; neither is encoded or normalized at capture.
+Raw factory handles use u32, Go ints use i64, and other scalars retain their
+source widths. There are no graph tables or unordered maps.
+
+The blockers who/blk and dd pointer are excluded: only the unblock command
+consumes them, after rebuilding selfGrid, clearing blk, rewriting who and
+assigning dd to this executor's dedupe. Guard grids do not consume them.
+Distances, predecessor/queue/heap storage and free-cache queues are rebuilt
+scratch. guardFacs, nGuard, keep, rowNear, cutBuf, blkBuf, rows, lanes,
+allyTowers, featDist and featOrder reset before their consumers. Places is
+immutable placement geometry and stats is reporting. Applied batch.rowNear
+must enter the application-attempt framing because that persistent worker
+input changes how an otherwise identical command executes.
+
+The initial executor writer requires absent m/table tags, with TODO(M3-U6)
+refusal for nonnil unverified bindings. U6 must bind the exact owning manager,
+terrain and table/catalog/rules provenance without calling tableFor, BuildTable
+or a placement producer. Host application instrumentation owns the quiescence
+marker and controller summary; this private writer alone does not claim live
+Modern-controller capture.
+
+#### 16.3.21 U5 order application receipts
+
+AI history observes the existing queue methods while an application is in
+progress. It does not replay requests through a second dispatcher. The scoped
+observer is diagnostic, simulation-thread-only, and absent by default. The
+caller already owns the actor allocation; observation must not resolve it
+through a new lookup, lazily create a queue, or rebind one.
+
+```go
+// internal/orders/checkpoint_receipts.go
+type CheckpointOrderReceipt struct {
+    Kind uint8
+    Segment uint8
+    Index int64
+    Node Node
+    PreviousCount, Added uint32
+    Preparation uint8
+}
+type CheckpointOrderObserver interface {
+    RecordCheckpointOrder(CheckpointOrderReceipt)
+}
+func (q *Queue) SetCheckpointObserver(CheckpointOrderObserver) CheckpointOrderObserver
+func (n *Node) WriteCheckpointValue(*checkpoint.Encoder) error
+```
+
+SetCheckpointObserver returns the previous observer for scoped restoration.
+Nested scopes replace and restore, never fan out. A nil queue returns nil.
+The callback is synchronous and must consume the receipt before returning;
+Node is a value snapshot but its opaque payload slices are borrowed read-only.
+The observer must not change gameplay, invoke producer work, or return errors
+into a gameplay path. It retains diagnostic failures itself. An active observer
+makes a full queue checkpoint fail as an application still in progress. No
+observer identity enters checkpoint bytes, and an absent observer introduces
+no receipt allocation or additional binding call.
+
+Receipt kinds are purge 1, drop-leading-auto 2, inserted-node 3, tail-coalesced
+4 and primary-preparation 5. Purge and drop receipts precede their actual
+invocation, including an empty queue. Primary preparation has subkind 1 before
+the existing stop-firing-position call and subkind 2 before the existing rules
+BeforeCommand call. These run before Push's allocation guard and remain
+visible even if that guard refuses insertion. Insert receipts follow the
+actual mutation and all node flag writes in Push, PushHead, PushSecondary and
+appendTail; they contain the actual node, segment (primary 1, secondary 2),
+and zero-based index. Coalescence emits only after the existing tail was
+changed, retaining the old count, actual add (including zero-to-one conversion),
+and final node value. The existing wrapping arithmetic is unchanged. A
+coalescence fallback emits the ordinary Push receipts, with no fictitious
+coalescence or insertion on refusal. Nested cleanup emissions keep their
+actual order within the outer invocation.
+
+WriteCheckpointValue reuses the retained node-value schema from §16.3.6,
+including raw handles and the existing staging exclusions; no capture-local graph identity is
+introduced. It rejects nil or unconsumed insertion inputs just as the graph
+writer does. The application chain maps receipts 1–3 to existing operation
+kinds 1–3. It adds operation 9 for primary preparation (actor, subkind), and
+operation 10 for general tail coalescence (actor, segment, index, old count,
+actual add, final retained node). Operation 3 additionally retains segment and
+index. This distinguishes factory/mobile coalescence from the stockpile
+producer's capped-count operation 4. These are refinements of the unreleased
+M3 schema, not changes to order behavior. Node removal side effects remain
+owned by their enclosing purge/drop/preparation operation; this journal is
+an ordered application receipt, not a second world mutation log.
+
+#### 16.3.22 U5 application-chain envelope API
+
+The history core owns the common envelope and retains only player/controller,
+next serial, count and digest between attempts. Nil disables it. Construction
+binds the admitted content/configuration digests, player 0–9 and history kind
+Classic 1 or Modern 2 (distinct from the existing Controller enum). It starts
+with next serial 1, count zero and the §16.3.7 initial digest.
+
+```go
+// internal/ai/checkpoint_history.go
+func NewApplicationHistory(checkpoint.Identity, uint8, uint8) (*ApplicationHistory, error)
+func (h *ApplicationHistory) NextSerial() uint64
+func (h *ApplicationHistory) BeginAttempt(tick uint32, serial uint64, ordinal uint32,
+    writeIntent func(*checkpoint.Encoder) error) *ApplicationAttempt
+func (a *ApplicationAttempt) Operation(kind uint16, write func(*checkpoint.Encoder) error)
+func (a *ApplicationAttempt) Finish(apm, terminal uint8)
+func (h *ApplicationHistory) Fail(error)
+func (h *ApplicationHistory) Snapshot() (ApplicationHistoryState, error)
+func (h *ApplicationHistory) WriteCheckpoint(*checkpoint.Encoder) error
+func (h *ApplicationHistory) AppendCheckpointSummary(*checkpoint.Summary) error
+```
+
+The exact common attempt bytes are player u8, history kind u8, tick u32,
+assigned serial u64, zero-based ordinal u32, the controller codec's typed
+intent/observed actors/optional target/product, APM u8, operation count u32,
+ordered operations (each tag u16 then its published operands), and terminal
+u8. There is no extra byte-string length around the typed intent or operation
+list. The synchronous writer callbacks are internal codec boundaries: they
+only encode already-observed values and may not invoke gameplay, retain the
+encoder, or inspect workers. This core does not substitute an untyped payload
+for the controller codecs still required by U5.
+
+Assigning a serial increments the next serial even for an empty batch. The
+last representable next serial is refused before it could wrap; counts and
+operation counts similarly refuse overflow. Overlapping attempts, unknown
+operation tags, invalid outcome tags, a Classic APM tag other than unlimited,
+and an APM rejection with operations or a non-rejection terminal invalidate
+reporting. First failure is sticky; callers continue gameplay normally.
+Finishing releases both temporary byte buffers even after an error. The chain
+never retains nodes, allocations, commands or worker data between attempts.
+
+Snapshot refuses an active attempt or a stored diagnostic failure. Full
+history framing is presence then count u64, the fixed 32 hash bytes, history
+kind u8, next serial u64, player u8. The ring fragment remains the five words
+in §16.3.7: count and four little-endian words of the hash, continuing the
+caller's accumulator. Nil history is an absent full record; a summary requires
+an enabled history, since its presence is the composition owner's field.
+
+#### 16.3.23 U5 typed intent and order-receipt codecs
+
+The `ai` package owns value-only codecs shared by both controller adapters.
+They accept already-observed allocation identities and already-admitted
+content identities. The adapter resolves these from the existing objects
+using the admission's CheckpointKeys; the codec performs no lookup, producer
+call, pointer serialization, or input normalization.
+
+```go
+// internal/ai/checkpoint_intent.go
+type ApplicationOperands struct {
+    Actors []checkpoint.Allocation
+    Target *checkpoint.Allocation
+    Product *checkpoint.Definition
+}
+type ClassicApplicationIntent struct {
+    Kind uint8
+    Code int64
+    ResolvedRow uint8
+    Modifier uint8
+    Argument int32
+    X, Y, Z numeric.Fixed
+    RawTarget uint32
+    UnitKey string
+    BuildKind int64
+    Count int64
+    RequestTick uint32
+    Active bool
+    Operands ApplicationOperands
+}
+type ModernApplicationIntent struct {
+    Kind uint8
+    Queued bool
+    RawTarget uint32
+    X, Z int32
+    ProductIndex int32
+    ProductKey string
+    Slot, Count, Spot, Spacing int32
+    Keep, Exact bool
+    RowNear int32
+    Operands ApplicationOperands
+}
+func (v ClassicApplicationIntent) WriteCheckpoint(*checkpoint.Encoder) error
+func (v ModernApplicationIntent) WriteCheckpoint(*checkpoint.Encoder) error
+// internal/ai/checkpoint_order_receipts.go
+func (a *ApplicationAttempt) RecordOrder(actor checkpoint.Allocation, receipt orders.CheckpointOrderReceipt)
+```
+
+Classic intent kind 1 is an ordinary order: kind u8, original command Code
+i64, actual ResolvedRow u8, Modifier u8, Argument i32, XYZ i64 each and raw
+target u32. Kind 2 is a typed build: kind u8, BuildKind i64, UnitKey string,
+XZ i64 each, requested Count i64 and the actual BuildRequest.Tick u32.
+Kind 3 is activation: kind u8, Active Boolean. Each is followed by the same
+Operands encoding: actor count u32, each allocation in observed emission
+order (duplicates retained), target presence and allocation if present,
+product presence and definition if present. Fields belonging only to another
+Classic variant do not enter that variant's bytes. No unknown Classic kind
+is accepted. Row zero remains a valid resolved order input.
+
+Modern's existing CmdKind numbers 1–14 are retained. Its exact fixed operand
+order is Kind u8, Queued Boolean, raw target u32, XZ i32 each, ProductIndex
+i32, ProductKey string, Slot/Count/Spot/Spacing i32 each, Keep/Exact Boolean,
+RowNear i32, then Operands. Actor-span offsets are replaced by that ordered
+actor list, not sorted or encoded as batch-buffer offsets. The applied
+batch.rowNear enters each attempt. ProductIndex and ProductKey are copied
+from the observed UnitInfo if present, zero and empty otherwise; the adapter
+validates that object's identity against its immutable table and admitted
+definition without constructing either. Kind zero or a new unknown kind
+invalidates reporting until its codec is reviewed.
+
+Allocation values require nonzero handle and serial. Optional absence has its
+own presence byte; it is not inferred from coordinates or a null target
+handle. Product identities require the admitted catalog family, nonzero unit
+ordinal and a nonempty `unit/` key; that structural check supplements, and does
+not replace, the adapter's pointer-to-admitted-key check.
+
+RecordOrder maps receipt kinds 1/2/3/4/5 to operation kinds 1/2/3/10/9.
+Purge/drop payload is actor allocation. Insertion is actor, segment u8, index
+i64, retained node values. Coalescence is actor, segment u8, index i64,
+previous count u32, actual add u32, retained node values. Preparation is actor
+and subkind u8. Unknown receipt kinds, invalid segments/indices or preparation
+subkinds invalidate reporting. Node owner is retained as supplied, even when
+it differs from the actor under nested cleanup; it is never repaired. The
+receipt codec does not interpret receipt count as a committed-effect count:
+controller terminal classification remains at the actual application sites.
+
+#### 16.3.24 U5 manager binding and Modern scheduling metadata
+
+A manager installs its optional diagnostic history only before creating its
+controller. Session U6 owns the stricter admitted-entry check; this helper
+rejects missing keys, unsupported controller kind/player, an existing history
+or an existing Ext value, including a typed nil. It never resets a chain.
+
+```go
+// internal/ai/checkpoint_application.go
+func (m *Manager) EnableCheckpointApplications(checkpoint.Identity, *content.CheckpointKeys) error
+func (m *Manager) CheckpointApplicationHistory() *ApplicationHistory
+func (m *Manager) CheckpointApplicationKey(*content.UnitDef) (checkpoint.Definition, error)
+func CheckpointAllocation(*units.Unit) (checkpoint.Allocation, error)
+// internal/ai/checkpoint_controller.go
+func (v ControllerCheckpoint) WriteCheckpoint(*checkpoint.Encoder) error
+func (v ControllerCheckpoint) AppendCheckpointSummary(*checkpoint.Summary) error
+```
+
+The manager's private checkpointHistory and checkpointKeys are instrumentation
+bindings. Its full Manager writer does not duplicate them: application state
+belongs to its separate U5 history/controller fragment and keys to frozen
+content admission. A retired observed unit is still an allocation identity;
+CheckpointAllocation reads its existing nonzero handle/serial, never a current
+slot lookup. The product helper uses the frozen key lookup by object identity.
+
+The controller provider additionally implements
+`AppendControllerCheckpointSummary(*checkpoint.Summary) error`, so the cheap
+ring can refuse active/failed applications without invoking a full writer.
+ControllerCheckpoint itself is a detached value getter, not admission: it
+returns Present for a nonnil host and its simulation-thread fields, filling
+serial/count/hash only from a successful history snapshot. A nil host returns
+zero. Full/summary writers validate before consuming this value.
+The value record's full encoding follows its source-field lexical order:
+ApplicationCount u64, fixed ApplicationHash bytes, DeadlinePresent Boolean,
+DeadlineTick u32, Initialized Boolean, LastFill u32, NextBatchSerial u64,
+NextThinkPresent Boolean, NextThinkTick u32, Present Boolean, Tokens i64.
+Its selected 11 summary words are the count/hash five, next-think presence/tick,
+deadline presence/tick, tokens and refill tick. Full and summary values preserve
+stored ticks even when their presence is false; the provider validates the
+boundary before passing a detached value to either leaf.
+
+The Modern Host borrows its manager's history at NewHost construction. Its
+inited and nextThink fields are already simulation-thread-only; use them for
+Initialized and next-think presence/tick. Add simulation-thread-only mirrors
+for pending deadline presence/tick, the assigned current batch serial, and an
+application-in-progress marker. Set the deadline and assign a serial at the
+existing Step site that marks a batch pending, including an empty batch, before
+starting a worker. Clear only deadline presence after applyBatch finishes;
+keep its assigned tick. Mirror the same path for Reaction zero. These writes
+must not change joins, scheduling, command dispatch or worker data.
+
+ControllerCheckpoint reads only those simulation-thread fields, executor
+tokens/lastFill and the history snapshot. Full writing/cheap summaries first
+refuse missing or failed history, an application-in-progress marker or a
+history belonging to another manager; they never inspect ready, flight, kit,
+brain, generator, observation, mapInfo or any batch field. The full Host payload
+is the detached controller record, effective Persona, then executor record.
+The initial full writer still refuses unverified executor manager/table
+bindings under §16.3.20 until U6 attests them. This scheduling unit does not
+claim to record applied attempts until the typed producer instrumentation lands.
+
+#### 16.3.25 U5 typed-build return classification
+
+`ai.WithCheckpointBuildVerdict(error, uint8) error` preserves the existing
+error text and unwrap chain while tagging a known return branch.
+`ai.CheckpointBuildVerdict(error) (uint8, bool)` reads only that tag (including
+through ordinary wrapping); nil is success 1. It never parses diagnostics.
+Constants CheckpointBuildSuccess/Product/Site/Owner/Limit/Binding/Other retain
+§16.3.7 values 1–7. An unknown error or invalid tag remains unclassified and
+must fail history reporting, not command execution.
+
+The session's existing AI typed-build closure classifies these branches:
+missing world/catalog or queue/descriptor is binding 6; missing/dead builder
+is owner 4; empty/unknown product or missing product movement profile is
+product 2; allocator exhaustion is limit 5; a nonpositive count is the known
+other-failure branch 7. The existing mobile producer does not add a new site
+check for diagnostics. Classification uses construction's existing sentinel
+errors with errors.Is, preserving their text and identity. A previously
+unknown construction error is returned unchanged and remains unclassified.
+
+Stockpile alias admission keeps its existing Boolean wrapper for other
+callers. A private result helper executes the same checks and operations once,
+returning success 1, binding 6 for a missing descriptor/queue, owner 4 for a nil
+unit, other 7 for a nonpositive count, or product 2 when the existing stockpile
+slot predicate refuses. AI maps that result to its existing error string with
+the verdict attached. Successful queue/coalescence behavior and the actual
+BuildRequest.Tick are unchanged, including zero where a producer omits Tick.
+Return success still does not prove an order was inserted when its existing
+allocation guard refuses; actual order receipts determine that separately.
+This return-classification unit does not yet install the queue observer or
+emit operation 5; those belong to the enclosing application instrumentation.
+
+#### 16.3.26 U5 producer observation helpers
+
+```go
+// internal/ai/checkpoint_producers.go
+func (h *ApplicationHistory) ActiveAttempt() *ApplicationAttempt
+func (a *ApplicationAttempt) ObserveQueue(*orders.Queue, *units.Unit) func()
+func (a *ApplicationAttempt) CommittedOperations() uint32
+func (a *ApplicationAttempt) IssuedOrders() uint32
+func (a *ApplicationAttempt) CoalescedOrders() uint32
+func (a *ApplicationAttempt) RecordStockpile(checkpoint.Allocation, orders.ID, int64, bool)
+func (a *ApplicationAttempt) RecordActivation(checkpoint.Allocation, bool)
+func (a *ApplicationAttempt) RecordBuild(checkpoint.Allocation, BuildRequest, error)
+```
+
+ObserveQueue scopes the already-existing queue to the issuing allocation and
+returns restoration of its previous observer. It does not look up, allocate
+or bind a queue. Nil attempt or queue returns a no-op restoration. Session
+uses it only after its existing lazy queue binding, so a factory's first queue
+is observable without inserting a new bind before product validation. Nested
+scopes replace/restore and never duplicate receipts. All helpers remain
+simulation-thread-only and disabled with a nil history/attempt.
+
+Operation 6 is actor allocation then requested Boolean, recorded immediately
+before the existing activation setter, even for an already-equal value.
+Operation 5 refines the unreleased framing to preserve the actual request:
+observed actor allocation, raw Builder u32, UnitKey string, XZ i64 each,
+actual facing u8 (zero: BuildRequest has no facing input), requested Count
+i64, Kind i64, Tick u32 and stable verdict u8. Intent carries the admitted
+product identity when available; an invalid request key is still represented
+by its exact request string. Unclassified errors poison history reporting.
+These helpers never execute a setter or build callback themselves.
+
+The attempt tracks derived receipt counts for producer-side classification:
+IssuedOrders counts only actual insertions/coalescences (operations 3/10).
+CoalescedOrders counts operation 10 alone. Operation 4 follows the stockpile
+queue call and writes actor allocation, resolved row u8, actual capped count
+i64, and whether that call produced a coalescence receipt. It is metadata;
+it never substitutes for the insertion/coalescence operation itself.
+CommittedOperations counts the semantic invocations/mutations 1/2/3/6/7/8/9/10,
+including the explicitly recorded empty purge/drop/preparation calls. The
+stockpile and typed-build metadata records 4/5 do not alone prove a committed
+operation. Counts increment only after successful encoding and cannot outgrow
+the u32 operation count. They are temporary application bookkeeping, not new
+checkpoint payload or gameplay state. Callers still classify explicit no-op
+and partial group outcomes at their actual branches; neither receipt count nor
+a nil typed-build error is enough to infer successful order insertion.
+
+#### 16.3.27 U5 Classic producer instrumentation
+
+A Classic decision serial belongs to one concrete actor submission after the
+existing caller's selection/admission gates; its ordinal is zero. Group
+broadcasts retain their existing member order and assign each submitted
+member a serial. No selection/search/upkeep or skipped rally resolution is
+invented as a submission. The private resolved-order helper carries the
+original command code as well as the resolved row; resolution and queue binds
+keep their existing order and invocation counts.
+
+Begin a submission before its existing queue mutation; observe a queue only
+after the existing bind. Order submissions use Classic intent kind 1; mobile
+and factory builds kind 2; activation kind 3. Actor/target allocations come
+from the observed objects. A product found in the selected catalog must resolve
+through the manager's frozen keys; an unknown product has no definition operand
+and keeps its raw request key. Capture errors never gate gameplay. Activation
+records the requested value immediately before the actual setter, even if it
+already matches. Its terminal is success.
+
+A typed call emits operation 5 after the call, retaining its actual request and
+classified return. The session scopes the same active attempt after its existing
+lazy queue bind, including a factory's first queue. Nested scopes replace and
+restore, so each operation appears once. queueExactResult borrows the enclosing
+mobile-build attempt; it never starts another serial. Its own invalid-site,
+missing-builder and missing-callback errors receive site/owner/binding verdicts
+without changing text, order or existing wrapped errors. Request Tick remains
+zero where the current producer omits it.
+
+Resolved nonzero order plus actual insertion/coalescence is success. A rejected
+resolution (including its row-zero insertion), failed typed call, or missing
+insertion is partial when any committed semantic operation ran, otherwise
+rejected with no commit. A nil typed return alone is not success. Explicit
+accepted no-op is reserved for a producer branch that actually accepts a no-op;
+Classic's submission paths currently have none. All Classic attempts use the
+unlimited APM tag. Restore queue observers before finishing the attempt. Existing
+activation RNG, queue preparation, purge, insertion, count, callback and resource
+behavior must match with diagnostics enabled, disabled or failed.
+
+#### 16.3.28 U6 binding authority primitive
+
+The stdlib checkpoint leaf supplies a local provenance token:
+
+```go
+type BindingAuthority struct { /* private, non-zero-sized */ }
+func NewBindingAuthority() *BindingAuthority
+func (a *BindingAuthority) Matches(expected *BindingAuthority) bool
+```
+
+Matches is true only for the same nonnil token. It emits no bytes and selects
+no gameplay behavior. A session's admitted composition owns one private token;
+owner contexts borrow it alongside the exact expected typed owner aliases.
+Known installation sites pass it when installing their reviewed bindings.
+Each callback slot retains its own private authority. Ordinary setters clear
+only that slot's authority, even for a caller supplying the same function.
+Canonical installers set only the slot they actually install; they cannot
+bless another slot's current contents. A replacement therefore refuses capture
+without needing Go function equality, addresses in the stream, reflection or
+revision counters. A foreign token is not the session's token. No live-owner
+getter, snapshot or host result exposes the private authority.
+
+Callback storage that remains publicly writable cannot claim this proof: it
+must first be encapsulated or replaced by an immutable callback/provenance
+value. A copied callback used later must carry its installation provenance
+with the copy, not consult its source's current stamp. Regular later canonical
+installs may reuse the same authority; full capture still validates their
+logical operands and exact owner aliases. Nil callbacks retain their absent
+encoding. This primitive alone admits no owner and removes no U6 refusal;
+each owner must have its installation API and wire binding tags reviewed.
+
+#### 16.3.29 U5 exact insertion completion
+
+Mutation receipts alone cannot classify an outer insertion: a preparation
+callback can insert a node before the outer Push reaches its allocation guard.
+Orders therefore supplies a separate, optional diagnostic completion interface:
+
+```go
+type CheckpointInsertionResult struct {
+    Method uint8 // Push 1, CoalesceTail 2
+    Row ID
+    Inserted, Coalesced bool // mutually exclusive; both false means refused
+}
+type CheckpointInsertionObserver interface {
+    RecordCheckpointInsertion(CheckpointInsertionResult)
+}
+```
+
+The existing CheckpointOrderObserver may additionally implement this interface.
+Public Push and CoalesceTail retain their signatures and execute the same private
+insertion cores, now returning the actual local result. CoalesceTail's fallback
+uses the Push core; only the public outer invocation reports its completion.
+Completion runs once after every ordinary return, including an allocation
+refusal, after all nested callbacks. A panic remains a panic, with no invented
+completion. Nil queue or absent observer emits none. Existing mutation receipt
+order/bytes remain unchanged. No result is encoded as a new operation: it is
+transient classification evidence, not a second gameplay return channel.
+
+The invocation captures its entry observer, so a nested temporary observer cannot
+steal the outer completion. The AI observer exposes:
+
+```go
+func (a *ApplicationAttempt) InsertionIndex() uint64
+func (a *ApplicationAttempt) InsertionAfter(uint64, checkpoint.Allocation, uint8) (orders.CheckpointInsertionResult, bool)
+```
+
+The AI observer remembers each completion's actor, value and an attempt-local
+u64 position. A producer takes the position immediately before its existing
+insertion/typed call, then accepts only a later completion for that observed
+actor and expected method. Nested insertion results are superseded by the outer completion. No
+completion, a refused completion, or a mismatched actor cannot establish that
+the requested insertion succeeded. Position exhaustion fails diagnostics. The
+result/position never affects queue admission, callbacks, statistics or gameplay
+control flow and is discarded when the attempt finishes.
+
+#### 16.3.30 Path binding admission preparation
+
+Scheduler admission uses §16.3.28 at its existing private callback slots:
+
+```go
+// internal/path
+func NewSchedulerWithCheckpointBindings(SearchFunc, PublishFunc, *checkpoint.BindingAuthority) *Scheduler
+func (s *Scheduler) SetSearchWithCheckpointBinding(SearchFunc, *checkpoint.BindingAuthority)
+func (s *Scheduler) SetPublishWithCheckpointBinding(PublishFunc, *checkpoint.BindingAuthority)
+func (s *Scheduler) SetCandidateProviderWithCheckpointBinding(CandidateProvider, *checkpoint.BindingAuthority)
+func (c *CheckpointContext) SetSchedulerBindings(*Scheduler, *checkpoint.BindingAuthority) error
+func CheckpointProviderMatches[T any, P interface { *T; CandidateProvider }](s *Scheduler, expected P, a *checkpoint.BindingAuthority) bool
+```
+
+Keep separate private authority slots for search, publish and provider. Ordinary
+setters clear only the changed slot before their existing work. Canonical siblings
+perform that work exactly once, then stamp only their own present slot. In
+particular provider installation still calls PlayerCount then UnitLimit once;
+capture calls neither. Nil receives no authority. The old constructor remains
+unattested. Context registration is private, rejects nil/conflicting registration,
+and accepts an identical registration idempotently. Collection and writing both
+check the exact registered scheduler and nonnil matching authority for every
+present binding; absent slots retain tag 0 and verified present slots use tag 1
+at their existing lexical positions.
+
+The generic provider helper accepts only a nonnil concrete provider pointer and
+type-asserts to that pointer type before comparing it. It checks the scheduler and matching
+provider authority without invoking the provider or comparing arbitrary open
+interfaces. Movement uses its concrete nonnil provider pointer and checks the
+exact system/scheduler/provider aliases before section 8. Unknown noncomparable
+provider implementations therefore refuse without a panic. These owner APIs
+prepare U6; until canonical movement/session installation is wired, production
+capture retains its unsupported-binding refusal.
+
+#### 16.3.31 U5 Modern placement receipts
+
+Operation 7 records the actual pending-ring write and adjacent cursor advance
+as one compound operation: written slot i64; new row cx/cz/fx/fz i32, group u8,
+tick u32; resulting nextPending i64. Emit it after both assignments in
+placedRow, preserving all preceding guard operations. guardPlaced itself
+writes no ring row; ordinary/extractor/exact site success must not invent one.
+
+Operation 8 records a write to one of the four guard-grid slots: slot i64
+(0–3), field ID u8, action u8, then the action operands. Field IDs and values:
+
+| ID | Field | Value |
+|---|---|---|
+| 1 | built | u32 |
+| 2 | cost | i32 slice with presence |
+| 3 | fac | raw u32 handle |
+| 4, 5 | ox, oz | i32 |
+| 6 | reach | u32 slice |
+| 7 | reachStamp | u32 |
+| 8 | sealed | Boolean |
+| 9 | seeds | i32 slice |
+| 10 | seen | u32 slice |
+| 11 | stamp | u32 |
+
+Actions are scalar assignment 1 (typed value); zero-filled slice replacement 2
+(u32 length, preceded by cost's presence Boolean for field 2); element assignment
+3 (index i64 then typed value); seeds truncation 4 (resulting u32 length); seeds
+append 5 (insertion index i64 then i32 value). Reject unknown field/action pairs
+in diagnostic encoding. Executed equal-value assignments still emit; skipped
+branches do not. No pointer or reconstructed/sorted final-state diff is encoded.
+
+Instrument ensure's cost/seen/reach replacements in that order; buildExitGrid's
+fac, ox, oz, cost writes and seeds truncation/appends; overlay's in-bounds cost
+writes; flood's stamp increment and separate wrap fixup, all seen/reach writes
+in traversal order, and final reachStamp. gridFor records failure fac=0, or
+built followed by physical-order pending overlays, flood and sealed assignment.
+guardPlaced visits actual eligible physical slots in order, each overlay,
+flood and sealed assignment. Record immediately after each existing assignment.
+These writes may precede a failed site, resolver or typed-build call and remain
+in the attempt even when no order is installed.
+
+```go
+// internal/aikit; scopes only the four guard slots, never selfGrid.
+func (e *executor) observeCheckpointLayout(a *ai.ApplicationAttempt) func()
+```
+
+The scope installs temporary attempt/slot observations and returns restoration
+of prior observations. Nil attempt does no work. Guard writer capture refuses
+an active observation. No worker pointers are inspected by this mechanism.
+No ordinary behavior is chosen from the observer or an encoding error.
+
+This is a selected semantic application journal, not a second complete mutation
+log. selfGrid, dedupe, free caches/selectors, spotCover and batch setup/refill
+retain their full-checkpoint coverage and do not use tags 7/8; APM also has the
+attempt verdict. Scratch and worker-state exclusions remain as reviewed. Modern
+command outcome reporting is a separate unit, using exact insertion completions
+(§16.3.29), per-actor/per-selected-target outcomes, and the explicit already-open
+Unblock no-op; the old any-issued return and statistics remain unchanged.
+
+#### 16.3.32 U5 Modern command scope and outcome helpers
+
+The executor's temporary checkpointApplication and checkpointBatchSerial fields
+exist only during simulation-thread application and are excluded from payloads.
+A full executor capture refuses either active field. Host copies its already
+assigned batch serial into this scope around its existing apply call and restores
+the previous value afterward; it does not assign another serial at application.
+
+```go
+// internal/aikit; diagnostic helpers, not a second command dispatcher.
+func (e *executor) newCheckpointCommand(*Command, *batch, uint32, uint64, uint32) *checkpointCommand
+func (e *executor) checkpointAttempt() *ai.ApplicationAttempt
+func (e *executor) checkpointActor(*units.Unit) checkpoint.Allocation
+func (e *executor) checkpointAccept()
+func (e *executor) checkpointReject()
+func (e *executor) checkpointNoop()
+func (e *executor) checkpointOrderOutcome(uint64, checkpoint.Allocation, uint8)
+func (e *executor) checkpointBuildOutcome(uint64, checkpoint.Allocation, ai.BuildRequest, error)
+func (c *checkpointCommand) finish(uint8)
+```
+
+The adapter copies all §16.3.23 fixed command operands and applied rowNear,
+then the observed actor span in its exact order, duplicates included. It checks
+span bounds and raw/observed handle agreement without consulting the live world.
+Retired observed allocations remain valid. A product must be the exact existing
+table row at its Index and by its definition/key, and its definition must resolve
+through frozen keys. The adapter never builds/prepares a table or content.
+Disabled/failed history skips intent work. Begin each emitted command before the
+existing APM test, using its batch ordinal, including later rejected commands.
+An unrepresentable ordinal fails diagnostics rather than wrapping.
+
+The caller scopes the temporary command pointer and §16.3.31 layout observer
+around the existing command execution. Restore both on every unwind, but finish
+only after ordinary return: a panic remains unchanged and leaves history
+incomplete, so capture refuses. APM retains its existing debit/refusal ordering.
+Per-actor and per-selected-target helpers record accepted/rejected outcomes;
+the old return Boolean, stats and gameplay branches do not consult these flags.
+Stop's actual purge/drop is success even when empty. The already-open Unblock
+branch is the explicit no-op. Partial groups and reclaim-before-failed-replace
+remain partial. Missing actor/target/queue, failed resolution/admission and an
+actual insertion refusal mark rejection at their existing branches.
+
+Take an insertion position immediately before each existing Push/CoalesceTail
+or typed callback and capture actor identity beforehand. OrderOutcome accepts
+only the exact fresh completion. BuildOutcome first records operation 5's actual
+request/return and accepts only a nil return with that actor's fresh CoalesceTail
+completion. Stockpile operation 4 follows its actual CoalesceTail and uses that
+completion's Coalesced flag, never an aggregate count. Existing omitted request
+Tick, count normalization/capping and callback order remain unchanged.
+
+At finish, APM rejection is terminal 3 with no operations. With no rejection,
+accepted work is success 2; explicit no-op with no committed operation is 1
+(with committed operations it is success). Otherwise any committed semantic
+operation means partial 4, and no commit means rejected 3. These flags carry no
+independent wire data and are not retained between commands.
+
+
+#### 16.3.33 Movement path binding installation
+
+Movement supplies the scheduler's closed search/publish/provider composition
+through the same private session authority (§16.3.28–§16.3.30):
+
+```go
+func NewSystemWithCheckpointBindings(*world.Terrain, Profile, *OccupancyGrid, *checkpoint.BindingAuthority) *System
+func (s *System) ConfigurePathWithCheckpointBinding(int, int32, func(int) bool, *checkpoint.BindingAuthority)
+func (c *CheckpointContext) SetPathBindings(*System, *units.World, *checkpoint.BindingAuthority) error
+```
+
+The ordinary and admitted constructors share the current construction body;
+terrain/grid setup, scheduler defaults and callback installation occur once in
+their existing order. The admitted variant stamps only the search, publisher,
+provider and default eligibility closures it actually installs. The eligibility
+slot is private on pathProvider. Ordinary ConfigurePath clears its authority
+only after its existing receiver/range guards permit installation; the admitted
+variant performs the same work and then stamps that one slot. Its scheduler
+provider installation uses the matching path authority. An unrelated callback
+replacement cannot be blessed by ConfigurePath.
+
+SetPathBindings records the capture's exact system, world and nonnil authority,
+registers the same scheduler with the shared path context, and validates the
+provider's concrete pointer with CheckpointProviderMatches. Conflicting repeated
+registration fails; identical registration is harmless. Capture revalidates the
+same aliases and stamps, without invoking eligibility, search, publication or
+any CandidateProvider getter. Provider system/world edges must match the
+registered owners; eligibility emits absent 0 or verified-present 1 at its
+existing lexical field. Ordinary unbound fixtures keep their prior admission.
+This path-specific registration does not admit unrelated movement callbacks,
+rules, terrain/content or copied mapping bindings; their existing refusals stay
+until their own canonical installation is implemented.
+
+#### 16.3.34 Frozen catalog preparation admission
+
+SimulationInputRequest records PreparingRuleName and PreparingRuleBase as the
+exact resolved strings used by skirmish preparation. SimulationInputs exposes
+them through PreparingRule; absence remains distinguishable and is not defaulted.
+These strings are admission metadata: configuration already names the selected
+rule, and the content manifest already hashes the resulting prepared values.
+The preparation metadata changes neither content digest nor identity encoding
+nor gameplay. Match admission
+requires the frozen name and base to agree with its registered selected set,
+as well as the existing effective Community comparison. Older freeze callers
+that omit the identity cannot admit a multiplayer configuration.
+
+Catalog.Clone preserves Limits, including after weapon preparation, restrictions
+and mutators. The manifest already encodes all four limits, so this corrects the
+frozen content digest of a clone that previously lost them (and encoded zeros),
+without changing the manifest schema. Admission compares all four effective compile limits even when
+zero: missing evidence is a refusal rather than a bypass. A frozen restriction
+set is admitted only when field 12 describes it, and an empty field 12 admits
+only unrestricted content (§16.6; until then any frozen set was refused). Profile
+name/directory provenance remains a separate pre-online identity requirement.
+
+
+#### 16.3.35 Session checkpoint history storage
+
+The public value types follow §16.3.6. Boundary names are CheckpointEntry (1),
+CheckpointInteriorTick (2), and CheckpointFinalPumpTick (3). The private ring
+uses fixed arrays of 64 digest records and 600 tick rows, preserving insertion
+order even through uint32 tick wrap. History reads return detached oldest-first
+copies without draining either ring. Append performs no allocation. Entry's
+digest occupies the first record slot; only completed runtime ticks enter the
+tick ring. Explicit off-cadence byte captures belong to the separate result,
+not the cadence record array. This storage adds no capture or tick hook by
+itself; session composition, boundary admission and request handling remain U6.
+
+#### 16.3.36 U5 integration checks and disabled cost
+
+The integrated Classic and Modern producer instrumentation preserves actual
+order completion rather than inferring success from legacy return values.
+Cleanup callbacks can change an actor's raw handle or allocation serial;
+the journal keeps the allocation observed before cleanup while the existing
+order and typed-build paths still read their actual operands afterward.
+The exact insertion mark stays immediately before insertion, after cleanup.
+Modern regression vectors cover Move, Build and Replace through both purge
+and automatic-order cleanup, including disabled/enabled/failed diagnostic
+behavior, typed metadata and partial results. Classic follows the same rule.
+
+The full fast and short retail gates passed on the integrated branch on
+2026-10-07, including lint, amd64 fingerprint locks under Rosetta and the
+GPU device fixtures. The final Classic cleanup correction separately passed
+the full AI package gate and was independently verified before integration.
+This is owner-group evidence, not whole-session M3 acceptance.
+
+Sequential displayless benchmark runs compared pre-U5 `202ff959` with
+integrated `cb7972f5b`: scene 1, Town & Country, Modern gameplay with Classic
+computer controllers, seed 7 for both streams, three 250-unit armies, 1,200
+warmup and 300 measured ticks, Darwin/arm64 Go 1.27.1, GOMAXPROCS=2.
+Scene/configuration/catalog identities, all seven census rows, initial/warm/
+final partial fingerprints and both final draw counts matched exactly
+(simulation 15,645; CRT 985,036). Allocation cost was 103,329.7 versus
+103,326.1 bytes/tick and 908.41 versus 908.38 objects/tick. Median/p95 were
+1.839/3.047 versus 1.722/2.817 ms; process CPU was 2.046 versus 1.873
+ms/tick. A concurrent verification gate and differing GC windows make these
+single timing samples unsuitable for a speedup claim. Raw reports and census
+are outside the repository at `/private/tmp/nanolathe-m3-u5-baseline-classic`
+and `/private/tmp/nanolathe-m3-u5-candidate-classic`. This checks disabled
+instrumentation for Classic controllers; it does not measure the Modern
+executor or complete enabled checkpoint cost, which remain U7 work.
+
+#### 16.3.37 U6 session strip fragment
+
+The session owns the final fragment of section 12, after the event buffer,
+effect service, fixed pool and debris (§16.3.17). Its private entry points are:
+
+```go
+func (t *stripTable) writeCheckpoint(e *checkpoint.Encoder) error
+func (t *stripTable) appendCheckpointSummary(s *checkpoint.Summary) error
+```
+
+The caller writes table presence; a nil table passed directly to either
+method is an error. Neither method creates simulation objects, invokes a
+callback, looks up content or draws RNG. The cheap summary allocates no heap
+objects; full encoding may allocate diagnostic field paths. The full payload is `live i64`, `poolCapacity i64`, `steadyCap i64`,
+then the fixed ten strip lists with no outer length. Each list writes its
+u32 length and objects in insertion order. Each object's lexical fields are
+`dst[3] i64`, `dstExtent[3] i64`, `family u8`, `frameCountBase i32`,
+`frameDelayParam i32`, `nextSpawn u32`, `particleLife i32`, `particles`
+(u32 length and ordered records), `phaseModulus i32`, `smokeSelector u8`,
+`spawnInterval i32`, `src[3] i64`, `srcExtent[3] i64`, `windowEnd u32`.
+Each particle's fields are `expiry u32`, `frame i32`, `frameDelay i32`,
+`lastFrame i32`, `lastFrameDraw i32`, `lastFrameDrawn bool`, `phase i32`,
+`vx/vy/vz i64`, `x/y/z i64`, in that order. These are stored values, not
+recalculated animation state. Colour-only fields, `reservedWord` and recycled
+particle storage remain excluded by §16.3.5.
+
+Validate a nonnegative live count equal to the sum of list lengths,
+nonnegative steady capacity, positive pool capacity with live no greater
+than it, and the closed family set 1–6 before writing. Per-strip length need
+not fit the current steady limit: that limit controls future eviction, and
+the writer must not normalize retained lists. Count overflow is an explicit
+encoding refusal. The cheap fragment appends the live strip-object count,
+then each object in strip/list order: family, nextSpawn, windowEnd, particle
+list length, and each particle's x/y/z, expiry, frame, frameDelay, phase.
+It does not append extra list lengths or limits beyond that selected schema;
+section composition appends the table presence once for both full and cheap
+forms. The cheap fragment checks only table/accumulator presence; full-only
+capacity, family and list-consistency validation does not run in that walk.
+A refused absent input leaves the supplied summary unchanged. Tests use an
+independently constructed byte vector, high fixed-point bits,
+retained-field mutations, exclusions, order, summary blind spots and purity.
+
+#### 16.3.38 U6 scenario fragment
+
+Section 13 writes the existing computer-manager fragment first, then Mission
+presence and its mutable `Defeat`, `Victory` trigger lists, the nonoptional
+`communitySchema` record, and Survival presence and payload. Nil trigger rows
+are retained with presence. Lists carry u32 lengths, fixed arrays none;
+§16.3.5 lexical order and source widths apply, with raw handles u32 and Go
+ints i64. The bounded private session API and lower-owner leaves are:
+
+```go
+type checkpointScenarioContext struct {
+    keys *content.CheckpointKeys
+    mission *mission.Mission // exact object retained by admitted composition
+}
+func (s *Session) writeScenarioCheckpoint(*checkpoint.Encoder, *checkpointScenarioContext) error
+func (s *Session) appendScenarioCheckpointSummary(*checkpoint.Summary) error
+// internal/triggers
+func (t *Trigger) WriteCheckpoint(*checkpoint.Encoder) error
+// internal/survival
+func (r *Regions) WriteCheckpoint(*checkpoint.Encoder) error
+// internal/ai
+func (s *SurvivalInfo) WriteCheckpoint(*checkpoint.Encoder) error
+```
+
+The session methods live in `checkpoint_scenario.go`; nested helpers remain
+private there. Each leaf's caller writes presence. No new global graph table
+is needed. Context construction belongs to admitted session composition:
+the constructor must retain its previously admitted Mission object, whose
+frozen OTA/TNT and selected schema determine immutable inputs. The scalar
+fragment cannot manufacture this proof from a terrain name. Reject a session
+or community-schema mission pointer different from that exact object;
+ordinary campaign/restore entry remains unsupported (§16.3.6). `IsRestore`,
+mission type, OTA/schema, placements/specials/initial features, wind bounds,
+use-only, difficulty and campaign selection are immutable entry bindings;
+`Mission.order` is load diagnostic state. Mutable trigger progress is encoded
+separately. Repeated nonnil trigger pointers across either list are refused:
+notification can mutate Args, so equal value copies do not preserve aliasing.
+
+Expanded retained records (nested values follow their own lexical order):
+
+| Record | Lexical fields |
+|---|---|
+| communitySchemaState | active bool; deferredPlacements []i64; mission binding presence; neutralOwner i8; nextDeferred i64; playerByStart [10]i8 |
+| Trigger | Args [3]i32; Celebrated bool; CenterReady bool; CenterX/Y/Z i32; Completed bool; Kind u8; Type string |
+| survivalState | accts [10]Account; attacker u8; centreX/Z i32; classes ordered records; cleanLost bool; info presence/payload; lastSpawn u32; nextG/P i64; nextRetarget u32; opts; phase u8; phaseEnd u32; plan; pool; removed; settled [10]u32; startClass local u32 reference; startRegion i32; stats [10]SurvivalStats; survived i64; team []u8; tuning; units ordered records; wave i64; wavePoints i64; waveUnits []u32 |
+| survivalClass | base i32; key string; profile; regions |
+| survivalUnit | h u32; infecting bool; shun u32; shunCellX/Z i32; shunSerial u64; shunUntil u32; target u32; wave i64 |
+| movement.Profile | BadSlope, BadWaterSlope u8; FootPrintX/Z i16; MaxSlope u8; MaxWaterDepth i32; MaxWaterSlope u8; MinWaterDepth i32 |
+| survival.Regions | H, W i32; label presence then length/values []i32; sizes []i32 |
+| survival.Account | Capacity, Earned, Stock F32 |
+| SurvivalStats | Damage, Destroyed, Lost i64 |
+| survival.Options | NoAir, NoNaval bool |
+| survival.Pool | MaxTier, RatioE, RatioM, Tier1Median i64; Units ordered records |
+| survival.Unit | Cost i64; Def presence/admitted key; Domain u8; Key string; Tier i64 |
+| survival.Wave | Budget i64; Groups ordered records; Number i64 |
+| survival.Group | Angle u16; Domain u8; Picks []i64 |
+| ai.SurvivalInfo | Attacker u8; CentreX/Z i32; Computer []bool; Starts [][2]i32; Team []u8; warnings pointer presence then ordered records |
+| ai.SurvivalWarning | Arrive u32; Groups ordered records; Tick u32; Wave i32 |
+| ai.SurvivalApproach | Angle u16; Domain string; X/Z i32 |
+
+Tuning's lexical fields are AirFrom u32, BaseUnits i64, BuddyRing i32,
+CleanWaveBonus i64, DirectionEvery u32, Doubling u32, DowntimeBase u32,
+DowntimeMax u32, DowntimePerUnit u32, EdgeInset i32, FastClearBonus i64,
+FirstWaveDelay u32, MaxDirections i64, NewTierWeight i64, RetargetEvery u32,
+SpawnPerTick i64, Straggle u32, ThemeWeights [5]i64, UnlockUnits i64,
+WarningTime u32, WaveReward F32. Write stored values without applying defaults.
+
+The account array is one physical [10]Account reused by Metal then Energy
+income passes, not two resource arrays; preserve unused residual rows too.
+Classes preserve allocation order and must be unique and nonnil. `startClass`
+is zero when absent, otherwise the exact one-based class index; reject a
+foreign pointer rather than resolving by its key. Regions preserve labels
+and sizes without rebuilding against current terrain; nil labels have an
+explicit absence tag because region readers distinguish them. `removed`
+uses a u32 count followed by numerically sorted handle-u32/health-i32 pairs;
+never redirect stale handles to live allocations. Pool definitions resolve
+through `keys.Unit(actualDef)`, keeping stored Key separately. No tiers,
+prices, plans or groups are reconstructed.
+
+SurvivalInfo loads its atomic warnings pointer once and writes the complete
+published list without the filtering/copying `Warnings` getter. The manager
+binding validator must require the exact scenario-owned info alias.
+`info.Team` remains independent of `team`: commander allocation failures can
+leave the former shorter. Setup/report-only deposits and history and rebuilt
+walk scratch remain excluded under §16.3.5.
+
+After managers the cheap fragment appends: Mission presence; Defeat length
+and each trigger presence, Completed, Celebrated; Victory likewise; Survival
+presence; then phase, phaseEnd, wave, nextG, nextP, nextRetarget, survived,
+wavePoints; stats[0..9] Damage/Destroyed/Lost; accts[0..9]
+Capacity/Earned/Stock exact F32 bits. It performs no map, region, warning,
+pool or full-reference walk. Validate selected NaNs before committing a local
+summary copy. Unselected tuning NaNs still fail the full writer, not this
+selected-only summary. Tests pin stored residuals, order, widths, signed zero,
+alias refusals, map insertion independence, exclusions and read-only behavior.
+
+#### 16.3.39 U6 runtime and visibility-tail fragments
+
+These callback-free private session leaves encode stored values after the
+parent's mandatory whole-session admission/binding/boundary preflight:
+
+```go
+func (s *Session) writeCheckpointRuntime(*checkpoint.Encoder, *content.CheckpointKeys, CheckpointBoundary) error
+func (s *Session) appendCheckpointRuntimeSummary(*checkpoint.Summary) error
+func (s *Session) writeCheckpointVisibilityTail(*checkpoint.Encoder) error
+func (s *Session) appendCheckpointVisibilityTailSummary(*checkpoint.Summary) error
+```
+
+They introduce no reference table and make no rule selection. Runtime starts
+with boundary u8 (1/2/3), followed by this exact source-lexical record:
+
+```text
+CampaignSlot i64; Clock.GlobalTick u32; Community; DefeatDone bool;
+EnemyOwner u8; EntryCommunity; Gameplay string; Latch; LocalOwner u8;
+Meteor; Mutators; Progress; RNGCrtSeed u32; RNGSimSeed u32; Restrictions;
+Rules { Base string; Name string }; Skirmish; State u8; VictoryDone bool;
+ViewingOwner u8; Wind presence/payload; battleEntryTailDone bool;
+builderOptionsReady bool; campaignPlayerSide [10]i8;
+campaignPlayerSideKnown [10]bool; deathmatchActive bool;
+deathmatchAttempts u16; deathmatchExhausted bool;
+deathsWithNoRecordedCause i64; noShake bool; pendingCommanderDeaths [10]bool;
+playerBuilderOptions [10]BuilderOptions; result; resultArmedTick u32;
+resultPending bool; resultPendingDraw bool; resultPendingLosers []i64;
+resultPendingReason string; resultPendingWinner i64;
+rngCrt { State u32; draws u64 }; rngInitialized bool;
+rngSim { State u32; draws u64 }; seatCommands.removed [10]bool;
+shakeActive bool; shakeAmpX i32; shakeAmpY i32; shakeDuration i32;
+shakeOffsetX i32; shakeOffsetY i32; shakeRemaining i32.
+```
+
+Community and EntryCommunity reuse `community.Features.WriteCheckpoint`;
+Wind reuses its existing writer. Read RNG state directly and use pure Draws,
+never initialization-capable SimRNG/CrtRNG getters. Names in Rules identify
+bindings already verified by preflight; matching them is not that verification.
+Nested lexical records are:
+
+| Record | Fields |
+|---|---|
+| Latch | Bits u16; Countdown i16; Pending u8 |
+| Progress | BetweenMissions i64; Thumbs [25]u8; WL [10]u8 |
+| BuilderOptions | Guard [3]u8; Patrol [3]u8 |
+| Result | ArmedTick u32; Countdown i16; Draw bool; Ended bool; Losers []i64; Reason string; Tick u32; Winners []i64 |
+| Meteor | Active bool; DurationTicks i32; Enabled bool; Initialized bool; IntervalTicks i32; NextHit u32; NextStrike u32; OriginX/Z i32; PerHitDelay i32; Radius i32; StrikeEnds u32; TargetX/Z i32; Weapon presence/admitted definition; WeaponName string |
+| Skirmish | CommanderDeath i64; Difficulty i64; Gameplay string; LOSType i64; LineOfSight i64; Location i64; MapName string; Mapping i64; NumPlayers i64; Players [10]SkirmishPlayer; RNGCrtSeed u32; RNGSimSeed u32; Survival options; UnitLimit i64 |
+| SkirmishPlayer | AI u8; AllyGroup i64; Controller i64; Energy i64; Metal i64; Side i64 |
+| Survival options | Enabled bool; NoAir bool; NoNaval bool; Pace u8 |
+| Mutators | AreaOfEffect, BuildCost, BuildSpeed, Damage, FireRate, Health, Income, Radar, Salvage, Sight, UnitSpeed; each Factor has Den u8 then Num u8 |
+| Restrictions | u32 entry count, then each Count u8, Unit string in the canonical order returned by Entries |
+
+Keep raw factors, duplicate/ordered result slots and every stored scalar;
+normalization and defaults do not belong in capture. Meteor's actual Weapon
+pointer resolves through `keys.Weapon`; no name lookup replaces it. Required
+leaf refusals are missing session/encoder/keys/Clock, unknown boundary, pending
+battle transition, active seat-command dispatch, invalid count/key encoding,
+foreign meteor definition and NaN wind. Full preflight additionally establishes
+quiescence and all actual bindings; no arbitrary admitted Boolean is accepted.
+A terminal final-tick state need not still be Battle.
+
+Section 6 writes the visibility service fragment and then this session tail:
+postLoop presence, followed when present by the eyeball-record count and each
+record's `cx i32`, `cz i32`, `emitter u8`, `expiry u32`, `heightByte u8`,
+`owner u8`, `published bool`, `sightDistance i16`, `x/y/z i64`; then visStamps
+count and numerically sorted entries `handle u32`, `cx/cz/radius i32`.
+Reject stamp keys outside u32 instead of narrowing them. Nil/empty maps both
+encode count zero; eyeballs preserve list order and live length. Never call
+tail-allocation or publication convenience helpers during either capture.
+
+Runtime's cheap words are: Clock.GlobalTick, State, rngInitialized,
+rngSim.State/draws, rngCrt.State/draws, Latch.Bits/Countdown/Pending,
+resultPending, result.Ended, result.Draw, pendingCommanderDeaths[0..9], Wind
+presence and its existing summary, Meteor.Active/NextStrike/StrikeEnds/NextHit,
+shakeActive/remaining. The tail appends eyeball count then each record's
+owner, x/y/z, expiry, published; absent tail contributes zero count, with no
+extra postLoop presence. These selected-only methods use a local summary
+copy and commit on success (including Wind's NaN check). No map, full graph,
+content, callback or heap allocation belongs in a cheap walk.
+
+**Parent-owned binding preflight.** CommunitySources is future-behavior input:
+SetRules/BindRules and command validation reread its slices and pointer-valued
+overrides. The initial admitted constructor has empty sources in Strict and
+otherwise one CommandLine override containing only Base equal to the frozen
+admitted table. Validate that exact shape and every value without resolving
+sources at capture. Arbitrary or mutated sources fail. Actual RuleSet seams
+and Features declarations must likewise have verified provenance; equal
+Name/Base strings do not bless changed interfaces, and unknown concrete
+interfaces must fail without invoking them or comparing potentially
+noncomparable values. This leaf unit does not remove those production refusals.
+
+#### 16.3.40 U6 admitted session receipt
+
+`NewAdmittedSkirmish` now retains a private checkpoint admission receipt after
+its existing validation, before composition. The receipt contains the frozen
+inputs, resolved configuration, exact admitted Mission pointer and one fresh
+BindingAuthority; `skirmishEntry` passes it to the new Session before any
+service wiring. Bind its owner to that exact Session before any service wiring;
+only successful completed composition marks the receipt ready. Every canonical
+installation requires that same owner, so a shallow copy cannot attest closures
+capturing itself against the original's shared owners. A shallow copy cannot reuse
+another object's receipt. Ordinary constructors carry no receipt and remain
+unsupported for whole-session capture.
+
+This is constructor provenance, not a declaration that all bindings have been
+verified. It neither enables histories nor changes gameplay. U6 preflight
+still must validate immutable mission inputs, actual owner aliases, rule and
+callback installations, and the C1 boundary. Capture keys are built only when
+diagnostics are enabled. The receipt is private, excluded from the stream,
+and offers no getter for its authority or frozen configuration storage.
+
+Entry lifecycle also has a pending implementation constraint: the existing
+tick-zero player prime can create a Modern Host before composition returns.
+The current manager-history API accepts only an unstarted controller, so it
+cannot yet support EnableCheckpoints at that completed entry. U6 must provide
+an explicit entry-time history attachment contract without joining a worker,
+inspecting its private state, changing prime behavior, or inventing history
+for commands already applied before the captured entry baseline.
+
+#### 16.3.41 U6 visibility cheap fragment
+
+`(*visibility.Service).AppendCheckpointSummary(*checkpoint.Summary) error`
+appends the service part of section 6 before §16.3.39's session tail: semantic
+mode bits (all stored mode bits except ModeFogCacheValid), local player,
+team[0..9], viewerDefeated, word-mask length and words, then each of the ten
+byte-grid lengths and their row-major bytes. Each scalar contributes one
+unsigned summary word. The caller owns service presence; missing service or
+accumulator is an error without a partial append. This selected-only walk
+reads no footprint map, dimension, sensor cache, rule or reader callback,
+allocates nothing and does not refresh visibility. Nil and empty grids both
+contribute zero length. Independent literal words lock order and zero extension;
+mutations prove selected refcounts and deliberate full-only blind spots.
+
+#### 16.3.42 U6 closed stateless rule tags
+
+The five owner rule interfaces in visibility, movement, orders, construction
+and combat expose `CheckpointRulesKind(Rules) (uint8, error)`. AI exposes
+`CheckpointPlannerKind(Planner) (uint8, error)`. Each uses an exhaustive type
+switch over the existing reviewed stateless implementations, without invoking
+methods, comparing arbitrary interfaces, or examining function addresses.
+Rule tags are nil 0, StrictRules 1, CommunityRules 2, ModernRules 3; planner
+tags are nil 0, RetailPlanner 1, ModernPlanner 2. Accept a value form where it
+implements the interface and a nonnil pointer form; refuse typed nil, custom
+embeddings, laboratory variants and all other concrete types. No gameplay
+registry or policy selection is added.
+
+Replace the existing zero rule/planner byte in the corresponding owner writer
+with that classification, removing only its absent-rule refusal. AI's
+ConstructionRules uses construction's classifier. Keep every unrelated owner,
+callback, content and active-scope refusal. Orders still refuses the entire
+QueueBinding and owned handlers until their ports are admitted: adding its
+classifier alone does not bless a binding. Nil fixture bytes remain unchanged.
+The same existing `path.CheckpointKernelKind` owns path kernel classification.
+
+These leaves prove concrete implementation identity only. Session preflight
+must separately require the current reserved Name/Base pair, matching Gameplay,
+empty reserved Features declarations and the actual projected rule/Community
+values on every owner. Live phase-1 switches can change the current reserved
+set independently of the entry selection; validation cannot rebind or normalize
+state. The private Modern controller planner installed by the existing mod
+registration is not ai.ModernPlanner: it remains unsupported until its own
+registration witness and host lifecycle contract is published. Unknown planner
+implementations must not be admitted through arbitrary interface methods.
+
+Tests cover every supported value/pointer, nil versus typed nil, hostile or
+noncomparable implementations without callbacks, nonzero tag bytes, unchanged
+nil payloads and unrelated bindings that still refuse. The stateless tag
+addition encodes existing policy, not a new rule or gameplay departure.
+
+
+#### 16.3.43 U6 completed-entry Modern history attachment
+
+The battle-entry player prime may already have constructed and stepped a
+Modern host when `NewAdmittedSkirmish` returns. Recording begins at the
+completed entry boundary, not retroactively during that prime. The initial
+full checkpoint describes its completed effects. Attaching instrumentation
+must not join or read a worker, recreate the host, or reset gameplay state.
+
+```go
+// internal/ai; the concrete caller proves the controller implementation.
+func EnableControllerCheckpointApplications[T any](m *Manager, expected *T, identity checkpoint.Identity, keys *content.CheckpointKeys) error
+// internal/aikit
+func (h *Host) EnableCheckpointApplications(checkpoint.Identity, *content.CheckpointKeys) error
+```
+
+The manager helper accepts only a nonnil manager, nonnil keys and expected
+pointer, ControllerModern, no existing history, and `m.Ext.(*T)` equal to
+expected. It performs no arbitrary interface equality or interface callback.
+It creates a fresh kind-2 history only after all checks, then installs history
+and keys together. The existing manager method keeps its no-Ext refusal.
+The helper establishes pointer ownership, not planner/binding admission; the
+session must still attest the registered concrete planner and actual host.
+
+Host attachment first checks nonnil host/manager; exact Ext ownership; no
+existing host or manager history; no active host application, executor command
+scope or nonzero host/executor batch serial; executor manager equals the host's manager
+when initialized and is nil before initialization. A pending deadline requires
+an initialized host. All refusals precede mutation. It then calls the manager
+helper, borrows the installed history, and reserves its first serial only if
+`checkpointDeadlinePresent` is true: that already scheduled batch is serial 1,
+and next serial is 2. Otherwise its diagnostic batch serial stays zero and
+next serial stays 1. Count is zero and the chain retains the initial hash.
+The next actual application records ordinary attempts from that pending batch.
+Previously completed prime attempts are not fabricated.
+
+Read only the host's simulation-thread ownership, initialization and diagnostic
+scope/deadline fields. Do not inspect `b`, `flight`, `ready`, brain, private RNG,
+observation or worker results. Do not invoke Step, begin, join, normalize or any
+producer. The executor reads the manager's history for future applications;
+there is no second chain to attach. Existing pre-start attachment remains valid.
+
+Tests cover unstarted, started without pending work, and pending hosts, fresh
+hash/count/serial values, mismatched or typed-nil Ext, repeated and active-scope
+refusals with atomic state, and a genuinely blocked worker. The blocked-worker
+case must attach and read its cheap controller summary before release, then
+apply its pending batch normally with unchanged world/RNG outcomes. No public
+session lifecycle or unknown controller admission is enabled by this unit.
+
+
+#### 16.3.44 U6 Modern planner registration witness
+
+Extend the existing single Modern AI registration slot; do not add a registry
+or let the lobby select another controller capability. The reviewed mods/aikit
+init uses `RegisterModernAIWithCheckpointBinding[T ai.ModernAIStep](step T)`.
+Ordinary `RegisterModernAI` continues to register gameplay identically but
+supplies no checkpoint witness, so arbitrary registrations remain unsupported
+for full capture. Both paths use the same duplicate/nil/zero-size checks.
+
+The attested path creates a private, generated type witness, never a callback
+supplied by the caller. At registration only, require T to be the actual
+concrete dynamic type of step, a zero-size struct. This rejects an interface
+instantiation whose assertion would accept other implementations, as well as
+pointer or stateful types. Its witness is only the exact `planner.(T)` type
+assertion and does not call planner methods, compare arbitrary interfaces or
+use reflection during capture. A different zero-size embedding is a different
+type and fails the witness. Registration is trusted composition code reviewed
+alongside its planner implementation; it is not evidence supplied by a lobby.
+
+Resolve step and witness together under the existing registration mutex once
+per session, before a Modern player starts. Keep the witness private beside
+Session.modernAI; ordinary registration leaves it nil. The private
+`checkpointModernPlannerMatches(ai.Planner) bool` requires a nonnil session
+witness and matches both the retained session planner and supplied owner
+planner. It is a read-only concrete-implementation check, without global
+lookup, locking, callbacks or controller/worker reads at capture. The whole
+preflight still validates exact manager/host ownership and executor bindings.
+Tests pin ordinary-registration refusal, exact-type acceptance, interface-type
+instantiation refusal, hostile/noncomparable and typed-nil replacements, and
+unchanged duplicate-registration behavior without invoking any think method.
+
+
+#### 16.3.45 U6 reserved rule and feature projection preflight
+
+The private session leaf `validateCheckpointRuleBindings(checkpointRuleContext)
+error` verifies the selected reserved set and the actual owner projections.
+The context contains `entryMode gameplay.Mode`, `entryCommunity
+community.Features`, and `defaultCommunity community.Features`. Whole-session
+admission constructs it from the private entry receipt and the mainline table
+frozen at entry; callers' public names or current fields are not provenance.
+The leaf does not establish the rest of the receipt/owner graph itself.
+
+Require nonnil Session; current Rules.Name exactly equal to its reserved Base
+word and Gameplay; empty Rules.Features; and this closed matrix, using the
+existing owner classifiers without gameplay calls:
+
+| Seam | Strict 3.1 | Community 3.9 | Modern |
+|---|---|---|---|
+| Visibility, movement, orders, construction, combat | StrictRules | CommunityRules | ModernRules |
+| Path | RetailKernel | RetailKernel | SmoothKernel |
+| RuleSet Planner | RetailPlanner | RetailPlanner | ModernPlanner |
+| UnitLimit | StrictUnitLimit | ModernUnitLimit | ModernUnitLimit |
+| ScriptPorts | StrictScriptPorts | CommunityScriptPorts | ModernScriptPorts |
+| ComputerIncome | StrictComputerIncome | CommunityComputerIncome | ModernComputerIncome |
+| Seats | StrictSeats | ModernSeats | ModernSeats |
+
+Accept the supported concrete value or nonnil pointer form, reject nil
+(including Path's otherwise equivalent nil fallback), typed nil, custom
+embeddings and laboratory implementations. The four session-owned interfaces
+use direct type switches with the same discipline as §.42. Never look up a
+rule set, build one, call its methods, resolve features, or rebind owners.
+
+Validate retained CommunitySources against entry mode, not current mode:
+Content and Player are empty; Strict entry has no CommandLine sources; other
+entry has exactly one override containing only Base, whose pointed value is
+entryCommunity. EntryCommunity equals that entry value (Strict must be zero).
+The full comparable Overrides value may be compared with `{Base: actual.Base}`
+to detect other fields; do not invoke arbitrary callbacks or interfaces.
+Current Community is zero in Strict; outside Strict it is defaultCommunity
+for a Strict entry with empty sources, otherwise entryCommunity. This allows
+normal phase-1 switches without erasing their retained source semantics.
+
+For each present owner, verify its actual concrete rule kind and the exact
+stored projection built by `projectCommunity`: visibility's two scalar feature
+fields; combat's complete projected Features; construction's projected Features;
+movement's Rules, Kernel and GridClaimTieBreak-only Features; economy's
+AIDifficultyIncome-only Features; shared Build.OrderBinding's Rules and
+orderCommunity Features; each manager's ConstructionRules and aiCommunity.
+Classic managers use the current set's planner; Modern managers require
+`checkpointModernPlannerMatches` for their actual planner. Unknown Controller
+values refuse. Do not call controller marker methods or read Ext/workers.
+Nil services/rows are skipped only by this leaf; whole-session admission owns
+required presence, exact singleton aliases and all callback proof. No callback
+refusal in an owner writer is relaxed by this check.
+
+Tests exercise all three entry modes across all three current reserved modes,
+source-value and projection mutations, same-name custom seams, typed nil and
+noncomparable hostile interfaces without method calls, Modern witness checks,
+and purity. Construct expected projections independently from the documented
+field lists; do not call projection helpers during validation or in expected
+values. Report a new projected field as a contract change when it is added.
+
+
+#### 16.3.46 U6 unit lifecycle binding ownership
+
+Encapsulate the four World lifecycle callbacks without changing any call or
+installation position. `DeathHook`, `DeathExtraHook`, `CreateHook` and
+`CaptureHook` return their current callback; `SetDeathHook`,
+`SetDeathExtraHook`, `SetCreateHook` and `SetCaptureHook` install an ordinary
+callback and clear only that slot's checkpoint proof. Each setter also has a
+`WithCheckpointBinding(callback, *checkpoint.BindingAuthority)` form used only
+at reviewed session composition sites. Its private proof names the exact
+World, slot and authority. A copied World still names the original World and
+cannot claim the copy's ownership. Getting and reinstalling a function does
+not transfer its proof, including when the function itself is unchanged.
+
+`(*units.CheckpointContext).SetLifecycleBindings(*World,
+*checkpoint.BindingAuthority) error` registers the expected world and private
+admission authority for this capture; it does not mutate or bless a binding.
+Reject missing/conflicting registrations. At the existing lexical four binding
+bytes encode absent 0 or attested present 1. Before discovery/writing, every
+present slot must carry its own exact world/authority proof. Unknown callbacks
+still refuse without invocation. Keep every unrelated units/COB/owner refusal.
+
+Session uses its private admission authority at the existing canonical primary
+create/death/capture installations. The additional death wrapper keeps existing
+gameplay chaining, but is attested only if its captured predecessor is absent.
+A nonnil predecessor, even another canonical wrapper, is not the reviewed
+initial composition and remains unsupported. Ordinary constructors and headless
+observation wrappers keep their gameplay and receive no proof. The recorder
+must reject an unreviewed wrapper, rather than silently assume it is harmless.
+
+Tests pin independent slot replacement, unchanged-function reinstall refusal,
+wrong world and authority, copied-world refusal, absence/presence bytes and
+unchanged callback order/deduplication through the existing lifecycle tests.
+Proof is local metadata excluded from all wire state and RNG behavior.
+
+
+#### 16.3.47 U6 copied COB port installation proof
+
+The VM already stores engine-port callbacks privately. Keep ordinary APIs and
+all invocation/fallback order unchanged; add reviewed installation forms:
+
+```go
+func (v *VM) BindPortWithCheckpointBinding(Port, func([]int32) int32, checkpoint.Allocation, *checkpoint.BindingAuthority)
+func (v *VM) BindPortBindingWithCheckpointBinding(Port, PortBinding, checkpoint.Allocation, *checkpoint.BindingAuthority)
+func (c *CheckpointContext) SetOwnerBindings(*VM, checkpoint.Allocation, *checkpoint.BindingAuthority) error
+```
+
+The two installation methods perform the existing installation once, then
+privately stamp that copied map entry with the exact VM, nonzero owning unit
+allocation and authority. Ordinary BindPort/BindPortBinding clear only the
+corresponding port's proof, even for a same-function reinstall. The two maps
+have independent proof slots because explicit bindings can fall back to legacy
+functions per read/write arm. Nil-only entries retain no proof and keep their
+existing absent behavior. Missing authority or zero allocation cannot attest.
+No callback is invoked by these methods beyond existing installation work
+(which currently calls none). Do not change BindingRequest or its callers.
+
+The context setter registers a nonnil expected VM, nonzero allocation and
+nonnil authority. Missing/conflicting registration refuses without mutation;
+repeating the same registration is allowed. It never stamps the live VM.
+Capture requires each nonnil actual port entry to match its own exact VM,
+allocation and authority; a copied VM cannot borrow the original's stamps.
+Capture reads installed entries, never request maps or their later contents.
+A context explicitly registered for another VM refuses even when ports are
+absent. Parent admission owns the actual unit/VM/program graph and constructs
+this context from that verified allocation; a caller's declaration alone is
+not whole-session proof. All non-port callback refusals remain in place.
+
+At the existing lexical `VM.bindings.portBindings` slot, encode absent byte 0
+if no Read/Write is nonnil. Otherwise encode 1, u32 active-row count, and rows
+in numeric Port order, each `port i64; readPresent bool; writePresent bool`.
+The independent `portFuncs` slot similarly encodes 0 or 1 plus u32 active-row
+count and each numeric `port i64` (all included rows have nonnil functions).
+Omit nil-only rows; preserve negative and full-width port keys without narrowing.
+Keep every other binding slot and all nil-fixture bytes unchanged. These rows
+encode which actual entry shadows which fallback; one generic presence byte
+would lose that distinction. Gather keys only, sort, then read values. Never
+call readPort/writePort or any arbitrary callback to verify the installed row.
+
+Tests cover independent explicit/legacy slots and read/write presence; nil rows
+and unchanged nil fixture bytes; numeric map insertion independence; private
+copy proof versus mutation of the input PortBinding; ordinary replacements;
+wrong authority/allocation/VM, copied VM and missing/conflicting context;
+unknown unrelated callbacks still refused; source-width literal vectors and
+read-only capture. Report map-function audit changes to the parent. This unit
+adds no gameplay behavior and does not admit the other VM bindings.
+
+#### 16.3.48 U6 economy callback and wind ownership
+
+Economy's three existing callbacks become private fields without changing their
+installation or invocation order. Its ordinary getters and setters are:
+
+```go
+func (s *Service) CloakCostHook() func(*units.Unit) float32
+func (s *Service) CloakDueHook() func(*units.Unit) bool
+func (s *Service) EndConditionHook() func(int, uint32)
+func (s *Service) SetCloakCost(func(*units.Unit) float32)
+func (s *Service) SetCloakDue(func(*units.Unit) bool)
+func (s *Service) SetEndCondition(func(int, uint32))
+```
+
+Each setter has a `WithCheckpointBinding` sibling taking the same callback
+and `*checkpoint.BindingAuthority`. An ordinary installation clears only its
+slot's private proof; an admitted installation performs that same installation
+then stamps the exact Service and nonnil authority when the callback is nonnil.
+A getter transfers no proof. Reinstalling the same function ordinarily loses
+proof, and a copied Service cannot reuse the original owner's proof. No
+callback is invoked or compared for identity.
+
+```go
+func (c *CheckpointContext) SetBindings(*Service, *world.Wind, *checkpoint.BindingAuthority) error
+```
+
+The context setter requires a nonnil context, Service and authority, records
+that exact service, expected wind pointer (which may be nil) and authority,
+and rejects conflicting registration atomically. Identical registration is
+idempotent. Both collection and full writing check actual service identity,
+each present callback's own proof, and actual Wind pointer equality. An
+unregistered fixture with no callbacks or wind remains valid. Preserve the
+existing Terrain equality against the world's context. A registered context
+for a different Service refuses even when callbacks and wind are absent.
+
+The canonical CloakCost closure reads only its unit argument. CloakDue captures
+the exact Session and reads its live clock and the argument's flags/deadline.
+EndCondition captures the exact Session and reads its current mission, player,
+ledger, countdown and result state. Session installs the first two at their
+existing composition sites and EndCondition lazily, only when absent, at its
+existing tickPlayers site. Its authority helper requires exact receipt
+ownership (§16.3.40); whole-session capture must also verify that owner graph.
+Wind remains a public pointer because its actual target is checked directly.
+Economy's synchronous call to ApplyCloakDebits does not retain another copy.
+
+At the existing lexical CloakCost, CloakDue, EndCondition and Wind slots, write
+validated presence booleans instead of absent-only zero bytes. Every other
+field, nil-fixture byte and selected-summary contract remains unchanged.
+Tests cover each slot independently, same-function reinstall, foreign
+proof, copied Service, wrong or equal-valued wind pointers, context conflicts,
+exact byte changes, read-only capture, and unchanged settlement ordering. This
+unit adds no gameplay rule and does not itself admit a complete Session.
+
+#### 16.3.49 U6 visibility reader and terrain ownership
+
+The CommunityState projection retains two private readers, `allied` and
+`offMap`, with ordinary methods:
+
+```go
+func (c *CommunityState) AlliedReader() func(PlayerID, PlayerID) bool
+func (c *CommunityState) OffMapReader() func(uint16) bool
+func (c *CommunityState) SetAllied(func(PlayerID, PlayerID) bool)
+func (c *CommunityState) SetOffMap(func(uint16) bool)
+func (s *Service) SetAlliedWithCheckpointBinding(func(PlayerID, PlayerID) bool, *checkpoint.BindingAuthority)
+func (s *Service) SetOffMapWithCheckpointBinding(func(uint16) bool, *checkpoint.BindingAuthority)
+func (c *CheckpointContext) SetBindings(*Service, *world.Terrain, *checkpoint.BindingAuthority) error
+```
+
+Each reader has private proof inside CommunityState, retaining its exact
+owning Service and authority. Ordinary setters clear only their reader's proof;
+getters transfer no proof. The Service installation forms run the ordinary
+setter then stamp nonnil callbacks with nonnil authority. Copying the projection
+retains the proof of the installed callback, but it is valid only on that same
+Service; a copied Service or projection installed on another Service refuses.
+Scalar feature edits do not disturb reader proof; the session's reserved rule
+preflight verifies those scalars separately. Capture neither invokes readers
+nor compares function addresses.
+
+The context registration requires a nonnil context, Service and authority,
+retains expected terrain (possibly nil), and rejects any conflicting tuple
+without mutation; the same tuple is idempotent. Both full collection and writing
+validate exact registered service and terrain identities and every present
+reader's proof. A registered foreign service refuses even with absent readers.
+Unregistered fixtures with absent readers preserve their current terrain
+presence encoding; whole-session admission always registers actual terrain.
+Immutable ray-table and sight-shape identity checks remain unchanged.
+
+At the existing Community.Allied and Community.OffMap lexical positions, encode
+validated presence booleans; preserve every other field and absent fixture byte.
+A disabled reader still needs proof because later rule changes can consume it.
+Session's projectCommunity installs admitted readers only at its existing
+only-if-absent sites: the alliance method and off-map method each capture the
+exact Session and read its current owners. They must receive the exact-owner
+checked authority (§16.3.40), while full capture verifies the Session graph.
+No gameplay, rule projection, read order or selected-summary behavior changes.
+
+Tests cover independent slot proof, ordinary same-function reinstall, wrong
+proof, copied projections/services, same-owner projection restore, context
+conflicts, wrong/equal-valued terrain pointers, unchanged absent vectors,
+exact presence-byte changes, and capture without callback invocation.
+
+#### 16.3.50 U6 feature callback, RNG and wind ownership
+
+Features retains six private callbacks with ordinary `NameHook()` getters and
+`SetName(fn)` setters, where Name is SequenceFrames, BurnWeapon, BurnSound,
+GeothermalSteam, BurnFrameGeometry or BurnSmoke. Their function signatures
+stay unchanged. Each also has a `SetNameWithCheckpointBinding(fn, authority)`
+method, where authority is `*checkpoint.BindingAuthority`. Private per-slot
+proof retains the exact Service and authority. Ordinary installations clear
+only their slot; canonical installation performs the same ordinary install and
+stamps only a nonnil callback with nonnil authority. Getters transfer no proof;
+copied Services and ordinary same-function reinstalls cannot borrow proof.
+
+```go
+func (c *CheckpointContext) SetBindings(*Service, *rng.Simulation, *rng.CRT, *world.Wind, *checkpoint.BindingAuthority) error
+```
+
+Context registration requires nonnil context, Service and authority, retaining
+the three expected owner pointers, which may individually be nil. Repeated
+identical registration is allowed; conflicting registration fails atomically.
+Both collection and writing require actual Service and RNG/wind identities to
+match and each present callback to retain its matching proof. A registered
+foreign Service refuses even with absent callbacks. Unregistered fixtures with
+all six callbacks and three owners absent preserve their previous behavior.
+The existing exact Terrain context check, active-traversal/burn-handoff refusal,
+content-definition/sequence identities, arena and cache validation remain.
+No callback or RNG accessor is invoked by capture. The ordinary presence slots
+for the six callbacks, Crt, Sim and Wind become validated booleans at their
+existing lexical positions; every absent fixture byte is unchanged.
+
+Canonical callbacks all capture Session, not a snapshot of its owners.
+BurnSmoke and GeothermalSteam append the existing strip records; BurnWeapon
+reads the current catalog, combat, units, terrain and clock; BurnSound publishes
+the existing positional cue. SequenceFrames reads current immutable simArt,
+while BurnFrameGeometry reads the current private featureSequence resolver.
+Whole-session admission must verify those current owners and that resolver's
+installation against the frozen art; the features token alone is insufficient.
+ShadowSequenceResolved remains presentation-only under the reviewed inventory.
+Its field and behavior do not change in this unit.
+
+Root session wiring preserves every current installation site and only-if-nil
+guard, using the exact-owner authority helper. Restore's temporary sound wrapper
+uses ordinary setters and invalidates its proof, consistent with currently
+unsupported capture on restored sessions. Feature cursor delay metadata remains
+validated against admitted sequence keys; no capture operation fills a cache.
+Tests cover each independent slot, copied Service, same-function ordinary
+reinstall, foreign proof, context conflicts, actual RNG/wind/terrain aliases,
+exact presence bytes, zero callback/draw effects, and the existing burn,
+reproduction and sequence timing tests. No gameplay behavior changes.
+
+#### 16.3.51 U6 provisional COB port installation receipts
+
+Production unit creation installs its script ports before COB Create runs, but
+commits the allocation serial only after that fallible bind succeeds. Both
+ordinary and forced allocation do so before extraction, the mover tail,
+activation and the creation hook. Do not predict the next serial or move its
+commit: nested creation and failed binds must retain their current behavior.
+The §16.3.47 immediate installation API remains available for known allocations;
+pre-create installation adds:
+
+```go
+func (v *VM) BindPortWithPendingCheckpointBinding(Port, func([]int32) int32, *checkpoint.BindingAuthority) *CheckpointPortInstallation
+func (v *VM) BindPortBindingWithPendingCheckpointBinding(Port, PortBinding, *checkpoint.BindingAuthority) *CheckpointPortInstallation
+func (r *CheckpointPortInstallation) Seal(checkpoint.Allocation) error
+```
+
+A receipt has only private fields. Each installation runs the ordinary setter
+once, then, for a present callback and authority, creates proof and a receipt
+for that exact VM, map family, key and copied installation. A nil-only callback
+or missing authority produces no receipt and no proof. Ordinary API nil-receiver
+behavior is preserved. Pending proof never admits a full capture.
+
+Seal requires a nonnil receipt, nonzero handle and serial, and the receipt's
+original proof still installed in the named map entry of the original VM.
+A replacement, including another canonical installation of the same callback,
+invalidates the old receipt. Sealing affects only its own private proof; it
+never blesses whichever callback now occupies the key. The first successful
+seal records the actual allocation, the same repeated seal is idempotent, and
+a different allocation refuses without mutation. No callback runs, no map row
+is reconstructed, and refusal changes no VM or receipt state. It is diagnostic
+bookkeeping, not a new gameplay operation or wire field; sealed rows use the
+same §16.3.47 encoding and existing exact VM/allocation/authority validation.
+
+The units owner will privately retain receipts alongside the exact *Unit during
+pre-create composition and seal that unit's receipts immediately after the
+existing successful allocation serial assignment in each allocator path.
+Failed creation never seals; nested creations retain their own receipt lists.
+A diagnostic proof refusal cannot change creation success or trigger additional
+gameplay work; that installation remains unsupported at capture. Ordinary
+fixtures and legacy asset-binding entry points remain unproved.
+
+Tests pin refusal before sealing, final-identity matching, invalid/repeated/
+conflicting seals, independent map slots, stale receipts after ordinary or
+canonical replacement, nil-only installs, copied VM refusal, reverse completion
+order for nested-created owners, unchanged encoded bytes after sealing and
+zero callback/RNG effects. This closes installation timing only; the remaining
+VM bindings and the actual unit/program owner graph still require admission.
+
+#### 16.3.52 U6 closed frozen-filesystem identity
+
+Whole-session admission must not call an arbitrary filesystem's
+`SimulationInputs()` method to prove its source. The content owner supplies:
+
+```go
+func (in *SimulationInputs) CheckpointFilesystemMatches(vfs.FSOps) bool
+```
+
+This is a pure closed-type check for the exact sealed view retained by those
+inputs. It accepts only the four private snapshot-view forms returned by the
+freezer (plain, range, ordered, range-and-ordered), with nonnil wrapper/base,
+non-transient base, the exact nonnil snapshot retained by the inputs’ sources,
+and that exact inputs pointer. The actual
+view and retained view must be the same concrete pointer, checked only after
+concrete narrowing; neither interface is compared as an arbitrary interface.
+Nil inputs/view, typed nil, a different snapshot, a copy or foreign wrapper,
+transient capture views and user-defined implementations refuse. No filesystem
+or open-interface method runs and no bytes, diagnostics or caches change.
+The result emits no wire data. It proves only source ownership; full admission
+still validates immutable identities, cached fallback inputs and owner aliases.
+
+Tests cover all four view variants, typed nil and noncomparable hostile wrappers,
+copied views, distinct frozen inputs, transient/unbound capture views, and pure
+zero-allocation successful checks. Existing freezing and ordinary composition
+behavior is unchanged; the current open helper remains a composition facility,
+never capture-time proof.
+
+#### 16.3.53 U6 session art resolver provenance
+
+Session's private effect-frame and feature-sequence resolvers are admitted only
+when both are present and installed from the exact nonnil frozen SimArt object.
+Private installation helpers call each existing public setter once at its
+current composition site and retain the exact Session and art pointer beside
+that resolver. Ordinary public setters clear that resolver's proof before their
+existing work, including the effect setter's smoke-frame resolution. They do
+not invalidate the other resolver. Getters, copied Session fields, equal-valued
+art and same-function ordinary reinstall cannot transfer ownership.
+
+Capture preflight checks current simArt against the admitted art and both
+resolver proofs against that exact Session/art. It calls no resolver, fills no
+cache and changes no strip or feature state. Missing art, missing resolvers or
+custom replacements refuse; canonical admitted entry always binds both. These
+proof fields are diagnostic metadata and add no wire bytes. Tests preserve
+existing setter behavior, reject copied/foreign/cleared/reinstalled resolvers,
+and require pure, allocation-free repeated validation.
+
+#### 16.3.54 U6 per-unit yard and status callback ownership
+
+The two private unit callback slots retain independent exact-*Unit/authority
+proof alongside their installation:
+
+```go
+func (u *Unit) SetYardOpenTransactionWithCheckpointBinding(YardOpenTransaction, *checkpoint.BindingAuthority)
+func (u *Unit) SetStatusCueSinkWithCheckpointBinding(StatusCueSink, *checkpoint.BindingAuthority)
+```
+
+Each new method performs the existing ordinary setter once, then stamps a
+nonnil callback and authority on a nonnil Unit. Ordinary setters clear only their
+own proof. Preserve their nil-receiver no-op behavior and invoke no callback.
+The existing `CheckpointContext.SetLifecycleBindings(world, authority)` supplies
+the expected owning world and authority for unit callback validation as well.
+Both collection and writing require that exact world registration and each
+present callback's exact unit and authority proof. A copied Unit, foreign
+world/context or ordinary same-function reinstall refuses. Missing callbacks
+preserve existing unregistered authored fixtures.
+
+The yard callback is installed before allocation commits its serial; proof
+therefore retains the exact Unit pointer, not a guessed allocation serial. The
+existing allocation collector still validates the actual committed handle and
+serial before writing its record. Retired allocations keep their own callback
+proof and follow existing graph discovery; they need not occupy a live slot.
+Change only the two existing statusCue/yardTransaction bytes to validated
+presence booleans. Other World, unit and VM bindings keep their current checks.
+Root wires these methods at the existing session pre-Create yard installer,
+status-sink sweep and creation hook with the exact-owner session authority.
+
+Tests cover both slots independently, pre-serial installation followed by
+successful allocation capture, copied units, foreign authority/world, nil
+inputs, ordinary replacement, unchanged nil bytes and exact presence changes,
+retired allocation references, and no callback or RNG activity during capture.
+This metadata does not alter allocation, yard requests or status-cue behavior.
+
+#### 16.3.55 U6 COB runtime binding admission
+
+The VM's remaining runtime bindings are admitted as actual installations, not
+by invoking a reader or sink. The existing twelve lexical binding slots stay
+in place. Ports retain §16.3.47. The other slots use validated presence bytes,
+except renderFlags, whose present byte is followed by kind 1 (direct external
+slice) or 2 (mapped handlers). The pieceFlags source is 0 with no duplicate
+bytes for a validated external unit store; unbound local storage keeps source
+1 and its existing bytes. No proof, pointer or scratch buffer is wire data.
+
+```go
+// internal/cob; each receipt has private fields.
+type CheckpointVMInstallation struct { /* private */ }
+func (*CheckpointVMInstallation) Seal(checkpoint.Allocation) error
+func (*VM) BindScriptTouchedWithPendingCheckpointBinding(func(), *checkpoint.BindingAuthority) *CheckpointVMInstallation
+func (*VM) BindTransportQueriesWithPendingCheckpointBinding(func(int32) bool, func() int32, *checkpoint.BindingAuthority) [2]*CheckpointVMInstallation
+func (*VM) BindTransportMutationsWithPendingCheckpointBinding(func(int32, int32, int32), func(int32), *checkpoint.BindingAuthority) [2]*CheckpointVMInstallation
+func (*VM) SetSFXVisibleWithPendingCheckpointBinding(func(int, int32) bool, *checkpoint.BindingAuthority) *CheckpointVMInstallation
+func (*VM) BindRenderFlagsWithPendingCheckpointBinding([]uint8, *checkpoint.BindingAuthority) *CheckpointVMInstallation
+func (*VM) BindRenderFlagHandlersWithPendingCheckpointBinding(func() []uint8, func(int, uint8, bool) bool, []uint8, []int, *checkpoint.BindingAuthority) *CheckpointVMInstallation
+func (*Binding) SFXVisibleReader() func(int, int32) bool
+func BindStrictWithCheckpointBinding(vfs.FSOps, BindingRequest, *checkpoint.BindingAuthority) (*Binding, *CheckpointVMInstallation, error)
+func (*Binding) SetSFXSinkWithPendingCheckpointBinding(SFXSink, func(int, int32) bool, *checkpoint.BindingAuthority) *CheckpointVMInstallation
+func (*CheckpointContext) SetRuntimeSources(*Binding, *rng.Simulation, []uint8, []int) error
+func SetCheckpointPresentationSink[T any, P interface { *T; PresentationSink }](*CheckpointContext, P) error
+func SetCheckpointExplosionSink[T any, P interface { *T; ExplosionSink }](*CheckpointContext, P) error
+func (*VM) ExplosionSink() ExplosionSink
+func (*VM) ValidateCheckpointBindings(*CheckpointContext) error
+```
+
+Receipt lifecycle follows §16.3.51: exact original VM/slot/installation,
+nonzero final allocation, idempotent same seal, atomic refusal on replacement,
+copy or conflicting seal. Ordinary setters clear only affected proofs; paired
+transport slots remain independent. Render proof is cleared by either render
+setter, UnbindRenderFlags and both program-reset branches. Installation keeps
+all existing work and nil-receiver behavior. It never calls a callback beyond
+work the ordinary API already performs. Pending proof refuses capture.
+
+Mapped render proof retains the exact flag and piece-map slices captured beside
+the canonical closures in units.bindRenderFlags. Both handlers must be present,
+renderFlagsBound true and direct storage nil. Capture compares their lengths
+and nonempty backing starts with the actual unit flags and Binding.PieceMap;
+empty slices have no readable storage to distinguish. Values in the current
+piece map separately must match admitted program/model links. Direct storage
+must alias the expected unit flag slice. Explicitly bound nil/empty storage
+remains distinct from local fallback through the binding/source tags. Mixed
+handler forms and the fallback loader's different live-field closures remain
+unsupported. Capture never calls the getter; its scratch is excluded because
+that getter overwrites every returned element before use.
+
+Binding's visibility callback becomes private. BindingRequest remains a copied
+installation input. The admitted constructor stamps the copied Binding and VM
+reader before PreCreate, never after a callback could replace it. Ordinary
+BindStrict remains unproved. Ordinary SetSFXSink clears the Binding/VM reader
+proof; its admitted sibling records both exact installations on one receipt.
+A later independent VM reader replacement must refuse even if the Binding
+retains its original proof. Public RNG and sink fields remain subject to
+actual structural validation, not installation claims.
+
+Runtime-source registration requires the existing exact VM/allocation/authority
+registration, checks Binding.VM when present, and records expected Binding,
+RNG and external slices. Conflicting repeats refuse atomically. Both actual VM
+and retained Binding RNG must equal the expected pointer. Sink registration
+uses only nonnil concrete pointers through the closed generic functions; any
+stored matcher is their private type-assertion/equality implementation, never
+an application-supplied callback or interface method. Recheck actual sinks at
+capture so replacement after registration is detected. VM SFX accepts only the
+value PresentationSinkAdapter around the registered presentation pointer;
+Binding.PresentationSink must match and Binding.SFXSink may be nil or that same
+adapter. ExplosionSink must be the registered concrete pointer. Absent sinks
+with no corresponding registration preserve fixtures; typed nil, custom,
+noncomparable and partial mismatches refuse without calls.
+
+Root verifies the session-owned sink before registration: exact Session,
+publication and clock; source handle equal to the associated unit; copied sink
+piece-map values equal to admitted links; explosion sink pointing at that same
+presentation sink. These are simulation-relevant sinks: their current session
+implementation appends authoritative strip records and performs synchronous
+bounded-arena admission. Their names do not justify a presentation exclusion.
+The unit owner writes Binding's existing model key followed by presence bytes
+in the existing PresentationSink, SFXSink, SFXVisible, SimulationRNG order, only
+after ValidateCheckpointBindings succeeds. Existing program, model, bridge,
+continuation, allocation and cheap-summary contracts remain unchanged.
+
+Tests pin stale/pending/copied proof, independent paired slots, program reset,
+nonaliasing equal-valued render storage, changed map storage, direct empty-store
+versus fallback vectors, Binding/VM reader mismatch, wrong RNG, hostile sinks,
+exact lexical tags and purity. The root migrates units/session call sites and
+retains/seals receipts at the existing successful allocator boundaries; this
+leaf never changes allocation success or starts an extra script callback.
+
+#### 16.3.56 U6 compiled-program future-allocation subset
+
+The initial production checkpoint admission supports catalogs whose every
+admitted unit record has a compiled, nonempty script. This is an explicit
+subset, not a claim that absent/fallback scripts cannot occur in authored
+content. A read-only diagnostic on 2026-10-07 exercised ordinary frozen entry
+on the reference install, Ashap Plateau, seeds 7/7, no mutators/restrictions,
+for all three reserved modes in both skirmish and Survival. Each had 278
+nonnil records, no missing/empty script and no ProgramForUnit mismatch. Capture
+must prove the condition every time; this census is not a substitute.
+
+```go
+// internal/content
+func (k *CheckpointKeys) ValidateCompiledAllocationPrograms(*Catalog) error
+```
+
+Walk all nonnil current catalog records in stored order, including duplicate
+names and definitions never allocated. Require precisely the admitted record
+set, manifest ordinals and names, plus each stored UnitDefID exactly as admitted
+(without assuming it equals the manifest ordinal); each admitted COB entry must be SimulationInputPresent.
+Require each current Script pointer to be nonnil, its Code nonempty, and its
+complete semantic digest to match that record's admitted program. Do not load
+files, normalize the catalog, populate caches, or change ProgramForUnit's
+existing general fallback behavior. CheckpointKeys construction checks every nonnil admitted catalog/COB record
+against its manifest ordinal before retaining metadata. It snapshots current
+holes and total slice length for later comparison; the manifest does not prove
+the history of earlier trailing nil slots. Exact
+Catalog pointer ownership is checked separately by the units context.
+
+This condition makes both loader branches unreachable: hasLoadableCOB returns
+on the nonempty compiled program, and the reviewed production binder consumes
+that same program. The catalog is finalized and bounds future allocations.
+Existing cache entries, including successful programs, cached nil misses and
+unrelated later populations, are therefore irrelevant in this subset. Never
+inspect, clear, rebuild or serialize that cache during capture. Missing, empty,
+fallback or later-mutated programs refuse. The freezer currently discards the
+separate LoadFromFS probe outcomes, whose name/path rules differ from the strict
+binder's manifest. Supporting those outcomes later needs its own frozen-input
+contract; equality with the strict binder's program is not sufficient evidence.
+
+The following units ownership API is staged after that content helper:
+
+```go
+func (*CheckpointContext) SetWorldBindings(*World, *content.SimulationInputs, *world.Terrain, *rng.Simulation, *cob.CachedLoader, *checkpoint.BindingAuthority) error
+func (*World) SetAttachmentObserverWithCheckpointBinding(AttachmentObserver, *checkpoint.BindingAuthority)
+func (*World) SetCOBSourceWithCheckpointBinding(vfs.FSOps, *cob.CachedLoader, *checkpoint.BindingAuthority)
+func (*World) SetCOBBinderWithCheckpointBinding(COBBinder, vfs.FSOps, *checkpoint.BindingAuthority)
+func (*World) SetExtractionSamplerWithCheckpointBinding(ExtractionSampler, *checkpoint.BindingAuthority)
+func (*World) SetCreationPoseWithCheckpointBinding(CreationPose, *checkpoint.BindingAuthority)
+func (*World) SetSimulationRNGWithCheckpointBinding(*rng.Simulation, *checkpoint.BindingAuthority)
+func (*World) AttachmentObserver() AttachmentObserver
+func (*World) CreationPose() CreationPose
+```
+
+The binder's extra filesystem is its actual captured source; its canonical
+model resolver must be built from that same source at the reviewed session
+site. Each private installation slot retains exact World/authority proof.
+Ordinary setters clear only their affected proofs, even for the same value;
+SetCOBSource clears source and loader proof. Preserve existing callback calls,
+nil-receiver behavior and installation timing. Getters transfer no proof.
+
+Context registration is atomic, idempotent for the same tuple and consistent
+with SetLifecycleBindings. It requires present context/world/inputs/authority;
+expected terrain, RNG and loader are explicit pointers. At collection and
+writing, verify exact catalog identity with inputs.Catalog(), the compiled
+program condition, exact current loader/RNG, and both current source and
+binder-captured source through CheckpointFilesystemMatches. Extraction must
+be a nonnil concrete *world.Terrain matching the expected terrain when present.
+Every present private slot needs its own exact proof. Root additionally checks
+AttachmentObserver and CreationPose by closed *movement.System type assertion
+against the session's actual movement owner, never arbitrary interface equality.
+A registered foreign World refuses even when every slot is absent. Unregistered
+all-absent authored fixtures retain existing behavior; whole-session admission
+requires the complete production graph, including its attested binder.
+
+Only the existing seven binding bytes become validated presence tags; no
+loader cache payload or new table is introduced. Tests cover all future records,
+never-created mutations, missing/empty/fallback programs, record order and name
+changes, independent proof invalidation, copied worlds, foreign registrations,
+exact source/loader/RNG/terrain aliases, poison caches left untouched and pure
+repeated capture. This adds no gameplay behavior or alternate allocation path.
+
+#### 16.3.57 U6 terrain movement installation ownership
+
+Both terrain movement ports become private, retaining ordinary getters and
+setters. A single immutable installation receipt covers their exact terrain,
+authority and captured restamp owner. Either ordinary setter invalidates that
+receipt, including a same-value reinstall. Getters transfer no proof.
+
+```go
+// internal/world
+type FootprintRestampOwner interface {
+    NoteFeatureFootprint(int32, int32, int16, int16)
+}
+func (*Terrain) ClassRestamp() FootprintRestamp
+func (*Terrain) SetClassRestamp(FootprintRestamp)
+func (*Terrain) Movers() MobileOccupancy
+func (*Terrain) SetMovers(MobileOccupancy)
+func (*Terrain) SetClassRestampOwnerWithCheckpointBinding(FootprintRestampOwner, *checkpoint.BindingAuthority)
+func (*Terrain) CheckpointMovementOwner(*checkpoint.BindingAuthority) (FootprintRestampOwner, bool)
+func (*CheckpointContext) SetMovementBindings(*Terrain, *checkpoint.BindingAuthority) error
+// internal/movement
+func (*CheckpointContext) SetTerrainBindings(*System, *world.CheckpointContext, *OccupancyGrid, *checkpoint.BindingAuthority) error
+```
+
+The admitted installer obtains owner.NoteFeatureFootprint itself and installs
+that method value at the existing call site. It cannot accept a different
+function plus a claimed owner. A nil interface installs nil without proof;
+other owner implementations are opaque data until movement narrows them.
+It invokes no method. Nonnil authority and owner create a receipt naming the
+exact terrain and the current two-port installation. Ordinary terrain setters
+and this installer are nil-receiver no-ops. The owner getter succeeds only for
+the current receipt's exact terrain and matching nonnil authority; it neither
+attests an unknown owner nor compares arbitrary interfaces.
+
+World context registration requires nonnil context, terrain and authority and
+a valid current receipt; it records that exact receipt. Repeating that same
+tuple is allowed, while conflicting terrain/authority/receipt registration
+refuses atomically. Full collection and writing check the current receipt is
+still exactly that registered receipt and belongs to the actual terrain.
+A copied terrain cannot borrow proof. Unregistered all-absent fixtures remain
+valid; present ports without proof refuse. The existing ClassRestamp and Movers
+zero bytes become validated presence bytes with no receipt data in the stream.
+Every geometry, feature normalization, entry sweep and content check remains.
+
+Movement registration/capture supplies the concrete proof that world cannot
+perform across its package boundary: the receipt owner must be a nonnil
+*System equal to the current system; actual Movers must be value-form
+gridOccupancy with its stored grid equal to the registered grid; System.Terrain
+and System.Grid must match the registered terrain/grid. A nonnil grid's plot
+must be that terrain. No method on either interface is invoked. Register the
+world context only after all movement checks pass. Both contexts must remain
+unchanged on a conflict. Movement capture repeats these checks, including the
+world receipt, so replacing System/Grid or terrain ports after registration
+refuses. Existing Grid body and presence are unchanged; only movement's Terrain
+byte becomes a validated presence tag. Other movement bindings remain refused.
+
+The production constructor keeps its current order: SetMovers(gridOccupancy),
+AttachPlot(terrain), then SetClassRestampOwnerWithCheckpointBinding(system,
+authority). The ordinary constructor passes nil authority and remains unproved.
+This does not create new layers, restamp cells or alter movement state. Later
+Classes/AirSectors, damage/product callbacks, overlap queries, mapping readers
+and queue handler proof are separate contracts; this unit admits none of them.
+
+Tests cover copied terrains/systems, same-authority foreign owners, typed nil
+and hostile/noncomparable occupancy, wrong grids, callback extraction and
+ordinary reinstall, replacement after registration, conflicts and exact tags,
+while existing absent fixtures and read-only callback/RNG assertions remain.
+
+#### 16.3.58 U6 order callback storage boundary
+
+QueueBinding and its five existing adapters (MovementGoalAdapter,
+WorldQueryAdapter, WorkAdapter, WeaponAdapter and PresentationAdapter) retain
+private callback storage. Every existing callback field Name has an ordinary
+NameHook() getter returning that exact callback and SetName(fn) setter. Neither
+invokes it or transfers checkpoint proof. Their signatures stay unchanged,
+including MovementGoalAdapter.RunAir's AirLegRunner type. Existing direct
+nil-receiver access panics remain ordinary method panics; these methods do not
+introduce fallback behavior. Later admitted setters must independently clear
+or replace the matching slot's proof.
+
+For each of those six types T, TConfig contains the former public field set
+with the same names and types, and NewT(TConfig) *T copies those inputs into a
+fresh owner without invoking callbacks. Noncallback fields (rules, projected
+Community, actual services/RNG and adapter pointers) remain directly visible
+on T for existing live projection and exact capture validation. TConfig is only
+construction input; editing it later cannot replace a copied callback. Empty
+and noncallback-only literals remain valid ordinary owners. No registry, new
+policy selection or second command path is introduced.
+
+All ordinary callers migrate mechanically: callback reads/calls go through
+the getter, assignments through the setter, and callback-bearing literals
+through the copied-input constructor. Keep initialization, callback expression
+evaluation, guarded replacement and invocation order. The root performs this
+cross-package migration before a bounded orders-owner proof implementation;
+existing QueueBinding/owned-handler capture refusals stay in force meanwhile.
+The existing order, movement, construction, session and AI behavior tests are
+the verification of this mechanical stage. This storage boundary itself adds
+no wire bytes and does not attest custom callbacks.
+
+#### 16.3.59 U6 order binding proof and payload
+
+Every callback on §16.3.58's six types has a private, independent installation
+proof naming its exact owning object and authority. The ordinary SetName clears
+only that slot. SetNameWithCheckpointBinding(fn, authority) performs that same
+ordinary installation once, then proves a nonnil callback when authority is
+nonnil. NameHook returns only the function, so even a same-function reinstall
+loses proof. Copied owners cannot borrow the original's proof. All nil-receiver
+and callback invocation behavior remains as before; no function address is read.
+
+For each of the six types T add NewTWithCheckpointBinding(TConfig,
+*checkpoint.BindingAuthority) *T. Ordinary and admitted constructors share one
+implementation, with the ordinary constructor passing nil authority. Each
+configuration expression is evaluated as before, each callback installed once,
+and no callback invoked. Preserve the independent live noncallback fields.
+
+```go
+// internal/orders
+func (*CheckpointContext) SetBindings(*QueueBinding, *economy.Service, *rng.Simulation, *checkpoint.BindingAuthority) error
+func (*CheckpointContext) ValidateBinding(*QueueBinding) error
+func (*QueueBinding) WriteCheckpoint(*checkpoint.Encoder, *CheckpointContext) error
+```
+
+SetBindings requires a nonnil context, binding and authority; economy and RNG
+are explicit expected pointers, possibly nil. Record the exact binding and all
+five of its current adapter pointers. Reject conflicting repeats atomically.
+At registration and at every collection/write, check each nonnil callback's
+exact owner/authority proof and all current adapter pointers against the tuple.
+Economy must be nil when the expected pointer is nil, otherwise a nonnil concrete
+*economy.Service equal to it; reject typed nil and arbitrary implementations
+without invoking them. SimRNG must equal the expected pointer. Classify Rules
+with the existing closed CheckpointRulesKind; write Community through its
+existing complete writer. Never call QueueBinding.Validate or a Ready callback
+to validate capture. A foreign binding refuses even with all nil callbacks.
+An absent binding is represented explicitly and remains valid for fixtures;
+whole-session admission owns production completeness and required presence.
+
+QueueBinding.WriteCheckpoint writes absent 0 or present 1 followed by its
+fields in the original public-name lexical order: BuildList, BuilderOptions,
+Community, CurrentTick, Damage, DangerCanRespond, DangerRouteFeasible,
+DangerStepFeasible, DangerVisible, Economy, Hostility, Lookup, ModernAIPlayer,
+Movement, Presentation, ReclaimFeature, Resources, Rules, SimRNG,
+TransportAdmission, Weapons, Work, World. Each callback and verified service/RNG
+is one presence bool, Rules its existing u8 kind, Community its existing body.
+Each adapter uses a presence bool followed by callback presence bools in its
+original public-name lexical order (including Ready and RunAir). There are no
+pointer IDs or proof bytes. The queue's existing binding byte becomes this
+payload at the same position; nil-fixture bytes remain identical. The owned
+handler refusal and all existing queue/node/transient checks remain untouched.
+A validation or writer failure is sticky and yields no usable digest.
+
+Session's newOrderBinding is the only canonical factory. Root must retain a
+private exact-Session/binding record of the five constructed adapters and the
+movement System captured by its bound methods. Whole-session capture requires
+those actual aliases unchanged. Work and Presentation closures capture the
+factory's worldQueries object; merely proving their authority would miss a
+later replacement of binding.World. The private factory record closes that
+edge, while callback-slot proof detects mutation within the captured adapter.
+The factory copies Lookup/Hostility from its freshly proved world adapter;
+proof on the copied callback belongs to the destination installation, not the
+source's later contents. Subsequent source edits do not rewrite that copy.
+Mapping-word copies and owned row handlers need their own later value-transfer
+contracts and remain unsupported by their current owners in this unit.
+
+Tests cover independent proof slots on every owner, copied owners/configuration
+mutation, same-function ordinary reinstalls, nil and foreign authority,
+changed adapters/economy/RNG, atomic conflicting contexts, exact independent
+lexical vectors and absent bytes, Rules/Community validation, and capture that
+never invokes callbacks or changes RNG/state. Root performs canonical session
+and late BuilderOptions/RunAir wiring after this leaf passes its gates. This
+unit does not admit an entire Session or add a gameplay rule.
 
 ## 17. Verification
 
@@ -4709,3 +7230,2019 @@ invent a retail rule while implementing an independent transport feature.
 | O21 | Whether restarting Modern controllers from observation at a snapshot tick is acceptable play (§9.1, §15 Q21) | Play-test computer seats across forced restarts and compare with a save and load, which already restarts them. |
 | O22 | Strict fidelity where the engine takes an exact integer root or compares squares and retail calls its distance routine on whole numbers — candidates seen while reading for M1 are the leash test, the guard and nano ranges and the air order distance. The routine truncates to one below the exact root on 722 ordered whole-number pairs up to 3,000, such as 20 by 99 `[01 R-DET-01 §7]`. This is not a lockstep hazard: integer code computes the same everywhere | **Settled.** `[04 R-STANCE-01 §4]`, `[04 R-AIR-01 §8]` and `[05 R-WORK-01 §2]` establish the caller widths and routine identity. Leash, work/construction reach and air-order distances now use the portable kernel. Ordinary guard arrival and unit reclaim remain genuinely squared tests. The dogfight reads a signed high word before comparing with 160; correcting it left the seed-7 Strict pool at a peak of 296 records through 15,000 steps, so the step-4,500 pool lock moved to seed 5 (M1-C9, DESIGN_MOVEMENT_PATH §3.4). The original fifteen locks are unchanged. M1-C6's CPU budget (§16.1) was measured before this change and re-measured on 2026-10-02 on a shared host (Go 1.27.1, Darwin/arm64, two runtime workers; 216 sequential runs of the M1-C6 setting, each build's fingerprints identical across its runs). On the windows where the build before O22 and the build with it still play the same battle, process CPU per tick differs by about 0 ± 2%; in the profiles the kernel takes about 2% of Strict and 1.6% of Modern CPU, all of it at call sites that predate O22, and the leash, reach and air-order sites O22 changed do not appear. Against M1-C6's baseline the quietest Modern session measured +1.2% (range −1.5% to +2.4%), consistent with the recorded +2.15%; the host's noise is as large as the three-percent budget, so this supports the budget and does not certify it, and Strict was never measured against it on a quiet host. Two things the first O22 record did not say: the correction is a shared retail mechanic, so it also changes Modern battles that reach its boundaries — the Modern benchmark scene's fingerprint already differs by tick 2,199, with no Modern lock moved, and giving the Modern repair-pad queue its own distance does not change that — and after O22 a full-window fingerprint match with the M1-C6 baseline is no longer possible, so a later cost comparison must use a window before the battles diverge. |
 | O23 | Which retail leaving path a Nanolathe resignation corresponds to, and whether Strict should reproduce it. Retail's surrender question has a menu variant (teardown only; peers delete positive-health units with no script, explosion or wreck) and an exit variant (30000 self-damage first, so a unit it leaves at non-positive health goes with the kill script, an effect-only explosion and the wreck); the order in which peers then empty the leaver's slots is only a Supported inference `[08 R-LEAVE-01 §7]` | **Decided 2026-10-02**, the maintainer: "units can be deleted silently" — the menu variant, as the other machines see it. A Strict resignation deletes the resigning seat's units, and its hosted computers' units with them, with no `Killed` script, explosion, wreck or credit, keeping the researched receiver path for a unit already at non-positive health and applying no self-damage; the records are then cleared as a voted removal clears them (§11.1). This supersedes the §15 Q28 proposal that a resignation apply the voted-removal contract. Still open, as research rather than a decision: the slot order in which peers empty the leaver's records, which a trace of the transport's player-destroyed notices when the leaver's session closes would settle; until then the protocol uses the voted removal's order (§11.1). |
+
+
+#### 16.3.60 U6 unit script installation and capture contexts
+
+The unit owner retains pending COB receipts from §16.3.51 and §16.3.55 on
+that exact Unit, never on the allocator's predicted next serial. The admitted
+strict helper shares the ordinary binding path and all existing callback
+ordering. A nil authority takes the ordinary path without proof metadata.
+
+```go
+// internal/units; same operands as the ordinary strict unit helper, then authority.
+func BindCOBForUnitWithCheckpointBinding(vfs.FSOps, *Unit, *model.Model, *rng.Simulation, cob.PresentationSink, func(int, int32) bool, func(*cob.Binding) error, *checkpoint.BindingAuthority) (*cob.Binding, error)
+func (*Unit) RetainCheckpointPortInstallation(*cob.CheckpointPortInstallation)
+func (*Unit) RetainCheckpointVMInstallation(*cob.CheckpointVMInstallation)
+func (*CheckpointContext) ScriptBindings(*Unit) (*cob.CheckpointContext, error)
+```
+
+The admitted helper records its exact Unit and authority before PreCreate,
+and retains the exact admitted VM when PreCreate receives it. Transport
+attestation and script preflight require that same current VM; clearing or
+replacing it through an ordinary path cannot reuse old unit metadata.
+Its port, script-touched and mapped-render installations use pending receipt
+APIs at their original sites. BindStrictWithCheckpointBinding supplies the
+Binding/VM visibility receipt; retain it only on success. The existing
+post-binder transport query installation uses this unit's authority when
+present and valid, and otherwise keeps the ordinary call. Neither the
+fallback loader nor an arbitrary ordinary binder acquires proof.
+
+Retain methods ignore nil receipts. A nonnil receipt without a prior admitted
+unit installation is a sticky diagnostic failure. Before successful allocation
+it is appended to that unit's private typed list; after successful allocation
+it seals immediately against the actual Handle/AllocationSerial. Immediately
+after each of the two existing successful serial assignments, seal all retained
+receipts against that actual allocation. Nested creation therefore seals each
+unit independently. Failed creation never reaches this boundary. A seal error
+is retained as a diagnostic refusal only; it cannot fail or roll back creation,
+change RNG, call gameplay code, or suppress an existing callback. Keep the
+first error. A copied Unit cannot reuse the original unit's metadata. Receipt
+lists may be released after sealing; their private VM proof remains installed.
+All this metadata is excluded from checkpoint bytes.
+
+ScriptBindings is capture-local preparation after reference discovery: require
+a nonnil discovered allocation and VM, admitted keys and the context's exact
+lifecycle World/authority. Resolve the actual program key, register that VM
+and the unit's actual nonzero allocation on a new lower COB context, and retain
+it by exact Unit pointer. Repeated calls return that same context only while
+the VM, program key, allocation and Binding pointer are unchanged. It also
+retains the current Unit.RenderPieceFlags header and rechecks its length and
+nonempty backing start at repeated access and preflight; empty slices have no
+readable storage. Root registers current
+Binding/RNG/render slices and the closed session sinks on it (§16.3.55).
+Preparation never calls a script, render getter or gameplay callback.
+
+The script preflight rechecks current aliases, admitted program key, exact
+unit/VM/allocation context and any sticky installation error. With a registered
+lower context it calls ValidateCheckpointBindings before emitting any script
+bytes, then emits Binding's four validated presence booleans and writes the
+VM with that same context. Without registration, existing all-absent fixtures
+keep their exact bytes and a present binding still refuses. Never discover a
+reference during writing. Tests cover normal/forced allocation, failed and
+nested creation, actual final serials, copied/stale metadata, receipt failures
+that do not alter creation, ordinary-path refusal, capture context conflicts,
+independent payload tags and capture purity.
+
+
+#### 16.3.61 U6 movement auxiliary ownership and lazy occupancy
+
+```go
+// internal/movement
+func (*System) BindWorldWithCheckpointBinding(*units.World, *checkpoint.BindingAuthority)
+func (*System) AttachOverlapBindingWithCheckpointBinding(func(uint8) uint8, *checkpoint.BindingAuthority)
+func (*CheckpointContext) SetAuxiliaryBindings(*System, *units.World, *checkpoint.BindingAuthority) error
+```
+
+BindWorld's admitted sibling shares its existing implementation and installs
+that same System as the unit world's attachment observer through the admitted
+setter at the original site. Ordinary BindWorld still clears observer proof.
+All sizing, clearing and registry behavior stays in its existing order.
+
+AttachOverlapBinding's admitted sibling shares its existing installation path.
+The grid privately retains independent proofs for ownerState and claimConflict:
+exact grid, exact captured System and authority. Ordinary AttachOverlap clears
+only ownerState proof, and ordinary AttachOverlapBinding clears both affected
+proofs. The admitted System helper stamps the actual claimConflict method it
+installs; no caller can claim an unrelated callback is that method. Capture
+checks the actual grid, overlap's nonnil concrete *System and the expected
+System/world aliases without invoking either callback. Presence bytes replace
+the existing absent tags at their lexical positions.
+
+The admitted System constructor keeps a private immutable snapshot of its
+freshly built AirSectors, with exact System/grid/terrain/authority identities,
+dimensions, all records including padding and the sentinel. Snapshot after the
+existing constructor builds the grid, without moving or repeating that build.
+Capture validates the actual grid pointer and every stored value against this
+snapshot; it never rebuilds from current terrain, whose mutable plot may have
+changed since entry. Copied Systems, replaced grids, missing proof and mutated
+records refuse. Absent AirSectors fixtures stay absent. The existing AirSectors
+slot changes only to a validated presence byte; the immutable values are proved
+by the admitted constructor and frozen-entry graph, not duplicated as state.
+No caller-facing arbitrary snapshot attestation API is added.
+
+SetAuxiliaryBindings records exact System, expected World and authority;
+required context/System/authority must be nonnil, the World may be nil for
+fixtures. It agrees with existing context System and SetPathBindings' World
+and authority in both registration orders, refuses conflicts atomically, and
+is rechecked at collection and writing. Registration proves no callback by
+itself. AirSectors and present overlap callbacks require their own proofs.
+Other unimplemented composition slots remain refused.
+
+Occupancy plane dimensions are nonnegative, and each of air and cells is
+independently either nil or exactly planeW*planeH elements. reindexPlane keeps
+nil storage and planeRow allocates each on demand. Counts must still equal
+nonzero stored occupants, including zero for nil storage. Capture retains the
+actual zero or full slice length in the existing encoding and never calls
+planeRow or creates absent planes. A nonnil empty slice with nonzero dimensions
+is malformed. Add vectors for untouched, ground-only and air-only grids,
+malformed lengths/counts, both registration orders, ordinary replacement,
+wrong/copy owners and air snapshot mutation/purity.
+
+
+#### 16.3.62 U6 copied owned-order handlers
+
+Owned queue handlers are copied values whose provenance travels with the
+function, including BindQueue's existing transfer from the prior queue. The
+ordinary getter still returns only a function, and ordinary SetOwnedHandler
+clears only that destination row's proof. Do not compare function addresses,
+call a handler, or infer ownership from its current source slot.
+
+```go
+// internal/orders; all fields of the two values below are private.
+type CheckpointHandlerSource struct { /* exact owner and authority */ }
+type CheckpointOwnedHandler struct { /* function, kind, source */ }
+const CheckpointConstructionWake uint8 = 1
+const CheckpointGetBuilt uint8 = 2
+const CheckpointAirStandby uint8 = 3
+func NewCheckpointHandlerSource[T any](*T, *checkpoint.BindingAuthority) *CheckpointHandlerSource
+func RegisterCheckpointHandlerSource[T any](*CheckpointContext, uint8, *CheckpointHandlerSource, *T, *checkpoint.BindingAuthority) error
+func NewCheckpointOwnedHandler(OwnedHandler, uint8, *CheckpointHandlerSource) CheckpointOwnedHandler
+func (CheckpointOwnedHandler) Handler() OwnedHandler
+func (*Queue) SetOwnedHandlerWithCheckpointBinding(ID, CheckpointOwnedHandler)
+```
+
+Source construction requires a nonnil concrete owner pointer and authority;
+nil operands return no source. Registration uses a closed generic type
+assertion and pointer comparison with the expected concrete owner. It never
+calls an interface or compares arbitrary interface values. Each of the three
+kinds has one expected source per capture, with atomic conflicting refusal and
+idempotent same registration. Source registration and binding registration use
+the same nonnil authority in either order; neither can refresh an old capture.
+An arbitrary caller cannot recover a live session's authority from a source.
+
+The function/source/kind record is immutable after construction. The admitted
+queue setter performs ordinary installation once at the same point, then keeps
+that record as the row's proof. Unknown kind, missing source, nil handler or
+mismatched row cannot gain admission. Kind 1 is limited to BuildingBuild,
+MobileBuild, VTOL_MobileBuild, ReclaimUnit and VTOL_ReclaimUnit; kind 2 to
+GetBuilt; kind 3 to VTOL_Standby. Preserve existing nil/invalid-ID allocation
+and no-op behavior. BindQueue copies the proof slice alongside the existing
+handler slice only in the existing inheritance branch; explicit replacement
+queues retain their own installed rows. Clearing/replacing one row cannot
+alter proof for another row, queue or previously copied value.
+
+Capture checks every actual nonnil row's retained proof and its exact
+registered source. A present handler with no proof refuses. Retained proof
+without the corresponding actual handler also refuses. Empty/all-nil storage
+keeps tag 0. Present storage uses tag 1, u32 active count, then ascending
+numeric rows, each row ID u8 followed by kind u8. All other queue payload is
+unchanged. Source pointers, authorities and function values are never bytes.
+Construction and movement create their sources at their reviewed canonical
+handler installation sites; root registers the actual owners and these exact
+sources before collection. This leaf does not itself admit those producers.
+Tests pin queue inheritance, independent replacements, wrong/copy owners,
+wrong authorities and kind/row combinations, exact vectors, context conflicts,
+ordinary getter/reinstall refusal and capture purity.
+
+
+#### 16.3.63 U6 frozen input mutation validation
+
+Cached content hashes and rounded canonical text do not prove that an admitted
+object remains unchanged. FreezeSimulationInputs retains a private typed
+snapshot after preparation and source sealing, before it returns. This is
+local diagnostic metadata, not a new manifest, wire field or M2 identity.
+No checkpoint may establish its baseline from the first capture's live values.
+
+```go
+// internal/content
+func (*SimulationInputs) ValidateCheckpointInputs() error
+func (*CheckpointKeys) ValidateMovementClasses(map[string]*MovementClass) error
+```
+
+CheckpointKeys validates the freeze-time snapshot before constructing keys;
+root revalidates it before every full capture when reusing keys. The snapshot
+retains original object pointers, exact detached scalar values (floating
+values by bits), ordered slices including holes, and sorted raw-key lookup
+rows. Validation checks lengths and those expected lookups without ranging
+current maps, calling getters, reading a filesystem, relinking definitions,
+normalizing values or rebuilding caches. Catalog.Clone is not a snapshot:
+it reconstructs indexes and shares some immutable storage.
+
+Validate the exact catalog, complete actual unitRecords and Units index,
+Weapons/Features/Movement membership including nil entries, ordered Sides,
+weaponRecords/weaponByID and CategoryRegistry.byName. Record full consumed
+definition values, category-mask words, weapon damageOrder and Damage,
+resolved weapon/feature links, limits, categories, build menus, download
+placements, meteor, sight/LOS tables (including unused records), and Survival
+roster Units/IncludeBuildTree. Keep all fields of movement classes: canonical
+key and FootprintX/Z, Max/MinWaterDepth, MaxSlope, BadSlope, MaxWaterSlope,
+BadWaterSlope. Side anchors keep every raw key and rectangle coordinate.
+Unit extension flags such as NanolatheInfector and exact economy/cost values
+must be checked even when an existing canonical writer omits or rounds them.
+Compiled COB programs retain their existing semantic identity contract.
+
+Also retain complete parsed-model and SimArt sequence membership, including
+known misses, geometry, frame delays, effect entries/holds and visit order;
+selected-map header pointer and actual header/schema values. Preserve actual
+lookup topology. Other installed maps are outside the battle selection.
+Provenance/providers, warnings, duplicate diagnostics, sounds/aliases,
+Survival AttackerSkin and SimArt source bookkeeping remain excluded under
+the existing consumer audit. Any further model-cache exclusion requires a
+consumer audit; do not infer it from the cache's name.
+
+ValidateMovementClasses compares a supplied map's complete raw-key membership,
+exact admitted class pointers and the stored values above. The map container
+itself may differ; a copied class with equal values cannot replace its admitted
+pointer. Validation is read-only and may never repair the caller's map.
+
+Tests mutate values both before the first CheckpointKeys call and afterward;
+cover deletion, nil and same-name foreign replacements, stale stored hashes,
+sub-rounding float changes, poisoned runtime indexes, and repeated validation
+with hostile filesystem methods and unchanged caches. These checks detect
+invalid local mutation; they do not change authored content or gameplay.
+
+
+#### 16.3.64 U6 construction and movement handler producers
+
+```go
+// internal/construction
+func NewServiceWithCheckpointBinding(*world.Terrain, *content.Catalog, *units.World, *economy.Service, *checkpoint.BindingAuthority) *Service
+func (*Service) RegisterCheckpointOrderHandlers(*orders.CheckpointContext, *checkpoint.BindingAuthority) error
+// internal/movement
+func (*System) RegisterCheckpointOrderHandlers(*orders.CheckpointContext, *checkpoint.BindingAuthority) error
+```
+
+Construction's new constructor shares NewService's body; the old entry passes
+nil authority. Movement uses its existing NewSystemWithCheckpointBindings
+constructor. Each admitted constructor retains one exact owner/authority and
+an opaque orders.CheckpointHandlerSource. Nil authority creates no proof.
+Neither constructor initializes lazy handlers early or invokes one.
+At the existing lazy handler creation sites only, retain the immutable owned
+handler value alongside the existing cached function: construction wake kind
+1, GetBuilt kind 2, movement standby kind 3 (§16.3.62). At every existing
+queue installation site transfer that same value through the admitted setter
+when valid proof exists, and preserve the ordinary setter otherwise. Repeated
+queue registration never replaces the cached handler or creates new closures.
+An ordinary cached handler cannot acquire proof later.
+
+Registration requires the exact constructor owner, nonnil matching authority
+and original source, then registers it against that concrete owner on the
+orders context. It never creates a source, constructs rows, or calls a handler.
+Copied services/systems, ordinary constructors and conflicting contexts refuse.
+Lower owners revalidate registered handler sources at collection/writing.
+Movement's existing airLegHandler field writes its actual presence after its
+own cached handler proof is checked; no new bytes are added. Empty fixtures
+with no handler keep the absent tag. Construction's row caches remain derived
+metadata under their existing disposition; their source is checked without
+requiring other unfinished construction bindings to be admitted first.
+Root supplies the authority at canonical construction creation and registers
+both producers before collecting queues. The old ordinary paths and function
+bodies retain their behavior. Tests cover late queue creation/inheritance,
+repeated registration, ordinary/copy refusal, changed authority and unchanged
+dispatch; capture never runs a handler or creates lazy registration state.
+
+
+#### 16.3.65 U6 canonical session script bindings
+
+The session's existing strict unit binder uses §16.3.60's admitted helper.
+Before Create, port 16, query ports 7–15, adopted ports 32/69–75 and both
+transport mutation callbacks retain their pending installation receipts on
+that exact unit. The unit owner seals them at its actual allocation boundary.
+Nil authority keeps ordinary installation and does not retain metadata.
+Callback bodies, order and creation failure behavior are unchanged.
+
+The existing private per-unit presentation sink retains two diagnostic aliases
+only for admitted composition: the exact Unit and the Terrain receiver captured
+by port 16's method value. Capture compares those with the current session and
+unit, alongside the sink's existing session/publication/clock/handle/piece-map
+aliases. This bounds the metadata lifetime to the existing sink and prevents a
+replaced terrain from concealing the old ground-height receiver. No source
+pointer or receipt contributes bytes. Explosion's private concrete sink must
+point to that same presentation sink.
+
+After reference discovery, root obtains each unit's capture-local ScriptBindings
+context, registers its actual Binding, simulation RNG, render backing and piece
+map, and supplies the validated concrete presentation/explosion sinks through
+the lower closed generic registration APIs. Lower preflight verifies every
+installation before any script bytes are written. Capture calls no callback,
+script, render getter or filesystem operation and never rebinds a VM. Tests use
+the real session binder with authored model/COB bytes, including creation after
+the first capture, ordinary callback replacement, copied sessions and changed
+captured terrain, and prove repeated capture leaves RNG and script state alone.
+
+
+#### 16.3.66 U6 copied mapping-word sources
+
+```go
+// internal/orders; private function and original installation proof.
+type CheckpointMappingWord struct { /* immutable copied value */ }
+func (*WorldQueryAdapter) CheckpointMappingWord() CheckpointMappingWord
+func (CheckpointMappingWord) Reader() func(int32, int32) (uint16, bool)
+func (*CheckpointContext) ValidateMappingWord(CheckpointMappingWord) error
+// internal/movement
+func (*ClassLayers) BindMappingWordWithCheckpointBinding(orders.CheckpointMappingWord)
+```
+
+The orders getter copies the current callback with its proof only when that
+proof still names this exact adapter and its authority. An ordinary installation
+returns its actual callback with no proof, so simulation behavior is unchanged
+but checkpoint validation refuses it. Reader returns the function alone; passing
+it through an ordinary installation never transfers provenance. The copied value
+retains its original proof after the source slot changes; it does not claim to
+be the adapter's current callback. ValidateMappingWord checks its exact original
+adapter against the capture's registered WorldQueryAdapter and authority, without
+calling the callback, comparing function pointers or refreshing proof from the
+current slot. The zero value is absence; present callbacks need valid proof.
+
+ClassLayers and each ClassLayer retain the immutable copied value beside their
+private mapping callback. Ordinary BindMappingWord keeps its existing nil no-op
+and allocation-order update behavior, clearing proof for each callback it
+actually replaces. The admitted sibling performs that same work at the same
+site and transfers the value to the registry and each affected layer. For's
+existing inheritance copies it with the mapping callback before the original
+stamp. Private movement helpers obtain the copied value through the requester's
+actual queue World adapter. Every existing retained mapping installation uses
+the admitted sibling, including diagnostic/laboratory paths; immediate reads
+continue using the ordinary function getter. No new mapping read, registry,
+layer, stamp, path request or source lookup is introduced.
+
+Registry and layer collection/writing validate their retained copied value
+against the shared orders context; a nonnil mapping with absent proof refuses.
+Existing mapping bytes become actual presence, retaining zero for absence.
+All other fields and lazy behavior stay unchanged. Tests cover inheritance,
+registry rebinding, nil no-op, source-slot replacement, ordinary getter/reinstall,
+copied adapters, conflicting captures, stale proof without a callback, pure
+capture with panic readers, and unchanged classifier behavior.
+
+
+#### 16.3.67 U6 construction callback storage and production bindings
+
+Construction privately stores CRTRandom, IsSpecialSecondState, ModelForFactory
+and ModelForUnit. Each retains its existing function signature and gains an
+ordinary Set<Name>/ <Name>Hook pair plus Set<Name>WithCheckpointBinding(fn,
+*checkpoint.BindingAuthority). Ordinary replacement clears only that slot's
+private proof; the admitted setter performs it once and records exact Service
+and authority for a nonnil function. Nil authority creates no proof. All
+readers and callers migrate without changing callback bodies, invocation order,
+arguments or results. There are four production installations, all at session
+composition. Allocator and LimitChecker have no production installations and
+retain their existing nonnil checkpoint refusals; nil keeps the current World
+allocation/default-admission path. Do not encapsulate unused fixture-only seams.
+
+```go
+// internal/construction
+func (*CheckpointContext) SetBindings(*Service, *content.SimulationInputs, *units.World, *economy.Service, *combat.Service, *movement.System, *orders.QueueBinding, *checkpoint.BindingAuthority) error
+func SetCheckpointPresentationSink[T any, P interface { *T; EmitNanolathe(frame.Event) bool }](*CheckpointContext, P) error
+```
+
+SetBindings retains one exact tuple atomically and revalidates exact repeats.
+The source must be §16.3.64's admitted constructor owner and authority. Current
+Catalog equals inputs.Catalog(); World/Economy/Combat/Movement/OrderBinding
+must equal the explicit expected pointers, and repairWorld is nil or that same
+unit world. Terrain retains its existing comparison against the collected
+world context. Root validates frozen inputs once for the whole capture; these
+owner checks never rebuild or rehash them. Callback proofs are independent and
+are checked without invocation. Ordinary and copied services cannot inherit
+another service's installations. Keep all existing mid-pump refusals and the
+ordinary temporary World/Economy/Terrain/Catalog swaps in StepUnit.
+
+Presentation is checked by a closed generic concrete-pointer matcher, as in
+the COB sink registration. Require a nonnil expected pointer, reject typed nil
+and arbitrary foreign/noncomparable implementations without calling methods,
+and permit only exact repeats. Root retains its actual installed
+*buildPresentationSink pointer and exact Session/Service/authority, then checks
+that sink's session field before registering it. The sink appends authoritative
+strips independently of frame-event admission; it is not excluded as display
+state. The CRT and special-state closures capture Session and read its current
+owners; model callbacks capture no extra objects. Capture never calls CrtRNG,
+which may initialize a stream, any callback, or the presentation sink.
+
+Collection and writing revalidate the registered tuple and sink. Existing absent
+binding bytes become actual booleans in the same lexical field positions; no
+new table or pointer value is encoded. Empty all-absent fixtures preserve their
+bytes without a registered tuple. Tests pin ordinary replacement per slot,
+foreign authority/copied owners, every alias and sink replacement, atomic
+conflicts, independent presence vectors and capture purity including RNG and
+strip state. Root migrates canonical calls and registers exact owners before
+construction collection; the leaf does not itself prove a complete session.
+
+
+#### 16.3.68 U6 effect art and fragment bindings
+
+The actual fixed pool retains fragmentContext between ticks. Its
+fragmentStepping field is the stored TerrainHeight-presence predicate, not a
+traversal marker; validation requires exact coherence and its existing
+TerrainHeight byte represents that derived field. Root's completed-tick
+boundary provides quiescence for the closed canonical callbacks. No new active
+marker is needed. This corrects §16.3.17's former false-only requirement.
+
+```go
+// internal/effects
+func (*EffectService) CheckpointFixedPool() *FixedEffectPool
+func (*CheckpointContext) SetBindings(*EffectService, *content.SimArt, *world.Terrain, uint32, *checkpoint.BindingAuthority) error
+func (*FixedEffectPool) SetFragmentStepContextWithCheckpointBinding(FragmentStepContext, *world.Terrain, uint32, *checkpoint.BindingAuthority)
+func (*EffectService) SetFragmentStepContextWithCheckpointBinding(FragmentStepContext, *world.Terrain, uint32, *checkpoint.BindingAuthority)
+```
+
+Ordinary SetFragmentStepContext clears its private proof. The admitted sibling
+performs that same installation and records exact pool, terrain, tick and
+private authority for the retained ports. Nil authority carries no proof.
+The service wrapper narrows its known fixed pool; other implementations keep
+ordinary forwarding without proof. CheckpointFixedPool returns only the known
+concrete nonnil pool and never invokes it. SetBindings requires nonnil context,
+service, expected art, terrain, pool and authority, validates exact current
+service/art/pool plus port proof, and atomically records one exact tuple;
+exact repeats revalidate. Before any fragment context installation its absent
+ports are valid. A present port requires proof for that exact pool, terrain,
+completed tick and authority. Ordinary replacement and copied pools cannot
+inherit proof. Capture revalidates without methods on interfaces, reflection,
+interface equality, filesystem reads or callbacks. The frozen input owner
+validates art contents once for the complete capture.
+
+Root migrates the sole production installation in bindFragmentStepContext,
+which constructs World.HeightAt and fragmentImpactSink{debrisImpactSink{s,tick}}
+immediately before effect advancement, supplying those same terrain/tick/authority
+operands. The sink can admit new effects and smoke strips and is authoritative.
+Its retained tick must equal the completed GlobalTick encoded by section 1;
+no duplicate wire word is needed. The actual service art comes from frozen
+inputs and controls lifetime/capacity. Existing art, Impact and TerrainHeight
+bytes become validated presence. heightAt has no production installations and
+keeps its nonnil refusal. All-absent fixture bytes and cheap summaries remain
+unchanged. Tests cover coherent enable state, presence vectors, copied pools,
+ordinary reinstall, foreign art/terrain/tick/authority, foreign interface owners,
+atomic registration, pure capture and unchanged callback/RNG consumption.
+
+
+#### 16.3.69 U6 movement class and callback bindings
+
+Movement privately stores its Damage and ProductFootprint functions, preserving
+their current signatures through ordinary Set<Name>/ <Name>Hook methods and
+Set<Name>WithCheckpointBinding(fn, *checkpoint.BindingAuthority). Ordinary
+replacement clears that slot's proof. The admitted sibling records exact
+System and authority for a nonnil callback after the same installation. Nil
+authority carries no proof. Current calls, arguments, results, and callback
+bodies remain unchanged. Root owns both production installations in composition:
+Damage captures Session through its method value, and ProductFootprint captures
+Session and consults its current Catalog. The private authority is supplied
+only by the original admitted Session.
+
+```go
+// internal/movement
+func (*CheckpointContext) SetCompositionBindings(*System, *content.CheckpointKeys, *checkpoint.BindingAuthority) error
+```
+
+SetCompositionBindings requires nonnil operands, exact §16.3.64 admitted
+constructor System and authority, keys equal to the shared unit context's
+Keys, and a class table accepted by keys.ValidateMovementClasses. It atomically
+records one exact tuple and revalidates repeats. It agrees with already
+registered terrain/path/auxiliary authorities and those registration methods
+must symmetrically refuse a conflicting composition authority. Collection and
+writing revalidate class membership, object identity and values using the frozen
+snapshot; no callback, class rebuild or map iteration is performed. Full frozen
+inputs validation remains root's once-per-capture responsibility. Classes stays
+public with its existing ordinary SetClasses behavior because identity and all
+values can be verified without function proof. Nonempty/present callbacks need
+their exact slot proof; copied systems and ordinary getter/reinstall refuse.
+Existing Classes, Damage and ProductFootprint bytes become actual presence;
+empty all-absent fixtures retain their bytes without registration. Root adds
+composition registration to prepareCheckpointMovement, before reference
+discovery. Tests cover each slot independently, conflicting aliases/authorities,
+changed classes, absent/stale/copy proof, pure capture and unchanged gameplay
+callback results. The two callback readers retain their ordinary invocation
+sites in cargo cascade and air build approach [06 §12.1][04 R-ORD-02 §2].
+
+
+#### 16.3.70 U6 combat callbacks and reaction ownership
+
+Combat's ten public Service callbacks and eight ReactionSeams callbacks become
+private slots. Their ordinary Set<Name>/ <Name>Hook APIs preserve each existing
+signature; ordinary replacement clears only that slot's proof. The admitted
+Set<Name>WithCheckpointBinding(fn, authority) performs the same assignment and
+retains exact slot owner and private authority for a nonnil function. Nil
+authority creates no proof. Ordinary ServiceConfig/NewService and
+ReactionSeamsConfig/NewReactionSeams copy initial public fields without invoking
+callbacks or initializing a pool. The admitted ReactionSeams constructor copies
+the same configuration through its With setters. Existing capacity construction
+and invocation order are unchanged.
+
+```go
+// internal/combat
+func NewReactionSeamsWithCheckpointBinding(ReactionSeamsConfig, *checkpoint.BindingAuthority) *ReactionSeams
+func (*CheckpointContext) SetBindings(*Service, *content.SimulationInputs, *features.Service, *world.Wind, *ReactionSeams, *checkpoint.BindingAuthority) error
+```
+
+SetBindings requires nonnil context, Service, inputs and authority, records one
+exact tuple atomically, and revalidates repeats. Actual Features, ProjectileWind
+and Reaction must equal the explicit expected pointers. Each present Service
+and Reaction callback requires its independent owner/authority proof. Copied
+services or reaction records cannot borrow installations. Unregistered fixtures
+keep their all-absent behavior; capture never calls callbacks, rule methods,
+lookup caches or presentation sinks. Root validates frozen inputs once; the
+private weapon lookup remains the existing content-derived cache, rebuilt only
+by weaponLookupFor before use, not during capture.
+
+Root supplies the actual installed combat owner and Reaction object. Of the ten
+Service callbacks, InfectionThreat is a package function; VisitOffMapFiled is a
+method value capturing the exact movement Grid; all others capture Session and
+read its current owners. The eight Reaction closures capture Session except
+UnderAttackSilenced, a package function. Root retains exact Session, Combat,
+Grid, Reaction and authority at the canonical installation, checks these edges
+before registration, and verifies the full session owners separately. Combat's
+Events callback is authoritative: it can request shake and append strips, so it
+is not omitted as presentation state. Callback code, arguments, ordering and
+RNG consumption stay unchanged.
+
+The existing ten callback and two pointer-edge bytes become actual presence.
+Reaction retains its presence byte and, when present, eight booleans in logical
+field-name order: Allied, ArmConstructionThrottle, ObserverNotice,
+PurgeOrdersOnDamage, RetaliationOrder, SlotAcquisitionAdmits, UnderAttackNotice,
+UnderAttackSilenced. Absence retains the original single zero. These bytes
+represent the optional parts rather than treating a partially installed record
+as a complete reaction. Tests cover each slot, presence vectors, exact aliases,
+ordinary getter/reinstall, copies, conflicting registration and capture purity.
+The existing active-impact, transport-handoff and area-transaction refusals stay.
+
+The package-global paralyze task installation is a separate remaining root
+check; this unit must not claim full-session admission until its original
+orders installation is also validated. It does not add a second gameplay seam.
+
+
+#### 16.3.71 U6 Classic manager composition bindings
+
+The nine Manager callbacks (CanPursueAir, IsAlliance, JammerSuppresses,
+QueueBuildTyped, RallyProbeKnown, RallyShotTimeAdmits, RallyVisible, UnitVisible
+and WeaponMaintenance) become private slots with ordinary Set<Name>/<Name>Hook
+APIs and admitted Set<Name>WithCheckpointBinding(fn, authority), preserving
+existing signatures. Ordinary setters clear only their slot's exact-owner
+proof. Ordinary ManagerConfig/NewManager copy initial public fields without
+invoking callbacks or running constructor work. Strategic's existing private
+energyEnvironment and rebuildRegistry setters gain independent exact-Strategic
+proofs; copying the embedded Strategic cannot transfer them.
+
+```go
+// internal/ai
+func (*Manager) InitializeBattleStateWithCheckpointBinding(*world.Terrain, RallyBattleBindings, *checkpoint.BindingAuthority) bool
+func (*Strategic) BindEnergyEnvironmentWithCheckpointBinding(func() (float32, float32), *checkpoint.BindingAuthority)
+func (*Strategic) BindTargetRegistryRebuildWithCheckpointBinding(func(uint32, uint8), *checkpoint.BindingAuthority)
+func (*CheckpointContext) SetBindings(*Manager, *content.SimulationInputs, *rng.Simulation, *orders.QueueBinding, *SurvivalInfo, *checkpoint.BindingAuthority) error
+```
+
+InitializeBattleState retains its one-shot guards and all initial arithmetic;
+the admitted sibling stamps its three rally slots only on the accepted
+installation. Rejected reinitialization changes neither state nor proof. Nil
+authority produces ordinary behavior without proof. Ordinary Strategic setters
+clear their own proof and preserve nil receiver handling.
+
+SetBindings requires nonnil context, Manager, inputs and authority. It retains
+one exact Manager/inputs/catalog/RNG/order-binding/Survival tuple per capture
+context, atomically and with repeat revalidation. Manager.Catalog and
+Strategic.Catalog equal the frozen catalog. Profile remains mutable serialized
+state: appliedCatalog may be nil or that same frozen catalog, including after
+SetDifficulty clears application state. Do not apply a profile, initialize
+Strategic, rebuild tables or rehash frozen inputs during capture. Each present
+callback must match its exact Manager or embedded Strategic and authority.
+Absent unregistered fixtures retain their current bytes and behavior.
+
+Root records each original manager in its actual session slot and verifies the
+Session-owned current operands before registration. The canonical closures
+capture Session, and QueueBuildTyped additionally captures the manager. Three
+rally functions arrive through the existing one-shot initializer. The
+WeaponMaintenance, CanPursueAir and registry-rebuild installations retain their
+existing only-if-absent timing. The headless observation wrapper's ordinary
+QueueBuildTyped replacement invalidates admission; it is not silently accepted
+as a transparent callback. Survival is nil or the exact scenario info for a
+survivor; root validates membership and keeps the attacker absent. The scenario
+owner already serializes that info, so Manager writes only validated presence.
+
+Existing Manager callback/catalog/RNG/order/Survival tags, Strategic catalog and
+two callback tags, and Profile.appliedCatalog tag become actual presence, with
+all mutable payload unchanged. This unit leaves Ext and registered Modern
+planner admission to the subsequent closed-host integration; it must not accept
+an arbitrary ControllerCheckpointProvider or change worker handling. Tests cover
+independent slot replacements, copied managers/Strategic values, foreign aliases,
+atomic conflicts, failed rally initialization and capture without callbacks,
+RNG draws or profile application. Existing active-step and stateless rule
+validation remains in force.
+
+#### 16.3.72 U6 static paralyze task installation
+
+The package-global paralyze task callback remains a static composition seam
+([06 §10], [06 R-DMG-01 §11]); it is not a new gameplay policy or session value.
+Make its storage private. The single installing API assigns the function and
+returns an opaque nonzero-size installation receipt for a nonnil callback;
+every replacement, including the same extracted function, has a new identity.
+Installing nil clears the receipt. A getter returns only the function. Orders'
+existing initializer retains its original receipt privately when installing
+PushParalyzeCredit. Root asks orders to validate that original receipt before
+full combat/session admission; validation never invokes or reinstalls the
+callback. A copied or forged receipt, absent callback, or later replacement
+refuses. This build-wide invariant adds no payload byte. Standalone combat
+fixtures keep ordinary callback behavior and may restore their private storage
+and receipt in cleanup; no public restore or receipt getter transfers admission.
+
+```go
+// internal/combat
+func SetParalyzeTaskPush(func(*units.Unit, uint32, uint32)) *CheckpointParalyzeTaskInstallation
+func ParalyzeTaskPushHook() func(*units.Unit, uint32, uint32)
+func ValidateCheckpointParalyzeTaskInstallation(*CheckpointParalyzeTaskInstallation) error
+// internal/orders
+func ValidateCheckpointParalyzeTaskBinding() error
+```
+
+#### 16.3.73 U6 Modern AI immutable table provenance
+
+BuildTable retains a private detached snapshot after its existing final fighter
+classification (and at its nil-catalog return). This changes no classification,
+ordering, numeric arithmetic, RNG or rule calls. The snapshot records exact
+Table self-pointer and source catalog, original closed construction-rule tag
+(nil 0, Strict 1, Community 2, Modern 3), and all stored table values. Unknown
+rules continue ordinary construction but mark checkpoint provenance unsupported.
+The original rules need not equal a later manager rule selection: mode changes
+may retain the existing table. No rules interface is retained for invocation.
+
+```go
+// internal/aikit
+func (*Table) ValidateCheckpointBindings(*content.Catalog, *content.CheckpointKeys) (uint8, error)
+```
+
+Validation requires nonnil operands, original table/catalog identity, admitted
+unit/feature identities and exact snapshot agreement, returning the original
+rule tag. Root still validates frozen content once per complete capture. It
+never calls BuildTable, tableFor, Shared.Value, a lookup/rule method, worker
+code, filesystem, reflection or sorting, and never traverses a live map.
+Compare map lengths and value/presence lookups against private snapshot rows
+formed during construction's ordered unit walk. Preserve nil versus empty
+collection shape. Capture must not repair or replace the snapshot.
+
+Snapshot Units and Capped in order with original UnitInfo pointers; complete
+byKey, byDef and defensiveFeatures membership (deduplicated constructor keys);
+and every UnitInfo scalar, string, Def/FinishedFeature pointer and private
+capSlot. Copy each Builds slice independently and preserve its ordered pointers
+and duplicates. UnitInfo is not merely content metadata: its identity is used
+by Buildable and its derived values are read during command application.
+All snapshot storage is private validation metadata, not another graph table.
+A copied Table, changed collection membership/order, changed UnitInfo value or
+build edge, foreign definition, unsupported rules or foreign catalog refuses.
+The later executor integration replaces its existing table tag with presence
+plus this original-rule u8 only when present; absent fixture bytes stay intact.
+Tests cover each surface, original/current rule divergence, source copies,
+capture purity and unsupported-rule ordinary behavior. Host/controller
+admission and the opaque Session-to-AI bridge are a separate following unit.
+
+#### 16.3.74 U6 immutable mission provenance
+
+The admitted mission pointer alone cannot prove unchanged authored inputs:
+deferred Community placement rereads its unit records, and later lava, score
+and meteor consumers read retained OTA values. Snapshot immutable mission and
+OTA/TDF values at the existing pre-compose admission point; validate after
+composition before ready and once during full-capture preflight. Do not parse,
+call typed getters, resolve lookup indexes, read files or rebuild content at
+capture. This validation adds no wire payload and changes no mission behavior.
+
+```go
+// internal/mission
+func SnapshotCheckpointInputs(*Mission) (*CheckpointInputs, error)
+func (*CheckpointInputs) Validate(*Mission) error
+// formats
+func SnapshotCheckpointOTAInputs(*OTA) (*CheckpointOTAInputs, error)
+func (*CheckpointOTAInputs) Validate(*OTA) error
+```
+
+Mission owns the exact original pointer, Type, TerrainKey, selected Schema
+(Name and StartPositions), ordered Units/Specials/Features with every stored
+field, WindBounds, UseOnlyPath, IsRestore, CampaignPath/Index/MissionName and
+Difficulty. Clone slices preserving nil presence, length, order and values;
+backing-array identity and capacity do not matter. Victory/Defeat and all
+trigger fields remain mutable payload under §16.3.38, not immutable snapshot
+members. The private load-order diagnostic is excluded. Campaign and restore
+remain unsupported admitted battle kinds, regardless of this snapshot.
+
+Formats owns exact OTA, Document and Section pointers and retained topology:
+OTA's scalar strings and ordered complete OTASchema values; Document.Root,
+OTA.Global and every nested Section edge; Section Name, OriginalName, ordered
+Items, private resolvedBuilt and resolved index words; every Item Kind, Key,
+OriginalKey, Value and Section edge. Line/Column source locations are excluded
+from both Item and Section. Preserve nil/empty distinctions. The raw authored
+tree contains both presentation and future simulation values; freeze it as a
+whole instead of introducing a key whitelist. Parsed production sections
+already have resolved indexes. An unresolved authored fixture may be recorded
+as-is; any later lazy resolution is a detectable mutation, never performed by
+snapshot or validation.
+
+Snapshot uses a visited-pointer set and fixed ordered record list, allowing
+shared edges without unbounded traversal. Validation walks only that detached
+list, comparing current fields and edges directly, so newly inserted cycles or
+replacement nodes refuse without following them. Snapshots own no mutable
+source slice. Nil optional OTA/document/section edges preserve their actual
+presence; nil snapshot/mission must fail where the root requires a mission.
+Tests cover each stored field group, duplicate assignment/index mutation,
+reordered schemas, pointer replacements/copies, cycle insertion, allowed
+trigger progress and diagnostic edits, and allocation-free repeated validation.
+Root supplies real skirmish/Survival entry and deferred-placement evidence.
+
+#### 16.3.75 U6 closed Modern planner and controller bridge
+
+Move §16.3.44's generated planner witness into an opaque ai-owned value, so
+Manager's writer can consume the same proof as Session. Keep its existing
+registration-time concrete, zero-size struct check; capture uses only the
+resulting concrete assertion, never reflection or planner/marker methods.
+
+```go
+// internal/ai
+func NewCheckpointModernPlanner[T ModernAIStep](T) CheckpointModernPlanner
+func (CheckpointModernPlanner) Matches(Planner) bool
+
+type CheckpointControllerOwner interface {
+    ControllerCheckpointProvider
+    EnableCheckpointApplications(checkpoint.Identity, *content.CheckpointKeys) error
+    ValidateCheckpointBindings(*Manager, *CheckpointContext) error
+}
+func NewCheckpointControllerSource[T any, P interface { *T; CheckpointControllerOwner }]() CheckpointControllerSource
+func (CheckpointControllerSource) Valid() bool
+func (CheckpointControllerSource) EnableApplications(*Manager, checkpoint.Identity, *content.CheckpointKeys) error
+func (CheckpointControllerSource) WriteCheckpoint(*Manager, *checkpoint.Encoder, *CheckpointContext) error
+func (CheckpointControllerSource) AppendSummary(*Manager, *checkpoint.Summary) error
+func (*CheckpointContext) SetModernBindings(*Manager, Planner, CheckpointModernPlanner, CheckpointControllerSource, *checkpoint.BindingAuthority) error
+func (*CheckpointContext) ValidateModernManager(*Manager) error
+// internal/aikit
+func CheckpointControllerSource() ai.CheckpointControllerSource
+func (*Host) ValidateCheckpointBindings(*ai.Manager, *ai.CheckpointContext) error
+// internal/session
+func RegisterModernAIWithCheckpointBinding[T ai.ModernAIStep](T, ai.CheckpointControllerSource)
+```
+
+The controller source accepts no callback argument. It seals generated adapters
+that first assert Ext to exactly P and reject typed nil, then invoke only the
+retained concrete owner's diagnostic methods. Pointer identity comparisons also
+narrow first; arbitrary noncomparable values, embeddings, provider-only objects
+and RetailTimer refuse without calls. The one reviewed production instance is
+[Host, *Host], returned by aikit and passed by mods/aikit at the existing Modern
+registration. Session retains step, opaque witness and opaque source together
+under the existing registration mutex. Ordinary registration carries neither
+proof. No second registry, dynamic capability selection or Session import of
+its controller implementation is introduced.
+
+Each AI capture context belongs to one Manager and shares the lower unit/world
+contexts. SetModernBindings stages one exact manager/authority/witness/source,
+expected registered planner, current optional controller pointer, history and
+keys tuple. Require Modern controller kind, valid player, both planner values
+accepted by the witness, matching shared keys and an enabled successful inactive
+history belonging to that player/kind. A nil Ext is valid before lazy Host
+creation; nonnil requires the closed source. Verify any existing §71 authority
+agrees, and §71 registration must symmetrically reject a conflicting authority.
+Modern registration may precede §71 registration, avoiding a circular admission
+requirement. Repeats revalidate the same tuple; copied context expectations
+cannot authorize a changed owner. ValidateModernManager rechecks these direct
+aliases without invoking the Host validator recursively. SetModernBindings then
+calls only the narrowed Host validator against the staged context and commits
+on success. Full Manager validation also revalidates its registered Modern row.
+
+The existing stateless Planner tags remain 0–2; the registered Modern step is
+3. Manager.Ext is absent 0 or the admitted Host 1, retaining the existing byte
+position. Host payload remains the separate controller fragment. Source full
+writing requires a present exact registered owner and preflights before any
+bytes; source summary narrows the present owner and preserves its selected-only
+summary boundary without a table walk. EnableApplications requires Modern
+controller kind and handles absent Ext
+through the existing Manager method and present Ext only through the closed
+Host method. It remains an entry-time diagnostic operation, never a capture
+operation. Fixture payloads keep their absent bytes; Host full-capture fixtures
+must now supply explicit typed registration.
+
+NewHost retains private exact self and manager provenance unconditionally,
+because entry priming can precede checkpoint enabling. Its current manager and
+Ext must still identify that Host; history must be the manager's exact history
+and pass ValidateModernManager. Existing attachment after completed entry also
+checks constructor provenance. In begin, immediately after the existing
+executor assignment and before worker preparation, retain exact executor,
+manager, table, catalog and terrain aliases. Before initialization these are
+absent; afterward validate the exact original aliases and §73 table snapshot.
+The executor's existing manager byte becomes presence. Its table byte becomes
+presence followed, only when present, by the original construction-rule u8.
+Current manager rules may differ from the table's original tag. Full Host
+validation occurs before its controller/persona bytes. No code here reads kit,
+obs, mapInfo, brain, rand, batch, ready, flight, Shared or worker readiness,
+including their pointers. Cheap summaries keep their current selected fields.
+
+Tests cover foreign/copy/typed-nil owners, all registration conflicts and both
+orders, original/current rule divergence, active/failed history, aliases and
+presence framing, unsupported provider purity, capture purity and active-worker
+race safety. AI bridge, aikit Host integration and root registration are separate
+exclusive-file units; §73 Table validation is the Host unit's prerequisite.
+
+U6 integration evidence (2026-10-07): the stable owner-binding candidate
+`9ba809ba4` passed whole `tools/check` and short `tools/check-retail`,
+including amd64 fingerprint locks and GPU device fixtures. Subsequent Classic
+AI composition retains the original Session/Manager/authority tuple and uses
+the admitted callback setters at their existing installation points. The
+retail admission fixture now collects and writes AI, world, features, visibility
+and economy together with units, orders, movement, path, construction, combat
+and effects, at entry and after 300 ticks, in Strict/Modern/Community skirmish
+and Survival. All six cases pass. These are owner-fragment checks; the Session
+capture lifecycle and playability gate remain outstanding.
+
+The displayless Classic scene at candidate `3219b9a6` retained its prior
+initial/warm/final fingerprints, complete census and both RNG draw counts
+(15,645 simulation; 985,036 CRT). Median tick cost was 1.646 ms, p95 2.708 ms,
+103,638 bytes and 908.37 objects per tick with no measured GC. Artifacts are
+outside the repository under `/private/tmp/nanolathe-m3-u6-inputs-classic`;
+the comparison is `/private/tmp/nanolathe-m3-u6-lifecycle-classic`. Shared-host
+timing differences are observations, not a speedup claim.
+
+#### 16.3.76 U6 materialized terrain input provenance
+
+Frozen source bytes do not prove that their loaded terrain copies remain
+unchanged. Heights and their derived floor bounds are immutable during a
+battle: there is no terrain deformation [03 R-TERR-01 §3]. The LOS terrain
+words are likewise built once [03 §3.5]. Validate these loaded inputs without
+changing the world payload or introducing a late snapshot operation.
+
+```go
+// internal/world
+func (*Terrain) ValidateCheckpointInputs(*content.SimulationInputs, string) error
+```
+
+The string is the original mission terrain key, not the display MapName.
+At the successful end of world.Load, after LOS construction, feature stamping
+and the first void fixup, privately retain the exact Terrain receiver,
+filesystem, catalog, requested terrain key and resolved TNT logical path.
+Snapshot CellW/CellH/Version, row-major plot height/min/max triples, SeaLevel,
+Gravity/AuthoredGravity/OTAGravity, LavaWorld, WaterDoesDamage/WaterDamage,
+WindMin/WindMax/Tidal, PlayRight/PlayBottom, losWords and losBuildCount.
+Preserve the exact float32 Tidal bits, including signed zero; refuse NaN.
+Validation requires the input set's CheckpointFilesystemMatches, exact Catalog
+identity, selected MapFiles TNT path and the expected requested terrain key.
+It compares detached values without reads from the filesystem, callbacks,
+loaders, recomputation, map traversal or allocation on success. Copies and
+hand-built terrains lack the original load proof and refuse this production
+admission API; existing lower-owner fixtures retain their existing behavior.
+
+Occupancy, metal, feature/sentinel, anchor/damage word, retained flags,
+metalSeeded and ordered FeatureNames/FeatureDefs remain in the mutable payload.
+Movers and class-restamp retain their existing binding proof. Renderer-only
+tiles/pixels, static-obstacle diagnostic revision and entry undo metadata stay
+excluded, with existing completed-entry checks still required. ApplySchema
+and mission feature replay happen after the snapshot and change only retained
+mutable values; replay restores the same playable insets.
+
+Session retains the original loaded Terrain pointer and mission terrain key
+in admission metadata. Require the same World and validate this snapshot
+before readiness and at each full capture. Test copied/foreign source owners,
+scalar and geometry/LOS mutation, same-area dimension changes, allowed mutable
+plot edits, exact float bits and repeated validation purity. The world unit
+owns terrain.go's private field/load hook and new provenance files; Session
+integration is a separate root-owned unit. Correct stale deformation wording
+in terrain.go and terrain_lifetime_test.go to match the cited established
+contract, without changing fixture behavior.
+
+#### 16.3.77 U6 remaining cheap summary leaves
+
+The §16.3.7 signature is implemented on units.World, orders.Queue, cob.VM,
+cob.AimSlot, features.Service and world.Terrain. These selected-only walks
+use a local Summary copy and commit on success, allocating nothing and
+invoking no callbacks, getters that synthesize values, graph collector or
+canonical writer. Missing receiver/accumulator and selected NaNs refuse.
+
+Unit words start with physical slot count (slot zero included). An empty slot
+contributes tag 0 only. A freed residual contributes tag 2, raw Handle, Owner,
+Remaining bits; its Kills is a deliberate full-only blind spot. A live slot
+contributes tag 1, Handle, AllocationSerial, Owner, Health, Remaining bits,
+Flags, X/Y/Z, Move.Heading/Speed, Pending, Stunned and ParalyzeExpire. For each
+of its fixed weapon slots append Reload, Ammo, then AimSlot's IssueBit, Ready,
+raw private readyWord; never call ReadyWord(). After slots append live then
+created counter, paired per player. Signed fields extend their source type.
+
+Queue words are primary length and selected nodes, then secondary length and
+selected nodes, then lastPumpTick. Each node contributes ID, Phase, Target,
+GoalX/Y/Z, Deadline, Param1/2/3 and Flags in that order. The existing retained
+queue traversal is used with malformed topology refusal; detached nodes remain
+a full-only blind spot. VM words are its eight physical threads in order:
+Status, PC, SP, Sleep, WaitPiece, WaitAxis, WaitThread, SignalMask, all 32 Stack
+words; then statics length/values, activeThreadCount, nextIdentity and the eight
+threadIdentity values. Session appends presence and these fragments only for
+physical live unit slots, without a reference graph or a slot-list length.
+
+Section 5's cheap order is features then terrain: feature instance count,
+reproduction cursor, arenaHeld; then plot length and each row-major cell's
+OccupantA/B, Metal, Feature, AnchorWord and FlagByte with the same excluded
+bits as the full world writer. Counts include stored records without resolving
+content or following the feature lookup map. Unselected geometry/feature
+progress, VM instruction/callback data and strings remain blind spots.
+
+Independent literal word vectors, retained/excluded mutations, selected NaNs,
+malformed queues and allocation checks lock these refinements. These methods
+observe existing state and introduce no new simulation state or gameplay rule.
+
+#### 16.3.78 U6 capture lifecycle composition
+
+Pump metadata starts at zero at Enable and increments for each ExecuteStep
+whose plan Runs, including zero-tick pumps. ConsumedInput is a diagnostic ordinal
+of drained queue elements passed to applyHumanCommand after Enable, local or
+stamped, including refusals and accepted no-ops. It is not an enqueue sequence
+or the relay stream position; M4 records the mapping to its input stream.
+Paused consumption advances the ordinal but produces no checkpoint. Overflow
+fails diagnostics without changing command execution. These counters never
+enter canonical bytes. Interior capture follows publication when another tick
+will actually execute; the actual last executed tick follows the retail tail.
+
+Full capture validates admitted inputs once, seeds physical allocations first,
+then repeats owner collectors in section order until no additions. Sections
+1–13 are present for an admitted complete battle. World contains terrain then
+features presence/payload; visibility contains service presence/payload then
+the session tail. Effects uses §16.3.17's five-fragment presence framing. The
+computer fragment is ten fixed slot rows, each manager presence and, when
+present, Manager payload, ApplicationHistory payload and controller presence;
+a present Modern controller contributes its Host payload. Classic controllers
+are absent; a lazy, absent Modern controller still has its enabled history.
+Scenario follows the ten rows. History player/kind must match the manager.
+Cheap computers append manager presence/summary then either the present Host's
+eleven selected words or history's five words and six zero scheduling/APM
+words for an absent controller. No history fields are hashed twice there.
+
+Enable requires the original completed admitted entry, initialized RNG, no
+executed tick, and a successful opening publication already made by the host.
+A sticky admission flag distinguishes a wrapped runtime tick zero from entry.
+It does not publish or step the world. Keys and the content/configuration
+identity are retained once. Attach application histories using the existing
+Classic/closed Modern entry APIs, then validate and capture the complete entry.
+On failure, stop each history attached by this attempt. Disable likewise stops
+those histories through their existing sticky Fail operation, making NextSerial
+and BeginAttempt return before any codec/hash work. It clears Session rings and
+pending sinks; a pending result receives an explicit cancellation error.
+No controller, worker or gameplay state is reset. A stopped chain cannot be
+restarted on that Session, including a battle with no computers: repeated Enable
+refuses any earlier enable attempt that reached history attachment,
+consistent with §24's no-reset contract. Fresh admitted entry is required.
+
+Track active pump/capture scopes to refuse recursive capture API calls and
+recursive Step/ExecuteStep from a sink. Scope cleanup also runs when a sink panics; the panic propagates and an
+incomplete diagnostic result remains, without blocking later gameplay.
+Capture errors affect only diagnostics;
+failed full captures/selected summaries append neither tick row nor cadence
+record. Requests at non-cadence boundaries update the result only. Validate
+successful publication by the frame buffer's existing PublishedTick metadata
+and the event buffer's empty staged window, without using presentation contents
+as authoritative state. Disabled pumps do no checkpoint traversal or hashing.
+
+FixedEffectPool.CheckpointCounts() (records, fragments int) supplies the ring's
+pool counts by direct record length and live geometry-slot flags, without
+copying presentation metadata. Session reuses its thirteen Summary accumulators
+so the closed controller adapter does not allocate a fresh escaping accumulator
+on each tick; no scratch state enters the ring or canonical stream.
+
+#### 16.3.79 U7 measurement composition
+
+The existing displayless simulation benchmark gains an opt-in
+`SimBenchOptions.Checkpoints bool`, exposed as `--sim-benchmark-checkpoints`.
+Its zero value keeps the existing entry and workload. Enabled runs use the
+same scene, seeds, per-player resources, rules and content through the M2
+single-seat admitted constructor, stage the same armies before any tick,
+publish the opening, then EnableCheckpoints once. Unsupported admission is
+reported, never bypassed; in particular the three-computer scene cannot use
+Strict's online one-computer-per-human limit. Matching Modern scenes supply
+the initial enabled/disabled cost comparison. The benchmark's fixture room
+uses profile `retail`, fixed participant identity 1 for the passive human,
+player view 1024..2048 without full-map and spectator/replay view 256..2048
+with full-map; revision/scheduling/pacing/drop/audience are 1, cumulative
+grace 90000 ms and audience delays zero. These fixture values are explicit
+configuration inputs, not a live room or a new default.
+
+The host checks the value-only capture result after each step and fails a run
+if diagnostics failed. The report adds `checkpoints` and optional
+`checkpoint_records`, `checkpoint_ticks`, `checkpoint_tick` and
+`checkpoint_digest` (the retained latest full SHA-256 in hexadecimal), read
+once after the measured window. A report never claims capture is enabled if
+only a partial fingerprint ran. No wall-clock reader enters Session. Existing
+per-tick/CPU/allocation series measure enabled cadence against the ordinary
+scene; focused retail benchmarks within session additionally measure one
+complete digest-only writer, byte capture and the selected row independently.
+Those benchmarks use already admitted, warmed state and never include entry
+or setup in the measured operation. Reports keep bytes and allocations as
+measurements, not correctness thresholds. Numerical acceptance budgets will
+be recorded after exploration and before the final acceptance runs (M3-C9).
+
+
+The benchmark census reads `units.World.DeathDispatches() uint64` instead of
+wrapping the admitted death callback. This diagnostic count increments once
+immediately before the existing primary death-hook dispatch in FinalizeDeath;
+it is not an allocation/free/loss counter. A host takes a starting value and
+subtracts it at census time. It invokes no observer, changes no death decision
+and is excluded from the unit stream and summary (no simulation reader).
+
+#### 16.3.80 U7 bounded history comparison
+
+`session.CompareCheckpointHistories(a, b CheckpointHistory)
+(CheckpointComparison, error)` compares detached history values only; it never
+reads a Session, runs capture or claims equality from a selected summary.
+Inputs are bounded to the published 64 records/600 rows. Runtime rows have
+interior/final boundaries; digest records additionally permit entry. Refuse
+duplicate positions or repeated tick labels within either retained sequence,
+invalid boundaries, and records/rows in nonchronological tick order (unsigned
+forward delta must be nonzero and below half the u32 range). Entry is optional
+and appears first at tick/pump/input zero. Pump ordinals never decrease and
+input ordinals never decrease; runtime ticks within a pump can wrap normally.
+The two peers must already have equal content/configuration identities;
+history alone has no admission identity and this API does not invent one.
+
+Only an exact `CheckpointPosition` match is comparable: tick, boundary, pump
+ordinal and consumed input position. Incompatible pump/input schedules are
+not diagnosed as a simulation divergence. Preserve retained sequence order,
+including u32 tick wrap, and never sort labels numerically. A bounded nested
+scan suffices; no pointer/map key or host clock participates.
+
+```
+type CheckpointDifference struct {
+    Position CheckpointPosition
+    Owners [CheckpointOwnerCount]bool // array index + 1 is the section ID
+    RNG, Pools bool // tick-row evidence only
+    Full bool // full digest differs; record evidence only
+}
+type CheckpointComparison struct {
+    ComparedTicks, ComparedRecords int
+    TickDifference, RecordDifference *CheckpointDifference
+    MayPredateTicks bool
+    UncoveredOwners [CheckpointOwnerCount]bool
+}
+```
+
+The first differing common row compares each selected `(Words, Sum)`, both
+RNG states/draw counts and all six pool counts. The first differing common
+record compares the full digest and all owner digests. Both results are kept:
+a full digest is evidence of divergence even when the summaries have a blind
+spot. `MayPredateTicks` means the first common row already differs; the
+retained data cannot establish onset before it. Zero ComparedTicks or
+ComparedRecords explicitly reports no comparable window of that kind.
+`UncoveredOwners` marks each owner whose full digest differs at a common
+record while that owner's selected summary is equal in a common row at the
+same position; it does not infer a hidden fault location between samples.
+No difference pointer means only that the available comparable evidence was
+equal, not that the whole worlds were proved equal.
+
+U6 evidence: the fast whole-tree gate passed at 09864cac, and real Classic
+lifecycle tests cover requested/cadence capture, zero/catch-up/shortened pumps,
+input drain positions, disable/restart, output failures/reentry/panic and tick
+wrap. Real Modern controller tests pass in all six reserved-mode/scenario
+combinations, with per-tick RNG and gameplay unchanged by capture frequency.
+The earlier staged mission/OTA provenance constructors and two absent-executor
+writer adapters remain in the generated production deadcode baseline because
+admitted construction has no shipped host until the staged replay/measurement
+entry; owner writers newly reached through ExecuteStep were removed from it.
+These facts do not claim U7 cost, native-platform or host-kind acceptance.
+
+#### 16.3.81 U7 encoding cost without schema changes
+
+Exploratory profiling found diagnostic path formatting in dense terrain,
+occupancy, capacity and projectile arrays dominates allocation. Encoder adds
+`FieldChild(prefix, name string)` and `FieldIndex(prefix string, index int,
+suffix string)`: their error paths are respectively `prefix + "." + name`
+and `prefix + "[" + decimal(index) + "]" + suffix`. They retain the parts and
+format only on failure. Calling ordinary Field clears any retained parts.
+These methods emit no bytes and keep sticky errors unchanged. Dense writers
+use them where they reproduce exactly the existing logical error path; a nil
+row needs no formatted nested path until a present payload writer uses it.
+
+The two SHA-256 destinations share one bounded 4 KiB buffer, which copies
+each primitive once and fans out complete chunks to both hashes. It is flushed
+before closing each section; the owner identity domain and the full header
+are written directly to their respective hashes before that section begins. A caller's output sink
+remains synchronous and unbuffered, preserving immediate write/short-write
+failure and its active logical field. This changes neither bytes, section
+boundaries, hash domains, validation, nor simulation state. Existing literal
+vectors and writer-error tests, plus paired retained checkpoint digests,
+remain correctness gates. No full snapshot is retained to hash it.
+
+
+The content semantic-digest helper also batches its existing byte stream into
+one 512-byte scratch buffer before SHA-256 writes. This applies to immutable
+program validation at capture as well as entry compilation; it does not cache
+validation results or skip checking a mutable program. Strings copy directly
+into that buffer. All existing varints, string lengths, float bits, domains and
+ordering stay unchanged, and sum flushes any tail before returning a digest.
+
+
+#### 16.3.82 U7 portable scene and live fault evidence
+
+The asset-free `TestCheckpointPortableScript` authors an in-memory HPI containing
+TNT/OTA, two weaponless commander definitions, one model, returning COB scripts,
+visibility masks and minimal game tables. The real compiler, freeze and admitted
+constructor compose two independent copies in each reserved mode. Thirteen
+explicit pumps produce 30 ticks with one-to-five-tick batches, paused Stop, empty
+accepted commands and zero-tick input retention; requested byte captures and
+cadence records remain distinct. The test compares complete bytes, all thirteen
+present owner digests, both RNG histories and exact pump/consumed-input positions.
+Its 507 logged identity/checkpoint/owner rows are also compared between native
+Darwin/arm64, Linux/amd64 v1/v3 and Windows/amd64 CI jobs. Merely passing two copies
+on one machine does not establish that native gate. This small scene covers
+entry, movement, input and pump boundaries, not busy combat or every content
+record; retail owner tests and the busy benchmark supply separate coverage.
+
+`TestCheckpointLiveFaultDiagnosis` injects a single int32 health decrement before
+tick 17 in one admitted copy. Two detached histories, retained after disabling
+capture, identify the first selected units difference at 17 and the first full
+units difference at 30 in all three modes. The prefix through tick 16 and entry
+record agree, RNG states/draws remain equal through tick 60, and the second full
+record retains the divergence. The comparison does not inspect either world.
+
+Local Darwin/arm64 checks pass. Native CI evidence remains pending until the
+branch's matrix and cross-artifact comparison run; no windowed-host result is
+claimed here. The actual window recording/headless replay gate belongs to M4
+and the perspective-dependent host differences remain M5 work (§17).
+
+
+The admitted benchmark now reaches the prior staged entry/provenance functions
+from a shipped host, so their generated deadcode entries are removed. Five
+comparison entries (the public comparator and its four private helpers) remain
+staged for M4's headless replay/desync-bundle host, with detached-history and live
+fault tests already exercising them. The obsolete movement layer convenience
+writer is removed rather than retained in that baseline.
+
+#### 16.3.83 U7 cost acceptance limits
+
+The following limits are fixed before the final acceptance measurements, after
+§16.3.81's exploratory profiling. They are diagnostic engineering limits for
+M3, not M6's input-latency or impaired-network acceptance. Do not adjust a limit
+to turn a failed run green. A failure needs an implementation change or a
+reported remaining gate. Timing tests remain opt-in measurements, not flaky
+wall-clock assertions in the correctness suite.
+
+Reference environment: Apple M3 Pro, 18 GiB RAM, Darwin/arm64, Go 1.27.1.
+The fixed-state probes use GOMAXPROCS=4; the sequential simulation benchmark
+uses GOMAXPROCS=2 and its shared benchmark lock. Record other active gates,
+scene metadata, census, complete digests where enabled and both RNG histories.
+Do not compare different workloads. Run the ordinary and moving/building
+fixed-state probes once each, the controller probe in all three barrier states,
+and two alternating pairs of disabled baseline/candidate simulation runs,
+followed by two enabled runs. Use the median process CPU for comparisons; each
+enabled run must satisfy the absolute limits.
+
+| Measurement | Limit and reason |
+|---|---|
+| Fixed-state digest, ordinary tick 900 and busy-modern-classic-v1 tick 300 | At most 50 ms/op: at the 30-tick cadence, at most 1.67 ms of amortized tick work for these scenes. |
+| Same states, byte capture into a reused buffer | At most 66.667 ms/op (two normal tick periods), including synchronous byte delivery. |
+| Selected row in those states | At most 1 ms/op and zero allocations; with the digest limit the recurring diagnostics stay below one tenth of a normal tick period on these scenes. |
+| Fixed-state writer allocation | At most 8 MiB/op and 200,000 allocations/op for both digest and reused-buffer capture; canonical bytes at most 8 MiB on these fixed fixtures. Counts guard against restoring eager diagnostic formatting; they do not constrain a different map or army. |
+| Retained 64-record/600-row history storage | At most 256 KiB, excluding a caller-owned requested byte buffer; no whole checkpoint is retained by the histories. |
+| Modern controller preparation outstanding, think outstanding and completed before deadline | Identical canonical bytes, selected summaries and allocation count across states; full writer at most 33.333 microseconds/op (one thousandth of a normal tick), 8 KiB/op and 256 allocations/op; summary zero allocations. Outstanding means barrier-held work, not a CPU-contention benchmark. Capture must not wait for that work or cross a reaction deadline. |
+| Disabled capture, scene 1, three 250-unit armies, Modern/Classic, seeds 7/7, 1,200 warmup + 300 measured ticks | Candidate median process CPU no more than 5% above pre-instrumentation `202ff9595`; bytes/tick and objects/tick no more than 1% above it. Match all scene metadata, census and fingerprints. |
+| Enabled capture on that same large scene at the initial cadence | Process CPU at most 11.111 ms/tick (one third of the 30 Hz tick period), p95 elapsed tick at most 11.111 ms, and maximum elapsed tick at most 166.667 ms (five tick periods). Allocation at most 2 MiB/tick. This reserves average CPU capacity but explicitly permits a visible checkpoint hitch; M6 must set and meet its own interactive latency bound before offering multiplayer. |
+
+The busy fixed-state fixture uses the ordinary admitted two-seat Ashap Plateau
+entry and adds 67 units to each seat before opening publication. Six factory
+queues and 88 ground move orders use the ordinary allocator, movement setup
+and order queues. At tick 300 the probe requires at least 100 live units,
+moving units, active routes, nanoframes and build orders. It verifies that
+measurement changes neither RNG stream, canonical state, selected row, census
+nor retained histories. This supplements the larger benchmark's combat and
+feature workload; it is not a substitute for it.
+
+Final local measurements are recorded in §16.3.84. Native platform comparison
+remains the separate M3-C8 gate in §16.3.82.
+
+
+#### 16.3.84 U7 final local cost evidence
+
+The limits in §16.3.83 were committed at `47dfcf776` before these runs.
+That candidate passes every local cost limit on the stated M3 Pro environment.
+The fixed-state measurements report elapsed encoding time; the whole-battle
+comparison reports measured process CPU as well as elapsed tick percentiles.
+These measurements preceded this task's whole-tree gates; no concurrent gate
+was reported by the coordinated builds.
+
+| Fixed state | Operation | ms/op | Bytes/op | Allocations/op |
+|---|---|---:|---:|---:|
+| Ordinary, tick 900 | Digest | 28.887 | 3,262,938 | 80,828 |
+| Ordinary, tick 900 | Reused byte buffer | 37.290 | 3,263,716 | 80,856 |
+| Ordinary, tick 900 | Selected row | 0.682 | 0 | 0 |
+| Moving/building, tick 300 | Digest | 41.730 | 6,279,004 | 152,195 |
+| Moving/building, tick 300 | Reused byte buffer | 52.093 | 6,279,836 | 152,224 |
+| Moving/building, tick 300 | Selected row | 0.777 | 0 | 0 |
+
+Canonical sizes are 5,237,959 and 6,262,176 bytes respectively. The retained
+history is 198,240 bytes. The busy state has 142 live units, 85 moving units,
+41 active routes, six nanoframes, seven build orders, six effects and 351 strip
+objects. Both RNG streams, complete canonical state, selected row, census and
+retained histories remain unchanged by each measurement series.
+
+The Modern controller's 879-byte leaf takes 5.790, 5.721 and 5.717 microseconds
+in preparation-outstanding, think-outstanding and completed-before-deadline
+states. All three retain identical bytes and summaries and use 7,689 bytes and
+227 allocations per write. Summaries take 20.07–20.33 ns with zero allocations.
+The barrier-controlled probe confirms capture does not join outstanding work;
+it does not claim performance under CPU contention or a whole Modern-AI army.
+
+Two alternating pairs compare pre-instrumentation `202ff9595` with the
+candidate with capture disabled. Median process CPU is 1.806 versus 1.817
+ms/tick (+0.63%). Allocation is 103,295 versus 103,701 bytes/tick (+0.39%),
+with 908.372 versus 908.378 objects/tick. These short samples meet the stated
+regression bounds; they do not establish a speedup.
+
+The two enabled runs measure 9.578 and 9.324 ms of process CPU per tick;
+p95 elapsed ticks are 6.111 and 6.195 ms, with maxima 147.373 and 149.209 ms.
+Both allocate approximately 1,167,745 bytes/tick and 25,718 objects/tick.
+The visible once-per-30-ticks spike remains a limitation for M6's interactive
+latency work, even though these M3 diagnostic limits pass.
+
+All six large-scene runs have identical complete scene/configuration/catalog
+metadata, initial/warm/final partial fingerprints, both final RNG draw counts
+(15,645 and 985,036), and every census row. They end with 734 live units,
+67 projectiles, 262 effects, 112 fragments, 1,175 strips, 6,213 features,
+12 burning features, 11 active builds and 44 deaths. The two enabled runs
+also agree on the complete checkpoint at tick 1,470:
+`02561516467458d8380f8349a6e2509d86e8a5544c1a4983eab14b2ca1aa5919`.
+The final partial fingerprint is `partial-v1:5762eecdf523bf33`.
+
+Raw local evidence is outside the repository under
+`/private/tmp/nanolathe-m3-u7-final-{baseline,candidate,enabled}-{1,2}/`,
+`/private/tmp/nanolathe-m3-u7-final-cost.log` and
+`/private/tmp/nanolathe-m3-u7-final-worker-cost.log`.
+The temporary baseline worktree was archived after the comparisons.
+
+A further local architecture check executes the complete portable scene on
+native Darwin/arm64 and Darwin/amd64 v1 under Rosetta. All three reserved modes
+pass and all 507 ordered identity/checkpoint/owner rows agree. Raw JSON is in
+`/private/tmp/nanolathe-m3-u7-portable-darwin-arm64.json` and
+`/private/tmp/nanolathe-m3-u7-portable-darwin-amd64-rosetta.json`. Rosetta is
+additional architecture evidence, not the required native Linux/Windows gate.
+
+Both whole-tree gates, `tools/check` and `tools/check-retail`, pass at the
+measured candidate. The retail gate includes the unchanged amd64 fingerprint
+locks under Rosetta and the real-device GPU fixtures. Native platform comparison
+is pending the branch's CI run; no M3 completion, window/headless replay
+equivalence, or multiplayer play-test readiness is claimed. The branch stays
+unmerged to main until play testing.
+
+
+### 16.4 Two-client play-test slice (user-authorized 2026-10-07)
+
+The immediate outcome is two local window clients controlling different human
+seats in one fixed Modern skirmish through a minimal local relay. Reuse the M2
+command/configuration identities and the small periodic unit checksum below.
+Complete replay files, native Linux/Windows acceptance, AI seats, Survival,
+polished lobby screens, public room codes, spectators and reconnect are outside
+this first play test. They remain in the milestones above. This changes delivery
+order, not the approved simulation rules or online departure policies.
+
+The prototype must not hide disagreements by forcing both clients to use one
+human's authoritative perspective. Both replicas simulate both human seats;
+presentation selects the local seat. Required work is the §6 subset exercised
+by those seats: owner-relative visibility/targeting, per-seat settlement and
+end state, and host-independent effect admission. Keep the ordinary single-seat
+path and fingerprint locks unchanged. Unsupported prototype configurations and
+commands are explicitly refused; no unfinished mechanic is replaced by a guess.
+
+The relay receives seat-attributed commands, assigns stream order and the next
+unsealed tick, and sends the same sealed commands/grants to both clients (§4).
+Each granted tick runs as one pump at normal speed. A client advances only when
+it has the complete sealed prefix. Developer launch options may select the two
+local seats and the relay address; a complete lobby is not needed to test battle
+controls. The initial listener is local-only. Network code stays in the host,
+relay and lockstep packages, outside authoritative simulation packages (§14).
+
+At the existing 30-tick cadence, compare `Session.UnitStateChecksum()` at the
+same completed tick. On 2026-10-07 the maintainer explicitly approved a small
+check that may detect hidden RNG/order divergence later when it affects unit
+positions or health. It is SHA-256 over the domain
+`nanolathe/playtest-units/v1`, completed tick u32, then live allocations in
+player-slice/slot order: handle u16, allocation serial u64, owner u8, dying u8,
+X/Y/Z raw fixed-point i64 and health i32, all fixed-width little-endian. Live
+nanoframes and dying records are included; freed records are absent. No sorting,
+allocation, worker join, pointer address, host clock or local viewing state is
+needed. This is a partial check with no guaranteed detection delay for hidden
+state; equal checks do not prove complete equality.
+
+A mismatch stops this two-seat prototype and reports the tick, consistent with
+§9.3's no-majority case. The comprehensive M3 writer and histories remain
+available diagnostics for admitted sessions that support them. Enabling them,
+extending their schema for new seat state, replay support and richer desync
+bundles are not prototype prerequisites. State checks neither synchronize a
+world nor authorize a command; they detect observable divergence.
+
+Implementation order within this slice:
+
+1. Publish the minimum perspective/constructor and granted-step interfaces;
+   prove two admitted human copies agree while selecting different presentation
+   seats and receiving the same seat commands.
+2. Connect the bounded local relay and driver to the window host's existing
+   input, feedback and battle presentation. Refuse unsupported entry paths.
+3. Verify movement, construction and combat commands from both seats,
+   periodic agreement and commander loss/end state with headless sessions,
+   real loopback connections and host-controller checks. The maintainer chose
+   headless automated testing on 2026-10-07; hands-on controls and rendering
+   remain part of their play test.
+4. Deliver exact launch instructions and the play-test limitations. Keep all
+   work on the multiplayer worktree branch; merging to main still awaits the
+   maintainer's play testing.
+
+Automated acceptance is these headless checks, affected contract checks,
+existing single-player locks and the normal local gates. Remaining full-milestone
+gates stay recorded as pending. This explicit sequencing exception also means the
+pending CI branch-push permission and replay-only command-schema decision do
+not block prototype work that uses neither.
+
+#### 16.4.1 Prototype composition interfaces
+
+The following bounded interfaces implement existing §6 behavior for two hostile
+human seats with common visibility settings. They add no checkpoint admission
+or schema work. The parent owns their session/host integration.
+
+Visibility reuses the existing ten coverage grids. It adds
+`SensorUnit.AllocationSerial uint64`, `Service.EnableOwnerPerspectives()`,
+`Service.SensorTickForPerspective(owner PlayerID, defeated bool, tick uint32,
+activePlayers int, units []SensorUnit)`, and
+`Service.StatusForPerspective(owner PlayerID, id uint16, allocationSerial uint64,
+unitOwner PlayerID, fallback uint32) uint32`. Disabled lookup returns fallback
+unchanged. Enabled lookup overlays only the sensor mask 0x1700 from that
+perspective's allocation-qualified bank; an unseen allocation gets constructor
+status (sonar only for its own perspective). Serial zero returns that seed
+without storing it, because initial COB creation precedes serial assignment.
+The same existing sensor algorithm writes each bank at that human's deadline;
+its locally-simulated source gate additionally requires source owner equal to
+that human. The shared reveal deadline remains the actual unit field. History
+sampling uses the querying owner online; single-player keeps its existing local
+history reader. Consumer wiring selects the actor's perspective, including
+fallback targeting and underwater visibility. No duplicate visibility service
+or new rules registry is introduced.
+
+`frame.NewEventBufferWithIndependentEffects(Limits) *EventBuffer` supplies a
+second bounded effect-only channel; `EventBuffer.EffectEvents() []Event` borrows
+its current window. Ordinary buffers return their existing staging events.
+The online channel has independent IDs, sequences and exhaustion, and receives
+valid routed effect events before any presentation-window refusal. It includes
+COBSFX, Nanolathe, MuzzleFlash, SmokeStart, SmokeEnd, ProjectileTrail, Impact,
+WaterImpact, Explosion, LHTFlash and Corpse. Audio, status, announcements,
+music and shake never enter it. Preserve the presentation verdict of Admit and
+all publication ordering. Reset clears both windows while retaining counters.
+The session composes this buffer before unit scripts run and passes EffectEvents
+to the existing effect consumer. The COB producer first uses the union of both
+human views (§6.3); local drawing applies its own visibility afterward.
+
+Session adds `onlineResults *onlineResultState`, nil in ordinary sessions.
+That state has ten optional rows, each with its own EndLatch and pending/final
+Result. `newOnlineResultState([10]bool)` initializes admitted rows.
+`evaluateOnlineSeatResult(player int, tick uint32)` runs at that player's
+existing due before settlement gates and publishes only that row's ending and
+countdown fields. `stepOnlineNoHumanEnd(tick uint32)` runs after the complete
+player loop using the same latches; `onlineSeatEnded(int)` controls command
+admission, and `onlineBattleEnded()` controls the shared terminal transition.
+`ResultForSeat(uint8)` returns a detached presentation result; GetResult selects
+the local client's row. Committed frames select that same row and its latch
+countdown, including the final publication before grants stop. Defeat precedes
+victory, an opponent that has never created a unit cannot satisfy victory,
+false due predicates retain countdown,
+and crossing the signed countdown below zero is terminal. A mutual wipe remains
+defeat with no winner. These are [08 R-TRIG-01 §6] and [08 R-SESS-01 §1], with
+§6's canonical seat composition; single-player result/countdown behavior stays
+unchanged. Commander sweeps must not stop because only one local row ended.
+The kind-3 elimination announcement keeps its one CRT draw and eight-entry
+selection [08 R-CAMP-01 §9]. Deathmatch/respawn is refused by prototype entry.
+
+#### 16.4.2 Play-test entry and local transport interfaces
+
+`session.NewPlaytestSkirmish(inputs, config, localSeat, progress)` admits only
+this slice's two hostile humans and composes both with controller byte 1 in
+canonical seat order. `PrepareGrantedBattle()` completes entry dispatch without
+wall-clock stepping; since §16.6 composition calls it before presentation
+exists, which is the same world because dispatch runs no tick, and the map
+schema comes from the compiled catalog's headers that admission reads; `StepGranted(tick)` accepts exactly the next tick and runs
+one pump; `OnlineBattleEnded()` is the shared termination condition. The local
+seat affects presentation only. Mobile-build admission checks the issuing
+seat's existing known-site predicate and the derived site height before any
+queue cancellation or replacement. It does not replace construction's later
+terrain/occupancy checks.
+
+`Session.CaptureOnlineCommand(HumanCommand) (SeatCommand, error)` is the
+quiescent host adapter after local selection resolves. It captures current
+allocation references without enqueuing or mutating a world. The initial closed
+vocabulary is Order, Stop, Activation, MobileBuild, FactoryBuild,
+CancelProduction, Stockpile, GroupAssign, Stance, Cloak, SelfDestruct,
+CancelQueuedMove and BuilderOptions. It preserves the existing local producer's
+count defaults and ordering, then applies the online codec's validation.
+Unsupported kinds and references fail explicitly. The driver translates a
+local pending move receipt to its assigned stream position before transmitting
+CancelQueuedMove; client sequence numbers are not global stream positions.
+
+The loopback transport is a development-only, bounded two-connection driver.
+It does not implement public-room authentication, reconnect or final removal.
+A lost connection aborts this test without awarding a result or changing seats.
+Both connections report the existing full `netproto.Identity` and tick-zero
+unit checksum before grants begin; any difference refuses entry. Commands stay
+opaque to the relay. It seals at most one tick per 1/30 second and waits for
+both acknowledgments before another grant, so a slow local client slows both.
+It compares the small unit checksum at every tick divisible by 30 and stops on
+a mismatch. The normal command sequence policy remains next=last+1, duplicate
+<=last ignored, gap refused; seat comes from the admitted connection.
+
+The transport API, owned by `internal/relay`, is:
+
+```go
+type LocalHello struct { Seat uint8; Identity netproto.Identity; InitialChecksum [32]byte }
+type LocalCommand struct { Seat uint8; Sequence, Position uint64; Payload []byte }
+type LocalGrant struct { Tick uint32; Position uint64; Commands []LocalCommand }
+func ListenLocal(address string) (*LocalRelay, error)
+func ListenLocalWithCommandDelay(address string, delay time.Duration) (*LocalRelay, error)
+func (r *LocalRelay) Addr() string
+func (r *LocalRelay) Close() error
+func DialLocal(ctx context.Context, address string, hello LocalHello) (*LocalClient, error)
+func (c *LocalClient) Submit(payload []byte) (uint64, error)
+func (c *LocalClient) ReadGrant() (LocalGrant, error)
+func (c *LocalClient) Acknowledge(tick uint32, checksum [32]byte, ended bool) error
+func (c *LocalClient) Close() error
+```
+
+Dial admits and sends hello without waiting for the second seat; ReadGrant waits
+for the ready barrier. Acknowledgments name exactly the preceding grant; only
+multiples of 30 carry a checksum. Both terminal acknowledgments finish the
+stream without another tick. All socket reads/writes are bounded and cancellable
+by Close. Prototype resource limits are at most 64 commands and 8 MiB of pending
+payload per tick (at most the existing 4 MiB per command), with refusal rather
+than unbounded buffering. Wire envelopes have a checked length before allocation;
+these are transport limits, not simulation choices. LocalClient supports one
+reader and serialized concurrent Submit/Acknowledge calls. No network dependency
+enters session or other authoritative packages.
+
+
+The prototype host driver API is `lockstep.NewLocalDriver(session, client)`
+returning `(*LocalDriver, error)`, with `Pump() (bool, error)` (nonblocking,
+one granted tick at most), `Submit(session.HumanCommand) (uint64, error)`
+and `Close() error`. The constructor requires a prepared battle. Network
+reads run separately; only the host calls Pump/Submit and touches session.
+The host drains ordinary command receipts after Pump and reports refusals.
+A terminal transport error freezes the test and reports it without awarding
+victory. Pausing, speed changes, saves and async wall-clock stepping are disabled.
+The resource double-click gesture has one pending tracked move; the driver
+retains that one receipt and defers its cancellation until the grant assigns
+a stream position. It never substitutes a client sequence for that position.
+
+
+**Launching the local play test.** Use the same stamped `nanolathe` binary and
+retail asset installation for both windows. Start seat 1 first, then seat 2:
+
+```sh
+nanolathe --root ~/TotalAnnihilation --mod none --map 'ashap plateau' --fullscreen=false --local-mp-listen 127.0.0.1:39731
+nanolathe --root ~/TotalAnnihilation --mod none --map 'ashap plateau' --fullscreen=false --local-mp-join 127.0.0.1:39731
+```
+
+The first window waits without advancing until both clients pass entry checks.
+The launch fixes Modern rules, two hostile human seats and seeds 7/11; identical
+`--seed N` arguments can replace both streams. It ignores saved content selection
+and rejects explicit mods, mutators, restrictions, AI and probe/benchmark entry
+options. Presentation settings remain local. Normal selection, orders and build
+controls submit to the relay. Menus continue receiving grants; pause, speed,
+save, load, restart and world-changing chat commands are unavailable. Closing a
+window stops this test on its peer. There is no lobby or LAN join yet, and the
+whole-state fog limitation in §12.6–§13 applies.
+
+**Prototype verification, 2026-10-07.** The two local session perspectives agree
+through tick 930 (31 seconds) with orders and construction from both seats and
+a commander self-destruct producing opposite local outcomes and identical
+per-seat results on both replicas. The regression also checks each committed
+frame's local pending countdown and terminal result: the final grant must
+publish the result the host needs, without requiring another tick. A headless
+host check confirms that both clients enter results from that final frame,
+including when a battle menu is open. The socket driver test sends both seats'
+commands through real loopback connections and checks a cancellation before
+its stream position is assigned. Relay and driver race tests pass. A closed
+driver cannot execute a buffered grant. Online fixed-effect and whole-debris
+publication uses the viewing seat's existing point-visibility predicate after
+copying the shared pools; strips keep their established drawing gates.
+
+The quick displayless performance comparison uses the same Town & Country
+scene, seed 7, two runtime workers, 1,200 warm-up and 300 measured ticks without
+checkpoints. Baseline `47dfcf776` and candidate `16552de0` have identical scene,
+content, initial/warm/final partial fingerprints, RNG totals and all censuses.
+Mean tick cost was 1.840 / 1.830 ms, p95 2.722 / 2.734 ms, p99 3.656 / 3.546 ms;
+allocation was 103,640 / 103,639 bytes per tick. These short local measurements
+show no material single-player regression; they are not online scalability or
+cross-platform acceptance. Evidence remains outside the repository at
+`/private/tmp/nanolathe-mp-playtest-before` and `...-after`.
+
+#### 16.4.3 Local responsiveness experiment
+
+To answer the maintainer's 2026-10-07 latency concern before deploying a service,
+`--local-mp-command-delay-ms N` on the listener adds a fixed 0..1000 ms wait to
+both seats' orders. The default is zero. This is a host diagnostic, not a game
+rule, simulated ping, or an internet transport acceptance claim. The ordinary
+local command/host/tick overhead is additional; tick boundaries round release
+up to the next grant. Selection and camera feedback remain local. Command
+cancellation follows the existing stream-position receipt path and can therefore
+pay another delay when it must first wait for that receipt.
+
+`ListenLocalWithCommandDelay` retains accepted commands until their monotonic
+host deadline, releasing only the ready prefix in stream order. Empty grants
+continue at the ordinary pace and expose only the last released stream position.
+The existing 64-command/8-MiB pending bounds cover delayed commands too. It adds
+no worker or simulation state, changes no match identity, and does not delay
+acknowledgments or grants. It does not emulate jitter, loss, asymmetric links,
+remote view age or TCP retransmission. The prototype still waits for both
+acknowledgments per tick; real-network pacing remains separate work (§4.3–§4.4).
+
+Compare the same map and seed at 0, 50, 100, 150 and 250 ms of **additional order
+delay**, starting with 0, 100 and 250. Try move then stop, repeated direction
+changes, build placement/cancellation and attack/retarget orders. Judge both
+first response and correcting a previous order. Close both windows between
+presets. The command-line form adds the option to the listener only:
+
+```sh
+nanolathe --root ~/TotalAnnihilation --mod none --map 'ashap plateau' --fullscreen=false --local-mp-listen 127.0.0.1:39731 --local-mp-command-delay-ms 100
+nanolathe --root ~/TotalAnnihilation --mod none --map 'ashap plateau' --fullscreen=false --local-mp-join 127.0.0.1:39731
+```
+
+Headless checks cover deadline equality, retained byte bounds and payload
+release, empty-grant progress, sealed-prefix ordering, both-seat command
+application and cancellation, and matching unit checksums with 150 ms delay.
+The feel test establishes a responsiveness preference. It cannot establish the
+ping or jitter budget of a hosted service; that needs a paced transport with
+measured click-to-application delay, frame stalls and real remote clients.
+
+### 16.5 First hosted relay (user-authorized 2026-10-07)
+
+After the local responsiveness experiment, the maintainer reports that up to
+150 ms of additional order delay feels acceptable and requests the hosted
+relay next. Bring forward this bounded M6 increment before full M3/M4/M5;
+keep the branch unmerged. That report is a preference, not a measured 150 ms
+network-RTT budget. Preserve §16.4's fixed two-human Modern configuration,
+small periodic unit checksum, command vocabulary and per-seat simulation.
+The hosted path has no artificial order delay. Direct-connect UI, room lists,
+AI/Survival, configuration editing, reconnect and removal votes remain later
+work. As in the local prototype, a lost connection aborts the test without a
+result or gameplay removal; this is not the full M6 departure policy.
+
+#### 16.5.1 Transport and admission contract
+
+`internal/relay` reuses the local grant/command/ack payloads and identity
+comparison, adding a versioned hosted create/join handshake. The client chooses
+an empty room string to create, or a returned code to join. The server assigns
+creator seat 0 and joiner seat 1, refuses a conflicting hello seat, and confirms
+the room code before the ordinary identity/tick-zero barrier. Both clients
+still compose the same fixed map/configuration before joining. A mismatch
+refuses the joining connection without replacing the creator's identity.
+
+Public API for this increment:
+
+```go
+type HostedConfig struct {
+    TLSConfig *tls.Config
+    InsecureLoopback bool
+    MaxRooms int // zero selects 16; admitted range 1..256
+    MaxConnections int // zero selects 512; admitted 2..1024, two per room at least
+}
+type HostedDialOptions struct {
+    TLSConfig *tls.Config
+    InsecureLoopback bool
+}
+func ListenHosted(address string, config HostedConfig) (*HostedServer, error)
+func (s *HostedServer) Addr() string
+func (s *HostedServer) Close() error
+func DialHosted(ctx context.Context, address, room string, hello LocalHello, options HostedDialOptions) (*LocalClient, string, error)
+```
+
+TLS is mandatory except an explicitly requested numeric-loopback test listener
+and connection. Clients verify the server certificate; custom roots support
+private test certificates, without an insecure certificate-verification flag.
+The standalone `cmd/nanolathe-server` reads certificate/key files and serves
+many independent rooms without assets, simulation, renderer or audio imports.
+Use cryptographic randomness for ten-character room codes; these are private
+invitations, not player accounts. Joining a full or unknown room is refused.
+
+Provisional host limits for this test: at most 512 established/pending
+connections (`--max-connections`), a 10-second handshake deadline, a two-minute
+wait for a second ready seat, and five-second writes. Each room holds at most
+64 commands and 256 KiB pending, accepts client frames of at most 256 KiB, and
+queues at most 1 MiB plus 4 KiB per peer, with all existing wire
+length/sequence checks. These bound one misbehaving room near 2.3 MiB: pending
+commands, one queue of grant bodies shared by both peers, each writer's
+in-flight copy and each reader's frame. The deployed image serves 128 rooms
+with `GOMEMLIMIT=384MiB`, so every room failing at once stays under that soft
+limit. Room failure is the blast radius of a bad client. The limits were
+measured on 2026-10-08 against honest load: a 1,000-unit order with a
+destination per unit encodes to about 21 KB, and 128 rooms of two players each
+issuing ten such orders a second held 30 ticks/second at 31 MiB resident on
+one core of the reviewer's Mac. Bandwidth, not memory or CPU, is the first
+limit of such play. A hosted client refuses to send a larger command. Per-peer writers are bounded and separate
+from room pacing; slow readers cannot block other rooms. All close/error paths
+release connection and room capacity. No room codes or credentials in routine
+server logs. A transient accept error, such as descriptor exhaustion, is
+retried with bounded backoff; only Close ends the service. Once grants flow, a
+client that receives no relay traffic for 25 seconds stops; that exceeds the
+ten-second progress abort and the 20-second WebSocket ping, and it applies only
+after the first grant, while a creator may still be waiting for its peer.
+These are initial host limits, not retail behavior or advertised
+public-service capacity; public-service admission hardening remains M7.
+
+#### 16.5.2 Continuous grants and client playout
+
+A room seals at most 30 ticks/second after its ready barrier without waiting
+for an acknowledgment of every tick. Seals keep a 30 Hz phase: a timer that
+wakes late does not delay the next seal, and only a gap of a whole interval or
+more, such as a wait at the lead bound, restarts the phase without a burst. Each seat acknowledges consecutive
+executed ticks; an acknowledgment ahead of the last grant, a duplicate or a
+gap fails the room. Compare each 30-tick checksum at that same tick even when
+reports arrive at different times. Only released stream positions are sealed.
+
+A room may lead its slowest acknowledged seat by at most 30 ticks. At that
+bound grants wait; a seat with no execution progress for ten seconds after
+battle start aborts this prototype room. Other rooms continue. On the first
+terminal acknowledgment stop new grants; both seats must report the same
+terminal tick/outcome bit, then receive explicit normal completion. Already
+sent surplus grants are drained without running any tick after the session's
+shared terminal state. A discrepancy aborts instead of awarding a result.
+
+`internal/lockstep` adds `Client` (Submit, ReadGrant, Acknowledge, Close with the
+existing relay.LocalClient signatures) and `NewPacedDriver(*session.Session,
+Client) (*LocalDriver, error)`. `Completed() bool` reports explicit normal
+relay completion, never a local result, close or failure. The hosted result
+overlay waits for this confirmation. NewLocalDriver keeps its existing behavior.
+The paced driver uses a bounded 32-entry receive queue and monotonic host time,
+a one-tick reserve (about 33 ms), and a maximum release rate of 30 ticks/second
+in steady state. Start with two grants; after an underrun refill the reserve. A lone grant
+waits at most two normal intervals, so a final tick cannot wait forever for a
+second grant after the peer has ended. Catch-up uses at most 33 ticks/second
+when more than two grants are waiting. The window host calls Pump once per
+30 Hz host step, and its steps land on display refreshes: on a 75 Hz display
+they alternate 26.7 and 40 ms apart, and a window updating at 20 Hz takes two
+steps at one instant. Deadlines therefore retain phase through lateness of up
+to two normal intervals and discard only lateness beyond that. One Pump runs
+every due tick, at most three, and every simulation tick still runs through
+its own StepGranted pump. The normal interval equals the host step period
+exactly. Hosts updating below 20 Hz cannot sustain 30 ticks/second. No wall
+clock enters session.
+Input submission remains immediate; commands take effect only on their sealed
+ticks. Record compact timing observations for the latency test without changing
+command payloads or simulation state.
+
+#### 16.5.3 Verification and delivery
+
+Run headless real-socket matches with equal/asymmetric links at 0, 50, 100 and
+150 ms RTT, plus bounded jitter and a temporary stall. Record executed tick
+rate, command submission-to-application latency and checksum agreement. Target
+steady-state 30 Hz within five percent on a stable link; at 100 ms RTT with
+up to 10 ms one-way jitter target p95 command latency below 225 ms. These are
+initial acceptance targets to test, not measurements or promises. Measure
+stall/recovery separately. Include TLS trust/refusal, identity mismatch,
+room isolation/full/expiry/close, bounded input/slow-reader behavior, delayed
+checksum mismatch and final-grant handling. Use existing single-player locks.
+
+Deliver the standalone server, a stamped client, exact TLS/local-test launch
+instructions and measured limits. Deployment to a paid host or public domain
+is separate; the first artifact must be locally runnable without such access.
+
+#### 16.5.4 Starting the hosted play test
+
+The server is a standalone standard-library program. It requires no retail
+installation and can be cross-built for a Linux VM:
+
+```sh
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o nanolathe-server ./cmd/nanolathe-server
+./nanolathe-server --listen :39032 --tls-cert /path/to/fullchain.pem --tls-key /path/to/privkey.pem
+```
+
+Use a certificate valid for the relay hostname. Clients make outbound TLS
+connections; the server needs its chosen TCP port reachable. The first client
+creates a room and prints its code in the game messages and standard error;
+the second supplies that code. Both use the same stamped client, content,
+map and optional seed. For example (the hostname and code are placeholders):
+
+```sh
+nanolathe --root ~/TotalAnnihilation --mod none --map 'ashap plateau' --fullscreen=false --relay-address relay.example.com:39032
+nanolathe --root ~/TotalAnnihilation --mod none --map 'ashap plateau' --fullscreen=false --relay-address relay.example.com:39032 --relay-room ABCDEFGHJK
+```
+
+A private test certificate can be trusted explicitly with `--relay-ca cert.pem`
+on each client. No option disables TLS certificate verification. For a test
+entirely on one machine, run the server with `--listen 127.0.0.1:39032
+--insecure-loopback` and pass `--relay-address 127.0.0.1:39032
+--relay-insecure-loopback` to both clients instead. These plaintext switches
+refuse non-loopback addresses. Local delay-test flags cannot combine with the
+hosted path. Settings/content-selection protections match the local play test.
+
+The opt-in real-socket latency sweep is:
+
+```sh
+NANOLATHE_RETAIL_ASSETS=~/TotalAnnihilation NANOLATHE_RELAY_LATENCY=1 GOMAXPROCS=4 GOFLAGS=-trimpath go test -p 4 -tags retail ./cmd/nanolathe -run '^TestHostedRelayLatencyRetail$' -count=1 -v
+```
+
+It uses two independently paced real sessions, a headless host that pumps on
+30 Hz host steps over a 75 Hz display (`NANOLATHE_RELAY_DISPLAY_HZ` selects
+another rate; §16.5.8),
+loopback TCP proxies with per-direction scheduled delay, five seconds of
+measured play after warm-up, and the existing small checksum. Samples measure
+command submission through application, excluding physical input polling and
+render/display latency. The probe adds ordered delivery delay and jitter; it
+does not emulate TCP packet loss, congestion control, bandwidth limits or an
+actual international route. It stays opt-in rather than adding real-time waits
+to every ordinary test run.
+
+
+#### 16.5.5 First measured hosted run (2026-10-07)
+
+The opt-in sweep passed on macOS/arm64 with the retail reference assets. Each
+seat applied 28 measured orders after warm-up. Values below are the range
+across the two seats, not a network service guarantee:
+
+| Injected RTT to relay | One-way jitter | Executed ticks/second | Command application p95 |
+|---|---|---|---|
+| 0 ms / 0 ms | none | 29.70 | 81–82 ms |
+| 50 ms / 50 ms | none | 29.61–29.70 | 134 ms |
+| 100 ms / 100 ms | ±10 ms | 29.71 | 182 ms |
+| 150 ms / 150 ms | none | 29.61–29.71 | 234–249 ms |
+| 50 ms / 150 ms, with a 250 ms stall | ±10 ms | 29.70 | 268 / 399 ms |
+
+Every pair agreed on its tick-180 unit checksum. The zero-delay case then
+self-destructed one commander through the ordinary command path; both copies
+finished at tick 510, displayed results only after explicit relay confirmation,
+and discarded surplus grants without advancing simulation. The asymmetric case
+recovered from its brief stall and reached the same tick/checksum. Its latency
+includes the stall and is reported separately from stable-link acceptance.
+
+Both declared stable-link targets passed. This measures ordered socket delay,
+not packet loss or a public Internet route. TLS trust and room/lifecycle faults
+are separate socket contract tests. The next useful test is two actual computers
+using a hosted server and a real connection; the delay knob's acceptable extra
+150 ms should not be confused with a total input-to-display or RTT budget.
+
+
+#### 16.5.6 Private App Platform deployment (2026-10-07)
+
+The maintainer requested a small private relay repository and Dockerfile for
+DigitalOcean App Platform. Its public ingress is HTTP, with platform-managed
+TLS; raw TCP listeners are only available internally. Add a WebSocket transport
+for the same hosted hello, room, commands, grants and acknowledgments. It does
+not change the simulation, command schema, pacing or room admission identity.
+Sources: [App Platform routing](https://docs.digitalocean.com/products/app-platform/how-to/manage-internal-routing/),
+[deployment limits](https://docs.digitalocean.com/products/app-platform/details/limits/),
+and [WebSocket RFC 6455](https://www.rfc-editor.org/rfc/rfc6455).
+
+The server adds `ListenHostedWebSocket(address string, config HostedConfig,
+behindTLSProxy bool) (*HostedServer, error)`; the client adds
+`DialHostedWebSocket(context.Context, url, room string, LocalHello,
+HostedDialOptions) (*LocalClient, string, error)`. Native TCP APIs stay intact.
+An internal constructor may reuse the hosted room service with an already
+secured stream listener. WebSocket bytes carry existing bounded wire frames;
+no JSON, command interpretation or new module dependency is introduced.
+Use RFC 6455 binary messages, subprotocol `nanolathe-relay-v1`, path `/relay`;
+handle masking, fragmentation, control frames and close correctly, reject
+extensions/text/oversized messages, and bound HTTP headers and pending sockets.
+Maintain the hosted connection limit and close/deadline behavior. HTTP
+headers are bounded at 8 KiB. WebSocket pings every 20 seconds keep a waiting
+room active at the proxy; these provisional bounds affect host traffic only.
+`GET /healthz` reports service readiness and contains no room information.
+`--health-listen` serves the same response on a separate listener outside the
+connection limit. The platform health check uses it, so connections that
+fill the relay's slots cannot fail the check and get the instance restarted.
+
+CLI server flags `--websocket` and `--behind-tls-proxy` explicitly select HTTP
+behind the hosting platform's TLS terminator. Public plaintext is permitted only
+with that proxy flag; standalone WebSocket TLS and explicit loopback test mode
+remain possible. The client accepts `wss://host/relay` in `--relay-address`;
+`ws://` requires the existing explicit numeric-loopback test switch. Reject
+credentials, fragments, queries and other paths. Certificate verification stays
+mandatory. The cloud container binds `:8080` for the relay and `:8081` for the
+platform health check, and runs as a non-root user. Its Linux/amd64 multi-stage Docker build contains only the relay,
+wire package and server command; no retail assets or simulation are copied.
+
+Export a reproducible source snapshot into a private `nanolathe-relay` repository
+with the upstream revision and source-file digests. The engine worktree remains
+the source of truth for protocol code; do not create independently evolving
+copies. Include the MIT license, Dockerfile, test/build CI, deployment instructions
+and an App Platform spec. Use one always-running instance, disable automatic
+redeploy on push, and document that a restart/redeploy ends active rooms. No
+cross-instance room lookup, database, autoscaling or reconnect is added here.
+
+Verification: existing TCP contracts, actual HTTP/WebSocket/TLS round trips,
+malformed framing and handshake rejection, health/lifecycle/connection bounds,
+and a headless two-session match through WebSocket. Build and run the exported
+Docker image when a daemon is available; otherwise report that check unrun.
+A published private repo and matching stamped client are the deliverables.
+The user will create the paid DigitalOcean App, then supply its URL for the
+real-cloud match test.
+
+The WebSocket acceptance run on 2026-10-07 passed all five §16.5.5 socket-delay
+cases with matching checksums: stable-link command p95 was 68–82 ms at zero
+RTT, 134–149 ms at 50 ms, 183 ms at 100 ms with jitter, and 232–234 ms at
+150 ms. The asymmetric stall case recovered (251/351 ms p95). Both seats
+confirmed terminal tick 510. Run the same probe with
+`NANOLATHE_RELAY_WEBSOCKET=1 NANOLATHE_RELAY_LATENCY=1`; it remains
+a headless local network simulation, not evidence of the cloud route.
+
+#### 16.5.7 Real cloud play-test acceptance (2026-10-07)
+
+The existing latency probe also accepts `NANOLATHE_RELAY_ENDPOINT` containing a
+certificate-verified `wss://host/relay` URL. That mode runs one two-seat battle
+through the specified remote service, with no local relay or injected delay,
+and exercises the same command receipts, tick-180 checksum and explicit
+terminal-result gate as §16.5.5. It remains opt-in; ordinary test gates never
+contact a cloud service. Reproduce with retail assets configured:
+
+```sh
+NANOLATHE_RELAY_ENDPOINT=wss://relay.nanolathe.gg/relay \
+  go test -tags retail ./cmd/nanolathe -run '^TestHostedRelayLatencyRetail$' -count=1 -v
+```
+
+The first run through DigitalOcean App Platform at `relay.nanolathe.gg` passed:
+both seats agreed on their checksums and terminal tick 510, and measured
+29.04/29.40 simulation ticks per second. Each seat applied 28 measured commands;
+command-to-simulation p95 was 101/116 ms. These measurements come from this
+Mac's actual cloud route, exclude input polling and display time, and do not
+establish concurrent-room capacity or another region's latency.
+
+Custom hostnames need both the DNS CNAME and registration on the App Platform
+app before its managed certificate can be issued. The initial CNAME already
+resolved to the deployed app, whose default-domain health endpoint worked;
+registering the custom domain and waiting for certificate issuance made
+`https://relay.nanolathe.gg/healthz` return 200 with normal TLS verification.
+No certificate verification bypass was used. Cloud runtime and both interactive
+clients remain the previously tested snapshot; this follow-up changes only the
+opt-in probe and this documentation. Engine main remains unmerged.
+
+#### 16.5.8 Hosted relay review fixes (2026-10-08)
+
+A review of the deployed play test found that the paced client could not keep
+30 Hz in the real window. The window host pumps the driver once per 30 Hz host
+step, on a display refresh, and the driver released at most one tick per pump.
+A step arriving a full interval late also reset the deadline phase. Once more
+than two grants queued, playout fell to 15 ticks/second on a 75 Hz display
+and about 20 on 50 or 100 Hz. The relay's 30-tick lead then held the whole
+match at that rate. On 60 and 120 Hz a backlog never drained. The §16.5.5 and
+§16.5.7 measurements pumped from a 60 Hz test ticker the window never uses, so
+they could not show this. §16.5.2 now states the corrected rule, and a
+deterministic lockstep test models the window host at 20–240 Hz.
+
+The same real-socket WebSocket probe, now pumping on 30 Hz host steps over a
+75 Hz display, measured on macOS/arm64 with the retail reference assets:
+
+| Injected RTT to relay | One-way jitter | Previous pacing ticks/s, p95 | Corrected ticks/s | Corrected command p95 |
+|---|---|---|---|---|
+| 0 ms / 0 ms | none | 15.00, 2.0–2.1 s | 29.99–30.00 | 68 ms |
+| 50 ms / 50 ms | none | 15.00, 2.0–2.1 s | 30.00 | 134 ms |
+| 100 ms / 100 ms | ±10 ms | 15.00, 2.0–2.1 s | 30.20–30.25 | 200 ms |
+| 150 ms / 150 ms | none | 15.00, 2.0–2.1 s | 29.99–30.00 | 240 ms |
+| 50 ms / 150 ms, with a 250 ms stall | ±10 ms | 15.00, 2.0–2.1 s | 29.77–30.00 | 306 / 401 ms |
+
+Every corrected pair agreed on its checksums, and the zero-delay case confirmed
+terminal tick 510 through the result gate. The corrected client against the
+deployed `relay.nanolathe.gg` service passed at 29.44 ticks/second for both
+seats, with command p95 of 133/134 ms. That service still ran the earlier
+relay, whose seals drifted below 30 Hz. After the corrected relay (export of
+2c1d47a03) was deployed, the same probe measured 30.00 ticks/second for both
+seats, with command p95 of 107/108 ms.
+
+The other fixes in this round are recorded in §16.5.1, §16.5.2 and §16.5.6:
+the seal phase, accept-error retry, the client's 25-second idle bound after the
+first grant, and the separate health listener. `deploy/relay/.do/app.yaml` is
+the intended spec: autodeploy off, one 512 MiB instance with
+`GOMEMLIMIT=384MiB`, and the HTTP health check on port 8081. Until it is
+applied, the live app deploys on every push to the relay repository and uses
+the platform's default health check on the relay port.
+
+Public-service hardening remains M7. Still open from this review:
+- One client can hold every room indefinitely by creating a room, joining it
+  with a second socket and acknowledging at 30 Hz.
+- Worst-case queued bytes per room exceeded the instance's memory long before
+  32 rooms. Fixed the same day: §16.5.1's per-room byte bounds hold 112
+  flooding rooms at 71 MiB, against 1,430 MiB under the previous limits.
+- The final done or failure frame can be lost to a TCP reset on Linux, and
+  the server never sends a WebSocket close frame.
+- A browser's permessage-deflate offer is refused rather than ignored.
+
+### 16.6 First online lobby (user-authorized 2026-10-08)
+
+The maintainer asked for an in-game way to start online matches, so players
+can play and give feedback. The main menu's MULTI entry opens an online
+screen with a server (default `relay.nanolathe.gg`) and Create and Join
+buttons. Create freezes the host's battle configuration and opens a lobby
+with a short room code. A joiner enters the code. When both players are
+ready, the host starts the match. This is a bounded M6 increment ahead of
+§16's order, like §16.4 and §16.5. Keep it simple; room lists, names, chat,
+configuration editing and reconnect remain later work.
+
+Decisions recorded 2026-10-08:
+
+- **Two human seats, Modern gameplay**, as §16.4. The session admits nothing
+  else yet.
+- **The host's map, mod, mutators and unit restrictions are locked into the
+  configuration at Create.** Every joining client composes from that
+  configuration, never from its own preferences, and the existing identity
+  comparison at join refuses any difference. This brings Q16 forward: field 12
+  carries the host's restrictions online. It is mapped from
+  `content.Restrictions` as DESIGN_MODS_MUTATORS §15.3 states, with nothing
+  seeded, the policy of the fifth mode-independent exception. Retail's
+  seeded-but-never-closed `wacky` state cannot arise, because the lobby has no
+  restriction screen. The host edits restrictions where single-player does.
+- **Room codes are six characters** from the existing 32-symbol alphabet,
+  replacing §16.5.1's ten. About 10^9 codes face at most 128 rooms; codes are
+  invitations, not credentials.
+- **No configuration change after Create.** A different map or mod means a new
+  room, so readiness never has to reset (§12.2).
+- **The host draws the seed pair** with `crypto/rand` when it freezes the
+  configuration. This is a temporary departure from §8.3: the relay-drawn pair
+  arrives with the two-stage Prepare start. The configuration digest covers
+  the seeds, so both seats still agree on them.
+- **A lobby waits at most 30 minutes before Start**, with the 20-second
+  WebSocket pings. A joiner who leaves before Start frees seat 2. The host
+  leaving closes the room. After Start, §16.5 applies unchanged.
+- Delivery: land on main locally without pushing; the maintainer curates main
+  before publishing.
+
+#### 16.6.1 Relay lobby protocol
+
+The hosted protocol becomes version 2; a version-1 hello is refused naming
+both versions. The relay still treats configurations as opaque bytes and
+interprets no gameplay.
+
+- **Create**: the hello carries an empty code, the `LocalHello` and the host's
+  encoded configuration (`session.EncodeMatchConfig`, at most 64 KiB). The
+  welcome returns the new code and seat 0, and the room enters its lobby.
+- **Describe**: a short-lived connection sends only a code and receives that
+  room's configuration bytes, or a refusal for an unknown, full, closed or
+  started room. The relay then closes the connection. A joiner uses it to learn
+  what to compose.
+- **Join**: the hello carries the code, the `LocalHello` and no configuration.
+  Admission compares identity and initial checksum with the creator's, as
+  today, so a joiner whose composition differs is refused, naming the field.
+- **Lobby state** (relay to both): which seats are present and ready, sent
+  after every change.
+- **Ready** (client to relay): a ready flag. **Start** (host to relay): accepted
+  only when both seats are present and ready; otherwise the relay repeats the
+  lobby state and the lobby stays open. Then **Started** goes to both, followed
+  by grants exactly as §16.5.2.
+- Commands submitted before Start wait for the first grant, as they did
+  before the lobby. An acknowledgment before Start fails the room. After
+  Start, ready and start messages are ignored. A peer that leaves the lobby
+  releases its seat (seat 2) or closes the room (seat 1).
+- A creator's hello may set an auto-start flag: the room starts as soon as a
+  second seat joins. `DialHosted` and `DialHostedWebSocket` set it when
+  creating and report ready at once when joining, so a command-line client
+  can also join a lobby room and play once its host starts.
+
+Public API added to `internal/relay`; `DialHosted` and `DialHostedWebSocket`
+keep their signatures and become a lobby that readies and starts
+automatically, so the command-line play test and the latency probe are
+unchanged:
+
+```go
+type HostedLobbyState struct {
+    Present, Ready [2]bool
+    Started bool
+}
+func DescribeHostedRoom(ctx context.Context, address, room string, options HostedDialOptions) ([]byte, error)
+func OpenHostedLobby(ctx context.Context, address, room string, hello LocalHello, config []byte, options HostedDialOptions) (*HostedLobby, error)
+func (l *HostedLobby) Code() string
+func (l *HostedLobby) Seat() uint8
+func (l *HostedLobby) State() (HostedLobbyState, error) // latest snapshot; never blocks
+func (l *HostedLobby) SetReady(ready bool) error
+func (l *HostedLobby) Start() error // seat 0 only
+func (l *HostedLobby) Battle() *LocalClient // non-nil once Started; owns the connection
+func (l *HostedLobby) Close() error
+```
+
+`address` is `host:port` for TLS or a `wss://host/relay` URL, chosen as
+`--relay-address` is today. The lobby reads relay messages on its own
+goroutine and stops reading exactly after Started, so the first grant reaches
+the battle client.
+
+#### 16.6.2 Client flow
+
+- **MULTI** is enabled except in the browser build, which has no relay
+  transport. It opens the online screen: a server field (a bare host expands
+  to `wss://host/relay`), a room-code field (case and spaces ignored), Create
+  Game, Join Game and Back. A status line reports refusals in plain words.
+  Unstamped builds are told up front that online play needs a stamped build.
+- **Create** uses the host's current skirmish map, with a button to change it
+  through the ordinary map picker, and its current mod, mutators and
+  restrictions. It composes and prepares the session off the game goroutine,
+  then opens the lobby.
+- **Join** describes the room, decodes its configuration, and adopts its map,
+  mod, mutators and restrictions. If the room's mod is installed but not
+  mounted, the client remounts it through the ordinary content reload,
+  telling the player. A missing mod or map is reported by name and nothing is
+  joined. It then composes and prepares, and opens the lobby.
+- **Lobby**: the room code shown large, with Copy where the host clipboard
+  allows; both seats with their readiness; Ready/Not ready; Start for the host,
+  enabled when both are ready; Leave.
+- **Started**: the client enters its prepared battle and drives it from the
+  lobby's battle client, as the command-line path does after its dial. When
+  the battle ends or the connection fails, leaving returns to the online
+  screen.
+- Details settled while building it (2026-10-08):
+  - A `ws://` server is the plaintext test opt-in, accepted only on a numeric
+    loopback address.
+  - Only a mod installed from its archive can be hosted, because field 8 needs
+    the archive digest. A folder install is refused, asking for a reinstall
+    from the zip.
+  - Field 10 holds only the mounted content's own Community table, never a
+    player's overrides. Both seats use the default builder options, as the
+    command line does.
+  - Joining a room whose mod is installed but not mounted saves that mod as
+    the player's selection, as any content reload does.
+
+#### 16.6.3 Verification
+
+- Relay socket tests for the lobby states, refusals, leaving, Describe and
+  version 2.
+- Session tests: field 12 admitted online, restrictions applied to both seats'
+  catalog clones, and identities that differ when restrictions differ.
+- Client tests: MULTI routing, configuration adoption, and refusal text.
+- One headless two-client match through a real relay, started from a lobby,
+  with a mutator and a restriction.
+- The existing latency probe and both gates still pass.

@@ -32,7 +32,7 @@ func TestPublishSnapshotCopiesFeatureRuntimeStateIndependentlyOfEventName(t *tes
 		t.Fatalf("resting feature published runtime state %#v", first.Features[0])
 	}
 
-	svc.SequenceFrames = func(*content.FeatureDef, uint8) []int32 { return []int32{4} }
+	svc.SetSequenceFrames(func(*content.FeatureDef, uint8) []int32 { return []int32{4} })
 	svc.ShadowSequenceResolved = func(*content.FeatureDef, string) bool { return true }
 	svc.RemoveFeatureAt(2, 2, features.CauseDead)
 	s.publishSnapshot(2)

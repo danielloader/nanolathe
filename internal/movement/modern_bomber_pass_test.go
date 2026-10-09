@@ -26,7 +26,7 @@ func TestModernBomberCompletesCloseTargetPass(t *testing.T) {
 		u.Flags |= units.ArmedStatus
 		u.Flags = (u.Flags & ^uint32((3<<units.StandingMoveShift)|(3<<units.StandingFireShift))) | 1<<units.StandingMoveShift | 2<<units.StandingFireShift
 		q := orders.QueueForUnit(u)
-		q.Binding().World = &orders.WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}
+		q.Binding().World = orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 0 }})
 		if modern {
 			q.Binding().Rules = &orders.ModernRules{}
 		}
@@ -37,7 +37,7 @@ func TestModernBomberCompletesCloseTargetPass(t *testing.T) {
 		var svc combat.Service
 		initialRNG := *q.Binding().SimRNG
 		releases := 0
-		q.Binding().Weapons = &orders.WeaponAdapter{InhibitSlot: combat.InhibitWeaponSlot, ReleaseSlot: combat.ReleaseWeaponSlot, FirePoint: combat.FireWeaponPoint, StopFiring: combat.StopWeaponFiring}
+		q.Binding().Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{InhibitSlot: combat.InhibitWeaponSlot, ReleaseSlot: combat.ReleaseWeaponSlot, FirePoint: combat.FireWeaponPoint, StopFiring: combat.StopWeaponFiring})
 		if !orders.AutonomousEngage(u, target) {
 			t.Fatal("engagement refused")
 		}

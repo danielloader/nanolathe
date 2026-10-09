@@ -155,9 +155,9 @@ func TestCarrierDeathCascadeCreditsTheCarriersKiller(t *testing.T) {
 }
 
 func bindCargoDamageFixture(system *System, w *units.World) *combat.Service {
-	service := &combat.Service{ControlByte: func(uint8) uint8 { return combat.ControlByteHuman }}
-	system.Damage = func(tick uint32, input combat.DamageInput) combat.DamageResult {
+	service := combat.NewService(combat.ServiceConfig{ControlByte: func(uint8) uint8 { return combat.ControlByteHuman }})
+	system.SetDamage(func(tick uint32, input combat.DamageInput) combat.DamageResult {
 		return service.AcceptDamage(w, tick, input)
-	}
+	})
 	return service
 }

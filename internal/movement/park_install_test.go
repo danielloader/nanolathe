@@ -17,16 +17,16 @@ func parkInstallFixture(t *testing.T) (*System, *units.Unit, *orders.Queue) {
 	sys, w, u := parkFixture(t)
 	sim := rng.NewSimulation(0x12345677)
 	q := orders.QueueForUnit(u)
-	q.SetBinding(&orders.QueueBinding{
+	q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{
 		SimRNG: &sim,
 		Lookup: w.Unit,
-		Movement: &orders.MovementGoalAdapter{
+		Movement: orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{
 			Ready:            func() bool { return true },
 			InstallPoint:     sys.InstallPointGoal,
 			InstallRectangle: sys.InstallRectangleGoal,
 			Release:          sys.ReleaseGoalPayload,
-		},
-	})
+		}),
+	}))
 	return sys, u, q
 }
 

@@ -24,11 +24,11 @@ func scanHostile(b *QueueBinding, actor, candidate *units.Unit) bool {
 	if b == nil || actor == nil || candidate == nil {
 		return false
 	}
-	if b.Hostility != nil {
-		return b.Hostility(actor, candidate)
+	if b.HostilityHook() != nil {
+		return b.HostilityHook()(actor, candidate)
 	}
-	if b.World != nil && b.World.Hostile != nil {
-		return b.World.Hostile(actor, candidate)
+	if b.World != nil && b.World.HostileHook() != nil {
+		return b.World.HostileHook()(actor, candidate)
 	}
 	return false
 }
@@ -117,11 +117,11 @@ func scanAttackUType(u *units.Unit, definition uint32) *units.Unit {
 // ground repeats that direction after its random pick, while VTOL does not.
 func scanRepairCandidates(u *units.Unit, radius int32) []*units.Unit {
 	b := bindingFor(u)
-	if b == nil || b.World == nil || b.World.ForEachUnitInRadius == nil {
+	if b == nil || b.World == nil || b.World.ForEachUnitInRadiusHook() == nil {
 		return nil
 	}
 	var out []*units.Unit
-	b.World.ForEachUnitInRadius(u.X, u.Z, numeric.Fixed(int64(int16(radius))<<16), func(h pool.Handle, candidate *units.Unit) bool {
+	b.World.ForEachUnitInRadiusHook()(u.X, u.Z, numeric.Fixed(int64(int16(radius))<<16), func(h pool.Handle, candidate *units.Unit) bool {
 		if !repairCandidate(b, u, h, candidate) {
 			return scanNext
 		}
@@ -156,16 +156,16 @@ func repairCandidate(b *QueueBinding, u *units.Unit, h pool.Handle, candidate *u
 // pad query [04 R-AIR-01 §6]. Walking live units could reproduce neither.
 func airBasePads(u *units.Unit) []*units.Unit {
 	b := bindingFor(u)
-	if b == nil || u == nil || b.Movement == nil || b.Movement.AirBases == nil || b.Lookup == nil {
+	if b == nil || u == nil || b.Movement == nil || b.Movement.AirBasesHook() == nil || b.LookupHook() == nil {
 		return nil
 	}
-	admitted := combat.ScanAirBaseList(u.X, u.Z, b.Movement.AirBases(u.Owner), b.Lookup)
+	admitted := combat.ScanAirBaseList(u.X, u.Z, b.Movement.AirBasesHook()(u.Owner), b.LookupHook())
 	if len(admitted) == 0 {
 		return nil
 	}
 	pads := make([]*units.Unit, 0, len(admitted))
 	for _, h := range admitted {
-		if pad := b.Lookup(h); pad != nil {
+		if pad := b.LookupHook()(h); pad != nil {
 			pads = append(pads, pad) // list order, nothing scored or sorted [04 R-AIR-01 §11]
 		}
 	}
@@ -193,7 +193,7 @@ func pickCandidate(u *units.Unit, list []*units.Unit) *units.Unit {
 // one feature may appear more than once [04 R-ORD-01 §4, §7].
 func scanFeatureLists(u *units.Unit, diameter int32) (energy, metal []FeatureView) {
 	b := bindingFor(u)
-	if b == nil || b.World == nil || b.World.LookupFeature == nil || u == nil || diameter < 0 {
+	if b == nil || b.World == nil || b.World.LookupFeatureHook() == nil || u == nil || diameter < 0 {
 		return nil, nil
 	}
 	// Halve the raw diameter, retaining odd whole-unit halves and the centre's
@@ -218,8 +218,8 @@ func scanFeatureLists(u *units.Unit, diameter int32) (energy, metal []FeatureVie
 			// TODO(question): retail copies an unwritten sample Y. Keep the existing
 			// terrain-height fallback until caller history and pre-update readers
 			// settle the retained value; this is not retail evidence [04 R-ORD-01 §4].
-			if b.World.TerrainHeight != nil {
-				if y, heightOK := b.World.TerrainHeight(x, z); heightOK {
+			if b.World.TerrainHeightHook() != nil {
+				if y, heightOK := b.World.TerrainHeightHook()(x, z); heightOK {
 					feature.Y = y
 				}
 			}
@@ -236,10 +236,10 @@ func scanFeatureLists(u *units.Unit, diameter int32) (energy, metal []FeatureVie
 
 func playerResources(u *units.Unit) (ResourceView, bool) {
 	b := bindingFor(u)
-	if b == nil || b.Resources == nil || u == nil {
+	if b == nil || b.ResourcesHook() == nil || u == nil {
 		return ResourceView{}, false
 	}
-	return b.Resources(u.Owner)
+	return b.ResourcesHook()(u.Owner)
 }
 
 // resourceAtLeastTwenty retains Modern guard assistance's single-precision

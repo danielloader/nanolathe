@@ -69,7 +69,7 @@ func splashFixture(t *testing.T) (*Service, *units.World, *world.Terrain) {
 	// case needs [I5].
 	w := newCombatFixtureWorld(64, nil)
 	terrain := &world.Terrain{CellW: 100, CellH: 100, Plot: make([]world.PlotCell, 100*100)}
-	svc := &Service{ControlByte: func(uint8) uint8 { return ControlByteHuman }}
+	svc := NewService(ServiceConfig{ControlByte: func(uint8) uint8 { return ControlByteHuman }})
 	return svc, w, terrain
 }
 
@@ -92,11 +92,11 @@ func splashUnit(t *testing.T, w *units.World, def *content.UnitDef, owner uint8,
 // collected its recipients.
 func flashRecorder(svc *Service) *[]pool.Handle {
 	var seen []pool.Handle
-	svc.Events = func(ev Event) {
+	svc.SetEvents(func(ev Event) {
 		if ev.Kind == EventDamageFlash {
 			seen = append(seen, ev.Target)
 		}
-	}
+	})
 	return &seen
 }
 

@@ -159,8 +159,8 @@ func (s *System) slotMappingWord(u *units.Unit) MappingWordSource {
 	if u == nil {
 		return nil
 	}
-	if b := airBinding(u); b != nil && b.World != nil && b.World.MappingWord != nil {
-		return b.World.MappingWord
+	if b := airBinding(u); b != nil && b.World != nil && b.World.MappingWordHook() != nil {
+		return b.World.MappingWordHook()
 	}
 	return nil
 }

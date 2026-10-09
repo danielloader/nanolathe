@@ -166,8 +166,8 @@ func TestRetailRestoreRecursiveVisitsPublishFieldsInOrder(t *testing.T) {
 		t.Fatal("staging constructed records before recursive restoration")
 	}
 	var allocated []pool.Handle
-	onCreate := s.Units.OnCreate
-	s.Units.OnCreate = func(h pool.Handle, u *units.Unit) {
+	onCreate := s.Units.CreateHook()
+	s.Units.SetCreateHook(func(h pool.Handle, u *units.Unit) {
 		if onCreate != nil {
 			onCreate(h, u)
 		}
@@ -194,7 +194,7 @@ func TestRetailRestoreRecursiveVisitsPublishFieldsInOrder(t *testing.T) {
 				t.Fatalf("later constructor observed shared weapon byte %d, want completed carrier byte 3", got)
 			}
 		}
-	}
+	})
 	if err := RestoreRetailBattleCore(stage); err != nil {
 		t.Fatal(err)
 	}

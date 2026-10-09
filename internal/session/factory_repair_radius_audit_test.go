@@ -82,13 +82,13 @@ func TestFactoryProductExcludedFromRepairRadius(t *testing.T) {
 				var visited []pool.Handle
 				q := orders.QueueForUnit(builder)
 				binding := q.Binding()
-				scan := binding.World.ForEachUnitInRadius
-				binding.World.ForEachUnitInRadius = func(x, z, radius numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
+				scan := binding.World.ForEachUnitInRadiusHook()
+				binding.World.SetForEachUnitInRadius(func(x, z, radius numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
 					scan(x, z, radius, func(h pool.Handle, u *units.Unit) bool {
 						visited = append(visited, h)
 						return visit(h, u)
 					})
-				}
+				})
 				// Roam keeps Community's ordinary Both work option and issues no return
 				// move; only the radius candidate-count pick can draw in this visit.
 				builder.Flags = builder.Flags&^(uint32(3)<<units.StandingMoveShift) | uint32(2)<<units.StandingMoveShift

@@ -18,11 +18,11 @@ func TestHelpBuildCancellationSkipsWorkAndCompletion(t *testing.T) {
 			n := q.Primary()[0]
 			n.Phase, n.DynamicGate, n.Deadline = phase, gateCancelCurrent, -1
 			var work, spray, cues int
-			q.binding.Work.Assist = func(*units.Unit, *Node, uint32) bool { work++; target.Remaining = 0; return true }
-			q.binding.Presentation = &PresentationAdapter{
+			q.binding.Work.SetAssist(func(*units.Unit, *Node, uint32) bool { work++; target.Remaining = 0; return true })
+			q.binding.Presentation = NewPresentationAdapter(PresentationAdapterConfig{
 				Nanolathe: func(*units.Unit, *Node, uint32) bool { spray++; return true },
 				Status:    func(*units.Unit, uint8, string) bool { cues++; return true },
-			}
+			})
 			if code := helpBuildHandler(builder, n, gateCancelCurrent, 100); code != 5 {
 				t.Errorf("cancel result=%d, want complete", code)
 			}

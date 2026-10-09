@@ -31,7 +31,7 @@ func TestModernGuardPadSelectionKeepsGuardAndSuccessor(t *testing.T) {
 			f.guard.Health = tc.health
 			pad := &units.Unit{Handle: 3, Alive: true, Activated: true, Def: &content.UnitDef{Builder: true, IsAirBase: true}, X: f.guard.X, Z: f.guard.Z}
 			carrier := &units.Unit{Handle: 4, Alive: true, Activated: true, Def: &content.UnitDef{Builder: true, IsAirBase: true, CanMove: true}, X: f.guard.X, Z: f.guard.Z}
-			b.Lookup = func(h pool.Handle) *units.Unit {
+			b.SetLookup(func(h pool.Handle) *units.Unit {
 				switch h {
 				case f.ward.Handle:
 					return f.ward
@@ -41,10 +41,10 @@ func TestModernGuardPadSelectionKeepsGuardAndSuccessor(t *testing.T) {
 					return carrier
 				}
 				return nil
-			}
+			})
 			// Consumer fixture: the production binding uses movement's shared
 			// release and synchronous index observer.
-			b.Movement.DetachTakeoff = func(u *units.Unit) bool {
+			b.Movement.SetDetachTakeoff(func(u *units.Unit) bool {
 				if !tc.want || u != f.guard || u.Attachment.Carrier != carrier.Handle {
 					t.Fatal("unexpected detach callback")
 				}
@@ -53,15 +53,15 @@ func TestModernGuardPadSelectionKeepsGuardAndSuccessor(t *testing.T) {
 				carrier.Attachment.Cargo = nil
 				u.Move.Mode = (u.Move.Mode &^ 3) | 2
 				return true
-			}
+			})
 			queries := 0
-			b.Movement.AirBases = func(uint8) []pool.Handle {
+			b.Movement.SetAirBases(func(uint8) []pool.Handle {
 				queries++
 				if !tc.pads {
 					return nil
 				}
 				return []pool.Handle{pad.Handle, carrier.Handle}
-			}
+			})
 			n := airGuardNode(f)
 			n.Phase, n.Param1 = 2, 123
 			rear := &Node{ID: Lookup("Move"), Owner: f.guard.Handle}
@@ -115,8 +115,8 @@ func TestModernGuardNearbyWorkPriorityAndBypass(t *testing.T) {
 				b.Rules = modeRules(modern)
 				f.guard.Def.Builder, f.guard.Def.CanReclamate, f.guard.Def.CanResurrect = true, true, true
 				f.guard.Def.CanFly, f.guard.Def.BMCode, f.guard.Def.SightDistance = air, 1, 128
-				b.Movement.InstallAir = func(AirGoalRequest) bool { return true }
-				b.World = &WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}
+				b.Movement.SetInstallAir(func(AirGoalRequest) bool { return true })
+				b.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 0 }})
 				patient := &units.Unit{Handle: 3, Alive: true, Def: &content.UnitDef{MaxDamage: 100}, Health: 50, MaxHealth: 100, X: f.guard.X + numeric.Fixed(128<<16), Z: f.guard.Z}
 				patient.Move.ModeMirror = 1
 				outside := *patient
@@ -128,21 +128,21 @@ func TestModernGuardNearbyWorkPriorityAndBypass(t *testing.T) {
 				reclaim := *patient
 				reclaim.Handle = 6
 				reclaim.LastDamageCause = 5
-				b.Hostility = func(a, c *units.Unit) bool { return a.Owner != c.Owner }
+				b.SetHostility(func(a, c *units.Unit) bool { return a.Owner != c.Owner })
 				unitScans, featureScans, workCalls := 0, 0, 0
-				b.World.ForEachUnit = func(visit func(pool.Handle, *units.Unit) bool) {
+				b.World.SetForEachUnit(func(visit func(pool.Handle, *units.Unit) bool) {
 					unitScans++
 					for _, candidate := range []*units.Unit{&outside, &enemy, &reclaim, patient} {
 						if visit(candidate.Handle, candidate) {
 							break
 						}
 					}
-				}
+				})
 				wreck := FeatureView{DefinitionKey: "unit_dead", Reclaimable: true, X: f.guard.X, Z: f.guard.Z}
-				b.World.ForEachFeature = func(visit func(FeatureView) bool) { featureScans++; visit(wreck) }
-				b.Work = &WorkAdapter{CanResurrectFeature: func(v FeatureView) bool { return v.DefinitionKey == wreck.DefinitionKey }, Repair: func(*units.Unit, *units.Unit, *Node, uint32) bool { workCalls++; return true }, Resurrect: func(*units.Unit, *Node, uint32) bool { workCalls++; return true }}
+				b.World.SetForEachFeature(func(visit func(FeatureView) bool) { featureScans++; visit(wreck) })
+				b.Work = NewWorkAdapter(WorkAdapterConfig{CanResurrectFeature: func(v FeatureView) bool { return v.DefinitionKey == wreck.DefinitionKey }, Repair: func(*units.Unit, *units.Unit, *Node, uint32) bool { workCalls++; return true }, Resurrect: func(*units.Unit, *Node, uint32) bool { workCalls++; return true }})
 				resources := ResourceView{Stock: [2]float32{0, 20}, Capacity: [2]float32{100, 100}}
-				b.Resources = func(uint8) (ResourceView, bool) { return resources, true }
+				b.SetResources(func(uint8) (ResourceView, bool) { return resources, true })
 				n := guardNode(f)
 				n.Phase = 1
 				n.GoalX = numeric.Fixed(16 << 16)
@@ -173,7 +173,7 @@ func TestModernGuardNearbyWorkPriorityAndBypass(t *testing.T) {
 						t.Fatal("guard did not proceed to nearby resurrection")
 					}
 					q.primary = q.primary[1:]
-					b.World.ForEachFeature = nil
+					b.World.SetForEachFeature(nil)
 					if got := guardHandler(f.guard, n, 0, 102); got != 2 || q.primary[0] != n || q.primary[1] != rear || n.Target != f.ward.Handle {
 						t.Fatal("finished work did not resume original Guard")
 					}
@@ -202,10 +202,10 @@ func TestModernGuardLowEnergyStillResurrectsOnlyEligibleNearbyWreck(t *testing.T
 			f.guard.Def.Builder, f.guard.Def.CanReclamate, f.guard.Def.CanResurrect = true, true, capable
 			f.guard.Def.BMCode, f.guard.Def.SightDistance = 1, 128
 			resources := ResourceView{Stock: [2]float32{0, 19}, Capacity: [2]float32{100, 100}}
-			b.Resources = func(uint8) (ResourceView, bool) { return resources, true }
-			b.World = &WorldQueryAdapter{
+			b.SetResources(func(uint8) (ResourceView, bool) { return resources, true })
+			b.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{
 				ForEachUnit: func(func(pool.Handle, *units.Unit) bool) { t.Fatal("low energy scanned repairs") },
-			}
+			})
 			eligible := FeatureView{DefinitionKey: "unit_dead", Reclaimable: true, X: f.guard.X + numeric.Fixed(128<<16), Z: f.guard.Z}
 			outside := eligible
 			outside.X += numeric.Fixed(1 << 16)
@@ -216,15 +216,15 @@ func TestModernGuardLowEnergyStillResurrectsOnlyEligibleNearbyWreck(t *testing.T
 			later := eligible
 			later.X = f.guard.X
 			featureScans, queries := 0, 0
-			b.World.ForEachFeature = func(visit func(FeatureView) bool) {
+			b.World.SetForEachFeature(func(visit func(FeatureView) bool) {
 				featureScans++
 				for _, v := range []FeatureView{outside, unreclaimable, tree, eligible, later} {
 					if visit(v) {
 						break
 					}
 				}
-			}
-			b.Work = &WorkAdapter{CanResurrectFeature: func(v FeatureView) bool { queries++; return v.DefinitionKey == eligible.DefinitionKey }}
+			})
+			b.Work = NewWorkAdapter(WorkAdapterConfig{CanResurrectFeature: func(v FeatureView) bool { queries++; return v.DefinitionKey == eligible.DefinitionKey }})
 			n := guardNode(f)
 			n.Phase = 1
 			q.primary = []*Node{n}
@@ -250,7 +250,7 @@ func TestGuardPadResumptionDoesNotReleaseStrictOrTransportCargo(t *testing.T) {
 		q := QueueForUnit(f.guard)
 		q.Binding().Rules = modeRules(modern)
 		carrier := &units.Unit{Handle: 3, Alive: true, Def: &content.UnitDef{Builder: true, IsAirBase: !modern}}
-		q.Binding().Lookup = func(h pool.Handle) *units.Unit {
+		q.Binding().SetLookup(func(h pool.Handle) *units.Unit {
 			if h == f.ward.Handle {
 				return f.ward
 			}
@@ -258,7 +258,7 @@ func TestGuardPadResumptionDoesNotReleaseStrictOrTransportCargo(t *testing.T) {
 				return carrier
 			}
 			return nil
-		}
+		})
 		f.guard.Attachment.Carrier = carrier.Handle
 		carrier.Attachment.Cargo = []pool.Handle{f.guard.Handle}
 		n := airGuardNode(f)
@@ -277,7 +277,7 @@ func TestModernGuardFailedLandingWaitsForMaintenanceRetry(t *testing.T) {
 	b.Rules = &ModernRules{}
 	f.guard.Health = 50
 	pad := &units.Unit{Handle: 3, Alive: true, Activated: true, Def: &content.UnitDef{Builder: true, IsAirBase: true}, X: f.guard.X, Z: f.guard.Z}
-	b.Lookup = func(h pool.Handle) *units.Unit {
+	b.SetLookup(func(h pool.Handle) *units.Unit {
 		if h == f.ward.Handle {
 			return f.ward
 		}
@@ -285,16 +285,16 @@ func TestModernGuardFailedLandingWaitsForMaintenanceRetry(t *testing.T) {
 			return pad
 		}
 		return nil
-	}
-	b.Movement.AirBases = func(uint8) []pool.Handle { return []pool.Handle{pad.Handle} }
+	})
+	b.Movement.SetAirBases(func(uint8) []pool.Handle { return []pool.Handle{pad.Handle} })
 	landings := 0
-	b.Movement.RunAir = func(_ *units.Unit, n *Node, _ uint32, _ uint32) (Code, bool) {
+	b.Movement.SetRunAir(func(_ *units.Unit, n *Node, _ uint32, _ uint32) (Code, bool) {
 		if n.ID == Lookup("VTOL_Landing") {
 			landings++
 			return 8, true
 		}
 		return 0, false
-	}
+	})
 	n := airGuardNode(f)
 	n.Phase = 2
 	q.primary = []*Node{n}
@@ -329,20 +329,20 @@ func TestModernGuardStaysWithAFactoryThatHasProductionQueued(t *testing.T) {
 			b.Rules = modeRules(modern)
 			f.guard.Def.Builder, f.guard.Def.CanReclamate, f.guard.Def.BMCode, f.guard.Def.SightDistance = true, true, 1, 128
 			f.guard.Def.CanFly = air
-			b.Movement.InstallAir = func(AirGoalRequest) bool { return true }
+			b.Movement.SetInstallAir(func(AirGoalRequest) bool { return true })
 			f.ward.Def.Builder = true
-			b.World = &WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}
+			b.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 0 }})
 			patient := &units.Unit{Handle: 3, Alive: true, Def: &content.UnitDef{MaxDamage: 100}, Health: 50, MaxHealth: 100, X: f.guard.X + numeric.Fixed(64<<16), Z: f.guard.Z}
 			patient.Move.ModeMirror = 1
 			unitScans := 0
-			b.World.ForEachUnit = func(visit func(pool.Handle, *units.Unit) bool) {
+			b.World.SetForEachUnit(func(visit func(pool.Handle, *units.Unit) bool) {
 				unitScans++
 				visit(patient.Handle, patient)
-			}
-			b.World.ForEachFeature = func(func(FeatureView) bool) {}
-			b.Resources = func(uint8) (ResourceView, bool) {
+			})
+			b.World.SetForEachFeature(func(func(FeatureView) bool) {})
+			b.SetResources(func(uint8) (ResourceView, bool) {
 				return ResourceView{Stock: [2]float32{100, 100}, Capacity: [2]float32{100, 100}}, true
-			}
+			})
 			// The gap between products: the factory's build record waits for
 			// the last product to clear the pad, with no product attached.
 			build := Lookup("BuildingBuild")

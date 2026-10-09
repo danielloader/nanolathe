@@ -276,7 +276,7 @@ func TestModernBurstTerrainCancelsDuePelletBeforeEffects(t *testing.T) {
 			econ.Players[shooter.Owner].Stock[economy.Metal] = 50
 			svc := Service{Rules: rulesForModern(modern)}
 			var events []Event
-			svc.Events = func(e Event) { events = append(events, e) }
+			svc.SetEvents(func(e Event) { events = append(events, e) })
 			r := rng.NewSimulation(9)
 			var sum UnitStepSummary
 			svc.firePreparedSlot(shooter, slot, 0, &slotPrep{weapon: weapon, tgtPos: aim}, 10, terrain, &econ, &r, w, nil, &sum)

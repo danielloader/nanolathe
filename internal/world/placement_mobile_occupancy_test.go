@@ -58,7 +58,7 @@ func TestMobileOccupancyRejectsAForeignOccupant(t *testing.T) {
 
 	// The mover plane is bound to the terrain for the whole battle, not
 	// elected per query, so every check below sees it.
-	terrain.Movers = stubOccupancy{x: 2, z: 2, id: 7}
+	terrain.SetMovers(stubOccupancy{x: 2, z: 2, id: 7})
 	held := free
 	if _, err := terrain.CheckPlacement(held); err == nil {
 		t.Fatal("a covered cell held by a mover must reject the placement [04 R-COLL-01 §2]")
@@ -104,7 +104,7 @@ func TestMoverPlaneIsNotAPerQueryChoice(t *testing.T) {
 	// A caller that knows nothing about movement still gets the mover test,
 	// because the terrain it was handed carries the plane.
 	terrain := mobileOccupancyTerrain()
-	terrain.Movers = stubOccupancy{x: 2, z: 2, id: 7}
+	terrain.SetMovers(stubOccupancy{x: 2, z: 2, id: 7})
 	if _, err := terrain.CheckPlacement(query); err == nil {
 		t.Fatal("a terrain-bound mover must reject the placement for every caller")
 	}

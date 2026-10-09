@@ -23,7 +23,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/benchlock"
-	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/vfs"
@@ -88,7 +87,10 @@ type SimBenchOptions struct {
 	// Profiles writes cpu.pprof and the allocation pair for the measured
 	// window only.
 	Profiles bool
-	Log      io.Writer
+	// Checkpoints composes through single-seat match admission and records full
+	// checkpoints plus selected tick rows (DESIGN_MULTIPLAYER §16.3.79).
+	Checkpoints bool
+	Log         io.Writer
 }
 
 func (o *SimBenchOptions) applyDefaults() {
@@ -215,6 +217,11 @@ type SimBenchReport struct {
 	PhaseTiming        bool                `json:"phase_timing"`
 	ThreadTiming       bool                `json:"thread_cpu_timing"`
 	Profiles           bool                `json:"profiles"`
+	Checkpoints        bool                `json:"checkpoints"`
+	CheckpointRecords  int                 `json:"checkpoint_records,omitempty"`
+	CheckpointTicks    int                 `json:"checkpoint_ticks,omitempty"`
+	CheckpointTick     uint32              `json:"checkpoint_tick,omitempty"`
+	CheckpointDigest   string              `json:"checkpoint_digest,omitempty"`
 	Scene              *SimBenchScene      `json:"scene"`
 	CatalogHash        string              `json:"catalog_hash,omitempty"`
 	InitialFingerprint string              `json:"initial_fingerprint"`
@@ -331,6 +338,7 @@ func runSimBenchmarkWithContent(opts SimBenchOptions, fs vfs.FSOps, catalog *con
 		SimulationSeed: opts.Seed, CRTSeed: opts.Seed, Difficulty: opts.Difficulty,
 		WarmupTicks: opts.WarmupTicks, MeasuredTicks: opts.MeasureTicks,
 		PhaseTiming: opts.PhaseTiming, ThreadTiming: opts.ThreadTiming, Profiles: opts.Profiles && opts.OutputDir != "", Scene: scene,
+		Checkpoints:        opts.Checkpoints,
 		InitialFingerprint: composed.InitialFingerprint,
 		Runtime:            simBenchRuntime(),
 	}
@@ -342,6 +350,11 @@ func runSimBenchmarkWithContent(opts SimBenchOptions, fs vfs.FSOps, catalog *con
 	fmt.Fprintf(log, "nanolathe: sim benchmark scene %d on %q, warm-up %d ticks\n", SimBenchSceneVersion, opts.Map, opts.WarmupTicks)
 	for tick := uint32(0); tick < opts.WarmupTicks; tick++ {
 		simBenchStep(sess)
+		if opts.Checkpoints {
+			if err := sess.CheckpointCaptureResult().Err; err != nil {
+				return report, err
+			}
+		}
 	}
 	report.WarmFingerprint, _ = sess.PartialStateFingerprint()
 
@@ -384,6 +397,7 @@ func runSimBenchmarkWithContent(opts SimBenchOptions, fs vfs.FSOps, catalog *con
 	lastStamps := simBenchRestampCounter(sess)
 	next := 0
 	processStart, processErr := simBenchProcessCPU()
+	var captureErr error
 	windowStart := time.Now()
 	for tick := uint32(0); tick < opts.MeasureTicks; tick++ {
 		var threadStart int64
@@ -408,6 +422,12 @@ func runSimBenchmarkWithContent(opts SimBenchOptions, fs vfs.FSOps, catalog *con
 		}
 		timing.endTick(before, elapsed)
 		millis = append(millis, float64(elapsed.Nanoseconds())/1e6)
+		if opts.Checkpoints {
+			captureErr = sess.CheckpointCaptureResult().Err
+			if captureErr != nil {
+				break
+			}
+		}
 		// Sampled between ticks, after the wall clock is stopped, so reading
 		// the counter is outside the individual tick timing.
 		stamps := simBenchRestampCounter(sess)
@@ -435,6 +455,14 @@ func runSimBenchmarkWithContent(opts SimBenchOptions, fs vfs.FSOps, catalog *con
 	}
 	stopCPU()
 	sess.PhaseObserver = nil
+	if captureErr != nil {
+		return report, captureErr
+	}
+	if opts.Checkpoints {
+		if err := simBenchCheckpointReport(sess, &report); err != nil {
+			return report, err
+		}
+	}
 	report.Census = append(report.Census, simBenchTakeCensus(sess, scene, "window-close", deaths))
 
 	if opts.OutputDir != "" && opts.Profiles {
@@ -490,21 +518,42 @@ func ComposeSimBenchBattle(opts SimBenchOptions, fs vfs.FSOps, catalog *content.
 	if err := opts.validateArmySize(); err != nil {
 		return FreshBattle{}, nil, err
 	}
+	if opts.Checkpoints && opts.ArmySize != SimBenchDefaultArmySize {
+		// TODO(M3-U6): enlarged-scene relocation calls ordinary BindWorld,
+		// which invalidates the admitted movement installation. The fixture
+		// must preserve that binding before enlarged capture is supported.
+		return FreshBattle{}, nil, diagnostic("simulation benchmark checkpoint scene unsupported", opts.Map, nil, "the default army size; enlarged relocation replaces an admitted movement binding")
+	}
 	cfg := simBenchConfig(opts.Map, opts.UnitLimit)
-	composed, err := ComposeFreshBattle(FreshBattleRequest{
+	request := FreshBattleRequest{
 		Gameplay:         opts.Gameplay,
 		CommunitySources: session.CommunitySources{Content: opts.ProfileFeatures, Player: opts.GameplayFeatures, CommandLine: opts.GameplayOverrides},
 		Kind:             ScenarioDirectOTA, Map: opts.Map, LocalOwner: -1,
 		Difficulty: opts.Difficulty, Skirmish: cfg,
 		SimulationSeed: opts.Seed, CRTSeed: opts.Seed,
 		FS: fs, Catalog: catalog,
-	})
+	}
+	var composed FreshBattle
+	var err error
+	if opts.Checkpoints {
+		composed, err = composeCheckpointSimBenchBattle(request)
+	} else {
+		composed, err = ComposeFreshBattle(request)
+	}
 	if err != nil {
 		return FreshBattle{}, nil, err
 	}
 	scene, err := buildSimBenchScene(composed.Session, opts.Map, composed.Session.Units.UnitLimit(), opts.ArmySize)
 	if err != nil {
 		return FreshBattle{}, nil, err
+	}
+	if opts.Checkpoints {
+		if !composed.Session.PublishOpeningFrame() {
+			return FreshBattle{}, nil, diagnostic("simulation benchmark checkpoint opening failed", opts.Map, nil, "an unticked opening publication")
+		}
+		if err := composed.Session.EnableCheckpoints(); err != nil {
+			return FreshBattle{}, nil, err
+		}
 	}
 	return composed, scene, nil
 }
@@ -599,21 +648,14 @@ func (t *simBenchPhaseTimer) summary(ticks int) []SimBenchPhaseCost {
 	return out
 }
 
-// simBenchDeathCounter chains the unit world's death hook so the census can
-// report cumulative deaths. It observes; it does not decide anything.
-func simBenchDeathCounter(sess *session.Session) *int {
-	count := new(int)
+// simBenchDeathCounter samples the primary death-hook dispatch count before
+// play. Census reads its delta without replacing an authoritative callback.
+func simBenchDeathCounter(sess *session.Session) *uint64 {
 	if sess == nil || sess.Units == nil {
-		return count
+		return nil
 	}
-	previous := sess.Units.OnDeath
-	sess.Units.OnDeath = func(handle pool.Handle, cause units.DeathCause, unit *units.Unit) {
-		*count++
-		if previous != nil {
-			previous(handle, cause, unit)
-		}
-	}
-	return count
+	baseline := sess.Units.DeathDispatches()
+	return &baseline
 }
 
 func simBenchCensusTicks(measured uint32, samples int) []uint32 {
@@ -627,10 +669,10 @@ func simBenchCensusTicks(measured uint32, samples int) []uint32 {
 	return out
 }
 
-func simBenchTakeCensus(sess *session.Session, scene *SimBenchScene, phase string, deaths *int) SimBenchCensus {
+func simBenchTakeCensus(sess *session.Session, scene *SimBenchScene, phase string, deaths *uint64) SimBenchCensus {
 	out := SimBenchCensus{Tick: sess.Clock.GlobalTick, Phase: phase}
 	if deaths != nil {
-		out.DeathsSoFar = *deaths
+		out.DeathsSoFar = int(sess.Units.DeathDispatches() - *deaths)
 	}
 	if sess.Snapshot != nil {
 		published := sess.Snapshot.Current()

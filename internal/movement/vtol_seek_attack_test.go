@@ -20,9 +20,9 @@ func TestVTOLSeekAttackTargetRestartMakesProgress(t *testing.T) {
 	u.Flags |= units.ArmedStatus | 2<<units.StandingMoveShift | 2<<units.StandingFireShift
 	q := orders.QueueForUnit(u)
 	b := q.Binding()
-	b.Weapons = &orders.WeaponAdapter{SetManualTarget: combat.SetManualWeaponTarget}
-	b.Hostility = func(a, b *units.Unit) bool { return a.Owner != b.Owner }
-	b.World = &orders.WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}
+	b.Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{SetManualTarget: combat.SetManualWeaponTarget})
+	b.SetHostility(func(a, b *units.Unit) bool { return a.Owner != b.Owner })
+	b.World = orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 0 }})
 	sys.BindAirOrderLegs()
 	q.Push(orders.Lookup("VTOL_SeekAttack"), orders.Node{Owner: u.Handle, Target: target.Handle})
 	seek := q.Primary()[0]
@@ -60,7 +60,7 @@ func TestVTOLSeekAttackRefusalSkipsTakeoff(t *testing.T) {
 			target := airTargetFor(t, sys, w, 40, 16)
 			u.Flags |= stance.move<<units.StandingMoveShift | stance.fire<<units.StandingFireShift
 			q := orders.QueueForUnit(u)
-			q.Binding().Weapons = &orders.WeaponAdapter{SetManualTarget: combat.SetManualWeaponTarget}
+			q.Binding().Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{SetManualTarget: combat.SetManualWeaponTarget})
 			q.Push(orders.Lookup("VTOL_SeekAttack"), orders.Node{Owner: u.Handle, Target: target.Handle, Param1: 17, Param2: 1})
 			n := q.Primary()[0]
 			draws := q.Binding().SimRNG.Draws()
@@ -96,10 +96,10 @@ func TestVTOLSeekAttackSearchIssuesBeforeCompleting(t *testing.T) {
 			u.Flags |= units.ArmedStatus | stance.move<<units.StandingMoveShift | stance.fire<<units.StandingFireShift
 			q := orders.QueueForUnit(u)
 			b := q.Binding()
-			b.Hostility = func(a, b *units.Unit) bool { return a.Owner != b.Owner }
-			b.World = &orders.WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}
+			b.SetHostility(func(a, b *units.Unit) bool { return a.Owner != b.Owner })
+			b.World = orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 0 }})
 			inhibited, scanned := 0, false
-			b.Weapons = &orders.WeaponAdapter{
+			b.Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{
 				SetManualTarget: combat.SetManualWeaponTarget,
 				InhibitSlot: func(actor *units.Unit, slot int) bool {
 					if slot != inhibited {
@@ -118,7 +118,7 @@ func TestVTOLSeekAttackSearchIssuesBeforeCompleting(t *testing.T) {
 					scanned = true
 					return target.Handle, true
 				},
-			}
+			})
 			q.Push(orders.Lookup("VTOL_SeekAttack"), orders.Node{Owner: u.Handle, Phase: 1, GoalX: u.X, GoalY: u.Y, GoalZ: u.Z, GoalSupplied: true})
 			n := q.Primary()[0]
 			draws := b.SimRNG.Draws()

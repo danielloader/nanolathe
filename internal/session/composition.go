@@ -23,6 +23,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/movement"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/checkpoint"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/visibility"
@@ -199,6 +200,9 @@ type cobPresentationSink struct {
 	source      pool.Handle
 	session     *Session
 	pieceMap    []int
+	// Exact receiver retained for the pre-Create ground-height port (§16.3.65).
+	checkpointTerrain *world.Terrain
+	checkpointUnit    *units.Unit
 }
 
 // SetCOBPieceMap is called by strict binding before mode-I Create. The map is
@@ -600,7 +604,12 @@ func (s *Session) bindBuildPresentation() {
 	if s == nil || s.Build == nil {
 		return
 	}
-	s.Build.Presentation = &buildPresentationSink{session: s}
+	sink := &buildPresentationSink{session: s}
+	s.Build.Presentation = sink
+	s.checkpointBuild = sessionCheckpointBuildBinding{}
+	if a := s.checkpointBindingAuthority(); a != nil {
+		s.checkpointBuild = sessionCheckpointBuildBinding{s, s.Build, sink, a}
+	}
 }
 
 // bindUnitCOBWith is the strict binding with the battle's model resolver. A
@@ -615,10 +624,22 @@ func (s *Session) bindUnitCOBWith(fs vfs.FSOps, models unitModelResolver, u *uni
 		return fmt.Errorf("unit %q model %s: %w", u.Def.UnitName, prov.ProviderID(), err)
 	}
 	sink := &cobPresentationSink{publication: s.publication, clock: s.Clock, source: u.Handle, session: s}
+	authority := s.checkpointBindingAuthority()
+	if authority != nil {
+		sink.checkpointTerrain, sink.checkpointUnit = s.World, u
+	}
 	explosionSink := &cobExplosionSink{presentation: sink}
 	visible := func(_ int, _ int32) bool {
 		// This is the established unit-level gameplay visibility gate used by
 		// combat acquisition; it never mutates authoritative state [03 §3.2].
+		if s.onlineResults != nil {
+			for i, seat := range s.onlineResults.seats {
+				if seat.present && s.IsUnitVisible(i, u) {
+					return true
+				}
+			}
+			return false
+		}
 		return s.IsUnitVisible(int(s.ViewingOwner), u)
 	}
 	registeredPlacement := false
@@ -627,19 +648,19 @@ func (s *Session) bindUnitCOBWith(fs vfs.FSOps, models unitModelResolver, u *uni
 		// and the exact unit-creation stamp before strict binding starts Create;
 		// the callback therefore observes the cached placement and can commit the
 		// bit before restamping [04 §4.7 port 18][04 R-COLL-01 §4].
-		u.SetYardOpenTransaction(func(requested bool) {
+		u.SetYardOpenTransactionWithCheckpointBinding(func(requested bool) {
 			tick := uint32(0)
 			if s.Clock != nil {
 				tick = s.Clock.GlobalTick
 			}
 			s.Build.YardOpenTransactionAt(u, requested, tick)
-		})
+		}, s.checkpointBindingAuthority())
 		if err := s.Build.RegisterBuildingPlacement(u); err != nil {
 			return fmt.Errorf("unit %q building placement: %w", u.Def.UnitName, err)
 		}
 		registeredPlacement = true
 	}
-	_, err = units.BindCOBWithPortsAndVisibilityAndContextForUnit(fs, u, mdl, s.SimRNG(), sink, visible, func(binding *cob.Binding) error {
+	_, err = units.BindCOBForUnitWithCheckpointBinding(fs, u, mdl, s.SimRNG(), sink, visible, func(binding *cob.Binding) error {
 		// Every engine query and mutation binding exists before Create: the
 		// callback can read live terrain, piece and unit state, and a port-1
 		// activation edge reaches the attached callback bridge [04 R-CB-01 §4].
@@ -647,7 +668,7 @@ func (s *Session) bindUnitCOBWith(fs vfs.FSOps, models unitModelResolver, u *uni
 			return fmt.Errorf("session: incomplete pre-Create COB binding")
 		}
 		if s.World != nil {
-			binding.VM.BindPort(cob.Port(16), cob.GroundHeightPortFunc(s.World.HeightAt))
+			u.RetainCheckpointPortInstallation(binding.VM.BindPortWithPendingCheckpointBinding(cob.Port(16), cob.GroundHeightPortFunc(s.World.HeightAt), authority))
 		}
 		// Explode can run from Create, so its fixed-pool boundary must be bound
 		// before the VM enters that callback [04 R-COB-04 §1][R-CB-01 §4].
@@ -656,7 +677,7 @@ func (s *Session) bindUnitCOBWith(fs vfs.FSOps, models unitModelResolver, u *uni
 		// COB attach/drop carry a 16-bit unit identity. Bind this before Create
 		// so a Create callback sees the same carrier-owned mutation surface as
 		// later transport callbacks [04 R-COB-03 §5][R-CB-01 §4].
-		binding.VM.BindTransportMutations(
+		for _, receipt := range binding.VM.BindTransportMutationsWithPendingCheckpointBinding(
 			func(cargo, piece, mode int32) {
 				if s.Movement == nil || s.Units == nil {
 					return
@@ -669,9 +690,12 @@ func (s *Session) bindUnitCOBWith(fs vfs.FSOps, models unitModelResolver, u *uni
 				}
 				s.Movement.ScriptDropCargo(s.Units, u.Handle, pool.Handle(uint16(cargo)))
 			},
-		)
+			authority,
+		) {
+			u.RetainCheckpointVMInstallation(receipt)
+		}
 		return nil
-	})
+	}, authority)
 	if err != nil {
 		if registeredPlacement {
 			s.Build.ReleasePlacement(u.Handle)
@@ -826,6 +850,10 @@ const maxPerPlayerRecords = int(^pool.Handle(0)) / 10
 // the table to a dozen definitions — cannot starve the pool: the record count
 // never consults the table at all.
 func newBattleSlicedWorldWithCOBSized(cat *content.Catalog, fs vfs.FSOps, mode int, sortKeys [pool.PlayerCount]uint32, perPlayerRecords int) (*units.World, error) {
+	return newBattleSlicedWorldWithCheckpointBinding(cat, fs, mode, sortKeys, perPlayerRecords, nil)
+}
+
+func newBattleSlicedWorldWithCheckpointBinding(cat *content.Catalog, fs vfs.FSOps, mode int, sortKeys [pool.PlayerCount]uint32, perPlayerRecords int, authority *checkpoint.BindingAuthority) (*units.World, error) {
 	if fs == nil {
 		return nil, fmt.Errorf("session: missing filesystem for COB binding [04 §4.1]")
 	}
@@ -875,7 +903,7 @@ func newBattleSlicedWorldWithCOBSized(cat *content.Catalog, fs vfs.FSOps, mode i
 	// nothing about the file behind it, so it must not outlive the battle's
 	// sources (DESIGN_MULTIPLAYER §8.7). A frozen battle's fs is its sealed
 	// capture, so every program the loader can return was admitted.
-	w.SetCOBSource(fs, cob.NewCachedLoader())
+	w.SetCOBSourceWithCheckpointBinding(fs, cob.NewCachedLoader(), authority)
 	return w, nil
 }
 
@@ -919,7 +947,8 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 	if s == nil {
 		return nil
 	}
-	worldQueries := &orders.WorldQueryAdapter{
+	authority := s.checkpointBindingAuthority()
+	worldQueries := orders.NewWorldQueryAdapterWithCheckpointBinding(orders.WorldQueryAdapterConfig{
 		LookupUnit: func(h pool.Handle) *units.Unit {
 			if s.Units == nil {
 				return nil
@@ -1065,69 +1094,69 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 			}
 			return s.World.SeaLevel
 		},
-	}
+	}, authority)
 	movementGoals := &orders.MovementGoalAdapter{}
 	if s.Movement != nil {
-		movementGoals.DetachTakeoff = func(u *units.Unit) bool {
+		movementGoals.SetDetachTakeoffWithCheckpointBinding(func(u *units.Unit) bool {
 			if u == nil {
 				return false
 			}
 			_, ok := movement.DetachTakeoff(s.Units, u.Handle)
 			return ok
-		}
-		movementGoals.Ready = func() bool { return s.Movement != nil }
-		movementGoals.RunAir = s.Movement.AirLegRunner()
+		}, authority)
+		movementGoals.SetReadyWithCheckpointBinding(func() bool { return s.Movement != nil }, authority)
+		movementGoals.SetRunAirWithCheckpointBinding(s.Movement.AirLegRunner(), authority)
 		// The target registry's third list, held and rebuilt by the movement
 		// system [06 §3.1][04 R-AIR-01 §11].
-		movementGoals.AirBases = s.Movement.AirBaseList
-		movementGoals.InstallPoint = func(req orders.PointGoalRequest) bool {
+		movementGoals.SetAirBasesWithCheckpointBinding(s.Movement.AirBaseList, authority)
+		movementGoals.SetInstallPointWithCheckpointBinding(func(req orders.PointGoalRequest) bool {
 			if req.Node == nil {
 				return false
 			}
 			return s.Movement.InstallPointGoal(req)
-		}
-		movementGoals.CrowdedMoveBlocked = s.Movement.CrowdedMoveBlocked
+		}, authority)
+		movementGoals.SetCrowdedMoveBlockedWithCheckpointBinding(s.Movement.CrowdedMoveBlocked, authority)
 		// The record-level payload release of [04 R-ORD-01 §1], in the form
 		// RWU-19-18 spells out: mover-less no-op, a NULL goal handed to the
 		// controller (cancel the in-flight search, `0x80` on the previous
 		// payload's record, clear has-waypoint and wants-repath), virtual
 		// delete, clear the field. Handlers that release their own payload use
 		// it; queue teardown uses Destroy below.
-		movementGoals.Release = func(node *orders.Node) bool {
+		movementGoals.SetReleaseWithCheckpointBinding(func(node *orders.Node) bool {
 			if node == nil {
 				return false
 			}
 			return s.Movement.ReleaseGoalPayload(node)
-		}
+		}, authority)
 		// Queue teardown is the record destructor, not the explicit release:
 		// it unbinds only when the removed record's object is the bound one
 		// [04 R-ORD-01 §9].
-		movementGoals.Destroy = func(node *orders.Node) bool {
+		movementGoals.SetDestroyWithCheckpointBinding(func(node *orders.Node) bool {
 			if node == nil {
 				return false
 			}
 			return s.Movement.ReleaseGoal(node)
-		}
-		movementGoals.InstallAnnulus = func(req orders.AnnulusGoalRequest) bool {
+		}, authority)
+		movementGoals.SetInstallAnnulusWithCheckpointBinding(func(req orders.AnnulusGoalRequest) bool {
 			return s.Movement.InstallAnnulusGoal(req)
-		}
-		movementGoals.InstallRectangle = func(req orders.RectangleGoalRequest) bool {
+		}, authority)
+		movementGoals.SetInstallRectangleWithCheckpointBinding(func(req orders.RectangleGoalRequest) bool {
 			return s.Movement.InstallRectangleGoal(req)
-		}
-		movementGoals.InstallAir = func(req orders.AirGoalRequest) bool {
+		}, authority)
+		movementGoals.SetInstallAirWithCheckpointBinding(func(req orders.AirGoalRequest) bool {
 			return s.Movement.InstallAirGoal(req)
-		}
+		}, authority)
 		// The direct position commit of [04 R-COLL-01 §4] — the setter that
 		// clears the old footprint, writes XYZ and the cell pair, and stamps
 		// the new one under the overlap protocol without asking the placement
 		// validator. internal/movement owns the occupancy planes and the
 		// class-layer restamp family [04 R-MOV-03 §3], so it owns this too; the
 		// `Teleport` row is its order-facing caller [04 R-ORD-01 §2].
-		movementGoals.PlaceUnit = func(req orders.PlaceRequest) bool {
+		movementGoals.SetPlaceUnitWithCheckpointBinding(func(req orders.PlaceRequest) bool {
 			return s.Movement.PlaceUnit(req)
-		}
+		}, authority)
 	}
-	return &orders.QueueBinding{
+	binding := orders.NewQueueBindingWithCheckpointBinding(orders.QueueBindingConfig{
 		Rules:               s.orderRules(),
 		Community:           s.orderCommunity(),
 		DangerVisible:       s.dangerVisible,
@@ -1140,8 +1169,8 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 		ModernAIPlayer: s.ModernAIPlayer,
 		Damage:         s.acceptDamage,
 		Economy:        s.Econ,
-		Lookup:         worldQueries.LookupUnit,
-		Hostility:      worldQueries.Hostile,
+		Lookup:         worldQueries.LookupUnitHook(),
+		Hostility:      worldQueries.HostileHook(),
 		SimRNG:         s.SimRNG(),
 		CurrentTick: func() uint32 {
 			if s.Clock == nil {
@@ -1186,13 +1215,13 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 			p := s.Econ.Players[owner]
 			return orders.ResourceView{Stock: p.Stock, Capacity: p.Capacity}, true
 		},
-		Work: &orders.WorkAdapter{
+		Work: orders.NewWorkAdapterWithCheckpointBinding(orders.WorkAdapterConfig{
 			Ready: func() bool { return s.Build != nil && s.Econ != nil },
 			Assist: func(builder *units.Unit, n *orders.Node, tick uint32) bool {
-				if s.Build == nil || n == nil || worldQueries.LookupUnit == nil {
+				if s.Build == nil || n == nil || worldQueries.LookupUnitHook() == nil {
 					return false
 				}
-				target := worldQueries.LookupUnit(n.Target)
+				target := worldQueries.LookupUnitHook()(n.Target)
 				var before float32
 				if target != nil {
 					before = target.Remaining
@@ -1227,7 +1256,7 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 				return ok
 			},
 			Repair: func(builder, patient *units.Unit, n *orders.Node, _ uint32) bool {
-				if s.Build == nil || n == nil || worldQueries.LookupUnit == nil {
+				if s.Build == nil || n == nil || worldQueries.LookupUnitHook() == nil {
 					return false
 				}
 				if builder == nil || builder.Def == nil {
@@ -1248,10 +1277,10 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 			// so this seam does not branch on TransferOwnership's bool beyond
 			// deciding whether the replacement's completion posture runs.
 			Capture: func(captor *units.Unit, n *orders.Node, tick uint32) bool {
-				if s.Build == nil || n == nil || worldQueries.LookupUnit == nil || captor == nil {
+				if s.Build == nil || n == nil || worldQueries.LookupUnitHook() == nil || captor == nil {
 					return false
 				}
-				target := worldQueries.LookupUnit(n.Target)
+				target := worldQueries.LookupUnitHook()(n.Target)
 				if target == nil {
 					return false
 				}
@@ -1299,7 +1328,7 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 				return true
 			},
 			Resurrect: func(builder *units.Unit, n *orders.Node, _ uint32) bool {
-				return s.resurrectStep(builder, n, worldQueries.LookupFeature)
+				return s.resurrectStep(builder, n, worldQueries.LookupFeatureHook())
 			},
 			// Modern guard searches must skip scenery that cannot resolve to
 			// a resurrectable unit, before installing a work order. This is a
@@ -1323,8 +1352,8 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 				}
 				return s.Build.DeliverCancelNotice(owner, n, tick)
 			},
-		},
-		Weapons: &orders.WeaponAdapter{
+		}, authority),
+		Weapons: orders.NewWeaponAdapterWithCheckpointBinding(orders.WeaponAdapterConfig{
 			Ready: func() bool { return s.Combat != nil },
 			FiringPositionBlocked: func(u, target *units.Unit, tick uint32) bool {
 				return s.Combat != nil && s.Combat.FiringPositionBlocked(u, target, tick)
@@ -1372,8 +1401,8 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 				}
 				return combat.WeaponCanEngage(u, idx, s.Units.Unit(target.Unit))
 			},
-		},
-		Presentation: &orders.PresentationAdapter{
+		}, authority),
+		Presentation: orders.NewPresentationAdapterWithCheckpointBinding(orders.PresentationAdapterConfig{
 			Ready: func() bool {
 				return s.publication != nil && s.publication.events != nil
 			},
@@ -1417,7 +1446,7 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 					// [03 §5.5][I9].
 					return false
 				}
-				target := worldQueries.LookupUnit(n.Target)
+				target := worldQueries.LookupUnitHook()(n.Target)
 				if target == nil || !target.Alive || target.Dying {
 					return false
 				}
@@ -1508,7 +1537,7 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 				minZ := world.CellToWorld(feature.CZ)
 				maxX := minX.Add(numeric.Fixed(int64(footX) * 1048576))
 				maxZ := minZ.Add(numeric.Fixed(int64(footZ) * 1048576))
-				minY, ok := worldQueries.TerrainHeight(minX, minZ)
+				minY, ok := worldQueries.TerrainHeightHook()(minX, minZ)
 				if !ok {
 					return false
 				}
@@ -1604,14 +1633,19 @@ func (s *Session) newOrderBinding() *orders.QueueBinding {
 					[3]numeric.Fixed{toX, toY, toZ},
 				)
 			},
-		},
+		}, authority),
+	}, authority)
+	s.checkpointOrders = sessionCheckpointOrderBinding{}
+	if authority != nil {
+		s.checkpointOrders = sessionCheckpointOrderBinding{owner: s, authority: authority, binding: binding, movement: binding.Movement, world: worldQueries, work: binding.Work, weapons: binding.Weapons, presentation: binding.Presentation, movementSystem: s.Movement}
 	}
+	return binding
 }
 
 // newConstructionService applies the same difficulty/controller inputs as the
 // ledger to both construction refund sites [05 R-ECO-01 §11].
 func (s *Session) newConstructionService() *construction.Service {
-	service := construction.NewService(s.World, s.Catalog, s.Units, s.Econ)
+	service := construction.NewServiceWithCheckpointBinding(s.World, s.Catalog, s.Units, s.Econ, s.checkpointBindingAuthority())
 	s.bindConstructionEconomy(service)
 	return service
 }
@@ -1621,7 +1655,7 @@ func (s *Session) bindConstructionEconomy(service *construction.Service) {
 		return
 	}
 	service.Economy = s.Econ
-	service.CRTRandom = func(bound uint32) uint32 { return s.CrtRNG().Uint32n(bound) }
+	service.SetCRTRandomWithCheckpointBinding(func(bound uint32) uint32 { return s.CrtRNG().Uint32n(bound) }, s.checkpointBindingAuthority())
 	service.ModeSelector = 2 // Unset difficulty follows the ledger's whole-credit path.
 	if s.Econ != nil && s.Econ.EconomySelector != nil {
 		service.ModeSelector = *s.Econ.EconomySelector
@@ -1631,9 +1665,9 @@ func (s *Session) bindConstructionEconomy(service *construction.Service) {
 	// A computer player the lobby marked Modern is paid in full, so its
 	// refunds skip the discount (DESIGN_ECONOMY_CONSTRUCTION "Modern AI full
 	// income"); the mark is false for every player of a Classic battle.
-	service.IsSpecialSecondState = func(owner uint8) bool {
+	service.SetIsSpecialSecondStateWithCheckpointBinding(func(owner uint8) bool {
 		return s.Econ != nil && int(owner) < len(s.Econ.Players) && s.Econ.Players[owner].ControllerState == 2 && !s.Econ.Players[owner].FullIncome
-	}
+	}, s.checkpointBindingAuthority())
 }
 
 // bindOrderQueue installs the session-owned order context immediately after a
@@ -1760,12 +1794,12 @@ func createAndBindServices(s *Session) error {
 	// Bind the battle's single Park-Miller stream before any mission,
 	// commander, or factory allocation reaches the common unit initializer
 	// [01 §7.1][R-P28-ANG-01R §2].
-	s.Units.SetSimulationRNG(s.SimRNG())
+	s.Units.SetSimulationRNGWithCheckpointBinding(s.SimRNG(), s.checkpointBindingAuthority())
 	// The extraction rate is sampled by the unit CREATOR, once per created unit
 	// and never recomputed [05 R-PROD-01 §6], so the plot it reads is bound
 	// here — before the first mission, commander, factory or restore allocation
 	// — rather than at each placement call site.
-	s.Units.SetExtractionSampler(s.World)
+	s.Units.SetExtractionSamplerWithCheckpointBinding(s.World, s.checkpointBindingAuthority())
 	cobFS, cobLoader := s.Units.COBSource()
 	if (cobFS == nil) != (cobLoader == nil) {
 		return fmt.Errorf("session: incomplete COB source for service wiring [04 §4.1]")
@@ -1800,10 +1834,10 @@ func createAndBindServices(s *Session) error {
 	}
 	if s.simArt != nil {
 		if s.effectFrameCount == nil {
-			s.SetEffectEntryFrameCount(s.simArt.EffectEntryFrameCount)
+			s.bindCheckpointEffectFrames(s.simArt)
 		}
 		if s.featureSequence == nil {
-			s.SetFeatureSequenceResolver(s.simArt.FeatureSequence)
+			s.bindCheckpointFeatureSequence(s.simArt)
 		}
 	}
 	// Composition is the central topology site for the session's committed-frame
@@ -1835,13 +1869,13 @@ func createAndBindServices(s *Session) error {
 		// One model resolver per battle: the frozen inputs' parsed models, or
 		// for a battle without them, each model read once and kept.
 		models := battleModelResolver(cobFS)
-		s.Units.SetCOBBinder(func(u *units.Unit) error {
+		s.Units.SetCOBBinderWithCheckpointBinding(func(u *units.Unit) error {
 			s.initializeSensorStatus(u) // constructor seed precedes COB Create [03 R-VIS-01 §4 Gate]
 			if u == nil || !s.Econ.InitializeUnitEconomy(u.Handle) {
 				return fmt.Errorf("session: initialize unit economy account")
 			}
 			return s.bindUnitCOBWith(cobFS, models, u)
-		})
+		}, cobFS, s.checkpointBindingAuthority())
 		if !s.Units.HasCOBBinder() {
 			return fmt.Errorf("session: missing COB binder for service wiring [04 §4.1]")
 		}
@@ -1851,12 +1885,12 @@ func createAndBindServices(s *Session) error {
 	// only CreditSpawn (spawn) may write directly to Stock outside the ledger.
 	s.Econ.Wind = s.Wind
 	s.Econ.Terrain = s.World
-	s.Econ.CloakCost = func(u *units.Unit) float32 {
+	s.Econ.SetCloakCostWithCheckpointBinding(func(u *units.Unit) float32 {
 		if u == nil {
 			return 0
 		}
 		return u.CloakCost() // [05 "Cloak debit"] stationary vs moving [P1-I04]
-	}
+	}, s.checkpointBindingAuthority())
 	// The cloak gate, all three terms [05 R-ECO-01 §9][03 R-VIS-01 §6].
 	//
 	// This gate is the REQUEST side. It decides whether the unit is charged
@@ -1898,11 +1932,11 @@ func createAndBindServices(s *Session) error {
 	// [03 R-VIS-01 §6][04 R-ORD-01 §1] (I13). A unit no handler has stamped carries
 	// zero and is therefore due from its first pass, which is exactly the idle
 	// cloaked unit's behavior.
-	s.Econ.CloakDue = func(u *units.Unit) bool {
+	s.Econ.SetCloakDueWithCheckpointBinding(func(u *units.Unit) bool {
 		if u == nil || !u.IsCloaked {
 			return false
 		}
-		if u.Flags&visibility.DecloakBit != 0 {
+		if s.sensorStatus(u.Owner, u)&visibility.DecloakBit != 0 {
 			return false
 		}
 		tick := uint32(0)
@@ -1910,7 +1944,7 @@ func createAndBindServices(s *Session) error {
 			tick = s.Clock.GlobalTick
 		}
 		return tick >= u.RevealDeadline
-	}
+	}, s.checkpointBindingAuthority())
 	// The ledger's production discount for a computer player selects on the
 	// battle's difficulty word [05 R-ECO-01 §3]; it is the same word the AI
 	// plan gate reads, through the same accessor. A word outside 0..2 leaves
@@ -1930,19 +1964,19 @@ func createAndBindServices(s *Session) error {
 		// The steam-strip producer of [05 R-ECO-02 §3] is bound before the
 		// terrain's own features are populated, because the vents are placed by
 		// that populate call and the producer runs from the stamp itself.
-		s.Features.GeothermalSteam = func(x, y, z numeric.Fixed) {
+		s.Features.SetGeothermalSteamWithCheckpointBinding(func(x, y, z numeric.Fixed) {
 			s.appendStripGeothermalSteam([3]numeric.Fixed{x, y, z})
-		}
+		}, s.checkpointBindingAuthority())
 		s.bindFeatureStripProducers()
 		s.Features.PopulateFromTerrain()
 	} else if s.Features.Terrain != s.World {
 		return fmt.Errorf("session: Features.Terrain mismatch")
 	} else {
 		// Existing service but world may have been swapped (e.g. load); ensure terrain features are present
-		if s.Features.GeothermalSteam == nil {
-			s.Features.GeothermalSteam = func(x, y, z numeric.Fixed) {
+		if s.Features.GeothermalSteamHook() == nil {
+			s.Features.SetGeothermalSteamWithCheckpointBinding(func(x, y, z numeric.Fixed) {
 				s.appendStripGeothermalSteam([3]numeric.Fixed{x, y, z})
-			}
+			}, s.checkpointBindingAuthority())
 		}
 		s.bindFeatureStripProducers()
 		s.Features.PopulateFromTerrain()
@@ -1970,18 +2004,26 @@ func createAndBindServices(s *Session) error {
 		}
 	}
 	s.Vis.SetLocal(visibility.PlayerID(s.ViewingOwner))
+	if s.onlineResults != nil {
+		s.Vis.EnableOwnerPerspectives()
+	}
 	// Sensor callbacks remain an internal visibility snapshot. Presentation
 	// consumes Frame.Radar after commit and does not bind a mutable surface sink
 	// to the authoritative session [03 §3.4][I6].
 	// Canonical visibility predicate for combat [03 §3.2] C8 P0-11 — single gameplay gate.
 	// Per-session isolated: was package-global combat.VisibilityHook, now Service.Visibility [RS-P0-018][INVARIANTS I1][I6].
 	if s.Combat != nil {
-		s.Combat.Visibility = func(viewer visibility.PlayerID, target visibility.Target) bool {
+		s.Combat.SetVisibilityWithCheckpointBinding(func(viewer visibility.PlayerID, target visibility.Target) bool {
 			if s.Vis == nil {
 				return false
 			}
+			if s.onlineResults != nil && s.Units != nil {
+				if u := s.Units.Unit(pool.Handle(target.UnitID)); u != nil {
+					target.Status = s.sensorStatus(uint8(viewer), u)
+				}
+			}
 			return s.Vis.IsVisible(viewer, target)
-		}
+		}, s.checkpointBindingAuthority())
 	}
 	// Movement [04 §8] with occupancy grid and compiled classes
 	if s.Movement == nil {
@@ -1992,7 +2034,7 @@ func createAndBindServices(s *Session) error {
 		// R-DOC04-A]. A zeroed record would be a real record whose zero
 		// thresholds block every slope and depth band.
 		fallback := movement.Template()
-		s.Movement = movement.NewSystem(s.World, fallback, grid)
+		s.Movement = movement.NewSystemWithCheckpointBindings(s.World, fallback, grid, s.checkpointBindingAuthority())
 	}
 	if s.Movement.Terrain != s.World {
 		return fmt.Errorf("session: Movement.Terrain mismatch")
@@ -2000,11 +2042,11 @@ func createAndBindServices(s *Session) error {
 	// The allocator grounds or floats each unit it creates through the
 	// movement-owned post-move correction [04 R-MOV-01 §5]. Bound here, like
 	// the extraction sampler above, before any battle-entry allocation.
-	s.Units.SetCreationPose(s.Movement)
-	s.Movement.BindWorld(s.Units)
+	s.Units.SetCreationPoseWithCheckpointBinding(s.Movement, s.checkpointBindingAuthority())
+	s.Movement.BindWorldWithCheckpointBinding(s.Units, s.checkpointBindingAuthority())
 	// Bind movement classes explicitly [02 "Movement class record"]
 	s.Movement.SetClasses(s.Catalog.Movement)
-	s.Movement.Damage = s.acceptDamage
+	s.Movement.SetDamageWithCheckpointBinding(s.acceptDamage, s.checkpointBindingAuthority())
 	// The air build approach's product-footprint resolver
 	// [04 R-ORD-02 §2][04 R-PATH-01 §13]: internal/movement holds no catalog
 	// handle of its own, so it asks this session-bound closure for the
@@ -2012,7 +2054,7 @@ func createAndBindServices(s *Session) error {
 	// order record carries in Param1 — the same catalog lookup
 	// construction.Service.siteAnchorCell/siteCentre already perform for the
 	// ground twin.
-	s.Movement.ProductFootprint = func(catalogIndex uint32) (fx, fz int32, ok bool) {
+	s.Movement.SetProductFootprintWithCheckpointBinding(func(catalogIndex uint32) (fx, fz int32, ok bool) {
 		if s.Catalog == nil {
 			return 0, 0, false
 		}
@@ -2022,7 +2064,7 @@ func createAndBindServices(s *Session) error {
 		}
 		fx, fz = world.FootprintForUnit(s.Catalog, def)
 		return fx, fz, true
-	}
+	}, s.checkpointBindingAuthority())
 	// The occupancy overlap protocol arbitrates a contested cell from the
 	// OCCUPANT'S OWNER player-row control byte and records the outcome on both
 	// units' flag words [04 R-COLL-01 §4]. The grid carries neither fact, so
@@ -2039,7 +2081,7 @@ func createAndBindServices(s *Session) error {
 	// [05 "Authoritative settlement order"]. It is NOT the sweep gate's
 	// separate byte with its eliminated value 10 [04 R-MOV-03 §1]; see
 	// movement.displaceableOwnerState, which carries the whole reading.
-	s.Movement.AttachOverlapBinding(func(owner uint8) uint8 {
+	s.Movement.AttachOverlapBindingWithCheckpointBinding(func(owner uint8) uint8 {
 		if s.Econ == nil || int(owner) >= len(s.Econ.Players) {
 			return combat.ControlByteAbsent
 		}
@@ -2048,10 +2090,10 @@ func createAndBindServices(s *Session) error {
 			return combat.ControlByteAbsent
 		}
 		return p.ControllerState
-	})
+	}, s.checkpointBindingAuthority())
 	// Path work is shared across the existing session players and uses the
 	// session unit-limit word as its pressure divisor [04 R-PATH-01 §6].
-	s.Movement.ConfigurePath(s.activePlayerCount(), sessionPathUnitLimit(s), func(player int) bool {
+	s.Movement.ConfigurePathWithCheckpointBinding(s.activePlayerCount(), sessionPathUnitLimit(s), func(player int) bool {
 		if s.Econ == nil || player < 0 || player >= len(s.Econ.Players) {
 			return false
 		}
@@ -2059,7 +2101,7 @@ func createAndBindServices(s *Session) error {
 		// [04 R-PATH-01 §6][04 R-MOV-03 §11].
 		visit, _ := s.sweepPlayerGate(uint8(player))
 		return visit
-	})
+	}, s.checkpointBindingAuthority())
 	// Path is alias to movement scheduler; one scheduler only [04 §7.3]
 	if s.Movement.Scheduler == nil {
 		return fmt.Errorf("session: Movement.Scheduler nil")
@@ -2083,11 +2125,11 @@ func createAndBindServices(s *Session) error {
 	s.RebindRules()
 	s.Combat.ProjectileWind = s.Wind
 	s.Combat.ResetCommunityAreaState()
-	s.Combat.VisitOffMapFiled = s.Movement.Grid.VisitOffMapFiled
-	s.Combat.IsOffMapFiled = func(h pool.Handle) bool {
+	s.Combat.SetVisitOffMapFiledWithCheckpointBinding(s.Movement.Grid.VisitOffMapFiled, s.checkpointBindingAuthority())
+	s.Combat.SetIsOffMapFiledWithCheckpointBinding(func(h pool.Handle) bool {
 		filing := s.Movement.OverlapFiling(int(h))
 		return filing != nil && filing.Filed && filing.OffMap
-	}
+	}, s.checkpointBindingAuthority())
 	s.Build.Combat = s.Combat
 	// The area walk of [06 §9.3] offers a feature candidate in every covered
 	// cell, and the entry it reaches is the feature damage of [06 §13.1]. The
@@ -2113,7 +2155,7 @@ func createAndBindServices(s *Session) error {
 	// a null-shooter record's neutral side byte selects — reads as
 	// ControlByteAbsent, which PASSES gate 1 and rejects gate 2
 	// [06 R-DMG-01 §9].
-	s.Combat.ControlByte = func(owner uint8) uint8 {
+	s.Combat.SetControlByteWithCheckpointBinding(func(owner uint8) uint8 {
 		if s.Econ == nil || int(owner) >= len(s.Econ.Players) {
 			return combat.ControlByteAbsent
 		}
@@ -2122,7 +2164,7 @@ func createAndBindServices(s *Session) error {
 			return combat.ControlByteAbsent
 		}
 		return p.ControllerState
-	}
+	}, s.checkpointBindingAuthority())
 	// Every newly-created queue receives this one session-owned binding. It
 	// carries the economy admission service, target lookup, hostility predicate,
 	// deterministic world traversal, and simulation RNG together so producer
@@ -2146,18 +2188,18 @@ func createAndBindServices(s *Session) error {
 	// Construction queries the immutable model retained by each strict COB
 	// binding. This keeps factory exit placement and mobile QueryNanoPiece on
 	// the authored model identity, including future products.
-	s.Build.ModelForFactory = func(u *units.Unit) *model.Model {
+	s.Build.SetModelForFactoryWithCheckpointBinding(func(u *units.Unit) *model.Model {
 		if u == nil || u.COBBinding() == nil {
 			return nil
 		}
 		return u.COBBinding().Model
-	}
-	s.Build.ModelForUnit = func(u *units.Unit) *model.Model {
+	}, s.checkpointBindingAuthority())
+	s.Build.SetModelForUnitWithCheckpointBinding(func(u *units.Unit) *model.Model {
 		if u == nil || u.COBBinding() == nil {
 			return nil
 		}
 		return u.COBBinding().Model
-	}
+	}, s.checkpointBindingAuthority())
 	s.bindBuildPresentation()
 	// Walk-to-site uses normal Move_Ground machinery [04 §3.4][R-P0-06].
 	// Bind the movement system so mobile builders walk into nano range before state 2.
@@ -2166,8 +2208,14 @@ func createAndBindServices(s *Session) error {
 	// OnDeath hook remains owned by the session loop for triggers/corpse/Killed;
 	// this observer releases the leaving unit's retained construction placement,
 	// including completed building occupancy, once.
-	priorDeathExtra := s.Units.OnDeathExtra
-	s.Units.OnDeathExtra = func(h pool.Handle, cause units.DeathCause, u *units.Unit) {
+	priorDeathExtra := s.Units.DeathExtraHook()
+	deathExtraAuthority := s.checkpointBindingAuthority()
+	if priorDeathExtra != nil {
+		// Only the initially absent predecessor is the reviewed admission shape.
+		// Keep custom/repeated gameplay chains, but do not attest their contents.
+		deathExtraAuthority = nil
+	}
+	s.Units.SetDeathExtraHookWithCheckpointBinding(func(h pool.Handle, cause units.DeathCause, u *units.Unit) {
 		if priorDeathExtra != nil {
 			priorDeathExtra(h, cause, u)
 		}
@@ -2194,11 +2242,11 @@ func createAndBindServices(s *Session) error {
 		if s.Combat != nil {
 			s.Combat.ForgetUnit(h)
 		}
-	}
+	}, deathExtraAuthority)
 	// Combat emits immutable authoritative events in impact order. The
 	// collector is presentation-only; EventUnitKilled remains a death/corpse
 	// notification in Units.OnDeath and is not duplicated here.
-	s.Combat.Events = func(ev combat.Event) {
+	s.Combat.SetEventsWithCheckpointBinding(func(ev combat.Event) {
 		if s.publication == nil || s.publication.events == nil {
 			return
 		}
@@ -2298,8 +2346,12 @@ func createAndBindServices(s *Session) error {
 				s.publication.events.EmitCorpse(pe)
 			}
 		}
-	}
+	}, s.checkpointBindingAuthority())
 	s.bindDamageReaction()
+	s.checkpointCombat = sessionCheckpointCombatBinding{}
+	if a := s.checkpointBindingAuthority(); a != nil {
+		s.checkpointCombat = sessionCheckpointCombatBinding{s, s.Combat, s.Movement.Grid, s.Combat.Reaction, a}
+	}
 	// Still-unwired strip producer rows [R-STRIP-01 §1], left for the units
 	// that own their trigger sites rather than invented here:
 	//   - strip 5, the flame-weapon area scan: the weapon-class dispatch
@@ -2735,20 +2787,20 @@ func (s *Session) bindDamageReaction() {
 	if s == nil || s.Combat == nil {
 		return
 	}
-	s.Combat.InfectionThreat = orders.InfectionThreat
-	s.Combat.DangerNotice = s.noticeModernDanger
-	s.Combat.ImpactNotice = s.noticeModernImpact
-	s.Combat.DamageActivity = func(victim, attacker *units.Unit, tick uint32) {
+	s.Combat.SetInfectionThreatWithCheckpointBinding(orders.InfectionThreat, s.checkpointBindingAuthority())
+	s.Combat.SetDangerNoticeWithCheckpointBinding(s.noticeModernDanger, s.checkpointBindingAuthority())
+	s.Combat.SetImpactNoticeWithCheckpointBinding(s.noticeModernImpact, s.checkpointBindingAuthority())
+	s.Combat.SetDamageActivityWithCheckpointBinding(func(victim, attacker *units.Unit, tick uint32) {
 		// The intake has already excluded healing and null attackers. Either
 		// participant may belong to the local player [03 R-AUD-01 §5].
 		if victim.Owner == s.LocalOwner || attacker.Owner == s.LocalOwner {
 			s.emitMusicIntensity(tick, victim.Handle, 1)
 		}
-	}
+	}, s.checkpointBindingAuthority())
 	// Survival scoring prices the health survivors remove from attacker
 	// units (DESIGN_SURVIVAL §8); outside Survival it returns at once.
-	s.Combat.HealthLost = s.survivalNoteDamage
-	s.Combat.Reaction = &combat.ReactionSeams{
+	s.Combat.SetHealthLostWithCheckpointBinding(s.survivalNoteDamage, s.checkpointBindingAuthority())
+	s.Combat.Reaction = combat.NewReactionSeamsWithCheckpointBinding(combat.ReactionSeamsConfig{
 		// Part 1: pending bit 0x10 on every order record observing the victim
 		// [06 R-WPN-04 §2 part 1][04 R-MOV-03 §7].
 		ObserverNotice: func(victim *units.Unit) {
@@ -2797,7 +2849,7 @@ func (s *Session) bindDamageReaction() {
 		UnderAttackNotice: func(victim *units.Unit) {
 			s.raiseStatusCue(victim, uint8(audio.SlotUnderAttack))
 		},
-	}
+	}, s.checkpointBindingAuthority())
 }
 
 // bindFeatureStripProducers connects the feature service's strip producers to
@@ -2847,21 +2899,21 @@ func (s *Session) bindFeatureStripProducers() {
 	if s == nil || s.Features == nil {
 		return
 	}
-	if s.Features.BurnSound == nil {
-		s.Features.BurnSound = func(pos [3]numeric.Fixed) {
+	if s.Features.BurnSoundHook() == nil {
+		s.Features.SetBurnSoundWithCheckpointBinding(func(pos [3]numeric.Fixed) {
 			s.EmitPositional("treeburn", pos) // [05 R-FEAT-01 §9 step 6][I6]
-		}
+		}, s.checkpointBindingAuthority())
 	}
-	if s.Features.BurnSmoke == nil {
-		s.Features.BurnSmoke = func(pos [3]numeric.Fixed) {
+	if s.Features.BurnSmokeHook() == nil {
+		s.Features.SetBurnSmokeWithCheckpointBinding(func(pos [3]numeric.Fixed) {
 			s.appendStripSmokePuffer(stripBurningFeatureSmoke, pos, SmokePuffTrail)
-		}
+		}, s.checkpointBindingAuthority())
 	}
 	// The two art-backed seams read the session's feature-sequence resolver
 	// through the session pointer, so a fixture that installs its own resolver
 	// after composition still reaches these closures.
-	if s.Features.BurnFrameGeometry == nil {
-		s.Features.BurnFrameGeometry = func(def *content.FeatureDef, visit int32) (w, h, xoff, yoff int32) {
+	if s.Features.BurnFrameGeometryHook() == nil {
+		s.Features.SetBurnFrameGeometryWithCheckpointBinding(func(def *content.FeatureDef, visit int32) (w, h, xoff, yoff int32) {
 			if s.featureSequence == nil || def == nil || def.SeqNameBurn == "" {
 				return 0, 0, 0, 0
 			}
@@ -2870,7 +2922,7 @@ func (s *Session) bindFeatureStripProducers() {
 				return 0, 0, 0, 0
 			}
 			return w, h, xoff, yoff
-		}
+		}, s.checkpointBindingAuthority())
 	}
 	// The cursor metadata: the per-frame delay words of whichever of the
 	// definition's three event sequences the selector names, straight from
@@ -2880,8 +2932,8 @@ func (s *Session) bindFeatureStripProducers() {
 	// composition without a content table answers nil: no sequence, so the
 	// transition replaces at once and nothing ignites — the contracts' own
 	// outcomes for an unresolved sequence, not a substitute lifetime.
-	if s.Features.SequenceFrames == nil {
-		s.Features.SequenceFrames = func(def *content.FeatureDef, selector uint8) []int32 {
+	if s.Features.SequenceFramesHook() == nil {
+		s.Features.SetSequenceFramesWithCheckpointBinding(func(def *content.FeatureDef, selector uint8) []int32 {
 			if s.simArt == nil || def == nil {
 				return nil
 			}
@@ -2894,7 +2946,7 @@ func (s *Session) bindFeatureStripProducers() {
 				return nil
 			}
 			return delays
-		}
+		}, s.checkpointBindingAuthority())
 	}
 	if s.Features.ShadowSequenceResolved == nil {
 		s.Features.ShadowSequenceResolved = func(def *content.FeatureDef, sequence string) bool {
@@ -2923,8 +2975,8 @@ func (s *Session) bindFeatureStripProducers() {
 	// zero would be player 0's own row, which is a different gate and a
 	// different split. The name is resolved with the catalog's link
 	// policy: a miss is record 0, the inactive sentinel, and fires nothing.
-	if s.Features.BurnWeapon == nil {
-		s.Features.BurnWeapon = func(name string, pos [3]numeric.Fixed) {
+	if s.Features.BurnWeaponHook() == nil {
+		s.Features.SetBurnWeaponWithCheckpointBinding(func(name string, pos [3]numeric.Fixed) {
 			if s.Catalog == nil || s.Combat == nil || s.Units == nil {
 				return
 			}
@@ -2937,7 +2989,7 @@ func (s *Session) bindFeatureStripProducers() {
 				tick = s.Clock.GlobalTick
 			}
 			s.Combat.ExplodeWeaponAt(s.Units, s.World, weapon, combat.Vec3{X: pos[0], Y: pos[1], Z: pos[2]}, 0, tick)
-		}
+		}, s.checkpointBindingAuthority())
 	}
 }
 

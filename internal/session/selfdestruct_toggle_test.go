@@ -36,13 +36,13 @@ func TestHumanSelfDestructToggles(t *testing.T) {
 		kind uint8
 	}
 	var cues []cue
-	s.Build.OrderBinding.Presentation = &orders.PresentationAdapter{
+	s.Build.OrderBinding.Presentation = orders.NewPresentationAdapter(orders.PresentationAdapterConfig{
 		Ready: func() bool { return true },
 		Status: func(u *units.Unit, kind uint8, _ string) bool {
 			cues = append(cues, cue{u.Handle, kind})
 			return true
 		},
-	}
+	})
 	id := orders.Lookup("SelfDestruct")
 	press := func(tick uint32, handles ...pool.Handle) {
 		s.applyHumanCommand(HumanCommand{Kind: HumanSelfDestruct, SelfDestruct: HumanSelfDestructCommand{Handles: handles}}, tick)

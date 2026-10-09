@@ -30,12 +30,12 @@ func TestModernImpactUsesIncomingMotionPastVictimCenter(t *testing.T) {
 					}
 					beforeDirection := hitDirectionByte(&p, victim)
 					called := false
-					s.ImpactNotice = func(v, a *units.Unit, bearing numeric.Angle, tick uint32) {
+					s.SetImpactNotice(func(v, a *units.Unit, bearing numeric.Angle, tick uint32) {
 						called = true
 						if v != victim || a != shooter || bearing != 49152 || tick != 1 {
 							t.Fatalf("incoming bearing=%d, want west", bearing)
 						}
-					}
+					})
 					before := victim.Health
 					applyProjectileDamage(s, &p, weapon, w, terrain, 1, victim.Handle)
 					if called != modern || victim.Health >= before || hitDirectionByte(&p, victim) != beforeDirection {

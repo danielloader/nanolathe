@@ -14,6 +14,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/mission"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/checkpoint"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
@@ -637,10 +638,13 @@ func NewSkirmishWithEntryOptions(fs vfs.FSOps, cat *content.Catalog, cfg Skirmis
 // selected map and the inputs frozen for them. composeSkirmish composes the
 // battle from these values and reads no live source for the simulation.
 type skirmishEntry struct {
-	cfg      SkirmishConfig
-	features community.Features
-	mission  *mission.Mission
-	inputs   *content.SimulationInputs
+	cfg                 SkirmishConfig
+	features            community.Features
+	mission             *mission.Mission
+	inputs              *content.SimulationInputs
+	checkpointAdmission *sessionCheckpointAdmission
+	online              *EffectiveMatchConfig
+	localSeat           uint8
 }
 
 // prepareSkirmishEntry is battle entry's front half: it resolves the
@@ -650,6 +654,11 @@ type skirmishEntry struct {
 // (DESIGN_MULTIPLAYER §8.7). It allocates no world and draws from neither
 // stream.
 func prepareSkirmishEntry(fs vfs.FSOps, cat *content.Catalog, cfg SkirmishConfig, options SkirmishEntryOptions) (skirmishEntry, error) {
+	return prepareSkirmishInputs(fs, cat, cfg, options, true)
+}
+
+// Frozen match inputs need a seat count, not the single-player lobby shape.
+func prepareSkirmishInputs(fs vfs.FSOps, cat *content.Catalog, cfg SkirmishConfig, options SkirmishEntryOptions, localLobby bool) (skirmishEntry, error) {
 	entryFeatures, err := ResolveCommunity(cfg.Gameplay, options.CommunitySources)
 	if err != nil {
 		return skirmishEntry{}, err
@@ -664,7 +673,7 @@ func prepareSkirmishEntry(fs vfs.FSOps, cat *content.Catalog, cfg SkirmishConfig
 	if err := cfg.Validate(); err != nil {
 		return skirmishEntry{}, err
 	}
-	if err := validateSkirmishLobby(cfg); err != nil && !options.AutomatedPlayers {
+	if err := validateSkirmishLobby(cfg); err != nil && localLobby && !options.AutomatedPlayers {
 		return skirmishEntry{}, err
 	}
 	// DET-01 [R-CORE-02]: battle bootstrap seeds both streams fresh BEFORE any
@@ -711,6 +720,8 @@ func prepareSkirmishEntry(fs vfs.FSOps, cat *content.Catalog, cfg SkirmishConfig
 	// admitted unit's program and model (units not yet built included), the
 	// animation table, the map, the AI profile and the extension inputs.
 	request := skirmishSimulationRequest(cat, m, entryFeatures, options)
+	preparing := RuleSetForMode(cfg.Gameplay)
+	request.PreparingRuleName, request.PreparingRuleBase = preparing.Name, string(preparing.Base)
 	// The frozen selection records the set beside the mutators; the prepared
 	// catalog already carries its effect (§15.5).
 	request.Restrictions = options.Restrictions
@@ -745,28 +756,30 @@ func composeSkirmish(entry skirmishEntry, options SkirmishEntryOptions, audio vf
 		return nil, err
 	}
 	report.Report(FamilyTerrain, 100)
-	// 4. create retail sliced unit pool [P0-16]. This constructor only ever
-	// builds a skirmish session (session kind 2), whose comparator path
-	// always orders by slot; the peer-identity sort key is consulted only
-	// in session kind 3 (multiplayer, never built by this engine)
-	// [08 R-SESS-01 §7]. Pass the skirmish kind explicitly rather than
-	// mission.Type — a different, file-loading discriminant — and drop the
-	// sort-key plumbing entirely: [08 R-SESS-01 §7 "Consequence for
-	// single-player"] establishes that an engine which never builds a
-	// kind-3 session needs none.
-	//
-	// The slice is `limit` records per slot, `limit × 10 + 1` in all
-	// [05 R-SHARE-01 §7]. A skirmish's limit is the configured
-	// `[Preferences] UnitLimit`, which battle entry copies over the session
-	// word — a skirmish never uses the map's `maxunits` [08 R-SKIR-01 §6].
-	// Normalize above applied only the missing-value default.
-	unitsWorld, err := newBattleSlicedWorldWithCOBSized(cat, frozen, sessionKindSkirmish, [pool.PlayerCount]uint32{}, cfg.UnitLimit)
+	// Online uses canonical seat order for the kind-3 pool comparator
+	// (DESIGN_MULTIPLAYER §6); single-player retains its kind-2 slot order.
+	kind := sessionKindSkirmish
+	var sortKeys [pool.PlayerCount]uint32
+	if entry.online != nil {
+		kind = 3
+		for i := range sortKeys {
+			sortKeys[i] = uint32(i)
+		}
+	}
+	var bindingAuthority *checkpoint.BindingAuthority
+	if entry.checkpointAdmission != nil {
+		bindingAuthority = entry.checkpointAdmission.authority
+	}
+	unitsWorld, err := newBattleSlicedWorldWithCheckpointBinding(cat, frozen, kind, sortKeys, cfg.UnitLimit, bindingAuthority)
 	if err != nil {
 		return nil, err
 	}
 	report.Report(FamilyUnitWorld, 100)
 	// Derive LocalOwner from configured human row, not zero default [08 "Skirmish configuration"].
 	localOwner := LocalOwnerForConfig(cfg)
+	if entry.online != nil {
+		localOwner = int(entry.localSeat)
+	}
 	enemyOwner := 0
 	for i := 0; i < cfg.NumPlayers && i < 10; i++ {
 		if i == localOwner {
@@ -786,25 +799,43 @@ func composeSkirmish(entry skirmishEntry, options SkirmishEntryOptions, audio vf
 		}
 	}
 	s := &Session{
-		Gameplay:         cfg.Gameplay.Normalize(),
-		CommunitySources: options.CommunitySources,
-		Community:        entryFeatures,
-		EntryCommunity:   entryFeatures,
-		Mutators:         options.Mutators,
-		Restrictions:     inputs.Restrictions(),
-		Catalog:          cat,
-		World:            terrain,
-		Mission:          m,
-		Skirmish:         cfg,
-		simArt:           inputs.SimArt(),
-		Clock:            &clock.State{Requested: 10, Active: 10},
-		Snapshot:         frame.NewBuffer(),
-		Units:            unitsWorld,
-		Econ:             &economy.Service{},
-		Latch:            NewEndLatch(),
-		LocalOwner:       uint8(localOwner),
-		ViewingOwner:     uint8(localOwner),
-		EnemyOwner:       uint8(enemyOwner),
+		checkpointAdmission: entry.checkpointAdmission,
+		Gameplay:            cfg.Gameplay.Normalize(),
+		CommunitySources:    options.CommunitySources,
+		Community:           entryFeatures,
+		EntryCommunity:      entryFeatures,
+		Mutators:            options.Mutators,
+		Restrictions:        inputs.Restrictions(),
+		Catalog:             cat,
+		World:               terrain,
+		Mission:             m,
+		Skirmish:            cfg,
+		simArt:              inputs.SimArt(),
+		Clock:               &clock.State{Requested: 10, Active: 10},
+		Snapshot:            frame.NewBuffer(),
+		Units:               unitsWorld,
+		Econ:                &economy.Service{},
+		Latch:               NewEndLatch(),
+		LocalOwner:          uint8(localOwner),
+		ViewingOwner:        uint8(localOwner),
+		EnemyOwner:          uint8(enemyOwner),
+	}
+	if entry.online != nil {
+		var seats [10]bool
+		for i := range entry.online.request.Seats {
+			seats[i] = true
+		}
+		s.onlineResults = newOnlineResultState(seats)
+		s.publication = newPublicationState(frame.NewEventBufferWithIndependentEffects(frame.Limits{}), s.EntryCommunity.ExplosionCapacity, s.simArt)
+		if err := setOnlineSeatCommands(s, *entry.online); err != nil {
+			return nil, err
+		}
+	}
+	if s.checkpointAdmission != nil {
+		// Bind authority before any callback can capture this session. A copy must
+		// never attest closures capturing itself against the original's owners.
+		s.checkpointAdmission.owner = s
+		s.checkpointAdmission.terrain = terrain
 	}
 	// Seed both streams fresh at battle bootstrap, before any battle setup
 	// draw [R-CORE-02] DET-01.
@@ -912,6 +943,11 @@ func composeSkirmish(entry skirmishEntry, options SkirmishEntryOptions, audio vf
 	if err := s.initializeBuilderOptions(options.BuilderOptions); err != nil {
 		return nil, err
 	}
+	if entry.online != nil {
+		for i, seat := range entry.online.request.Seats {
+			s.playerBuilderOptions[i] = seat.BuilderOptions
+		}
+	}
 	// Construct every manager in ascending slot order before commander and map
 	// unit allocation. Each constructor consumes its exact eight strategic
 	// draws from the shared stream [08 R-ENTRY-01 §3 step 24][08 R-AI-01 §9].
@@ -941,7 +977,7 @@ func composeSkirmish(entry skirmishEntry, options SkirmishEntryOptions, audio vf
 		if cfg.Players[i].IsObserver() {
 			continue
 		}
-		if err := initializeBattleAI(s, uint8(i), sharedProf, sessionKindSkirmish); err != nil {
+		if err := initializeBattleAI(s, uint8(i), sharedProf, kind); err != nil {
 			return nil, err
 		}
 	}
@@ -1000,6 +1036,12 @@ func composeSkirmish(entry skirmishEntry, options SkirmishEntryOptions, audio vf
 	}
 	if err := s.ValidateComposition(); err != nil {
 		return nil, fmt.Errorf("session: composition invalid: %w", err)
+	}
+	if s.checkpointAdmission != nil {
+		if err := s.validateCheckpointInputs(); err != nil {
+			return nil, err
+		}
+		s.checkpointAdmission.ready = true
 	}
 	return s, nil
 }
@@ -1357,26 +1399,14 @@ func skirmishReconstructUnits(s *Session, cfg SkirmishConfig, m *mission.Mission
 		if cfg.Players[playerIdx].Side == neutralSideIndex {
 			continue
 		}
-		// The stamp helper places the commander AT the slot's start position and
-		// draws nothing [08 R-ENTRY-01 §5] "Kind 2 (skirmish), no save file":
-		// steps 1–4 copy side and colour, set the storage bonus, resolve the
-		// `StartPos`, and a miss is fatal. "No simulation draw is made by the
-		// stamp or the grant themselves" — the only draws in this loop are the
-		// allocator's two, taken inside s.Units.Create below [04 §2.3b].
-		//
-		// **Correction (WU-19-178).** This site drew two simulation values per
-		// eligible slot — an X/Z "jitter" — and kept the jittered value as a
-		// fallback when the map had no matching `StartPos`, with a comment
-		// asserting the bounds were map-cell counts. Both halves were wrong.
-		// The jitter belongs to the kind-3 (multiplayer) path alone, where its
-		// bounds are the TNT extents × 16, i.e. WORLD units, not cells
-		// [08 R-ENTRY-01 §5] "Kind 3", correction 2 of [08 R-ENTRY-01 §10]; the
-		// "in cells" reading came from the superseded "Randomization for
-		// skirmish starts" paragraph, which that correction retracts. This
-		// engine never builds a kind-3 session, so the jitter has no reachable
-		// caller and is deleted rather than carried with the wrong unit; the
-		// draws it was taking on every skirmish were phantom traffic that
-		// displaced every later draw in the battle.
+		// Kind 3 consumes its two placement draws before StartPos replaces
+		// them [08 R-ENTRY-01 §5]. The online slice admits only active humans;
+		// ordinary kind-2 entry takes neither draw and requires StartPos.
+		var x, z numeric.Fixed
+		if s.onlineResults != nil {
+			x = numeric.Fixed(s.SimRNG().Uint32n(uint32(s.World.CellW*16-160))+80) << 16
+			z = numeric.Fixed(s.SimRNG().Uint32n(uint32(s.World.CellH*16-160))+80) << 16
+		}
 		perm, has := permMap[playerIdx]
 		if !has {
 			// permMap is built from `eligible`, which applies the same
@@ -1392,7 +1422,10 @@ func skirmishReconstructUnits(s *Session, cfg SkirmishConfig, m *mission.Mission
 		// — or StartPos0, which stores 0 as well [08 R-ENTRY-01 §5] step 3,
 		// [08 R-TRIG-01 §9].
 		sp := findSpecial(perm)
-		if sp == nil {
+		if sp != nil {
+			x = numeric.Fixed(int32(sp.X) * 65536)
+			z = numeric.Fixed(int32(sp.Z) * 65536)
+		} else if s.onlineResults == nil {
 			return errStartPositionMissing(perm)
 		}
 		// CP-UD-3 replaces this player's commander when any initial placement
@@ -1408,8 +1441,6 @@ func skirmishReconstructUnits(s *Session, cfg SkirmishConfig, m *mission.Mission
 		if commanderErr != nil {
 			return commanderErr
 		}
-		x := numeric.Fixed(int32(sp.X) * 65536)
-		z := numeric.Fixed(int32(sp.Z) * 65536)
 		y := numeric.Fixed(0)
 		if s.World != nil {
 			y = s.World.HeightAt(x, z)

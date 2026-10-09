@@ -156,9 +156,10 @@ func (c *BattleController) Step(frame BattleInputFrame, cl *client.Client) {
 	c.battle.stepFollowCamera()
 	state := input.StateFromSample(frame)
 	if c.battle.sess != nil {
-		if c.battle.sim != nil {
-			// The batch runs on the simulation goroutine; the host feeds these
-			// observers each publication after joining it (battle_sim.go).
+		if c.battle.sim != nil || c.battle.onlineBattle() {
+			// Async batches are observed after joining; granted online ticks
+			// are observed by the host pump before input. Neither uses the
+			// synchronous wall-clock observer below.
 			c.battle.sess.SetPublicationObserver(nil)
 		} else {
 			c.battle.sess.SetPublicationObserver(func(cur *committedframe.Frame) {
@@ -227,6 +228,9 @@ func (c *BattleController) Step(frame BattleInputFrame, cl *client.Client) {
 		c.cursorScaled = scaled
 	} else {
 		c.cursorScaledValid = false
+	}
+	if c.battle.onlineBattle() {
+		return
 	}
 	budget := c.stepScaled(scaled)
 	if c.battle.sim != nil {

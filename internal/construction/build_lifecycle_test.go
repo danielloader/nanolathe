@@ -259,7 +259,7 @@ func TestGetBuiltCompletionRebindsAndConsumesWatcher(t *testing.T) {
 	pq.Primary()[0].DynamicGate = 0
 	hostility := func(*units.Unit, *units.Unit) bool { return true }
 	lookup := func(pool.Handle) *units.Unit { return factory }
-	pq.SetBinding(&orders.QueueBinding{Hostility: hostility, Lookup: lookup, Economy: &economy.Service{}})
+	pq.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Hostility: hostility, Lookup: lookup, Economy: &economy.Service{}}))
 	svc := NewService(nil, cat, w, nil)
 	svc.queueForUnit(product)
 	product.Remaining = 0
@@ -271,7 +271,7 @@ func TestGetBuiltCompletionRebindsAndConsumesWatcher(t *testing.T) {
 			t.Fatalf("completed queue retained GetBuilt: %v", prim)
 		}
 	}
-	if binding := newQ.Binding(); binding == nil || binding.Hostility == nil || binding.Lookup == nil || binding.Economy == nil {
+	if binding := newQ.Binding(); binding == nil || binding.HostilityHook() == nil || binding.LookupHook() == nil || binding.Economy == nil {
 		t.Fatal("rally queue hooks were not preserved")
 	}
 }
@@ -467,7 +467,7 @@ func TestAcceptedWorkEmitsNanoAndStallDoesNot(t *testing.T) {
 	q.Push(orders.Lookup("BuildingBuild"), orders.Node{BuildDefKey: prodDef.CanonicalKey, Param2: 1, Phase: uint8(State3)})
 	q.Primary()[0].BindTarget(ph) // stage the runtime product relink [04 R-ORD-01 §6]
 	svc := NewService(nil, cat, w, &economy.Service{})
-	svc.ModelForUnit = func(*units.Unit) *model.Model { return trivialModel(1, nil) }
+	svc.SetModelForUnit(func(*units.Unit) *model.Model { return trivialModel(1, nil) })
 	collector := frame.NewEventBuffer(frame.Limits{})
 	svc.Presentation = collector
 	svc.StepUnit(TickContext{Tick: 7, World: w, Catalog: cat}, h)

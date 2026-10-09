@@ -194,10 +194,10 @@ func TestResourceMoveCancellationReleasesActiveGoalOnce(t *testing.T) {
 	n := q.Head()
 	var installed *orders.Node
 	var released []*orders.Node
-	q.SetBinding(&orders.QueueBinding{Movement: &orders.MovementGoalAdapter{
+	q.SetBinding(&orders.QueueBinding{Movement: orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{
 		InstallPoint: func(req orders.PointGoalRequest) bool { installed = req.Node; return true },
 		Release:      func(node *orders.Node) bool { released = append(released, node); return true },
-	}})
+	})})
 	q.Pump(u, 1)
 	if installed != n {
 		t.Fatal("move did not install its active goal")

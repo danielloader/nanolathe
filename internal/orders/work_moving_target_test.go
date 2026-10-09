@@ -22,7 +22,7 @@ func TestWorkRestartsWhenTargetStartsMoving(t *testing.T) {
 		q, builder, target := vtolWorkFixture()
 		target.MoveTier = 1
 		var repairs int
-		q.binding.Work.Repair = func(*units.Unit, *units.Unit, *Node, uint32) bool { repairs++; return true }
+		q.binding.Work.SetRepair(func(*units.Unit, *units.Unit, *Node, uint32) bool { repairs++; return true })
 		n := &Node{ID: Lookup("VTOL_RepairUnit"), Owner: builder.Handle, Target: target.Handle, Phase: 2, Deadline: -1}
 		if code := vtolRepairUnitHandler(builder, n, 0, 100); code != 0 || n.Deadline != 115 || n.DynamicGate&gateDeadline == 0 || repairs != 0 {
 			t.Fatalf("moving repair: code=%d deadline=%d gate=%#x repairs=%d", code, n.Deadline, n.DynamicGate, repairs)

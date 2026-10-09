@@ -113,7 +113,7 @@ func TestProTAAttackChaseTakesOneSlot(t *testing.T) {
 			q, u, target := workFixture()
 			q.Binding().Rules = tc.rules
 			q.Binding().Community = community.Features{AttackSingleSlotTake: tc.enabled}
-			q.Binding().Weapons = &WeaponAdapter{CanEngage: func(*units.Unit, pool.Handle, int) bool { return true }}
+			q.Binding().Weapons = NewWeaponAdapter(WeaponAdapterConfig{CanEngage: func(*units.Unit, pool.Handle, int) bool { return true }})
 			for idx := 0; idx < units.NumSlots; idx++ {
 				u.Slots[idx] = units.Slot{Flags: units.SlotFlagEnabled | units.SlotFlagAutonomous, Target: units.Target{Kind: units.TargetUnit, Unit: 9}}
 			}
@@ -195,12 +195,12 @@ func TestProTAResurrectionFailureText(t *testing.T) {
 		f.q.Binding().Community = community.Features{ResurrectionTextFix: tc.enabled}
 		var captions []string
 		var statuses []uint8
-		f.q.Binding().Presentation = &PresentationAdapter{
+		f.q.Binding().Presentation = NewPresentationAdapter(PresentationAdapterConfig{
 			Status: func(_ *units.Unit, status uint8, text string) bool {
 				captions, statuses = append(captions, text), append(statuses, status)
 				return true
 			},
-		}
+		})
 		f.q.Push(Lookup("Resurrect"), Node{Owner: f.builder.Handle, GoalX: world.CellToWorld(4), GoalZ: world.CellToWorld(5), GoalSupplied: true})
 		f.q.Pump(f.builder, 0)
 		f.q.Head().Satisfied |= gateArrived

@@ -14,7 +14,7 @@ func TestPublishedDiplomacyRowsMatchOrderHostility(t *testing.T) {
 	s.Econ.Players[0].Allies[1] = true
 	s.Econ.Players[1].Allies[0] = false
 	binding := s.newOrderBinding()
-	if binding == nil || binding.Hostility == nil {
+	if binding == nil || binding.HostilityHook() == nil {
 		t.Fatal("missing order hostility binding")
 	}
 
@@ -31,7 +31,7 @@ func TestPublishedDiplomacyRowsMatchOrderHostility(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			actor := &units.Unit{Owner: tc.actorOwner}
 			target := &units.Unit{Owner: tc.targetOwner}
-			if got := binding.Hostility(actor, target); got != tc.want {
+			if got := binding.HostilityHook()(actor, target); got != tc.want {
 				t.Fatalf("authoritative hostility = %v, want %v", got, tc.want)
 			}
 			rows := publishedPlayerRows(t, s, uint32(10+tc.actorOwner*3+tc.targetOwner))

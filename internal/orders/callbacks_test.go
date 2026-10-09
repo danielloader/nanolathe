@@ -185,7 +185,7 @@ func newCleanupCase(t *testing.T) *cleanupCase {
 	u, vm := cbUnit(cbProgram("StopBuilding", "TargetCleared"))
 	assignSlot(u, 0, 0x02, units.Target{Kind: units.TargetUnit, Unit: 9})
 	sim := rng.SimulationFromState(0x2A5F17)
-	q := &Queue{binding: &QueueBinding{SimRNG: &sim, Lookup: func(pool.Handle) *units.Unit { return u }}}
+	q := &Queue{binding: NewQueueBinding(QueueBindingConfig{SimRNG: &sim, Lookup: func(pool.Handle) *units.Unit { return u }})}
 	return &cleanupCase{q: q, u: u, vm: vm}
 }
 

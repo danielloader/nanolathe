@@ -14,13 +14,13 @@ func TestUnitReferencesAcrossCreationPathsAndReuse(t *testing.T) {
 	w := newFixtureWorld(3, nil)
 	def := p28AngleDef("reference", 4096)
 	var notified []pool.UnitRef
-	w.OnCreate = func(h pool.Handle, u *Unit) {
+	w.SetCreateHook(func(h pool.Handle, u *Unit) {
 		ref := w.Reference(h)
 		if ref.Serial == 0 || ref.Serial != w.LastAllocationSerial() || w.LookupReference(ref) != u {
 			t.Fatal("creation notification cannot resolve its successful allocation")
 		}
 		notified = append(notified, ref)
-	}
+	})
 	creators := []func() (pool.Handle, error){
 		func() (pool.Handle, error) { return w.Create(def, 0, 0, 0, 0) },
 		func() (pool.Handle, error) { return w.CreateNanoframe(def, 1, 0, 0, 0) },
@@ -83,7 +83,7 @@ func TestUnitReferenceFailedCreation(t *testing.T) {
 			sim, expected := rng.NewSimulation(53), rng.NewSimulation(53)
 			w.SetSimulationRNG(&sim)
 			notifications := 0
-			w.OnCreate = func(pool.Handle, *Unit) { notifications++ }
+			w.SetCreateHook(func(pool.Handle, *Unit) { notifications++ })
 			w.SetCOBBinder(func(u *Unit) error {
 				if w.Reference(u.Handle) != (pool.UnitRef{}) || u.AllocationSerial != 0 {
 					t.Fatal("unfinished binding has a successful allocation reference")
@@ -181,7 +181,7 @@ func TestUnitReferenceReservationReleasedBeforeNotification(t *testing.T) {
 	w := newFixtureWorld(2, nil)
 	w.lastAllocationSerial = math.MaxUint64 - 2
 	def := p28AngleDef("notification", 4096)
-	w.OnCreate = func(_ pool.Handle, u *Unit) {
+	w.SetCreateHook(func(_ pool.Handle, u *Unit) {
 		if w.pendingAllocationSerials != 0 {
 			t.Fatal("successful reservation still held in notification")
 		}
@@ -191,7 +191,7 @@ func TestUnitReferenceReservationReleasedBeforeNotification(t *testing.T) {
 				t.Fatalf("notification creation = %d, %v", w.Reference(h).Serial, err)
 			}
 		}
-	}
+	})
 	if _, err := w.Create(def, 0, 0, 0, 0); err != nil {
 		t.Fatal(err)
 	}

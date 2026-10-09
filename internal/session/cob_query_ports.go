@@ -53,8 +53,8 @@ func (s *Session) bindQueryPorts(binding *cob.Binding, u *units.Unit) {
 			u.Z.Add(offset[2]),
 		}
 	})
-	vm.BindPort(cob.Port(7), cob.PiecePositionXZPortFunc(pieceWorld))
-	vm.BindPort(cob.Port(8), cob.PiecePositionYPortFunc(pieceWorld))
+	u.RetainCheckpointPortInstallation(vm.BindPortWithPendingCheckpointBinding(cob.Port(7), cob.PiecePositionXZPortFunc(pieceWorld), s.checkpointBindingAuthority()))
+	u.RetainCheckpointPortInstallation(vm.BindPortWithPendingCheckpointBinding(cob.Port(8), cob.PiecePositionYPortFunc(pieceWorld), s.checkpointBindingAuthority()))
 
 	// Ports 9, 10 and 11 — another unit, selected by the identifier in the
 	// first argument slot. The identifier is masked to sixteen bits; a zero
@@ -87,16 +87,16 @@ func (s *Session) bindQueryPorts(binding *cob.Binding, u *units.Unit) {
 		}
 		return [3]numeric.Fixed{target.X, target.Y, target.Z}, height, true
 	})
-	vm.BindPort(cob.Port(9), cob.UnitPositionXZPortFunc(lookup))
-	vm.BindPort(cob.Port(10), cob.UnitPositionYPortFunc(lookup))
-	vm.BindPort(cob.Port(11), cob.UnitHeightPortFunc(lookup))
+	u.RetainCheckpointPortInstallation(vm.BindPortWithPendingCheckpointBinding(cob.Port(9), cob.UnitPositionXZPortFunc(lookup), s.checkpointBindingAuthority()))
+	u.RetainCheckpointPortInstallation(vm.BindPortWithPendingCheckpointBinding(cob.Port(10), cob.UnitPositionYPortFunc(lookup), s.checkpointBindingAuthority()))
+	u.RetainCheckpointPortInstallation(vm.BindPortWithPendingCheckpointBinding(cob.Port(11), cob.UnitHeightPortFunc(lookup), s.checkpointBindingAuthority()))
 
 	// Ports 12 to 15 — the trig arm. Port 12 is the only one of the four that
 	// reads unit state, and it reads it at CALL time: the heading moves every
 	// tick and the port subtracts the heading the reading unit carries now
 	// [04 §4.4].
-	vm.BindPort(cob.Port(12), cob.RelativeBearingPortFunc(func() uint16 { return u.Move.Heading }))
-	vm.BindPort(cob.Port(13), cob.DistancePortFunc())
-	vm.BindPort(cob.Port(14), cob.AtanPortFunc())
-	vm.BindPort(cob.Port(15), cob.HypotPortFunc())
+	u.RetainCheckpointPortInstallation(vm.BindPortWithPendingCheckpointBinding(cob.Port(12), cob.RelativeBearingPortFunc(func() uint16 { return u.Move.Heading }), s.checkpointBindingAuthority()))
+	u.RetainCheckpointPortInstallation(vm.BindPortWithPendingCheckpointBinding(cob.Port(13), cob.DistancePortFunc(), s.checkpointBindingAuthority()))
+	u.RetainCheckpointPortInstallation(vm.BindPortWithPendingCheckpointBinding(cob.Port(14), cob.AtanPortFunc(), s.checkpointBindingAuthority()))
+	u.RetainCheckpointPortInstallation(vm.BindPortWithPendingCheckpointBinding(cob.Port(15), cob.HypotPortFunc(), s.checkpointBindingAuthority()))
 }

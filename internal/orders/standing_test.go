@@ -28,7 +28,7 @@ func standingFixture(def *content.UnitDef) (*Queue, *units.Unit) {
 		Health:    3000,
 		MaxHealth: 3000,
 	}
-	q := &Queue{binding: &QueueBinding{SimRNG: rng.Global.Sim, World: &WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}}}
+	q := &Queue{binding: &QueueBinding{SimRNG: rng.Global.Sim, World: NewWorldQueryAdapter(WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 0 }})}}
 	BindQueue(u, q)
 	return q, u
 }
@@ -381,13 +381,13 @@ func TestStandbyNeedsAMoverAndStandbyMineTheBuildingClassBit(t *testing.T) {
 func TestOpportunityScanIsFireAtWillOnly(t *testing.T) {
 	q, u := standingFixture(&content.UnitDef{SightDistance: 500})
 	calls := 0
-	q.Binding().Weapons = &WeaponAdapter{Acquire: func(_ *units.Unit, slot int, limit uint32) (pool.Handle, bool) {
+	q.Binding().Weapons = NewWeaponAdapter(WeaponAdapterConfig{Acquire: func(_ *units.Unit, slot int, limit uint32) (pool.Handle, bool) {
 		calls++
 		if slot != 0 || limit != 500 {
 			t.Fatalf("opportunity scan used slot %d range %d, want slot 0 sightdistance 500", slot, limit)
 		}
 		return 0, false
-	}}
+	}})
 	for value := uint32(0); value <= 3; value++ {
 		calls = 0
 		u.Flags = (u.Flags &^ (3 << stanceFireShift)) | (value << stanceFireShift)

@@ -50,14 +50,14 @@ func arrivedFixture(def *content.UnitDef) (*Queue, *units.Unit, *statusSpy) {
 	spy := &statusSpy{}
 	q := &Queue{binding: &QueueBinding{
 		SimRNG: rng.Global.Sim,
-		Presentation: &PresentationAdapter{
+		Presentation: NewPresentationAdapter(PresentationAdapterConfig{
 			Ready: func() bool { return true },
 			Status: func(_ *units.Unit, kind uint8, text string) bool {
 				spy.kinds = append(spy.kinds, kind)
 				spy.texts = append(spy.texts, text)
 				return true
 			},
-		},
+		}),
 	}}
 	BindQueue(u, q)
 	return q, u, spy

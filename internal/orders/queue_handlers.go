@@ -58,6 +58,10 @@ func (q *Queue) SetOwnedHandler(id ID, handler OwnedHandler) {
 	if q == nil || int(id) <= 0 || int(id) >= len(table) {
 		return
 	}
+	// Reinstalling even the same function transfers no provenance (§16.3.62).
+	if int(id) < len(q.checkpointOwnedHandlers) {
+		q.checkpointOwnedHandlers[id] = CheckpointOwnedHandler{}
+	}
 	if q.ownedHandlers == nil {
 		if handler == nil {
 			return

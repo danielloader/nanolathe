@@ -120,8 +120,8 @@ func (s *Session) bindScriptPorts(vm *cob.VM, u *units.Unit) {
 	}
 	for _, id := range adoptedScriptPorts {
 		port := id
-		vm.BindPortBinding(port, cob.PortBinding{Read: func(args [4]int32) int32 {
+		u.RetainCheckpointPortInstallation(vm.BindPortBindingWithPendingCheckpointBinding(port, cob.PortBinding{Read: func(args [4]int32) int32 {
 			return s.scriptPortRules().ReadScriptPort(s, u, port, args)
-		}})
+		}}, s.checkpointBindingAuthority()))
 	}
 }

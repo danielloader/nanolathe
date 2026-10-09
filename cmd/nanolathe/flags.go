@@ -34,6 +34,15 @@ type Options struct {
 	MetalModelCapture                      string
 	MetalFrames, MetalQuads, MetalTextures int
 
+	// Extra delay for both seats in the local responsiveness experiment.
+	LocalMPCommandDelayMS int
+
+	// Hosted two-human play test; empty room creates one on the relay.
+	RelayAddress          string
+	RelayRoom             string
+	RelayCA               string
+	RelayInsecureLoopback bool
+
 	// excludedMapRoot belongs only to a prepared map-removal mount; never saved.
 	excludedMapRoot   string
 	Gameplay          gameplay.Mode
@@ -121,6 +130,8 @@ type Options struct {
 	ListInstalls       bool     // print resolved installation roots without mounting content
 	CheckInstall       bool     // validate startup content and exit without opening a window
 	SaveDir            string   // exact save/load directory override; empty uses the install root
+	LocalMPListen      string   // developer loopback relay, seat 0
+	LocalMPJoin        string   // developer loopback relay, seat 1
 	Map                string   // map name without extension, e.g. "ashap plateau"
 	Survival           bool     // a Survival battle on Map (docs/DESIGN_SURVIVAL.md)
 	SurvivalBuddies    int      // allied computer players, 0..2
@@ -219,7 +230,7 @@ var ErrHelp = errors.New("help requested")
 
 func parseFlags(args []string, out io.Writer) (Options, error) {
 	var opts Options
-	var unitLimitSet, liveSecondsSet, benchmarkPreTicksSet bool
+	var unitLimitSet, liveSecondsSet, benchmarkPreTicksSet, localMPSet bool
 	set := flag.NewFlagSet("nanolathe", flag.ContinueOnError)
 	set.BoolVar(&opts.Arrival, "arrival", true, "modern battle opening: commander arrival for new games, map reveal for saves")
 	set.Float64Var(&opts.ShotArrivalTime, "shot-arrival-time", -1, "capture the arrival prototype at these presentation seconds (requires --shot --shot-ticks=0)")
@@ -245,6 +256,13 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	set.IntVar(&opts.MetalTextures, "metal-textures", 1, "Metal battle benchmark stress: model texture scale, 1 or 2")
 	set.StringVar(&opts.SaveDir, "save-dir", "", "exact save/load directory (omitted uses savegame beneath the installation)")
 	set.StringVar(&opts.Map, "map", "", "map name without extension, e.g. \"ashap plateau\"")
+	set.StringVar(&opts.LocalMPListen, "local-mp-listen", "", "host a two-human Modern play test at a numeric loopback address (requires --map)")
+	set.StringVar(&opts.LocalMPJoin, "local-mp-join", "", "join seat 2 of a local play test (requires --map)")
+	set.IntVar(&opts.LocalMPCommandDelayMS, "local-mp-command-delay-ms", 0, "additional order delay for both local seats, 0..1000 ms (listener only; not simulated ping)")
+	set.StringVar(&opts.RelayAddress, "relay-address", "", "hosted relay host:port or wss://host/relay for a two-human Modern play test (requires --map)")
+	set.StringVar(&opts.RelayRoom, "relay-room", "", "join this hosted room code; omit to create a room")
+	set.StringVar(&opts.RelayCA, "relay-ca", "", "additional trusted PEM certificate for a private TLS relay")
+	set.BoolVar(&opts.RelayInsecureLoopback, "relay-insecure-loopback", false, "plaintext hosted transport for numeric loopback tests only")
 	set.BoolVar(&opts.Survival, "survival", false, "start a Survival battle on --map (docs/DESIGN_SURVIVAL.md)")
 	set.IntVar(&opts.SurvivalBuddies, "survival-buddies", 0, "allied computer players in a Survival battle, 0..2")
 	set.StringVar(&opts.SurvivalPace, "survival-pace", "normal", "Survival wave pace: normal, relaxed or relentless")
@@ -419,6 +437,8 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	}
 	set.Visit(func(f *flag.Flag) {
 		switch f.Name {
+		case "local-mp-listen", "local-mp-join", "local-mp-command-delay-ms", "relay-address", "relay-room", "relay-ca", "relay-insecure-loopback":
+			localMPSet = true
 		case "unit-limit":
 			unitLimitSet = true
 		case "fullscreen":
@@ -458,6 +478,39 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 		if opts.BenchmarkScene == "field" && !benchmarkPreTicksSet {
 			opts.BenchmarkPreTicks = int(headless.SimBenchDefaultWarmupTicks)
 		}
+	}
+	if localMPSet {
+		var refused error
+		if !opts.multiplayerPlaytest() {
+			refused = localMultiplayerError("address", "a local play-test address or --relay-address host:port")
+		}
+		set.Visit(func(f *flag.Flag) {
+			if !localMultiplayerFlagAllowed(f.Name) {
+				refused = localMultiplayerError("--"+f.Name, "a window play-test option")
+			}
+			if strings.HasPrefix(f.Name, "relay-") && opts.RelayAddress == "" || strings.HasPrefix(f.Name, "local-mp-") && opts.RelayAddress != "" {
+				refused = localMultiplayerError("--"+f.Name, "one local or hosted transport")
+			}
+			if f.Name == "local-mp-command-delay-ms" && opts.LocalMPListen == "" {
+				refused = localMultiplayerError("--"+f.Name, "--local-mp-listen to set the common order delay")
+			}
+			if f.Name == "arrival" && opts.Arrival {
+				refused = localMultiplayerError("--arrival", "no startup arrival in a multiplayer game")
+			}
+			if f.Name == "seed" && opts.Seed < 0 {
+				refused = localMultiplayerError("--seed", "a nonnegative fixed seed")
+			}
+		})
+		if refused != nil {
+			fmt.Fprintln(out, refused)
+			return opts, refused
+		}
+		if err := validateLocalMultiplayerOptions(opts); err != nil {
+			fmt.Fprintln(out, err)
+			return opts, err
+		}
+		opts.Gameplay, opts.GameplaySet = gameplay.Modern, true
+		opts.Arrival, opts.ArrivalSet = false, true
 	}
 	if opts.Survival {
 		if _, err := survival.ParsePace(opts.SurvivalPace); err != nil {

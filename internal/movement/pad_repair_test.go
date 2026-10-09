@@ -125,7 +125,7 @@ func TestVTOLLandingPushesSelfRepairOnTouchdown(t *testing.T) {
 	// records is the pair the port was handed, which is the whole of the
 	// producer's contract with internal/construction [05 R-WORK-01 §3].
 	var billed, healed pool.Handle
-	q.Binding().Work = &orders.WorkAdapter{
+	q.Binding().Work = orders.NewWorkAdapter(orders.WorkAdapterConfig{
 		Repair: func(builder, patient *units.Unit, _ *orders.Node, _ uint32) bool {
 			if builder != nil {
 				billed = builder.Handle
@@ -135,7 +135,7 @@ func TestVTOLLandingPushesSelfRepairOnTouchdown(t *testing.T) {
 			}
 			return false
 		},
-	}
+	})
 	q.Push(orders.Lookup("VTOL_Landing"), orders.Node{Owner: u.Handle, Target: pad.Handle})
 
 	last := uint32(0)

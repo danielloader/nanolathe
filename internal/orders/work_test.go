@@ -43,7 +43,7 @@ func workFixture() (*Queue, *units.Unit, *units.Unit) {
 		X: numeric.Fixed(70 << 16), Y: numeric.Fixed(40 << 16), Z: numeric.Fixed(90 << 16),
 	}
 	target.Move.Mode, target.Move.ModeMirror = 1, 1 // grounded: RepairUnit refuses any other mover mode [04 R-ORD-01 §5]
-	q := &Queue{binding: &QueueBinding{
+	q := &Queue{binding: NewQueueBinding(QueueBindingConfig{
 		SimRNG:  rng.Global.Sim,
 		Economy: &economy.Service{},
 		Lookup: func(h pool.Handle) *units.Unit {
@@ -55,10 +55,10 @@ func workFixture() (*Queue, *units.Unit, *units.Unit) {
 			}
 			return nil
 		},
-	}}
-	q.binding.Work = &WorkAdapter{
+	})}
+	q.binding.Work = NewWorkAdapter(WorkAdapterConfig{
 		Assist: func(_ *units.Unit, n *Node, _ uint32) bool {
-			t := q.binding.Lookup(n.Target)
+			t := q.binding.LookupHook()(n.Target)
 			if t == nil || t.Remaining == 0 {
 				return false
 			}
@@ -71,7 +71,7 @@ func workFixture() (*Queue, *units.Unit, *units.Unit) {
 			return true
 		},
 		Repair: func(_ *units.Unit, _ *units.Unit, n *Node, _ uint32) bool {
-			t := q.binding.Lookup(n.Owner)
+			t := q.binding.LookupHook()(n.Owner)
 			if t == nil || t.Health >= t.Def.MaxDamage {
 				return false
 			}
@@ -79,14 +79,14 @@ func workFixture() (*Queue, *units.Unit, *units.Unit) {
 			t.Health++
 			return true
 		},
-	}
-	q.binding.Movement = &MovementGoalAdapter{
+	})
+	q.binding.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{
 		InstallPoint:     func(PointGoalRequest) bool { return true },
 		InstallAnnulus:   func(AnnulusGoalRequest) bool { return true },
 		InstallRectangle: func(RectangleGoalRequest) bool { return true },
 		InstallAir:       func(AirGoalRequest) bool { return true },
 		Release:          func(*Node) bool { return true },
-	}
+	})
 	q.SetBinding(q.binding)
 	BindQueue(builder, q)
 	return q, builder, target
@@ -161,12 +161,12 @@ func TestWorkOrdersDispatchAndReachTheirTerminal(t *testing.T) {
 func TestRepairStepHealsOnePointAndBillsOneEnergy(t *testing.T) {
 	q, builder, target := workFixture()
 	target.Health = 50
-	q.binding.Work = &WorkAdapter{Repair: func(_ *units.Unit, _ *units.Unit, _ *Node, _ uint32) bool {
+	q.binding.Work = NewWorkAdapter(WorkAdapterConfig{Repair: func(_ *units.Unit, _ *units.Unit, _ *Node, _ uint32) bool {
 		b := q.Binding().Economy.UnitBuckets(builder.Handle)
 		economy.AdmitOneResource(b, 1)
 		target.Health++
 		return true
-	}}
+	}})
 	n := &Node{Owner: builder.Handle, Target: target.Handle}
 	if ok, bound := boundRepair(q, builder, target, n, 1); !bound || !ok {
 		t.Fatal("repair step refused a damaged target with energy carry non-positive")
@@ -381,15 +381,15 @@ func assistFixture(quanta ...int32) (*economy.Service, []*units.Unit, *units.Uni
 		}
 		builders = append(builders, b)
 		q := &Queue{}
-		binding := &QueueBinding{SimRNG: rng.Global.Sim, Economy: econ, Lookup: lookup}
-		binding.Movement = &MovementGoalAdapter{
+		binding := NewQueueBinding(QueueBindingConfig{SimRNG: rng.Global.Sim, Economy: econ, Lookup: lookup})
+		binding.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{
 			InstallPoint:     func(PointGoalRequest) bool { return true },
 			InstallAnnulus:   func(AnnulusGoalRequest) bool { return true },
 			InstallRectangle: func(RectangleGoalRequest) bool { return true },
 			InstallAir:       func(AirGoalRequest) bool { return true },
 			Release:          func(*Node) bool { return true },
-		}
-		binding.Work = &WorkAdapter{Assist: func(builder *units.Unit, n *Node, tick uint32) bool {
+		})
+		binding.Work = NewWorkAdapter(WorkAdapterConfig{Assist: func(builder *units.Unit, n *Node, tick uint32) bool {
 			t := lookup(n.Target)
 			if t == nil || t.Remaining == 0 {
 				return false
@@ -412,7 +412,7 @@ func assistFixture(quanta ...int32) (*economy.Service, []*units.Unit, *units.Uni
 				}
 			}
 			return true
-		}}
+		}})
 		q.SetBinding(binding)
 		BindQueue(b, q)
 		q.Push(Lookup("HelpBuild"), Node{Owner: b.Handle, Target: frame.Handle})
@@ -528,7 +528,7 @@ func TestBoundWorkCallbacksOwnAssistAndRepair(t *testing.T) {
 	q, builder, target := workFixture()
 	b := q.Binding()
 	assistCalls, repairCalls := 0, 0
-	b.Work = &WorkAdapter{
+	b.Work = NewWorkAdapter(WorkAdapterConfig{
 		Assist: func(_ *units.Unit, _ *Node, _ uint32) bool {
 			assistCalls++
 			target.Remaining = 0
@@ -539,7 +539,7 @@ func TestBoundWorkCallbacksOwnAssistAndRepair(t *testing.T) {
 			target.Health = target.MaxHealth
 			return true
 		},
-	}
+	})
 	q.SetBinding(b)
 
 	assist := &Node{ID: Lookup("HelpBuild"), Owner: builder.Handle, Target: target.Handle, Phase: 3}

@@ -137,7 +137,7 @@ func TestAirWorkPreambleDropCommitsAirborneMode(t *testing.T) {
 	q, u := standingFixture(def)
 	carrier := &units.Unit{Handle: 2, Def: &content.UnitDef{UnitName: "carrier"}, Alive: true}
 	BindQueue(carrier, q)
-	q.binding.Lookup = func(h pool.Handle) *units.Unit {
+	q.binding.SetLookup(func(h pool.Handle) *units.Unit {
 		switch h {
 		case u.Handle:
 			return u
@@ -145,14 +145,14 @@ func TestAirWorkPreambleDropCommitsAirborneMode(t *testing.T) {
 			return carrier
 		}
 		return nil
-	}
+	})
 	u.Attachment.Carrier = carrier.Handle
 	u.Attachment.AttachPiece = 3
 	carrier.Attachment.Cargo = []pool.Handle{u.Handle}
 	u.Move.Mode = 0 // attached/parked [04 R-MOV-01 §8]
 
 	// Consumer-only fixture: production composes movement's shared detach.
-	q.binding.Movement = &MovementGoalAdapter{DetachTakeoff: func(child *units.Unit) bool {
+	q.binding.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{DetachTakeoff: func(child *units.Unit) bool {
 		if child != u || child.Attachment.Carrier != carrier.Handle {
 			t.Fatal("unexpected detach callback")
 		}
@@ -161,7 +161,7 @@ func TestAirWorkPreambleDropCommitsAirborneMode(t *testing.T) {
 		carrier.Attachment.Cargo = nil
 		child.Move.Mode = 2
 		return true
-	}}
+	}})
 	n := &Node{Owner: u.Handle}
 	if code := airWorkPreamble(u, n, "Building"); code != 1 {
 		t.Fatalf("preamble returned %d, want advance (1) [04 R-ORD-01 §7]", code)

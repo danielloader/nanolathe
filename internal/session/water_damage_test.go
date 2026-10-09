@@ -39,12 +39,12 @@ func waterDamageFixture(t *testing.T, waterDoesDamage, waterDamage int32) (*Sess
 		World:   ter,
 		Econ:    &economy.Service{},
 	}
-	s.Combat = &combat.Service{ControlByte: func(owner uint8) uint8 {
+	s.Combat = combat.NewService(combat.ServiceConfig{ControlByte: func(owner uint8) uint8 {
 		if int(owner) >= len(s.Econ.Players) || !s.Econ.Players[owner].Exists {
 			return combat.ControlByteAbsent
 		}
 		return s.Econ.Players[owner].ControllerState
-	}}
+	}})
 	s.Econ.Players[0] = economy.Player{Exists: true, ControllerState: combat.ControlByteHuman}
 	return s, def
 }
@@ -154,9 +154,9 @@ func TestWaterDamageDrownsAndFinalizesInTheSameVisit(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	var died []units.DeathCause
-	s.Units.OnDeath = func(_ pool.Handle, cause units.DeathCause, _ *units.Unit) {
+	s.Units.SetDeathHook(func(_ pool.Handle, cause units.DeathCause, _ *units.Unit) {
 		died = append(died, cause)
-	}
+	})
 	s.stepUnitPhase(30)
 	if len(died) != 1 || died[0] != units.DeathKilled {
 		t.Fatalf("death finalization = %v, want exactly one DeathKilled in the same visit [04 R-MOV-03 §1] step 10", died)

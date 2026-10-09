@@ -64,7 +64,8 @@ const (
 // each of the search's eight sectors, of every unit and of the slow-turning
 // ones.
 type claimGrid struct {
-	all, slow [][8]uint8
+	all, slow                     [][8]uint8
+	checkpointAll, checkpointSlow *checkpointClaimRow
 	// written lists the blocks that hold a claim, so that a count clears
 	// those and not the whole map.
 	written []int32
@@ -75,10 +76,11 @@ type claimState struct {
 	grids []*claimGrid // by owner
 	// own marks the requester's own claims: the search's serial and the
 	// claim's sector.
-	own    []uint32
-	serial uint32
-	have   bool
-	trail  []int32 // scratch: one route's claims, block and sector
+	own           []uint32
+	checkpointOwn *checkpointClaimRow
+	serial        uint32
+	have          bool
+	trail         []int32 // scratch: one route's claims, block and sector
 }
 
 func claimStateOf(s *System) *claimState {
@@ -111,6 +113,8 @@ func (st *claimState) grid(owner uint8) *claimGrid {
 	if g == nil {
 		n := int(st.w) * int(st.h)
 		g = &claimGrid{all: make([][8]uint8, n), slow: make([][8]uint8, n)}
+		g.checkpointAll = &checkpointClaimRow{kind: 2, counts: g.all}
+		g.checkpointSlow = &checkpointClaimRow{kind: 2, counts: g.slow}
 		st.grids[owner] = g
 	}
 	return g
@@ -186,6 +190,7 @@ func (p ClaimsPilot) BeginTick(s *System, tick uint32) {
 		st.w, st.h = w, h
 		st.grids = st.grids[:0]
 		st.own = make([]uint32, int(w)*int(h))
+		st.checkpointOwn = &checkpointClaimRow{kind: 1, own: st.own}
 	}
 	for _, g := range st.grids {
 		if g == nil {
@@ -243,8 +248,10 @@ func (p ClaimsPilot) Search(s *System, r path.Request, cfg *path.SearchConfig) {
 	}
 	g := st.grids[u.Owner]
 	counts := g.all
+	countsHolder, row := g.checkpointAll, uint8(2)
 	if p.Rank && claimSlow(u) {
 		counts = g.slow
+		countsHolder, row = g.checkpointSlow, 3
 	}
 	fx, fz := max(cfg.FootPrintX, 1), max(cfg.FootPrintZ, 1)
 	// The serial keeps twenty-nine bits beside the sector.
@@ -262,6 +269,17 @@ func (p ClaimsPilot) Search(s *System, r path.Request, cfg *path.SearchConfig) {
 	}
 	w, h := st.w, st.h
 	per, against := p.per(), p.Oncoming
+	if roots := s.checkpointSearch; roots != nil && cfg == &s.searchCfg {
+		roots.cost = &checkpointAccessorCapture{
+			value: path.CheckpointAccessor{Kind: 7, Owner: u.Owner, Serial: serial,
+				Width: w, Height: h, FootprintX: fx, FootprintZ: fz, Per: per, Against: against, Row: row},
+			counts: countsHolder, own: st.checkpointOwn,
+		}
+		if countsHolder == nil || st.checkpointOwn == nil {
+			// Authored rows without construction metadata cannot prove aliases.
+			roots.unsupported = "TODO(M3-U6): claim rows lack checkpoint holders"
+		}
+	}
 	cfg.CostDir = func(c path.Cell, dir uint8) int32 {
 		// The footprint's centre, in world units.
 		x, z := c.X*16+8*fx, c.Z*16+8*fz

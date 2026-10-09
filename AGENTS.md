@@ -129,7 +129,12 @@ host supplies may change what a tick
 computes, and a single-seat battle is untouched: every fingerprint lock runs
 single-player. It is owned by
 [DESIGN_MULTIPLAYER](docs/DESIGN_MULTIPLAYER.md), which stages the work in
-milestones (§16): build them in that order.
+milestones (§16). Build them in that order except for the maintainer-approved
+bounded increments brought forward ahead of full M3 platform acceptance and M4
+replays, each preserving the existing simulation contracts: the 2026-10-07
+two-client play-test slice (§16.4), the first hosted relay the same day (§16.5)
+and the first online lobby on 2026-10-08 (§16.6). The maintainer had all three
+landed on main on 2026-10-08.
 
 **Unit restrictions are the fifth mode-independent exception (user-authorized
 2026-10-05).** A restriction is retail's multiplayer unit-restriction count,
@@ -147,8 +152,9 @@ not choose a unit once its own records have reached the cap. Definitions
 authored `norestrict` can never be restricted, and nothing is seeded: an
 empty set leaves the catalog, its hash and every identity untouched, `wacky`
 content included. Strict 3.1 *with no restrictions* is the retail baseline,
-and every fingerprint lock runs with none. The multiplayer lobby reuses the
-same set later as battle-configuration field 12. It is owned by
+and every fingerprint lock runs with none. The online lobby carries the
+host's set as battle-configuration field 12 (user-authorized 2026-10-08,
+DESIGN_MULTIPLAYER §16.6). It is owned by
 [DESIGN_MODS_MUTATORS](docs/DESIGN_MODS_MUTATORS.md) §15.
 
 Current policies: [terrain admission](docs/DESIGN_WEAPONS_PROJECTILES.md#231-modern-terrain-admission),

@@ -33,8 +33,8 @@ func TestModernWaveAirTargetsSplitByCapability(t *testing.T) {
 		if withGround {
 			ground, _ = w.Create(enemy, 1, numeric.FixedFromInt(600), 0, numeric.FixedFromInt(0))
 		}
-		m := &Manager{Player: 0, IsAlliance: func(uint8, uint8) bool { return false }}
-		m.CanPursueAir = func(member, target *units.Unit) bool { return member.Handle == aa }
+		m := NewManager(ManagerConfig{Player: 0, IsAlliance: func(uint8, uint8) bool { return false }})
+		m.SetCanPursueAir(func(member, target *units.Unit) bool { return member.Handle == aa })
 		return w, m, aa, plain, plane, ground
 	}
 	e := runtimeEconomy(0, 2)

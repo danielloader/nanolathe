@@ -31,15 +31,15 @@ func combatArrivalFixture(t *testing.T) (*System, *units.World, *units.Unit, *or
 
 	sim := rng.NewSimulation(0x12345677)
 	q := orders.QueueForUnit(u)
-	q.SetBinding(&orders.QueueBinding{
+	q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{
 		SimRNG: &sim,
 		Lookup: w.Unit,
-		Movement: &orders.MovementGoalAdapter{
+		Movement: orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{
 			Ready:        func() bool { return true },
 			InstallPoint: sys.InstallPointGoal,
 			Release:      sys.ReleaseGoalPayload,
-		},
-	})
+		}),
+	}))
 	return sys, w, u, q
 }
 

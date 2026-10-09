@@ -6,6 +6,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/cob"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/model"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/checkpoint"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
@@ -22,7 +23,7 @@ func RequiredCOBEntryPoints(_ *content.UnitDef) []string { return nil }
 // before the D+wake Create callback. This seam retains the same strict
 // model/piece checks; the extra ports are supplied before Create starts.
 func BindCOBWithPorts(fs vfs.FSOps, def *content.UnitDef, mdl *model.Model, sim *rng.Simulation, sink cob.PresentationSink) (*cob.Binding, error) {
-	return bindCOBWithPortsAndVisibility(fs, def, mdl, sim, sink, nil, nil, nil)
+	return bindCOBWithPortsAndVisibility(fs, def, mdl, sim, sink, nil, nil, nil, nil)
 }
 
 // BindCOBWithPortsAndVisibilityForUnit is the production binding seam for a
@@ -39,7 +40,20 @@ func BindCOBWithPortsAndVisibilityAndContextForUnit(fs vfs.FSOps, u *Unit, mdl *
 	if u == nil {
 		return nil, fmt.Errorf("nanolathe: COB binding: nil unit")
 	}
-	return bindCOBWithPortsAndVisibility(fs, u.Def, mdl, sim, sink, visible, u, preCreate)
+	return bindCOBWithPortsAndVisibility(fs, u.Def, mdl, sim, sink, visible, u, preCreate, nil)
+}
+
+// BindCOBForUnitWithCheckpointBinding shares the ordinary strict path and its
+// callback order. Its receipts remain pending until the unit's allocator
+// commits the actual serial (DESIGN_MULTIPLAYER §16.3.60).
+func BindCOBForUnitWithCheckpointBinding(fs vfs.FSOps, u *Unit, mdl *model.Model, sim *rng.Simulation, sink cob.PresentationSink, visible func(int, int32) bool, preCreate func(*cob.Binding) error, authority *checkpoint.BindingAuthority) (*cob.Binding, error) {
+	if u == nil {
+		return nil, fmt.Errorf("nanolathe: COB binding: nil unit")
+	}
+	if authority != nil {
+		u.beginCheckpointScriptInstallation(authority)
+	}
+	return bindCOBWithPortsAndVisibility(fs, u.Def, mdl, sim, sink, visible, u, preCreate, authority)
 }
 
 // PendingScriptTouched is the SCRIPT-TOUCHED MARKER: bit 2 of the unit's
@@ -158,7 +172,7 @@ func bindUnitPortHandlers(vm *cob.VM, u *Unit) {
 // instance port handlers are installed before Create runs, matching retail's
 // D+wake initialization order. The exported helper above remains a generic
 // asset-binding seam for callers without an owning Unit instance.
-func bindCOBWithPortsAndVisibility(fs vfs.FSOps, def *content.UnitDef, mdl *model.Model, sim *rng.Simulation, sink cob.PresentationSink, visible func(piece int, sfxType int32) bool, u *Unit, preCreate func(*cob.Binding) error) (*cob.Binding, error) {
+func bindCOBWithPortsAndVisibility(fs vfs.FSOps, def *content.UnitDef, mdl *model.Model, sim *rng.Simulation, sink cob.PresentationSink, visible func(piece int, sfxType int32) bool, u *Unit, preCreate func(*cob.Binding) error, authority *checkpoint.BindingAuthority) (*cob.Binding, error) {
 	if def == nil {
 		return nil, fmt.Errorf("nanolathe: COB binding: nil unit definition")
 	}
@@ -192,15 +206,26 @@ func bindCOBWithPortsAndVisibility(fs vfs.FSOps, def *content.UnitDef, mdl *mode
 			if binding == nil || binding.VM == nil || binding.Callbacks == nil {
 				return fmt.Errorf("unit creation received incomplete COB binding")
 			}
+			if authority != nil {
+				u.bindCheckpointScriptVM(binding.VM, authority)
+			}
 			// Install the model-owned render state and all six write arms with the
 			// real VM before Create can issue a piece flag or port operation.
 			modelFlags := BuildRenderPieceFlags(mdl)
 			u.RenderPieceFlags = modelFlags
-			bindRenderFlags(binding, modelFlags)
+			bindRenderFlags(binding, modelFlags, u, authority)
 			for port, portBinding := range unitPortBindings(binding.VM, u) {
-				binding.VM.BindPortBinding(port, portBinding)
+				if authority != nil {
+					u.RetainCheckpointPortInstallation(binding.VM.BindPortBindingWithPendingCheckpointBinding(port, portBinding, authority))
+				} else {
+					binding.VM.BindPortBinding(port, portBinding)
+				}
 			}
-			binding.VM.BindScriptTouched(u.raiseScriptTouched)
+			if authority != nil {
+				u.RetainCheckpointVMInstallation(binding.VM.BindScriptTouchedWithPendingCheckpointBinding(u.raiseScriptTouched, authority))
+			} else {
+				binding.VM.BindScriptTouched(u.raiseScriptTouched)
+			}
 			if err := u.AttachCOBBindingPreCreate(binding); err != nil {
 				return err
 			}
@@ -210,7 +235,17 @@ func bindCOBWithPortsAndVisibility(fs vfs.FSOps, def *content.UnitDef, mdl *mode
 			return nil
 		}
 	}
-	binding, err := cob.BindStrict(fs, req)
+	var binding *cob.Binding
+	var err error
+	if authority != nil {
+		var receipt *cob.CheckpointVMInstallation
+		binding, receipt, err = cob.BindStrictWithCheckpointBinding(fs, req, authority)
+		if err == nil {
+			u.RetainCheckpointVMInstallation(receipt)
+		}
+	} else {
+		binding, err = cob.BindStrict(fs, req)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +262,7 @@ func bindCOBWithPortsAndVisibility(fs vfs.FSOps, def *content.UnitDef, mdl *mode
 	return binding, nil
 }
 
-func bindRenderFlags(binding *cob.Binding, modelFlags []uint8) {
+func bindRenderFlags(binding *cob.Binding, modelFlags []uint8, u *Unit, authority *checkpoint.BindingAuthority) {
 	if binding == nil || binding.Callbacks == nil {
 		return
 	}
@@ -243,41 +278,44 @@ func bindRenderFlags(binding *cob.Binding, modelFlags []uint8) {
 	// caller that writes through a returned slice (internal/cob's retail
 	// restore) takes that path only when no getter is bound at all.
 	scratch := make([]uint8, len(pm))
-	binding.Callbacks.BindRenderFlags(
-		func() []uint8 {
-			flags := scratch
-			for i, modelPiece := range pm {
-				if modelPiece >= 0 && modelPiece < len(mf) {
-					flags[i] = mf[modelPiece]
-				} else {
-					flags[i] = 0x06
-				}
-			}
-			return flags
-		},
-		func(piece int, mask uint8, set bool) bool {
-			if piece < 0 || piece >= len(pm) || (mask != 0x01 && mask != 0x02 && mask != 0x04) {
-				return false
-			}
-			modelPiece := pm[piece]
-			if modelPiece < 0 {
-				// A declared script piece beyond the model has no render
-				// record. Retail's flag adapter writes past the table with
-				// no check and the thread carries on; Nanolathe keeps the
-				// thread and drops the write [04 R-COB-01 §4].
-				return true
-			}
-			if modelPiece >= len(mf) {
-				return false
-			}
-			if set {
-				mf[modelPiece] |= mask
+	get := func() []uint8 {
+		flags := scratch
+		for i, modelPiece := range pm {
+			if modelPiece >= 0 && modelPiece < len(mf) {
+				flags[i] = mf[modelPiece]
 			} else {
-				mf[modelPiece] &^= mask
+				flags[i] = 0x06
 			}
+		}
+		return flags
+	}
+	set := func(piece int, mask uint8, set bool) bool {
+		if piece < 0 || piece >= len(pm) || (mask != 0x01 && mask != 0x02 && mask != 0x04) {
+			return false
+		}
+		modelPiece := pm[piece]
+		if modelPiece < 0 {
+			// A declared script piece beyond the model has no render
+			// record. Retail's flag adapter writes past the table with
+			// no check and the thread carries on; Nanolathe keeps the
+			// thread and drops the write [04 R-COB-01 §4].
 			return true
-		},
-	)
+		}
+		if modelPiece >= len(mf) {
+			return false
+		}
+		if set {
+			mf[modelPiece] |= mask
+		} else {
+			mf[modelPiece] &^= mask
+		}
+		return true
+	}
+	if authority != nil {
+		u.RetainCheckpointVMInstallation(binding.Callbacks.VM.BindRenderFlagHandlersWithPendingCheckpointBinding(get, set, mf, pm, authority))
+	} else {
+		binding.Callbacks.BindRenderFlags(get, set)
+	}
 }
 
 type creationCallbacks interface {

@@ -11,10 +11,19 @@ import (
 )
 
 // isResultVisible reports whether the authoritative result overlay should be shown [RS-05][08][P1-01].
-// It is presentation-only and reads only the committed result view (I6).
+// It is presentation-only: the result comes from the committed view (I6),
+// and hosted transport must confirm shared completion before displaying it.
 // The overlay is visible when the terminal result is latched (Ended) and has not been dismissed.
 func (b *battleSession) isResultVisible() bool {
 	if b == nil || b.battleState().Input.ResultDismissed {
+		return false
+	}
+	// A local defeat may finish before the other seat's countdown. Keep
+	// pumping grants before offering any result route that retires transport.
+	if b.onlineBattle() && (b.sess == nil || !b.sess.OnlineBattleEnded()) {
+		return false
+	}
+	if mp := b.multiplayer; mp != nil && (mp.failure != nil || mp.completed != nil && !mp.completed()) {
 		return false
 	}
 	cur, ok := b.currentSnapshot()
@@ -82,7 +91,7 @@ func (b *battleSession) adjustGameSpeed(delta int) {
 }
 
 func (b *battleSession) setGameSpeed(delta int) {
-	if b == nil || b.sess == nil {
+	if b == nil || b.sess == nil || b.onlineBattle() {
 		return
 	}
 	// The clamp is the setter's: 1..20 on signed compares, and the

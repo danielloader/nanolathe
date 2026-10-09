@@ -8,6 +8,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/features"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/checkpoint"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
@@ -16,8 +17,8 @@ import (
 )
 
 func (s *Service) emitEvent(ev Event) {
-	if s != nil && s.Events != nil {
-		s.Events(ev)
+	if s != nil && s.EventsHook() != nil {
+		s.EventsHook()(ev)
 	}
 }
 
@@ -389,13 +390,17 @@ func (s *Service) dispatchSlotAim(u *units.Unit, slot *units.Slot, idx int, tick
 	if bridge != nil {
 		key := pendingKey{Unit: u.Handle, Slot: idx}
 		returned, value := false, int32(0)
-		result := bridge.Aim(cob.WeaponSlot(idx), yaw, pitch, func(ret cob.CallbackReturn) {
+		result := bridge.AimWithCheckpoint(cob.WeaponSlot(idx), yaw, pitch, func(ret cob.CallbackReturn) {
 			delete(s.pendingAims, key)
 			returned, value = true, ret.Value
 			// Every outstanding callback addresses this slot's receiver. A
 			// zero delivery cannot revoke a different callback's grant
 			// [04 R-CB-01 §6]; only a fresh dispatch clears the receiver.
 			slot.Aim.CompleteAim(ret.Value)
+		}, cob.CheckpointContinuation{
+			RawUnitKey: uint32(key.Unit),
+			Target:     checkpoint.Allocation{Handle: uint32(u.Handle), Serial: u.AllocationSerial},
+			WeaponSlot: uint8(idx),
 		})
 		if returned {
 			sum.ReturnSeen, sum.ReturnValue = true, value
@@ -797,7 +802,7 @@ func (s *Service) rebuildTargetRegistry(tick uint32, owner uint8, w *units.World
 		if u.Flags&units.ImmunityStatus == 0 && directlyVisibleAtRebuild(owner, u, vis) {
 			pri = append(pri, u.Handle) // unit-array order [06 §3.1] (I1)
 		}
-		if u.Flags&visibility.SeenBit != 0 {
+		if perspectiveStatus(vis, owner, u)&visibility.SeenBit != 0 {
 			sec = append(sec, u.Handle) // the same order, independent test
 		}
 	}
@@ -822,7 +827,7 @@ func directlyVisibleAtRebuild(owner uint8, cand *units.Unit, vis *visibility.Ser
 	if cand == nil || vis == nil {
 		return false // hostile list entry is visibility-gated [06 §3.1]
 	}
-	return vis.IsVisible(visibility.PlayerID(owner), visibilityTarget(cand, cand.Flags))
+	return vis.IsVisible(visibility.PlayerID(owner), visibilityTarget(cand, perspectiveStatus(vis, owner, cand)))
 }
 
 // visibilityTarget forms the direct-visibility probe from the definition's
@@ -1006,7 +1011,7 @@ func (s *Service) materializeCandidatesInRange(u *units.Unit, w *units.World, li
 		if !WithinRange(u.X, u.Z, cand.X, cand.Z, rangeLimit) {
 			continue
 		}
-		out = append(out, acquisitionCandidate(u, cand, seaLevel, cand.Flags, catalog))
+		out = append(out, acquisitionCandidate(u, cand, seaLevel, perspectiveStatus(vis, u.Owner, cand), catalog))
 	}
 	s.candidateScratch = out
 	if len(out) == 0 {
@@ -1136,7 +1141,7 @@ func slotAcquisition(s *Service, u *units.Unit, slot *units.Slot, idx int, w *un
 			if candUnit == nil {
 				return false
 			}
-			return vis.IsVisible(visibility.PlayerID(u.Owner), visibilityTarget(candUnit, candUnit.Flags))
+			return vis.IsVisible(visibility.PlayerID(u.Owner), visibilityTarget(candUnit, perspectiveStatus(vis, u.Owner, candUnit)))
 		}
 	}
 	if ballistic {
@@ -2444,7 +2449,7 @@ func (s *Service) explodeWeaponAt(w *units.World, terrain *world.Terrain, weapon
 	return feedback
 }
 
-// ParalyzeTaskPush is the seam a kind-2 packet reaches the victim's primary
+// paralyzeTaskPush is the seam a kind-2 packet reaches the victim's primary
 // command list through [06 §10]: "the engine then resolves the task type by the
 // authored alias `paralyze` and inspects only the HEAD of the victim's primary
 // command list. If the head already carries that task type, the packet's
@@ -2462,17 +2467,17 @@ func (s *Service) explodeWeaponAt(w *units.World, terrain *world.Terrain, weapon
 // With nothing installed a paralyzer hit keeps the preliminary side effects of
 // [06 §10] and pushes no task, which is what a fixture composing internal/combat
 // alone gets.
-var ParalyzeTaskPush func(victim *units.Unit, credit uint32, tick uint32)
+var paralyzeTaskPush func(victim *units.Unit, credit uint32, tick uint32)
 
 // pushParalyzeTask is the packet side of [06 §10]. The stun's whole mechanism —
 // the release verb on all three slots, the unconditional target clear, the
 // goal-payload release, the wait arm and the stunned mark — belongs to the
 // task's first visit, not to this site [06 R-DMG-01 §11].
 func pushParalyzeTask(victim *units.Unit, credit uint32, tick uint32) {
-	if victim == nil || ParalyzeTaskPush == nil {
+	if victim == nil || paralyzeTaskPush == nil {
 		return
 	}
-	ParalyzeTaskPush(victim, credit, tick)
+	paralyzeTaskPush(victim, credit, tick)
 }
 
 // AcceptDamage is combat's common receiver for locally delivered packets. It
@@ -2522,8 +2527,8 @@ func (s *Service) AcceptDamage(w *units.World, tick uint32, in DamageInput) Dama
 		victim.EngagementTarget = in.Attacker
 		if rawAttacker := w.RawUnitRecord(in.Attacker); rawAttacker != nil {
 			victim.LastDamageSide = rawAttacker.Owner
-			if s.DamageActivity != nil {
-				s.DamageActivity(victim, rawAttacker, tick)
+			if s.DamageActivityHook() != nil {
+				s.DamageActivityHook()(victim, rawAttacker, tick)
 			}
 		}
 	}
@@ -2543,8 +2548,8 @@ func (s *Service) AcceptDamage(w *units.World, tick uint32, in DamageInput) Dama
 
 	before := victim.Health
 	victim.Health = ApplyDamage(victim.Health, amount)
-	if s.HealthLost != nil && before > 0 && victim.Health < before {
-		s.HealthLost(victim, w.RawUnitRecord(in.Attacker), before-max(victim.Health, 0))
+	if s.HealthLostHook() != nil && before > 0 && victim.Health < before {
+		s.HealthLostHook()(victim, w.RawUnitRecord(in.Attacker), before-max(victim.Health, 0))
 	}
 	if victim.Health <= 0 && s.DeathLatchAdmitted(victim.Owner) {
 		// Preserve the modular health and stored provenance for the later
@@ -2692,4 +2697,16 @@ func interceptorRescanPort(svc *Service, u *units.Unit, weapon *content.WeaponDe
 		}
 		return h
 	}
+}
+
+// Sensor contact belongs to the observing owner online; disabled services retain
+// the original unit status exactly (DESIGN_MULTIPLAYER §6.3, §16.4.1).
+func perspectiveStatus(vis *visibility.Service, owner uint8, target *units.Unit) uint32 {
+	if target == nil {
+		return 0
+	}
+	if vis == nil {
+		return target.Flags
+	}
+	return vis.StatusForPerspective(visibility.PlayerID(owner), uint16(target.Handle), target.AllocationSerial, visibility.PlayerID(target.Owner), target.Flags)
 }

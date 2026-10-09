@@ -24,9 +24,9 @@ func TestLandingOccupancyChecksBothPlanes(t *testing.T) {
 			}
 			s.Grid.StampPlane(plane, c.CachedAnchor, c.FootPrintX, c.FootPrintZ, id)
 			mapped := uint16(1 << u.Owner)
-			orders.QueueForUnit(u).Binding().World = &orders.WorldQueryAdapter{
+			orders.QueueForUnit(u).Binding().World = orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{
 				MappingWord: func(_, _ int32) (uint16, bool) { return mapped, true },
-			}
+			})
 			if got := s.landable(u, u.X, u.Z); got != self {
 				t.Errorf("plane=%d self=%v: mapped landing=%v, want %v", plane, self, got, self)
 			}
@@ -59,7 +59,7 @@ func TestLandingPairCanResumeConstructionPatrol(t *testing.T) {
 				}
 				pair := []*units.Unit{first, w.Unit(h)}
 				binding := orders.QueueForUnit(first).Binding()
-				binding.Movement = &orders.MovementGoalAdapter{InstallAir: s.InstallAirGoal, Release: s.ReleaseGoalPayload}
+				binding.Movement = orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{InstallAir: s.InstallAirGoal, Release: s.ReleaseGoalPayload})
 				if modern {
 					s.Rules = &ModernRules{}
 					binding.Rules = &orders.ModernRules{}

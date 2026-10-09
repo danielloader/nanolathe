@@ -26,7 +26,7 @@ type kickRecord struct {
 // overrides this method with its existing deterministic clearance policy
 // [DESIGN_COMMUNITY_PATCH §4.3, §11].
 func (CommunityRules) YieldObstruction(s *Service, requester *units.Unit, clear world.FootprintRect, _ []world.YardCell, tick uint32, urgent bool) {
-	if !urgent || s == nil || s.World == nil || s.Terrain == nil || s.CRTRandom == nil || requester == nil || !s.Community.ConstructionKickout {
+	if !urgent || s == nil || s.World == nil || s.Terrain == nil || s.CRTRandomHook() == nil || requester == nil || !s.Community.ConstructionKickout {
 		return
 	}
 	for _, h := range s.kickoutOccupants(clear) {
@@ -36,7 +36,7 @@ func (CommunityRules) YieldObstruction(s *Service, requester *units.Unit, clear 
 		}
 		// The approved per-candidate cadence draws even before protected-work
 		// rejection (DESIGN_COMMUNITY_PATCH §11 Q3); source draws at search entry.
-		randomDirection := float64(s.CRTRandom(360)) / 57.0
+		randomDirection := float64(s.CRTRandomHook()(360)) / 57.0
 		if !s.shouldKickout(u, clear) {
 			continue
 		}
@@ -114,8 +114,8 @@ func (s *Service) kickoutOccupants(clear world.FootprintRect) []pool.Handle {
 			if cell := s.Terrain.PlotAt(x, z); cell != nil {
 				add(int(cell.OccupantA()))
 			}
-			if s.Terrain.Movers != nil {
-				add(int(s.Terrain.Movers.CellOccupant(x, z)))
+			if s.Terrain.Movers() != nil {
+				add(int(s.Terrain.Movers().CellOccupant(x, z)))
 			}
 		}
 	}
@@ -266,7 +266,7 @@ func (s *Service) kickoutCellClear(u *units.Unit, x, z int64) bool {
 		return false
 	}
 	cell := s.Terrain.PlotAt(cx, cz)
-	if cell == nil || cell.OccupantA() != 0 || (s.Terrain.Movers != nil && s.Terrain.Movers.CellOccupant(cx, cz) != 0) {
+	if cell == nil || cell.OccupantA() != 0 || (s.Terrain.Movers() != nil && s.Terrain.Movers().CellOccupant(cx, cz) != 0) {
 		return false
 	}
 	if feature, ok := s.Terrain.FeatureDefAt(cell.Feature()); ok && feature.Height != 0 {

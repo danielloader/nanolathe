@@ -115,7 +115,8 @@ func (u *UnitInfo) Strength() int64 { return int64(u.DPS) * int64(u.HP) / 16 }
 
 // Table is the catalog summarized for one session's build rules.
 type Table struct {
-	Units []*UnitInfo
+	checkpoint *checkpointTableSnapshot // detached construction provenance; never worker state
+	Units      []*UnitInfo
 	// Capped lists the definitions with a cap (UnitInfo.Cap >= 0), in table
 	// order; empty when the battle restricts nothing, so a battle without
 	// caps adds no observation work.
@@ -146,6 +147,7 @@ func (t *Table) Of(def *content.UnitDef) *UnitInfo {
 func BuildTable(cat *content.Catalog, rules construction.Rules) *Table {
 	t := &Table{byKey: map[string]*UnitInfo{}, byDef: map[*content.UnitDef]*UnitInfo{}, defensiveFeatures: map[*content.FeatureDef]bool{}}
 	if cat == nil {
+		t.snapshotCheckpointBindings(cat, rules)
 		return t
 	}
 	for _, key := range cat.SortedUnitKeys() {
@@ -199,6 +201,7 @@ func BuildTable(cat *content.Catalog, rules construction.Rules) *Table {
 			u.Role = u.Role&^RoleBomber | RoleFighter
 		}
 	}
+	t.snapshotCheckpointBindings(cat, rules)
 	return t
 }
 

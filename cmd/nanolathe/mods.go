@@ -69,7 +69,7 @@ func modSettingSelector(s settings.ModSelection) string { return modSelectorOf(s
 // never from the saved choice, so a run reproduces from its flags
 // (docs/DESIGN_MODS_MUTATORS.md §4.3, §6.6).
 func (o Options) ignoresSavedSelection() bool {
-	return o.Headless || o.Shot != "" || o.ShotModel != "" || o.ShotDebris != "" || o.Film != "" || o.NLShot != "" || o.BattleBenchmark != ""
+	return o.multiplayerPlaytest() || o.Headless || o.Shot != "" || o.ShotModel != "" || o.ShotDebris != "" || o.Film != "" || o.NLShot != "" || o.BattleBenchmark != ""
 }
 
 // resolveModSelection applies §4.3's precedence: several explicit roots are
@@ -482,6 +482,10 @@ type contentReloadRequest struct {
 	// loadSave is a save to load once the new content is bound: a game saved
 	// under another mod switches to it first (§7.3 step 2).
 	loadSave string
+	// online is a room being joined whose mod the switch mounts; the join
+	// resumes on the new shell (DESIGN_MULTIPLAYER §16.6.2). Its mutators
+	// stay the player's own: the room's apply only to its battle.
+	online *onlineRoom
 }
 
 // pendingContentReload is the switch a screen asked for. The window loop
@@ -514,6 +518,10 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 	fail := func(err error) {
 		fmt.Fprintf(os.Stderr, "nanolathe: mod switch failed: %v\n", err)
 		notice := "Mod switch failed: " + noticeReason(err)
+		if request.online != nil && old.online != nil {
+			old.onlineIdleStatus("This game's mod could not be loaded: " + noticeReason(err))
+			return
+		}
 		if modsUI != nil {
 			modsUI.notice = notice
 			old.refreshModsPanel()
@@ -604,6 +612,11 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 	if modsUI != nil {
 		old.closeModsScreen()
 	}
+	if old.online != nil {
+		old.closeOnlineScreen()
+	}
+	// An online job reads the old set's content; let it finish first.
+	onlineWork.Wait()
 	optionsPanel, optionsAssets, optionsState = nil, nil, nil
 	saveLoadUI, saveLoadPanel, saveLoadAssets = nil, nil, nil
 	old.releaseAudio()
@@ -618,6 +631,9 @@ func (h *shellHost) reload(request contentReloadRequest, cl *client.Client) {
 	modDownload.rememberMounted(shell.cs.mod)
 	if request.loadSave != "" {
 		h.loadAfterReload(request.loadSave)
+	}
+	if request.online != nil {
+		h.shell.resumeOnlineJoin(*request.online)
 	}
 	writeWindowStartupReport(os.Stderr, h.shell, time.Since(started))
 }

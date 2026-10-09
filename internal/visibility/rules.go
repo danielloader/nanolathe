@@ -32,9 +32,15 @@ type ModernRules struct{ CommunityRules }
 type CommunityState struct {
 	AlliedJammingIgnored      bool
 	OffMapAircraftMarginTiles int
-	Allied                    func(viewer, other PlayerID) bool
+	allied                    func(viewer, other PlayerID) bool
 	// OffMap reads the canonical movement sort-bucket filing for a unit id.
-	OffMap func(unitID uint16) bool
+	offMap func(unitID uint16) bool
+
+	// Capture metadata travels with a copied projection but proves only its
+	// original Service. Scalars and reader behavior do not depend on it; the
+	// proof itself emits no bytes (DESIGN_MULTIPLAYER §16.3.49).
+	checkpointAllied checkpointReaderProof
+	checkpointOffMap checkpointReaderProof
 }
 
 // strictRules is converted once so an unbound Service takes the retail path
@@ -75,13 +81,13 @@ func (StrictRules) Visible(s *Service, viewer PlayerID, target Target) bool {
 // viewing player's alliance row declares its owner allied. The predicate is
 // deliberately one-directional [community patch engine behavior CP-FIX-6].
 func (CommunityRules) JammerSuppresses(s *Service, viewer, jammerOwner PlayerID) bool {
-	if s == nil || !s.Community.AlliedJammingIgnored || s.Community.Allied == nil {
+	if s == nil || !s.Community.AlliedJammingIgnored || s.Community.AlliedReader() == nil {
 		return StrictRules{}.JammerSuppresses(s, viewer, jammerOwner)
 	}
 	if viewer == jammerOwner {
 		return false
 	}
-	return !s.Community.Allied(viewer, jammerOwner)
+	return !s.Community.AlliedReader()(viewer, jammerOwner)
 }
 
 // Visible keeps the retail ordered gate unless the community off-map aircraft

@@ -62,7 +62,7 @@ func (s *Session) appendDeathEyeball(u *units.Unit) {
 	if s == nil || s.Vis == nil || u == nil || !u.Alive || s.Clock == nil {
 		return
 	}
-	if u.Owner != s.ViewingOwner {
+	if s.onlineResults == nil && u.Owner != s.ViewingOwner {
 		return
 	}
 	mode := s.Vis.Mode()
@@ -70,7 +70,17 @@ func (s *Session) appendDeathEyeball(u *units.Unit) {
 		return
 	}
 	state := postLoopStateFor(s)
-	if state == nil || len(state.eyeballs.records) >= eyeballCapacity {
+	if state == nil {
+		return
+	}
+	list := &state.eyeballs
+	if s.onlineResults != nil {
+		if int(u.Owner) >= len(s.onlineResults.seats) || !s.onlineResults.seats[u.Owner].present {
+			return
+		}
+		list = &state.onlineEyeballs[u.Owner]
+	}
+	if len(list.records) >= eyeballCapacity {
 		return
 	}
 	rec := eyeballRecord{
@@ -101,7 +111,7 @@ func (s *Session) appendDeathEyeball(u *units.Unit) {
 		s.Vis.Publish(rec.owner, rec.cx, rec.cz, rec.emitter, int32(rec.sightDistance))
 		rec.published = true
 	}
-	state.eyeballs.records = append(state.eyeballs.records, rec)
+	list.records = append(list.records, rec)
 }
 
 // expire is the post-loop expiry pass [03 R-COMP-02 §2]: every record whose

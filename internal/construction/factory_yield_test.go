@@ -40,7 +40,7 @@ func yieldFixtureCatalog(t *testing.T, cat *content.Catalog, factoryDef, product
 	sys.BindWorld(w)
 	svc.Movement = sys
 	sim := rng.NewSimulation(17)
-	svc.OrderBinding = &orders.QueueBinding{Lookup: w.Unit, SimRNG: &sim}
+	svc.OrderBinding = orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: w.Unit, SimRNG: &sim})
 	for i := range svc.Economy.Players {
 		svc.Economy.Players[i].Stock = [2]float32{1e9, 1e9}
 		svc.Economy.Players[i].Capacity = [2]float32{2e9, 2e9}

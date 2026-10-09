@@ -1,6 +1,7 @@
 package checkpoint
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -59,15 +60,16 @@ type Digests struct {
 // Capture tees one ordered encoding to the full hash, current owner hash and
 // optional output. Its output is usable only after Finish succeeds.
 type Capture struct {
-	identity Identity
-	out      io.Writer
-	full     hash.Hash
-	section  hash.Hash
-	current  *Encoder
-	digests  Digests
-	next     Owner
-	err      error
-	finished bool
+	identity   Identity
+	out        io.Writer
+	full       hash.Hash
+	section    hash.Hash
+	hashBuffer *bufio.Writer
+	current    *Encoder
+	digests    Digests
+	next       Owner
+	err        error
+	finished   bool
 }
 
 // NewCapture writes the canonical header. A nil out computes hashes only.
@@ -105,6 +107,9 @@ func (c *Capture) Section(owner Owner, present bool) (*Encoder, error) {
 		return nil, c.fail(owner, "sections", fmt.Errorf("section out of order: got %d, expected %d", owner, c.next))
 	}
 	c.closeSection()
+	if c.err != nil {
+		return nil, c.err
+	}
 	c.section = sha256.New()
 	// Owner domains omit the section count and include only their own exact
 	// owner/presence/payload bytes after this identity prefix.
@@ -113,11 +118,19 @@ func (c *Capture) Section(owner Owner, present bool) (*Encoder, error) {
 	domain.U16(SchemaVersion)
 	domain.write(c.identity.Content[:])
 	domain.write(c.identity.Config[:])
-	sinks := []io.Writer{c.full, c.section}
-	if c.out != nil {
-		sinks = append(sinks, c.out)
+	// One copy per primitive; fan out to both hashes only in complete chunks.
+	// The caller's sink stays outside this buffer for exact failure attribution.
+	hashes := io.MultiWriter(c.full, c.section)
+	if c.hashBuffer == nil {
+		c.hashBuffer = bufio.NewWriterSize(hashes, 4096)
+	} else {
+		c.hashBuffer.Reset(hashes)
 	}
-	e := NewEncoder(io.MultiWriter(sinks...))
+	w := io.Writer(c.hashBuffer)
+	if c.out != nil {
+		w = io.MultiWriter(c.hashBuffer, c.out)
+	}
+	e := NewEncoder(w)
 	e.capture = c
 	e.owner = owner
 	e.Field("section")
@@ -143,6 +156,9 @@ func (c *Capture) Finish() (Digests, error) {
 	}
 	c.finished = true
 	c.closeSection()
+	if c.err != nil {
+		return Digests{}, c.err
+	}
 	if c.next != OwnerComputersScenario+1 {
 		return Digests{}, c.fail(c.next, "sections", errors.New("missing section"))
 	}
@@ -153,6 +169,10 @@ func (c *Capture) Finish() (Digests, error) {
 func (c *Capture) closeSection() {
 	if c.current != nil {
 		c.current.closed = true
+		if err := c.hashBuffer.Flush(); err != nil {
+			c.fail(c.current.owner, "digest", err)
+			return
+		}
 		copy(c.digests.Owners[c.current.owner-1][:], c.section.Sum(nil))
 	}
 }

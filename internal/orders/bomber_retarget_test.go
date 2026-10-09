@@ -16,12 +16,12 @@ import (
 func TestBomberPointAttackReplacementPurgesCancelSeek(t *testing.T) {
 	q, u := gateFixture()
 	u.Flags |= 2 << units.StandingFireShift
-	q.SetBinding(&QueueBinding{SimRNG: q.binding.SimRNG, Lookup: func(h pool.Handle) *units.Unit {
+	q.SetBinding(NewQueueBinding(QueueBindingConfig{SimRNG: q.binding.SimRNG, Lookup: func(h pool.Handle) *units.Unit {
 		if h == u.Handle {
 			return u
 		}
 		return nil
-	}})
+	}}))
 
 	oldGoal := numeric.FixedFromInt(100)
 	q.Push(Lookup("AirStrike"), NewNodeForOrder(Lookup("AirStrike"), 0, oldGoal, 0, oldGoal, 1, u.Handle, false))
@@ -53,19 +53,19 @@ func TestBomberPointAttackReplacementPurgesCancelSeek(t *testing.T) {
 func TestBomberCancelRetainsDetachedSuccessorTruth(t *testing.T) {
 	q, u := gateFixture()
 	u.Flags |= 2 << units.StandingFireShift
-	q.SetBinding(&QueueBinding{SimRNG: q.binding.SimRNG, Lookup: func(h pool.Handle) *units.Unit {
+	q.SetBinding(NewQueueBinding(QueueBindingConfig{SimRNG: q.binding.SimRNG, Lookup: func(h pool.Handle) *units.Unit {
 		if h == u.Handle {
 			return u
 		}
 		return nil
-	}})
+	}}))
 	q.Push(Lookup("AirStrike"), NewNodeForOrder(Lookup("AirStrike"), 0, numeric.FixedFromInt(100), 0, numeric.FixedFromInt(100), 1, u.Handle, false))
 	old := q.Head()
 	old.DynamicGate = 0xE2
 	q.Push(Lookup("Wait"), Node{Owner: u.Handle})
 	survivor := q.Primary()[1]
 	observedCleanup := false
-	q.binding.Movement = &MovementGoalAdapter{Release: func(n *Node) bool {
+	q.binding.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{Release: func(n *Node) bool {
 		if n != old {
 			return true
 		}
@@ -75,7 +75,7 @@ func TestBomberCancelRetainsDetachedSuccessorTruth(t *testing.T) {
 			t.Errorf("queue during detached cleanup = %v, want only original protected successor", got)
 		}
 		return true
-	}}
+	}})
 
 	q.PurgeUnprotected()
 	if !observedCleanup {

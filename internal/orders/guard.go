@@ -117,10 +117,10 @@ const chaseVerticalJump int64 = 8 << 16
 // would then refuse to fire.
 func canEngageSlot(u *units.Unit, target pool.Handle, slot int) bool {
 	b := bindingOfUnit(u)
-	if b == nil || b.Weapons == nil || b.Weapons.CanEngage == nil {
+	if b == nil || b.Weapons == nil || b.Weapons.CanEngageHook() == nil {
 		return false
 	}
-	return b.Weapons.CanEngage(u, target, slot)
+	return b.Weapons.CanEngageHook()(u, target, slot)
 }
 
 // attackChaseHandler is the pursuing attack [04 R-ORD-01 §3].
@@ -184,8 +184,8 @@ func attackChaseHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) C
 	case 1:
 		// "release the payload" is the installers' own release arm, reached
 		// here without an install [04 R-ORD-01 §1].
-		if b := bindingOfUnit(u); b != nil && b.Movement != nil && b.Movement.Release != nil {
-			b.Movement.Release(n)
+		if b := bindingOfUnit(u); b != nil && b.Movement != nil && b.Movement.ReleaseHook() != nil {
+			b.Movement.ReleaseHook()(n)
 		}
 		if satisfied&0x3000 != 0 {
 			return Code(1) // *advance*
@@ -370,10 +370,10 @@ func liveUnitByHandle(actor *units.Unit, h pool.Handle) *units.Unit {
 		return nil
 	}
 	binding := q.Binding()
-	if binding == nil || binding.Lookup == nil {
+	if binding == nil || binding.LookupHook() == nil {
 		return nil
 	}
-	tgt := binding.Lookup(h)
+	tgt := binding.LookupHook()(h)
 	if tgt == nil || !tgt.Alive || tgt.Dying {
 		return nil
 	}
@@ -386,8 +386,8 @@ func getLookupForWard(n *Node, u *units.Unit) *units.Unit {
 	}
 	if u != nil {
 		if q := QueueForUnit(u); q != nil {
-			if binding := q.Binding(); binding != nil && binding.Lookup != nil {
-				if tgt := binding.Lookup(n.Target); tgt != nil {
+			if binding := q.Binding(); binding != nil && binding.LookupHook() != nil {
+				if tgt := binding.LookupHook()(n.Target); tgt != nil {
 					return tgt
 				}
 			}
@@ -422,8 +422,8 @@ func attackerHostileToGuard(guard, attacker *units.Unit) bool {
 	if guard == nil || attacker == nil {
 		return false
 	}
-	if b := bindingOfUnit(guard); b != nil && b.World != nil && b.World.DeclaresAlliance != nil {
-		return !b.World.DeclaresAlliance(attacker.Owner, guard.Owner)
+	if b := bindingOfUnit(guard); b != nil && b.World != nil && b.World.DeclaresAllianceHook() != nil {
+		return !b.World.DeclaresAllianceHook()(attacker.Owner, guard.Owner)
 	}
 	// No rows to read: slot initialization leaves each player allied only to
 	// itself [05 R-SHARE-01 §1], so a different owner is hostile.
@@ -1134,10 +1134,10 @@ func vtolFollowOffMap(u *units.Unit, n *Node, satisfied uint32, tick uint32) (Co
 		return 0, false
 	}
 	b := q.Binding()
-	if b == nil || b.Movement == nil || b.Movement.RunAir == nil {
+	if b == nil || b.Movement == nil || b.Movement.RunAirHook() == nil {
 		return 0, false
 	}
-	return b.Movement.RunAir(u, n, satisfied, tick)
+	return b.Movement.RunAirHook()(u, n, satisfied, tick)
 }
 
 // vtolFollowAdmit is `VTOL_Follow`'s phase 0 [04 R-ORD-02 §3]:
@@ -1209,11 +1209,11 @@ func vtolFollowOrbit(u *units.Unit, n *Node, ward *units.Unit, satisfied uint32,
 		r = engagementDistance(u, 0) + airFollowOrbitBonus
 	}
 	ox, oz := bearingOffset(uint16(n.Param1), numeric.Fixed(int64(r)<<16))
-	if b := bindingOfUnit(u); b != nil && b.Movement != nil && b.Movement.InstallAir != nil {
+	if b := bindingOfUnit(u); b != nil && b.Movement != nil && b.Movement.InstallAirHook() != nil {
 		// The air seam owns the release of the displaced payload, the `0x80`
 		// raise on its owner and the closing pending clear [04 R-ORD-01 §9],
 		// exactly as it does for `VTOL_Patrol`'s marker next door.
-		b.Movement.InstallAir(AirGoalRequest{
+		b.Movement.InstallAirHook()(AirGoalRequest{
 			Owner:  n.Owner,
 			Node:   n,
 			X:      ward.X - ox,

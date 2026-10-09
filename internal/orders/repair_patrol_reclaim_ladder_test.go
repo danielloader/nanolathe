@@ -34,12 +34,12 @@ func reclaimLadderFixture(t *testing.T, metalValue, energyValue int32) (*units.U
 	actor.Move.Mode, actor.Move.ModeMirror = 1, 1
 
 	sim := rng.SimulationFromState(1)
-	binding := &QueueBinding{
+	binding := NewQueueBinding(QueueBindingConfig{
 		SimRNG: &sim,
 		Resources: func(uint8) (ResourceView, bool) {
 			return ResourceView{Stock: [2]float32{50, 50}, Capacity: [2]float32{100, 100}}, true
 		},
-		World: &WorldQueryAdapter{
+		World: NewWorldQueryAdapter(WorldQueryAdapterConfig{
 			LookupFeature: func(cx, _ int32) (FeatureView, bool) {
 				f := FeatureView{Reclaimable: true, Autoreclaimable: true}
 				if cx < 0 {
@@ -51,8 +51,8 @@ func reclaimLadderFixture(t *testing.T, metalValue, energyValue int32) (*units.U
 			},
 			TerrainHeight: func(numeric.Fixed, numeric.Fixed) (numeric.Fixed, bool) { return 0, true },
 			SeaLevel:      func() uint8 { return 20 },
-		},
-	}
+		}),
+	})
 	BindQueue(actor, &Queue{binding: binding})
 	return actor, &sim
 }

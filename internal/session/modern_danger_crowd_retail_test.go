@@ -89,14 +89,14 @@ func TestModernRetailCapturedFlashCrowdEscapesImpact(t *testing.T) {
 			x, z := flash.X, flash.Z
 			bearing := numeric.AngleFromAtan2(-927581, 670502)
 			noticed := false
-			notice := s.Combat.ImpactNotice
-			s.Combat.ImpactNotice = func(v, a *units.Unit, b numeric.Angle, tick uint32) {
+			notice := s.Combat.ImpactNoticeHook()
+			s.Combat.SetImpactNotice(func(v, a *units.Unit, b numeric.Angle, tick uint32) {
 				if v == flash {
 					noticed = true
 					bearing = b
 				}
 				notice(v, a, b, tick)
-			}
+			})
 			if s.dangerVisible(flash, tower) {
 				t.Fatal("captured hidden source became visible")
 			}

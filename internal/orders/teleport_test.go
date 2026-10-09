@@ -49,7 +49,7 @@ func teleportFixture(t *testing.T, def *content.UnitDef, others []*units.Unit) (
 	walk := append([]*units.Unit{teleporter}, others...)
 	binding := &QueueBinding{
 		SimRNG: rng.Global.Sim,
-		World: &WorldQueryAdapter{
+		World: NewWorldQueryAdapter(WorldQueryAdapterConfig{
 			ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
 				for _, u := range walk {
 					if visit(u.Handle, u) {
@@ -57,8 +57,8 @@ func teleportFixture(t *testing.T, def *content.UnitDef, others []*units.Unit) (
 					}
 				}
 			},
-		},
-		Movement: &MovementGoalAdapter{
+		}),
+		Movement: NewMovementGoalAdapter(MovementGoalAdapterConfig{
 			PlaceUnit: func(req PlaceRequest) bool {
 				*log = append(*log, teleportPlacement{
 					what: "place", unit: req.Unit,
@@ -71,8 +71,8 @@ func teleportFixture(t *testing.T, def *content.UnitDef, others []*units.Unit) (
 				}
 				return true
 			},
-		},
-		Presentation: &PresentationAdapter{
+		}),
+		Presentation: NewPresentationAdapter(PresentationAdapterConfig{
 			Teleport: func(moved *units.Unit, fx0, fy0, fz0, tx, ty, tz numeric.Fixed) bool {
 				*log = append(*log, teleportPlacement{
 					what: "effect", unit: moved.Handle,
@@ -81,7 +81,7 @@ func teleportFixture(t *testing.T, def *content.UnitDef, others []*units.Unit) (
 				})
 				return true
 			},
-		},
+		}),
 	}
 	q := &Queue{binding: binding}
 	BindQueue(teleporter, q)
@@ -196,8 +196,8 @@ func TestTeleportWithoutASeamStillCompletes(t *testing.T) {
 	def := &content.UnitDef{FootprintX: 2, FootprintZ: 2, ModelTopFixed: 40 * tpFx}
 	inside := teleportCandidate(2, 70, 45, 90)
 	q, teleporter, _ := teleportFixture(t, def, []*units.Unit{inside})
-	q.binding.Movement.PlaceUnit = nil
-	q.binding.Presentation.Teleport = nil
+	q.binding.Movement.SetPlaceUnit(nil)
+	q.binding.Presentation.SetTeleport(nil)
 
 	q.Push(Lookup("Teleport"), Node{Owner: teleporter.Handle, GoalX: 200 * tpFx, GoalY: 50 * tpFx, GoalZ: 300 * tpFx, GoalSupplied: true})
 	q.Pump(teleporter, 0)

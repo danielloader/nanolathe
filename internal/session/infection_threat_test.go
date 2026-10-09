@@ -11,14 +11,14 @@ import (
 func TestInfectionThreatCompositionRebindAndConstructorDamage(t *testing.T) {
 	s, actor, victim := infectionSession(t, gameplay.Modern)
 	s.bindOrderQueue(actor) // the director binds every hunter before issuing work
-	if s.Combat.InfectionThreat == nil {
+	if s.Combat.InfectionThreatHook() == nil {
 		t.Fatal("missing existing-policy observation binding")
 	}
 	sim, crt, stock := *s.SimRNG(), *s.CrtRNG(), s.Econ.Players[1].Stock
 	for _, mode := range []gameplay.Mode{gameplay.Modern, gameplay.Strict31, gameplay.Community39, gameplay.Modern} {
 		s.SetGameplay(mode)
-		if s.Combat.InfectionThreat(actor) != (mode == gameplay.Modern) || s.Combat.InfectionThreat(victim) {
-			t.Fatalf("mode=%v actor=%v victim=%v alive=%v remaining=%v actorQueue=%v rules=%T", mode, s.Combat.InfectionThreat(actor), s.Combat.InfectionThreat(victim), actor.Alive, actor.Remaining, orders.QueueOfUnit(actor), s.Build.OrderBinding.Rules)
+		if s.Combat.InfectionThreatHook()(actor) != (mode == gameplay.Modern) || s.Combat.InfectionThreatHook()(victim) {
+			t.Fatalf("mode=%v actor=%v victim=%v alive=%v remaining=%v actorQueue=%v rules=%T", mode, s.Combat.InfectionThreatHook()(actor), s.Combat.InfectionThreatHook()(victim), actor.Alive, actor.Remaining, orders.QueueOfUnit(actor), s.Build.OrderBinding.Rules)
 		}
 	}
 	for _, state := range []string{"stunned", "unfinished", "dying", "dead"} {
@@ -33,7 +33,7 @@ func TestInfectionThreatCompositionRebindAndConstructorDamage(t *testing.T) {
 		case "dead":
 			actor.Alive = false
 		}
-		if s.Combat.InfectionThreat(actor) {
+		if s.Combat.InfectionThreatHook()(actor) {
 			t.Fatalf("inactive %s infector received threat preference", state)
 		}
 	}

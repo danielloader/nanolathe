@@ -1,0 +1,47 @@
+package main
+
+import (
+	"context"
+	"io"
+	"strings"
+	"testing"
+)
+
+func TestServerRequiresExplicitTransport(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, args := range [][]string{
+		nil, {"--tls-cert", "missing.pem"},
+		{"--behind-tls-proxy"}, {"--websocket", "--behind-tls-proxy", "--insecure-loopback"},
+		{"--websocket", "--behind-tls-proxy", "--tls-key", "key.pem"}, {"--insecure-loopback", "--tls-cert", "cert.pem"},
+		{"--insecure-loopback", "--listen", "0.0.0.0:0"}, {"--insecure-loopback", "--max-rooms", "257"},
+		{"--insecure-loopback", "--max-rooms", "100", "--max-connections", "199"}, {"--insecure-loopback", "--max-connections", "1025"},
+		{"--insecure-loopback", "unexpected-argument"},
+	} {
+		if err := run(ctx, args, io.Discard); err == nil {
+			t.Fatalf("admitted %v", args)
+		}
+	}
+	var out strings.Builder
+	if err := run(ctx, []string{"--insecure-loopback", "--listen", "127.0.0.1:0"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "plaintext loopback test") {
+		t.Fatal("test transport not identified")
+	}
+	if err := run(ctx, []string{"--websocket", "--behind-tls-proxy", "--listen", "127.0.0.1:0"}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(ctx, []string{"--help"}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHealthListenFlag(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out strings.Builder
+	if err := run(ctx, []string{"--insecure-loopback", "--listen", "127.0.0.1:0", "--health-listen", "127.0.0.1:0"}, &out); err != nil || !strings.Contains(out.String(), "relay health on 127.0.0.1:") {
+		t.Fatalf("health flag: %v %q", err, out.String())
+	}
+}

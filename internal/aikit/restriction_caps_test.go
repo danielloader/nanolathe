@@ -52,8 +52,8 @@ func newCapFixture(t *testing.T) *capFixture {
 		t.Fatal(err)
 	}
 	r := rng.NewSimulation(3)
-	m := &ai.Manager{Player: 0, Catalog: cat, RNG: &r, OrderBinding: &orders.QueueBinding{SimRNG: &r},
-		QueueBuildTyped: func(req ai.BuildRequest) error { f.reqs = append(f.reqs, req); return nil }}
+	m := ai.NewManager(ai.ManagerConfig{Player: 0, Catalog: cat, RNG: &r, OrderBinding: &orders.QueueBinding{SimRNG: &r},
+		QueueBuildTyped: func(req ai.BuildRequest) error { f.reqs = append(f.reqs, req); return nil }})
 	f.h = NewHost(m, &countBrain{}, PersonaMax)
 	h := f.h
 	h.kit.Table = BuildTable(cat, nil)

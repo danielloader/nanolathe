@@ -330,6 +330,16 @@ type Host struct {
 	b       batch
 	rand    Rand
 
+	// Checkpoint metadata is simulation-thread-only. The worker's batch is
+	// never inspected by capture (DESIGN_MULTIPLAYER §16.3.24).
+	checkpointOwner           checkpointHostOwner
+	checkpointExecutor        checkpointHostExecutor
+	checkpointHistory         *ai.ApplicationHistory
+	checkpointDeadlinePresent bool
+	checkpointDeadlineTick    uint32
+	checkpointBatchSerial     uint64 // assigned at scheduling; typed attempts borrow it
+	checkpointApplying        bool
+
 	nextThink uint32
 	inited    bool // begin ran: the table, executor and generator exist
 	ready     bool // the preparation has been joined: Kit.Map and the brain are set up
@@ -348,7 +358,9 @@ type Host struct {
 // simulation; preparation starts on the first eligible tick.
 func NewHost(m *ai.Manager, brain Brain, persona Persona) *Host {
 	persona.normalize()
-	return &Host{m: m, brain: brain, persona: persona}
+	h := &Host{m: m, brain: brain, persona: persona, checkpointHistory: m.CheckpointApplicationHistory()}
+	h.checkpointOwner = checkpointHostOwner{h, m}
+	return h
 }
 
 // Brain returns the bound brain.
@@ -426,6 +438,7 @@ func (h *Host) begin(tick uint32, w *units.World) {
 		break
 	}
 	h.ex = executor{m: m, table: table, obs: &h.obs}
+	h.checkpointExecutor = checkpointHostExecutor{&h.ex, m, table, m.Catalog, m.Terrain}
 	h.rand = PlayerRand(m.BattleSeed, m.Player)
 	h.kit = Kit{Me: m.Player, Side: side, Table: table, Persona: h.persona, Rand: &h.rand}
 	h.kit.obs = &h.obs
@@ -476,7 +489,7 @@ func startEnemies(m *ai.Manager) []bool {
 		if p < 0 || p >= 10 || uint8(p) == m.Player {
 			continue
 		}
-		enemy[i] = m.IsAlliance == nil || !m.IsAlliance(m.Player, uint8(p))
+		enemy[i] = m.IsAllianceHook() == nil || !m.IsAllianceHook()(m.Player, uint8(p))
 	}
 	return enemy
 }
@@ -573,6 +586,9 @@ func (h *Host) Step(tick uint32, w *units.World, econ *economy.Service) {
 			h.b.reset()
 			h.b.due = tick + h.persona.Reaction
 			h.b.pending = true
+			h.checkpointDeadlinePresent = true
+			h.checkpointDeadlineTick = h.b.due
+			h.checkpointBatchSerial = h.checkpointHistory.NextSerial()
 			budget := h.ex.projectBudget(tick, &h.persona)
 			h.nextThink = h.onPhase(tick + 1)
 			if pp != nil {
@@ -606,6 +622,16 @@ func (h *Host) Step(tick uint32, w *units.World, econ *economy.Service) {
 }
 
 func (h *Host) applyBatch(tick uint32, w *units.World) {
+	// A producer may expose a callback during application. Refuse capture
+	// until all bookkeeping completes; restore the enclosing marker on unwind.
+	previous := h.checkpointApplying
+	previousSerial := h.ex.checkpointBatchSerial
+	h.checkpointApplying = true
+	h.ex.checkpointBatchSerial = h.checkpointBatchSerial
+	defer func() {
+		h.checkpointApplying = previous
+		h.ex.checkpointBatchSerial = previousSerial
+	}()
 	before := h.ex.stats
 	h.ex.apply(&h.b, tick, w, &h.persona)
 	after := h.ex.stats
@@ -620,6 +646,7 @@ func (h *Host) applyBatch(tick uint32, w *units.World) {
 		h.kit.Last.Reasons[i] = after.Reasons[i] - before.Reasons[i]
 	}
 	h.b.pending = false
+	h.checkpointDeadlinePresent = false
 }
 
 // buildObs fills h.obs from the live world on the simulation thread. It is
@@ -642,7 +669,7 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 		if uint8(i) == me || !p.Exists || p.IsObserver {
 			continue
 		}
-		allied := m.IsAlliance != nil && m.IsAlliance(me, uint8(i))
+		allied := m.IsAllianceHook() != nil && m.IsAllianceHook()(me, uint8(i))
 		o.Allied[i] = allied
 		hostile[i] = !allied
 	}
@@ -694,7 +721,7 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 	for _, u := range ob.walk {
 		if u.Owner != me {
 			if d := u.Def; d != nil && u.Activated && (d.RadarDistanceJam != 0 || d.SonarDistanceJam != 0) &&
-				(m.JammerSuppresses == nil || m.JammerSuppresses(me, u.Owner)) {
+				(m.JammerSuppressesHook() == nil || m.JammerSuppressesHook()(me, u.Owner)) {
 				ob.addJammer(u)
 			}
 			continue
@@ -749,7 +776,7 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 			continue
 		}
 		if o.Allied[u.Owner] {
-			if !h.persona.Omniscient && (m.UnitVisible == nil || !m.UnitVisible(me, u)) {
+			if !h.persona.Omniscient && (m.UnitVisibleHook() == nil || !m.UnitVisibleHook()(me, u)) {
 				continue
 			}
 			info := table.Of(u.Def)
@@ -767,7 +794,7 @@ func (h *Host) buildObs(tick uint32, w *units.World, econ *economy.Service) {
 		if !hostile[u.Owner] {
 			continue
 		}
-		sighted := m.UnitVisible != nil && m.UnitVisible(me, u)
+		sighted := m.UnitVisibleHook() != nil && m.UnitVisibleHook()(me, u)
 		visible := h.persona.Omniscient || sighted
 		x, z := fixedToWorld(int64(u.X)), fixedToWorld(int64(u.Z))
 		if visible {
@@ -814,7 +841,7 @@ func (h *Host) updateMemory(tick uint32) {
 	// Forget what we can now see is gone: a remembered position inside the
 	// owner's current sight that produced no contact this pass. Mobile
 	// memories also age out.
-	probe := h.m.RallyProbeKnown
+	probe := h.m.RallyProbeKnownHook()
 	for i := 0; i < len(o.Memory); {
 		r := &o.Memory[i]
 		if r.LastSeen == tick {

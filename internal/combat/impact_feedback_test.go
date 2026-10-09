@@ -112,14 +112,14 @@ func TestImpactFeedbackFollowsNestedInterceptorImpacts(t *testing.T) {
 	svc.Records[int(h)-1].WeaponID = incoming.ID
 	svc.Records[int(h)-1].Pos = pos
 	impacts := 0
-	svc.Events = func(ev Event) {
+	svc.SetEvents(func(ev Event) {
 		if ev.Kind == EventProjectileImpact {
 			impacts++
 			if shooter.Pending != 0 {
 				t.Errorf("feedback preceded nested impact: %#x", shooter.Pending)
 			}
 		}
-	}
+	})
 	p := &Projectile{Shooter: shooter.Handle, Pos: pos}
 	handleProjectileImpact(svc, 0, p, &content.WeaponDef{AreaOfEffect: 32, Interceptor: true, UnitsOnly: true}, w, terrain, nil, nil, cat, 100, Vec3{}, nil, 0)
 	if impacts != 2 || shooter.Pending != 0x2000 {

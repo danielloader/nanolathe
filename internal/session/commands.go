@@ -610,6 +610,7 @@ func (s *Session) applyHumanCommands(tick uint32) {
 	s.pendingHuman = future
 	s.humanMu.Unlock()
 	for _, c := range cmds {
+		s.checkpointConsumedInput()
 		s.applyHumanCommand(c, tick)
 	}
 }
@@ -681,6 +682,7 @@ func (s *Session) applyPausedHumanCommands(tick uint32, before func()) int {
 		before()
 	}
 	for _, c := range cmds {
+		s.checkpointConsumedInput()
 		s.applyHumanCommand(c, tick)
 	}
 	return n

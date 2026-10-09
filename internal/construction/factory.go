@@ -164,7 +164,7 @@ type Service struct {
 	// Allocator hook for tests; if nil, uses World.Create.
 	Allocator func(owner uint8, def *content.UnitDef, x, y, z numeric.Fixed) (*units.Unit, error)
 	// ModelForFactory hook for QueryBuildInfo when m param is nil; tests may set.
-	ModelForFactory func(factory *units.Unit) *model.Model
+	modelForFactory func(factory *units.Unit) *model.Model
 	// OnRefresh is the interface refresh hook [05 C18][05 C21][05 C22].
 	OnRefresh func(*units.Unit)
 	// Presentation receives already-admitted construction cues: one call per
@@ -189,7 +189,7 @@ type Service struct {
 	StatusText func(text string)
 	// ModelForUnit resolves the current model used by QueryNanoPiece. The
 	// factory hook remains the compatibility name for factory/model fixtures.
-	ModelForUnit func(unit *units.Unit) *model.Model
+	modelForUnit func(unit *units.Unit) *model.Model
 
 	// ModeSelector is the difficulty word that selects the computer player's
 	// production scaling: 0 credits a HALF, 1 credits seven tenths, any other
@@ -202,7 +202,7 @@ type Service struct {
 	ModeSelector int
 	// IsSpecialSecondState reports whether the referenced player object is in
 	// the special second state [05 C21]. nil means no player is special.
-	IsSpecialSecondState func(owner uint8) bool
+	isSpecialSecondState func(owner uint8) bool
 
 	// LimitChecker is the per-def limit hook for allocation [P0-I16][05 C23].
 	// Was package var LimitChecker; now per-Service to avoid shared mutable.
@@ -218,7 +218,10 @@ type Service struct {
 	// CRTRandom is the session-owned CRT stream projection. CP-CON-1 consumes
 	// one bound-360 draw for every considered occupant, before choosing whether
 	// that occupant may move [community patch engine behavior §5.6].
-	CRTRandom func(bound uint32) uint32
+	crtRandom func(bound uint32) uint32
+	// Per-slot installation witnesses are diagnostic metadata, never bytes
+	// (DESIGN_MULTIPLAYER §16.3.67). The constructor witness stays in checkpointHandlers.
+	checkpointCallbacks [4]checkpointCallbackProof
 
 	// Per-session derived index for progress publication and the construction
 	// removal helper. Saved producer order targets rebuild it; retail's carrier
@@ -284,6 +287,7 @@ type Service struct {
 	// This is only the current call's owner; all progress lives on the node.
 	vtolBuildStepOwner *units.Unit
 	boundGetBuilt      orders.OwnedHandler
+	checkpointHandlers checkpointOrderHandlers // constructor/lazy-installation proof, never wire state
 }
 
 // ensureRegistrationRows resolves this service's row ids and binds its two
@@ -310,6 +314,10 @@ func (s *Service) ensureRegistrationRows() {
 	s.boundGetBuilt = func(u *units.Unit, n *orders.Node, satisfied uint32, tick uint32) (orders.Code, bool) {
 		return s.handleGetBuiltOrder(u, n, satisfied, tick), true
 	}
+	if s.hasCheckpointHandlerSource() {
+		s.checkpointHandlers.wake = orders.NewCheckpointOwnedHandler(s.boundConstructionWake, orders.CheckpointConstructionWake, s.checkpointHandlers.source)
+		s.checkpointHandlers.built = orders.NewCheckpointOwnedHandler(s.boundGetBuilt, orders.CheckpointGetBuilt, s.checkpointHandlers.source)
+	}
 }
 
 // registerGetBuilt binds the construction-owned `GetBuilt` lifecycle to q
@@ -320,7 +328,7 @@ func (s *Service) registerGetBuilt(q *orders.Queue) {
 		return
 	}
 	s.ensureRegistrationRows()
-	q.SetOwnedHandler(s.getBuiltRow, s.boundGetBuilt)
+	s.setCheckpointOrderHandler(q, s.getBuiltRow, s.boundGetBuilt, s.checkpointHandlers.built)
 }
 
 // placementRecord retains the occupancy rectangle, definition and derived
@@ -381,7 +389,7 @@ func (s *Service) RegisterOrderHandlers(q *orders.Queue) {
 	}
 	s.ensureRegistrationRows()
 	for _, id := range s.stepDrivenRows {
-		q.SetOwnedHandler(id, s.boundConstructionWake)
+		s.setCheckpointOrderHandler(q, id, s.boundConstructionWake, s.checkpointHandlers.wake)
 	}
 	// The two mobile-build rows use the same handler so their stop/cancel
 	// notifications are delivered before their phase-1 movement wake. Their
@@ -389,7 +397,7 @@ func (s *Service) RegisterOrderHandlers(q *orders.Queue) {
 	// wake and arrives as the ordinary handler argument [04 §3.3][05 R-WORK-01
 	// §13]. StepUnit still owns all continuing state-machine arms.
 	for _, id := range s.mobileWakeRows {
-		q.SetOwnedHandler(id, s.boundConstructionWake)
+		s.setCheckpointOrderHandler(q, id, s.boundConstructionWake, s.checkpointHandlers.wake)
 	}
 }
 
@@ -705,10 +713,7 @@ func (s *Service) CheckLimit(factory *units.Unit, defKey string) bool {
 
 // NewService creates a Service with given dependencies.
 func NewService(terrain *world.Terrain, catalog *content.Catalog, w *units.World, econ *economy.Service) *Service {
-	s := &Service{Terrain: terrain, Catalog: catalog, World: w, Economy: econ}
-	s.builderLinks = make(map[pool.Handle]pool.Handle)
-	s.placements = make(map[pool.Handle]placementRecord)
-	return s
+	return NewServiceWithCheckpointBinding(terrain, catalog, w, econ, nil)
 }
 
 // Messages returns the verbatim diagnostics emitted so far [05 C18][05 C21][05 C22].

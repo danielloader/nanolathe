@@ -300,8 +300,8 @@ func TestOnDeathExtraFiresExactlyOnceAlongsidePrimary(t *testing.T) {
 		t.Fatal(err)
 	}
 	var primary, extra int
-	world.OnDeath = func(pool.Handle, DeathCause, *Unit) { primary++ }
-	world.OnDeathExtra = func(pool.Handle, DeathCause, *Unit) { extra++ }
+	world.SetDeathHook(func(pool.Handle, DeathCause, *Unit) { primary++ })
+	world.SetDeathExtraHook(func(pool.Handle, DeathCause, *Unit) { extra++ })
 	world.Destroy(h, DeathKilled)
 	if got := world.FinalizeDeath(h, 1); !got.Freed {
 		t.Fatalf("FinalizeDeath = %#v, want freed", got)

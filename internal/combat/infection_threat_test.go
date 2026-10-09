@@ -20,15 +20,15 @@ func TestModernInfectorPreferenceKeepsAdmissionAndHysteresis(t *testing.T) {
 				t.Fatal(err)
 			}
 			infector := w.Unit(h)
-			s.InfectionThreat = func(u *units.Unit) bool { return u == infector }
+			s.SetInfectionThreat(func(u *units.Unit) bool { return u == infector })
 			shooter.SlotAt(0).Target = units.Target{Kind: units.TargetUnit, Unit: ordinary.Handle}
 			want := infector.Handle
 			switch tc {
 			case "disabled":
-				s.InfectionThreat = nil
+				s.SetInfectionThreat(nil)
 				want = ordinary.Handle
 			case "unseen", "radar":
-				s.Visibility = func(_ visibility.PlayerID, v visibility.Target) bool { return v.X != infector.X }
+				s.SetVisibility(func(_ visibility.PlayerID, v visibility.Target) bool { return v.X != infector.X })
 				infector.Flags |= visibility.SeenBit
 				want = ordinary.Handle
 			case "out of range":
@@ -49,7 +49,7 @@ func TestModernInfectorPreferenceKeepsAdmissionAndHysteresis(t *testing.T) {
 			case "tie":
 				ordinary.X = infector.X
 				shooter.SlotAt(0).Target = units.Target{}
-				s.InfectionThreat = func(*units.Unit) bool { return true }
+				s.SetInfectionThreat(func(*units.Unit) bool { return true })
 				want = ordinary.Handle
 			}
 			q := modernTargetQuery(s, w, terrain, shooter, infector, ordinary)
@@ -75,7 +75,7 @@ func TestInfectorBonusDoesNotOverrideManualTargetOrHoldFire(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s.InfectionThreat = func(u *units.Unit) bool { return u.Handle == h }
+		s.SetInfectionThreat(func(u *units.Unit) bool { return u.Handle == h })
 		shooter.SlotAt(0).Target = units.Target{Kind: units.TargetUnit, Unit: target.Handle}
 		if hold {
 			shooter.Flags &^= units.StandingFieldMask << units.StandingFireShift
@@ -96,14 +96,14 @@ func TestStrictAndCommunityNeverReadInfectionPreference(t *testing.T) {
 	for _, rules := range []Rules{nil, StrictRules{}, CommunityRules{}} {
 		s, w, terrain, shooter, target, _ := modernCombatFixture(t)
 		s.Rules = rules
-		s.InfectionThreat = func(*units.Unit) bool { t.Fatal("disabled mode read infection threat"); return true }
+		s.SetInfectionThreat(func(*units.Unit) bool { t.Fatal("disabled mode read infection threat"); return true })
 		q := modernTargetQuery(s, w, terrain, shooter, target)
 		sim := rng.NewSimulation(19)
 		q.Acquisition.RNG = &sim
 		before := sim
 		got, ok := s.rules().SelectTarget(s, &q)
 		after := sim
-		s.InfectionThreat = nil
+		s.SetInfectionThreat(nil)
 		sim = before
 		baseline, baseOK := s.rules().SelectTarget(s, &q)
 		if got != baseline || ok != baseOK || sim != after {
@@ -119,8 +119,8 @@ func TestHumanAndComputerAutonomousWeaponsPreferInfector(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s.ControlByte = func(uint8) uint8 { return control }
-		s.InfectionThreat = func(u *units.Unit) bool { return u.Handle == h }
+		s.SetControlByte(func(uint8) uint8 { return control })
+		s.SetInfectionThreat(func(u *units.Unit) bool { return u.Handle == h })
 		shooter.SlotAt(0).Target = units.Target{Kind: units.TargetUnit, Unit: target.Handle}
 		s.targets.primary[shooter.Owner] = []pool.Handle{target.Handle, h}
 		for i := 0; i < 40; i++ {

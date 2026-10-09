@@ -20,9 +20,9 @@ func moveRetentionFixture(t *testing.T, rules Rules, modernAI bool) (*Queue, *un
 	}
 	u := w.Unit(h)
 	q := QueueForUnit(u)
-	q.SetBinding(&QueueBinding{Rules: rules, SimRNG: &rng.Simulation{}, ModernAIPlayer: func(owner uint8) bool {
+	q.SetBinding(NewQueueBinding(QueueBindingConfig{Rules: rules, SimRNG: &rng.Simulation{}, ModernAIPlayer: func(owner uint8) bool {
 		return modernAI && owner == 3
-	}})
+	}}))
 	move := &Node{ID: Lookup("Move_Ground"), Owner: h, Phase: 1}
 	next := &Node{ID: Lookup("Move_Ground"), Owner: h}
 	q.SetPrimary([]*Node{move, next})
@@ -94,7 +94,7 @@ func TestModernAIMoveRetentionReadsTheRunningRecord(t *testing.T) {
 		})
 	}
 	q, u, _ := moveRetentionFixture(t, &ModernRules{}, true)
-	q.Binding().ModernAIPlayer = nil
+	q.Binding().SetModernAIPlayer(nil)
 	if rulesOfUnit(u).KeepsMoveOnDamage(u) {
 		t.Fatal("a binding without the predicate kept a move")
 	}

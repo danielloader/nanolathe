@@ -98,8 +98,8 @@ func KickoutRewrite(u *units.Unit, x, y, z numeric.Fixed, tick uint32, already b
 }
 
 func lookupKickoutTarget(q *Queue, h pool.Handle) *units.Unit {
-	if q == nil || h == 0 || q.binding == nil || q.binding.Lookup == nil {
+	if q == nil || h == 0 || q.binding == nil || q.binding.LookupHook() == nil {
 		return nil
 	}
-	return q.binding.Lookup(h)
+	return q.binding.LookupHook()(h)
 }

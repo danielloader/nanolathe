@@ -260,7 +260,7 @@ func modernObstructedCell(q *ShotQuery, cx, cz, low, high int32, terminalTarget 
 			// A manual unit attack exempts only the intended victim. Friends
 			// in front of any other target still require a clear firing place.
 			if (u != q.Target || !q.manualAttack()) && (u.Owner == q.Shooter.Owner ||
-				(q.Service != nil && q.Service.Reaction != nil && q.Service.Reaction.Allied != nil && q.Service.Reaction.Allied(q.Shooter.Owner, u.Owner))) {
+				(q.Service != nil && q.Service.Reaction != nil && q.Service.Reaction.AlliedHook() != nil && q.Service.Reaction.AlliedHook()(q.Shooter.Owner, u.Owner))) {
 				return true
 			}
 			if u == q.Target {

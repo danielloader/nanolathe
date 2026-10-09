@@ -30,6 +30,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/path"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/checkpoint"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
@@ -48,7 +49,8 @@ type System struct {
 	Community community.Features
 	Terrain   *world.Terrain
 	// Damage delivers cargo-cascade packets through the session intake [06 §12.1].
-	Damage func(uint32, combat.DamageInput) combat.DamageResult
+	damage           func(uint32, combat.DamageInput) combat.DamageResult
+	checkpointDamage checkpointCompositionProof
 
 	// Fallback is retained for callers that ask for a handle before its unit
 	// surface exists. Initialized units always use either their resolved class
@@ -94,6 +96,10 @@ type System struct {
 	// that site is a fresh heap closure per unit per tick; the bound value
 	// is the same function either way.
 	airLegHandler orders.OwnedHandler
+	// Constructor provenance and the immutable cached value are diagnostic
+	// metadata only; airLegHandler retains its existing presence byte (§16.3.64).
+	checkpointOrderHandlers *checkpointOrderHandlerSource
+	checkpointAirLegHandler orders.CheckpointOwnedHandler
 	// The per-handle tables below are dense rows indexed by pool handle, not
 	// hashed maps [I5]. Handles are pool slots — dense by construction, slot 0
 	// null, reused immediately — so the identity IS the index and a nil (or
@@ -217,6 +223,9 @@ type System struct {
 	visit Visit
 	// searchCfg is the scratch configuration handed to the Pilot's Search.
 	searchCfg path.SearchConfig
+	// checkpointSearch is lent alongside searchCfg only for the pilot call.
+	// The opened working set owns its roots afterwards; see checkpoint_metadata.go.
+	checkpointSearch *checkpointAccessorRoots
 	// countRefusals makes the laboratory count refused steps by kind
 	// (LabStats.Refused).
 	countRefusals bool
@@ -248,7 +257,8 @@ type System struct {
 	// [04 R-AIR-01 §1] step 4 reads — explicitly NOT the four-corner terrain
 	// query — and the sentinel test the off-map recovery legs run. It is built
 	// once, with the terrain, and never rebuilt.
-	AirSectors *AirSectorGrid
+	AirSectors           *AirSectorGrid
+	checkpointAirSectors *checkpointAirSnapshot // admitted constructor metadata, never wire state
 	// These are session-owned lobby values. Zero keeps path scheduling inert
 	// until the session supplies explicit limits [04 R-PATH-01 §6].
 	PathPlayers   int
@@ -263,7 +273,8 @@ type System struct {
 	// than duplicating the catalog lookup. A nil resolver leaves callers on
 	// whatever behavior they had before this seam existed — no invented
 	// fallback.
-	ProductFootprint func(catalogIndex uint32) (fx, fz int32, ok bool)
+	productFootprint           func(catalogIndex uint32) (fx, fz int32, ok bool)
+	checkpointProductFootprint checkpointCompositionProof
 }
 
 // pathProvider is the movement-owned candidate surface. Submit/Cancel only
@@ -288,7 +299,9 @@ type pathProvider struct {
 	tick     uint32
 	players  int
 	eligible func(int) bool
-	limit    int32
+	// Installation proof only; absent from gameplay and canonical payloads.
+	checkpointEligibilityAuthority *checkpoint.BindingAuthority
+	limit                          int32
 	// eligibleNow caches eligible for the duration of one scheduler call:
 	// the gate reads player records no path work can change, and the
 	// scheduler asks it on every admission-loop iteration for every player.
@@ -745,7 +758,8 @@ type pathWorkingSet struct {
 	// through is the reading the search was opened under: zero for the
 	// request's own, and otherwise one of Modern routes through friends'
 	// (traffic_through.go).
-	through uint8
+	through    uint8
+	checkpoint *checkpointAccessorRoots
 }
 
 // thresholdSqFromRadius computes the goal-handle threshold² = floor(radiusParam/16)² [R-P0-01].
@@ -927,6 +941,10 @@ type StepResult struct {
 // passability over the supplied terrain, and whose PublishFunc stores into Routes via
 // Route.Publish [04 §7.3] C14.
 func NewSystem(terrain *world.Terrain, fallback Profile, grid *OccupancyGrid) *System {
+	return newSystem(terrain, fallback, grid, nil)
+}
+
+func newSystem(terrain *world.Terrain, fallback Profile, grid *OccupancyGrid, authority *checkpoint.BindingAuthority) *System {
 	s := &System{
 		Terrain:    terrain,
 		AirSectors: NewAirSectorGrid(terrain), // built once at map load [04 R-AIR-01 §5]
@@ -937,6 +955,12 @@ func NewSystem(terrain *world.Terrain, fallback Profile, grid *OccupancyGrid) *S
 		PathPlayers:   1,
 		PathUnitLimit: 1,
 	}
+	if authority != nil {
+		s.checkpointOrderHandlers = &checkpointOrderHandlerSource{
+			system: s, authority: authority, source: orders.NewCheckpointHandlerSource(s, authority),
+		}
+	}
+	s.snapshotCheckpointAirSectors(authority)
 	// Slot 0 is the null pool slot and holds nothing [I5], but allocating it
 	// here makes every row non-nil from construction, which is what callers
 	// that test a row against nil to ask "is this movement system composed?"
@@ -946,7 +970,7 @@ func NewSystem(terrain *world.Terrain, fallback Profile, grid *OccupancyGrid) *S
 	// for the rest of the battle, so every placement check reaches both halves
 	// without its caller electing to pass one [04 R-COLL-01 §2].
 	if terrain != nil {
-		terrain.Movers = gridOccupancy{grid: grid}
+		terrain.SetMovers(gridOccupancy{grid: grid})
 		// Retail's mobile occupancy IS the plot cell's first two words
 		// [03 §2.2][04 R-COLL-01 §4]; binding them here makes every grid stamp
 		// and clear write the word of the same plane in the same call. The
@@ -957,11 +981,11 @@ func NewSystem(terrain *world.Terrain, fallback Profile, grid *OccupancyGrid) *S
 		// The feature stamper's class-layer half [03 §5.1.2][03 R-LAYER §2].
 		// internal/features writes the plot cells and calls the terrain's
 		// NoteFootprintRestamp; this is where that reaches the layers.
-		terrain.ClassRestamp = s.NoteFeatureFootprint
+		terrain.SetClassRestampOwnerWithCheckpointBinding(s, authority)
 	}
-	sched := path.NewScheduler(s.searchFunc, s.publishFunc)
-	s.pathProvider = &pathProvider{system: s, players: s.PathPlayers, limit: s.PathUnitLimit, eligible: func(player int) bool { return player == 0 }}
-	sched.SetCandidateProvider(s.pathProvider)
+	sched := path.NewSchedulerWithCheckpointBindings(s.searchFunc, s.publishFunc, authority)
+	s.pathProvider = &pathProvider{system: s, players: s.PathPlayers, limit: s.PathUnitLimit, eligible: func(player int) bool { return player == 0 }, checkpointEligibilityAuthority: authority}
+	sched.SetCandidateProviderWithCheckpointBinding(s.pathProvider, authority)
 	// Use DefaultBase unless overridden [P0-I16]; no longer reads mutable global.
 	sched.SetBase(path.DefaultBase)
 	s.Scheduler = sched
@@ -973,6 +997,10 @@ func NewSystem(terrain *world.Terrain, fallback Profile, grid *OccupancyGrid) *S
 // this after the economy player records and sliced unit pool exist. Eligibility
 // reads the actual player slot separately from the equal-share divisor.
 func (s *System) ConfigurePath(players int, unitLimit int32, eligible func(int) bool) {
+	s.configurePath(players, unitLimit, eligible, nil)
+}
+
+func (s *System) configurePath(players int, unitLimit int32, eligible func(int) bool, authority *checkpoint.BindingAuthority) {
 	if s == nil || s.pathProvider == nil || s.Scheduler == nil {
 		return
 	}
@@ -982,9 +1010,13 @@ func (s *System) ConfigurePath(players int, unitLimit int32, eligible func(int) 
 	s.PathPlayers = players
 	s.PathUnitLimit = unitLimit
 	s.pathProvider.players = players
+	s.pathProvider.checkpointEligibilityAuthority = nil
 	s.pathProvider.eligible = eligible
 	s.pathProvider.limit = unitLimit
-	s.Scheduler.SetCandidateProvider(s.pathProvider)
+	s.Scheduler.SetCandidateProviderWithCheckpointBinding(s.pathProvider, authority)
+	if eligible != nil {
+		s.pathProvider.checkpointEligibilityAuthority = authority
+	}
 }
 
 // SetClasses binds the compiled movement-class table. Call it before the first
@@ -1002,6 +1034,10 @@ func (s *System) SetClasses(classes map[string]*content.MovementClass) {
 // the world on every call. This is the minimal additive interface for ON-03;
 // it does not change internal/path or internal/orders.
 func (s *System) BindWorld(w *units.World) {
+	s.bindWorld(w, nil)
+}
+
+func (s *System) bindWorld(w *units.World, authority *checkpoint.BindingAuthority) {
 	if s == nil {
 		return
 	}
@@ -1010,7 +1046,7 @@ func (s *System) BindWorld(w *units.World) {
 	}
 	s.world = w
 	if w != nil {
-		w.SetAttachmentObserver(s)
+		w.SetAttachmentObserverWithCheckpointBinding(s, authority)
 	}
 	// The pool's capacity is fixed for the battle and every handle it can hand
 	// out is below it, so sizing the per-handle tables here is what lets every
@@ -1064,10 +1100,28 @@ func (s *System) mappingWordSource(h pool.Handle) MappingWordSource {
 		return nil
 	}
 	b := airBinding(u)
-	if b == nil || b.World == nil || b.World.MappingWord == nil {
+	if b == nil || b.World == nil || b.World.MappingWordHook() == nil {
 		return nil
 	}
-	return b.World.MappingWord
+	return b.World.MappingWordHook()
+}
+
+// checkpointMappingWordSource follows the same requester lookup for retained
+// readers, carrying the original copied installation proof (§16.3.66). Pure
+// immediate reads keep using mappingWordSource; neither lookup calls a reader.
+func (s *System) checkpointMappingWordSource(h pool.Handle) orders.CheckpointMappingWord {
+	if s == nil || s.world == nil {
+		return orders.CheckpointMappingWord{}
+	}
+	u := s.world.Unit(h)
+	if u == nil {
+		return orders.CheckpointMappingWord{}
+	}
+	b := airBinding(u)
+	if b == nil || b.World == nil {
+		return orders.CheckpointMappingWord{}
+	}
+	return b.World.CheckpointMappingWord()
 }
 
 // ensureLayerRegistry returns the layer registry, creating it at first use for
@@ -3002,6 +3056,11 @@ func (s *System) searchUnder(r path.Request, scale int32, budget int, through ui
 			bounds = path.Rect{Min: path.Cell{X: 0, Z: 0}, Max: path.Cell{X: s.Terrain.CellW - 1, Z: s.Terrain.CellH - 1}}
 		}
 		var cfg path.SearchConfig
+		roots := &checkpointAccessorRoots{}
+		if _, err := path.CheckpointKernelKind(s.Kernel); err != nil {
+			// TODO(M3-U6): custom kernels need their own reviewed capture contract.
+			roots.unsupported = "TODO(M3-U6): unsupported path kernel"
+		}
 		if s.Terrain != nil {
 			// The requesting unit's class layer is the search passability
 			// source [04 §6.1 R-DOC04-B]: one record and one stamped layer
@@ -3031,7 +3090,7 @@ func (s *System) searchUnder(r path.Request, scale int32, budget int, through ui
 			// expansion [04 §6.1 R-DOC04-B][04 §7.3]; path.Session.init
 			// invokes cfg.Revise first.
 			reg := s.ensureLayerRegistry()
-			reg.BindMappingWord(s.mappingWordSource(r.Unit))
+			reg.BindMappingWordWithCheckpointBinding(s.checkpointMappingWordSource(r.Unit))
 			cls := s.classKeyFor(r.Unit)
 			layer := reg.For(cls, profile)
 			requester := r.Unit
@@ -3042,6 +3101,12 @@ func (s *System) searchUnder(r path.Request, scale int32, budget int, through ui
 				if u := s.world.Unit(r.Unit); u != nil {
 					owner = u.Owner
 				}
+			}
+			classCapture := checkpointClassCapture(layer, profile, requester, owner, revTick)
+			roots.passable = classCapture
+			roots.revise = &checkpointAccessorCapture{
+				value: path.CheckpointAccessor{Kind: 8, Profile: checkpointProfile(profile), Requester: uint32(requester), Tick: revTick},
+				layer: layer, registry: reg, class: cls,
 			}
 			cfg = path.SearchConfig{
 				Start:      r.Start,
@@ -3065,6 +3130,7 @@ func (s *System) searchUnder(r path.Request, scale int32, budget int, through ui
 			// learned nothing keep the retail read above
 			// (docs/DESIGN_MOVEMENT_PATH.md "Modern learned terrain").
 			if learned := s.rules().LearnedTerrain(s); learned != nil {
+				roots.passable = checkpointLearnedCapture(classCapture, learned, owner, footX, footZ)
 				cfg.PassableValue = func(c path.Cell) uint8 {
 					return layer.passableLearned(c.X, c.Z, footX, footZ, owner, learned)
 				}
@@ -3076,6 +3142,9 @@ func (s *System) searchUnder(r path.Request, scale int32, budget int, through ui
 				// smoothing").
 				learned := s.rules().LearnedTerrain(s)
 				keeps := s.keepsItsGround(owner)
+				view := checkpointLearnedCapture(classCapture, learned, owner, footX, footZ)
+				view = checkpointThroughCapture(view, owner, 1, footX, footZ)
+				roots.leg = checkpointWallCapture(view, s, owner, 2)
 				cfg.LegValue = func(c path.Cell) uint8 {
 					return layer.passableThrough(c.X, c.Z, footX, footZ, owner, learned, keeps)
 				}
@@ -3084,6 +3153,7 @@ func (s *System) searchUnder(r path.Request, scale int32, budget int, through ui
 			// absent, and hostile names the units that stay walls to it.
 			staticView := false
 			var hostile func(id int) bool
+			var wall uint8
 			if through != 0 {
 				// Nanolathe Modern policy: the request's own search found
 				// nothing, and this one reads friendly units as absent
@@ -3092,6 +3162,13 @@ func (s *System) searchUnder(r path.Request, scale int32, budget int, through ui
 				learned := s.rules().LearnedTerrain(s)
 				staticView, hostile = true, s.throughKeeps(owner, through)
 				walls := hostile
+				wall = 2
+				if through >= 2 {
+					wall = 1
+				}
+				view := checkpointLearnedCapture(classCapture, learned, owner, footX, footZ)
+				view = checkpointThroughCapture(view, owner, through, footX, footZ)
+				roots.passable = checkpointWallCapture(view, s, owner, wall)
 				cfg.PassableValue = func(c path.Cell) uint8 {
 					return layer.passableThrough(c.X, c.Z, footX, footZ, owner, learned, walls)
 				}
@@ -3105,6 +3182,10 @@ func (s *System) searchUnder(r path.Request, scale int32, budget int, through ui
 			if jamAfter, _ := s.rules().JamRelease(s); jamAfter > 0 && s.releasing(requester, s.tick) {
 				learned := s.rules().LearnedTerrain(s)
 				staticView, hostile = true, s.hostileMover(owner)
+				wall = 1
+				view := checkpointLearnedCapture(classCapture, learned, owner, footX, footZ)
+				view = checkpointStaticCapture(view, layer, footX, footZ)
+				roots.passable = checkpointWallCapture(view, s, owner, wall)
 				cfg.PassableValue = func(c path.Cell) uint8 {
 					return layer.staticPassableKeeping(c.X, c.Z, footX, footZ, owner, learned, hostile)
 				}
@@ -3121,6 +3202,12 @@ func (s *System) searchUnder(r path.Request, scale int32, budget int, through ui
 				if start, wedged := s.wedgedStart(requester, profile); wedged {
 					base := cfg.PassableValue
 					fx, fz := profile.footprintSize()
+					override := classCapture
+					if staticView {
+						override = checkpointStaticCapture(override, layer, footX, footZ)
+						override = checkpointWallCapture(override, s, owner, wall)
+					}
+					roots.passable = checkpointWedgeCapture(roots.passable, override, start, fx, fz, footX, footZ)
 					cfg.PassableValue = func(c path.Cell) uint8 {
 						v := base(c)
 						if v != LayerBlocked || c.X <= start.X-fx || c.X >= start.X+fx || c.Z <= start.Z-fz || c.Z >= start.Z+fz {
@@ -3131,6 +3218,8 @@ func (s *System) searchUnder(r path.Request, scale int32, budget int, through ui
 				}
 			}
 		} else {
+			// TODO(M3-U6): the constant-blocked callback has no reviewed descriptor.
+			roots.unsupported = "TODO(M3-U6): path search has no terrain"
 			// No authored terrain layer is available; keep this request inert
 			// rather than inventing permissive passability.
 			cfg = path.SearchConfig{
@@ -3149,9 +3238,14 @@ func (s *System) searchUnder(r path.Request, scale int32, budget int, through ui
 			// Through the system's scratch copy: a configuration whose
 			// address is taken here would be moved to the heap for every
 			// search, pilot or none.
-			s.searchCfg = cfg
+			if !checkpointPilotSupported(p) {
+				// TODO(M3-U6): custom pilots may replace callbacks or other cfg fields.
+				roots.unsupported = "TODO(M3-U6): unsupported path pilot"
+			}
+			s.searchCfg, s.checkpointSearch = cfg, roots
 			p.Search(s, r, &s.searchCfg)
 			cfg, s.searchCfg = s.searchCfg, path.SearchConfig{}
+			s.checkpointSearch = nil
 		}
 		// A replaced session gives the table back before the new one asks for
 		// it, so a goal or activation change does not leave it lent.
@@ -3162,7 +3256,7 @@ func (s *System) searchUnder(r path.Request, scale int32, budget int, through ui
 		// request — the resumption below and every node it expands stay
 		// inside the opened search.
 		sess = s.pathKernel().NewSession(cfg)
-		setHandleRow(&s.sessions, idx, &pathWorkingSet{session: sess, goal: r.Goal, activation: r.Activation, through: through})
+		setHandleRow(&s.sessions, idx, &pathWorkingSet{session: sess, goal: r.Goal, activation: r.Activation, through: through, checkpoint: roots})
 		// Request setup reports its established 0x100/0x200 notification to
 		// the goal object's owning order even when search work continues. These
 		// bits are distinct from the final route diagnostic [04 R-PATH-01
@@ -3582,8 +3676,8 @@ func (s *System) diplomacyRows() func(from, toward uint8) bool {
 	// the whole live pool first made that an O(units) walk per tick.
 	var rows func(from, toward uint8) bool
 	s.world.FirstLive(func(u *units.Unit) bool {
-		if b := airBinding(u); b != nil && b.World != nil && b.World.DeclaresAlliance != nil {
-			rows = b.World.DeclaresAlliance
+		if b := airBinding(u); b != nil && b.World != nil && b.World.DeclaresAllianceHook() != nil {
+			rows = b.World.DeclaresAllianceHook()
 			return true
 		}
 		return false

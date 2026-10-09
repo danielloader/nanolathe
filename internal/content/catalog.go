@@ -785,6 +785,7 @@ func (c *Catalog) Clone() *Catalog {
 	out := &Catalog{
 		Manifest: c.Manifest,
 		Hash:     c.Hash,
+		Limits:   c.Limits,
 	}
 	if c.SurvivalRoster != nil {
 		cp := *c.SurvivalRoster

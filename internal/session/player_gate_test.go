@@ -102,7 +102,7 @@ func TestPhase2SweepSkipsUngatedOwnersInOrder(t *testing.T) {
 	}
 
 	var visited []pool.Handle
-	w.OnDeath = func(h pool.Handle, _ units.DeathCause, _ *units.Unit) { visited = append(visited, h) }
+	w.SetDeathHook(func(h pool.Handle, _ units.DeathCause, _ *units.Unit) { visited = append(visited, h) })
 	s.stepUnitPhase(1)
 
 	if len(visited) != len(want) {

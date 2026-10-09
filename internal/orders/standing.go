@@ -427,7 +427,7 @@ func paralyzeHandler(u *units.Unit, n *Node, _ uint32, tick uint32) Code {
 // PushParalyzeCredit is the packet side of the stun [06 §10] — the entry point
 // a kind-2 damage packet reaches this row through. internal/combat cannot call
 // it directly, because this package imports that one, so combat declares the
-// seam (combat.ParalyzeTaskPush) and the initializer below installs this
+// seam (combat.SetParalyzeTaskPush) and the initializer below installs this
 // function into it.
 //
 // [06 §10]: the engine resolves the task type by the authored alias `paralyze`
@@ -614,11 +614,11 @@ func teleportHandler(u *units.Unit, n *Node, _ uint32, _ uint32) Code {
 		newX := n.GoalX + (other.X - u.X)
 		newY := n.GoalY + (other.Y - u.Y)
 		newZ := n.GoalZ + (other.Z - u.Z)
-		if b.Presentation != nil && b.Presentation.Teleport != nil {
-			b.Presentation.Teleport(other, other.X, other.Y, other.Z, newX, newY, newZ)
+		if b.Presentation != nil && b.Presentation.TeleportHook() != nil {
+			b.Presentation.TeleportHook()(other, other.X, other.Y, other.Z, newX, newY, newZ)
 		}
-		if b.Movement != nil && b.Movement.PlaceUnit != nil {
-			b.Movement.PlaceUnit(PlaceRequest{Unit: h, X: newX, Y: newY, Z: newZ})
+		if b.Movement != nil && b.Movement.PlaceUnitHook() != nil {
+			b.Movement.PlaceUnitHook()(PlaceRequest{Unit: h, X: newX, Y: newY, Z: newZ})
 		}
 		return scanNext
 	})
@@ -642,7 +642,7 @@ func opportunityScan(u *units.Unit) *units.Unit {
 		return nil // not fire at will: no search at all [04 R-STANCE-01 §3]
 	}
 	q := QueueOfUnit(u)
-	if q == nil || q.Binding() == nil || q.Binding().Weapons == nil || q.Binding().Weapons.Acquire == nil {
+	if q == nil || q.Binding() == nil || q.Binding().Weapons == nil || q.Binding().Weapons.AcquireHook() == nil {
 		return nil
 	}
 	rangeLimit := uint32(0)
@@ -652,8 +652,8 @@ func opportunityScan(u *units.Unit) *units.Unit {
 	// The opportunity helper asks once through slot zero. Trying additional
 	// weapons after a refusal changes both target choice and RNG consumption
 	// [04 R-STANCE-01 §3].
-	if handle, ok := q.Binding().Weapons.Acquire(u, 0, rangeLimit); ok {
-		return q.Binding().Lookup(handle)
+	if handle, ok := q.Binding().Weapons.AcquireHook()(u, 0, rangeLimit); ok {
+		return q.Binding().LookupHook()(handle)
 	}
 	return nil
 }
@@ -893,5 +893,5 @@ func init() {
 	// than by the session composer because it carries no session state: the
 	// record it pushes reaches the mover, the RNG and every other session-owned
 	// port through the victim's own queue binding.
-	combat.ParalyzeTaskPush = PushParalyzeCredit
+	checkpointParalyzeInstallation = combat.SetParalyzeTaskPush(PushParalyzeCredit)
 }

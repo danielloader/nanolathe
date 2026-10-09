@@ -134,13 +134,13 @@ func (s *Service) fireBurnEvent(inst *Instance) {
 	// binds resolves the weapon name and hands that record to the shared
 	// splash entry. The weapon itself is a seam because the projectile and
 	// damage subsystem is combat's, which this package cannot import.
-	if inst.Def != nil && inst.Def.BurnWeapon != "" && s.BurnWeapon != nil {
+	if inst.Def != nil && inst.Def.BurnWeapon != "" && s.BurnWeaponHook() != nil {
 		x := footprintCentreWorld(cx, inst.FootprintX)
 		z := footprintCentreWorld(cz, inst.FootprintZ)
 		// The four-corner bilinear query of [03 §2.3], raw — on the map's last
 		// row or column it is retail's −1 sentinel, and the request carries it.
 		y := s.Terrain.HeightAt(x, z)
-		s.BurnWeapon(inst.Def.BurnWeapon, [3]numeric.Fixed{x, y, z})
+		s.BurnWeaponHook()(inst.Def.BurnWeapon, [3]numeric.Fixed{x, y, z})
 	}
 }
 
@@ -359,13 +359,13 @@ func (s *Service) igniteAt(cx, cz int, def *content.FeatureDef) bool {
 	s.setInstance(idx, inst)
 	s.attachEventRecord(inst)
 	s.Terrain.Plot[idx].SetOccupied(true) // the anchor's instance-attached bit
-	if s.BurnSound != nil {
+	if s.BurnSoundHook() != nil {
 		// Step 6 uses the anchor tile corner [05 R-FEAT-01 §9].
 		// TODO(question): ignition leaves its sound height unset, depending on
 		// transient caller state. Use deterministic zero as a host placeholder
 		// until invocation provenance or manual retail evidence establishes Y;
 		// terrain height and the feature centre are not established substitutes.
-		s.BurnSound([3]numeric.Fixed{world.CellToWorld(int32(cx)), 0, world.CellToWorld(int32(cz))})
+		s.BurnSoundHook()([3]numeric.Fixed{world.CellToWorld(int32(cx)), 0, world.CellToWorld(int32(cz))})
 	}
 	return true
 }

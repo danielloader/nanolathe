@@ -19,9 +19,9 @@ func TestMobileBuildInterruptsDoNotUseFactoryEpilogues(t *testing.T) {
 				product.Remaining = 0.5
 				q := orders.QueueForUnit(builder)
 				svc.RegisterOrderHandlers(q)
-				q.Binding().Work = &orders.WorkAdapter{CancelNotice: svc.DeliverCancelNotice}
+				q.Binding().Work = orders.NewWorkAdapter(orders.WorkAdapterConfig{CancelNotice: svc.DeliverCancelNotice})
 				var statuses []string
-				q.Binding().Presentation = &orders.PresentationAdapter{Status: func(_ *units.Unit, _ uint8, text string) bool { statuses = append(statuses, text); return true }}
+				q.Binding().Presentation = orders.NewPresentationAdapter(orders.PresentationAdapterConfig{Status: func(_ *units.Unit, _ uint8, text string) bool { statuses = append(statuses, text); return true }})
 				if cancel {
 					q.PurgeUnprotected()
 				} else {
@@ -75,10 +75,10 @@ func TestMobileBuildPreCheckBitOrder(t *testing.T) {
 			node.ID = orders.Lookup(tc.row)
 			q := orders.QueueForUnit(builder)
 			var statuses []string
-			q.Binding().Presentation = &orders.PresentationAdapter{Status: func(_ *units.Unit, _ uint8, text string) bool {
+			q.Binding().Presentation = orders.NewPresentationAdapter(orders.PresentationAdapterConfig{Status: func(_ *units.Unit, _ uint8, text string) bool {
 				statuses = append(statuses, text)
 				return true
-			}}
+			}})
 			code, handled := svc.mobileBuildInterrupt(builder, node, tc.satisfied)
 			if !handled || code != tc.wantCode {
 				t.Fatalf("%s satisfied %#x: code=%d handled=%v, want %d/true", tc.row, tc.satisfied, code, handled, tc.wantCode)

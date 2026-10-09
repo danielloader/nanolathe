@@ -100,8 +100,8 @@ func TestP28COB01RFactoryProductUsesIndependentStrictARMCKBinding(t *testing.T) 
 	node.Deadline = -1
 	factory.InBuildStance = true
 	svc := NewService(exitTerrain(96, 96), cat, w, &economy.Service{})
-	svc.ModelForFactory = modelFor
-	svc.ModelForUnit = modelFor
+	svc.SetModelForFactory(modelFor)
+	svc.SetModelForUnit(modelFor)
 	svc.Pump(factory, 0)
 	product := w.Unit(node.Target)
 	if product == nil || product.Def != armck {

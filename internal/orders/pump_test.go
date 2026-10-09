@@ -1309,14 +1309,14 @@ func TestRemoveHeadSurvivesACancelNoticeThatRemovesTheHead(t *testing.T) {
 	u := newTestUnit()
 	var q *Queue
 	notices := 0
-	q = &Queue{binding: &QueueBinding{
+	q = &Queue{binding: NewQueueBinding(QueueBindingConfig{
 		Lookup: func(h pool.Handle) *units.Unit {
 			if h == u.Handle {
 				return u
 			}
 			return nil
 		},
-		Work: &WorkAdapter{
+		Work: NewWorkAdapter(WorkAdapterConfig{
 			CancelNotice: func(owner *units.Unit, n *Node, tick uint32) bool {
 				notices++
 				// Cancel-current's epilogue: release the gate first so the
@@ -1326,8 +1326,8 @@ func TestRemoveHeadSurvivesACancelNoticeThatRemovesTheHead(t *testing.T) {
 				q.RemoveHead()
 				return true
 			},
-		},
-	}}
+		}),
+	})}
 	q.Push(buildID, Node{Owner: u.Handle, DynamicGate: 0xa, Phase: 3})
 	q.Push(moveID, Node{Owner: u.Handle})
 	if len(q.primary) != 2 {
@@ -1354,19 +1354,19 @@ func TestRemoveHeadSurvivesACancelNoticeThatRemovesTheHead(t *testing.T) {
 	// And the degenerate case the crash actually hit: nothing behind the head,
 	// so the notification empties the segment before the outer splice runs.
 	q2 := &Queue{}
-	q2.binding = &QueueBinding{
+	q2.binding = NewQueueBinding(QueueBindingConfig{
 		Lookup: func(h pool.Handle) *units.Unit {
 			if h == u.Handle {
 				return u
 			}
 			return nil
 		},
-		Work: &WorkAdapter{CancelNotice: func(owner *units.Unit, n *Node, tick uint32) bool {
+		Work: NewWorkAdapter(WorkAdapterConfig{CancelNotice: func(owner *units.Unit, n *Node, tick uint32) bool {
 			n.DynamicGate &^= 2
 			q2.RemoveHead()
 			return true
-		}},
-	}
+		}}),
+	})
 	q2.Push(buildID, Node{Owner: u.Handle, DynamicGate: 0xa, Phase: 3})
 	if got := q2.RemoveHead(); got == nil {
 		t.Fatal("RemoveHead on the lone cancelled record returned nil")

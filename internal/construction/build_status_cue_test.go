@@ -24,13 +24,13 @@ func captureStatus(u *units.Unit, out *[]statusRaise) {
 	if binding == nil {
 		binding = &orders.QueueBinding{}
 	}
-	binding.Presentation = &orders.PresentationAdapter{
+	binding.Presentation = orders.NewPresentationAdapter(orders.PresentationAdapterConfig{
 		Ready: func() bool { return true },
 		Status: func(_ *units.Unit, kind uint8, text string) bool {
 			*out = append(*out, statusRaise{Kind: kind, Text: text})
 			return true
 		},
-	}
+	})
 	q.SetBinding(binding)
 }
 

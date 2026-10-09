@@ -85,16 +85,16 @@ func transportFixture(t *testing.T, carrierDef, cargoDef *content.UnitDef) (*uni
 	carrier.Move.Mode, cargo.Move.Mode = 1, 1
 	carrier.Move.ModeMirror, cargo.Move.ModeMirror = 1, 1
 	kinds := &[]uint8{}
-	binding := &QueueBinding{
+	binding := NewQueueBinding(QueueBindingConfig{
 		Lookup: w.Unit,
-		Presentation: &PresentationAdapter{
+		Presentation: NewPresentationAdapter(PresentationAdapterConfig{
 			Ready: func() bool { return true },
 			Status: func(_ *units.Unit, kind uint8, _ string) bool {
 				*kinds = append(*kinds, kind)
 				return true
 			},
-		},
-	}
+		}),
+	})
 	QueueForUnit(carrier).SetBinding(binding)
 	QueueForUnit(cargo).SetBinding(binding)
 	return w, carrier, cargo, kinds
@@ -295,7 +295,7 @@ func TestTransportLanding(t *testing.T) {
 	uPad.Move.Mode, uPad.Move.ModeMirror = 1, 1
 	startX, startY, startZ := uVTOL.X, uVTOL.Y, uVTOL.Z
 	qVTOL := QueueForUnit(uVTOL)
-	qVTOL.SetBinding(&QueueBinding{Lookup: func(h pool.Handle) *units.Unit { return w2.Unit(h) }})
+	qVTOL.SetBinding(NewQueueBinding(QueueBindingConfig{Lookup: func(h pool.Handle) *units.Unit { return w2.Unit(h) }}))
 	idLand := Lookup("VTOL_Landing")
 	if idLand == 0 {
 		t.Fatalf("VTOL_Landing lookup failed")

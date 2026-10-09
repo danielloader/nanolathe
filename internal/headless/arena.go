@@ -1066,8 +1066,8 @@ func playArena(req ArenaRequest, sess *session.Session) (ArenaResult, error) {
 	if req.Starts == StartsSwap && (starts[0] != 1 || starts[1] != 0) {
 		return ArenaResult{}, fmt.Errorf("arena: starts %q placed slots at starts %v, want [1 0]; the session's randomized assignment no longer follows [08 \"Randomization for skirmish starts\"]", req.Starts, starts)
 	}
-	prevDeath := sess.Units.OnDeath
-	sess.Units.OnDeath = func(handle pool.Handle, cause units.DeathCause, u *units.Unit) {
+	prevDeath := sess.Units.DeathHook()
+	sess.Units.SetDeathHook(func(handle pool.Handle, cause units.DeathCause, u *units.Unit) {
 		if u != nil && int(u.Owner) < n && u.Def != nil {
 			info := table.Of(u.Def)
 			if info != nil && u.Remaining == 0 {
@@ -1089,16 +1089,16 @@ func playArena(req ArenaRequest, sess *session.Session) (ArenaResult, error) {
 		if prevDeath != nil {
 			prevDeath(handle, cause, u)
 		}
-	}
-	prevCreate := sess.Units.OnCreate
-	sess.Units.OnCreate = func(handle pool.Handle, u *units.Unit) {
+	})
+	prevCreate := sess.Units.CreateHook()
+	sess.Units.SetCreateHook(func(handle pool.Handle, u *units.Unit) {
 		if u != nil && int(u.Owner) < n && u.Def != nil {
 			tr.built[u.Owner][u.Def.UnitName]++
 		}
 		if prevCreate != nil {
 			prevCreate(handle, u)
 		}
-	}
+	})
 
 	result := ArenaResult{Map: req.Map, Seed: req.Seed, BattleSeed: sess.RNGSimSeed, CRTSeed: sess.RNGCrtSeed, Starts: req.Starts, ScoreKind: req.Score, Gameplay: string(sess.Gameplay), Level: req.Level, RuleSet: string(req.Gameplay), Winner: -1}
 	var adj *adjudicator

@@ -19,12 +19,12 @@ func TestFeatureReproductionDrawFollowsPlayerPhase(t *testing.T) {
 	s.Features.SetCursor(source + 1)
 	baseline := s.SimRNG().Draws()
 	observed := false
-	s.Econ.EndCondition = func(_ int, _ uint32) {
+	s.Econ.SetEndCondition(func(_ int, _ uint32) {
 		observed = true
 		if s.Features.Cursor() != source+1 || s.SimRNG().Draws() != baseline {
 			t.Errorf("phase-5 consumer followed reproduction: cursor=%d draws=%d", s.Features.Cursor(), s.SimRNG().Draws()-baseline)
 		}
-	}
+	})
 	s.EnablePhaseTrace()
 	s.stepOneSubTick(1)
 	if !observed {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/nanolathe-gg/nanolathe/internal/client"
+	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
 )
@@ -18,6 +19,13 @@ func (b *battleSession) battleState() *ui.BattleState {
 
 func (b *battleSession) applyBattleSchedule(intent ui.BattleScheduleIntent) {
 	if b == nil || b.sess == nil {
+		return
+	}
+	if b.onlineBattle() {
+		b.battleState().SetPauseTruth(false)
+		if b.cl != nil {
+			b.cl.SetPresentationPaused(false)
+		}
 		return
 	}
 	if intent.PauseSet {
@@ -154,6 +162,11 @@ func (b *battleSession) activateBattleMenuButton(name string, cl *client.Client)
 	if state == nil {
 		return
 	}
+	name = gui.CallbackName(name)
+	if b.onlineBattle() && (name == "SAVEGAME" || name == "LOADGAME" || name == "RESTART") {
+		b.onlineNotice("Saves, loads and restarts are unavailable in multiplayer games")
+		return
+	}
 	before := state.Modal()
 	action := state.Activate(name)
 	// Child construction belongs to the transition that exposed it.  The draw
@@ -219,6 +232,10 @@ func (b *battleSession) activateBattleMenuButton(name string, cl *client.Client)
 // in the direction the ARMOPT button selected [07 R-FE-01 §7] [07 R-FE-01 §8].
 func (b *battleSession) openBattleSaveLoadScreen(mode saveLoadMode) {
 	if b == nil || b.shell == nil {
+		return
+	}
+	if b.onlineBattle() {
+		b.onlineNotice("Saves and loads are unavailable in multiplayer games")
 		return
 	}
 	b.shell.openSaveLoadScreenReporting(mode, saveLoadFromBattle)

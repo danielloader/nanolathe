@@ -108,7 +108,7 @@ func placementLegalCases() (*Terrain, []PlacementQuery) {
 			{DefinitionHeader: content.DefinitionHeader{CanonicalKey: "vent"}, Geothermal: true},
 			nil, // a real index that binds to no definition
 		},
-		Movers: legalCaseMovers{},
+		movers: legalCaseMovers{},
 	}
 	for z := int32(0); z < h; z++ {
 		for x := int32(0); x < w; x++ {

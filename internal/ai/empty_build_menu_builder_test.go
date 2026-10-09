@@ -92,7 +92,7 @@ func emptyMenuConstructionFixture(t *testing.T) (*Manager, *units.World, *units.
 
 	sim := rng.NewSimulation(7)
 	var submitted []pool.Handle
-	m := &Manager{
+	m := NewManager(ManagerConfig{
 		Player:       1,
 		Profile:      &Profile{Weight: map[string]int32{productDef.CanonicalKey: 100}, Limit: map[string]int32{}},
 		Catalog:      cat,
@@ -103,7 +103,7 @@ func emptyMenuConstructionFixture(t *testing.T) (*Manager, *units.World, *units.
 			submitted = append(submitted, req.Builder)
 			return nil
 		},
-	}
+	})
 	m.Strategic = Strategic{
 		CenterX:         empty.X,
 		CenterZ:         empty.Z,

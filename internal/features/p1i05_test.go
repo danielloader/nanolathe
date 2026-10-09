@@ -358,9 +358,9 @@ func TestGeothermalStampRunsTheSteamProducer(t *testing.T) {
 
 	type puff struct{ x, y, z numeric.Fixed }
 	var puffs []puff
-	svc.GeothermalSteam = func(x, y, z numeric.Fixed) {
+	svc.SetGeothermalSteam(func(x, y, z numeric.Fixed) {
 		puffs = append(puffs, puff{x, y, z})
-	}
+	})
 
 	if svc.PlaceAt(3, 3, plain) == nil {
 		t.Fatal("plain feature placement rejected")

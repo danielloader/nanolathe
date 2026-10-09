@@ -72,6 +72,7 @@ import (
 	"slices"
 
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/checkpoint"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
@@ -192,9 +193,11 @@ type OccupancyGrid struct {
 	// occupant keeps every contested cell, which is the branch retail takes for
 	// every owner that is not in the displacing state [04 R-COLL-01 §4]
 	// (community-patch-engine.md CP-DMG-2).
-	overlap       OverlapUnits
-	ownerState    func(owner uint8) uint8
-	claimConflict func(incumbent, claimant int) bool
+	overlap                 OverlapUnits
+	ownerState              func(owner uint8) uint8
+	claimConflict           func(incumbent, claimant int) bool
+	checkpointOwnerState    checkpointGridProof
+	checkpointClaimConflict checkpointGridProof
 	// inOverlapScan guards the clear's overlap scan against re-entry. A
 	// restamp only stamps, so it cannot start a second clear; the flag keeps
 	// a future writer from turning the scan quadratic by accident.
@@ -370,6 +373,7 @@ func (g *OccupancyGrid) AttachOverlap(u OverlapUnits, ownerState func(owner uint
 	}
 	g.overlap = u
 	g.ownerState = ownerState
+	g.checkpointOwnerState = checkpointGridProof{}
 }
 
 // AttachOverlapBinding installs this System as its grid's overlap window and
@@ -377,6 +381,10 @@ func (g *OccupancyGrid) AttachOverlap(u OverlapUnits, ownerState func(owner uint
 // The state byte is the player row's, never the unit's own owner byte, which
 // is the slot number [06 R-DMG-01 §8].
 func (s *System) AttachOverlapBinding(ownerState func(owner uint8) uint8) {
+	s.attachOverlapBinding(ownerState, nil)
+}
+
+func (s *System) attachOverlapBinding(ownerState func(owner uint8) uint8, authority *checkpoint.BindingAuthority) {
 	if s == nil || s.Grid == nil {
 		return
 	}
@@ -385,6 +393,14 @@ func (s *System) AttachOverlapBinding(ownerState func(owner uint8) uint8) {
 	// RebindRules replaces System.Rules at a command boundary, and every later
 	// cell arbitration must observe that replacement without another grid bind.
 	s.Grid.claimConflict = s.claimConflict
+	s.Grid.checkpointClaimConflict = checkpointGridProof{}
+	if authority != nil {
+		proof := checkpointGridProof{grid: s.Grid, system: s, authority: authority}
+		if ownerState != nil {
+			s.Grid.checkpointOwnerState = proof
+		}
+		s.Grid.checkpointClaimConflict = proof
+	}
 }
 
 // claimConflict projects the currently bound movement rule into the grid. The

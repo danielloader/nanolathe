@@ -107,6 +107,19 @@ func TestAdmittedSkirmishComposesTheLocalBattleRetail(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: admitted entry: %v", c.name, err)
 		}
+		if local.checkpointAdmission != nil {
+			t.Fatalf("%s: ordinary local entry acquired checkpoint admission", c.name)
+		}
+		receipt := admitted.checkpointAdmission
+		if receipt == nil || !receipt.ready || receipt.owner != admitted || receipt.inputs != inputs || receipt.mission != admitted.Mission ||
+			receipt.config.Digest() != config.Digest() || receipt.authority == nil {
+			t.Fatalf("%s: admitted entry lost its private completed provenance", c.name)
+		}
+		for _, mgr := range admitted.AI {
+			if mgr != nil && mgr.CheckpointApplicationHistory() != nil {
+				t.Fatalf("%s: constructor provenance unexpectedly enabled recording", c.name)
+			}
+		}
 		if admitted.frozenSimulationInputs() != inputs || admitted.Catalog != inputs.Catalog() || admitted.simArt != inputs.SimArt() {
 			t.Fatalf("%s: the admitted battle does not run on the inputs it was given", c.name)
 		}

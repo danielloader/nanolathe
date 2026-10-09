@@ -49,7 +49,7 @@ type Terrain struct {
 	//
 	// Nil means no mover plane exists yet, which is the pre-movement and
 	// terrain-only-fixture case, not a caller's choice.
-	Movers MobileOccupancy
+	movers MobileOccupancy
 
 	// ClassRestamp is the movement class layers' half of the feature stamper.
 	// Retail's single stamping service and its footprint teardown helper each
@@ -66,10 +66,11 @@ type Terrain struct {
 	// (docs/ARCHITECTURE.md). Nil means no class layers exist yet — map load
 	// and terrain-only fixtures — and a layer allocated later stamps the whole
 	// map from the plot as it stands, so nothing is lost.
-	ClassRestamp FootprintRestamp
+	classRestamp FootprintRestamp
 
 	// losWords is built once during map load and remains immutable for the
-	// battle, including across terrain deformation [03 §3.5][R-P0-18-B §4].
+	// battle [03 §3.5][R-P0-18-B §4]. Terrain deformation does not exist
+	// [03 R-TERR-01 §3].
 	losWords      []uint16
 	losBuildCount int
 	Gravity       numeric.Fixed // per-tick gravity [03 §2.2] C4
@@ -118,6 +119,17 @@ type Terrain struct {
 	// load failure — retail maps outlive their feature sets.
 	FeatureDefs []*content.FeatureDef
 
+	// checkpointFeatureBases records the existing normalization provenance only
+	// for copies retained in FeatureDefs (DESIGN_MULTIPLAYER §16.3.11).
+	checkpointFeatureBases map[*content.FeatureDef]*content.FeatureDef
+
+	// checkpointMovement records installation ownership, never simulation state.
+	checkpointMovement *checkpointMovementReceipt
+
+	// checkpointInputs seals materialized immutable inputs at successful load,
+	// before callers can mutate them (DESIGN_MULTIPLAYER §16.3.76).
+	checkpointInputs *checkpointTerrainInputs
+
 	// staticObstacleRevision is the monotonic Nanolathe revision for blocking
 	// feature mutations, and only those. No completed-structure writer bumps
 	// it, and none is missing: a building blocks through the occupancy grid's
@@ -148,6 +160,9 @@ type Terrain struct {
 	voidSweepUndo []voidSweepUndoEntry
 	voidSwept     bool
 	voidSweepLava bool
+	// voidPassActive marks the entry undo/stamp/replay transaction, during
+	// which the current plot is not a checkpoint boundary.
+	voidPassActive bool
 }
 
 // voidSweepUndoEntry is one cell the edge/lava void sweep converted, with the
@@ -185,7 +200,7 @@ type FootprintRestamp func(anchorX, anchorZ int32, footX, footZ int16)
 // non-blocking feature replacing a blocking one changes the layer just as much
 // as the reverse, and the classifier decides which it was.
 func (t *Terrain) NoteFootprintRestamp(anchorX, anchorZ int32, footX, footZ int16) {
-	if t == nil || t.ClassRestamp == nil {
+	if t == nil || t.ClassRestamp() == nil {
 		return
 	}
 	if footX <= 0 {
@@ -194,7 +209,7 @@ func (t *Terrain) NoteFootprintRestamp(anchorX, anchorZ int32, footX, footZ int1
 	if footZ <= 0 {
 		footZ = 1
 	}
-	t.ClassRestamp(anchorX, anchorZ, footX, footZ)
+	t.ClassRestamp()(anchorX, anchorZ, footX, footZ)
 }
 
 // BumpStaticObstacleRevision advances the shared static revision. Saturating
@@ -806,6 +821,7 @@ func Load(fs vfs.FSOps, cat *content.Catalog, mapKey string, opts ...LoadOption)
 	// RunMissionFeaturePass instead — which undoes this sweep around it and
 	// replays it afterwards.
 	t.applyVoidFixup(mh)
+	t.snapshotCheckpointInputs(fs, cat, mapKey, logicalTNT)
 
 	return t, nil
 }
@@ -982,6 +998,12 @@ func (t *Terrain) RunMissionFeaturePass(stamp func()) {
 		}
 		return
 	}
+	// A callback sees the temporarily unswept plot. Preserve the previous
+	// marker through nested calls and panic unwinding without changing the
+	// entry transaction (DESIGN_MULTIPLAYER §16.3.11).
+	wasActive := t.voidPassActive
+	t.voidPassActive = true
+	defer func() { t.voidPassActive = wasActive }()
 	before := make([]uint16, len(t.Plot))
 	for i := range t.Plot {
 		before[i] = t.Plot[i].Feature()

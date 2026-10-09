@@ -23,9 +23,9 @@ func offMapFixture(t *testing.T, rules Rules, flying bool) (*Service, *units.Wor
 	s := NewServiceWithProjectileCapacity(300)
 	s.Rules = rules
 	s.Community = community.Features{OffMapAircraftMarginTiles: 1}
-	s.ControlByte = func(uint8) uint8 { return ControlByteHuman }
-	s.VisitOffMapFiled = func(yield func(pool.Handle, uint64) bool) { yield(u.Handle, 1) }
-	s.IsOffMapFiled = func(h pool.Handle) bool { return h == u.Handle }
+	s.SetControlByte(func(uint8) uint8 { return ControlByteHuman })
+	s.SetVisitOffMapFiled(func(yield func(pool.Handle, uint64) bool) { yield(u.Handle, 1) })
+	s.SetIsOffMapFiled(func(h pool.Handle) bool { return h == u.Handle })
 	return s, w, terrain, u
 }
 

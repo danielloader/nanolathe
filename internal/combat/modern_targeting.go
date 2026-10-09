@@ -57,7 +57,7 @@ func (*ModernRules) ReconsiderTarget(shooter *units.Unit, slot *units.Slot, targ
 		slot.Target.Unit != shooter.EngagementTarget || target.Handle != shooter.EngagementTarget {
 		return true
 	}
-	return vis.IsVisible(visibility.PlayerID(shooter.Owner), visibilityTarget(target, target.Flags))
+	return vis.IsVisible(visibility.PlayerID(shooter.Owner), visibilityTarget(target, perspectiveStatus(vis, shooter.Owner, target)))
 }
 func (*ModernRules) CombatTick(s *Service, tick uint32, afterProjectiles bool) {
 	s.modernTick = tick
@@ -67,16 +67,16 @@ func (*ModernRules) CombatTick(s *Service, tick uint32, afterProjectiles bool) {
 }
 
 func (*ModernRules) ObserveDanger(s *Service, victim, attacker *units.Unit, tick uint32) {
-	if s == nil || s.DangerNotice == nil || victim == nil || attacker == nil ||
+	if s == nil || s.DangerNoticeHook() == nil || victim == nil || attacker == nil ||
 		victim == attacker || !victim.Alive || victim.Dying || !attacker.Alive || attacker.Dying ||
 		victim.Owner == attacker.Owner || victim.Def == nil || attacker.Def == nil {
 		return
 	}
 	// A composed session supplies the alliance row. Without it, fail closed.
-	if s.Reaction == nil || s.Reaction.Allied == nil || s.Reaction.Allied(victim.Owner, attacker.Owner) {
+	if s.Reaction == nil || s.Reaction.AlliedHook() == nil || s.Reaction.AlliedHook()(victim.Owner, attacker.Owner) {
 		return
 	}
-	s.DangerNotice(victim, attacker, tick)
+	s.DangerNoticeHook()(victim, attacker, tick)
 }
 
 func (r *ModernRules) Launched(s *Service, h pool.Handle, q *ShotQuery) {
@@ -250,7 +250,7 @@ func (s *Service) incomingDamage(observer, target *units.Unit, w *units.World, t
 			continue
 		}
 		// Only the observer's own/allied fire can justify withholding its shot.
-		if observer.Owner != p.ShooterSide && (s.Reaction == nil || s.Reaction.Allied == nil || !s.Reaction.Allied(observer.Owner, p.ShooterSide)) {
+		if observer.Owner != p.ShooterSide && (s.Reaction == nil || s.Reaction.AlliedHook() == nil || !s.Reaction.AlliedHook()(observer.Owner, p.ShooterSide)) {
 			continue
 		}
 		if modernBeamWeapon(in.weapon) && target.Def != nil && target.Def.BMCode != 0 {
@@ -495,16 +495,17 @@ func (*ModernRules) SelectTarget(s *Service, q *TargetQuery) (pool.Handle, bool)
 		}
 		// A registry may be thirty ticks old. Recheck present contact knowledge;
 		// never acquire or retain a vanished contact merely because it scored well.
-		visible := q.Visibility != nil && q.Visibility.IsVisible(visibility.PlayerID(q.Shooter.Owner), visibilityTarget(target, target.Flags))
-		if q.Visibility == nil && s.Visibility != nil {
-			visible = s.Visibility(visibility.PlayerID(q.Shooter.Owner), visibilityTarget(target, target.Flags))
+		status := perspectiveStatus(q.Visibility, q.Shooter.Owner, target)
+		visible := q.Visibility != nil && q.Visibility.IsVisible(visibility.PlayerID(q.Shooter.Owner), visibilityTarget(target, status))
+		if q.Visibility == nil && s.VisibilityHook() != nil {
+			visible = s.VisibilityHook()(visibility.PlayerID(q.Shooter.Owner), visibilityTarget(target, status))
 		}
 		// A secondary-list population exists only behind an open targeting
 		// upgrade, and its membership test is the candidate's seen bit
 		// [06 §3.1][04 R-SPEC-01 §8]. The recheck for it is that same bit,
 		// read now: requiring direct sight here would silently cancel the
 		// Targeting Facility under Modern (issue #36).
-		if !visible && !(q.FromSecondary && target.Flags&visibility.SeenBit != 0) {
+		if !visible && !(q.FromSecondary && status&visibility.SeenBit != 0) {
 			continue
 		}
 		incoming, shot := s.candidateCoverage(q, target)
@@ -515,7 +516,7 @@ func (*ModernRules) SelectTarget(s *Service, q *TargetQuery) (pool.Handle, bool)
 		// A visible active takeover capability is an additional local threat.
 		// Keep category, incoming-fire and retention policy below unchanged.
 		// Radar-only secondary contacts disclose no capability for this bonus.
-		if visible && s.InfectionThreat != nil && s.InfectionThreat(target) {
+		if visible && s.InfectionThreatHook() != nil && s.InfectionThreatHook()(target) {
 			score += 12000
 		}
 		preferred := IsPreferredCategory(c.Category, q.Acquisition.BadMask)

@@ -1,0 +1,607 @@
+package relay
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/tls"
+	"errors"
+	"fmt"
+	"net"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/nanolathe-gg/nanolathe/internal/netproto"
+)
+
+// HostedConfig selects the bounded room service of DESIGN_MULTIPLAYER §16.5.1.
+// TLS is required unless InsecureLoopback explicitly selects numeric loopback
+// or ListenHostedWebSocket explicitly selects a hosting TLS terminator.
+type HostedConfig struct {
+	TLSConfig        *tls.Config
+	InsecureLoopback bool
+	MaxRooms         int // Zero selects 16; otherwise 1..256.
+	// MaxConnections bounds established and pending connections together.
+	// Zero selects 512; otherwise 2..1024, and at least two per room.
+	MaxConnections int
+}
+
+// HostedDialOptions permits custom trusted roots, never skipped verification.
+type HostedDialOptions struct {
+	TLSConfig        *tls.Config
+	InsecureLoopback bool
+}
+
+const (
+	hostedHelloMessage   = localDoneMessage + 1
+	hostedWelcomeMessage = hostedHelloMessage + 1
+	// Lobby messages before Start (DESIGN_MULTIPLAYER §16.6.1).
+	hostedDescribeMessage    = hostedWelcomeMessage + 1
+	hostedDescriptionMessage = hostedDescribeMessage + 1
+	hostedLobbyMessage       = hostedDescriptionMessage + 1
+	hostedReadyMessage       = hostedLobbyMessage + 1
+	hostedStartMessage       = hostedReadyMessage + 1
+	hostedStartedMessage     = hostedStartMessage + 1
+	hostedVersion            = 2
+	hostedCodeLength         = 6
+	// A creator's hello flag: start as soon as the second seat joins, for the
+	// command-line play test and its probes, which have no lobby.
+	hostedAutoStart         = 1
+	hostedMaxConfigBytes    = 64 << 10
+	hostedMaxHandshakeFrame = localMaxHelloBytes + hostedMaxConfigBytes + 64
+	hostedCodeAlphabet      = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	hostedMaxAhead          = 30
+	hostedMaxQueuedFrames   = 64
+	// Per-room byte bounds keep one misbehaving room's worst case near
+	// 2.3 MiB: pending commands, one shared queue of grant bodies, each
+	// writer's in-flight copy and each reader's frame. 128 rooms then stay
+	// under the image's 384 MiB soft memory limit (§16.5.1). A 1,000-unit
+	// order with a destination per unit encodes to about 21 KB.
+	hostedMaxCommandBytes = 256 << 10
+	hostedMaxClientFrame  = hostedMaxCommandBytes + 32
+	hostedMaxPendingBytes = 256 << 10
+	hostedMaxQueuedBytes  = (1 << 20) + 4096
+)
+
+// These host deadlines are policy, not simulation time. Keeping them together
+// also lets socket tests exercise expiry without waiting minutes (§16.5.1–2).
+type hostedTimeouts struct {
+	handshake, waiting, write, progress time.Duration
+}
+
+// A lobby may wait 30 minutes for both seats to start (§16.6).
+var hostedDefaultTimeouts = hostedTimeouts{10 * time.Second, 30 * time.Minute, 5 * time.Second, 10 * time.Second}
+
+// hostedClientIdle bounds a running client's wait for any relay traffic. It
+// exceeds the relay's ten-second progress abort and 20-second WebSocket ping,
+// and replaces TCP keepalive's minutes of silence on a half-open route.
+const hostedClientIdle = 25 * time.Second
+
+// HostedServer holds independent two-human rooms. It never loads game assets or
+// interprets a gameplay command (DESIGN_MULTIPLAYER §12, §16.5).
+type HostedServer struct {
+	listener  net.Listener
+	websocket bool
+	config    HostedConfig
+	timeouts  hostedTimeouts
+	done      chan struct{}
+	once      sync.Once
+	wg        sync.WaitGroup
+	mu        sync.Mutex
+	rooms     map[string]*hostedRoom
+	conns     map[net.Conn]struct{}
+}
+
+func hostedError(path, expected string) error {
+	return fmt.Errorf("nanolathe: hosted relay rejected: logical path %s, providers searched [hosted transport], expected %s", path, expected)
+}
+
+func ListenHosted(address string, config HostedConfig) (*HostedServer, error) {
+	return listenHosted(address, config, hostedDefaultTimeouts)
+}
+
+func listenHosted(address string, config HostedConfig, timeouts hostedTimeouts) (*HostedServer, error) {
+	return listenHostedTransport(address, config, timeouts, false, false)
+}
+
+func listenHostedTransport(address string, config HostedConfig, timeouts hostedTimeouts, websocket, behindTLSProxy bool) (*HostedServer, error) {
+	if config.MaxRooms == 0 {
+		config.MaxRooms = 16
+	}
+	if config.MaxRooms < 1 || config.MaxRooms > 256 {
+		return nil, hostedError("room capacity", "1..256 rooms")
+	}
+	if config.MaxConnections == 0 {
+		config.MaxConnections = 512
+	}
+	if config.MaxConnections < 2*config.MaxRooms || config.MaxConnections > 1024 {
+		return nil, hostedError("connection capacity", "2..1024 connections and at least two per room")
+	}
+	if behindTLSProxy {
+		if !websocket || config.TLSConfig != nil || config.InsecureLoopback {
+			return nil, hostedError("TLS proxy", "WebSocket HTTP with neither native TLS nor loopback mode")
+		}
+	} else if config.InsecureLoopback {
+		if config.TLSConfig != nil {
+			return nil, hostedError("TLS", "TLS or explicit loopback plaintext, not both")
+		}
+		if err := localAddress(address, true); err != nil {
+			return nil, err
+		}
+	} else {
+		if config.TLSConfig == nil || (len(config.TLSConfig.Certificates) == 0 && config.TLSConfig.GetCertificate == nil && config.TLSConfig.GetConfigForClient == nil) {
+			return nil, hostedError("TLS", "a server certificate")
+		}
+		config.TLSConfig = config.TLSConfig.Clone()
+		config.TLSConfig.MinVersion = max(config.TLSConfig.MinVersion, tls.VersionTLS12)
+	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return nil, localIOError("hosted listen", err)
+	}
+	s := &HostedServer{listener: listener, websocket: websocket, config: config, timeouts: timeouts, done: make(chan struct{}), rooms: make(map[string]*hostedRoom), conns: make(map[net.Conn]struct{})}
+	s.wg.Add(1)
+	go s.accept()
+	return s, nil
+}
+
+func (s *HostedServer) Addr() string {
+	if s == nil {
+		return ""
+	}
+	return s.listener.Addr().String()
+}
+
+// Close releases listeners, pending handshakes, rooms and all peer goroutines.
+func (s *HostedServer) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.once.Do(func() {
+		close(s.done)
+		_ = s.listener.Close()
+		s.mu.Lock()
+		for conn := range s.conns {
+			_ = conn.Close()
+		}
+		s.mu.Unlock()
+	})
+	s.wg.Wait()
+	return nil
+}
+
+func (s *HostedServer) accept() {
+	defer s.wg.Done()
+	var backoff time.Duration
+	for {
+		conn, err := s.listener.Accept()
+		if err != nil {
+			// Descriptor or buffer exhaustion passes; only Close ends the
+			// service. Returning would leave a live process accepting nothing.
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			backoff = min(max(2*backoff, 5*time.Millisecond), time.Second)
+			select {
+			case <-s.done:
+				return
+			case <-time.After(backoff):
+			}
+			continue
+		}
+		backoff = 0
+		s.mu.Lock()
+		select {
+		case <-s.done:
+			_ = conn.Close()
+			s.mu.Unlock()
+			return
+		default:
+		}
+		if len(s.conns) == s.config.MaxConnections {
+			_ = conn.Close()
+			s.mu.Unlock()
+			continue
+		}
+		s.conns[conn] = struct{}{}
+		s.wg.Add(1)
+		s.mu.Unlock()
+		go s.serve(conn)
+	}
+}
+
+func (s *HostedServer) serve(raw net.Conn) {
+	defer s.wg.Done()
+	defer func() {
+		_ = raw.Close()
+		s.mu.Lock()
+		delete(s.conns, raw)
+		s.mu.Unlock()
+	}()
+	conn := raw
+	handshakeDeadline := time.Now().Add(s.timeouts.handshake)
+	_ = conn.SetDeadline(handshakeDeadline)
+	if s.config.TLSConfig != nil {
+		secure := tls.Server(raw, s.config.TLSConfig)
+		if err := secure.Handshake(); err != nil {
+			return
+		}
+		conn = secure
+	}
+	if s.websocket {
+		stream, err := acceptHostedWebSocket(conn, s.timeouts.write, handshakeDeadline)
+		if err != nil {
+			return
+		}
+		defer stream.Close()
+		conn = stream
+	}
+	body, err := readLocalFrame(conn, hostedMaxHandshakeFrame)
+	if err != nil {
+		return
+	}
+	_ = conn.SetWriteDeadline(minDeadline(handshakeDeadline, time.Now().Add(s.timeouts.write)))
+	if body[0] == hostedDescribeMessage {
+		_ = writeLocalFrame(conn, s.describe(body))
+		return
+	}
+	code, flags, hello, config, err := decodeHostedHello(body)
+	if err != nil {
+		_ = writeLocalFrame(conn, localFailureBody(localRefusedMessage, err))
+		return
+	}
+	peer := newHostedPeer(conn, hello, s.timeouts.write)
+	peer.helloDeadline = handshakeDeadline
+	room, creator, err := s.admit(code, flags, config, peer)
+	if err != nil {
+		_ = writeLocalFrame(conn, localFailureBody(localRefusedMessage, err))
+		return
+	}
+	_ = conn.SetDeadline(time.Time{})
+	go peer.write()
+	if creator {
+		go room.run()
+	} else if !room.send(hostedEvent{peer: peer, join: true}) {
+		_ = peer.conn.Close()
+		peer.stop()
+		<-peer.written
+		return
+	}
+	for {
+		body, err := readLocalFrame(conn, hostedMaxClientFrame)
+		if !room.send(hostedEvent{peer: peer, body: body, err: err}) || err != nil {
+			break
+		}
+	}
+	// The room's writer must flush explicit completion before this owner closes
+	// the connection. The reader exiting is not permission to discard that frame.
+	<-peer.written
+}
+
+// describe answers a joiner's request for a room's configuration before it
+// composes anything (DESIGN_MULTIPLAYER §16.6.1). The connection then closes.
+func (s *HostedServer) describe(body []byte) []byte {
+	r := netproto.NewReader(body, hostedError)
+	r.U8()
+	if v := r.U16(); v != hostedVersion {
+		r.Abort(hostedVersionError(v))
+	}
+	code := r.Text(hostedCodeLength)
+	if err := r.End(); err != nil {
+		return localFailureBody(localRefusedMessage, err)
+	}
+	s.mu.Lock()
+	room := s.rooms[code]
+	var refusal error
+	switch {
+	case room == nil:
+		refusal = hostedError("room", "an existing invitation")
+	case room.joined:
+		refusal = hostedError("room", "an unoccupied second seat")
+	}
+	var config []byte
+	if room != nil {
+		config = room.config
+	}
+	s.mu.Unlock()
+	if refusal != nil {
+		return localFailureBody(localRefusedMessage, refusal)
+	}
+	var w netproto.Writer
+	w.U8(hostedDescriptionMessage)
+	w.U32(uint32(len(config)))
+	w.Raw(config)
+	return w.Bytes()
+}
+
+func hostedVersionError(sent uint16) error {
+	return hostedError("handshake", fmt.Sprintf("hosted protocol version %d; this client sent version %d", hostedVersion, sent))
+}
+
+func validHostedCode(code string) bool {
+	if len(code) != hostedCodeLength {
+		return false
+	}
+	for i := range code {
+		found := false
+		for j := range hostedCodeAlphabet {
+			found = found || code[i] == hostedCodeAlphabet[j]
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *HostedServer) admit(code string, flags uint8, config []byte, peer *hostedPeer) (*hostedRoom, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.done:
+		return nil, false, hostedError("admission", "an open server")
+	default:
+	}
+	creator := code == ""
+	seat := uint8(1)
+	if creator {
+		seat = 0
+	}
+	if peer.hello.Seat != seat {
+		return nil, false, hostedError("hello seat", "creator seat 0 or joining seat 1")
+	}
+	room := s.rooms[code]
+	if creator {
+		if len(s.rooms) >= s.config.MaxRooms {
+			return nil, false, hostedError("room capacity", "space for another room")
+		}
+		for {
+			var random [hostedCodeLength]byte
+			if _, err := rand.Read(random[:]); err != nil {
+				return nil, false, localIOError("room invitation", err)
+			}
+			for i := range random {
+				random[i] = hostedCodeAlphabet[random[i]&31]
+			}
+			code = string(random[:])
+			if s.rooms[code] == nil {
+				break
+			}
+		}
+		room = &hostedRoom{server: s, code: code, creator: peer, config: config, autoStart: flags&hostedAutoStart != 0, events: make(chan hostedEvent), done: make(chan struct{})}
+		s.rooms[code] = room
+		s.wg.Add(1)
+	} else {
+		if room == nil {
+			return nil, false, hostedError("room", "an existing invitation")
+		}
+		select {
+		case <-room.done:
+			return nil, false, hostedError("room", "an open room")
+		default:
+		}
+		if room.joined {
+			return nil, false, hostedError("room", "an unoccupied second seat")
+		}
+		if field := localIdentityDifference(room.creator.hello, peer.hello); field != "" {
+			return nil, false, hostedError("hello "+field, "identical values from both seats")
+		}
+		room.joined = true
+	}
+	peer.room = room
+	// A fresh peer's queue is empty, so welcome always precedes its grants.
+	_ = peer.enqueue(encodeHostedWelcome(code, seat), false)
+	return room, creator, nil
+}
+
+// A creator's hello carries its configuration and flags; a joiner's carries
+// neither (§16.6.1).
+func encodeHostedHello(code string, flags uint8, hello LocalHello, config []byte) ([]byte, error) {
+	if code != "" && !validHostedCode(code) {
+		return nil, hostedError("room code", "a six-character invitation")
+	}
+	if code != "" && (flags != 0 || len(config) != 0) {
+		return nil, hostedError("join", "no creator flags or configuration")
+	}
+	if len(config) > hostedMaxConfigBytes {
+		return nil, hostedError("room configuration", "at most 64 KiB")
+	}
+	body, err := encodeLocalHello(hello)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > localMaxHelloBytes {
+		return nil, hostedError("hello", "at most 1024 bytes")
+	}
+	var w netproto.Writer
+	w.U8(hostedHelloMessage)
+	w.U16(hostedVersion)
+	w.Text(code)
+	w.U8(flags)
+	w.U32(uint32(len(body)))
+	w.Raw(body)
+	w.U32(uint32(len(config)))
+	w.Raw(config)
+	return w.Bytes(), nil
+}
+
+func decodeHostedHello(body []byte) (string, uint8, LocalHello, []byte, error) {
+	r := netproto.NewReader(body, hostedError)
+	if r.U8() != hostedHelloMessage {
+		r.Abort(hostedError("handshake", "a hosted hello or room description request"))
+	}
+	if v := r.U16(); v != hostedVersion {
+		r.Abort(hostedVersionError(v))
+	}
+	code := r.Text(hostedCodeLength)
+	if code != "" && !validHostedCode(code) {
+		r.Abort(hostedError("room code", "a six-character invitation"))
+	}
+	flags := r.U8()
+	n := r.Count(localMaxHelloBytes, 1)
+	hello := r.Raw(n)
+	config := r.Raw(r.Count(hostedMaxConfigBytes, 1))
+	if flags&^hostedAutoStart != 0 || (code != "" && (flags != 0 || len(config) != 0)) {
+		r.Abort(hostedError("hello flags", "known creator flags, and none with a configuration from a joiner"))
+	}
+	if err := r.End(); err != nil {
+		return "", 0, LocalHello{}, nil, err
+	}
+	h, err := decodeLocalHello(hello)
+	return code, flags, h, config, err
+}
+
+func encodeHostedWelcome(code string, seat uint8) []byte {
+	var w netproto.Writer
+	w.U8(hostedWelcomeMessage)
+	w.U16(hostedVersion)
+	w.Text(code)
+	w.U8(seat)
+	return w.Bytes()
+}
+
+// DialHosted creates a room when room is empty, or joins its invitation, and
+// returns the grant stream directly (§16.5.1). The room needs no lobby: a
+// creator's room starts as soon as a second seat joins, and a joiner reports
+// ready at once, so it also starts when a lobby host starts (§16.6.1).
+func DialHosted(ctx context.Context, address, room string, hello LocalHello, options HostedDialOptions) (*LocalClient, string, error) {
+	return dialHostedStream(ctx, address, room, hello, options)
+}
+
+func dialHostedStream(ctx context.Context, address, room string, hello LocalHello, options HostedDialOptions) (*LocalClient, string, error) {
+	var flags uint8
+	if room == "" {
+		flags = hostedAutoStart
+	}
+	body, err := encodeHostedHello(room, flags, hello, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	conn, code, err := hostedHandshake(ctx, address, options, body, room, hello.Seat)
+	if err != nil {
+		return nil, "", err
+	}
+	c := newHostedClient(conn)
+	if err := c.writeMessage([]byte{hostedReadyMessage, 1}); err != nil {
+		_ = c.Close()
+		return nil, "", err
+	}
+	return c, code, nil
+}
+
+// hostedHandshake connects as dialHostedTransport does and exchanges the
+// hello within the handshake deadline.
+func hostedHandshake(ctx context.Context, address string, options HostedDialOptions, body []byte, room string, seat uint8) (net.Conn, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, hostedDefaultTimeouts.handshake)
+	defer cancel()
+	conn, err := dialHostedTransport(ctx, address, options)
+	if err != nil {
+		return nil, "", err
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	code, err := exchangeHostedHello(conn, body, room, seat)
+	stopped := stop()
+	if expired := handshakeExpired(ctx); err != nil || !stopped || expired != nil {
+		_ = conn.Close()
+		if expired != nil {
+			return nil, "", localIOError("hosted handshake", expired)
+		}
+		return nil, "", err
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return conn, code, nil
+}
+
+// handshakeExpired reports the context's end, including a socket deadline
+// that fired at the context's deadline just before its timer did.
+func handshakeExpired(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+// dialHostedTransport opens a verified TLS stream to host:port, or a WebSocket
+// stream when address is a ws(s) URL, with the context's deadline applied.
+func dialHostedTransport(ctx context.Context, address string, options HostedDialOptions) (net.Conn, error) {
+	if strings.Contains(address, "://") {
+		return dialWebSocketTransport(ctx, address, options)
+	}
+	if options.InsecureLoopback {
+		if options.TLSConfig != nil {
+			return nil, hostedError("TLS", "TLS or explicit loopback plaintext, not both")
+		}
+		if err := localAddress(address, false); err != nil {
+			return nil, err
+		}
+	} else if options.TLSConfig != nil && options.TLSConfig.InsecureSkipVerify {
+		return nil, hostedError("TLS", "server certificate verification")
+	}
+	var conn net.Conn
+	var err error
+	if options.InsecureLoopback {
+		conn, err = (&net.Dialer{}).DialContext(ctx, "tcp", address)
+	} else {
+		config := &tls.Config{}
+		if options.TLSConfig != nil {
+			config = options.TLSConfig.Clone()
+		}
+		config.MinVersion = max(config.MinVersion, tls.VersionTLS12)
+		conn, err = (&tls.Dialer{Config: config}).DialContext(ctx, "tcp", address)
+	}
+	if err != nil {
+		return nil, localIOError("hosted dial", err)
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	return conn, nil
+}
+
+func exchangeHostedHello(conn net.Conn, body []byte, requested string, seat uint8) (string, error) {
+	if err := writeLocalFrame(conn, body); err != nil {
+		return "", err
+	}
+	response, err := readLocalFrame(conn, localMaxErrorBytes+32)
+	if err != nil {
+		return "", err
+	}
+	r := netproto.NewReader(response, hostedError)
+	kind := r.U8()
+	if kind == localRefusedMessage || kind == localFailedMessage {
+		message := r.Text(localMaxErrorBytes)
+		if err := r.End(); err != nil {
+			return "", err
+		}
+		return "", errors.New(message)
+	}
+	if kind != hostedWelcomeMessage {
+		r.Abort(hostedError("welcome", "a hosted welcome"))
+	}
+	if v := r.U16(); v != hostedVersion {
+		r.Abort(hostedVersionError(v))
+	}
+	code, assigned := r.Text(hostedCodeLength), r.U8()
+	if !validHostedCode(code) || (requested != "" && code != requested) || assigned != seat {
+		r.Abort(hostedError("welcome", "the requested room and assigned seat"))
+	}
+	return code, r.End()
+}
+
+func newHostedClient(conn net.Conn) *LocalClient {
+	return &LocalClient{conn: hostedClientConn{Conn: conn}, idle: hostedClientIdle, maxCommand: hostedMaxCommandBytes}
+}
+
+// LocalClient serializes all writes. Apply the hosted write bound without
+// changing the loopback client's behavior; ReadGrant owns the idle bound.
+type hostedClientConn struct{ net.Conn }
+
+func (c hostedClientConn) Write(p []byte) (int, error) {
+	if err := c.Conn.SetWriteDeadline(time.Now().Add(hostedDefaultTimeouts.write)); err != nil {
+		return 0, err
+	}
+	return c.Conn.Write(p)
+}

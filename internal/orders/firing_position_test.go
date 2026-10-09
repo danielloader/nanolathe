@@ -26,9 +26,9 @@ func newFiringFixture() *firingFixture {
 	q.primary = []*Node{n, {ID: Lookup("Move_Ground"), Owner: u.Handle, GoalX: numeric.FixedFromInt(123)}}
 	f := &firingFixture{q: q, u: u, target: target, n: n, blocked: true, candidates: true, installOK: true}
 	b := q.Binding()
-	b.DangerRouteFeasible = func(*units.Unit, numeric.Fixed, numeric.Fixed) bool { return true }
-	b.World.TerrainHeight = func(numeric.Fixed, numeric.Fixed) (numeric.Fixed, bool) { return 0, true }
-	b.Weapons = &WeaponAdapter{
+	b.SetDangerRouteFeasible(func(*units.Unit, numeric.Fixed, numeric.Fixed) bool { return true })
+	b.World.SetTerrainHeight(func(numeric.Fixed, numeric.Fixed) (numeric.Fixed, bool) { return 0, true })
+	b.Weapons = NewWeaponAdapter(WeaponAdapterConfig{
 		FiringPositionBlocked: func(shooter, target *units.Unit, tick uint32) bool {
 			return f.blocked && shooter == f.u && target == f.target
 		},
@@ -36,8 +36,8 @@ func newFiringFixture() *firingFixture {
 			f.previews++
 			return f.candidates
 		},
-	}
-	b.Movement = &MovementGoalAdapter{
+	})
+	b.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{
 		InstallPoint: func(p PointGoalRequest) bool {
 			f.installs++
 			f.point = p
@@ -54,7 +54,7 @@ func newFiringFixture() *firingFixture {
 			return true
 		},
 		Release: func(*Node) bool { panic("overlay must use identity-safe destruction") },
-	}
+	})
 	return f
 }
 
@@ -105,7 +105,7 @@ func TestFiringPositionEligibility(t *testing.T) {
 		"carried":             func(f *firingFixture) { f.u.Attachment.Carrier = 5 },
 		"stationary order":    func(f *firingFixture) { f.n.ID = Lookup("Attack_NoMove") },
 		"hidden": func(f *firingFixture) {
-			f.q.Binding().DangerVisible = func(*units.Unit, *units.Unit) bool { return false }
+			f.q.Binding().SetDangerVisible(func(*units.Unit, *units.Unit) bool { return false })
 		},
 		"friendly":                 func(f *firingFixture) { f.target.Owner = f.u.Owner },
 		"target gone":              func(f *firingFixture) { f.n.Satisfied |= pendTargetGone },
@@ -157,7 +157,7 @@ func TestFiringPositionLeashAndRefusedInstall(t *testing.T) {
 	f := newFiringFixture()
 	f.n.GuardX, f.n.GuardY = 512, 512
 	f.n.Param3 = 16
-	f.q.Binding().DangerRouteFeasible = func(_ *units.Unit, x, z numeric.Fixed) bool { return x == f.u.X || z == f.u.Z }
+	f.q.Binding().SetDangerRouteFeasible(func(_ *units.Unit, x, z numeric.Fixed) bool { return x == f.u.X || z == f.u.Z })
 	if f.step(10) || f.installs != 0 {
 		t.Fatal("candidate at leash equality was admitted")
 	}
@@ -177,17 +177,17 @@ func TestFiringPositionRetiresOnCompletionAndIdentityChanges(t *testing.T) {
 		"strict switch":            func(f *firingFixture) { f.q.Binding().Rules = StrictRules{} },
 		"hold position":            func(f *firingFixture) { f.u.Flags &^= 3 << units.StandingMoveShift },
 		"hidden": func(f *firingFixture) {
-			f.q.Binding().DangerVisible = func(*units.Unit, *units.Unit) bool { return false }
+			f.q.Binding().SetDangerVisible(func(*units.Unit, *units.Unit) bool { return false })
 		},
 		"reused target": func(f *firingFixture) {
 			replacement := *f.target
-			old := f.q.Binding().Lookup
-			f.q.Binding().Lookup = func(h pool.Handle) *units.Unit {
+			old := f.q.Binding().LookupHook()
+			f.q.Binding().SetLookup(func(h pool.Handle) *units.Unit {
 				if h == replacement.Handle {
 					return &replacement
 				}
 				return old(h)
-			}
+			})
 		},
 		"displaced": func(f *firingFixture) {
 			successor := &Node{ID: Lookup("Paralyze"), Owner: f.u.Handle}
@@ -264,7 +264,7 @@ func TestFiringPositionAutomaticStationaryResponseKeepsManeuverPost(t *testing.T
 	f.q.danger.anchored = true
 	f.q.danger.anchorX, f.q.danger.anchorZ = f.u.X, f.u.Z
 	f.u.Def.ManeuverLeashLength = 16
-	f.q.Binding().DangerRouteFeasible = func(_ *units.Unit, x, z numeric.Fixed) bool { return x == f.u.X || z == f.u.Z }
+	f.q.Binding().SetDangerRouteFeasible(func(_ *units.Unit, x, z numeric.Fixed) bool { return x == f.u.X || z == f.u.Z })
 	if f.step(11) {
 		t.Fatal("stationary maneuver reached leash equality")
 	}
@@ -302,8 +302,8 @@ func TestFiringPositionPumpDeliversCancellationBeforeRestart(t *testing.T) {
 					} else {
 						f.n.Satisfied |= event.bit
 					}
-					f.q.Binding().Movement.Release = func(*Node) bool { return true }
-					f.q.Binding().Weapons.CanEngage = func(*units.Unit, pool.Handle, int) bool { return true }
+					f.q.Binding().Movement.SetRelease(func(*Node) bool { return true })
+					f.q.Binding().Weapons.SetCanEngage(func(*units.Unit, pool.Handle, int) bool { return true })
 					handler := DescriptorFor(f.n.ID).Handler
 					calls := 0
 					restore := setHandler(f.n.ID, func(u *units.Unit, n *Node, satisfied, tick uint32) Code {

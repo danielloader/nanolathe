@@ -48,8 +48,8 @@ func newReactionFixture(t *testing.T) *reactionFixture {
 	f.victim.Flags |= 2<<units.StandingMoveShift | 2<<units.StandingFireShift
 	f.victim.Remaining = 0
 	f.admits = func(*units.Unit, int, *units.Unit) bool { return true }
-	f.svc = &Service{ControlByte: func(uint8) uint8 { return ControlByteHuman }}
-	f.svc.Reaction = &ReactionSeams{
+	f.svc = NewService(ServiceConfig{ControlByte: func(uint8) uint8 { return ControlByteHuman }})
+	f.svc.Reaction = NewReactionSeams(ReactionSeamsConfig{
 		ObserverNotice:          func(*units.Unit) { f.observed++ },
 		Allied:                  func(a, b uint8) bool { return a == b },
 		ArmConstructionThrottle: func(uint8, uint32) { f.throttle++ },
@@ -60,7 +60,7 @@ func newReactionFixture(t *testing.T) *reactionFixture {
 		},
 		UnderAttackSilenced: func(*units.Unit) bool { return false },
 		UnderAttackNotice:   func(*units.Unit) { f.notices++ },
-	}
+	})
 	return f
 }
 
@@ -143,10 +143,10 @@ func TestReactionRetaliationOuterGates(t *testing.T) {
 		{"unbuilt", func(f *reactionFixture) { f.victim.Remaining = 0.5 }},
 		{"unarmed", func(f *reactionFixture) { f.victim.Flags &^= units.ArmedStatus }},
 		{"allied", func(f *reactionFixture) {
-			f.svc.Reaction.Allied = func(uint8, uint8) bool { return true }
+			f.svc.Reaction.SetAllied(func(uint8, uint8) bool { return true })
 		}},
 		{"absent controller", func(f *reactionFixture) {
-			f.svc.ControlByte = func(uint8) uint8 { return ControlByteAbsent }
+			f.svc.SetControlByte(func(uint8) uint8 { return ControlByteAbsent })
 		}},
 		{"hold fire", func(f *reactionFixture) {
 			f.victim.Flags &^= units.StandingFieldMask << units.StandingFireShift
@@ -192,7 +192,7 @@ func TestReactionThrottleIsCanCaptureAndControllerTwo(t *testing.T) {
 
 	f = newReactionFixture(t)
 	f.victim.Def.CanCapture = true
-	f.svc.ControlByte = func(uint8) uint8 { return ControlByteComputer }
+	f.svc.SetControlByte(func(uint8) uint8 { return ControlByteComputer })
 	f.svc.ReactToDamage(f.w, f.victim, f.attacker, 5)
 	if f.throttle != 1 || f.stops != 1 {
 		t.Fatalf("computer builder throttle=%d stops=%d, want 1/1 [08 R-AI-01 §11]", f.throttle, f.stops)
@@ -215,7 +215,7 @@ func TestReactionUnderAttackNoticeGates(t *testing.T) {
 
 	// Bit 7 set on the front primary record silences it.
 	f = newReactionFixture(t)
-	f.svc.Reaction.UnderAttackSilenced = func(*units.Unit) bool { return true }
+	f.svc.Reaction.SetUnderAttackSilenced(func(*units.Unit) bool { return true })
 	f.svc.ReactToDamage(f.w, f.victim, f.attacker, 5)
 	if f.notices != 0 {
 		t.Fatalf("notices=%d, want zero while bit 7 is set [06 R-WPN-04 §2]", f.notices)
@@ -250,17 +250,17 @@ func TestReactionRunsBeforeTheProvenanceStamp(t *testing.T) {
 	// a combat fixture has no movement system to fill them.
 	stampGroundOccupancy(t, terrain, f.victim)
 	var flashes int
-	f.svc.Events = func(ev Event) {
+	f.svc.SetEvents(func(ev Event) {
 		if ev.Kind == EventDamageFlash {
 			flashes++
 		}
-	}
+	})
 	var seenSide uint8
 	var seenCause uint8
-	f.svc.Reaction.UnderAttackNotice = func(u *units.Unit) {
+	f.svc.Reaction.SetUnderAttackNotice(func(u *units.Unit) {
 		seenSide, seenCause = u.LastDamageSide, u.LastDamageCause
 		f.notices++
-	}
+	})
 	f.victim.LastDamageSide = 7
 	f.victim.LastDamageCause = 3
 	weapon := &content.WeaponDef{ID: 1, AreaOfEffect: 200, DamageDefault: 10, EdgeEffectiveness: 0}
@@ -284,7 +284,7 @@ func TestNoDamageRunsNoReaction(t *testing.T) {
 	f := newReactionFixture(t)
 	terrain := &world.Terrain{CellW: 100, CellH: 100, Plot: make([]world.PlotCell, 100*100)}
 	var events int
-	f.svc.Events = func(Event) { events++ }
+	f.svc.SetEvents(func(Event) { events++ })
 	// A blast with no area reaches no victim [06 §9.3].
 	weapon := &content.WeaponDef{ID: 1, AreaOfEffect: 0, DamageDefault: 10}
 	f.svc.ExplodeWeaponAt(f.w, terrain, weapon, Vec3{X: f.victim.X, Y: f.victim.Y, Z: f.victim.Z}, f.attacker.Handle, 5)

@@ -29,7 +29,7 @@ func TestCargoCascadeCommonIntake(t *testing.T) {
 				cargo.Health, cargo.Kills, wantHealth, wantDeath = 0, 0, -30000, true
 			case "remote":
 				cargo.Kills, wantHealth = 0, 0
-				service.ControlByte = func(uint8) uint8 { return combat.ControlByteRemote }
+				service.SetControlByte(func(uint8) uint8 { return combat.ControlByteRemote })
 			case "dead latch":
 				cargo.Dying, wantHealth, wantDeath = true, 29000, true
 			case "null attacker":
@@ -50,20 +50,20 @@ func TestCargoCascadeCommonIntake(t *testing.T) {
 				}
 			}
 			flashes, observations := 0, 0
-			service.Events = func(ev combat.Event) {
+			service.SetEvents(func(ev combat.Event) {
 				if ev.Kind == combat.EventDamageFlash {
 					flashes++
 					if ev.Tick != 37 || ev.Source != attacker {
 						t.Errorf("flash = %+v", ev)
 					}
 				}
-			}
-			service.Reaction = &combat.ReactionSeams{ObserverNotice: func(v *units.Unit) {
+			})
+			service.Reaction = combat.NewReactionSeams(combat.ReactionSeamsConfig{ObserverNotice: func(v *units.Unit) {
 				observations++
 				if uint8(v.BlinkSuppress) != 240 || v.LastDamageCause != 5 || v.LastDamageSide != 8 || v.EngagementTarget != carrier.Handle {
 					t.Error("reaction lost prior provenance or flash")
 				}
-			}}
+			}})
 			system.HandleDeath(w, carrier.Handle, attacker, 37)
 			if cargo.Health != wantHealth || cargo.Dying != wantDeath || isCarried(w, cargo.Handle) {
 				t.Fatalf("health/death/carried = %d/%v/%v", cargo.Health, cargo.Dying, isCarried(w, cargo.Handle))

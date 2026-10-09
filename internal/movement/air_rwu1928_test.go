@@ -75,12 +75,12 @@ func TestLandingCoarseAcceptShortCircuitsTheWalk(t *testing.T) {
 	wantX, wantZ := airMappingTile(anchorX, anchorZ, 1)
 	var word uint16
 	var sawX, sawZ int32
-	orders.QueueOfUnit(u).Binding().World = &orders.WorldQueryAdapter{
+	orders.QueueOfUnit(u).Binding().World = orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{
 		MappingWord: func(tileX, tileZ int32) (uint16, bool) {
 			sawX, sawZ = tileX, tileZ
 			return word, true
 		},
-	}
+	})
 
 	// Unmapped for owner 0: landable outright, with no feature, yard,
 	// occupancy, depth or slope test at all.
@@ -109,7 +109,7 @@ func guardSeekFixture(t *testing.T, candOwner uint8, candFlies bool, declares fu
 	// queue binding's world adapter, the same seam the air-base registry's
 	// rebuild uses [05 R-SHARE-01 §1].
 	if q := orders.QueueOfUnit(seeker); q != nil && q.Binding() != nil {
-		q.Binding().World = &orders.WorldQueryAdapter{DeclaresAlliance: declares}
+		q.Binding().World = orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{DeclaresAlliance: declares})
 	}
 
 	def := setScratchMovement(&content.UnitDef{

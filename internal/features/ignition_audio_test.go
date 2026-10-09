@@ -34,12 +34,12 @@ func TestIgnitionSoundSuccessAndRefusals(t *testing.T) {
 				cx, cz = -1, -1
 			}
 			var positions [][3]numeric.Fixed
-			s.BurnSound = func(pos [3]numeric.Fixed) {
+			s.SetBurnSound(func(pos [3]numeric.Fixed) {
 				if !inst.IsBurning || !s.Terrain.PlotAt(4, 6).Occupied() {
 					t.Fatal("sound raised before burn attachment")
 				}
 				positions = append(positions, pos)
-			}
+			})
 			beforeSim, beforeCRT := sim.Draws(), crt.Draws()
 			ok := s.igniteAt(cx, cz, def)
 			if refusal != "" {
@@ -70,7 +70,7 @@ func TestRestoredBurnSelectorRequestsIgnitionSound(t *testing.T) {
 		def.SparkTime = 150
 		stubSequences(s, longBurn(), longBurn(), longBurn())
 		var positions [][3]numeric.Fixed
-		s.BurnSound = func(pos [3]numeric.Fixed) { positions = append(positions, pos) }
+		s.SetBurnSound(func(pos [3]numeric.Fixed) { positions = append(positions, pos) })
 		data := make([]byte, RetailRestorePayloadSize(1))
 		data[9] = 0x50 | selector
 		before := sim.Draws()

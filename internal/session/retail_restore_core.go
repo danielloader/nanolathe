@@ -449,9 +449,9 @@ func RestoreRetailBattleCore(stage *RetailBattleStage) error {
 		s.visStamps = make(map[int]visStamp)
 		publishVisibilityForAll(s)
 	}
-	if s.Features != nil && s.Features.BurnSound != nil {
+	if s.Features != nil && s.Features.BurnSoundHook() != nil {
 		for _, pos := range stage.burnSounds {
-			s.Features.BurnSound(pos)
+			s.Features.BurnSoundHook()(pos)
 		}
 	}
 	stage.burnSounds = nil

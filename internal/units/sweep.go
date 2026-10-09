@@ -171,8 +171,9 @@ func (w *World) FinalizeDeath(handle pool.Handle, tick uint32) DeathResult {
 	}
 	cause := u.DeathCause
 	hookFired := false
-	if !u.deathHookFired && w.OnDeath != nil {
-		w.OnDeath(handle, cause, u)
+	if !u.deathHookFired && w.DeathHook() != nil {
+		w.deathDispatches++
+		w.DeathHook()(handle, cause, u)
 		u.deathHookFired = true
 		hookFired = true
 	} else if !u.deathHookFired {
@@ -181,8 +182,8 @@ func (w *World) FinalizeDeath(handle pool.Handle, tick uint32) DeathResult {
 		// However the slot will be freed now, so later calls are no-ops anyway.
 		// To preserve exactly-once semantics when hook later appears, do not set flag.
 	}
-	if !u.deathExtraHookFired && w.OnDeathExtra != nil {
-		w.OnDeathExtra(handle, cause, u)
+	if !u.deathExtraHookFired && w.DeathExtraHook() != nil {
+		w.DeathExtraHook()(handle, cause, u)
 		u.deathExtraHookFired = true
 		hookFired = true
 	}
@@ -201,4 +202,14 @@ func (w *World) FinalizeDeath(handle pool.Handle, tick uint32) DeathResult {
 		w.liveCounters[player]--
 	}
 	return DeathResult{Freed: true, HookFired: hookFired, Cause: cause}
+}
+
+// DeathDispatches reads the diagnostic primary-hook count. Benchmark census
+// uses it without replacing a bound gameplay callback (DESIGN_MULTIPLAYER
+// §16.3.79). It is not a count of all freed records and is not checkpoint state.
+func (w *World) DeathDispatches() uint64 {
+	if w == nil {
+		return 0
+	}
+	return w.deathDispatches
 }

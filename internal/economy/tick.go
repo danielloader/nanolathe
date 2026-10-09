@@ -94,8 +94,8 @@ func (s *Service) TickPlayer(player int, tick uint32, w *units.World, beforeDead
 	// its phase. Economy cannot import the session, so the block reaches it
 	// through the same callback seam as beforeDeadline; the *local* slot gate
 	// belongs to the callback, which knows which slot is local.
-	if s.EndCondition != nil {
-		s.EndCondition(player, tick)
+	if s.EndConditionHook() != nil {
+		s.EndConditionHook()(player, tick)
 	}
 
 	// C4 settlement gate chain, all required before Settle. The early check already covered

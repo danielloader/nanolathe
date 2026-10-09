@@ -141,6 +141,8 @@ func simulationManifestDigest(entries []SimulationInput) [32]byte {
 type semanticDigest struct {
 	h       hash.Hash
 	scratch [binary.MaxVarintLen64]byte
+	buffer  [512]byte
+	used    int
 }
 
 func newSemanticDigest(domain string) *semanticDigest {
@@ -149,7 +151,25 @@ func newSemanticDigest(domain string) *semanticDigest {
 	return d
 }
 
-func (d *semanticDigest) u8(v uint8) { d.h.Write([]byte{v}) }
+// Compile-time identities are revalidated by checkpoints. Batch primitive
+// writes without changing their framing (DESIGN_MULTIPLAYER §16.3.81).
+func (d *semanticDigest) flush() {
+	if d.used != 0 {
+		d.h.Write(d.buffer[:d.used])
+		d.used = 0
+	}
+}
+func (d *semanticDigest) write(p []byte) {
+	for len(p) != 0 {
+		n := copy(d.buffer[d.used:], p)
+		d.used += n
+		p = p[n:]
+		if d.used == len(d.buffer) {
+			d.flush()
+		}
+	}
+}
+func (d *semanticDigest) u8(v uint8) { d.scratch[0] = v; d.write(d.scratch[:1]) }
 func (d *semanticDigest) boolean(v bool) {
 	if v {
 		d.u8(1)
@@ -157,25 +177,32 @@ func (d *semanticDigest) boolean(v bool) {
 		d.u8(0)
 	}
 }
-func (d *semanticDigest) u64(v uint64) { d.h.Write(d.scratch[:binary.PutUvarint(d.scratch[:], v)]) }
+func (d *semanticDigest) u64(v uint64) { d.write(d.scratch[:binary.PutUvarint(d.scratch[:], v)]) }
 func (d *semanticDigest) u32(v uint32) { d.u64(uint64(v)) }
-func (d *semanticDigest) s64(v int64)  { d.h.Write(d.scratch[:binary.PutVarint(d.scratch[:], v)]) }
+func (d *semanticDigest) s64(v int64)  { d.write(d.scratch[:binary.PutVarint(d.scratch[:], v)]) }
 func (d *semanticDigest) s32(v int32)  { d.s64(int64(v)) }
 func (d *semanticDigest) text(s string) {
 	d.u64(uint64(len(s)))
-	d.h.Write([]byte(s))
+	for len(s) != 0 {
+		n := copy(d.buffer[d.used:], s)
+		d.used += n
+		s = s[n:]
+		if d.used == len(d.buffer) {
+			d.flush()
+		}
+	}
 }
 func (d *semanticDigest) f32(v float32) {
 	var b [4]byte
 	binary.LittleEndian.PutUint32(b[:], math.Float32bits(v))
-	d.h.Write(b[:])
+	d.write(b[:])
 }
 func (d *semanticDigest) f64(v float64) {
 	var b [8]byte
 	binary.LittleEndian.PutUint64(b[:], math.Float64bits(v))
-	d.h.Write(b[:])
+	d.write(b[:])
 }
-func (d *semanticDigest) digest(v [32]byte) { d.h.Write(v[:]) }
+func (d *semanticDigest) digest(v [32]byte) { d.write(v[:]) }
 func (d *semanticDigest) texts(values []string) {
 	d.u64(uint64(len(values)))
 	for _, v := range values {
@@ -183,8 +210,9 @@ func (d *semanticDigest) texts(values []string) {
 	}
 }
 func (d *semanticDigest) sum() [32]byte {
+	d.flush()
 	var out [32]byte
-	d.h.Sum(out[:0])
+	copy(out[:], d.h.Sum(d.buffer[:0]))
 	return out
 }
 

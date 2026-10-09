@@ -52,7 +52,7 @@ func vtolWorkFixture() (*Queue, *units.Unit, *units.Unit) {
 	// [04 R-ORD-01 §5], through the terrain the session's economy service
 	// carries. One stock-shaped tree stands on the builder's own cell.
 	tree, _ := retailShapedTree()
-	q := &Queue{binding: &QueueBinding{
+	q := &Queue{binding: NewQueueBinding(QueueBindingConfig{
 		SimRNG: rng.Global.Sim,
 		// `VTOL_HelpBuild` phase 0 refuses a builder whose build list is empty
 		// [04 R-ORD-01 §17]; the fixture's builder has one.
@@ -67,30 +67,30 @@ func vtolWorkFixture() (*Queue, *units.Unit, *units.Unit) {
 			}
 			return nil
 		},
-	}}
-	q.binding.Work = &WorkAdapter{
+	})}
+	q.binding.Work = NewWorkAdapter(WorkAdapterConfig{
 		Assist: func(_ *units.Unit, n *Node, _ uint32) bool {
-			if n == nil || q.binding.Lookup(n.Target) == nil {
+			if n == nil || q.binding.LookupHook()(n.Target) == nil {
 				return false
 			}
 			return true
 		},
 		Repair: func(_ *units.Unit, _ *units.Unit, n *Node, _ uint32) bool {
-			t := q.binding.Lookup(n.Target)
+			t := q.binding.LookupHook()(n.Target)
 			if t == nil || t.Health >= t.Def.MaxDamage {
 				return false
 			}
 			t.Health++
 			return true
 		},
-	}
-	q.binding.Movement = &MovementGoalAdapter{
+	})
+	q.binding.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{
 		InstallPoint:     func(PointGoalRequest) bool { return true },
 		InstallAnnulus:   func(AnnulusGoalRequest) bool { return true },
 		InstallRectangle: func(RectangleGoalRequest) bool { return true },
 		InstallAir:       func(AirGoalRequest) bool { return true },
 		Release:          func(*Node) bool { return true },
-	}
+	})
 	q.SetBinding(q.binding)
 	BindQueue(builder, q)
 	return q, builder, target
@@ -285,7 +285,7 @@ func TestVTOLReclaimCountdownUsesThirty(t *testing.T) {
 func TestVTOLReclaimEmitsTheNanolatheSpray(t *testing.T) {
 	q, builder, _ := vtolWorkFixture()
 	terrain := q.Binding().Economy.(*economy.Service).Terrain
-	q.Binding().World = &WorldQueryAdapter{
+	q.Binding().World = NewWorldQueryAdapter(WorldQueryAdapterConfig{
 		LookupFeature: func(cellX, cellZ int32) (FeatureView, bool) {
 			def, ax, az, ok := features.FeatureAt(terrain, world.CellToWorld(cellX), world.CellToWorld(cellZ))
 			if !ok {
@@ -298,11 +298,11 @@ func TestVTOLReclaimEmitsTheNanolatheSpray(t *testing.T) {
 				Metal:         def.Metal, Energy: def.Energy, Reclaimable: def.Reclaimable,
 			}, true
 		},
-	}
+	})
 	segments := 0
-	q.Binding().Presentation = &PresentationAdapter{
+	q.Binding().Presentation = NewPresentationAdapter(PresentationAdapterConfig{
 		NanolatheFeature: func(*units.Unit, *Node, FeatureView, uint32) bool { segments++; return true },
-	}
+	})
 
 	// Phase 3, seed 40: one visit takes the countdown from 40 to 38, which
 	// clears the row's own `work > 30` gate and must fire exactly one call —
@@ -388,7 +388,7 @@ func TestVTOLRepairPatrolHoldsOnItsOwnDeadline(t *testing.T) {
 // in this file (`repairAdmission`) was collapsed into [04 R-ORD-02 §7].
 func TestRepairWaterClause(t *testing.T) {
 	const sea = 40
-	bind := &QueueBinding{World: &WorldQueryAdapter{SeaLevel: func() uint8 { return sea }}}
+	bind := &QueueBinding{World: NewWorldQueryAdapter(WorldQueryAdapterConfig{SeaLevel: func() uint8 { return sea }})}
 
 	mk := func(def *content.UnitDef, y int32) *units.Unit {
 		u := &units.Unit{Def: def, Y: numeric.Fixed(int64(y) * 65536)}

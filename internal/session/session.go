@@ -130,6 +130,15 @@ func (s *Session) ensurePublicationState() *publicationState {
 // services owned centrally by this package C5.
 // Go allows methods in any file, but the struct is defined once here.
 type Session struct {
+	// Only admitted composition supplies this private provenance receipt. It
+	// does not enable capture or attest mutable service bindings by itself.
+	checkpointAdmission *sessionCheckpointAdmission
+	checkpoints         *sessionCheckpoints
+	checkpointOrders    sessionCheckpointOrderBinding
+	checkpointBuild     sessionCheckpointBuildBinding
+	checkpointCombat    sessionCheckpointCombatBinding
+	checkpointAI        [pool.PlayerCount]sessionCheckpointAIManager
+
 	Gameplay gameplay.Mode
 	// Community is the resolved, session-owned feature table (DESIGN_COMMUNITY_PATCH §3).
 	Community community.Features
@@ -166,7 +175,8 @@ type Session struct {
 	// bound. It is the one production source of the two resolvers below, which
 	// is what makes a headless battle and a windowed battle the same
 	// simulation [05 R-FEAT-01 §10][03 R-STRIP-01 §2].
-	simArt *content.SimArt
+	simArt        *content.SimArt
+	checkpointArt [2]checkpointArtBinding // diagnostic installation ownership, never wire state
 
 	// effectFrameCount resolves an effect entry's frame count for the strip
 	// families; see SetEffectEntryFrameCount.
@@ -202,6 +212,10 @@ type Session struct {
 	// manager in place of the bound set's own step (plannerFor). Nil while
 	// no player is marked Modern.
 	modernAI ai.Planner
+	// Generated at the reviewed registration site, then frozen beside modernAI.
+	// It proves concrete planner identity without invoking gameplay (§16.3.44).
+	modernAICheckpointWitness ai.CheckpointModernPlanner
+	modernAICheckpointSource  ai.CheckpointControllerSource
 
 	publication *publicationState // staged events and admitted effects at the committed-frame boundary [01 §4.4][03 §1]
 	debris      *effects.DebrisPool
@@ -307,6 +321,9 @@ type Session struct {
 	// slot's UpdateTime settlement deadline, so there is no result-poll due
 	// word here [08 R-TRIG-01 §6] "The due tick is the settlement deadline"
 	// [05 R-ECO-01 §1].
+	// onlineResults holds the per-human latches of DESIGN_MULTIPLAYER §16.4.1.
+	// Nil keeps the ordinary single-player result path.
+	onlineResults       *onlineResultState
 	result              Result
 	resultPending       bool
 	resultPendingWinner int
@@ -723,7 +740,7 @@ func (s *Session) ValidateComposition() error {
 			if int(mgr.Player) != i {
 				return fmt.Errorf("session: ai manager player %d at index %d mismatch [RS-02][08]", mgr.Player, i)
 			}
-			if mgr.QueueBuildTyped == nil {
+			if mgr.QueueBuildTypedHook() == nil {
 				return fmt.Errorf("session: ai manager player %d has no QueueBuildTyped binding [RX-01][F-P0-004]", mgr.Player)
 			}
 		}
@@ -832,7 +849,7 @@ func (s *Session) IsUnitVisible(viewer int, target *units.Unit) bool {
 		return false
 	}
 	vid := visibility.PlayerID(viewer)
-	status := target.Flags
+	status := s.sensorStatus(uint8(viewer), target)
 	// The predicate's cloak input is the INSTANCE cloaked bit and nothing else.
 	//
 	// `init_cloaked` used to be ORed in here; it is consumed exactly once, by
@@ -1099,7 +1116,7 @@ func (s *Session) RegisterAll() {
 		// unit had a sink — are silent, which is the battle-start clear-all §7
 		// lists among the queue's readers, not a dropped cue.
 		s.bindStatusCueSinks()
-		s.Units.OnDeath = func(h pool.Handle, cause units.DeathCause, u *units.Unit) {
+		s.Units.SetDeathHookWithCheckpointBinding(func(h pool.Handle, cause units.DeathCause, u *units.Unit) {
 			// The unit-teardown purge of [03 R-AUD-01 §7]: the removed unit's
 			// queued cue entries are dropped before the record goes away. This
 			// hook is the slot-end finalizer, which is that removal.
@@ -1385,8 +1402,8 @@ func (s *Session) RegisterAll() {
 			// [08 R-ENTRY-01 §3]. The open-question marker and the empty else-branch
 			// that stood here described a def-less path the branch condition
 			// already excludes, and did nothing.
-		}
-		s.Units.OnCreate = func(h pool.Handle, u *units.Unit) {
+		}, s.checkpointBindingAuthority())
+		s.Units.SetCreateHookWithCheckpointBinding(func(h pool.Handle, u *units.Unit) {
 			// Production seeds before COB Create in the allocation binder.
 			// Source-free fixture worlds still use the same constructor seed.
 			if !s.Units.HasCOBBinder() {
@@ -1396,7 +1413,7 @@ func (s *Session) RegisterAll() {
 			// factory product's activation edge reaches the same sink as a
 			// placed unit's [03 R-AUD-01 §7].
 			if u != nil {
-				u.SetStatusCueSink(s.raiseStatusCue)
+				u.SetStatusCueSinkWithCheckpointBinding(s.raiseStatusCue, s.checkpointBindingAuthority())
 			}
 			// Do not publish visibility at allocator return. A phase-2 factory
 			// product is attached to its authored build piece later in the same
@@ -1412,8 +1429,8 @@ func (s *Session) RegisterAll() {
 			}
 			// Completion belongs to the builder's terminal order phase, not
 			// product allocation [05 "The build-order caption census"].
-		}
-		s.Units.OnCapture = func(h pool.Handle, oldOwner, newOwner uint8, u *units.Unit) {
+		}, s.checkpointBindingAuthority())
+		s.Units.SetCaptureHookWithCheckpointBinding(func(h pool.Handle, oldOwner, newOwner uint8, u *units.Unit) {
 			// Capture/transfer notification is driven here [08 "Evaluation"];
 			// type-gated CaptureUnitType decrements only here.
 			if s.Mission != nil && u != nil {
@@ -1425,7 +1442,7 @@ func (s *Session) RegisterAll() {
 			if s.Audio != nil && u != nil && s.Clock != nil {
 				_ = s.Audio.Emit(s.Clock.GlobalTick, audio.SlotCapture, h, "")
 			}
-		}
+		}, s.checkpointBindingAuthority())
 	}
 
 }

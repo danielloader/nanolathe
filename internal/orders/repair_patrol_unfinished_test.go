@@ -37,7 +37,7 @@ func TestVTOLRepairPatrolUnfinishedTargetSpawnsHelpBuildDirectly(t *testing.T) {
 				c.Health = c.Def.MaxDamage / 2 // shared repair admission requires health != maxdamage
 			}
 			released := 0
-			q.binding.Movement.Release = func(*Node) bool { released++; return true }
+			q.binding.Movement.SetRelease(func(*Node) bool { released++; return true })
 			n := &Node{Owner: actor.Handle, Phase: 1}
 
 			got := vtolRepairPatrolHandler(actor, n, 0, 100)

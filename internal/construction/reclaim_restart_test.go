@@ -48,7 +48,7 @@ func TestReclaimOutOfReachRestartEmitsStopThenStart(t *testing.T) {
 	s.Movement = movement.NewSystem(&world.Terrain{CellW: 32, CellH: 32, Plot: make([]world.PlotCell, 1024)}, movement.Profile{FootPrintX: 1, FootPrintZ: 1}, movement.NewOccupancyGrid())
 	s.Movement.BindWorld(s.World)
 	s.Movement.EnsureUnit(builder)
-	orders.QueueForUnit(builder).SetBinding(&orders.QueueBinding{Lookup: func(pool.Handle) *units.Unit { return builder }})
+	orders.QueueForUnit(builder).SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: func(pool.Handle) *units.Unit { return builder }}))
 	vm := bindScriptBridge(t, builder, "StartBuilding", "StopBuilding")
 	step := func(tick uint32) {
 		s.StepUnit(TickContext{Tick: tick, World: s.World, Economy: s.Economy, Catalog: s.Catalog}, builder.Handle)

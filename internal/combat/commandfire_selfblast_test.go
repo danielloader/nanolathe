@@ -44,12 +44,12 @@ func commandFireProbe(t *testing.T, commandFire bool, control uint8) (*Service, 
 	slot.Reload = 0
 	cat := &content.Catalog{Weapons: map[string]*content.WeaponDef{"w": weapon}}
 	cat.RebuildWeaponIndex()
-	svc := &Service{ControlByte: func(owner uint8) uint8 {
+	svc := NewService(ServiceConfig{ControlByte: func(owner uint8) uint8 {
 		if owner == 0 {
 			return control
 		}
 		return ControlByteComputer
-	}}
+	}})
 	_ = target
 	return svc, shooter, w, terrain, cat
 }
@@ -116,7 +116,7 @@ func TestCommandFireNeverAutoAcquiresForAHuman(t *testing.T) {
 // what a nil accessor reads as [06 R-DMG-01 §9] — answers like a human's.
 func TestCommandFireUnoccupiedRowDoesNotAutoAcquire(t *testing.T) {
 	svc, shooter, w, terrain, cat := commandFireProbe(t, true, ControlByteAbsent)
-	svc.ControlByte = nil // every row reads as unoccupied [06 R-DMG-01 §8]
+	svc.SetControlByte(nil) // every row reads as unoccupied [06 R-DMG-01 §8]
 	if runProbeVisits(svc, shooter, w, terrain, cat, simRNGPtr(1)) {
 		t.Fatalf("a command-fire weapon acquired with no player row bound; only controller type 2 admits it [06 §3.2]")
 	}
@@ -177,7 +177,7 @@ func TestManualTargetStillFiresACommandFireWeapon(t *testing.T) {
 	slot.Reload = 0
 	cat := &content.Catalog{Weapons: map[string]*content.WeaponDef{"w": weapon}}
 	cat.RebuildWeaponIndex()
-	svc := &Service{ControlByte: func(uint8) uint8 { return ControlByteHuman }}
+	svc := NewService(ServiceConfig{ControlByte: func(uint8) uint8 { return ControlByteHuman }})
 	vis := allVisibleService(terrain)
 
 	// With no manual target the human's command-fire slot stays silent.
@@ -205,7 +205,7 @@ func TestManualTargetStillFiresACommandFireWeapon(t *testing.T) {
 	// The same holds when the tracking flag is clear, which is the state a
 	// previous target's death leaves behind: the slot must not re-acquire, and
 	// must not lose the installed target either.
-	svc2 := &Service{ControlByte: func(uint8) uint8 { return ControlByteHuman }}
+	svc2 := NewService(ServiceConfig{ControlByte: func(uint8) uint8 { return ControlByteHuman }})
 	slot.Target = units.Target{Kind: units.TargetUnit, Unit: target.Handle}
 	slot.Flags &^= 0x02
 	slot.Reload = 0
@@ -280,7 +280,7 @@ func blastFixture(t *testing.T) (*Service, *units.World, *world.Terrain, *units.
 	}
 	shooter := at(3, 40)   // owner 3 so the stamp cannot be confused with slot 0
 	neighbour := at(1, 56) // the next cell east, sixteen world units away and well inside the blast
-	svc := &Service{ControlByte: func(uint8) uint8 { return ControlByteHuman }}
+	svc := NewService(ServiceConfig{ControlByte: func(uint8) uint8 { return ControlByteHuman }})
 	return svc, w, terrain, shooter, neighbour
 }
 

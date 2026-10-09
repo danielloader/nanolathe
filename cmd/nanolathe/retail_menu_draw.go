@@ -92,6 +92,11 @@ func (g *gameShell) drawRetailWindow(c *client.Client, mode shellMode, p *ui.Pan
 		background = assets.background
 		page = assets.art
 	}
+	if assets := g.onlinePanelAssets(p); assets != nil {
+		// So do the online windows (DESIGN_MULTIPLAYER §16.6.2).
+		background = assets.background
+		page = assets.art
+	}
 	if saveLoadAssets != nil && p == saveLoadPanel {
 		// The save/load dialog is a child window with its own authored
 		// backdrop; it must not borrow the surface it was opened over
@@ -152,6 +157,7 @@ func (g *gameShell) drawRetailWindow(c *client.Client, mode shellMode, p *ui.Pan
 	if sparksAt == len(p.Window.Gadgets) {
 		g.menuSparks.draw(c, p, int(r.X), int(r.Y))
 	}
+	g.drawOnlineExtras(c, p)
 }
 
 // drawRetailModal draws the authored MSGBOX.GUI panel. Message text is bound

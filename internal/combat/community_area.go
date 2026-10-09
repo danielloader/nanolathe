@@ -192,7 +192,7 @@ func (s *Service) ensureCommunityAreaIndex(w *units.World, terrain *world.Terrai
 		if u == nil || u.Def == nil || !u.Alive || u.Dying || u.Move.ModeMirror != 2 || u.Attachment.Carrier != 0 {
 			continue
 		}
-		if s.IsOffMapFiled != nil && s.IsOffMapFiled(u.Handle) {
+		if s.IsOffMapFiledHook() != nil && s.IsOffMapFiledHook()(u.Handle) {
 			continue
 		}
 		footW, footH := int32(u.FootprintSizeX), int32(u.FootprintSizeZ)

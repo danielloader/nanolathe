@@ -19,7 +19,9 @@ import (
 // §8.1 item 5, §8.6): the map schema the map-entry code selected, the mod and
 // content profile, the seats' public identities, and the room's permissions,
 // restrictions, views and policies. The room supplies every one of them; the
-// adapter fills none.
+// adapter fills none. UnitRestrictions are field 12's records, which
+// MatchUnitRestrictions maps from the host's restriction set against its
+// unrestricted compiled catalog.
 type MatchRoomInputs struct {
 	// MapSchema is the schema the existing map-entry code selected for the
 	// battle's map and seat count, resolved once by the room.
@@ -54,12 +56,25 @@ type MatchRoomInputs struct {
 // argument is changed. Every entry option is accounted for (§8.6): the
 // builder options become the human row's six values, the Community sources
 // the resolved table, the content limits and mutators their fields, and the
-// AI overrides each computer row's merged parameters. AutomatedPlayers is
-// refused, since a lockstep battle never sets it; Progress is a local load
-// observer; SimArt belongs to frozen content identity, not configuration.
+// AI overrides each computer row's merged parameters. The restrictions are
+// field 12, whose records the room supplies, mapped against its unrestricted
+// catalog by MatchUnitRestrictions, which this adapter does not hold; a
+// nonzero set in the options must be the set those records describe, so it is
+// never silently dropped. AutomatedPlayers is refused, since a lockstep battle
+// never sets it; Progress is a local load observer; SimArt belongs to frozen
+// content identity, not configuration.
 func NewMatchConfigRequest(cfg SkirmishConfig, options SkirmishEntryOptions, room MatchRoomInputs) (MatchConfigRequest, error) {
 	if options.AutomatedPlayers {
 		return MatchConfigRequest{}, matchFieldError("options.automatedPlayers", "false: an online battle seats its computers through the configuration")
+	}
+	if !options.Restrictions.IsZero() {
+		set, err := matchRestrictionSet(room.UnitRestrictions)
+		if err != nil {
+			return MatchConfigRequest{}, err
+		}
+		if !set.Equal(options.Restrictions) {
+			return MatchConfigRequest{}, matchFieldError("options.restrictions", fmt.Sprintf("the set the room's field-12 records describe (MatchUnitRestrictions), %q; got %q", set.String(), options.Restrictions.String()))
+		}
 	}
 	// The zero mode word is Modern by the vocabulary's own contract; any
 	// other word must name a registered set and is never normalized to

@@ -49,13 +49,13 @@ func DragCommunityOrder(q *Queue, receipt CommunityOrderDragReceipt, destination
 		// the path request, detaches and destroys the record goal, and clears the
 		// route's active/repath state. Invalid build placement below puts the
 		// receipt position back; accepted destinations replace it.
-		if q.binding.Lookup != nil {
-			if u := q.binding.Lookup(n.Owner); u != nil {
+		if q.binding.LookupHook() != nil {
+			if u := q.binding.LookupHook()(n.Owner); u != nil {
 				n.GoalX, n.GoalY, n.GoalZ = u.X, u.Y, u.Z
 			}
 		}
-		if q.binding.Movement != nil && q.binding.Movement.Release != nil {
-			q.binding.Movement.Release(n)
+		if q.binding.Movement != nil && q.binding.Movement.ReleaseHook() != nil {
+			q.binding.Movement.ReleaseHook()(n)
 		}
 	}
 	if resolve != nil {

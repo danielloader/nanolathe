@@ -43,12 +43,12 @@ func TestSpecialAttackKeepsTargetIntent(t *testing.T) {
 		u.Flags |= units.ArmedStatus
 		u.Def.CanAttack, u.Def.CanDGun = true, true
 		target := &units.Unit{Handle: 7, Owner: u.Owner, Alive: true, Def: u.Def}
-		q.Binding().Lookup = func(handle pool.Handle) *units.Unit {
+		q.Binding().SetLookup(func(handle pool.Handle) *units.Unit {
 			if friendly && handle == target.Handle {
 				return target
 			}
 			return nil
-		}
+		})
 		q.Push(Lookup("AttackSpecial"), Node{Owner: u.Handle, Target: target.Handle, GoalSupplied: true})
 		n := q.Head()
 		if !friendly {

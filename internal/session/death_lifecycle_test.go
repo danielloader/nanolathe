@@ -35,8 +35,8 @@ func TestPhase2AlreadyDyingRunsNormalStagesAndFinalizesOnce(t *testing.T) {
 	u.Dying = true
 	u.DeathCause = units.DeathKilled
 	var primary, extra int
-	s.Units.OnDeath = func(pool.Handle, units.DeathCause, *units.Unit) { primary++ }
-	s.Units.OnDeathExtra = func(pool.Handle, units.DeathCause, *units.Unit) { extra++ }
+	s.Units.SetDeathHook(func(pool.Handle, units.DeathCause, *units.Unit) { primary++ })
+	s.Units.SetDeathExtraHook(func(pool.Handle, units.DeathCause, *units.Unit) { extra++ })
 
 	s.stepUnitPhase(1)
 	if s.Units.Unit(h) != nil {
@@ -56,7 +56,7 @@ func TestPhase3DeathSurvivesKillTickAndFinalizesNextPhase2(t *testing.T) {
 	victim := unitsInOrder[0]
 	h := pool.Handle(victim.Handle)
 	deathCallbacks := 0
-	s.Units.OnDeath = func(pool.Handle, units.DeathCause, *units.Unit) { deathCallbacks++ }
+	s.Units.SetDeathHook(func(pool.Handle, units.DeathCause, *units.Unit) { deathCallbacks++ })
 
 	// Complete phase 2, then model a lethal phase-3 damage result. The remaining
 	// phases and publication must still observe the death-marked record.

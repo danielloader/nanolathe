@@ -163,10 +163,10 @@ func TestGroundScriptedTransportRunsThroughPreCreateBinding(t *testing.T) {
 		carried bool
 	}
 	var statuses []statusState
-	binding := &orders.QueueBinding{SimRNG: s.SimRNG(), Lookup: w.Unit, Presentation: &orders.PresentationAdapter{Ready: func() bool { return true }, Status: func(_ *units.Unit, kind uint8, _ string) bool {
+	binding := orders.NewQueueBinding(orders.QueueBindingConfig{SimRNG: s.SimRNG(), Lookup: w.Unit, Presentation: orders.NewPresentationAdapter(orders.PresentationAdapterConfig{Ready: func() bool { return true }, Status: func(_ *units.Unit, kind uint8, _ string) bool {
 		statuses = append(statuses, statusState{kind, cargo.Attachment.Carrier == carrier.Handle})
 		return true
-	}}}
+	}})})
 	orders.QueueForUnit(carrier).SetBinding(binding)
 	orders.QueueForUnit(cargo).SetBinding(binding)
 	beforeState, beforeDraws := s.SimRNG().State, s.SimRNG().Draws()
@@ -232,12 +232,12 @@ func TestCompositionBinderFutureAllocationIsStrictAndPreCreate(t *testing.T) {
 	w.SetCOBSource(fs, globalCobLoader)
 	w.SetCOBBinder(func(u *units.Unit) error { return s.bindUnitCOB(fs, u) })
 	var createCalls int
-	w.OnCreate = func(_ pool.Handle, u *units.Unit) {
+	w.SetCreateHook(func(_ pool.Handle, u *units.Unit) {
 		createCalls++
 		if u.COBBinding() == nil || u.COBBinding().SimulationRNG != s.SimRNG() {
 			t.Fatalf("OnCreate observed incomplete/non-session binding: %#v", u.COBBinding())
 		}
-	}
+	})
 	h, err := w.Create(good, 0, 0, 0, 0)
 	if err != nil || h == 0 {
 		t.Fatalf("strict future allocation: h=%d err=%v", h, err)
@@ -275,10 +275,10 @@ func TestCompositionCreationInitializesEconomyAccountBeforePublicationAndSlotReu
 		t.Fatalf("createAndBindServices: %v", err)
 	}
 	var observedSaveable bool
-	w.OnCreate = func(h pool.Handle, _ *units.Unit) {
+	w.SetCreateHook(func(h pool.Handle, _ *units.Unit) {
 		_, err := s.Econ.RetailUnitAccountImage(h)
 		observedSaveable = err == nil
-	}
+	})
 	h, err := w.Create(def, 0, 0, 0, 0)
 	if err != nil {
 		t.Fatalf("first create: %v", err)

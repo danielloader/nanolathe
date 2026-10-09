@@ -170,8 +170,8 @@ func (s *Service) handleState2(factory *units.Unit, node *orders.Node, tick uint
 
 	// Determine model for factory.
 	var m *model.Model
-	if s.ModelForFactory != nil {
-		m = s.ModelForFactory(factory)
+	if s.ModelForFactoryHook() != nil {
+		m = s.ModelForFactoryHook()(factory)
 	}
 	if m == nil {
 		if binding := factory.COBBinding(); binding != nil {

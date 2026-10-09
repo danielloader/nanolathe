@@ -1,6 +1,7 @@
 package content
 
 import (
+	"encoding/binary"
 	"strings"
 	"testing"
 
@@ -231,5 +232,115 @@ func TestCheckpointKeysRejectMissingObjects(t *testing.T) {
 	}
 	if _, err := keys.NormalizedFeature(nil, nil); err == nil {
 		t.Fatal("nil base accepted")
+	}
+}
+
+func TestCheckpointVisibilityAndFeatureSequenceReferences(t *testing.T) {
+	f := newFrozenFixture(t)
+	cat := f.catalog(t)
+	cat.Features["tree1"].SeqNameDie = "missing"
+	cat.Sight = &SightShapes{Shapes: []SightShape{{W: 1, H: 1, Opaque: []bool{true}}}}
+	cat.LOS = &LOSTables{NumTables: 1, Tables: []LOSTable{{TableNum: 1, NumLines: 1, Lines: [][]int32{{1, 0, 1}}}}}
+	inputs := f.freeze(t, SimulationInputRequest{Catalog: cat})
+	// A reference lookup must remain independent of the provider and artwork.
+	inputs.view = struct{ vfs.FSOps }{}
+	keys, err := inputs.CheckpointKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sight, err := keys.SightShapes(cat.Sight)
+	if err != nil || sight != (checkpoint.Definition{Family: 1, Key: "sightshapes"}) {
+		t.Fatalf("sight = %+v, %v", sight, err)
+	}
+	los, err := keys.LOSTables(cat.LOS)
+	if err != nil || los != (checkpoint.Definition{Family: 1, Key: "los"}) {
+		t.Fatalf("LOS = %+v, %v", los, err)
+	}
+	copiedSight, copiedLOS := *cat.Sight, *cat.LOS
+	if _, err := keys.SightShapes(&copiedSight); err == nil {
+		t.Fatal("foreign shape table admitted")
+	}
+	if _, err := keys.LOSTables(&copiedLOS); err == nil {
+		t.Fatal("foreign ray table admitted")
+	}
+	if _, err := keys.SightShapes(nil); err == nil {
+		t.Fatal("nil sprite mask needs presence, not a key")
+	}
+	if _, err := keys.LOSTables(nil); err == nil {
+		t.Fatal("nil ray table needs presence, not a key")
+	}
+	delays, ok := inputs.SimArt().FeatureSequenceDelays("trees", "treeburn")
+	if !ok {
+		t.Fatal("missing authored sequence")
+	}
+	seq, err := keys.FeatureSequence(" TREES ", "TreeBurn", delays)
+	if err != nil || seq != (checkpoint.Definition{Family: 4, Key: "sequence/trees|treeburn"}) {
+		t.Fatalf("sequence = %+v, %v", seq, err)
+	}
+	delays[0]++
+	if _, err := keys.FeatureSequence("trees", "treeburn", delays); err == nil {
+		t.Fatal("changed delay words admitted")
+	}
+	for _, name := range []string{"absent", "treeburn"} {
+		if _, err := keys.FeatureSequence("trees", name, nil); err == nil {
+			t.Fatal("absent sequence given a key")
+		}
+	}
+	if _, err := keys.FeatureSequence("trees", "missing", []int32{3, 0, 2}); err == nil {
+		t.Fatal("equal words admitted under a missing sequence")
+	}
+	if err := keys.FeatureSequenceAbsent("trees", "missing"); err != nil {
+		t.Fatal(err)
+	}
+	if err := keys.FeatureSequenceAbsent("", "treeburn"); err != nil {
+		t.Fatal(err)
+	}
+	if err := keys.FeatureSequenceAbsent("trees", " "); err != nil {
+		t.Fatal(err)
+	}
+	if err := keys.FeatureSequenceAbsent("trees", "treeburn"); err == nil {
+		t.Fatal("present timing accepted as a cache miss")
+	}
+	if err := keys.FeatureSequenceAbsent("trees", "never-requested"); err == nil {
+		t.Fatal("unadmitted timing accepted as a cache miss")
+	}
+	cat.Sight.Shapes[0].Opaque[0] = false
+	if _, err := inputs.CheckpointKeys(); err == nil {
+		t.Fatal("changed admitted sprite table accepted")
+	}
+}
+
+// Empty-but-present artwork still has no timing sequence for the feature
+// consumer. In particular, an empty caller slice is not a present binding.
+func TestCheckpointFeatureSequenceZeroFrames(t *testing.T) {
+	f := newFrozenFixture(t)
+	// The general writer requires frames; author a zero count in its entry
+	// header for the metadata consumer boundary [fmt gaf].
+	data := frozenFixtureGAF(t, "zero", 1)
+	entry := binary.LittleEndian.Uint32(data[12:16])
+	binary.LittleEndian.PutUint16(data[entry:], 0)
+	f.write(t, "anims/empty.gaf", data)
+	cat := f.catalog(t)
+	cat.Features["tree1"].Filename = "empty"
+	cat.Features["tree1"].SeqNameBurn = "zero"
+	cat.Features["tree1"].SeqNameDie = "missing"
+	inputs := f.freeze(t, SimulationInputRequest{Catalog: cat})
+	if _, requested := inputs.simArt.sequences[simArtSequenceKey("empty", "zero")]; !requested {
+		t.Fatal("fixture must request the authored zero-frame sequence")
+	}
+	if delays, present := inputs.SimArt().FeatureSequenceDelays("empty", "zero"); present || delays != nil {
+		t.Fatal("zero-frame metadata must compile to the consumer's absent result")
+	}
+	keys, err := inputs.CheckpointKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"zero", "missing"} {
+		if err := keys.FeatureSequenceAbsent("empty", name); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := keys.FeatureSequence("empty", name, []int32{}); err == nil {
+			t.Fatalf("%s admitted an empty nonnil timing slice", name)
+		}
 	}
 }

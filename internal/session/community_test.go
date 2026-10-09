@@ -129,7 +129,7 @@ func TestCommunityFreshAndRestoredEntryShareConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := staged.Session
-	if src.Build.OrderBinding.BuilderOptions(src.LocalOwner) != initialOptions || dst.Build.OrderBinding.BuilderOptions(dst.LocalOwner) != loadedOptions {
+	if src.Build.OrderBinding.BuilderOptionsHook()(src.LocalOwner) != initialOptions || dst.Build.OrderBinding.BuilderOptionsHook()(dst.LocalOwner) != loadedOptions {
 		t.Fatal("battle load did not take the current host builder preferences")
 	}
 	if src.Community != dst.Community || src.EntryCommunity != dst.EntryCommunity || dst.Units.UnitLimit() != limit || dst.Combat.Slots.Capacity() != src.Combat.Slots.Capacity() {
@@ -192,7 +192,7 @@ func TestCommunityRepairBanksFollowSessionLifecycle(t *testing.T) {
 		target := w.Unit(th)
 		target.Health = 10
 		enabled, one := true, 1
-		s := &Session{Units: w, Econ: &economy.Service{}, Combat: &combat.Service{ControlByte: func(uint8) uint8 { return combat.ControlByteHuman }}, CommunitySources: CommunitySources{Player: community.Overrides{RepairRate: &community.RepairRateOverrides{Enabled: &enabled, RepairMultiplier: &one, SelfHealMultiplier: &one}}}}
+		s := &Session{Units: w, Econ: &economy.Service{}, Combat: combat.NewService(combat.ServiceConfig{ControlByte: func(uint8) uint8 { return combat.ControlByteHuman }}), CommunitySources: CommunitySources{Player: community.Overrides{RepairRate: &community.RepairRateOverrides{Enabled: &enabled, RepairMultiplier: &one, SelfHealMultiplier: &one}}}}
 		s.Build = construction.NewService(nil, cat, w, s.Econ)
 		s.Build.Combat = s.Combat
 		if err := s.SetRules(CommunityRuleSetName); err != nil {

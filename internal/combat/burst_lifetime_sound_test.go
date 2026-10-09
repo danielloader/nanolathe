@@ -146,7 +146,7 @@ func TestBurstSoundTriggerPublicationOrder(t *testing.T) {
 			muzzle := Vec3{X: numeric.FixedFromInt(30)}
 			refreshed := Vec3{X: numeric.FixedFromInt(40), Z: numeric.FixedFromInt(50)}
 			var events []Event
-			s.Events = func(e Event) {
+			s.SetEvents(func(e Event) {
 				events = append(events, e)
 				if len(events) == 2 {
 					clone := s.Records[1]
@@ -154,7 +154,7 @@ func TestBurstSoundTriggerPublicationOrder(t *testing.T) {
 						t.Fatalf("sound ran outside copy-before-expiry/random boundary: clone=%+v draws=%d", clone, r.Draws())
 					}
 				}
-			}
+			})
 			shooter := &units.Unit{Handle: 7}
 			shooter.Move.Heading = 0xc000 // fixed muzzle faces the target on +X
 			_, ok := TryFire(&s, &Slot{Weapon: w}, 0, Target{Kind: TargetPoint, X: numeric.FixedFromInt(130)}, 0, FirePorts{RNG: &r, Spy: spy, Shooter: shooter, Events: &combatFireEvents{svc: &s, shooter: 7, pos: muzzle}})
@@ -201,7 +201,7 @@ func TestBurstZeroSpeedFaultKeepsPriorSideEffects(t *testing.T) {
 	w := &content.WeaponDef{ID: 1, SoundTrigger: true, SoundStart: "start", RandomDecay: 10}
 	r := rng.NewSimulation(1)
 	sounds := 0
-	s.Events = func(Event) { sounds++ }
+	s.SetEvents(func(Event) { sounds++ })
 	defer func() {
 		if recover() == nil {
 			t.Fatal("zero-speed divide did not fault")

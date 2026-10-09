@@ -179,3 +179,37 @@ func TestEncoderSinkAndValidationFailures(t *testing.T) {
 		t.Fatal("uninitialized encoder accepted a write")
 	}
 }
+
+func TestEncoderLazyFieldPaths(t *testing.T) {
+	for _, tc := range []struct {
+		set  func(*Encoder)
+		want string
+	}{
+		{func(e *Encoder) { e.FieldChild("world", "value") }, "world.value"},
+		{func(e *Encoder) { e.FieldIndex("world.rows", 32769, ".value") }, "world.rows[32769].value"},
+		{func(e *Encoder) { e.FieldIndex("ignored", 1, ".old"); e.Field("plain") }, "plain"},
+		{func(e *Encoder) { e.FieldIndex("ignored", 1, ".old"); e.FieldChild("new", "value") }, "new.value"},
+	} {
+		e := NewEncoder(io.Discard)
+		tc.set(e)
+		e.F32(math.Float32frombits(0x7fc00001))
+		if e.Err() == nil || !strings.Contains(e.Err().Error(), "logical path "+tc.want+",") {
+			t.Fatalf("path: %v, want %s", e.Err(), tc.want)
+		}
+		first := e.Err()
+		e.FieldIndex("later", 4, "")
+		e.Fail(errors.New("later"))
+		if e.Err() != first {
+			t.Fatal("lazy field changed sticky error")
+		}
+	}
+	e := NewEncoder(io.Discard)
+	if got := testing.AllocsPerRun(100, func() {
+		e.FieldChild("array", "value")
+		e.U32(42)
+		e.FieldIndex("array", 32769, ".value")
+		e.U32(42)
+	}); got != 0 {
+		t.Fatalf("successful lazy fields allocated %g", got)
+	}
+}

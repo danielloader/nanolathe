@@ -22,20 +22,20 @@ func reentrantCancelQueue(t *testing.T) (*Queue, *units.Unit, *int) {
 	u := newTestUnit()
 	notices := 0
 	q := &Queue{}
-	q.binding = &QueueBinding{
+	q.binding = NewQueueBinding(QueueBindingConfig{
 		Lookup: func(h pool.Handle) *units.Unit {
 			if h == u.Handle {
 				return u
 			}
 			return nil
 		},
-		Work: &WorkAdapter{CancelNotice: func(_ *units.Unit, n *Node, _ uint32) bool {
+		Work: NewWorkAdapter(WorkAdapterConfig{CancelNotice: func(_ *units.Unit, n *Node, _ uint32) bool {
 			notices++
 			n.DynamicGate &^= 2
 			q.RemovePrimaryNode(n, false)
 			return true
-		}},
-	}
+		}}),
+	})
 	return q, u, &notices
 }
 
@@ -149,20 +149,20 @@ func TestPurgeVisitsRecordAppendedByCancelCleanup(t *testing.T) {
 	u := newTestUnit()
 	q := &Queue{}
 	notices := 0
-	q.binding = &QueueBinding{
+	q.binding = NewQueueBinding(QueueBindingConfig{
 		Lookup: func(h pool.Handle) *units.Unit {
 			if h == u.Handle {
 				return u
 			}
 			return nil
 		},
-		Work: &WorkAdapter{CancelNotice: func(_ *units.Unit, n *Node, _ uint32) bool {
+		Work: NewWorkAdapter(WorkAdapterConfig{CancelNotice: func(_ *units.Unit, n *Node, _ uint32) bool {
 			notices++
 			n.DynamicGate &^= 2
 			q.appendTail(Lookup("Move_Ground"), Node{Owner: u.Handle})
 			return true
-		}},
-	}
+		}}),
+	})
 	q.Push(Lookup("MobileBuild"), Node{Owner: u.Handle, DynamicGate: 2})
 
 	q.PurgeUnprotected()
@@ -199,12 +199,12 @@ func TestCancelAllCleansEveryRecordAfterReentrantRemoval(t *testing.T) {
 				n.Flags |= FlagStopBuildingPending
 			}
 			var released []*Node
-			q.binding.Movement = &MovementGoalAdapter{Release: func(n *Node) bool {
+			q.binding.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{Release: func(n *Node) bool {
 				if n != build {
 					released = append(released, n)
 				}
 				return true
-			}}
+			}})
 			stops := 0
 			callbackBridgeFor(u).SetLifecycleSink(func(e cob.LifecycleEvent) {
 				if e.Name == "StopBuilding" && e.Phase == "start" {
@@ -251,18 +251,18 @@ func TestCancelAllDoesNotRecleanARecordRemovedByAnEarlierNotice(t *testing.T) {
 	q.Push(Lookup("Move_Ground"), Node{Owner: u.Handle, Param1: 8})
 	tail := q.Primary()[2]
 	var released []*Node
-	q.binding.Movement = &MovementGoalAdapter{Release: func(n *Node) bool {
+	q.binding.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{Release: func(n *Node) bool {
 		if n == removed || n == tail {
 			released = append(released, n)
 		}
 		return true
-	}}
-	q.binding.Work.CancelNotice = func(_ *units.Unit, n *Node, _ uint32) bool {
+	}})
+	q.binding.Work.SetCancelNotice(func(_ *units.Unit, n *Node, _ uint32) bool {
 		n.DynamicGate &^= 2
 		q.RemovePrimaryNode(removed, false)
 		q.RemovePrimaryNode(n, false)
 		return true
-	}
+	})
 	q.CancelAll()
 	if len(released) != 2 || released[0] != removed || released[1] != tail {
 		t.Fatalf("release order = %v, want removed sibling then tail, once each", released)
@@ -281,7 +281,7 @@ func TestCancelAllDrainsCancellationCreatedRecords(t *testing.T) {
 	q.PushSecondary(Lookup("BuildWeapon"), Node{Owner: u.Handle})
 	rear := q.Secondary()[0]
 	var addedFront, addedRear *Node
-	q.binding.Work.CancelNotice = func(_ *units.Unit, n *Node, _ uint32) bool {
+	q.binding.Work.SetCancelNotice(func(_ *units.Unit, n *Node, _ uint32) bool {
 		if n != head || q.indexOfPrimary(n) != -1 || q.Head() != tail {
 			t.Fatal("cancel notice ran before unlinking its record")
 		}
@@ -292,12 +292,12 @@ func TestCancelAllDrainsCancellationCreatedRecords(t *testing.T) {
 		addedFront = q.appendTail(Lookup("Move_Ground"), Node{Owner: u.Handle})
 		addedRear = q.appendTail(Lookup("BuildWeapon"), Node{Owner: u.Handle})
 		return true
-	}
+	})
 	var cleaned []*Node
-	q.binding.Movement = &MovementGoalAdapter{Release: func(n *Node) bool {
+	q.binding.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{Release: func(n *Node) bool {
 		cleaned = append(cleaned, n)
 		return true
-	}}
+	}})
 	q.CancelAll()
 	want := []*Node{head, tail, addedFront, rear, addedRear}
 	if len(cleaned) != len(want) || len(q.Primary()) != 0 || len(q.Secondary()) != 0 {
@@ -319,7 +319,7 @@ func TestCancelFrontMostUnlinksBeforeCleanup(t *testing.T) {
 	q.Push(Lookup("Move_Ground"), Node{Owner: u.Handle})
 	tail := q.Primary()[1]
 	notices := 0
-	q.binding.Work.CancelNotice = func(_ *units.Unit, n *Node, _ uint32) bool {
+	q.binding.Work.SetCancelNotice(func(_ *units.Unit, n *Node, _ uint32) bool {
 		notices++
 		if n != head || q.Head() != tail || q.indexOfPrimary(n) != -1 ||
 			q.detachedNode != n || !q.detachedHasSuccessor {
@@ -327,7 +327,7 @@ func TestCancelFrontMostUnlinksBeforeCleanup(t *testing.T) {
 		}
 		n.DynamicGate &^= 2
 		return true
-	}
+	})
 	if !q.CancelFrontMost(func(n Node) bool { return n.ID == head.ID }) || notices != 1 ||
 		len(q.Primary()) != 1 || q.Head() != tail {
 		t.Fatal("toggle did not remove exactly one record")

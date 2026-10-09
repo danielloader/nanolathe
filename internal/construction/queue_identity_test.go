@@ -33,7 +33,7 @@ func TestRemoveHead_PreservesQueueOwnedServices(t *testing.T) {
 	econ := &stubEconomy{}
 	hostilityCalls := 0
 	lookupCalls := 0
-	q.SetBinding(&orders.QueueBinding{
+	q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{
 		Hostility: func(actor, other *units.Unit) bool { hostilityCalls++; return true },
 		Lookup: func(h pool.Handle) *units.Unit {
 			lookupCalls++
@@ -43,7 +43,7 @@ func TestRemoveHead_PreservesQueueOwnedServices(t *testing.T) {
 			return nil
 		},
 		Economy: econ,
-	})
+	}))
 
 	build := orders.Node{Param2: 1}
 	q.Push(orders.Lookup("BuildingBuild"), build)
@@ -62,10 +62,10 @@ func TestRemoveHead_PreservesQueueOwnedServices(t *testing.T) {
 	if after != q {
 		t.Fatalf("removeHead replaced the unit's queue; queue identity must survive subtraction [05 C21]")
 	}
-	if after.Binding() == nil || after.Binding().Hostility == nil {
+	if after.Binding() == nil || after.Binding().HostilityHook() == nil {
 		t.Errorf("Hostility hook lost across removal")
 	}
-	if after.Binding() == nil || after.Binding().Lookup == nil {
+	if after.Binding() == nil || after.Binding().LookupHook() == nil {
 		t.Errorf("Lookup hook lost across removal")
 	}
 	if after.Binding() == nil || after.Binding().Economy != econ {
@@ -77,7 +77,7 @@ func TestRemoveHead_PreservesQueueOwnedServices(t *testing.T) {
 
 	// The successor must still resolve its target through the queue's own
 	// lookup, which is the concrete failure the replacement queue caused.
-	if after.Binding().Hostility(factory, after.Binding().Lookup(target.Handle)) != true || lookupCalls == 0 || hostilityCalls == 0 {
+	if after.Binding().HostilityHook()(factory, after.Binding().LookupHook()(target.Handle)) != true || lookupCalls == 0 || hostilityCalls == 0 {
 		t.Errorf("successor order could not resolve target/hostility after removal")
 	}
 

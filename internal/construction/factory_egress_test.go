@@ -190,7 +190,7 @@ func TestCompletionIsReportedBeforeSuccessorLeavesBlockedRetry(t *testing.T) {
 	sys.BindWorld(w)
 	svc.Movement = sys
 	sim := rng.NewSimulation(17)
-	svc.OrderBinding = &orders.QueueBinding{SimRNG: &sim, Lookup: w.Unit}
+	svc.OrderBinding = orders.NewQueueBinding(orders.QueueBindingConfig{SimRNG: &sim, Lookup: w.Unit})
 	for i := range svc.Economy.Players {
 		svc.Economy.Players[i].Stock[0] = 1e9
 		svc.Economy.Players[i].Stock[1] = 1e9
@@ -296,7 +296,7 @@ func TestAircraftProductTakesOffAndFreesTheYard(t *testing.T) {
 	sys.BindWorld(w)
 	svc.Movement = sys
 	// Session composition binds the runner before a product's first order visit.
-	svc.OrderBinding = &orders.QueueBinding{Lookup: w.Unit, Movement: &orders.MovementGoalAdapter{RunAir: sys.AirLegRunner()}}
+	svc.OrderBinding = orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: w.Unit, Movement: orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{RunAir: sys.AirLegRunner()})})
 
 	for i := range svc.Economy.Players {
 		svc.Economy.Players[i].Stock[0] = 1e9

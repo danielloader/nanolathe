@@ -115,7 +115,7 @@ func startBurning(svc *Service, inst *Instance, delays []int32, countdown int32)
 // stubSequences binds the content-metadata seam to three authored delay
 // tables, one per selector; a nil table is an unresolved sequence.
 func stubSequences(svc *Service, burn, die, reclaim []int32) {
-	svc.SequenceFrames = func(_ *content.FeatureDef, selector uint8) []int32 {
+	svc.SetSequenceFrames(func(_ *content.FeatureDef, selector uint8) []int32 {
 		switch selector {
 		case featureAnimSelectorBurn:
 			return burn
@@ -125,7 +125,7 @@ func stubSequences(svc *Service, burn, die, reclaim []int32) {
 			return reclaim
 		}
 		return nil
-	}
+	})
 }
 
 // containerDraw stands for the producer the session binds: the strip-5
@@ -147,7 +147,7 @@ func TestBurnSmokeDrawsThreeCRTPerBurningInstanceEveryThirdTick(t *testing.T) {
 	crt := rng.CRTFromState(0x1234567)
 	sim := rng.SimulationFromState(99)
 	svc := burningFeatureService(t, &crt, &sim, [2]int{1, 1}, [2]int{5, 3})
-	svc.BurnSmoke = containerDraw(&crt)
+	svc.SetBurnSmoke(containerDraw(&crt))
 
 	for tick := uint32(0); tick < 7; tick++ {
 		beforeCRT := crt.Draws()
@@ -196,7 +196,7 @@ func TestBurnSmokeDrawsAreConsecutiveOnTheCRTStream(t *testing.T) {
 	// Record which value the producer sees, to pin it as the THIRD draw rather
 	// than one taken before the jitter pair.
 	var atProducer uint32
-	svc.BurnSmoke = func([3]numeric.Fixed) { atProducer = uint32(crt.Rand()) }
+	svc.SetBurnSmoke(func([3]numeric.Fixed) { atProducer = uint32(crt.Rand()) })
 	svc.TickLifecycle(0)
 
 	ref := rng.CRTFromState(seed)
@@ -472,7 +472,7 @@ func TestBurnSmokeEmitsAtTheFootprintCentre(t *testing.T) {
 	sim := rng.SimulationFromState(3)
 	svc := burningFeatureService(t, &crt, &sim, [2]int{3, 4})
 	var got [][3]numeric.Fixed
-	svc.BurnSmoke = func(pos [3]numeric.Fixed) { got = append(got, pos) }
+	svc.SetBurnSmoke(func(pos [3]numeric.Fixed) { got = append(got, pos) })
 
 	svc.TickLifecycle(0) // gated tick: one puff
 	svc.TickLifecycle(1) // ungated: none
@@ -504,17 +504,17 @@ func TestBurnSmokeJitterMovesWorldXAndHeightInference(t *testing.T) {
 	simA := rng.SimulationFromState(1)
 	plain := burningFeatureService(t, &crtA, &simA, [2]int{3, 4})
 	var gotPlain [][3]numeric.Fixed
-	plain.BurnSmoke = func(pos [3]numeric.Fixed) { gotPlain = append(gotPlain, pos) }
+	plain.SetBurnSmoke(func(pos [3]numeric.Fixed) { gotPlain = append(gotPlain, pos) })
 	plain.TickLifecycle(0)
 
 	crtB := rng.CRTFromState(seed)
 	simB := rng.SimulationFromState(1)
 	jittered := burningFeatureService(t, &crtB, &simB, [2]int{3, 4})
-	jittered.BurnFrameGeometry = func(*content.FeatureDef, int32) (int32, int32, int32, int32) {
+	jittered.SetBurnFrameGeometry(func(*content.FeatureDef, int32) (int32, int32, int32, int32) {
 		return frame.W, frame.H, frame.XOff, frame.YOff
-	}
+	})
 	var gotJitter [][3]numeric.Fixed
-	jittered.BurnSmoke = func(pos [3]numeric.Fixed) { gotJitter = append(gotJitter, pos) }
+	jittered.SetBurnSmoke(func(pos [3]numeric.Fixed) { gotJitter = append(gotJitter, pos) })
 	jittered.TickLifecycle(0)
 
 	if len(gotPlain) != 1 || len(gotJitter) != 1 {
@@ -544,14 +544,14 @@ func TestBurnSmokeDrawsThreeCRTWithTheGeometrySeamBound(t *testing.T) {
 	crt := rng.CRTFromState(0x1234567)
 	sim := rng.SimulationFromState(99)
 	svc := burningFeatureService(t, &crt, &sim, [2]int{1, 1}, [2]int{5, 3})
-	svc.BurnFrameGeometry = func(*content.FeatureDef, int32) (int32, int32, int32, int32) {
+	svc.SetBurnFrameGeometry(func(*content.FeatureDef, int32) (int32, int32, int32, int32) {
 		return 16, 24, 3, 9
-	}
+	})
 	puffs := 0
-	svc.BurnSmoke = func([3]numeric.Fixed) {
+	svc.SetBurnSmoke(func([3]numeric.Fixed) {
 		puffs++
 		crt.Rand() // the container's last-frame draw [03 R-STRIP-01 §2]
-	}
+	})
 	for tick := uint32(0); tick < 7; tick++ {
 		before := crt.Draws()
 		svc.TickLifecycle(tick)
@@ -649,15 +649,15 @@ func TestBurnSmokeWithAuthoredGeometryKeepsTheDrawBudget(t *testing.T) {
 	// Rebind the burning record's cursor to the authored sequence, so the
 	// frame the walk asks geometry for is the one the cadence names.
 	svc.InstanceAt(2, 2).cursor.start(seq.delays)
-	svc.BurnFrameGeometry = func(_ *content.FeatureDef, visit int32) (int32, int32, int32, int32) {
+	svc.SetBurnFrameGeometry(func(_ *content.FeatureDef, visit int32) (int32, int32, int32, int32) {
 		f := seq.at(visit)
 		return f.W, f.H, f.XOff, f.YOff
-	}
+	})
 	var puffs [][3]numeric.Fixed
-	svc.BurnSmoke = func(pos [3]numeric.Fixed) {
+	svc.SetBurnSmoke(func(pos [3]numeric.Fixed) {
 		puffs = append(puffs, pos)
 		crt.Rand() // the container's last-frame draw [03 R-STRIP-01 §2]
-	}
+	})
 
 	ref := rng.CRTFromState(0xabcdef)
 	baseX := numeric.FixedFromInt(2*16 + 8)

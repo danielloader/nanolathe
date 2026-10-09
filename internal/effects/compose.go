@@ -21,6 +21,7 @@ type FixedEffectPool struct {
 	fragmentCursor     int
 	fragmentRoundRobin bool
 	fragmentContext    FragmentStepContext
+	checkpointFragment checkpointFragmentBinding
 	fragmentStepping   bool
 	gravity            numeric.Fixed                          // default per-tick gravity when record.Gravity is zero [03 §2.2]
 	heightAt           func(x, z numeric.Fixed) numeric.Fixed // terrain height query; nil skips terrain/water contact [03 §1]

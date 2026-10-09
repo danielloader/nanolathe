@@ -110,13 +110,13 @@ func TestAICallbackInsideTickPlayer(t *testing.T) {
 	p.EndGameCountdown = -1
 	p.UpdateTime = 10
 	calls := 0
-	mgr := &ai.Manager{Player: 0, WeaponMaintenance: func(uint8) {
+	mgr := ai.NewManager(ai.ManagerConfig{Player: 0, WeaponMaintenance: func(uint8) {
 		calls++
 		if p.UpdateTime != 10 {
 			t.Fatal("manager ran after deadline advance")
 		}
 		p.Mirror[economy.Metal].Production = 5
-	}}
+	}})
 	s := &Session{Econ: econ, Units: units.NewSliced(10, nil), AI: [10]*ai.Manager{0: mgr}}
 	s.tickPlayers(10)
 	if calls != 1 || p.PassProduced[economy.Metal] != 5 || p.UpdateTime != 40 {
@@ -139,7 +139,7 @@ func TestCoordinatorIteratesPlayersAscending(t *testing.T) {
 		p.ControllerState = 1
 		p.EndGameCountdown = -1
 		p.UpdateTime = 100
-		managers[i] = &ai.Manager{Player: uint8(i), WeaponMaintenance: func(player uint8) { order = append(order, player) }}
+		managers[i] = ai.NewManager(ai.ManagerConfig{Player: uint8(i), WeaponMaintenance: func(player uint8) { order = append(order, player) }})
 	}
 	s := &Session{Econ: econ, Units: units.NewSliced(10, nil), AI: managers}
 	s.tickPlayers(99) // future settlement deadlines still run the real manager work

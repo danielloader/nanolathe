@@ -31,12 +31,12 @@ func TestAirApproachAbandonsOnNoRouteWithoutACaption(t *testing.T) {
 	var captions int
 	q := orders.QueueOfUnit(builder)
 	binding := q.Binding()
-	binding.Presentation = &orders.PresentationAdapter{
+	binding.Presentation = orders.NewPresentationAdapter(orders.PresentationAdapterConfig{
 		Status: func(*units.Unit, uint8, string) bool {
 			captions++
 			return true
 		},
-	}
+	})
 	q.SetBinding(binding)
 
 	code, applied := svc.vtolBuildVisit(builder, node, 0x40, 1)

@@ -288,7 +288,7 @@ func TestPlacementSuccessResetsRadiusBeforeQueueFailure(t *testing.T) {
 	terrain := placementTerrain(64, 64, 0)
 	m := makePlacementManager(cat, terrain, 0)
 	m.Strategic.Radius = 320
-	m.QueueBuildTyped = func(BuildRequest) error { return errors.New("fixture queue rejection") }
+	m.SetQueueBuildTyped(func(BuildRequest) error { return errors.New("fixture queue rejection") })
 	res := placeWithResult(m, "armsolar", terrain)
 	if res.Valid || res.Reason != ReasonQueueFailed {
 		t.Fatalf("queue failure result=%+v", res)

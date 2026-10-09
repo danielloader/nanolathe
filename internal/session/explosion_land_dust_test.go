@@ -52,7 +52,7 @@ func TestExplosionLandDustFollowsTheAllocatorsGate(t *testing.T) {
 			x := world.CellToWorld(tc.cell) + numeric.FixedFromInt(1)
 			z := world.CellToWorld(4) + numeric.FixedFromInt(1)
 			before := len(s.strips.strips[9])
-			s.Combat.Events(combat.Event{
+			s.Combat.EventsHook()(combat.Event{
 				Kind: tc.kind, Tick: 7, Source: 4,
 				Position: combat.Vec3{X: x, Y: numeric.FixedFromInt(tc.y), Z: z},
 			})

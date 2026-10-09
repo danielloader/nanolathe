@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/nanolathe-gg/nanolathe/internal/model"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/checkpoint"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 	"github.com/nanolathe-gg/nanolathe/vfs"
@@ -127,8 +128,11 @@ type Binding struct {
 	Callbacks        *CallbackBridge
 	SimulationRNG    *rng.Simulation
 	SFXSink          SFXSink
-	SFXVisible       func(piece int, sfxType int32) bool
+	sfxVisible       func(piece int, sfxType int32) bool
 	PresentationSink PresentationSink
+
+	// The copied reader and VM slot share installation identity (§16.3.55).
+	checkpointSFXVisible *CheckpointVMInstallation
 
 	// LinkNotes records the piece-table entries retail links without a name
 	// match: a script piece whose name the model lacks, and a script piece
@@ -164,6 +168,10 @@ type Binding struct {
 // The VM is returned only after all checks pass, so a failed unit never becomes
 // playable with a partially linked or empty script.
 func BindStrict(fs vfs.FSOps, req BindingRequest) (*Binding, error) {
+	return bindStrict(fs, req, nil, nil)
+}
+
+func bindStrict(fs vfs.FSOps, req BindingRequest, authority *checkpoint.BindingAuthority, receipt **CheckpointVMInstallation) (*Binding, error) {
 	logical, unitName, err := bindingPath(req)
 	if err != nil {
 		return nil, &BindingError{Diagnostics: []BindingDiagnostic{{Code: BindingInvalidRequest, Logical: logical, Expected: "unit name and script path", Detail: err.Error()}}}
@@ -228,7 +236,10 @@ func BindStrict(fs vfs.FSOps, req BindingRequest) (*Binding, error) {
 	if sink, ok := req.PresentationSink.(interface{ SetCOBPieceMap([]int) }); ok {
 		sink.SetCOBPieceMap(pieceMap)
 	}
-	binding := &Binding{Program: program, VM: vm, Model: req.Model, ScriptPath: logical, Provider: info.Source, PieceMap: pieceMap, LinkNotes: linkNotes(program.Pieces, req.ModelPieces, pieceMap, logical, func() string { return providersFor(fs, logical, info) }), Callbacks: bridge, SimulationRNG: req.SimulationRNG, SFXSink: req.SFXSink, SFXVisible: req.SFXVisible, PresentationSink: req.PresentationSink}
+	binding := &Binding{Program: program, VM: vm, Model: req.Model, ScriptPath: logical, Provider: info.Source, PieceMap: pieceMap, LinkNotes: linkNotes(program.Pieces, req.ModelPieces, pieceMap, logical, func() string { return providersFor(fs, logical, info) }), Callbacks: bridge, SimulationRNG: req.SimulationRNG, SFXSink: req.SFXSink, sfxVisible: req.SFXVisible, PresentationSink: req.PresentationSink}
+	if receipt != nil {
+		*receipt = binding.checkpointVisibleInstallation(authority)
+	}
 	if req.PreCreate != nil {
 		if err := req.PreCreate(binding); err != nil {
 			return nil, &BindingError{Diagnostics: []BindingDiagnostic{{
@@ -314,14 +325,17 @@ func (b *Binding) SetSimulationRNG(sim *rng.Simulation) {
 	}
 }
 
-// SetSFXSink binds a presentation-only sink and visibility predicate to the
-// production VM. The sink is also retained on the binding for composition
-// diagnostics; it never mutates authoritative state [GAP T15] C19.
+// SFXVisibleReader returns the current reader without installation proof.
+func (b *Binding) SFXVisibleReader() func(int, int32) bool { return b.sfxVisible }
+
+// SetSFXSink binds an effect sink and visibility predicate to the production VM.
+// The session sink may append authoritative strip records (DESIGN_MULTIPLAYER §16.3.55).
 func (b *Binding) SetSFXSink(sink SFXSink, visible func(piece int, sfxType int32) bool) {
 	if b == nil {
 		return
 	}
-	b.SFXSink, b.SFXVisible = sink, visible
+	b.SFXSink, b.sfxVisible = sink, visible
+	b.checkpointSFXVisible = nil
 	if b.VM != nil {
 		b.VM.SetSFXSink(sink)
 		b.VM.SetSFXVisible(visible)

@@ -153,6 +153,9 @@ type VM struct {
 	// [04 §5.3]. Owning it here rather than in a slot-indexed table outside the
 	// VM is what makes those three rules survive a reallocation.
 	onReturn [8]func(int32)
+	// checkpointReturns observes the same allocation ownership as onReturn.
+	// It never selects or invokes gameplay (DESIGN_MULTIPLAYER §16.3.6).
+	checkpointReturns [8]checkpointReturn
 
 	// tickDenom is latched once at VM construction from the engine's fixed
 	// 30-tick configuration and is immutable afterwards; it is not re-derived
@@ -169,6 +172,15 @@ type VM struct {
 	// is a saved retail counter [03 R-COMP-01 §4][03 R-REN-03A §4].
 	cacheRevision         uint64
 	cacheValidityRevision uint64
+
+	// Diagnostic proof belongs to each copied installed row, independently for
+	// explicit and legacy ports. It is never gameplay state or checkpoint bytes
+	// (DESIGN_MULTIPLAYER §16.3.47).
+	checkpointPortBindings map[Port]checkpointPortProof
+	checkpointPortFuncs    map[Port]checkpointPortProof
+
+	// Function/render receipts are independent slot installations (§16.3.55).
+	checkpointBindingsProof [checkpointVMSlotCount]*CheckpointVMInstallation
 
 	// Render-piece flag delegation [04 §"Piece flag polarity"] [R-COB-01 §1].
 	// Production units own RenderPieceFlags on units.Unit; the VM delegates its
@@ -272,6 +284,7 @@ func (v *VM) SetProgramChecked(prog *Program) error {
 		v.renderFlagsBound = false
 		v.renderFlagGet = nil
 		v.renderFlagSet = nil
+		v.checkpointBindingsProof[checkpointVMRenderFlags] = nil
 		return nil
 	}
 	// Script statics: retail's bind performs no zeroing pass; the initial bytes
@@ -306,6 +319,7 @@ func (v *VM) SetProgramChecked(prog *Program) error {
 	v.renderFlagsBound = false
 	v.renderFlagGet = nil
 	v.renderFlagSet = nil
+	v.checkpointBindingsProof[checkpointVMRenderFlags] = nil
 	// Construction clears only the status words; every other thread field
 	// keeps its prior content [R-COB-01 §1].
 	for i := range v.Threads {
@@ -327,6 +341,7 @@ func (v *VM) SetProgramChecked(prog *Program) error {
 		// can match one, and the receivers go with them [04 §4.2].
 		v.threadIdentity[i] = 0
 		v.onReturn[i] = nil
+		v.checkpointReturns[i] = checkpointReturn{}
 	}
 	return nil
 }
@@ -381,6 +396,7 @@ func (v *VM) BindPort(p Port, fn func(args []int32) int32) {
 		v.portFuncs = make(map[Port]func(args []int32) int32)
 	}
 	v.portFuncs[p] = fn
+	delete(v.checkpointPortFuncs, p)
 }
 
 // BindPortBinding registers an explicit engine-port read/write pair. It takes
@@ -394,6 +410,7 @@ func (v *VM) BindPortBinding(p Port, binding PortBinding) {
 		v.portBindings = make(map[Port]PortBinding)
 	}
 	v.portBindings[p] = binding
+	delete(v.checkpointPortBindings, p)
 }
 
 func (v *VM) readPort(id int32, args [4]int32) int32 {
@@ -433,6 +450,7 @@ func (v *VM) BindScriptTouched(raise func()) {
 		return
 	}
 	v.scriptTouched = raise
+	v.checkpointBindingsProof[checkpointVMScriptTouched] = nil
 }
 
 // raiseScriptTouched fires the marker for one engine write [04 R-COB-06].
@@ -457,6 +475,8 @@ func (v *VM) BindTransportQueries(inCargo func(id int32) bool, carrier func() in
 	}
 	v.cargoContains = inCargo
 	v.carrierIdentity = carrier
+	v.checkpointBindingsProof[checkpointVMCargoContains] = nil
+	v.checkpointBindingsProof[checkpointVMCarrierIdentity] = nil
 }
 
 // BindTransportMutations installs the executing unit's attach and drop
@@ -470,6 +490,8 @@ func (v *VM) BindTransportMutations(attach func(cargo, piece, mode int32), drop 
 	}
 	v.transportAttach = attach
 	v.transportDrop = drop
+	v.checkpointBindingsProof[checkpointVMTransportAttach] = nil
+	v.checkpointBindingsProof[checkpointVMTransportDrop] = nil
 }
 
 // BindRenderFlags attaches the unit-owned render-piece record [04 §"Piece flag polarity"].
@@ -484,6 +506,7 @@ func (v *VM) BindRenderFlags(flags []uint8) {
 	v.renderFlagsBound = true
 	v.renderFlagGet = nil
 	v.renderFlagSet = nil
+	v.checkpointBindingsProof[checkpointVMRenderFlags] = nil
 }
 
 // BindRenderFlagHandlers installs a handler pair for the unit's render-piece record [04 §"Piece flag polarity"].
@@ -496,6 +519,7 @@ func (v *VM) BindRenderFlagHandlers(get func() []uint8, set func(piece int, mask
 	}
 	v.renderFlagGet = get
 	v.renderFlagSet = set
+	v.checkpointBindingsProof[checkpointVMRenderFlags] = nil
 	if get != nil || set != nil {
 		v.renderFlagsBound = true
 	}
@@ -510,6 +534,7 @@ func (v *VM) UnbindRenderFlags() {
 	v.renderFlagsBound = false
 	v.renderFlagGet = nil
 	v.renderFlagSet = nil
+	v.checkpointBindingsProof[checkpointVMRenderFlags] = nil
 }
 
 // renderPieceFlags returns the active flag storage: the unit-owned record when bound, otherwise the VM-local fallback [04 §"Piece flag polarity"].
@@ -626,7 +651,10 @@ func (v *VM) SetExplosionSink(s ExplosionSink) {
 // When nil, presentation emission is suppressed (the missing dependency fails
 // closed). When set, the gate is called with (piece, sfxType) and must return
 // true for the effect to be emitted. The gate affects presentation only.
-func (v *VM) SetSFXVisible(fn func(piece int, sfxType int32) bool) { v.sfxVisible = fn }
+func (v *VM) SetSFXVisible(fn func(piece int, sfxType int32) bool) {
+	v.sfxVisible = fn
+	v.checkpointBindingsProof[checkpointVMSFXVisible] = nil
+}
 
 // SetSimulationRNG binds the session-owned simulation stream to this VM. COB
 // random opcodes then consume this stream instead of the process-global
@@ -793,6 +821,10 @@ func (v *VM) ReturnedAs(threadIdx int, identity uint64) bool {
 // by a reuse cannot acquire a receiver after the fact [04 §4.2][04 §5.3].
 // The receiver is invoked by the explicit-return opcode and by nothing else.
 func (v *VM) SetThreadCompletion(threadIdx int, identity uint64, fn func(int32)) bool {
+	return v.setThreadCompletion(threadIdx, identity, fn, checkpointReturn{})
+}
+
+func (v *VM) setThreadCompletion(threadIdx int, identity uint64, fn func(int32), metadata checkpointReturn) bool {
 	if v == nil || identity == 0 || threadIdx < 0 || threadIdx >= 8 {
 		return false
 	}
@@ -800,6 +832,7 @@ func (v *VM) SetThreadCompletion(threadIdx int, identity uint64, fn func(int32))
 		return false
 	}
 	v.onReturn[threadIdx] = fn
+	v.checkpointReturns[threadIdx] = metadata
 	return true
 }
 
@@ -813,6 +846,7 @@ func (v *VM) claimThread(idx int) uint64 {
 	v.nextIdentity++
 	v.threadIdentity[idx] = v.nextIdentity
 	v.onReturn[idx] = nil
+	v.checkpointReturns[idx] = checkpointReturn{}
 	v.lastReturnValid[idx] = false
 	v.lastReturnValue[idx] = 0
 	v.lastReturnIdentity[idx] = 0
@@ -1121,6 +1155,7 @@ func (v *VM) killThread(idx int) {
 	// explicit-return opcode has already taken and invoked its own before
 	// calling in [04 §4.3][04 §5.3].
 	v.onReturn[idx] = nil
+	v.checkpointReturns[idx] = checkpointReturn{}
 	// The signal mask is left as it stands: an idle thread ignores it, and
 	// retail clears nothing here [04 §4.3].
 	t.WaitThread = -1
@@ -2172,6 +2207,7 @@ func (v *VM) runThread(idx int) {
 			// no later occupant inherits it.
 			fn := v.onReturn[idx]
 			v.onReturn[idx] = nil
+			v.checkpointReturns[idx] = checkpointReturn{}
 			if fn != nil {
 				fn(ret)
 			}

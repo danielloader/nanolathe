@@ -66,15 +66,15 @@ func TestObservationUsesBoundJammerPolicy(t *testing.T) {
 				vis.SetLocal(0)
 				vis.Rules = tc.rules
 				vis.Community.AlliedJammingIgnored = tc.ignored
-				vis.Community.Allied = func(a, b visibility.PlayerID) bool { return a == 0 && b == 2 }
+				vis.Community.SetAllied(func(a, b visibility.PlayerID) bool { return a == 0 && b == 2 })
 				if tc.team {
 					vis.SetVisionTeam([]visibility.PlayerID{0, 2})
 				}
-				m := &ai.Manager{Player: 0, Catalog: cat, Terrain: terrain,
+				m := ai.NewManager(ai.ManagerConfig{Player: 0, Catalog: cat, Terrain: terrain,
 					IsAlliance:  func(a, b uint8) bool { return a == 0 && b == 2 },
-					UnitVisible: func(uint8, *units.Unit) bool { return false }}
+					UnitVisible: func(uint8, *units.Unit) bool { return false }})
 				if !tc.unbound {
-					m.JammerSuppresses = func(a, b uint8) bool { return vis.JammerSuppresses(visibility.PlayerID(a), visibility.PlayerID(b)) }
+					m.SetJammerSuppresses(func(a, b uint8) bool { return vis.JammerSuppresses(visibility.PlayerID(a), visibility.PlayerID(b)) })
 				}
 				econ := computerEconomy()
 				econ.Players[1].Exists, econ.Players[2].Exists = true, true
@@ -92,7 +92,7 @@ func TestObservationUsesBoundJammerPolicy(t *testing.T) {
 					t.Fatalf("engine contact %v, observation %+v, want %v", engine, h.obs.Enemy, tc.want)
 				}
 				// Sight follows jamming: a visible target stays identified.
-				m.UnitVisible = func(_ uint8, u *units.Unit) bool { return u == us[1] }
+				m.SetUnitVisible(func(_ uint8, u *units.Unit) bool { return u == us[1] })
 				h.buildObs(2, w, econ)
 				if len(h.obs.Enemy) != 1 || !h.obs.Enemy[0].Visible || h.obs.Enemy[0].H != us[1].Handle {
 					t.Fatalf("jamming hid a sighted target: %+v", h.obs.Enemy)
@@ -115,7 +115,7 @@ func TestBlipsMatchTheEngineSensorPhase(t *testing.T) {
 	vis.SetLocal(me)
 	vis.Rules = visibility.ModernRules{}
 	vis.Community.AlliedJammingIgnored = true
-	vis.Community.Allied = func(a, b visibility.PlayerID) bool { return a != b && a != enemy && b != enemy }
+	vis.Community.SetAllied(func(a, b visibility.PlayerID) bool { return a != b && a != enemy && b != enemy })
 
 	seed := uint32(12345)
 	next := func(n int32) int32 {

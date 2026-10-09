@@ -55,7 +55,7 @@ func newGuardFixture(t *testing.T, guardFoot, wardFoot int32) *guardFixture {
 
 	sim := rng.NewSimulation(7)
 	f.sim = &sim
-	binding := &QueueBinding{
+	binding := NewQueueBinding(QueueBindingConfig{
 		SimRNG: f.sim,
 		Lookup: func(h pool.Handle) *units.Unit {
 			if h == 2 {
@@ -64,7 +64,7 @@ func newGuardFixture(t *testing.T, guardFoot, wardFoot int32) *guardFixture {
 			return nil
 		},
 		Hostility: func(_, _ *units.Unit) bool { return false },
-		Movement: &MovementGoalAdapter{
+		Movement: NewMovementGoalAdapter(MovementGoalAdapterConfig{
 			InstallPoint: func(req PointGoalRequest) bool {
 				f.installs = append(f.installs, req)
 				return true
@@ -74,8 +74,8 @@ func newGuardFixture(t *testing.T, guardFoot, wardFoot int32) *guardFixture {
 				return true
 			},
 			Release: func(*Node) bool { f.releases++; return true },
-		},
-	}
+		}),
+	})
 	QueueForUnit(f.guard).SetBinding(binding)
 	QueueForUnit(f.ward).SetBinding(&QueueBinding{})
 	return f

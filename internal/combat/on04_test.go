@@ -413,7 +413,7 @@ func TestON04_TwoSeededRuns_Identical(t *testing.T) {
 		slot.Flags |= 0x02
 		var svc Service
 		var events []Event
-		svc.Events = func(ev Event) { events = append(events, ev) }
+		svc.SetEvents(func(ev Event) { events = append(events, ev) })
 		cat := &content.Catalog{Weapons: map[string]*content.WeaponDef{"w": weapon}}
 		cat.RebuildWeaponIndex()
 		sum := svc.StepWeaponsForUnit(shooter, 1, w, nil, terrain, nil, cat, &r, nil)

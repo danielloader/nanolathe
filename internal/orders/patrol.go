@@ -505,12 +505,12 @@ func installAirPatrolMarker(u *units.Unit, n *Node) {
 		return
 	}
 	b := bindingOfUnit(u)
-	if b == nil || b.Movement == nil || b.Movement.InstallAir == nil {
+	if b == nil || b.Movement == nil || b.Movement.InstallAirHook() == nil {
 		return
 	}
 	heading := startBuildingBearing(u.X, u.Z, n.GoalX, n.GoalZ)
 	ox, oz := bearingOffset(heading, numeric.Fixed(int64(airPatrolSetback)<<16))
-	b.Movement.InstallAir(AirGoalRequest{
+	b.Movement.InstallAirHook()(AirGoalRequest{
 		Owner:  n.Owner,
 		Node:   n,
 		X:      n.GoalX - ox,
@@ -570,8 +570,8 @@ func vtolMoveLeg(u *units.Unit, n *Node, satisfied uint32, tick uint32) (Code, b
 		return 0, false
 	}
 	b := q.Binding()
-	if b == nil || b.Movement == nil || b.Movement.RunAir == nil {
+	if b == nil || b.Movement == nil || b.Movement.RunAirHook() == nil {
 		return 0, false
 	}
-	return b.Movement.RunAir(u, n, satisfied, tick)
+	return b.Movement.RunAirHook()(u, n, satisfied, tick)
 }

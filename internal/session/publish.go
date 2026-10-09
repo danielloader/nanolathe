@@ -242,6 +242,7 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 		published.Effects = published.Effects[:0]
 	}
 	published.Debris = s.publishDebris(published.Debris[:0])
+	s.filterOnlineVisuals(published)
 	published.Fragments = s.publishFragments(published.Fragments[:0])
 	// Every live strip sub-record, in the composer's walk order [03 §1]. This
 	// is the one writer of the committed strip channel, and it runs once per
@@ -274,7 +275,7 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 				PriorHealthSample: u.PriorSample,
 				MaxHealth:         u.MaxHealth,
 				BuildRemaining:    u.Remaining,
-				Flags:             u.Flags,
+				Flags:             s.sensorStatus(s.ViewingOwner, u),
 				Heading:           u.Move.Heading,
 				Pitch:             u.Move.Pitch,
 				Bank:              u.Move.Bank,
@@ -291,7 +292,7 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 				// request: a unit whose owner could not pay this pass is drawn
 				// [05 R-ECO-01 §9] (WU-19-92).
 				Cloaked:    u.Hidden,
-				Decloaking: u.Flags&visibility.DecloakBit != 0,
+				Decloaking: s.sensorStatus(s.ViewingOwner, u)&visibility.DecloakBit != 0,
 				// The carrier link the unit painter's per-unit present needs:
 				// a carried child is drawn with its carrier, not only as its
 				// own bucket entry [03 R-RAST-01 §7][04 R-UNIT-06 §3].
@@ -386,9 +387,10 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 			// The hull extents and the underwater-exemption bit of the
 			// four-point visibility gate [03 §3.2] steps 3 and 5.
 			publishHullGateInputs(vp, u)
+			vp.UnderwaterExempt = s.sensorStatus(s.ViewingOwner, u)&visibility.SonarBit != 0
 			if s.Vis != nil {
 				vp.DirectVisibilityKnown = true
-				vp.DirectlyVisible = s.Vis.IsVisible(visibility.PlayerID(s.ViewingOwner), unitVisibilityTarget(u, u.Flags))
+				vp.DirectlyVisible = s.Vis.IsVisible(visibility.PlayerID(s.ViewingOwner), unitVisibilityTarget(u, s.sensorStatus(s.ViewingOwner, u)))
 			}
 			if vm := u.GetScript(); vm != nil {
 				// CacheRevision is copied at the publication boundary; consuming or
@@ -634,7 +636,7 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 			if u == nil || !u.Alive {
 				continue
 			}
-			status := u.Flags
+			status := s.sensorStatus(s.ViewingOwner, u)
 			active := u.Activated
 			onOffable := false
 			// The contact's cloak input is the INSTANCE cloaked bit and
@@ -823,7 +825,13 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 	// latch countdown is exposed for presentation; no second result side-channel
 	// exists.
 	{
-		r := s.result
+		r, countdown := s.result, s.Latch.Countdown
+		if s.onlineResults != nil {
+			// Each admitted seat owns its pending and final result; publication
+			// selects this client's row (DESIGN_MULTIPLAYER §16.4.1).
+			row := &s.onlineResults.seats[s.LocalOwner]
+			r, countdown = row.result, row.latch.Countdown
+		}
 		columnMaxima := r.ColumnMaxima
 		if columnMaxima == [7]int{} {
 			columnMaxima = resultColumnMaxima(r.Scores)
@@ -843,7 +851,7 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 		published.Result.Losers = copyIntsInto(published.Result.Losers, r.Losers)
 		published.Result.Scores = copyScoresInto(published.Result.Scores, r.Scores)
 		if !r.Ended {
-			published.Result.Countdown = s.Latch.Countdown
+			published.Result.Countdown = countdown
 		}
 	}
 	if s.publication != nil && s.publication.events != nil {

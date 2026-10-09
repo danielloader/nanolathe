@@ -79,7 +79,7 @@ func trafficFixtureUnder(t *testing.T, rules Rules, offset int64) (sys *System, 
 		sys.EnsureUnit(u)
 		handleRow(sys.Collisions, h).Heading = 0xC000
 		handleRow(sys.Steers, h).Heading = 0xC000
-		orders.QueueForUnit(u).SetBinding(&orders.QueueBinding{Lookup: w.Unit, World: &orders.WorldQueryAdapter{}})
+		orders.QueueForUnit(u).SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: w.Unit, World: &orders.WorldQueryAdapter{}}))
 	}
 	end := world.CellToWorld(17)
 	q := orders.QueueOfUnit(w.Unit(a))

@@ -115,7 +115,7 @@ func featureLifecycleSession(t *testing.T, fs *vfs.FS, cat *content.Catalog) *Se
 	if err := createAndBindServicesForTest(t, s); err != nil {
 		t.Fatalf("createAndBindServices: %v", err)
 	}
-	if s.Features.SequenceFrames == nil {
+	if s.Features.SequenceFramesHook() == nil {
 		t.Fatal("composition left the cursor metadata seam unbound")
 	}
 	return s

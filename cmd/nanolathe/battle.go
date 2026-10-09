@@ -13,9 +13,11 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/clock"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/headless"
 	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
+	"github.com/nanolathe-gg/nanolathe/internal/netproto"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/benchlock"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/ebitenapp"
@@ -32,6 +34,7 @@ import (
 // the integrated session (all twelve kernel phases) and the interaction state:
 // selection, order latch, and build placement.
 type battleSession struct {
+	multiplayer *battleMultiplayer
 	// preview owns a silent, isolated Settings scene (interface design §3.17).
 	preview                                bool
 	hostPresentation                       *settings.Presentation
@@ -388,7 +391,7 @@ func runBattleView(launch, opts Options, cs *contentSet) error {
 	}
 	shell, cl := view.shell, view.cl
 	writeWindowStartupReport(os.Stderr, shell, time.Since(started))
-	shell.settingsWritable = opts.LiveTrace == ""
+	shell.settingsWritable = opts.LiveTrace == "" && !opts.multiplayerPlaytest()
 	defer shell.teardownBattle(cl)
 	options := shell.windowOptions()
 	if shell.liveTrace != nil {
@@ -415,16 +418,29 @@ func runBattleView(launch, opts Options, cs *contentSet) error {
 // and interpolation producer follow the current battle after loading a save.
 func newDirectBattleView(opts Options, cs *contentSet) (*gameShell, *client.Client, error) {
 	saved := loadedSettings()
-	opts.Gameplay = startupGameplay(opts, saved.Gameplay)
+	if opts.multiplayerPlaytest() {
+		if err := validateLocalMultiplayerOptions(opts); err != nil {
+			return nil, nil, err
+		}
+		opts.Gameplay, opts.GameplaySet = gameplay.Modern, true
+		opts.Arrival, opts.ArrivalSet = false, true
+	} else {
+		opts.Gameplay = startupGameplay(opts, saved.Gameplay)
+	}
 	// The saved unit restrictions as this content takes them, unless
 	// --restrict chose the run's set (docs/DESIGN_MODS_MUTATORS.md §15.5).
-	opts.Restrictions = directViewRestrictions(opts, cs, saved)
+	if !opts.multiplayerPlaytest() {
+		opts.Restrictions = directViewRestrictions(opts, cs, saved)
+	}
 	scene, err := parseLiveScene(opts.LiveScene)
 	if err != nil {
 		return nil, nil, err
 	}
 	var authoritative headless.FreshBattle
-	if scene.Kind == "field" {
+	var identity netproto.Identity
+	if opts.multiplayerPlaytest() {
+		authoritative, identity, err = composeLocalMultiplayer(opts, cs)
+	} else if scene.Kind == "field" {
 		authoritative, err = composeLiveFieldBattle(opts, cs, scene)
 	} else {
 		var request freshBattleRequest
@@ -455,6 +471,7 @@ func newDirectBattleView(opts Options, cs *contentSet) (*gameShell, *client.Clie
 	entered := false
 	defer func() {
 		if !entered {
+			shell.teardownBattle(clPtr)
 			shell.releaseAudio()
 		}
 	}()
@@ -520,6 +537,11 @@ func newDirectBattleView(opts Options, cs *contentSet) (*gameShell, *client.Clie
 	shell.pendingDetail = detailArtFor(shell.opts, cs, sess.World, nil)
 	if err := shell.enterBattle(sess, sess.Catalog); err != nil {
 		return nil, nil, err
+	}
+	if opts.multiplayerPlaytest() {
+		if err := shell.battle.startLocalMultiplayer(opts, identity); err != nil {
+			return nil, nil, err
+		}
 	}
 	if err := browserStageBattle(opts, shell); err != nil {
 		return nil, nil, err
@@ -740,6 +762,10 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 		return
 	}
 	b.cl = cl
+	if b.onlineBattle() && b.sess.Clock != nil {
+		b.sess.Clock.Paused = false
+		b.sess.Clock.Requested, b.sess.Clock.Active = settings.DefaultGameSpeed, settings.DefaultGameSpeed
+	}
 	s := settings.Defaults()
 	if !b.preview {
 		s = loadedSettings()
@@ -888,6 +914,7 @@ func (b *battleSession) teardown(cl *client.Client) {
 	}
 	// The session is retired below; its simulation goroutine goes first.
 	b.stopSimulation(cl)
+	b.multiplayer.close()
 	// LoadGame can leave ENDMSN through replacement rather than its Start or
 	// MainMenu routes. Retire the same temporary display state on every exit.
 	if b.postBattle != nil {
@@ -1100,6 +1127,7 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 	if b == nil || cl == nil {
 		return
 	}
+	b.pumpLocalMultiplayer(cl)
 	b.followExecutor(cl.Enhanced())
 	b.syncCameraControls()
 	b.syncStrategicIcons(cl)

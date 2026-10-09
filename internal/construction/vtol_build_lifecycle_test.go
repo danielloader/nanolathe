@@ -24,7 +24,7 @@ func vtolBuildFixture(t *testing.T) (*Service, *units.Unit, *orders.Node) {
 	svc.Movement.SetClasses(svc.Catalog.Movement)
 	svc.Movement.BindWorld(svc.World)
 	svc.Movement.EnsureUnit(builder)
-	svc.Movement.ProductFootprint = func(uint32) (int32, int32, bool) { return 6, 6, true }
+	svc.Movement.SetProductFootprint(func(uint32) (int32, int32, bool) { return 6, 6, true })
 	return svc, builder, node
 }
 
@@ -53,7 +53,7 @@ func restoreVTOLBuildOrder(t *testing.T, svc *Service, builder *units.Unit) *ord
 	svc.Movement = movement.NewSystem(svc.Terrain, movement.Profile{FootPrintX: 1, FootPrintZ: 1}, movement.NewOccupancyGrid())
 	svc.Movement.BindWorld(svc.World)
 	svc.Movement.EnsureUnit(builder)
-	svc.Movement.ProductFootprint = func(uint32) (int32, int32, bool) { return 6, 6, true }
+	svc.Movement.SetProductFootprint(func(uint32) (int32, int32, bool) { return 6, 6, true })
 	if err := svc.Movement.RestoreHeadGoal(builder); err != nil {
 		t.Fatal(err)
 	}
@@ -150,14 +150,14 @@ func TestVTOLBuildCompletingWorkInstallsOrbitBeforePhaseFive(t *testing.T) {
 	// phase; it must not be mistaken for an invalid phase and reset to takeoff.
 	node.Phase++
 	var completed int
-	orders.QueueOfUnit(builder).Binding().Presentation = &orders.PresentationAdapter{
+	orders.QueueOfUnit(builder).Binding().Presentation = orders.NewPresentationAdapter(orders.PresentationAdapterConfig{
 		Status: func(_ *units.Unit, _ uint8, text string) bool {
 			if text == "Building complete" {
 				completed++
 			}
 			return true
 		},
-	}
+	})
 	svc.Pump(builder, 150)
 	if orders.QueueOfUnit(builder).Head() == node || completed != 1 {
 		t.Fatalf("completion kept record or omitted caption: retained=%v captions=%d", orders.QueueOfUnit(builder).Head() == node, completed)

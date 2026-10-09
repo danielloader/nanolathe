@@ -46,7 +46,7 @@ func repairPatrolRefusalFixture(t *testing.T, air bool) (*units.Unit, []*units.U
 	}
 
 	sim := rng.SimulationFromState(1)
-	binding := &QueueBinding{
+	binding := NewQueueBinding(QueueBindingConfig{
 		SimRNG:    &sim,
 		Hostility: func(_, _ *units.Unit) bool { return false },
 		Resources: func(uint8) (ResourceView, bool) {
@@ -54,12 +54,12 @@ func repairPatrolRefusalFixture(t *testing.T, air bool) (*units.Unit, []*units.U
 			// keeps the "both stores healthy" hold shut.
 			return ResourceView{Stock: [2]float32{0, 100}, Capacity: [2]float32{100, 100}}, true
 		},
-		Movement: &MovementGoalAdapter{
+		Movement: NewMovementGoalAdapter(MovementGoalAdapterConfig{
 			InstallPoint: func(PointGoalRequest) bool { return true },
 			InstallAir:   func(AirGoalRequest) bool { return true },
 			Release:      func(*Node) bool { return true },
-		},
-		World: &WorldQueryAdapter{
+		}),
+		World: NewWorldQueryAdapter(WorldQueryAdapterConfig{
 			ForEachUnitInRadius: func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
 				if visit(actor.Handle, actor) {
 					return
@@ -85,8 +85,8 @@ func repairPatrolRefusalFixture(t *testing.T, air bool) (*units.Unit, []*units.U
 			},
 			TerrainHeight: func(numeric.Fixed, numeric.Fixed) (numeric.Fixed, bool) { return 0, true },
 			SeaLevel:      func() uint8 { return 20 },
-		},
-	}
+		}),
+	})
 	q := &Queue{binding: binding}
 	BindQueue(actor, q)
 	return actor, candidates, &sim, q

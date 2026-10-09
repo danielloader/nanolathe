@@ -82,6 +82,7 @@ func (g *gameShell) applySettings(s settings.Settings) {
 	g.resolveRestrictionSetting()
 	g.modernAISetting = s.ModernAI
 	g.controlsOffered = s.ControlsOffered
+	g.onlineServer = s.OnlineServer
 	// Unknown actions and unreadable chords are dropped here; the file keeps
 	// only what the key map can play (keymap.go).
 	g.keyMap = keyMapFromSettings(s.KeyBindings)
@@ -238,6 +239,7 @@ func (g *gameShell) liveSettings() settings.Settings {
 		ModernAI:         g.modernAISetting,
 		ControlsOffered:  g.controlsOffered,
 		ModLockOverrides: g.lockOverrides,
+		OnlineServer:     g.onlineServer,
 		ModSettings:      g.baseSettings.ModSettings,
 		Presets:          g.presets,
 		// The keyboard profile and only the actions rebound from it.

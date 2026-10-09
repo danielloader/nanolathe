@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/nanolathe-gg/nanolathe/internal/sim/checkpoint"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
@@ -85,18 +86,19 @@ func placementWorldCoordinate(outputCell, footprint int32) numeric.Fixed {
 //
 // It is the insertion half alone. Command code 14's capability gate and the
 // non-queued issue's replacement purge belong to the construction task's issue
-// site, which runs them first — see issueMobileBuild.
-func queueExactResult(m *Manager, defKey string, res PlacementResult) error {
+// site, which runs them first — see issueMobileBuild. Its observed actor predates
+// cleanup; the request still uses the factory's current raw handle.
+func queueExactResult(m *Manager, defKey string, res PlacementResult, actor checkpoint.Allocation) error {
 	if !res.Valid {
-		return fmt.Errorf("ai: placement result is invalid")
+		return WithCheckpointBuildVerdict(fmt.Errorf("ai: placement result is invalid"), CheckpointBuildSite)
 	}
 	fac := m.Factory
 	if fac == nil {
-		return fmt.Errorf("ai: builder unavailable")
+		return WithCheckpointBuildVerdict(fmt.Errorf("ai: builder unavailable"), CheckpointBuildOwner)
 	}
-	cb := m.QueueBuildTyped
+	cb := m.QueueBuildTypedHook()
 	if cb == nil {
-		return fmt.Errorf("ai: typed build queue unavailable")
+		return WithCheckpointBuildVerdict(fmt.Errorf("ai: typed build queue unavailable"), CheckpointBuildBinding)
 	}
 	req := BuildRequest{
 		Builder: fac.Handle,
@@ -106,7 +108,10 @@ func queueExactResult(m *Manager, defKey string, res PlacementResult) error {
 		Count:   1,
 		Kind:    BuildKindMobileSite,
 	}
-	if err := cb(req); err != nil {
+	a := m.CheckpointApplicationHistory().ActiveAttempt()
+	err := cb(req)
+	a.RecordBuild(actor, req, err)
+	if err != nil {
 		return fmt.Errorf("ai: typed build queue: %w", err)
 	}
 	return nil
@@ -134,7 +139,7 @@ func PlaceCandidate(m *Manager, defKey string, w *world.Terrain) PlacementResult
 	if m.Factory == nil {
 		return placementFailure(HelperNone, ReasonMissingBuilder, "mobile build builder unavailable")
 	}
-	if m.QueueBuildTyped == nil {
+	if m.QueueBuildTypedHook() == nil {
 		return placementFailure(HelperNone, ReasonMissingQueue, "ai: typed build queue unavailable")
 	}
 	// Resolve terrain for this call: prefer passed-in w, else manager's terrain

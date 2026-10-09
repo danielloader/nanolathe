@@ -60,8 +60,8 @@ func lookupTarget(carrier *units.Unit, target pool.Handle) *units.Unit {
 		return nil
 	}
 	if q := QueueForUnit(carrier); q != nil {
-		if binding := q.Binding(); binding != nil && binding.Lookup != nil {
-			return binding.Lookup(target)
+		if binding := q.Binding(); binding != nil && binding.LookupHook() != nil {
+			return binding.LookupHook()(target)
 		}
 	}
 	return nil
@@ -313,20 +313,20 @@ func groundTransportShortMove(u *units.Unit, n *Node) Code {
 // a fixture, and leaves the payload alone.
 func installGroundGoal(u *units.Unit, n *Node, x, y, z numeric.Fixed, radius int32) {
 	b := bindingOfUnit(u)
-	if b == nil || b.Movement == nil || b.Movement.InstallPoint == nil {
+	if b == nil || b.Movement == nil || b.Movement.InstallPointHook() == nil {
 		return
 	}
-	b.Movement.InstallPoint(PointGoalRequest{Owner: u.Handle, Node: n, X: x, Y: y, Z: z, Radius: radius})
+	b.Movement.InstallPointHook()(PointGoalRequest{Owner: u.Handle, Node: n, X: x, Y: y, Z: z, Radius: radius})
 }
 
 // releaseGoal is the payload release of [04 R-ORD-01 §1]'s four goal
 // installers.
 func releaseGoal(u *units.Unit, n *Node) {
 	b := bindingOfUnit(u)
-	if b == nil || b.Movement == nil || b.Movement.Release == nil {
+	if b == nil || b.Movement == nil || b.Movement.ReleaseHook() == nil {
 		return
 	}
-	b.Movement.Release(n)
+	b.Movement.ReleaseHook()(n)
 }
 
 // RearmBeCarried applies the attachment-side queue transition for locally

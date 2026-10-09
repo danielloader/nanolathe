@@ -81,6 +81,14 @@ type Service struct {
 	// sensorIndex is rebuilt from the immutable SensorTick input before its
 	// ordered candidate walks. It has no movement-phase dependency.
 	sensorIndex sensorCandidateIndex
+
+	// Owner perspectives are the online sensor words of DESIGN_MULTIPLAYER
+	// §16.4.1. Coverage remains in the existing per-player grids; local still
+	// selects presentation. The two scratch slices hold no retained state.
+	ownerPerspectives    bool
+	perspectiveStatus    [10][]perspectiveSensorStatus
+	perspectiveUnits     []SensorUnit
+	perspectiveTransient []uint32
 }
 
 type sensorStatus struct {
@@ -312,7 +320,13 @@ func (s *Service) visionBits(owner PlayerID) uint16 {
 // localSide reports an owner on the viewing player's side: the viewer itself,
 // or a member of its vision team.
 func (s *Service) localSide(owner PlayerID) bool {
-	return owner == s.local || (validPlayer(s.local) && validPlayer(owner) && s.team[s.local]&cellBit(owner) != 0)
+	return s.sameSide(s.local, owner)
+}
+
+// sameSide retains the fixed Survival vision-team exception for an explicit
+// viewer. Ordinary skirmish has no team bits [DESIGN_SURVIVAL §4.3].
+func (s *Service) sameSide(viewer, owner PlayerID) bool {
+	return owner == viewer || (validPlayer(viewer) && validPlayer(owner) && s.team[viewer]&cellBit(owner) != 0)
 }
 
 // setWordBit sets the owner's bit if absent; idempotent, never decrements [03 §3.2] C4.

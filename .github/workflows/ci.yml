@@ -76,6 +76,29 @@ jobs:
       - name: execute numeric kernel tests and vectors
         shell: bash
         run: go test -count=1 ./internal/sim/numeric
+      - name: execute authored complete-checkpoint script
+        shell: bash
+        run: go test -json -count=1 -run '^TestCheckpointPortableScript$' ./internal/session > checkpoints.json
+      - name: keep native checkpoint evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoints-${{ matrix.goos }}-${{ matrix.goarch }}-${{ matrix.goamd64 || 'native' }}
+          path: checkpoints.json
+          retention-days: 14
+          if-no-files-found: error
+
+  checkpoint-equivalence:
+    name: compare native complete checkpoints
+    needs: numeric-kernel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: checkpoints-*
+          path: checkpoint-evidence
+      - name: compare every recorded identity and owner digest
+        run: python3 .github/scripts/compare-checkpoints.py checkpoint-evidence
 
   # Formatting and static checks. Cheap, so it gates the rest.
   hygiene:

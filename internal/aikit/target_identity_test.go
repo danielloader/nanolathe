@@ -40,7 +40,7 @@ func TestRememberedTargetKeepsObservedInstance(t *testing.T) {
 						f.def.RadarDistance = 1000
 						actor.Activated = true
 					}
-					f.h.m.OrderBinding = &orders.QueueBinding{World: &orders.WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}}
+					f.h.m.OrderBinding = &orders.QueueBinding{World: orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 0 }})}
 					tick := uint32(1)
 					think := func(n int) {
 						t.Helper()
@@ -59,7 +59,7 @@ func TestRememberedTargetKeepsObservedInstance(t *testing.T) {
 					}
 					think(1)
 					old, gen := f.w.Unit(f.enemy), f.h.obs.Memory[0].Gen
-					f.h.m.UnitVisible = func(uint8, *units.Unit) bool { return false }
+					f.h.m.SetUnitVisible(func(uint8, *units.Unit) bool { return false })
 					if reuse == "before-issue" {
 						f.replace(t, f.enemy, 1, tick)
 						f.replace(t, f.enemy, 1, tick) // unseen churn must not advance Gen
@@ -87,7 +87,7 @@ func TestRememberedTargetKeepsObservedInstance(t *testing.T) {
 					if got := f.h.Stats(); got != want {
 						t.Fatalf("remembered attack: %+v, want %+v", got, want)
 					}
-					f.h.m.UnitVisible = func(uint8, *units.Unit) bool { return true }
+					f.h.m.SetUnitVisible(func(uint8, *units.Unit) bool { return true })
 					think(3)
 					if reuse != "none" {
 						gen++
@@ -125,7 +125,7 @@ func TestConstructionCommandsRejectRecycledTargets(t *testing.T) {
 			}
 			old := w.Unit(target)
 			queued := 0
-			m := &ai.Manager{Player: 0, Catalog: cat, QueueBuildTyped: func(ai.BuildRequest) error { queued++; return nil }}
+			m := ai.NewManager(ai.ManagerConfig{Player: 0, Catalog: cat, QueueBuildTyped: func(ai.BuildRequest) error { queued++; return nil }})
 			e := &executor{m: m, table: BuildTable(cat, nil),
 				mapInfo: &MapInfo{CellW: 64, CellH: 64, Spots: []MetalSpot{{X: 160, Z: 160}}, cellLo: make([]uint8, 64*64), cellHi: make([]uint8, 64*64)},
 				places:  []*placeDef{{ok: true, footX: 1, footZ: 1}}}

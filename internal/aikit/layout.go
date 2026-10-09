@@ -65,6 +65,9 @@ type exitGrid struct {
 	seeds      []int32
 	built      uint32 // tick the picture was taken
 	dd         *gridDedupe
+
+	// Temporary application observation; never retained checkpoint state.
+	checkpointObservation checkpointGridObservation
 }
 
 // gridDedupe finds a blocker already listed while a grid is built; one is
@@ -119,9 +122,18 @@ func (e *executor) buildingCost(u *units.Unit) int32 {
 func (g *exitGrid) ensure(n int) {
 	if len(g.cost) != n {
 		g.cost = make([]int32, n)
+		if g.checkpointObservation.attempt != nil {
+			g.checkpointObservation.record(checkpointGridWrite{field: 2, action: 2, value: int64(n), boolean: g.cost != nil})
+		}
 		g.who = make([]int32, n*blkPerCell)
 		g.seen = make([]uint32, n)
+		if g.checkpointObservation.attempt != nil {
+			g.checkpointObservation.record(checkpointGridWrite{field: 10, action: 2, value: int64(n)})
+		}
 		g.reach = make([]uint32, n)
+		if g.checkpointObservation.attempt != nil {
+			g.checkpointObservation.record(checkpointGridWrite{field: 6, action: 2, value: int64(n)})
+		}
 		g.dist = make([]int32, n)
 		g.prev = make([]int32, n)
 	}
@@ -183,7 +195,16 @@ func (e *executor) buildExitGrid(g *exitGrid, w *units.World, f *UnitInfo, self 
 	g.ensure(n)
 	g.blk = g.blk[:0]
 	g.fac = self
+	if g.checkpointObservation.attempt != nil {
+		g.checkpointObservation.record(checkpointGridWrite{field: 3, action: 1, value: int64(g.fac)})
+	}
 	g.ox, g.oz = (fcx>>5)-exitRadius, (fcz>>5)-exitRadius
+	if g.checkpointObservation.attempt != nil {
+		g.checkpointObservation.record(checkpointGridWrite{field: 4, action: 1, value: int64(g.ox)})
+	}
+	if g.checkpointObservation.attempt != nil {
+		g.checkpointObservation.record(checkpointGridWrite{field: 5, action: 1, value: int64(g.oz)})
+	}
 	if blockers {
 		g.dd = &e.dedupe
 		g.dd.ensure(int(m.CellW * m.CellH))
@@ -194,6 +215,9 @@ func (e *executor) buildExitGrid(g *exitGrid, w *units.World, f *UnitInfo, self 
 					g.who[int(k)*blkPerCell+s] = -1
 				}
 				g.cost[k] = e.macroCost(g, w, &mc, g.ox+i, g.oz+j, self, k)
+				if g.checkpointObservation.attempt != nil {
+					g.checkpointObservation.record(checkpointGridWrite{field: 2, action: 3, index: int64(k), value: int64(g.cost[k])})
+				}
 			}
 		}
 	} else {
@@ -205,6 +229,9 @@ func (e *executor) buildExitGrid(g *exitGrid, w *units.World, f *UnitInfo, self 
 					c = gridFree
 				}
 				g.cost[j*exitWindow+i] = c
+				if g.checkpointObservation.attempt != nil {
+					g.checkpointObservation.record(checkpointGridWrite{field: 2, action: 3, index: int64(j*exitWindow + i), value: int64(c)})
+				}
 			}
 		}
 	}
@@ -213,10 +240,16 @@ func (e *executor) buildExitGrid(g *exitGrid, w *units.World, f *UnitInfo, self 
 	g.overlay(ax, az, f.FootX, f.FootZ)
 	// Seeds: the macro row just in front of the exit.
 	g.seeds = g.seeds[:0]
+	if g.checkpointObservation.attempt != nil {
+		g.checkpointObservation.record(checkpointGridWrite{field: 9, action: 4, value: int64(len(g.seeds))})
+	}
 	sz := (az+f.FootZ+1)>>1 - g.oz
 	for x := ax >> 1; x <= (ax+f.FootX-1)>>1; x++ {
 		if i := x - g.ox; i >= 0 && i < exitWindow && sz >= 0 && sz < exitWindow {
 			g.seeds = append(g.seeds, sz*exitWindow+i)
+			if g.checkpointObservation.attempt != nil {
+				g.checkpointObservation.record(checkpointGridWrite{field: 9, action: 5, index: int64(len(g.seeds) - 1), value: int64(sz*exitWindow + i)})
+			}
 		}
 	}
 	return true
@@ -619,6 +652,9 @@ func (g *exitGrid) overlay(ax, az, fx, fz int32) {
 			i, j := x-g.ox, z-g.oz
 			if i >= 0 && j >= 0 && i < exitWindow && j < exitWindow {
 				g.cost[j*exitWindow+i] = gridBlocked
+				if g.checkpointObservation.attempt != nil {
+					g.checkpointObservation.record(checkpointGridWrite{field: 2, action: 3, index: int64(j*exitWindow + i), value: int64(gridBlocked)})
+				}
 			}
 		}
 	}
@@ -636,16 +672,28 @@ func onEdge(k int32) bool {
 // extra is nil.
 func (g *exitGrid) flood(extra []int32) bool {
 	g.stamp++
+	if g.checkpointObservation.attempt != nil {
+		g.checkpointObservation.record(checkpointGridWrite{field: 11, action: 1, value: int64(g.stamp)})
+	}
 	if g.stamp == 0 {
 		g.stamp = 1
+		if g.checkpointObservation.attempt != nil {
+			g.checkpointObservation.record(checkpointGridWrite{field: 11, action: 1, value: int64(g.stamp)})
+		}
 	}
 	for _, k := range extra {
 		g.seen[k] = g.stamp // treated as visited: never entered
+		if g.checkpointObservation.attempt != nil {
+			g.checkpointObservation.record(checkpointGridWrite{field: 10, action: 3, index: int64(k), value: int64(g.stamp)})
+		}
 	}
 	g.queue = g.queue[:0]
 	for _, k := range g.seeds {
 		if g.cost[k] == gridFree && g.seen[k] != g.stamp {
 			g.seen[k] = g.stamp
+			if g.checkpointObservation.attempt != nil {
+				g.checkpointObservation.record(checkpointGridWrite{field: 10, action: 3, index: int64(k), value: int64(g.stamp)})
+			}
 			g.queue = append(g.queue, k)
 		}
 	}
@@ -655,6 +703,9 @@ func (g *exitGrid) flood(extra []int32) bool {
 		g.queue = g.queue[:len(g.queue)-1]
 		if extra == nil {
 			g.reach[k] = g.stamp
+			if g.checkpointObservation.attempt != nil {
+				g.checkpointObservation.record(checkpointGridWrite{field: 6, action: 3, index: int64(k), value: int64(g.stamp)})
+			}
 		}
 		if onEdge(k) {
 			found = true
@@ -683,11 +734,17 @@ func (g *exitGrid) flood(extra []int32) bool {
 				continue
 			}
 			g.seen[nk] = g.stamp
+			if g.checkpointObservation.attempt != nil {
+				g.checkpointObservation.record(checkpointGridWrite{field: 10, action: 3, index: int64(nk), value: int64(g.stamp)})
+			}
 			g.queue = append(g.queue, nk)
 		}
 	}
 	if extra == nil {
 		g.reachStamp = g.stamp
+		if g.checkpointObservation.attempt != nil {
+			g.checkpointObservation.record(checkpointGridWrite{field: 7, action: 1, value: int64(g.reachStamp)})
+		}
 	}
 	return found
 }
@@ -958,9 +1015,15 @@ func (e *executor) gridFor(f *OwnUnit, w *units.World, tick uint32) *exitGrid {
 	g := &e.grids[oldest]
 	if !e.buildExitGrid(g, w, f.Info, f.H, f.X, f.Z, false) {
 		g.fac = 0
+		if g.checkpointObservation.attempt != nil {
+			g.checkpointObservation.record(checkpointGridWrite{field: 3, action: 1, value: int64(g.fac)})
+		}
 		return nil
 	}
 	g.built = tick
+	if g.checkpointObservation.attempt != nil {
+		g.checkpointObservation.record(checkpointGridWrite{field: 1, action: 1, value: int64(g.built)})
+	}
 	// Sites accepted recently but not yet framed.
 	for i := range e.pending {
 		ps := &e.pending[i]
@@ -969,6 +1032,9 @@ func (e *executor) gridFor(f *OwnUnit, w *units.World, tick uint32) *exitGrid {
 		}
 	}
 	g.sealed = !g.flood(nil)
+	if g.checkpointObservation.attempt != nil {
+		g.checkpointObservation.record(checkpointGridWrite{field: 8, action: 1, boolean: g.sealed})
+	}
 	return g
 }
 
@@ -1060,6 +1126,9 @@ func (e *executor) guardPlaced(cx, cz, fx, fz int32) {
 		}
 		g.overlay(cx, cz, fx, fz)
 		g.sealed = !g.flood(nil)
+		if g.checkpointObservation.attempt != nil {
+			g.checkpointObservation.record(checkpointGridWrite{field: 8, action: 1, boolean: g.sealed})
+		}
 	}
 }
 
@@ -1067,18 +1136,21 @@ func (e *executor) guardPlaced(cx, cz, fx, fz int32) {
 func (e *executor) execUnblock(c *Command, b *batch, tick uint32, w *units.World) bool {
 	if c.count < 1 {
 		e.stats.Failed++
+		e.checkpointReject()
 		return false
 	}
 	u := e.actorOK(w, b.actors[c.first], b.inst[c.first])
 	if u == nil {
 		e.stats.Stale++
 		e.stats.Reasons[FailNoActor]++
+		e.checkpointReject()
 		return false
 	}
 	f := e.targetOK(w, c)
 	if f == nil || f.Owner != e.m.Player || f.Def == nil {
 		e.stats.Stale++
 		e.stats.Reasons[FailTarget]++
+		e.checkpointReject()
 		return false
 	}
 	info := e.table.Of(f.Def)
@@ -1086,21 +1158,25 @@ func (e *executor) execUnblock(c *Command, b *batch, tick uint32, w *units.World
 	if info == nil || !e.buildExitGrid(g, w, info, f.Handle, int32(int64(f.X)>>16), int32(int64(f.Z)>>16), true) {
 		e.stats.Failed++
 		e.stats.Reasons[FailResolve]++
+		e.checkpointReject()
 		return false
 	}
 	g.sealed = !g.flood(nil)
 	if !g.sealed {
+		e.checkpointNoop()
 		return true // open: nothing to do
 	}
 	e.blkBuf = g.cheapestOpening(e.blkBuf[:0], 4)
 	if len(e.blkBuf) == 0 {
 		e.stats.Failed++
 		e.stats.Reasons[FailNoSite]++
+		e.checkpointReject()
 		return false
 	}
 	q := orders.BindQueueBinding(u, e.m.OrderBinding)
 	if q == nil {
 		e.stats.Failed++
+		e.checkpointReject()
 		return false
 	}
 	issued := false
@@ -1111,12 +1187,15 @@ func (e *executor) execUnblock(c *Command, b *batch, tick uint32, w *units.World
 			ok = e.reclaimFeature(u, q, blk.cx, blk.cz, tick, !issued)
 		} else if t := w.Unit(blk.h); t != nil {
 			ok = e.reclaimUnit(u, q, t, tick, !issued)
+		} else {
+			e.checkpointReject()
 		}
 		issued = issued || ok
 	}
 	if !issued {
 		e.stats.Failed++
 		e.stats.Reasons[FailResolve]++
+		e.checkpointReject()
 		return false
 	}
 	e.stats.Unblocks++
@@ -1900,8 +1979,10 @@ func (m *MapInfo) corridor(c *MoveClass, cx, cz, fx, fz int32) bool {
 // placedRow remembers an accepted row site until its frame appears.
 func (e *executor) placedRow(cx, cz, fx, fz int32, g rowGroup, tick uint32) {
 	e.guardPlaced(cx, cz, fx, fz)
+	slot := e.nextPending
 	e.pending[e.nextPending] = pendingSite{cx: cx, cz: cz, fx: fx, fz: fz, g: g, tick: tick}
 	e.nextPending = (e.nextPending + 1) % len(e.pending)
+	e.recordCheckpointPending(slot)
 }
 
 // Clear orders a builder to reclaim features around (x, z) within radius:
@@ -1930,11 +2011,13 @@ func (e *executor) execClear(c *Command, b *batch, tick uint32, w *units.World) 
 	if u == nil {
 		e.stats.Stale++
 		e.stats.Reasons[FailNoActor]++
+		e.checkpointReject()
 		return false
 	}
 	if m == nil || t == nil || u.Def == nil || !u.Def.CanReclamate {
 		e.stats.Failed++
 		e.stats.Reasons[FailResolve]++
+		e.checkpointReject()
 		return false
 	}
 	radius := c.Count
@@ -2012,11 +2095,13 @@ func (e *executor) execClear(c *Command, b *batch, tick uint32, w *units.World) 
 	if n == 0 {
 		e.stats.Failed++
 		e.stats.Reasons[FailNoSite]++
+		e.checkpointReject()
 		return false
 	}
 	q := orders.BindQueueBinding(u, e.m.OrderBinding)
 	if q == nil {
 		e.stats.Failed++
+		e.checkpointReject()
 		return false
 	}
 	issued := false
@@ -2029,6 +2114,7 @@ func (e *executor) execClear(c *Command, b *batch, tick uint32, w *units.World) 
 	if !issued {
 		e.stats.Failed++
 		e.stats.Reasons[FailResolve]++
+		e.checkpointReject()
 		return false
 	}
 	e.stats.Clears++

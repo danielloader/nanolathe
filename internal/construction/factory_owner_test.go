@@ -36,7 +36,7 @@ func ownerFixture(t *testing.T, count uint32) (*Service, *units.World, *movement
 	sys.BindWorld(w)
 	svc.Movement = sys
 	sim := rng.NewSimulation(19)
-	svc.OrderBinding = &orders.QueueBinding{SimRNG: &sim, Lookup: w.Unit}
+	svc.OrderBinding = orders.NewQueueBinding(orders.QueueBindingConfig{SimRNG: &sim, Lookup: w.Unit})
 	for i := range svc.Economy.Players {
 		svc.Economy.Players[i].Stock[0] = 1e9
 		svc.Economy.Players[i].Stock[1] = 1e9

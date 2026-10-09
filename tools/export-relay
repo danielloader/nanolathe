@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Export a reviewed relay-only source snapshot; never publish or overwrite files."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import re
+import subprocess
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('destination', type=Path)
+parser.add_argument('--revision', default='HEAD')
+args = parser.parse_args()
+repo = Path(__file__).resolve().parent.parent
+
+def git(*arguments):
+    return subprocess.check_output(['git', '-C', str(repo), *arguments])
+
+revision = git('rev-parse', '--verify', args.revision + '^{commit}').decode().strip()
+paths = git('ls-tree', '-rz', '--name-only', revision).decode().split('\0')
+destination = args.destination.resolve()
+if destination.exists() and any(destination.iterdir()):
+    parser.error('destination must be absent or empty; existing files are never overwritten')
+selected = [p for p in paths if (p.endswith('.go') and p.rsplit('/', 1)[0] in
+    ('cmd/nanolathe-server', 'internal/relay', 'internal/netproto')) or p.startswith('deploy/relay/') or p == 'LICENSE']
+if not selected or not any('websocket' in p for p in selected):
+    parser.error('revision does not contain the App Platform relay')
+source_mod = git('show', revision + ':go.mod').decode()
+version = re.search(r'^go (\S+)$', source_mod, re.M).group(1)
+old = b'github.com/nanolathe-gg/nanolathe/'
+new = b'github.com/nanolathe-gg/nanolathe-relay/'
+manifest = {'repository': 'https://github.com/nanolathe-gg/nanolathe', 'revision': revision,
+    'transform': 'Only Go module import prefix rewritten; deploy/relay templates placed at root.', 'files': {}}
+destination.mkdir(parents=True, exist_ok=True)
+for path in sorted(selected):
+    original = git('show', revision + ':' + path)
+    exported = original.replace(old, new) if path.endswith('.go') else original
+    target = path.removeprefix('deploy/relay/')
+    if (destination / target).exists():
+        raise SystemExit('duplicate export path: ' + target)
+    (destination / target).parent.mkdir(parents=True, exist_ok=True)
+    (destination / target).write_bytes(exported)
+    manifest['files'][target] = {'source': path, 'source_sha256': hashlib.sha256(original).hexdigest(),
+        'export_sha256': hashlib.sha256(exported).hexdigest()}
+(destination / 'go.mod').write_text('module github.com/nanolathe-gg/nanolathe-relay\n\ngo ' + version + '\n')
+(destination / 'UPSTREAM.json').write_text(json.dumps(manifest, indent=2) + '\n')
+print(f'Exported {len(selected)} files from {revision} to {destination}')

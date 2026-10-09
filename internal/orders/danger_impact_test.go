@@ -14,19 +14,19 @@ func TestImpactWithdrawsWithoutAttackerKnowledge(t *testing.T) {
 		q, u, _ := dangerFixture(true)
 		u.Flags = u.Flags&^(uint32(3)<<units.StandingMoveShift) | move<<units.StandingMoveShift
 		q.primary = []*Node{{ID: Lookup("Standby"), Owner: u.Handle}}
-		q.Binding().Lookup = func(pool.Handle) *units.Unit { t.Fatal("anonymous impact looked up a unit"); return nil }
-		q.Binding().DangerVisible = func(*units.Unit, *units.Unit) bool {
+		q.Binding().SetLookup(func(pool.Handle) *units.Unit { t.Fatal("anonymous impact looked up a unit"); return nil })
+		q.Binding().SetDangerVisible(func(*units.Unit, *units.Unit) bool {
 			t.Fatal("anonymous impact read hidden contact state")
 			return false
-		}
-		q.Binding().DangerCanRespond = func(*units.Unit, *units.Unit, int) bool {
+		})
+		q.Binding().SetDangerCanRespond(func(*units.Unit, *units.Unit, int) bool {
 			t.Fatal("anonymous impact sought an attack target")
 			return false
-		}
-		q.Binding().Weapons = &WeaponAdapter{Acquire: func(*units.Unit, int, uint32) (pool.Handle, bool) {
+		})
+		q.Binding().Weapons = NewWeaponAdapter(WeaponAdapterConfig{Acquire: func(*units.Unit, int, uint32) (pool.Handle, bool) {
 			t.Fatal("anonymous impact acquired a target")
 			return 0, false
-		}}
+		}})
 		random := *q.Binding().SimRNG
 		ObserveImpact(u, numeric.Angle(16384), 10) // +X side
 		StepDangerResponse(u, 10)
@@ -44,10 +44,10 @@ func TestImpactWithdrawsWithoutAttackerKnowledge(t *testing.T) {
 			t.Fatal("hidden hit did not withdraw away from its observed side")
 		}
 		installed := false
-		q.Binding().Movement = &MovementGoalAdapter{Release: func(*Node) bool { return true }, InstallPoint: func(req PointGoalRequest) bool {
+		q.Binding().Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{Release: func(*Node) bool { return true }, InstallPoint: func(req PointGoalRequest) bool {
 			installed = req.Node == n && req.X == n.GoalX && req.Z == n.GoalZ
 			return true
-		}}
+		}})
 		q.Pump(u, 10)
 		if !installed {
 			t.Fatal("withdrawal did not install ordinary movement payload")

@@ -316,11 +316,11 @@ func installPointGoalPayload(u *units.Unit, n *Node, x, y, z numeric.Fixed, radi
 	canfly := u != nil && u.Def != nil && u.Def.CanFly
 	if b := bindingOfUnit(u); b != nil && b.Movement != nil {
 		if canfly {
-			if b.Movement.Release != nil {
-				b.Movement.Release(n)
+			if b.Movement.ReleaseHook() != nil {
+				b.Movement.ReleaseHook()(n)
 			}
-		} else if b.Movement.InstallPoint != nil {
-			b.Movement.InstallPoint(PointGoalRequest{Owner: n.Owner, Node: n, X: x, Y: y, Z: z, Radius: radius})
+		} else if b.Movement.InstallPointHook() != nil {
+			b.Movement.InstallPointHook()(PointGoalRequest{Owner: n.Owner, Node: n, X: x, Y: y, Z: z, Radius: radius})
 		}
 	}
 	n.Satisfied &^= 0x3E0 // clear pending 0x20..0x200 [04 R-ORD-01 §0][04 R-ORD-01 §1]
@@ -344,11 +344,11 @@ func installAnnulusGoal(u *units.Unit, n *Node, x, y, z numeric.Fixed, outer, in
 	canfly := u != nil && u.Def != nil && u.Def.CanFly
 	if b := bindingOfUnit(u); b != nil && b.Movement != nil {
 		if canfly {
-			if b.Movement.Release != nil {
-				b.Movement.Release(n)
+			if b.Movement.ReleaseHook() != nil {
+				b.Movement.ReleaseHook()(n)
 			}
-		} else if b.Movement.InstallAnnulus != nil {
-			b.Movement.InstallAnnulus(AnnulusGoalRequest{
+		} else if b.Movement.InstallAnnulusHook() != nil {
+			b.Movement.InstallAnnulusHook()(AnnulusGoalRequest{
 				Owner: n.Owner, Node: n, X: x, Y: y, Z: z,
 				OuterRadius: outer, InnerRadius: inner,
 			})
@@ -382,10 +382,10 @@ func targetOf(u *units.Unit, n *Node) *units.Unit {
 		return nil
 	}
 	binding := q.Binding()
-	if binding == nil || binding.Lookup == nil {
+	if binding == nil || binding.LookupHook() == nil {
 		return nil
 	}
-	return binding.Lookup(n.Target)
+	return binding.LookupHook()(n.Target)
 }
 
 // leashBroken is the return-to-post test [R-STANCE-01 §4] that both the ground
@@ -914,10 +914,10 @@ func slotTargetUnit(u *units.Unit, k int) *units.Unit {
 		return nil
 	}
 	b := bindingOfUnit(u)
-	if b == nil || b.Lookup == nil {
+	if b == nil || b.LookupHook() == nil {
 		return nil
 	}
-	return b.Lookup(s.Target.Unit)
+	return b.LookupHook()(s.Target.Unit)
 }
 
 // scanRegistryAroundPoint shares the cached target-registry query between
@@ -925,10 +925,10 @@ func slotTargetUnit(u *units.Unit, k int) *units.Unit {
 // would bypass the primary visibility list and the secondary upgrade gate.
 func scanRegistryAroundPoint(u *units.Unit, x, z numeric.Fixed, radius int32) []pool.Handle {
 	b := bindingFor(u)
-	if u == nil || b == nil || b.Weapons == nil || b.Weapons.TargetsInRadius == nil {
+	if u == nil || b == nil || b.Weapons == nil || b.Weapons.TargetsInRadiusHook() == nil {
 		return nil
 	}
-	return b.Weapons.TargetsInRadius(u, x, z, radius)
+	return b.Weapons.TargetsInRadiusHook()(u, x, z, radius)
 }
 
 // ---------------------------------------------------------------------------

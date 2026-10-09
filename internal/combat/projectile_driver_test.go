@@ -63,7 +63,7 @@ func TestTickProjectilesNonBounceGroundContact(t *testing.T) {
 	p.Velocity.Y = numeric.FixedFromInt(-2)
 	p.ExpiryTick = 10
 	var events []Event
-	svc.Events = func(ev Event) { events = append(events, ev) }
+	svc.SetEvents(func(ev Event) { events = append(events, ev) })
 
 	svc.TickProjectiles(1, w, terrain, nil, nil, nil, nil, driverCatalog(weapon), nil, nil)
 	if svc.Count() != 0 {
@@ -104,7 +104,7 @@ func TestTickProjectilesUnitsOnlyMissSkipsGroundContact(t *testing.T) {
 	p.Velocity.Y = numeric.FixedFromInt(-2)
 	p.ExpiryTick = 10
 	var events []Event
-	svc.Events = func(ev Event) { events = append(events, ev) }
+	svc.SetEvents(func(ev Event) { events = append(events, ev) })
 
 	svc.TickProjectiles(1, w, terrain, nil, nil, nil, nil, driverCatalog(weapon), nil, nil)
 	if svc.Count() != 1 || !svc.Alive(h) {
@@ -149,11 +149,11 @@ func TestTickProjectilesProximityImpactSweepsLiveVictims(t *testing.T) {
 	pIncoming.Pos = pos
 	pIncoming.ExpiryTick = 10
 	var impacts []Event
-	svc.Events = func(ev Event) {
+	svc.SetEvents(func(ev Event) {
 		if ev.Kind == EventProjectileImpact {
 			impacts = append(impacts, ev)
 		}
-	}
+	})
 
 	svc.TickProjectiles(1, nil, nil, nil, nil, nil, nil, cat, nil, nil)
 	if svc.Count() != 0 {
@@ -207,7 +207,7 @@ func TestTickProjectilesOpaqueLiquidStopsOnlyTheWaterLadder(t *testing.T) {
 		p.Pos = Vec3{X: cellCentre(cx), Y: numeric.FixedFromInt(10), Z: cellCentre(cz)}
 		p.ExpiryTick = 10
 		var events []Event
-		svc.Events = func(ev Event) { events = append(events, ev) }
+		svc.SetEvents(func(ev Event) { events = append(events, ev) })
 		svc.TickProjectiles(1, w, terrain, nil, nil, nil, nil, driverCatalog(weapon), nil, nil)
 		if withUnit {
 			health = w.Unit(targetHandle).Health
@@ -310,11 +310,11 @@ func TestTickProjectilesMixedBurstUsesCapturedSpanAfterOrdinaryImpact(t *testing
 	pBurst.ExpiryTick = 10
 	sim := rng.NewSimulation(7)
 	drawsAtImpact := uint64(^uint64(0))
-	svc.Events = func(ev Event) {
+	svc.SetEvents(func(ev Event) {
 		if ev.Kind == EventProjectileImpact {
 			drawsAtImpact = sim.Draws()
 		}
-	}
+	})
 
 	svc.TickProjectiles(1, w, terrain, nil, nil, nil, nil, cat, &sim, nil)
 	if drawsAtImpact != 0 {
@@ -357,11 +357,11 @@ func TestTickProjectilesFeatureFringeUsesContactedCellHeightAndCache(t *testing.
 		p.Pos = Vec3{X: cellCentre(ax + 1), Y: numeric.FixedFromInt(35), Z: cellCentre(az)}
 		p.ExpiryTick = 10
 		impacts := 0
-		svc.Events = func(ev Event) {
+		svc.SetEvents(func(ev Event) {
 			if ev.Kind == EventProjectileImpact {
 				impacts++
 			}
-		}
+		})
 		cat := driverCatalog(weapon)
 		svc.TickProjectiles(1, w, terrain, nil, nil, nil, nil, cat, nil, nil)
 		svc.TickProjectiles(2, w, terrain, nil, nil, nil, nil, cat, nil, nil)
@@ -452,11 +452,11 @@ func TestTickProjectilesSelfPropImpactContinuesAfterCentralImpact(t *testing.T) 
 			p.Velocity.X = numeric.FixedFromInt(16)
 			p.ExpiryTick = 1
 			var impacts []Vec3
-			svc.Events = func(ev Event) {
+			svc.SetEvents(func(ev Event) {
 				if ev.Kind == EventProjectileImpact {
 					impacts = append(impacts, ev.Position)
 				}
-			}
+			})
 
 			svc.TickProjectiles(1, w, terrain, nil, nil, nil, nil, driverCatalog(weapon), nil, nil)
 			if len(impacts) != 2 || impacts[0] != (Vec3{X: cellCentre(cx), Y: numeric.FixedFromInt(10), Z: cellCentre(cz)}) || impacts[1].X != cellCentre(cx+1) {
@@ -542,14 +542,14 @@ func TestTickProjectilesSteeringFailureRebuildsAfterImpact(t *testing.T) {
 	oldYaw, oldPitch := p.Yaw, p.Pitch
 	oldVelocity := p.Velocity
 	seenVelocity := Vec3{}
-	svc.Events = func(ev Event) {
+	svc.SetEvents(func(ev Event) {
 		if ev.Kind == EventProjectileImpact {
 			seenVelocity = svc.Records[int(h)-1].Velocity
 			if got := &svc.Records[int(h)-1]; got.Yaw != oldYaw || got.Pitch != oldPitch {
 				t.Errorf("impact observed mutated failing guidance: yaw=%d pitch=%d", got.Yaw, got.Pitch)
 			}
 		}
-	}
+	})
 
 	svc.TickProjectiles(1, nil, nil, nil, nil, nil, nil, driverCatalog(weapon), nil, nil)
 	if seenVelocity != oldVelocity {
@@ -597,11 +597,11 @@ func TestTickProjectilesCachedFeatureContinuesToTerrainAndWater(t *testing.T) {
 			p.CacheCellX, p.CacheCellZ = cx, cz
 			p.ExpiryTick = 10
 			impacts := 0
-			svc.Events = func(ev Event) {
+			svc.SetEvents(func(ev Event) {
 				if ev.Kind == EventProjectileImpact {
 					impacts++
 				}
-			}
+			})
 			svc.TickProjectiles(1, w, terrain, nil, nil, nil, nil, driverCatalog(weapon), nil, nil)
 			if impacts != tc.impacts || svc.Count() != tc.live {
 				t.Fatalf("impacts/live = %d/%d, want %d/%d", impacts, svc.Count(), tc.impacts, tc.live)
@@ -629,11 +629,11 @@ func TestTickProjectilesOffMapNoExplodeRetiresWithoutImpact(t *testing.T) {
 	p.Pos = Vec3{X: -1, Y: numeric.FixedFromInt(10), Z: cellCentre(1)}
 	p.ExpiryTick = 10
 	impacts := 0
-	svc.Events = func(ev Event) {
+	svc.SetEvents(func(ev Event) {
 		if ev.Kind == EventProjectileImpact {
 			impacts++
 		}
-	}
+	})
 	svc.TickProjectiles(1, w, terrain, nil, nil, nil, nil, driverCatalog(weapon), nil, nil)
 	if svc.Count() != 0 || impacts != 0 {
 		t.Fatalf("live/impacts = %d/%d, want 0/0", svc.Count(), impacts)
@@ -670,7 +670,7 @@ func TestTickProjectilesOffMapBeforeLinkedProximity(t *testing.T) {
 			quarry.WeaponID, quarry.ExpiryTick = incoming.ID, 10
 			quarry.Pos = Vec3{X: tc.tx, Y: p.Pos.Y, Z: tc.tz}
 			var events []Event
-			svc.Events = func(ev Event) { events = append(events, ev) }
+			svc.SetEvents(func(ev Event) { events = append(events, ev) })
 			svc.TickProjectiles(1, w, terrain, nil, nil, nil, nil, cat, nil, nil)
 			if len(events) != 0 || svc.Count() != 1 || svc.Records[0].WeaponID != incoming.ID {
 				t.Fatalf("off-map proximity emitted %v; survivors=%d, want silent retirement and quarry survival [06 §8.1]", events, svc.Count())
@@ -692,11 +692,11 @@ func TestTickProjectilesExpiryImpactBeforeOffMapRetirement(t *testing.T) {
 	p.Velocity.X = numeric.FixedFromInt(-2)
 	before := p.Pos
 	var impacts []Vec3
-	svc.Events = func(ev Event) {
+	svc.SetEvents(func(ev Event) {
 		if ev.Kind == EventProjectileImpact {
 			impacts = append(impacts, ev.Position)
 		}
-	}
+	})
 	svc.TickProjectiles(1, w, terrain, nil, nil, nil, nil, driverCatalog(weapon), nil, nil)
 	if len(impacts) != 1 || impacts[0] != before || svc.Count() != 0 {
 		t.Fatalf("impacts=%v survivors=%d, want pre-motion impact then off-map retirement [06 §6.6][06 §8.1]", impacts, svc.Count())

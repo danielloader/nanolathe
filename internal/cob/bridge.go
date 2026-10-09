@@ -189,6 +189,10 @@ func (b *CallbackBridge) lifecycleEvent(name string, mode CallbackMode, thread i
 // receiver with the allocation, and only this callback's own explicit return
 // can invoke it [04 §4.2][04 §4.3][04 §5.3].
 func (b *CallbackBridge) arm(thread int, name string, mode CallbackMode, receiver CallbackReceiver) uint64 {
+	return b.armCheckpoint(thread, name, mode, receiver, nil)
+}
+
+func (b *CallbackBridge) armCheckpoint(thread int, name string, mode CallbackMode, receiver CallbackReceiver, continuation *CheckpointContinuation) uint64 {
 	if thread < 0 || thread >= len(b.lifecyclePending) {
 		return 0
 	}
@@ -199,9 +203,16 @@ func (b *CallbackBridge) arm(thread int, name string, mode CallbackMode, receive
 		// the ordinary bridge start stays allocation-free [04 §4.2].
 		return identity
 	}
-	b.VM.SetThreadCompletion(thread, identity, func(value int32) {
+	metadata := checkpointReturn{recognized: receiver == nil}
+	if receiver != nil && continuation != nil {
+		metadata.recognized = true
+		metadata.continuation = *continuation
+		metadata.continuation.ThreadSlot = uint8(thread)
+		metadata.continuation.ThreadIdentity = identity
+	}
+	b.VM.setThreadCompletion(thread, identity, func(value int32) {
 		b.complete(thread, identity, name, mode, receiver, value)
-	})
+	}, metadata)
 	return identity
 }
 
@@ -293,6 +304,10 @@ func (b *CallbackBridge) DeferredWakeArgs(name string, arity int, args [4]int32,
 }
 
 func (b *CallbackBridge) deferred(name string, arity int, args []int32, receiver CallbackReceiver, wake bool) CallbackResult {
+	return b.deferredCheckpoint(name, arity, args, receiver, wake, nil)
+}
+
+func (b *CallbackBridge) deferredCheckpoint(name string, arity int, args []int32, receiver CallbackReceiver, wake bool, continuation *CheckpointContinuation) CallbackResult {
 	result := CallbackResult{Name: name, Mode: ModeDeferred, Thread: -1}
 	pc, found := 0, false
 	if b != nil && b.VM != nil {
@@ -308,7 +323,7 @@ func (b *CallbackBridge) deferred(name string, arity int, args []int32, receiver
 	thread := b.VM.LastStartedThread()
 	result.Started, result.Wake, result.Thread = true, wake, thread
 	b.lifecycleEvent(name, ModeDeferred, thread, "start")
-	identity := b.arm(thread, name, ModeDeferred, receiver)
+	identity := b.armCheckpoint(thread, name, ModeDeferred, receiver, continuation)
 	if wake {
 		b.VM.Drain(0)
 		b.collectReturns()
@@ -402,6 +417,21 @@ func (b *CallbackBridge) Aim(slot WeaponSlot, heading, pitch uint16, receiver Ca
 		return CallbackResult{Name: "", Mode: ModeDeferred, Thread: -1}
 	}
 	return b.Deferred(name, []int32{int32(heading), int32(pitch)}, receiver)
+}
+
+// AimWithCheckpoint starts the same deferred Aim operation while recording
+// the combat producer's captured operands beside its existing receiver. The
+// producer and scripts owner validate the target allocation and slot alias;
+// no callback is inferred from a function address (DESIGN_MULTIPLAYER §16.3.6).
+func (b *CallbackBridge) AimWithCheckpoint(slot WeaponSlot, heading, pitch uint16, receiver CallbackReceiver, continuation CheckpointContinuation) CallbackResult {
+	name, ok := weaponCallbackName(slot, "Aim")
+	if !ok {
+		return CallbackResult{Name: "", Mode: ModeDeferred, Thread: -1}
+	}
+	continuation.Kind = CheckpointContinuationSlotAim
+	continuation.WeaponSlot = uint8(slot)
+	continuation.Mode = ModeDeferred
+	return b.deferredCheckpoint(name, 2, []int32{int32(heading), int32(pitch)}, receiver, false, &continuation)
 }
 
 // Fire starts the matching Fire* callback deferred with zero arguments.

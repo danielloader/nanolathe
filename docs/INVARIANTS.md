@@ -255,7 +255,10 @@ the relay draws the explicit seed pair and every client receives it in the
 start message; it enters composition through the same handoff a
 single-player battle uses. The relay is not an authoritative package, so its
 use of `crypto/rand` is outside this rule, and no client-side history seeds
-either stream.
+either stream. Until the two-stage start exists, the first online lobby's host
+draws the pair in `cmd/nanolathe` when it freezes the configuration, whose
+digest covers it (DESIGN_MULTIPLAYER §16.6); that is also outside every
+authoritative package.
 
 **Check.** Identical seeded session setups have stable simulation and CRT draw
 counts; setup and briefing draws leave the retained battle CRT fresh; the

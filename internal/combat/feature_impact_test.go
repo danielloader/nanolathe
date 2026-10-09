@@ -131,12 +131,12 @@ func TestFirestarterBlastIgnitesWithOneSimulationDraw(t *testing.T) {
 	def.SeqNameBurn = "treeburn"
 	sim := rng.SimulationFromState(12345)
 	svc, feats, terrain := featureBlastFixture(t, def, 8, 8, &sim)
-	feats.SequenceFrames = func(_ *content.FeatureDef, selector uint8) []int32 {
+	feats.SetSequenceFrames(func(_ *content.FeatureDef, selector uint8) []int32 {
 		if selector != 0 {
 			return nil
 		}
 		return []int32{100}
-	}
+	})
 	w := newCombatFixtureWorld(4, nil)
 
 	before := sim.Draws()

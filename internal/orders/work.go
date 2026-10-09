@@ -84,8 +84,8 @@ func workStatus(u *units.Unit, kind uint8, text string) {
 	}
 	if q := QueueForUnit(u); q != nil {
 		if b := q.Binding(); b != nil {
-			if b.Presentation != nil && b.Presentation.Status != nil {
-				_ = b.Presentation.Status(u, kind, text)
+			if b.Presentation != nil && b.Presentation.StatusHook() != nil {
+				_ = b.Presentation.StatusHook()(u, kind, text)
 			}
 		}
 	}
@@ -107,8 +107,8 @@ func emitNanolathe(u *units.Unit, n *Node, tick uint32) {
 		return
 	}
 	if q := QueueForUnit(u); q != nil {
-		if b := q.Binding(); b != nil && b.Presentation != nil && b.Presentation.Nanolathe != nil {
-			_ = b.Presentation.Nanolathe(u, n, tick)
+		if b := q.Binding(); b != nil && b.Presentation != nil && b.Presentation.NanolatheHook() != nil {
+			_ = b.Presentation.NanolatheHook()(u, n, tick)
 		}
 	}
 }
@@ -121,8 +121,8 @@ func emitFeatureNanolathe(u *units.Unit, n *Node, feature FeatureView, tick uint
 		return
 	}
 	if q := QueueForUnit(u); q != nil {
-		if b := q.Binding(); b != nil && b.Presentation != nil && b.Presentation.NanolatheFeature != nil {
-			_ = b.Presentation.NanolatheFeature(u, n, feature, tick)
+		if b := q.Binding(); b != nil && b.Presentation != nil && b.Presentation.NanolatheFeatureHook() != nil {
+			_ = b.Presentation.NanolatheFeatureHook()(u, n, feature, tick)
 		}
 	}
 }
@@ -245,11 +245,11 @@ func installWorkGoalWithRadius(u *units.Unit, n *Node, x, y, z numeric.Fixed, ai
 	if q := QueueOfUnit(u); q != nil {
 		if b := q.Binding(); b != nil && b.Movement != nil {
 			if u != nil && u.Def != nil && u.Def.CanFly {
-				if b.Movement.InstallAir != nil {
+				if b.Movement.InstallAirHook() != nil {
 					// Work rows install a point marker at the copied target
 					// position. Target is retained as a separate request field for
 					// follow markers, but these rows do not use that family.
-					return b.Movement.InstallAir(AirGoalRequest{Owner: n.Owner, Node: n, X: x, Y: y, Z: z, Radius: airRadius})
+					return b.Movement.InstallAirHook()(AirGoalRequest{Owner: n.Owner, Node: n, X: x, Y: y, Z: z, Radius: airRadius})
 				}
 			} else {
 				name := DescriptorFor(n.ID).Name
@@ -261,8 +261,8 @@ func installWorkGoalWithRadius(u *units.Unit, n *Node, x, y, z numeric.Fixed, ai
 					} else if u.Def != nil {
 						half = assistApproachHalf(u.Def.FootprintX, u.Def.FootprintZ)
 					}
-					if b.Movement.InstallAnnulus != nil {
-						return b.Movement.InstallAnnulus(AnnulusGoalRequest{Owner: n.Owner, Node: n, X: x, Y: y, Z: z, OuterRadius: u.Def.BuildDistance + half, InnerRadius: half})
+					if b.Movement.InstallAnnulusHook() != nil {
+						return b.Movement.InstallAnnulusHook()(AnnulusGoalRequest{Owner: n.Owner, Node: n, X: x, Y: y, Z: z, OuterRadius: u.Def.BuildDistance + half, InnerRadius: half})
 					}
 				case "RepairUnit", "Capture":
 					// Both live-target rows pass the TARGET's committed anchor
@@ -273,10 +273,10 @@ func installWorkGoalWithRadius(u *units.Unit, n *Node, x, y, z numeric.Fixed, ai
 					// back off the mover's committed anchor — not a floor of
 					// the centre with half the footprint taken off it, which
 					// is a different cell for every even footprint.
-					if target := targetOf(u, n); target != nil && target.Def != nil && b.Movement.InstallRectangle != nil {
+					if target := targetOf(u, n); target != nil && target.Def != nil && b.Movement.InstallRectangleHook() != nil {
 						cellX := footprintAnchorCell(target.X, target.Def.FootprintX)
 						cellZ := footprintAnchorCell(target.Z, target.Def.FootprintZ)
-						return b.Movement.InstallRectangle(RectangleGoalRequest{Owner: n.Owner, Node: n, CellX: cellX, CellZ: cellZ, Width: target.Def.FootprintX, Depth: target.Def.FootprintZ})
+						return b.Movement.InstallRectangleHook()(RectangleGoalRequest{Owner: n.Owner, Node: n, CellX: cellX, CellZ: cellZ, Width: target.Def.FootprintX, Depth: target.Def.FootprintZ})
 					}
 				case "Reclaim", "Resurrect":
 					// Both feature rows install a RECTANGLE from the FEATURE's
@@ -289,13 +289,13 @@ func installWorkGoalWithRadius(u *units.Unit, n *Node, x, y, z numeric.Fixed, ai
 					// class stores is that footprint grown by the RECLAIMER's
 					// own footprint [04 R-PATH-01 §12]; this seam passes the
 					// arguments, internal/movement builds the rectangle.
-					if fdef, cx, cz, ok := featureAtGoal(u, n); ok && b.Movement.InstallRectangle != nil {
+					if fdef, cx, cz, ok := featureAtGoal(u, n); ok && b.Movement.InstallRectangleHook() != nil {
 						footX, footZ := featureFootprint(fdef)
-						return b.Movement.InstallRectangle(RectangleGoalRequest{Owner: n.Owner, Node: n, CellX: int32(cx), CellZ: int32(cz), Width: footX, Depth: footZ})
+						return b.Movement.InstallRectangleHook()(RectangleGoalRequest{Owner: n.Owner, Node: n, CellX: int32(cx), CellZ: int32(cz), Width: footX, Depth: footZ})
 					}
 				}
-				if b.Movement.InstallPoint != nil {
-					return b.Movement.InstallPoint(PointGoalRequest{Owner: n.Owner, Node: n, X: x, Y: y, Z: z})
+				if b.Movement.InstallPointHook() != nil {
+					return b.Movement.InstallPointHook()(PointGoalRequest{Owner: n.Owner, Node: n, X: x, Y: y, Z: z})
 				}
 			}
 		}
@@ -307,8 +307,8 @@ func boundAssist(q *Queue, builder *units.Unit, n *Node, tick uint32) (bool, boo
 	if q == nil || n == nil {
 		return false, false
 	}
-	if b := q.Binding(); b != nil && b.Work != nil && b.Work.Assist != nil {
-		ok := b.Work.Assist(builder, n, tick)
+	if b := q.Binding(); b != nil && b.Work != nil && b.Work.AssistHook() != nil {
+		ok := b.Work.AssistHook()(builder, n, tick)
 		if ok {
 			emitNanolathe(builder, n, tick)
 		}
@@ -331,8 +331,8 @@ func boundCapture(q *Queue, captor *units.Unit, n *Node, tick uint32) (bool, boo
 	if q == nil || n == nil {
 		return false, false
 	}
-	if b := q.Binding(); b != nil && b.Work != nil && b.Work.Capture != nil {
-		return b.Work.Capture(captor, n, tick), true
+	if b := q.Binding(); b != nil && b.Work != nil && b.Work.CaptureHook() != nil {
+		return b.Work.CaptureHook()(captor, n, tick), true
 	}
 	return false, false
 }
@@ -341,8 +341,8 @@ func boundRepair(q *Queue, builder, patient *units.Unit, n *Node, tick uint32) (
 	if q == nil || n == nil {
 		return false, false
 	}
-	if b := q.Binding(); b != nil && b.Work != nil && b.Work.Repair != nil {
-		ok := b.Work.Repair(builder, patient, n, tick)
+	if b := q.Binding(); b != nil && b.Work != nil && b.Work.RepairHook() != nil {
+		ok := b.Work.RepairHook()(builder, patient, n, tick)
 		if ok {
 			emitNanolathe(builder, n, tick)
 		}
@@ -1094,7 +1094,7 @@ func featureViewAtGoal(u *units.Unit, n *Node) (FeatureView, bool) {
 		return FeatureView{}, false
 	}
 	q := QueueForUnit(u)
-	if q == nil || q.Binding() == nil || q.Binding().World == nil || q.Binding().World.LookupFeature == nil {
+	if q == nil || q.Binding() == nil || q.Binding().World == nil || q.Binding().World.LookupFeatureHook() == nil {
 		return FeatureView{}, false
 	}
 	_, cx, cz, ok := featureAtGoal(u, n)
@@ -1333,12 +1333,12 @@ func finishFeatureReclaim(u *units.Unit, cx, cz int) {
 	// With no binding the terrain-only transition stands, which is what every
 	// fixture that does not compose a session gets.
 	reclaim := features.ReclaimTransition
-	if binding := q.Binding(); binding != nil && binding.ReclaimFeature != nil {
+	if binding := q.Binding(); binding != nil && binding.ReclaimFeatureHook() != nil {
 		// The service twin now takes the recorded position and makes the hop for
 		// itself, exactly as the terrain-only helper does, so both payouts read
 		// the guard's cell bit from the same cell [05 R-FEAT-01 §15].
 		reclaim = func(_ *world.Terrain, cx, cz int) (float32, float32, bool) {
-			return binding.ReclaimFeature(cx, cz)
+			return binding.ReclaimFeatureHook()(cx, cz)
 		}
 	}
 	metal, energy, ok := reclaim(econ.Terrain, cx, cz)
@@ -1542,8 +1542,8 @@ func boundResurrect(u *units.Unit, n *Node, tick uint32) (ok bool, bound bool) {
 	if q == nil || n == nil {
 		return false, false
 	}
-	if b := q.Binding(); b != nil && b.Work != nil && b.Work.Resurrect != nil {
-		return b.Work.Resurrect(u, n, tick), true
+	if b := q.Binding(); b != nil && b.Work != nil && b.Work.ResurrectHook() != nil {
+		return b.Work.ResurrectHook()(u, n, tick), true
 	}
 	return false, false
 }
@@ -1563,8 +1563,8 @@ func spawnResurrectionRepair(u *units.Unit, n *Node) {
 		return
 	}
 	var product *units.Unit
-	if b := q.Binding(); b != nil && b.Lookup != nil {
-		product = b.Lookup(n.Target)
+	if b := q.Binding(); b != nil && b.LookupHook() != nil {
+		product = b.LookupHook()(n.Target)
 	}
 	if product == nil {
 		return

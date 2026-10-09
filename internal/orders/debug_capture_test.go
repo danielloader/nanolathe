@@ -29,7 +29,7 @@ func TestDebugDangerCaptureDoesNotAgeOrAliasState(t *testing.T) {
 	q.danger.contacts[0] = dangerContact{unit: attacker, handle: attacker.Handle, tick: 1, failedUntil: 11, x: 23, z: 37}
 	q.danger.impacts[0] = dangerImpact{valid: true, sector: 2, tick: 1, x: 41, z: 43}
 	q.danger.nextDecision = 99
-	q.Binding().CurrentTick = func() uint32 { return 1000 }
+	q.Binding().SetCurrentTick(func() uint32 { return 1000 })
 	before, random := q.danger, *q.Binding().SimRNG
 	d := q.DebugSnapshot(u.Handle)
 	if !reflect.DeepEqual(q.danger, before) || *q.Binding().SimRNG != random {
@@ -44,16 +44,16 @@ func TestDebugDangerCaptureDoesNotAgeOrAliasState(t *testing.T) {
 	if d.Danger.Response.GoalX != numeric.FixedFromInt(80) || d.Danger.Contacts[0].X != 23 || d.Danger.Impacts[0].X != 41 {
 		t.Fatal("capture aliases live danger state")
 	}
-	q.Binding().Lookup = func(h pool.Handle) *units.Unit {
+	q.Binding().SetLookup(func(h pool.Handle) *units.Unit {
 		if h == u.Handle {
 			return u
 		}
 		return &units.Unit{Handle: attacker.Handle}
-	}
-	q.Binding().DangerVisible = func(*units.Unit, *units.Unit) bool {
+	})
+	q.Binding().SetDangerVisible(func(*units.Unit, *units.Unit) bool {
 		t.Fatal("capture queried visibility for stale identity")
 		return false
-	}
+	})
 	stale := q.DebugSnapshot(u.Handle).Danger.Contacts[0]
 	if !stale.IdentityChecked || stale.IdentityCurrent || stale.VisibilityChecked {
 		t.Fatalf("stale slot presented as current: %+v", stale)

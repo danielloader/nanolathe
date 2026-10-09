@@ -22,7 +22,7 @@ func obstructionFixture(t *testing.T) ShotQuery {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := &Service{Rules: &ModernRules{}, Reaction: &ReactionSeams{Allied: func(a, b uint8) bool { return a == b || (a == 0 && b == 2) }}}
+	svc := &Service{Rules: &ModernRules{}, Reaction: NewReactionSeams(ReactionSeamsConfig{Allied: func(a, b uint8) bool { return a == b || (a == 0 && b == 2) }})}
 	return ShotQuery{Service: svc, World: w, Shooter: w.Unit(h), Terrain: terrain,
 		Launch: Slot{Weapon: modernTerrainWeapon()}, Muzzle: muzzle, Aim: aim, Tick: 10, Wind: &world.Wind{}}
 }

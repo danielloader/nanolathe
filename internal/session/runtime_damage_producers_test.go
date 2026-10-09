@@ -40,20 +40,20 @@ func TestRuntimeSelfDamageProducersUseSharedIntake(t *testing.T) {
 					u.Dying = true
 				}
 				flashes, observations := 0, 0
-				s.Combat.Events = func(ev combat.Event) {
+				s.Combat.SetEvents(func(ev combat.Event) {
 					if ev.Kind == combat.EventDamageFlash {
 						flashes++
 						if ev.Tick != 17 || ev.Source != h || ev.Target != h {
 							t.Errorf("flash = %+v", ev)
 						}
 					}
-				}
-				s.Combat.Reaction = &combat.ReactionSeams{ObserverNotice: func(v *units.Unit) {
+				})
+				s.Combat.Reaction = combat.NewReactionSeams(combat.ReactionSeamsConfig{ObserverNotice: func(v *units.Unit) {
 					observations++
 					if uint8(v.BlinkSuppress) != 240 || v.LastDamageCause != 5 || v.LastDamageSide != 8 || v.EngagementTarget != 3 {
 						t.Errorf("reaction must see flash and prior provenance: %+v", v)
 					}
-				}}
+				}})
 				if producer == "countdown" {
 					q := orders.BindQueueBinding(u, s.newOrderBinding())
 					q.Push(orders.Lookup("SelfDestructFG"), orders.Node{Owner: h})
@@ -94,16 +94,16 @@ func TestWaterVisitFlashesWithoutReactionAndPreservesPriorAttacker(t *testing.T)
 	u := s.Units.Unit(h)
 	u.LastDamageCause, u.LastDamageSide, u.EngagementTarget = 5, 8, 3
 	u.Armored, def.DamageModifier, u.Kills = true, 32768, 25
-	s.Combat.Reaction = &combat.ReactionSeams{ObserverNotice: func(*units.Unit) { t.Error("kind 11 ran reaction") }}
+	s.Combat.Reaction = combat.NewReactionSeams(combat.ReactionSeamsConfig{ObserverNotice: func(*units.Unit) { t.Error("kind 11 ran reaction") }})
 	flashes := 0
-	s.Combat.Events = func(ev combat.Event) {
+	s.Combat.SetEvents(func(ev combat.Event) {
 		if ev.Kind == combat.EventDamageFlash {
 			flashes++
 			if ev.Tick != 30 {
 				t.Error("wrong water tick")
 			}
 		}
-	}
+	})
 	s.stepWaterDamage(u, 30)
 	if u.Health != 96 || uint8(u.BlinkSuppress) != 240 || flashes != 1 || u.LastDamageCause != combat.KindNoReaction || u.LastDamageSide != 8 || u.EngagementTarget != 3 {
 		t.Fatalf("water intake = health %d flash %d/%d provenance %d/%d/%d", u.Health, uint8(u.BlinkSuppress), flashes, u.LastDamageCause, u.LastDamageSide, u.EngagementTarget)

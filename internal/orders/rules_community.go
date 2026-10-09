@@ -82,8 +82,8 @@ func guardOption(u *units.Unit) GuardHomeOption {
 		return GuardCavedog
 	}
 	options := DefaultBuilderOptions()
-	if b != nil && b.BuilderOptions != nil {
-		options = b.BuilderOptions(u.Owner)
+	if b != nil && b.BuilderOptionsHook() != nil {
+		options = b.BuilderOptionsHook()(u.Owner)
 	}
 	option := options.Guard[mode]
 	if option > GuardScatter {
@@ -99,8 +99,8 @@ func patrolOption(u *units.Unit) PatrolWorkOption {
 		return PatrolBoth
 	}
 	options := DefaultBuilderOptions()
-	if b != nil && b.BuilderOptions != nil {
-		options = b.BuilderOptions(u.Owner)
+	if b != nil && b.BuilderOptionsHook() != nil {
+		options = b.BuilderOptionsHook()(u.Owner)
 	}
 	option := options.Patrol[mode]
 	if option > PatrolAssistOnly {

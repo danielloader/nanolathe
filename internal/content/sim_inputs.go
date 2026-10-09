@@ -49,6 +49,10 @@ type SimulationInputRequest struct {
 	CommunityDigest [32]byte
 	Mutators        Mutators
 	Restrictions    Restrictions
+	// PreparingRuleName and PreparingRuleBase are the exact resolved rule
+	// identity used by catalog preparation, not a request to apply it again.
+	// Empty strings retain legacy freeze support, but cannot admit a match.
+	PreparingRuleName, PreparingRuleBase string
 }
 
 // SimulationInputs is one battle's frozen simulation content. Its accessors
@@ -56,11 +60,12 @@ type SimulationInputRequest struct {
 // Filesystem is the sealed view of the capture, which never falls through to
 // the live providers.
 type SimulationInputs struct {
-	sources *SimulationSources
-	view    vfs.FSOps
-	catalog *Catalog
-	simArt  *SimArt
-	models  map[string]*model.Model
+	checkpointInputs *checkpointInputSnapshot // detached freeze-time diagnostics; never manifest bytes
+	sources          *SimulationSources
+	view             vfs.FSOps
+	catalog          *Catalog
+	simArt           *SimArt
+	models           map[string]*model.Model
 	// Captured definition-loader heights complete the parsed-model identity;
 	// checkpoint validation must not reload bytes (DESIGN_MULTIPLAYER §16.3.6).
 	modelTops  map[string]int32
@@ -200,6 +205,17 @@ func (i *SimulationInputs) CommunityDigest() [32]byte {
 	return i.selection.CommunityDigest
 }
 
+// PreparingRule returns the resolved rule identity under which this catalog
+// was prepared. It is admission metadata; the content digest already covers
+// prepared definition values, while the match identity names the rule set
+// (DESIGN_MULTIPLAYER §16.3.34). Absence remains explicit for older callers.
+func (i *SimulationInputs) PreparingRule() (name, base string) {
+	if i == nil {
+		return "", ""
+	}
+	return i.selection.PreparingRuleName, i.selection.PreparingRuleBase
+}
+
 // Mutators returns the mutators the catalog had already been prepared with
 // when it was frozen, each identity factor spelled as the zero value: the
 // vector the manifest records, which is never applied again.
@@ -319,6 +335,7 @@ func FreezeSimulationInputs(sources *SimulationSources, r SimulationInputRequest
 	f.inputs.view = sources.snap.newView(f.inputs, false)
 	sources.snap.seal()
 	sources.frozen = true
+	f.inputs.checkpointInputs = snapshotCheckpointInputs(f.inputs)
 	return f.inputs, nil
 }
 
@@ -549,7 +566,7 @@ func (f *freezer) freezeScripts() {
 func fileDigest(data []byte) [32]byte {
 	d := newSemanticDigest("nanolathe/sim-content/file/1")
 	d.u64(uint64(len(data)))
-	d.h.Write(data)
+	d.write(data)
 	return d.sum()
 }
 

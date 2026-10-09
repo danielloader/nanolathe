@@ -361,15 +361,15 @@ func TestZeroAlpha5VSOCWeaponPayment(t *testing.T) {
 	// The real root and its burst clones pass through the ordinary projectile
 	// driver and area-paralyzer intake; the target's order row raises the stun.
 	impacts := 0
-	oldEvents := s.Combat.Events
-	s.Combat.Events = func(e combat.Event) {
+	oldEvents := s.Combat.EventsHook()
+	s.Combat.SetEvents(func(e combat.Event) {
 		if oldEvents != nil {
 			oldEvents(e)
 		}
 		if e.Kind == combat.EventExplosion && strings.EqualFold(e.Graphic, "Weapon_VSOC1") {
 			impacts++
 		}
-	}
+	})
 	stunned := false
 	for tick := uint32(11); tick <= 210; tick++ {
 		s.Combat.TickProjectiles(tick, s.Units, s.World, s.Wind, s.Features, s.Vis, s.Econ, s.Catalog, s.SimRNG(), s.CrtRNG())

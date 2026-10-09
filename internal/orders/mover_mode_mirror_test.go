@@ -35,12 +35,12 @@ func TestRepairUnitReadsTheCommittedMoverModeNotTheRequest(t *testing.T) {
 			q, builder, target := workFixture()
 			target.Health = 50 // damaged and finished: the row has work to do
 			var captions []string
-			q.binding.Presentation = &PresentationAdapter{
+			q.binding.Presentation = NewPresentationAdapter(PresentationAdapterConfig{
 				Status: func(_ *units.Unit, _ uint8, text string) bool {
 					captions = append(captions, text)
 					return true
 				},
-			}
+			})
 			target.Move.Mode, target.Move.ModeMirror = tc.request, tc.mirror
 			n := &Node{ID: Lookup("RepairUnit"), Owner: builder.Handle, Target: target.Handle, Deadline: -1}
 
@@ -88,15 +88,15 @@ func TestStandbyMineReadsTheCommittedMoverModeNotTheRequest(t *testing.T) {
 			mine.Flags = (mine.Flags &^ (stanceFieldMask << stanceFireShift)) | 2<<stanceFireShift // fire at will: the scan searches
 			victim := &units.Unit{Handle: 2, Def: &content.UnitDef{MaxDamage: 100}, Alive: true, Health: 100}
 			victim.Move.Mode, victim.Move.ModeMirror = tc.request, tc.mirror
-			q.binding.Weapons = &WeaponAdapter{
+			q.binding.Weapons = NewWeaponAdapter(WeaponAdapterConfig{
 				Acquire: func(*units.Unit, int, uint32) (pool.Handle, bool) { return victim.Handle, true },
-			}
-			q.binding.Lookup = func(h pool.Handle) *units.Unit {
+			})
+			q.binding.SetLookup(func(h pool.Handle) *units.Unit {
 				if h == victim.Handle {
 					return victim
 				}
 				return nil
-			}
+			})
 			n := &Node{ID: Lookup("Standby_Mine"), Owner: mine.Handle, Phase: 1, Deadline: -1}
 
 			got := standbyMineHandler(mine, n, 0, 100)

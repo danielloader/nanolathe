@@ -26,7 +26,7 @@ func TestModernHoldFireKeepsGuardFollowing(t *testing.T) {
 				b := q.Binding()
 				b.Rules = modeRules(tc.modern)
 				airInstalls := 0
-				b.Movement.InstallAir = func(AirGoalRequest) bool { airInstalls++; return true }
+				b.Movement.SetInstallAir(func(AirGoalRequest) bool { airInstalls++; return true })
 				q.SetBinding(b)
 				n := guardNode(f.guardFixture)
 				n.Phase = 1

@@ -33,12 +33,12 @@ func TestAutonomousManeuverRetainsReturnAction(t *testing.T) {
 			actor.X, actor.Y, actor.Z = 70<<16|1234, 40<<16, -90<<16|4321
 			actor.Flags = units.ArmedStatus | tc.move<<stanceMoveShift | tc.fire<<stanceFireShift
 			target := &units.Unit{Handle: 2, Owner: 1, Alive: true, Def: &content.UnitDef{}, X: 120 << 16, Z: 90 << 16}
-			q.binding.Lookup = func(h pool.Handle) *units.Unit {
+			q.binding.SetLookup(func(h pool.Handle) *units.Unit {
 				if h == target.Handle {
 					return target
 				}
 				return nil
-			}
+			})
 			if got := autoEngage(actor, target, tc.force); got != tc.wantIssue {
 				t.Fatalf("issued = %v, want %v", got, tc.wantIssue)
 			}

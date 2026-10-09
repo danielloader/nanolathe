@@ -38,12 +38,12 @@ func TestReactionThrottleUsesConstructedManagerRNG(t *testing.T) {
 	}
 	s.Econ.Players[1].Exists = true
 	s.Econ.Players[1].ControllerState = 2
-	s.Combat.ControlByte = func(owner uint8) uint8 {
+	s.Combat.SetControlByte(func(owner uint8) uint8 {
 		if int(owner) >= len(s.Econ.Players) || !s.Econ.Players[owner].Exists {
 			return combat.ControlByteAbsent
 		}
 		return s.Econ.Players[owner].ControllerState
-	}
+	})
 	s.bindDamageReaction()
 	s.SeedSessionRNG(123, 456)
 	mgr := &ai.Manager{Player: 1, RNG: s.SimRNG()}

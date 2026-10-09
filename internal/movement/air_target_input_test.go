@@ -18,10 +18,10 @@ func bindAirInputFixture(t *testing.T, sys *System, u *units.Unit) *orders.Queue
 	u.InstallWeapon(0, u.Def.Weapon1Def)
 	u.Flags |= units.ArmedStatus
 	q := orders.QueueForUnit(u)
-	q.Binding().World = &orders.WorldQueryAdapter{
+	q.Binding().World = orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{
 		Hostile:  func(a, b *units.Unit) bool { return a.Owner != b.Owner },
 		SeaLevel: func() uint8 { return 0 },
-	}
+	})
 	sys.BindAirOrderLegs()
 	sys.SetMoverMode(u, 2)
 	return q

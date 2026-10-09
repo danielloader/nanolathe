@@ -84,7 +84,7 @@ func (s *System) LabRouteViews(u *units.Unit) (out [LabViews]LabRouteView, ok bo
 	if reg == nil {
 		return out, false
 	}
-	reg.BindMappingWord(s.mappingWordSource(u.Handle))
+	reg.BindMappingWordWithCheckpointBinding(s.checkpointMappingWordSource(u.Handle))
 	cls := s.classKeyFor(u.Handle)
 	layer := reg.For(cls, profile)
 	if layer == nil {
@@ -168,7 +168,7 @@ func (s *System) LabGround(u *units.Unit, x0, z0, x1, z1 int32) (search, static 
 	if reg == nil {
 		return nil, nil, false
 	}
-	reg.BindMappingWord(s.mappingWordSource(u.Handle))
+	reg.BindMappingWordWithCheckpointBinding(s.checkpointMappingWordSource(u.Handle))
 	layer := reg.For(s.classKeyFor(u.Handle), profile)
 	if layer == nil {
 		return nil, nil, false
@@ -277,7 +277,7 @@ func (s *System) LabReachOf(u *units.Unit, r *LabReach) bool {
 	if reg == nil {
 		return false
 	}
-	reg.BindMappingWord(s.mappingWordSource(u.Handle))
+	reg.BindMappingWordWithCheckpointBinding(s.checkpointMappingWordSource(u.Handle))
 	layer := reg.For(s.classKeyFor(u.Handle), profile)
 	if layer == nil {
 		return false

@@ -8,20 +8,24 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
 )
 
 // Encoder streams the canonical little-endian representation. Its first error
 // is sticky; Field supplies diagnostic context without changing the encoding.
 // Encoders and their captures are used only on the simulation thread.
 type Encoder struct {
-	w       io.Writer
-	err     error
-	path    string
-	owner   Owner
-	capture *Capture
-	closed  bool
-	absent  bool
-	word    [8]byte
+	w          io.Writer
+	err        error
+	path       string
+	pathSuffix string
+	pathIndex  int
+	pathKind   uint8
+	owner      Owner
+	capture    *Capture
+	closed     bool
+	absent     bool
+	word       [8]byte
 }
 
 // NewEncoder creates a standalone encoder. A nil writer is an error; use
@@ -35,7 +39,30 @@ func NewEncoder(w io.Writer) *Encoder {
 }
 
 // Field sets the logical path used by subsequent errors; it emits no bytes.
-func (e *Encoder) Field(path string) { e.path = path }
+func (e *Encoder) Field(path string) {
+	e.path, e.pathSuffix, e.pathKind = path, "", 0
+}
+
+// FieldChild is Field(prefix + "." + name) without allocating on success.
+func (e *Encoder) FieldChild(prefix, name string) {
+	e.path, e.pathSuffix, e.pathKind = prefix, name, 1
+}
+
+// FieldIndex formats an indexed logical path only when an error occurs.
+func (e *Encoder) FieldIndex(prefix string, index int, suffix string) {
+	e.path, e.pathIndex, e.pathSuffix, e.pathKind = prefix, index, suffix, 2
+}
+
+func (e *Encoder) errorPath() string {
+	switch e.pathKind {
+	case 1:
+		return e.path + "." + e.pathSuffix
+	case 2:
+		return e.path + "[" + strconv.Itoa(e.pathIndex) + "]" + e.pathSuffix
+	default:
+		return e.path
+	}
+}
 
 func (e *Encoder) Bool(v bool) {
 	var b uint8
@@ -130,7 +157,7 @@ func (e *Encoder) Fail(err error) {
 	if err == nil || e.Err() != nil {
 		return
 	}
-	e.err = contextualError(e.owner, e.path, err)
+	e.err = contextualError(e.owner, e.errorPath(), err)
 	if e.capture != nil {
 		e.capture.err = e.err
 	}

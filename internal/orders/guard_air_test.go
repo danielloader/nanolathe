@@ -59,7 +59,7 @@ func newAirGuardFixture(t *testing.T) *airGuardFixture {
 
 	sim := rng.NewSimulation(7)
 	f.sim = &sim
-	binding := &QueueBinding{
+	binding := NewQueueBinding(QueueBindingConfig{
 		SimRNG: f.sim,
 		Lookup: func(h pool.Handle) *units.Unit {
 			if h == 2 {
@@ -68,7 +68,7 @@ func newAirGuardFixture(t *testing.T) *airGuardFixture {
 			return nil
 		},
 		Hostility: func(_, _ *units.Unit) bool { return false },
-		Movement: &MovementGoalAdapter{
+		Movement: NewMovementGoalAdapter(MovementGoalAdapterConfig{
 			InstallAir: func(req AirGoalRequest) bool {
 				f.air = append(f.air, req)
 				return true
@@ -78,8 +78,8 @@ func newAirGuardFixture(t *testing.T) *airGuardFixture {
 				return false
 			},
 			Release: func(*Node) bool { return true },
-		},
-	}
+		}),
+	})
 	QueueForUnit(f.guard).SetBinding(binding)
 	QueueForUnit(f.ward).SetBinding(&QueueBinding{})
 	return f
@@ -448,7 +448,7 @@ func TestVTOLFollowDivertsToTheOffMapLoiter(t *testing.T) {
 	offMap := true
 	calls := 0
 	binding := QueueForUnit(f.guard).Binding()
-	binding.Movement.RunAir = func(u *units.Unit, n *Node, satisfied uint32, tick uint32) (Code, bool) {
+	binding.Movement.SetRunAir(func(u *units.Unit, n *Node, satisfied uint32, tick uint32) (Code, bool) {
 		calls++
 		if DescriptorFor(n.ID).Name != "VTOL_Follow" {
 			t.Fatalf("the seam saw %q", DescriptorFor(n.ID).Name)
@@ -458,7 +458,7 @@ func TestVTOLFollowDivertsToTheOffMapLoiter(t *testing.T) {
 		}
 		n.DynamicGate |= 0xE0 // the recovery leg's gate [04 R-AIR-01 §5]
 		return Code(2), true
-	}
+	})
 
 	n := airGuardNode(f)
 	before := f.sim.Draws()
@@ -519,13 +519,13 @@ func TestVTOLFollowCopiesTheWardsWorkThroughTheAirLeg(t *testing.T) {
 			}
 			frame.MaxHealth, frame.Health = 100, 40
 			binding := QueueForUnit(f.guard).Binding()
-			wardOnly := binding.Lookup
-			binding.Lookup = func(h pool.Handle) *units.Unit {
+			wardOnly := binding.LookupHook()
+			binding.SetLookup(func(h pool.Handle) *units.Unit {
 				if h == frame.Handle {
 					return frame
 				}
 				return wardOnly(h)
-			}
+			})
 			wq := QueueForUnit(f.ward)
 			wq.Push(rowVTOLMobileBuild, Node{
 				Owner: f.ward.Handle,

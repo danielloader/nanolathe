@@ -134,8 +134,8 @@ func TestCloakDebitRunsInSlotOrderDuringPass(t *testing.T) {
 	pl := settlingPlayer(&svc, 0)
 	pl.Stock[Energy] = 10
 	w, _ := settleTestWorld(t, 2)
-	svc.CloakCost = func(u *units.Unit) float32 { return 6 }
-	svc.CloakDue = func(*units.Unit) bool { return true }
+	svc.SetCloakCost(func(u *units.Unit) float32 { return 6 })
+	svc.SetCloakDue(func(*units.Unit) bool { return true })
 
 	svc.Settle(0, 0, w)
 

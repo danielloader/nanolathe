@@ -61,9 +61,9 @@ func TestClassifierEligibilityStatusLifecycle(t *testing.T) {
 	def := &content.UnitDef{UnitName: "status-lifecycle", MaxDamage: 100, Limit: -1}
 
 	var observedAtCreate uint32
-	world.OnCreate = func(_ pool.Handle, u *Unit) {
+	world.SetCreateHook(func(_ pool.Handle, u *Unit) {
 		observedAtCreate = u.Flags
-	}
+	})
 	h, err := world.Create(def, 0, 0, 0, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -93,9 +93,9 @@ func TestClassifierEligibilityStatusLifecycle(t *testing.T) {
 	// The death notification observes the still-live record. The bit is cleared
 	// by the finalizer, matching the documented teardown ordering [04 §2.3].
 	var observedAtDeath uint32
-	world.OnDeath = func(_ pool.Handle, _ DeathCause, dead *Unit) {
+	world.SetDeathHook(func(_ pool.Handle, _ DeathCause, dead *Unit) {
 		observedAtDeath = dead.Flags
-	}
+	})
 	world.Destroy(h, DeathKilled)
 	if observedAtDeath != 0 {
 		t.Fatalf("OnDeath fired at Destroy, want deferred finalization: status=%08x", observedAtDeath)

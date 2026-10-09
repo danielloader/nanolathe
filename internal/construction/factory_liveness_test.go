@@ -267,7 +267,7 @@ func TestFourAircraftProductsEachLeaveThePad(t *testing.T) {
 	sys.BindWorld(w)
 	svc.Movement = sys
 	// Session composition binds the runner before a product's first order visit.
-	svc.OrderBinding = &orders.QueueBinding{Lookup: w.Unit, Movement: &orders.MovementGoalAdapter{RunAir: sys.AirLegRunner()}}
+	svc.OrderBinding = orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: w.Unit, Movement: orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{RunAir: sys.AirLegRunner()})})
 
 	for i := range svc.Economy.Players {
 		svc.Economy.Players[i].Stock[0] = 1e9

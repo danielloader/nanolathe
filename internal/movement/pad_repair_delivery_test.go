@@ -66,18 +66,18 @@ func padRepairFixture(t *testing.T) (*units.World, *economy.Service, *units.Unit
 	econ := &economy.Service{}
 	svc := construction.NewService(nil, cat, w, econ)
 	svc.Combat = &combat.Service{}
-	binding := &orders.QueueBinding{Economy: econ, Lookup: w.Unit}
+	binding := orders.NewQueueBinding(orders.QueueBindingConfig{Economy: econ, Lookup: w.Unit})
 	// The session's binding, verbatim in shape [internal/session/composition.go]:
 	// the builder is the unit billed, the patient the unit healed, and the
 	// quantum is the BUILDER's `workertime/30` [05 R-WORK-01 §3].
-	binding.Work = &orders.WorkAdapter{
+	binding.Work = orders.NewWorkAdapter(orders.WorkAdapterConfig{
 		Repair: func(builder, patient *units.Unit, _ *orders.Node, _ uint32) bool {
 			if builder == nil || builder.Def == nil {
 				return false
 			}
 			return svc.Repair(builder, patient, construction.WorkerQuantum(builder.Def.WorkerTime))
 		},
-	}
+	})
 	q := orders.QueueForUnit(lander)
 	q.SetBinding(binding)
 	q.Push(orders.Lookup("SelfRepair"), orders.Node{Owner: lh, Target: ph})

@@ -92,9 +92,9 @@ func TestAssistInsideGroundReachWaitsForMovementOutcome(t *testing.T) {
 					t.Fatal("fixture must be inside ground padded reach")
 				}
 				calls := 0
-				q.Binding().Work.Assist = func(*units.Unit, *Node, uint32) bool { calls++; return true }
+				q.Binding().Work.SetAssist(func(*units.Unit, *Node, uint32) bool { calls++; return true })
 				var marker AirGoalRequest
-				q.Binding().Movement.InstallAir = func(req AirGoalRequest) bool { marker = req; return true }
+				q.Binding().Movement.SetInstallAir(func(req AirGoalRequest) bool { marker = req; return true })
 				phase, waiting, gate := uint8(0), uint8(1), uint32(gateWorkApproach)
 				if air {
 					phase, waiting, gate = 1, 2, gateMoveOutcomes

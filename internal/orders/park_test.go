@@ -80,10 +80,10 @@ func TestParkPhase0RoutesThroughTheRectangleInstaller(t *testing.T) {
 	var rects []RectangleGoalRequest
 	q := QueueForUnit(u)
 	q.SetBinding(&QueueBinding{
-		Movement: &MovementGoalAdapter{
+		Movement: NewMovementGoalAdapter(MovementGoalAdapterConfig{
 			InstallRectangle: func(req RectangleGoalRequest) bool { rects = append(rects, req); return true },
 			Release:          func(*Node) bool { return true },
-		},
+		}),
 	})
 	n := &Node{ID: Lookup("Park"), Owner: u.Handle, Deadline: -1, Satisfied: 0x3E0}
 

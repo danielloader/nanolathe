@@ -16,7 +16,7 @@ func TestAirAttackPreparationUsesSlotVerbs(t *testing.T) {
 			sys, w, u := wideAirFixture(t)
 			target := airTargetFor(t, sys, w, 30, 16)
 			q := orders.QueueForUnit(u)
-			q.Binding().Weapons = &orders.WeaponAdapter{InhibitSlot: combat.InhibitWeaponSlot, ReleaseSlot: combat.ReleaseWeaponSlot, SetManualTarget: combat.SetManualWeaponTarget, FireTarget: combat.FireWeaponTarget, FirePoint: combat.FireWeaponPoint, StopFiring: combat.StopWeaponFiring}
+			q.Binding().Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{InhibitSlot: combat.InhibitWeaponSlot, ReleaseSlot: combat.ReleaseWeaponSlot, SetManualTarget: combat.SetManualWeaponTarget, FireTarget: combat.FireWeaponTarget, FirePoint: combat.FireWeaponPoint, StopFiring: combat.StopWeaponFiring})
 			for i := range u.Slots {
 				u.InstallWeapon(i, &content.WeaponDef{Range: 1000})
 				combat.ReleaseWeaponSlot(u, i)
@@ -80,7 +80,7 @@ func TestAirStrikeFiresOnlyAfterRelease(t *testing.T) {
 		combat.ReleaseWeaponSlot(u, i)
 	}
 	q := orders.QueueForUnit(u)
-	q.Binding().Weapons = &orders.WeaponAdapter{InhibitSlot: combat.InhibitWeaponSlot, ReleaseSlot: combat.ReleaseWeaponSlot, SetManualTarget: combat.SetManualWeaponTarget, FireTarget: combat.FireWeaponTarget, FirePoint: combat.FireWeaponPoint, StopFiring: combat.StopWeaponFiring}
+	q.Binding().Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{InhibitSlot: combat.InhibitWeaponSlot, ReleaseSlot: combat.ReleaseWeaponSlot, SetManualTarget: combat.SetManualWeaponTarget, FireTarget: combat.FireWeaponTarget, FirePoint: combat.FireWeaponPoint, StopFiring: combat.StopWeaponFiring})
 	q.Push(orders.Lookup("AirStrike"), orders.Node{Owner: u.Handle, Target: target.Handle, Phase: 1, GoalX: target.X, GoalY: target.Y, GoalZ: target.Z, GoalSupplied: true})
 	n := q.Head()
 	sys.legAirStrike(u, n, 0, 100)
@@ -126,7 +126,7 @@ func TestAirStrikeRetainsAttackIntent(t *testing.T) {
 			WeaponVelocity: 32 << 16, Tolerance: 32767, AreaOfEffect: 32, ReloadTime: 5, Burst: 2, BurstRate: 3}
 		u.InstallWeapon(0, weapon)
 		q := orders.QueueForUnit(u)
-		q.Binding().Weapons = &orders.WeaponAdapter{ReleaseSlot: combat.ReleaseWeaponSlot, FirePoint: combat.FireWeaponPoint}
+		q.Binding().Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{ReleaseSlot: combat.ReleaseWeaponSlot, FirePoint: combat.FireWeaponPoint})
 		n := orders.Node{Owner: u.Handle, Target: target.Handle, Phase: 5,
 			GoalX: target.X, GoalY: target.Y, GoalZ: target.Z, GoalSupplied: true}
 		if ground {

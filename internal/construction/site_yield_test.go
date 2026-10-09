@@ -18,7 +18,7 @@ func siteYieldFixture(t *testing.T) (*Service, *units.Unit, *units.Unit, *orders
 	s.Economy = &economy.Service{}
 	bindConstructionCombat(s)
 	sim := rng.NewSimulation(17)
-	s.OrderBinding = &orders.QueueBinding{Lookup: s.World.Unit, SimRNG: &sim, Movement: &orders.MovementGoalAdapter{InstallPoint: s.Movement.InstallPointGoal, Release: s.Movement.ReleaseGoalPayload}}
+	s.OrderBinding = orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: s.World.Unit, SimRNG: &sim, Movement: orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{InstallPoint: s.Movement.InstallPointGoal, Release: s.Movement.ReleaseGoalPayload})})
 	s.queueForUnit(b).SetBinding(s.OrderBinding)
 	n.Phase, n.DynamicGate, n.Deadline = uint8(State2), 0, -1
 	d := *b.Def

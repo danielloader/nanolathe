@@ -1675,15 +1675,15 @@ func TestCompositionInstallsContentAnimationMetadata(t *testing.T) {
 	}
 	// The two feature seams, bound against the same table.
 	def := cat.Features["tree1"]
-	if s.Features == nil || s.Features.SequenceFrames == nil || s.Features.ShadowSequenceResolved == nil || s.Features.BurnFrameGeometry == nil {
+	if s.Features == nil || s.Features.SequenceFramesHook() == nil || s.Features.ShadowSequenceResolved == nil || s.Features.BurnFrameGeometryHook() == nil {
 		t.Fatal("composition left a feature art seam unbound")
 	}
-	if got := s.Features.SequenceFrames(def, 1); len(got) != 1 || got[0] != 4 {
+	if got := s.Features.SequenceFramesHook()(def, 1); len(got) != 1 || got[0] != 4 {
 		t.Fatalf("death sequence delays %v, want the entry's single frame word [4]", got)
 	}
 	// The reclaim sequence is unauthored, so it reports no sequence and the
 	// transition keeps its immediate replacement. Nothing is invented for it.
-	if got := s.Features.SequenceFrames(def, 2); got != nil {
+	if got := s.Features.SequenceFramesHook()(def, 2); got != nil {
 		t.Fatalf("unauthored reclaim sequence reported delays %v, want none", got)
 	}
 	if !s.Features.ShadowSequenceResolved(def, def.SeqNameDieShad) {
@@ -1692,13 +1692,13 @@ func TestCompositionInstallsContentAnimationMetadata(t *testing.T) {
 	if s.Features.ShadowSequenceResolved(def, "missing-shadow") {
 		t.Fatal("missing event shadow resolved through composition")
 	}
-	gw, gh, gx, gy := s.Features.BurnFrameGeometry(def, 0)
+	gw, gh, gx, gy := s.Features.BurnFrameGeometryHook()(def, 0)
 	if gw != 20 || gh != 12 || gx != 7 || gy != 5 {
 		t.Fatalf("burn frame geometry (%d,%d,%d,%d), want the first frame's (20,12,7,5)", gw, gh, gx, gy)
 	}
 	// Visit 3 has crossed the first frame's three holds into the second, whose
 	// authored delay of zero still occupies one visit [05 R-FEAT-01 §10].
-	if gw, gh, _, _ := s.Features.BurnFrameGeometry(def, 3); gw != 5 || gh != 7 {
+	if gw, gh, _, _ := s.Features.BurnFrameGeometryHook()(def, 3); gw != 5 || gh != 7 {
 		t.Fatalf("burn frame geometry at visit 3 is %dx%d, want the second frame's 5x7", gw, gh)
 	}
 
@@ -1909,8 +1909,8 @@ func TestCompositionKeepsASharedAnimationTable(t *testing.T) {
 	}
 	def := cat.Features["tree1"]
 	for visit := int32(0); visit < 6; visit++ {
-		a1, a2, a3, a4 := own.Features.BurnFrameGeometry(def, visit)
-		b1, b2, b3, b4 := sharing.Features.BurnFrameGeometry(def, visit)
+		a1, a2, a3, a4 := own.Features.BurnFrameGeometryHook()(def, visit)
+		b1, b2, b3, b4 := sharing.Features.BurnFrameGeometryHook()(def, visit)
 		if a1 != b1 || a2 != b2 || a3 != b3 || a4 != b4 {
 			t.Fatalf("visit %d: shared table answered differently from the battle's own", visit)
 		}

@@ -37,7 +37,7 @@ func TestPathFailureRecoveryRearmsEverySixtyTicks(t *testing.T) {
 		t.Fatal("Move_Ground order is unavailable")
 	}
 	q := orders.QueueForUnit(u)
-	q.SetBinding(&orders.QueueBinding{Movement: &orders.MovementGoalAdapter{Destroy: system.ReleaseGoal}})
+	q.SetBinding(&orders.QueueBinding{Movement: orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{Destroy: system.ReleaseGoal})})
 	q.Push(moveID, orders.Node{Owner: h, GoalX: world.CellToWorld(8), GoalZ: world.CellToWorld(1), GoalSupplied: true})
 	head := q.Head()
 	if head == nil {

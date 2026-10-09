@@ -75,7 +75,7 @@ func TestMusicIntensityDeathCauseAndStoredAttacker(t *testing.T) {
 			u.EngagementTarget = 0 // stored owner survives attacker removal
 			s.Econ.Players[u.Owner].Exists = tc.present
 			s.publication.events.Reset()
-			s.Units.OnDeath(u.Handle, 0, u)
+			s.Units.DeathHook()(u.Handle, 0, u)
 			points := int32(0)
 			for _, ev := range s.publication.events.SnapshotEvents() {
 				if ev.Kind == frame.EventKindMusicIntensity {

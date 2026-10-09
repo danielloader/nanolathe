@@ -177,14 +177,14 @@ type Service struct {
 	// session and economy must not import it; the callback receives the slot
 	// index and owns the local-slot test, since economy has no notion of which
 	// slot is local. A nil hook is a battle with no end conditions bound.
-	EndCondition func(player int, tick uint32)
+	endCondition func(player int, tick uint32)
 	// CloakCost reports a unit's per-pass cloak upkeep, or zero when the unit
 	// is not cloaked [05 "Cloak debit"] C13. It is a seam rather than a field
 	// read because the cloak state lives on the unit's runtime status and the
 	// authored cost on its definition, and economy owns neither. A nil hook
 	// skips the debit entirely, which is what a session with no cloaking units
 	// would observe anyway.
-	CloakCost func(*units.Unit) float32
+	cloakCost func(*units.Unit) float32
 	// CloakDue is the narrow seam for the runtime cloak gate. It reports the
 	// REQUEST side only; whether the unit ends the pass hidden is decided by
 	// ApplyCloakDebits and written to units.Unit.Hidden, never read back here.
@@ -233,7 +233,10 @@ type Service struct {
 	//
 	// A nil hook is inert: no unit is cloak-due, which is what a fixture that
 	// composes no session observes.
-	CloakDue func(*units.Unit) bool
+	cloakDue func(*units.Unit) bool
+
+	// Installation proofs are diagnostics only, excluded from checkpoint bytes.
+	checkpointCallbacks [3]checkpointCallbackProof
 
 	// Wind holds the authoritative wind holder for wind generation scalar [01 §7.3]
 	// [05 "Wind generation"]. Scalar is float32 published per I2.
@@ -524,7 +527,7 @@ func ApplyCloakDebits(s *Service, w *units.World, player int, getCost func(*unit
 	}
 	p := &s.Players[player]
 	ForEachUnitOrdered(w, player, func(u *units.Unit) {
-		if s.CloakDue == nil || !s.CloakDue(u) {
+		if s.CloakDueHook() == nil || !s.CloakDueHook()(u) {
 			u.SetCloakedInstance(false)
 			return
 		}

@@ -12,7 +12,7 @@ import (
 )
 
 func bindBuilderOptions(u *units.Unit, rules Rules, features community.Features, options BuilderOptions) *QueueBinding {
-	b := &QueueBinding{Rules: rules, Community: features, BuilderOptions: func(uint8) BuilderOptions { return options }}
+	b := NewQueueBinding(QueueBindingConfig{Rules: rules, Community: features, BuilderOptions: func(uint8) BuilderOptions { return options }})
 	BindQueue(u, &Queue{binding: b})
 	return b
 }
@@ -40,10 +40,10 @@ func TestBuilderOptionDefaultsAndFallbacks(t *testing.T) {
 		t.Fatalf("invalid movement mode patrol option = %d, want Both", got)
 	}
 	calledOwner := uint8(0xff)
-	b.BuilderOptions = func(owner uint8) BuilderOptions {
+	b.SetBuilderOptions(func(owner uint8) BuilderOptions {
 		calledOwner = owner
 		return bad
-	}
+	})
 	u.Flags = 0
 	if got := guardOption(u); got != GuardCavedog {
 		t.Fatalf("invalid stored guard option = %d, want Cavedog", got)
@@ -54,7 +54,7 @@ func TestBuilderOptionDefaultsAndFallbacks(t *testing.T) {
 	if calledOwner != u.Owner {
 		t.Fatalf("options provider owner = %d, want acting owner %d", calledOwner, u.Owner)
 	}
-	b.BuilderOptions = nil
+	b.SetBuilderOptions(nil)
 	if got := guardOption(u); got != GuardCavedog {
 		t.Fatalf("nil provider guard option = %d, want default Cavedog", got)
 	}
@@ -135,7 +135,7 @@ func TestGuardHomeStayArithmeticFractionsAndQuadrants(t *testing.T) {
 		GoalY: numeric.Fixed(int64(41)<<16 | 0x2468),
 		GoalZ: numeric.Fixed(int64(11)<<16 | 0x9bdf),
 	}
-	b.Movement = &MovementGoalAdapter{InstallPoint: func(PointGoalRequest) bool { return true }}
+	b.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{InstallPoint: func(PointGoalRequest) bool { return true }})
 	if code := guardFollowMaintenance(guard, n, ward, 0, 10); code != 2 {
 		t.Fatalf("guard maintenance returned %d, want hold", code)
 	}
@@ -180,10 +180,10 @@ func communityPatrolFixture(t *testing.T, air bool, option PatrolWorkOption) (*u
 	unitScans, featureScans := 0, 0
 	b := bindBuilderOptions(u, &CommunityRules{}, community.Features{PatrollingBuilderFilters: true}, options)
 	b.SimRNG = &sim
-	b.Resources = func(uint8) (ResourceView, bool) {
+	b.SetResources(func(uint8) (ResourceView, bool) {
 		return ResourceView{Stock: [2]float32{0, 50}, Capacity: [2]float32{100, 100}}, true
-	}
-	b.World = &WorldQueryAdapter{
+	})
+	b.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{
 		ForEachUnit:         func(func(pool.Handle, *units.Unit) bool) { unitScans++ },
 		ForEachUnitInRadius: func(_, _, _ numeric.Fixed, _ func(pool.Handle, *units.Unit) bool) { unitScans++ },
 		LookupFeature: func(int32, int32) (FeatureView, bool) {
@@ -191,8 +191,8 @@ func communityPatrolFixture(t *testing.T, air bool, option PatrolWorkOption) (*u
 			return FeatureView{ID: 7, Energy: 10, Reclaimable: true, Autoreclaimable: true}, true
 		},
 		TerrainHeight: func(numeric.Fixed, numeric.Fixed) (numeric.Fixed, bool) { return 0, true },
-	}
-	b.Movement = &MovementGoalAdapter{
+	})
+	b.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{
 		InstallPoint: func(PointGoalRequest) bool { return true },
 		InstallAir:   func(AirGoalRequest) bool { return true },
 		Release:      func(*Node) bool { return true },
@@ -200,7 +200,7 @@ func communityPatrolFixture(t *testing.T, air bool, option PatrolWorkOption) (*u
 			t.Fatalf("reclaim-only patrol reached the VTOL assistance pad scan")
 			return nil
 		},
-	}
+	})
 	n := &Node{Owner: u.Handle, Phase: 1, Deadline: -1, GoalSupplied: true}
 	return u, n, &sim, &unitScans, &featureScans
 }
@@ -238,9 +238,9 @@ func TestPatrolWorkFiltersPreserveBranchDraws(t *testing.T) {
 
 		t.Run(name+" reclaim only keeps its retail entry", func(t *testing.T) {
 			u, n, sim, unitScans, featureScans := communityPatrolFixture(t, air, PatrolReclaimOnly)
-			QueueOfUnit(u).Binding().Resources = func(uint8) (ResourceView, bool) {
+			QueueOfUnit(u).Binding().SetResources(func(uint8) (ResourceView, bool) {
 				return ResourceView{Stock: [2]float32{50, 50}, Capacity: [2]float32{100, 100}}, true
-			}
+			})
 			// CP-CON-3 resumes ground patrol at its storage gate, but aircraft
 			// directly at feature pairing. Air has no healthy-stores early hold
 			// [04 R-ORD-01 §4, §7].

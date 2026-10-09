@@ -35,7 +35,7 @@ func TestRetailSaveAfterLaterTargetFinalization(t *testing.T) {
 	shooter.InstallWeapon(0, weapon)
 	shooter.Slots[0].Target = units.Target{Kind: units.TargetUnit, Unit: target.Handle}
 	shooter.Slots[0].Reload = 100
-	svc := combat.Service{ControlByte: func(uint8) uint8 { return combat.ControlByteHuman }}
+	svc := *combat.NewService(combat.ServiceConfig{ControlByte: func(uint8) uint8 { return combat.ControlByteHuman }})
 	src.Units.VisitActiveSlots(func(v units.SlotVisit) {
 		if v.Handle == shooter.Handle {
 			svc.StepWeaponsForUnit(shooter, 1, src.Units, nil, nil, src.Econ, nil, src.SimRNG(), src.CrtRNG())
@@ -92,7 +92,7 @@ func TestRetailSaveAfterLaterTargetFinalization(t *testing.T) {
 func TestRetailPendingDamageResumesOneFinalization(t *testing.T) {
 	src, f := newRestoreCoreFixture(t, 2)
 	victim, attacker := src.Units.Unit(f[0].handle), src.Units.Unit(f[1].handle)
-	svc := combat.Service{ControlByte: func(uint8) uint8 { return combat.ControlByteHuman }}
+	svc := *combat.NewService(combat.ServiceConfig{ControlByte: func(uint8) uint8 { return combat.ControlByteHuman }})
 	result := svc.AcceptDamage(src.Units, 1, combat.DamageInput{Victim: victim.Handle, Attacker: attacker.Handle, Nominal: 200, Kind: 1})
 	if !result.DeathLatched {
 		t.Fatal("fatal packet did not latch")
@@ -103,12 +103,12 @@ func TestRetailPendingDamageResumesOneFinalization(t *testing.T) {
 	}
 	dst, g := newRestoreCoreFixture(t, 2)
 	count := 0
-	dst.Units.OnDeath = func(_ pool.Handle, cause units.DeathCause, u *units.Unit) {
+	dst.Units.SetDeathHook(func(_ pool.Handle, cause units.DeathCause, u *units.Unit) {
 		count++
 		if cause != units.DeathKilled || u.EngagementTarget != attacker.Handle {
 			t.Fatal("restored death lost cause or attacker")
 		}
-	}
+	})
 	stage := &RetailBattleStage{Session: dst, StableUnit: stableUnitMap(g), Image: &save.BattleImage{Units: image}}
 	if err := RestoreRetailBattleCore(stage); err != nil {
 		t.Fatal(err)

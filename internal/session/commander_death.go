@@ -40,7 +40,16 @@ func (s *Session) isCommanderForOwner(u *units.Unit) bool {
 // decremented live count and cannot run twice for one commander [08
 // R-SKIR-01 §3].
 func (s *Session) processPendingCommanderDeaths(tick uint32) {
-	if s == nil || s.Units == nil || s.result.Ended {
+	if s == nil || s.Units == nil {
+		return
+	}
+	// One human reaching its latch must not stop the other owner's sweep
+	// (DESIGN_MULTIPLAYER §16.4.1). Ordinary sessions retain their old gate.
+	if s.onlineResults != nil {
+		if s.onlineBattleEnded() {
+			return
+		}
+	} else if s.result.Ended {
 		return
 	}
 	rule := CommanderDeathMode(s.Skirmish.CommanderDeath)

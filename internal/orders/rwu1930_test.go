@@ -57,7 +57,7 @@ func TestAirEntryStep1SeekReplacement(t *testing.T) {
 	} {
 		q, u := gateFixture()
 		u.Flags = u.Flags&^(units.StandingFieldMask<<units.StandingFireShift) | tc.stance<<units.StandingFireShift
-		q.SetBinding(&QueueBinding{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return u }})
+		q.SetBinding(NewQueueBinding(QueueBindingConfig{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return u }}))
 		q.Push(Lookup("AirToGround"), Node{Owner: u.Handle, Target: 7, GoalX: 11 << 16, GoalY: 12 << 16, GoalZ: 13 << 16, GoalSupplied: true})
 		if tc.successor {
 			q.Push(Lookup("Wait"), Node{Owner: u.Handle})
@@ -119,7 +119,7 @@ func TestAirEntryStep2SeekReplacement(t *testing.T) {
 		u.Flags |= 2 << units.StandingFireShift
 		// The lookup resolves nothing: the target has gone since the record was
 		// issued, which is §16's null target reference.
-		q.SetBinding(&QueueBinding{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return nil }})
+		q.SetBinding(NewQueueBinding(QueueBindingConfig{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return nil }}))
 		q.Push(Lookup("AirToGround"), Node{Owner: u.Handle, Target: tc.target, StaticGate: tc.mask | 1})
 		if tc.successor {
 			q.Push(Lookup("Wait"), Node{Owner: u.Handle})
@@ -177,7 +177,7 @@ func TestSelfRepairPhase0ReadsTargetRemainingAndOwnActivation(t *testing.T) {
 			Remaining: tc.repairerRemaining,
 			Activated: tc.repairerActivated,
 		}
-		q.SetBinding(&QueueBinding{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return repairer }})
+		q.SetBinding(NewQueueBinding(QueueBindingConfig{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return repairer }}))
 		n := &Node{ID: Lookup("SelfRepair"), Owner: u.Handle, Target: 7}
 
 		if code := selfRepairHandler(u, n, 0, 40); code != tc.want {

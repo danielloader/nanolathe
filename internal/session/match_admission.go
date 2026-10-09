@@ -34,8 +34,8 @@ var (
 	// not registered in this build.
 	ErrMatchRulesMismatch = errors.New("nanolathe: match admission rejected the rules")
 	// ErrMatchContentMismatch: the frozen content does not hold what the
-	// configuration names — a side, the applied mutators, the content limits
-	// — or there are no frozen inputs.
+	// configuration names — a side, the applied mutators or unit
+	// restrictions, the content limits — or there are no frozen inputs.
 	ErrMatchContentMismatch = errors.New("nanolathe: match admission rejected the content")
 	// ErrMatchConfigurationRejected: the configuration selects something this
 	// build cannot run, or there is no configuration.
@@ -93,12 +93,6 @@ func admitMatch(c EffectiveMatchConfig, inputs *content.SimulationInputs) (match
 		errs = append(errs, matchAdmissionError(kind, inputs, path, expected))
 	}
 
-	// Configuration this build cannot run. Unit restrictions have no
-	// enforcement yet (§8.6 field 12, §15 Q16): an encoded choice is refused,
-	// never silently ignored (U5's reading, §16.2).
-	if len(r.UnitRestrictions) != 0 {
-		refuse(ErrMatchConfigurationRejected, "unitRestrictions", "no unit restriction until restriction enforcement exists (DESIGN_MULTIPLAYER §15 Q16)")
-	}
 	// The online policies are the consumer policies this build supports
 	// (§8.6 field 15). Schema validity admits the same values today; the two
 	// are separate questions, and a policy a later schema admits is not
@@ -139,21 +133,15 @@ func admitMatch(c EffectiveMatchConfig, inputs *content.SimulationInputs) (match
 		}
 	}
 
-	// Rules: the configuration's effective Community table is the table the
-	// frozen content was prepared under. Its rule set was resolved against
-	// this build's registry when the configuration was, and the inputs
-	// cannot contradict it, so it is not looked up again here.
-	//
-	// TODO(question): the frozen inputs record the Community table's digest
-	// but not the rule set that prepared the catalog clone, and preparation
-	// also asks the set's combat seam for each weapon's reload
-	// (prepareCommunityWeapons). Two sets with one table and different reload
-	// answers are indistinguishable here. Across seats, CompareMatchIdentity
-	// (U6) now refuses them: the content digest covers each prepared weapon's
-	// reload time. And FreezeMatchInputs prepares under the configuration's
-	// own set. What remains open is inputs a caller froze some other way;
-	// settle by recording the preparing set's name and base in the freeze
-	// request (content's owner, U4).
+	// The frozen metadata records the exact resolved set that prepared the
+	// catalog. A matching Community table alone cannot establish that: two
+	// sets can prepare different reload values under the same table
+	// (DESIGN_MULTIPLAYER §16.3.34).
+	set, known := LookupRuleSet(r.RuleName)
+	name, base := inputs.PreparingRule()
+	if !known || name != r.RuleName || base != string(set.Base) {
+		refuse(ErrMatchRulesMismatch, "preparingRule", fmt.Sprintf("catalog preparation under rule %q with its registered base, frozen under %q (%q)", r.RuleName, name, base))
+	}
 	if got := communityDigest(r.Community); got != inputs.CommunityDigest() {
 		want := inputs.CommunityDigest()
 		refuse(ErrMatchRulesMismatch, "community", fmt.Sprintf("the Community table the frozen content was prepared under, digest %x, got %x", want[:], got[:]))
@@ -173,20 +161,27 @@ func admitMatch(c EffectiveMatchConfig, inputs *content.SimulationInputs) (match
 			refuse(ErrMatchContentMismatch, fmt.Sprintf("seats[%d].side", i), fmt.Sprintf("a side below the admitted content's %d sides", len(cat.Sides)))
 		}
 	}
-	// The content limits are the ones the frozen catalog was compiled under,
-	// compared exactly where the catalog attests them.
-	//
-	// TODO(question): a catalog prepared as a clone — mutators applied, or a
-	// weapon reload changed by the rules — carries no limits, because
-	// Catalog.Clone drops them (recorded under U4 in DESIGN_MULTIPLAYER
-	// §16.2), so its limits cannot be compared here. Settle by having the
-	// catalog's owner copy Limits in Clone; this comparison then covers every
-	// battle.
-	if limits := cat.Limits; limits.Units > 0 {
-		p := r.ContentProfile
-		if int64(p.Units) != int64(limits.Units) || int64(p.Weapons) != int64(limits.Weapons) || p.TNTBytes != uint64(limits.TNTBytes) || p.LOSBytes != uint64(limits.LOSBytes) {
-			refuse(ErrMatchContentMismatch, "contentProfile", fmt.Sprintf("the limits the frozen catalog was compiled under: units %d, weapons %d, TNT bytes %d, LOS bytes %d", limits.Units, limits.Weapons, limits.TNTBytes, limits.LOSBytes))
+	// The unit restrictions are the set the frozen catalog clone was already
+	// restricted with, before the mutators, so composition never applies one
+	// a second time (§8.6 field 12, §16.6; DESIGN_MODS_MUTATORS §15.3, §15.5).
+	// An empty list therefore admits only unrestricted content. The records'
+	// definition IDs index the unrestricted catalog, which FreezeMatchInputs
+	// verified them against; here every surviving record is checked against
+	// the frozen table as well.
+	if set, err := matchRestrictionSet(r.UnitRestrictions); err != nil {
+		refuse(ErrMatchConfigurationRejected, "unitRestrictions", "records describing one restriction set: "+err.Error())
+	} else if frozen := inputs.Restrictions(); !set.Equal(frozen) {
+		refuse(ErrMatchContentMismatch, "unitRestrictions", fmt.Sprintf("the unit restrictions the frozen catalog was prepared with, %q, got %q", frozen.String(), set.String()))
+	} else if !set.IsZero() {
+		if path, expected, ok := matchFrozenRestrictionRecords(cat, r.UnitRestrictions, set); !ok {
+			refuse(ErrMatchContentMismatch, path, expected)
 		}
+	}
+	// Clone preserves the effective compile limits even when preparation
+	// transforms definitions. Missing limits are an admission failure too.
+	limits, p := cat.Limits, r.ContentProfile
+	if int64(p.Units) != int64(limits.Units) || int64(p.Weapons) != int64(limits.Weapons) || p.TNTBytes != uint64(limits.TNTBytes) || p.LOSBytes != uint64(limits.LOSBytes) {
+		refuse(ErrMatchContentMismatch, "contentProfile", fmt.Sprintf("the limits the frozen catalog was compiled under: units %d, weapons %d, TNT bytes %d, LOS bytes %d", limits.Units, limits.Weapons, limits.TNTBytes, limits.LOSBytes))
 	}
 	// TODO(question): the frozen inputs carry no record of the content
 	// profile's name or directory table, nor of the mod's id, version and
@@ -225,8 +220,9 @@ func admitMatch(c EffectiveMatchConfig, inputs *content.SimulationInputs) (match
 // Design reading: the permissions, views, online policies and participant
 // identities are not composition inputs. The command boundary (U2) and the
 // host (M6) enforce them from the configuration, so they neither change the
-// battle composed here nor refuse it. The session does not keep the
-// configuration; a host that needs it keeps the value it admitted.
+// battle composed here nor refuse it. The session privately retains the
+// admitted inputs/configuration for checkpoint provenance; a host keeps its
+// own resolved value for command and view policy enforcement.
 func NewAdmittedSkirmish(inputs *content.SimulationInputs, c EffectiveMatchConfig, progress content.Progress) (*Session, error) {
 	admitted, err := admitMatch(c, inputs)
 	if err != nil {
@@ -264,7 +260,11 @@ func NewAdmittedSkirmish(inputs *content.SimulationInputs, c EffectiveMatchConfi
 	// its own mount when it adopts the battle, as it does for every battle
 	// (attachBattleAudio). The simulation reads nothing through it, and its
 	// presentation draws use a copy of the CRT stream.
-	return composeSkirmish(skirmishEntry{cfg: cfg, features: r.Community, mission: admitted.mission, inputs: inputs}, options, nil)
+	receipt, err := newSessionCheckpointAdmission(inputs, c, admitted.mission)
+	if err != nil {
+		return nil, err
+	}
+	return composeSkirmish(skirmishEntry{cfg: cfg, features: r.Community, mission: admitted.mission, inputs: inputs, checkpointAdmission: receipt}, options, nil)
 }
 
 // matchSingleSeat refuses a configuration the single-player composition
@@ -405,7 +405,19 @@ func matchSkirmishSetup(r *MatchConfigRequest) (SkirmishConfig, SkirmishEntryOpt
 // multi-seat ones included; whether a battle can be composed from the result
 // is NewAdmittedSkirmish's question, and whether the result admits the
 // configuration is ValidateMatchInputs'. A supplied catalog must have been
-// compiled under the configuration's content limits, which admission checks.
+// compiled under the configuration's content limits, which admission checks,
+// and must be unrestricted: the catalog compile's own table, whose record
+// indices field 12's definition IDs are.
+//
+// The unit restrictions of field 12 are read back against that unrestricted
+// catalog (RestrictionsFromMatch) and handed to battle entry as its
+// restriction set, so the clone is restricted exactly as single-player battle
+// entry restricts it, before the Community preparation and the mutators
+// (DESIGN_MODS_MUTATORS §15.3, §15.5). Without a supplied catalog and with
+// restrictions, the catalog is compiled from a capture of its own first and
+// then handed to battle entry, whose freeze checks it against the battle's
+// capture like any supplied catalog. An empty field 12 leaves the front half
+// exactly as before.
 //
 // Every refusal wraps ErrMatchConfigurationRejected (no configuration) or
 // ErrMatchContentMismatch (this install could not capture, compile, select
@@ -420,10 +432,37 @@ func FreezeMatchInputs(fs vfs.FSOps, cat *content.Catalog, c EffectiveMatchConfi
 	}
 	cfg, options := matchSkirmishSetup(&c.request)
 	options.Progress = progress
-	entry, err := prepareSkirmishEntry(fs, cat, cfg, options)
+	if records := c.request.UnitRestrictions; len(records) != 0 {
+		base, err := matchUnrestrictedCatalog(fs, cat, c.request.MapName, options.ContentLimits, progress)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", matchAdmissionError(ErrMatchContentMismatch, nil, "catalog",
+				"the unrestricted catalog this install compiles, which the unit restrictions' definition IDs index"), err)
+		}
+		restrictions, err := RestrictionsFromMatch(base, records)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", matchAdmissionError(ErrMatchContentMismatch, nil, "unitRestrictions",
+				"unit restrictions this install's unrestricted catalog holds, record for record"), err)
+		}
+		cat, options.Restrictions = base, restrictions
+	}
+	entry, err := prepareSkirmishInputs(fs, cat, cfg, options, false)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", matchAdmissionError(ErrMatchContentMismatch, nil, "inputs",
 			fmt.Sprintf("content this install can capture, compile, prepare and freeze for map %q, %d seats and rule set %q", c.request.MapName, len(c.request.Seats), c.request.RuleName)), err)
 	}
 	return entry.inputs, nil
+}
+
+// matchUnrestrictedCatalog is the catalog field 12's definition IDs index: a
+// supplied catalog, validated as battle entry validates it, or one compiled
+// through a capture of fs taken for the configuration's map.
+func matchUnrestrictedCatalog(fs vfs.FSOps, cat *content.Catalog, mapName string, limits content.Limits, progress content.Progress) (*content.Catalog, error) {
+	if cat != nil {
+		return strictCatalogWithProgress(fs, cat, limits, progress)
+	}
+	sources, err := content.CaptureSimulationSources(fs, mapName)
+	if err != nil {
+		return nil, err
+	}
+	return strictCatalogWithProgress(sources.Filesystem(), nil, limits, progress)
 }

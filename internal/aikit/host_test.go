@@ -94,7 +94,7 @@ func newGenFixture(t *testing.T, b Brain) *genFixture {
 	if f.enemy, err = f.w.Create(def, 1, numeric.FixedFromInt(300), 0, numeric.FixedFromInt(100)); err != nil {
 		t.Fatal(err)
 	}
-	m := &ai.Manager{Player: 0, Catalog: cat, UnitVisible: func(uint8, *units.Unit) bool { return true }}
+	m := ai.NewManager(ai.ManagerConfig{Player: 0, Catalog: cat, UnitVisible: func(uint8, *units.Unit) bool { return true }})
 	f.h = NewHost(m, b, PersonaMax) // thinks every 10 ticks, reacts in 3
 	return f
 }

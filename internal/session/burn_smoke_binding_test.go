@@ -22,13 +22,13 @@ func TestBurnSmokeProducerSpendsTheContainersLastFrameDraw(t *testing.T) {
 	s.Clock.GlobalTick = 40
 	s.Features = &features.Service{}
 	s.bindFeatureStripProducers()
-	if s.Features.BurnSmoke == nil {
+	if s.Features.BurnSmokeHook() == nil {
 		t.Fatal("the composer left BurnSmoke unbound; the emission would lose its third draw")
 	}
 
 	pos := [3]numeric.Fixed{numeric.FixedFromInt(48), numeric.FixedFromInt(12), numeric.FixedFromInt(80)}
 	before := crt.Draws()
-	s.Features.BurnSmoke(pos)
+	s.Features.BurnSmokeHook()(pos)
 	if got := crt.Draws() - before; got != 1 {
 		t.Fatalf("the producer spent %d CRT draws, want exactly 1 — the puff's last frame [05 R-FEAT-01 §16]", got)
 	}

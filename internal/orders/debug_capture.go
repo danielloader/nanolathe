@@ -78,10 +78,10 @@ func (q *Queue) DebugSnapshot(unit pool.Handle) *DebugState {
 	}
 	for i, c := range d.contacts {
 		copy := DebugDangerContact{Present: c.unit != nil, Handle: c.handle, ObservedTick: c.tick, FailedUntil: c.failedUntil, X: c.x, Z: c.z}
-		if b := q.Binding(); c.unit != nil && b != nil && b.Lookup != nil {
-			copy.IdentityChecked, copy.IdentityCurrent = true, b.Lookup(c.handle) == c.unit
-			if observer := b.Lookup(unit); copy.IdentityCurrent && observer != nil && b.DangerVisible != nil {
-				copy.VisibilityChecked, copy.VisibleNow = true, b.DangerVisible(observer, c.unit)
+		if b := q.Binding(); c.unit != nil && b != nil && b.LookupHook() != nil {
+			copy.IdentityChecked, copy.IdentityCurrent = true, b.LookupHook()(c.handle) == c.unit
+			if observer := b.LookupHook()(unit); copy.IdentityCurrent && observer != nil && b.DangerVisibleHook() != nil {
+				copy.VisibilityChecked, copy.VisibleNow = true, b.DangerVisibleHook()(observer, c.unit)
 			}
 		}
 		out.Danger.Contacts[i] = copy

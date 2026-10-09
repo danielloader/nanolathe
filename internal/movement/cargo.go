@@ -471,8 +471,8 @@ func (s *System) HandleDeath(w *units.World, dyingHandle pool.Handle, killerHand
 			if len(beforePassengerDamage) != 0 && beforePassengerDamage[0] != nil {
 				beforePassengerDamage[0](w.Unit(cargoHandle))
 			}
-			if s.Damage != nil {
-				s.Damage(tick, combat.DamageInput{Victim: cargoHandle, Attacker: killerHandle, Nominal: 30000, Kind: uint8(cascadeCause)})
+			if s.DamageHook() != nil {
+				s.DamageHook()(tick, combat.DamageInput{Victim: cargoHandle, Attacker: killerHandle, Nominal: 30000, Kind: uint8(cascadeCause)})
 			}
 			DetachCargo(w, cargoHandle)
 		}

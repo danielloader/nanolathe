@@ -40,9 +40,9 @@ func TestRouteRecordsStaticRevisionButZeroPublicationKeepsMetadata(t *testing.T)
 func TestFeatureStampRestampsOnlyItsOwnRectangle(t *testing.T) {
 	terrain := staticRevisionTerrain(8, 8)
 	layer := NewClassLayer(Template(), terrain, nil)
-	terrain.ClassRestamp = func(ax, az int32, fx, fz int16) {
+	terrain.SetClassRestamp(func(ax, az int32, fx, fz int16) {
 		layer.restampOccupantRect(Cell{X: ax, Z: az}, fx, fz)
-	}
+	})
 	if got := layer.Value(3, 3); got == LayerBlocked {
 		t.Fatalf("empty cell unexpectedly blocked: %d", got)
 	}

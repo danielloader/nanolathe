@@ -9,8 +9,8 @@ func TestDamageActivityAfterReactionBeforeHealthAndParalyze(t *testing.T) {
 	for _, kind := range []uint8{KindOrdinary, KindParalyzer, KindNoReaction, KindHeal} {
 		f := newReactionFixture(t)
 		calls := 0
-		f.svc.Reaction.ObserverNotice = func(v *units.Unit) { v.Owner = 3 }
-		f.svc.DamageActivity = func(v, a *units.Unit, tick uint32) {
+		f.svc.Reaction.SetObserverNotice(func(v *units.Unit) { v.Owner = 3 })
+		f.svc.SetDamageActivity(func(v, a *units.Unit, tick uint32) {
 			calls++
 			if tick != 7 || v.LastDamageCause != kind || v.LastDamageSide != a.Owner || v.Health != 5000 {
 				t.Fatalf("activity before provenance or after health: kind=%d victim=%+v", kind, v)
@@ -18,7 +18,7 @@ func TestDamageActivityAfterReactionBeforeHealthAndParalyze(t *testing.T) {
 			if kind != KindNoReaction && v.Owner != 3 {
 				t.Fatal("activity ran before reaction")
 			}
-		}
+		})
 		f.svc.AcceptDamage(f.w, 7, DamageInput{Victim: f.victim.Handle, Attacker: f.attacker.Handle, Kind: kind, Nominal: 1})
 		want := 1
 		if kind == KindHeal {

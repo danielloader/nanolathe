@@ -241,13 +241,13 @@ func TestDispatchPrecedesStrategicRefresh(t *testing.T) {
 	e := runtimeEconomy(0, 2)
 	var maintenanceState uint32
 	maintenanceCalled := false
-	m.WeaponMaintenance = func(uint8) {
+	m.SetWeaponMaintenance(func(uint8) {
 		maintenanceCalled = true
 		maintenanceState = r.State
 		if m.Deadlines[TaskExplore] <= 30 || m.Strategic.LastRefreshTick != 0 {
 			t.Fatal("maintenance must follow task dispatch and precede strategic refresh")
 		}
-	}
+	})
 	m.Tick(30, w, e)
 	probe := rng.NewSimulation(41)
 	probe.Uint32n(900)
@@ -311,20 +311,20 @@ func TestWaveGatherEngageHysteresisAndNearestStableTie(t *testing.T) {
 	e := runtimeEconomy(0, 2)
 	e.Players[1].Exists, e.Players[1].ControllerState = true, 1
 	e.Players[2].Exists, e.Players[2].ControllerState = true, 1
-	m := &Manager{
+	m := NewManager(ManagerConfig{
 		Player: 0, GroupWaveA: append([]pool.Handle(nil), wave...), GroupNull: []pool.Handle{base},
-		OrderBinding: &orders.QueueBinding{World: &orders.WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}},
+		OrderBinding: &orders.QueueBinding{World: orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 0 }})},
 		IsAlliance:   func(uint8, uint8) bool { return false },
-	}
+	})
 
 	if got := m.nearestHostileUnit(w, e, numeric.FixedFromInt(64), 0, numeric.FixedFromInt(64)); got == nil || got.Handle != first {
 		t.Fatalf("nearest hostile tie chose %v, want first player/pool target %d (other %d)", got, first, second)
 	}
-	m.IsAlliance = nil
+	m.SetIsAlliance(nil)
 	if got := m.nearestHostileUnit(w, e, numeric.FixedFromInt(64), 0, numeric.FixedFromInt(64)); got != nil {
 		t.Fatalf("nil alliance binding exposed hostile target %v", got)
 	}
-	m.IsAlliance = func(uint8, uint8) bool { return false }
+	m.SetIsAlliance(func(uint8, uint8) bool { return false })
 	for _, h := range wave {
 		if orders.QueueOfUnit(w.Unit(h)) != nil {
 			t.Fatal("wave fixture must exercise a fresh unbound unit")
@@ -394,11 +394,11 @@ func TestNearestHostileAndRallyScoreUseSignedPositionWordDeltas(t *testing.T) {
 	}
 	e := runtimeEconomy(0, 2)
 	e.Players[1].Exists, e.Players[1].ControllerState = true, 1
-	m := &Manager{
-		Player:       0,
-		IsAlliance:   func(uint8, uint8) bool { return false },
-		rallyTargets: []pool.Handle{first},
-	}
+	m := NewManager(ManagerConfig{
+		Player:     0,
+		IsAlliance: func(uint8, uint8) bool { return false },
+	})
+	m.rallyTargets = []pool.Handle{first}
 	m.Strategic.SingleVectors = map[string]int8{"enemy": 7}
 
 	if got := m.nearestHostileUnit(w, e, queryX, 0, 0); got == nil || got.Handle != second {
@@ -839,10 +839,10 @@ func TestWaveAndExploreNoTargetPathsAreDeterministicNoOps(t *testing.T) {
 		group = append(group, h)
 	}
 	r := rng.NewSimulation(19)
-	m := &Manager{
+	m := NewManager(ManagerConfig{
 		Player: 0, RNG: &r, Terrain: &world.Terrain{CellW: 16, CellH: 16}, GroupWaveA: group,
 		IsAlliance: func(uint8, uint8) bool { return false },
-	}
+	})
 	e := runtimeEconomy(0, 2)
 	m.doWave(1, w, e, waveAThreshold, waveMin, waveMax)
 	if !m.waveAEngaged {

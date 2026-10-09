@@ -118,7 +118,7 @@ func TestOW0D_YGateHelper(t *testing.T) {
 func TestOW0D_WeaponStartEvents(t *testing.T) {
 	var svc Service
 	var got []EventKind
-	svc.Events = func(ev Event) { got = append(got, ev.Kind) }
+	svc.SetEvents(func(ev Event) { got = append(got, ev.Kind) })
 	// Create a weapon with start sound and start smoke
 	wdef := &content.WeaponDef{ID: 20, Range: 100, WeaponVelocity: 100 * 65536 / 30, LineOfSight: true, SoundStart: "fire.wav", StartSmoke: true}
 	slot := &Slot{Weapon: wdef, MuzzlePiece: -1, Target: Target{Kind: TargetPoint, X: numeric.FixedFromInt(10), Z: numeric.FixedFromInt(10)}}

@@ -76,8 +76,8 @@ func TestRetailLandedAircraftResumePatrolAssistance(t *testing.T) {
 	// or target health bar alone cannot satisfy this check.
 	var contributed [3]bool
 	work := orders.QueueForUnit(aircraft[0]).Binding().Work
-	assist := work.Assist
-	work.Assist = func(builder *units.Unit, n *orders.Node, tick uint32) bool {
+	assist := work.AssistHook()
+	work.SetAssist(func(builder *units.Unit, n *orders.Node, tick uint32) bool {
 		previous := target.Remaining
 		result := assist(builder, n, tick)
 		if n.Target == h && target.Remaining < previous {
@@ -88,7 +88,7 @@ func TestRetailLandedAircraftResumePatrolAssistance(t *testing.T) {
 			}
 		}
 		return result
-	}
+	})
 	var handles []pool.Handle
 	for _, u := range aircraft {
 		handles = append(handles, u.Handle)

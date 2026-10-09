@@ -11,6 +11,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/checkpoint"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
@@ -82,15 +83,23 @@ const (
 // tasks and autonomous maintenance before strategic refresh and settlement
 // [08 "Dispatch gates and order sinks"][05 "Authoritative settlement order"].
 type Manager struct {
+	// Optional diagnostic bindings, installed only at admitted battle entry.
+	// Application history has its own checkpoint fragment; keys are immutable.
+	checkpointHistory *ApplicationHistory
+	checkpointKeys    *content.CheckpointKeys
+	// Per-slot provenance is excluded from bytes; copied managers cannot
+	// inherit installation ownership (DESIGN_MULTIPLAYER §16.3.71).
+	checkpointCallbacks [9]checkpointManagerCallbackProof
+
 	// WeaponMaintenance is session wiring for the manager's post-task scan.
 	// It runs before the separate strategic refresh [06 §3.2][08 "Dispatch gates and order sinks"].
-	WeaponMaintenance func(player uint8)
+	weaponMaintenance func(player uint8)
 
 	// CanPursueAir is session wiring for Modern wave air targets: whether a
 	// member has a weapon that can engage an airborne hostile. It is asked
 	// only under ModernPlanner; nil keeps the retail broadcast
 	// (DESIGN_SESSIONS_AI_SAVE "Modern wave air targets").
-	CanPursueAir func(member, target *units.Unit) bool
+	canPursueAir func(member, target *units.Unit) bool
 	// modernWaveAir is set by ModernPlanner for the duration of its step.
 	modernWaveAir bool
 
@@ -120,7 +129,7 @@ type Manager struct {
 
 	// P0-07: typed build request replacing lossy callback [P0-07] ON-06 F-P0-004.
 	// Session binds this to construction queue; default nil → error diagnostic.
-	QueueBuildTyped func(BuildRequest) error // typed mobile/factory build [P0-07]
+	queueBuildTyped func(BuildRequest) error // typed mobile/factory build [P0-07]
 	// OrderBinding is the session-owned context for AI order producers that
 	// submit ordinary orders directly. It is nil for unbound fixtures, where
 	// those producers retain their existing queue behavior [04 §3.3][06 §11.1].
@@ -128,7 +137,7 @@ type Manager struct {
 
 	// P0-07: alliance awareness [P0-07] ON-06. A nil binding fails closed: the
 	// manager may not infer hostility from ownership or side identity [08 R-AI-01 §9].
-	IsAlliance func(a, b uint8) bool
+	isAlliance func(a, b uint8) bool
 
 	// Manager task vectors for tactical coordination. The retail manager owns
 	// nine vector records; the classifier and direct group writer fill some of
@@ -193,11 +202,11 @@ type Manager struct {
 	// 30-tick strategic refresh rebuilds the rally score vector. A nil binding
 	// keeps that vector empty rather than granting omniscient target knowledge
 	// [08 R-AI-01 §7, §16].
-	RallyVisible func(viewer uint8, target *units.Unit) bool `json:"-"`
+	rallyVisible func(viewer uint8, target *units.Unit) bool `json:"-"`
 	// RallyProbeKnown follows the session visibility mode: LineOfSight samples
 	// the owner's current-sight byte grid; Permanent LOS samples the local
 	// viewing slot's mapping-word bit [08 R-AI-01 §7][03 R-VIS-01 §1].
-	RallyProbeKnown func(owner uint8, x, y, z numeric.Fixed) bool `json:"-"`
+	rallyProbeKnown func(owner uint8, x, y, z numeric.Fixed) bool `json:"-"`
 	// RallyShotTimeAdmits is the gate the rally task applies to a member with
 	// no mover. [08 R-AI-01 §19] settles both halves of what used to be an open
 	// question here: the member test reads the unit record's mover pointer, and
@@ -211,7 +220,7 @@ type Manager struct {
 	// planner carries no second copy. A nil binding fails closed: an unbound
 	// fixture skips buildings rather than rallying them from an invented
 	// predicate.
-	RallyShotTimeAdmits func(unit *units.Unit, x, y, z numeric.Fixed) bool `json:"-"`
+	rallyShotTimeAdmits func(unit *units.Unit, x, y, z numeric.Fixed) bool `json:"-"`
 
 	// RS-06: per-session isolated RNG [I4][RS-P0-018]. A nil stream is an
 	// unbound setup and must not fall back to process-global randomness.
@@ -288,11 +297,11 @@ type Manager struct {
 	ControllerParams string `json:"-"`
 	// UnitVisible is the owner's ordinary line-of-sight predicate for one
 	// unit, bound by the session. Nil fails closed (nothing is visible).
-	UnitVisible func(viewer uint8, target *units.Unit) bool `json:"-"`
+	unitVisible func(viewer uint8, target *units.Unit) bool `json:"-"`
 	// JammerSuppresses is the bound visibility policy, including Survival's
 	// shared side. The observation builder calls it on the simulation thread;
 	// nil keeps Strict's owner-only exemption [03 R-VIS-01 §4].
-	JammerSuppresses func(viewer, jammerOwner uint8) bool `json:"-"`
+	jammerSuppresses func(viewer, jammerOwner uint8) bool `json:"-"`
 	// Community is the session's projected copy of the feature-table answers
 	// the think step reads: the three ProTA 4.8 package AI switches
 	// (DESIGN_COMMUNITY_PATCH §4.7). The session writes it beside Planner at
@@ -437,8 +446,8 @@ func (m *Manager) EngineUpkeep(tick uint32, w *units.World) {
 	if m == nil {
 		return
 	}
-	if m.WeaponMaintenance != nil {
-		m.WeaponMaintenance(m.Player)
+	if m.WeaponMaintenanceHook() != nil {
+		m.WeaponMaintenanceHook()(m.Player)
 	}
 	if m.Catalog != nil || m.Strategic.Catalog != nil {
 		m.Strategic.MaybeRefresh(tick, m.simRNG(), m.Player, w)
@@ -729,8 +738,8 @@ func (m *Manager) retailStep(tick uint32, w *units.World, econ *economy.Service)
 		m.EnsureStrategicInitialized()
 		m.runDueTasks(tick, w, econ)
 	}
-	if m.WeaponMaintenance != nil {
-		m.WeaponMaintenance(m.Player)
+	if m.WeaponMaintenanceHook() != nil {
+		m.WeaponMaintenanceHook()(m.Player)
 	}
 	// Strategic refresh follows manager dispatch and precedes economy
 	// settlement, which invokes this method as its before-deadline callback
@@ -972,7 +981,7 @@ func (m *Manager) constructionPlacePass(tick uint32, w *units.World, econ *econo
 		}
 		if isFactoryBuilder && isTargetMobile {
 			// Factory production: direct typed queue without placement.
-			if m.QueueBuildTyped == nil {
+			if m.QueueBuildTypedHook() == nil {
 				// Production composition binds this ordinary order sink. An
 				// unbound fixture has no supported submission path.
 				continue
@@ -984,7 +993,13 @@ func (m *Manager) constructionPlacePass(tick uint32, w *units.World, econ *econo
 				Kind:    BuildKindFactoryQueue,
 				Tick:    tick,
 			}
-			_ = m.QueueBuildTyped(req)
+			a := m.beginClassicApplication(tick, u, nil, classicBuildIntent(req))
+			actor := classicApplicationActor(a, u)
+			mark := a.InsertionIndex()
+			err := m.QueueBuildTypedHook()(req)
+			succeeded := classicBuildSucceeded(a, mark, actor, err)
+			a.RecordBuild(actor, req, err)
+			finishClassicApplication(a, succeeded)
 			continue
 		}
 		// Mobile site construction via the placement root. The root searches
@@ -1039,10 +1054,26 @@ func (m *Manager) issueMobileBuild(builder *units.Unit, defKey string, res Place
 	if m == nil || builder == nil {
 		return
 	}
+	// The typed producer below omits Request.Tick; retain that zero in the
+	// intent too, independently of this submission's application tick.
+	a := m.beginClassicApplication(tick, builder, nil, classicBuildIntent(BuildRequest{
+		Builder: builder.Handle, UnitKey: defKey, X: res.WorldX, Z: res.WorldZ, Count: 1, Kind: BuildKindMobileSite,
+	}))
 	q := orders.BindQueueBinding(builder, m.OrderBinding)
 	if q == nil {
+		finishClassicApplication(a, false)
 		return
 	}
+	restore := a.ObserveQueue(q, builder)
+	actor := classicApplicationActor(a, builder)
+	succeeded, returned := false, false
+	defer func() {
+		restore()
+		// A panic leaves the attempt incomplete, so capture refuses it.
+		if returned {
+			finishClassicApplication(a, succeeded)
+		}
+	}()
 	id := orders.Resolve(14, builder, nil, &orders.ResolvePos{X: res.WorldX, Z: res.WorldZ})
 	// The purge belongs to the insertion, which runs on whatever the resolver
 	// wrote; it is not conditional on the command having resolved.
@@ -1056,9 +1087,13 @@ func (m *Manager) issueMobileBuild(builder *units.Unit, defKey string, res Place
 		node.Param1 = m.definitionIndex(defKey)
 		node.Param2 = 1
 		q.Push(0, node)
+		returned = true
 		return
 	}
-	_ = queueExactResult(m, defKey, res)
+	mark := a.InsertionIndex()
+	err := queueExactResult(m, defKey, res, actor)
+	succeeded = classicBuildSucceeded(a, mark, actor, err)
+	returned = true
 }
 
 // definitionIndex is the catalog type index the construction task passes as the
@@ -1155,8 +1190,8 @@ func (m *Manager) constructionRepositionPass(tick uint32, w *units.World, centre
 			// has just made this member's own: the move target is the centre's
 			// height plus a zero vertical offset, and the patrol destination is
 			// the centre local itself [08 R-AI-01 §3].
-			m.submitResolvedOrder(u, resolveAIIntent(2, u, nil, tx, centreY, tz), nil, tx, centreY, tz, tick, 0, 0)
-			m.submitResolvedOrder(u, resolveAIIntent(9, u, nil, centreX, centreY, centreZ), nil, centreX, centreY, centreZ, tick, 1, 0)
+			m.submitResolvedOrder(u, 2, resolveAIIntent(2, u, nil, tx, centreY, tz), nil, tx, centreY, tz, tick, 0, 0)
+			m.submitResolvedOrder(u, 9, resolveAIIntent(9, u, nil, centreX, centreY, centreZ), nil, centreX, centreY, centreZ, tick, 1, 0)
 			continue
 		}
 		dx := int64(fixedWordDelta(centreX, u.X))
@@ -1185,7 +1220,7 @@ func (m *Manager) constructionRepositionPass(tick uint32, w *units.World, centre
 			ty = numeric.Fixed(int32(u.Y) + int32((dy*scale)>>16))
 			tz = numeric.Fixed(int32(u.Z) + int32((dz*scale)>>16))
 		}
-		m.submitResolvedOrder(u, resolveAIIntent(9, u, nil, tx, ty, tz), nil, tx, ty, tz, tick, 0, 0)
+		m.submitResolvedOrder(u, 9, resolveAIIntent(9, u, nil, tx, ty, tz), nil, tx, ty, tz, tick, 0, 0)
 	}
 }
 
@@ -1251,7 +1286,9 @@ func (m *Manager) doResourceGroup(tick uint32, w *units.World, econ *economy.Ser
 			// zero draw leave activation unchanged [08 R-AI-01 §2]. The ProTA
 			// appliance branch keeps this order, threshold and draw unchanged.
 			if energyStock <= metalStock+metalStock {
+				a := m.beginClassicActivation(tick, u, false)
 				u.SetActivated(false)
+				a.Finish(1, 2)
 			} else if netEnergy > 0 {
 				// Only this surplus branch admits RNG(5) [08 R-AI-01 §2][I4].
 				s := m.simRNG()
@@ -1261,7 +1298,9 @@ func (m *Manager) doResourceGroup(tick uint32, w *units.World, econ *economy.Ser
 					continue
 				}
 				if s.Uint32n(5) != 0 {
+					a := m.beginClassicActivation(tick, u, true)
 					u.SetActivated(true)
+					a.Finish(1, 2)
 				}
 			}
 			continue
@@ -1304,7 +1343,7 @@ func (m *Manager) doResourceGroup(tick uint32, w *units.World, econ *economy.Ser
 		if !ok {
 			continue
 		}
-		if m.QueueBuildTyped == nil {
+		if m.QueueBuildTypedHook() == nil {
 			// No supported order sink is available in an unbound fixture.
 			continue
 		}
@@ -1315,7 +1354,14 @@ func (m *Manager) doResourceGroup(tick uint32, w *units.World, econ *economy.Ser
 			Kind:    BuildKindFactoryQueue,
 			Tick:    tick,
 		}
-		if err := m.QueueBuildTyped(req); err != nil {
+		a := m.beginClassicApplication(tick, u, nil, classicBuildIntent(req))
+		actor := classicApplicationActor(a, u)
+		mark := a.InsertionIndex()
+		err := m.QueueBuildTypedHook()(req)
+		succeeded := classicBuildSucceeded(a, mark, actor, err)
+		a.RecordBuild(actor, req, err)
+		finishClassicApplication(a, succeeded)
+		if err != nil {
 			continue
 		}
 	}
@@ -1584,7 +1630,7 @@ func (m *Manager) broadcastGroupOrder(w *units.World, group uint8, intent int, m
 		// needs the session diplomacy and sea level [04 R-ORD-02 §1].
 		orders.BindQueueBinding(u, m.OrderBinding)
 		id := resolveAIIntent(intent, u, target, x, y, z)
-		m.submitResolvedOrder(u, id, target, x, y, z, tick, modifier, spacing)
+		m.submitResolvedOrder(u, intent, id, target, x, y, z, tick, modifier, spacing)
 	}
 }
 
@@ -1619,15 +1665,32 @@ func resolveAIIntent(intent int, actor, target *units.Unit, x, y, z numeric.Fixe
 // silent record that completes when it heads.
 //
 // Only the rally task tests the result, and it tests it at its own call site.
-func (m *Manager) submitResolvedOrder(u *units.Unit, id orders.ID, target *units.Unit, x, y, z numeric.Fixed, tick uint32, modifier uint8, argument int32) {
+func (m *Manager) submitResolvedOrder(u *units.Unit, intent int, id orders.ID, target *units.Unit, x, y, z numeric.Fixed, tick uint32, modifier uint8, argument int32) {
 	if m == nil || u == nil {
 		return
 	}
 	queued := modifier != 0
+	var rawTarget uint32
+	if target != nil {
+		rawTarget = uint32(target.Handle)
+	}
+	a := m.beginClassicApplication(tick, u, target, ClassicApplicationIntent{Kind: 1, Code: int64(intent), ResolvedRow: uint8(id),
+		Modifier: modifier, Argument: argument, X: x, Y: y, Z: z, RawTarget: rawTarget})
 	q := orders.BindQueueBinding(u, m.OrderBinding)
 	if q == nil {
+		finishClassicApplication(a, false)
 		return
 	}
+	restore := a.ObserveQueue(q, u)
+	actor := classicApplicationActor(a, u)
+	succeeded, returned := false, false
+	defer func() {
+		restore()
+		// Restoring diagnostic scope does not complete a panicking producer.
+		if returned {
+			finishClassicApplication(a, succeeded)
+		}
+	}()
 	if !queued {
 		q.PurgeUnprotected()
 		q.DropLeadingAutoOps()
@@ -1638,11 +1701,15 @@ func (m *Manager) submitResolvedOrder(u *units.Unit, id orders.ID, target *units
 	}
 	node := orders.NewNodeForOrder(id, targetHandle, x, y, z, tick, u.Handle, queued)
 	node.Param1 = uint32(argument)
+	mark := a.InsertionIndex()
 	q.Push(id, node)
+	result, completed := a.InsertionAfter(mark, actor, 1)
+	succeeded = id != 0 && completed && result.Inserted
+	returned = true
 }
 
 func (m *Manager) hostileOwner(owner uint8, econ *economy.Service) bool {
-	if m == nil || econ == nil || m.IsAlliance == nil || int(owner) >= len(econ.Players) || int(m.Player) >= len(econ.Players) {
+	if m == nil || econ == nil || m.IsAllianceHook() == nil || int(owner) >= len(econ.Players) || int(m.Player) >= len(econ.Players) {
 		return false
 	}
 	if owner == m.Player {
@@ -1652,7 +1719,7 @@ func (m *Manager) hostileOwner(owner uint8, econ *economy.Service) bool {
 	if !p.Exists || (p.ControllerState != 1 && p.ControllerState != 2 && p.ControllerState != 3) {
 		return false
 	}
-	return !m.IsAlliance(m.Player, owner)
+	return !m.IsAllianceHook()(m.Player, owner)
 }
 
 // The task records store authoritative positions as signed 32-bit 16.16
@@ -1731,7 +1798,7 @@ const airborneMode = 2
 // targets: the policy is on for this step, the session bound its predicate,
 // and the chosen hostile is airborne.
 func (m *Manager) airTargetSplit(target *units.Unit) bool {
-	return m.modernWaveAir && m.CanPursueAir != nil && target != nil && target.Move.ModeMirror&3 == airborneMode
+	return m.modernWaveAir && m.CanPursueAirHook() != nil && target != nil && target.Move.ModeMirror&3 == airborneMode
 }
 
 // broadcastAirSplit is broadcastGroupOrder for an airborne target under
@@ -1750,7 +1817,7 @@ func (m *Manager) broadcastAirSplit(w *units.World, econ *economy.Service, group
 			continue
 		}
 		pick := target
-		if !m.CanPursueAir(u, target) {
+		if !m.CanPursueAirHook()(u, target) {
 			if !looked {
 				ground, looked = m.nearestHostile(w, econ, x, y, z, true), true
 			}
@@ -1765,7 +1832,7 @@ func (m *Manager) broadcastAirSplit(w *units.World, econ *economy.Service, group
 		}
 		orders.BindQueueBinding(u, m.OrderBinding)
 		id := resolveAIIntent(intent, u, ordered, pick.X, pick.Y, pick.Z)
-		m.submitResolvedOrder(u, id, ordered, pick.X, pick.Y, pick.Z, tick, modifier, 0)
+		m.submitResolvedOrder(u, intent, id, ordered, pick.X, pick.Y, pick.Z, tick, modifier, 0)
 	}
 }
 
@@ -1791,9 +1858,9 @@ func (m *Manager) InitializeBattleState(terrain *world.Terrain, bindings RallyBa
 		return false
 	}
 	m.Terrain = terrain
-	m.RallyVisible = bindings.Visible
-	m.RallyProbeKnown = bindings.ProbeKnown
-	m.RallyShotTimeAdmits = bindings.ShotTimeAdmits
+	m.SetRallyVisible(bindings.Visible)
+	m.SetRallyProbeKnown(bindings.ProbeKnown)
+	m.SetRallyShotTimeAdmits(bindings.ShotTimeAdmits)
 	halfX := (terrain.CellW * 16) / 2
 	halfZ := (terrain.CellH * 16) / 2
 	x := fixedWordFromUnits(halfX)
@@ -1803,6 +1870,19 @@ func (m *Manager) InitializeBattleState(terrain *world.Terrain, bindings RallyBa
 	m.rallyDriftX, m.rallyDriftY, m.rallyDriftZ = x, 0, z
 	m.rallyBestScore = 0
 	m.rallyInitialized = true
+	return true
+}
+
+// InitializeBattleStateWithCheckpointBinding preserves the ordinary one-shot
+// initialization and stamps only the three slots it actually installed. In
+// particular, a rejected repeat cannot repair invalidated proof (§16.3.71).
+func (m *Manager) InitializeBattleStateWithCheckpointBinding(terrain *world.Terrain, bindings RallyBattleBindings, authority *checkpoint.BindingAuthority) bool {
+	if !m.InitializeBattleState(terrain, bindings) {
+		return false
+	}
+	m.stampCheckpointCallback(checkpointRallyVisible, bindings.Visible != nil, authority)
+	m.stampCheckpointCallback(checkpointRallyProbeKnown, bindings.ProbeKnown != nil, authority)
+	m.stampCheckpointCallback(checkpointRallyShotTimeAdmits, bindings.ShotTimeAdmits != nil, authority)
 	return true
 }
 
@@ -1816,7 +1896,7 @@ func (m *Manager) refreshRallyTargets(w *units.World, econ *economy.Service) {
 		return
 	}
 	m.rallyTargets = m.rallyTargets[:0]
-	if w == nil || econ == nil || m.RallyVisible == nil {
+	if w == nil || econ == nil || m.RallyVisibleHook() == nil {
 		return
 	}
 	m.rallyWalk = w.AppendLiveSliced(m.rallyWalk[:0]) // players then slots ascending (I1)
@@ -1830,7 +1910,7 @@ func (m *Manager) refreshRallyTargets(w *units.World, econ *economy.Service) {
 			// target registry's build of the vector applies [06 §3.1].
 			continue
 		}
-		if !m.RallyVisible(m.Player, u) {
+		if !m.RallyVisibleHook()(m.Player, u) {
 			continue
 		}
 		m.rallyTargets = append(m.rallyTargets, u.Handle)
@@ -1982,7 +2062,7 @@ func (m *Manager) doRally(tick uint32, w *units.World, econ *economy.Service) {
 	m.rallyProbeX = fixedWordAdd(m.rallyProbeX, m.rallyDriftX)
 	m.rallyProbeY = fixedWordAdd(m.rallyProbeY, m.rallyDriftY)
 	m.rallyProbeZ = fixedWordAdd(m.rallyProbeZ, m.rallyDriftZ)
-	if m.RallyProbeKnown != nil && m.RallyProbeKnown(m.Player, m.rallyProbeX, m.rallyProbeY, m.rallyProbeZ) {
+	if m.RallyProbeKnownHook() != nil && m.RallyProbeKnownHook()(m.Player, m.rallyProbeX, m.rallyProbeY, m.rallyProbeZ) {
 		score := m.rallyProbeScore(w, m.rallyProbeX, m.rallyProbeZ)
 		if drawBelowSigned(r, m.rallyBestScore) < drawBelowSigned(r, score) {
 			m.rallyBestScore = score
@@ -2003,7 +2083,7 @@ func (m *Manager) doRally(tick uint32, w *units.World, econ *economy.Service) {
 		// anything, and one with no weapon in slot 1 reads the sentinel
 		// record's zero range and is likewise skipped.
 		if u.Def.BMCode != 1 {
-			if m.RallyShotTimeAdmits == nil || !m.RallyShotTimeAdmits(u, m.rallyBestX, m.rallyBestY, m.rallyBestZ) {
+			if m.RallyShotTimeAdmitsHook() == nil || !m.RallyShotTimeAdmitsHook()(u, m.rallyBestX, m.rallyBestY, m.rallyBestZ) {
 				continue
 			}
 		}
@@ -2015,7 +2095,7 @@ func (m *Manager) doRally(tick uint32, w *units.World, econ *economy.Service) {
 			// replacement purge [04 §3.4][08 R-AI-01 §7].
 			continue
 		}
-		m.submitResolvedOrder(u, id, nil, m.rallyBestX, m.rallyBestY, m.rallyBestZ, tick, 0, 0)
+		m.submitResolvedOrder(u, 3, id, nil, m.rallyBestX, m.rallyBestY, m.rallyBestZ, tick, 0, 0)
 	}
 }
 

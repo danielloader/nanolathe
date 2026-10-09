@@ -136,7 +136,7 @@ func eventShadowName(def *content.FeatureDef, selector uint8) string {
 // sequence, the reading under which nothing freezes; a static trace of the
 // bank lookup's miss return would settle it.
 func (s *Service) sequenceDelays(def *content.FeatureDef, selector uint8) []int32 {
-	if s == nil || def == nil || s.SequenceFrames == nil {
+	if s == nil || def == nil || s.SequenceFramesHook() == nil {
 		return nil
 	}
 	if EventSequenceName(def, selector) == "" {
@@ -146,7 +146,7 @@ func (s *Service) sequenceDelays(def *content.FeatureDef, selector uint8) []int3
 	if delays, seen := s.sequences[key]; seen {
 		return delays
 	}
-	delays := s.SequenceFrames(def, selector)
+	delays := s.SequenceFramesHook()(def, selector)
 	if len(delays) == 0 {
 		delays = nil
 	}

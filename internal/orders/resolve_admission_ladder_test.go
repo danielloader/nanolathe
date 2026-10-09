@@ -118,14 +118,14 @@ func TestCarriableLadderIsTheNineRejectsInOrder(t *testing.T) {
 
 	// The resolver reaches the ladder through the binding, never through a
 	// second copy of it [04 R-ORD-02 §1].
-	orders.BindQueueBinding(carrier, &orders.QueueBinding{
+	orders.BindQueueBinding(carrier, orders.NewQueueBinding(orders.QueueBindingConfig{
 		TransportAdmission: func(c, cand *units.Unit) bool {
 			if c == nil || cand == nil {
 				return false
 			}
 			return sys.CanTransport(c.Handle, cand.Handle, w).Allowed
 		},
-	})
+	}))
 	if id := orders.Resolve(6, carrier, candidate, nil); id != 0 {
 		t.Fatalf("code 6 on an inadmissible candidate = %q, want reject [04 R-ORD-02 §1]", orders.DescriptorFor(id).Name)
 	}

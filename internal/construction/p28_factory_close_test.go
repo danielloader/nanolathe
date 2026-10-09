@@ -80,7 +80,7 @@ func p28CompletionFixture(t *testing.T, count int) (*Service, *units.Unit, *unit
 	q.Primary()[0].BindTarget(ph) // stage the runtime product relink [04 R-ORD-01 §6]
 	svc := NewService(exitTerrain(16, 16), cat, w, &economy.Service{})
 	bindConstructionCombat(svc)
-	svc.ModelForFactory = func(*units.Unit) *model.Model { return trivialModel(1, nil) }
+	svc.SetModelForFactory(func(*units.Unit) *model.Model { return trivialModel(1, nil) })
 	return svc, factory, product, q.Primary()[0]
 }
 

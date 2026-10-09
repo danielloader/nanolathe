@@ -7,7 +7,7 @@ import (
 
 // RecordDeathStatistics applies the death-credit switch at the authoritative
 // finalization boundary. Callers provide the packet's stored attacker-side
-// snapshot and the already-resolved cause-3 alliance gate; no live-world scan
+// snapshot and the already-resolved cause-3 receipt-latch gate; no live-world scan
 // is performed [06 §12.1][08 R-CAMP-01 §7].
 func (s *Session) RecordDeathStatistics(in combat.DeathCreditInput) {
 	s.recordDeathStatistics(in, nil)
@@ -140,10 +140,18 @@ func (s *Session) recordFinalizedDeathStatistics(cause units.DeathCause, u *unit
 	// The full credit path below reads exactly that pair.
 	attackerPresent := c == combat.CauseOrdinary || c == combat.CauseSelfDestruct || c == combat.CauseReclaim || c == combat.CauseCargo
 	cause3LossEligible := false
-	if c == combat.CauseSelfDestruct && s.Econ != nil && int(s.LocalOwner) < len(s.Econ.Players) && int(u.Owner) < len(s.Econ.Players) {
-		// The local player's outbound alliance row is the established cause-3
-		// gate; a zero byte admits the victim loss [06 §12.1].
-		cause3LossEligible = !s.Econ.Players[s.LocalOwner].Allies[u.Owner]
+	if c == combat.CauseSelfDestruct && s.Econ != nil && int(u.Owner) < len(s.Econ.Players) {
+		if s.onlineResults != nil {
+			// The owner files its own loss once. Lockstep has no remote
+			// requested-snapshot receipt that could suppress it [06 §12.1]
+			// [08 "Economy and integrity checks — overwrite-sync, not compare"].
+			cause3LossEligible = true
+		} else if int(s.LocalOwner) < len(s.Econ.Players) {
+			// TODO(question): correct the preexisting single-player alliance
+			// gate in a separate change with fingerprint review. Current
+			// [06 §12.1] establishes a receipt latch, always zero offline.
+			cause3LossEligible = !s.Econ.Players[s.LocalOwner].Allies[u.Owner]
+		}
 	}
 	in := combat.DeathCreditInput{
 		Cause:              c,

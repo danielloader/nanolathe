@@ -27,7 +27,7 @@ func TestQueueTeardownOfADisplacedRecordLeavesTheBoundGoal(t *testing.T) {
 	orders.BindQueue(u, orders.NewQueueWith([]*orders.Node{front, behind}, nil))
 	s.bindExistingOrderQueue(u)
 	q := orders.QueueOfUnit(u)
-	if b := q.Binding(); b == nil || b.Movement == nil || b.Movement.Destroy == nil {
+	if b := q.Binding(); b == nil || b.Movement == nil || b.Movement.DestroyHook() == nil {
 		t.Fatal("the composed queue binding has no record-destructor port")
 	}
 	for _, n := range []*orders.Node{behind, front} {

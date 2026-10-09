@@ -21,21 +21,21 @@ func TestCommunityOrderDragHeadInterruptsTailDoesNot(t *testing.T) {
 	tail := &Node{ID: move, Owner: u.Handle, CreationTick: 4, GoalX: 20 << 16, Phase: 5}
 	q.SetPrimary([]*Node{head, tail})
 	released := 0
-	q.SetBinding(&QueueBinding{
+	q.SetBinding(NewQueueBinding(QueueBindingConfig{
 		Lookup: func(h pool.Handle) *units.Unit {
 			if h == u.Handle {
 				return u
 			}
 			return nil
 		},
-		Movement: &MovementGoalAdapter{Release: func(n *Node) bool {
+		Movement: NewMovementGoalAdapter(MovementGoalAdapterConfig{Release: func(n *Node) bool {
 			released++
 			if n.GoalX != u.X || n.GoalY != u.Y || n.GoalZ != u.Z {
 				t.Fatalf("head interruption goal=(%d,%d,%d), want unit point", n.GoalX, n.GoalY, n.GoalZ)
 			}
 			return n == head
-		}},
-	})
+		}}),
+	}))
 	if !DragCommunityOrder(q, communityDragReceipt(tail, 1), CommunityOrderDragDestination{X: 30 << 16}, nil) {
 		t.Fatal("tail drag refused")
 	}
@@ -56,10 +56,10 @@ func TestCommunityOrderDragRefusesStaleReceiptAndKeepsBuildFacing(t *testing.T) 
 	q := NewQueueWith([]*Node{n}, nil)
 	u := &units.Unit{Handle: n.Owner, X: 4 << 16, Y: 5 << 16, Z: 6 << 16}
 	released := 0
-	q.SetBinding(&QueueBinding{Lookup: func(pool.Handle) *units.Unit { return u }, Movement: &MovementGoalAdapter{Release: func(*Node) bool {
+	q.SetBinding(NewQueueBinding(QueueBindingConfig{Lookup: func(pool.Handle) *units.Unit { return u }, Movement: NewMovementGoalAdapter(MovementGoalAdapterConfig{Release: func(*Node) bool {
 		released++
 		return true
-	}}})
+	}})}))
 	stale := communityDragReceipt(n, 0)
 	stale.GoalX++
 	if DragCommunityOrder(q, stale, CommunityOrderDragDestination{X: 80 << 16}, nil) {

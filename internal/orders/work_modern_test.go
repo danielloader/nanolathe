@@ -38,9 +38,9 @@ func newModernWorkFixture(air bool) *modernWorkFixture {
 		u.Move.Mode, u.Move.ModeMirror = 2, 2
 	}
 	q.binding.Rules, q.binding.SimRNG = &ModernRules{}, &f.sim
-	q.binding.Resources = func(uint8) (ResourceView, bool) { return f.resources, true }
-	q.binding.Hostility = func(a, b *units.Unit) bool { return a.Owner != b.Owner }
-	q.binding.Lookup = func(h pool.Handle) *units.Unit {
+	q.binding.SetResources(func(uint8) (ResourceView, bool) { return f.resources, true })
+	q.binding.SetHostility(func(a, b *units.Unit) bool { return a.Owner != b.Owner })
+	q.binding.SetLookup(func(h pool.Handle) *units.Unit {
 		if h == u.Handle {
 			return u
 		}
@@ -50,8 +50,8 @@ func newModernWorkFixture(air bool) *modernWorkFixture {
 			}
 		}
 		return nil
-	}
-	q.binding.World = &WorldQueryAdapter{
+	})
+	q.binding.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{
 		SeaLevel: func() uint8 { return 0 },
 		ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
 			f.scans++
@@ -69,9 +69,9 @@ func newModernWorkFixture(air bool) *modernWorkFixture {
 				}
 			}
 		},
-	}
-	q.binding.Work.Assist = func(*units.Unit, *Node, uint32) bool { f.workCalls++; return false }
-	q.binding.Work.Repair = func(*units.Unit, *units.Unit, *Node, uint32) bool { f.workCalls++; return false }
+	})
+	q.binding.Work.SetAssist(func(*units.Unit, *Node, uint32) bool { f.workCalls++; return false })
+	q.binding.Work.SetRepair(func(*units.Unit, *units.Unit, *Node, uint32) bool { f.workCalls++; return false })
 	id := rowRepairPatrol
 	if air {
 		id = rowVTOLRepairPatrol
@@ -121,7 +121,7 @@ func TestModernBuilderDefaultsAndIndependentPreferences(t *testing.T) {
 			for _, choice := range []PatrolWorkOption{PatrolReclaimOnly, PatrolBoth, PatrolAssistOnly} {
 				options := defaults
 				options.Patrol[mode] = choice
-				f.q.binding.BuilderOptions = func(uint8) BuilderOptions { return options }
+				f.q.binding.SetBuilderOptions(func(uint8) BuilderOptions { return options })
 				f.q.binding.Community = community.Features{} // Modern does not need CP-CON-3.
 				got := r.PatrolWork(PatrolWorkRequest{Builder: f.u})
 				want := PatrolBoth
@@ -214,7 +214,7 @@ func TestModernPatrolChoicesAndResourceCapacity(t *testing.T) {
 					f.resources.Stock = tc.stock
 					options := (&ModernRules{}).DefaultBuilderOptions()
 					options.Patrol = [3]PatrolWorkOption{choice, choice, choice}
-					f.q.binding.BuilderOptions = func(uint8) BuilderOptions { return options }
+					f.q.binding.SetBuilderOptions(func(uint8) BuilderOptions { return options })
 					f.features = []FeatureView{modernFeature(3, 16, 0, tc.metal, tc.energy)}
 					f.features[0].DefinitionKey = "authored_tree_rock_or_metal" // identity never decides resource type.
 					random, resources := f.sim, f.resources
@@ -240,7 +240,7 @@ func TestModernPatrolChoicesAndResourceCapacity(t *testing.T) {
 			f := newModernWorkFixture(air)
 			options := (&ModernRules{}).DefaultBuilderOptions()
 			options.Patrol[0] = choice
-			f.q.binding.BuilderOptions = func(uint8) BuilderOptions { return options }
+			f.q.binding.SetBuilderOptions(func(uint8) BuilderOptions { return options })
 			f.units = []*units.Unit{modernPatient(2, 32, 0, true)}
 			f.features = []FeatureView{modernFeature(1, 0, 0, 10, 0)}
 			f.resources.Stock[0] = 0
@@ -435,7 +435,7 @@ func TestModernGuardBorrowedWorkTracksWardButDirectAssistanceDoesNot(t *testing.
 			f.guard.Def.BMCode, f.guard.Def.SightDistance = 1, 1024
 			f.ward.X, f.ward.Z = f.guard.X, f.guard.Z
 			patient := modernPatient(3, int32(f.ward.X.Raw()>>16)+128, int32(f.ward.Z.Raw()>>16), false)
-			b.Lookup = func(h pool.Handle) *units.Unit {
+			b.SetLookup(func(h pool.Handle) *units.Unit {
 				if h == patient.Handle {
 					return patient
 				}
@@ -443,18 +443,20 @@ func TestModernGuardBorrowedWorkTracksWardButDirectAssistanceDoesNot(t *testing.
 					return f.ward
 				}
 				return nil
-			}
-			b.World = &WorldQueryAdapter{ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
-				if !resurrect {
-					visit(patient.Handle, patient)
-				}
-			}}
+			})
 			feature := FeatureView{X: patient.X, Z: patient.Z, Reclaimable: true}
-			b.World.ForEachFeature = func(visit func(FeatureView) bool) { visit(feature) }
-			b.Work = &WorkAdapter{CanResurrectFeature: func(FeatureView) bool { return true }}
-			b.Resources = func(uint8) (ResourceView, bool) {
+			b.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{
+				ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
+					if !resurrect {
+						visit(patient.Handle, patient)
+					}
+				},
+				ForEachFeature: func(visit func(FeatureView) bool) { visit(feature) },
+			})
+			b.Work = NewWorkAdapter(WorkAdapterConfig{CanResurrectFeature: func(FeatureView) bool { return true }})
+			b.SetResources(func(uint8) (ResourceView, bool) {
 				return ResourceView{Stock: [2]float32{100, 100}, Capacity: [2]float32{100, 100}}, true
-			}
+			})
 			n := guardNode(f)
 			n.Phase = 1
 			if air {
@@ -532,13 +534,13 @@ func TestModernGuardDirectWardAndProductionRemainUnbounded(t *testing.T) {
 			q := QueueOfUnit(f.guard)
 			q.binding.Rules = &ModernRules{}
 			product := modernPatient(3, 1000, 1000, true)
-			lookup := q.binding.Lookup
-			q.binding.Lookup = func(h pool.Handle) *units.Unit {
+			lookup := q.binding.LookupHook()
+			q.binding.SetLookup(func(h pool.Handle) *units.Unit {
 				if h == product.Handle {
 					return product
 				}
 				return lookup(h)
-			}
+			})
 			wantTarget := f.ward.Handle
 			if production {
 				f.ward.Def.Builder = true

@@ -39,7 +39,7 @@ func TestVTOLAirOrdersDispatchAndDoNotPark(t *testing.T) {
 		q, u := gateFixture()
 		// A live target reference: three of these rows end the order on a null
 		// one before they ever reach a leg [04 R-AIR-01 §7][04 R-AIR-01 §8].
-		q.SetBinding(&QueueBinding{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return u }})
+		q.SetBinding(NewQueueBinding(QueueBindingConfig{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return u }}))
 		q.Push(Lookup(name), Node{Owner: u.Handle, Target: 7})
 		q.Pump(u, 40)
 
@@ -74,7 +74,7 @@ func TestVTOLEvadeEntryCompletesWithoutSeek(t *testing.T) {
 		{name: "target cloaked", target: 7, satisfied: pendTargetCloaked},
 	} {
 		q, u := gateFixture()
-		q.SetBinding(&QueueBinding{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return u }})
+		q.SetBinding(NewQueueBinding(QueueBindingConfig{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return u }}))
 		n := &Node{ID: Lookup("VTOL_Evade"), Owner: u.Handle, Target: tc.target}
 		u.Flags |= 2 << units.StandingFireShift
 		before := *q.binding.SimRNG
@@ -90,7 +90,7 @@ func TestVTOLEvadeEntryCompletesWithoutSeek(t *testing.T) {
 // Evade bypasses the attack entries' leash and cache update [04 R-AIR-01 §8].
 func TestVTOLEvadeEntryReachesLegOutsideLeash(t *testing.T) {
 	q, u := gateFixture()
-	q.binding.Lookup = func(pool.Handle) *units.Unit { return u }
+	q.binding.SetLookup(func(pool.Handle) *units.Unit { return u })
 	n := &Node{ID: Lookup("VTOL_Evade"), Owner: u.Handle, Target: 7, Param3: 1}
 	if !leashBroken(u, n) {
 		t.Fatal("fixture must be outside attack leash")
@@ -113,7 +113,7 @@ func TestVTOLEvadeEntryReachesLegOutsideLeash(t *testing.T) {
 // that can no longer happen.
 func TestVTOLGetRepairedIsATwoPhaseWait(t *testing.T) {
 	q, u := gateFixture()
-	q.SetBinding(&QueueBinding{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return u }})
+	q.SetBinding(NewQueueBinding(QueueBindingConfig{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return u }}))
 	u.Def.MaxDamage = 100
 	u.Health = 40
 
@@ -161,7 +161,7 @@ func TestVTOLAirFamilyOwnsTheFourAirAttackRows(t *testing.T) {
 		// which Go does not compare: the placeholder completes a record whose
 		// entry sequence fell through, this family holds it for its legs.
 		q, u := gateFixture()
-		q.SetBinding(&QueueBinding{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return u }})
+		q.SetBinding(NewQueueBinding(QueueBindingConfig{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return u }}))
 		n := &Node{ID: id, Owner: u.Handle, Target: 7}
 		if code := handler(u, n, 0, 40); code != 2 {
 			t.Fatalf("%s: entry fall-through returned %d, want the 2 that hands off to the legs", name, code)
@@ -189,7 +189,7 @@ func TestLandIfCanCompletesOnTouchdown(t *testing.T) {
 	landed := false
 	u := &units.Unit{Def: &content.UnitDef{UnitName: "flier", CanFly: true}}
 	q := QueueForUnit(u)
-	q.SetBinding(&QueueBinding{Movement: &MovementGoalAdapter{
+	q.SetBinding(&QueueBinding{Movement: NewMovementGoalAdapter(MovementGoalAdapterConfig{
 		RunAir: func(_ *units.Unit, n *Node, _ uint32, tick uint32) (Code, bool) {
 			if landed {
 				return Code(5), true
@@ -198,7 +198,7 @@ func TestLandIfCanCompletesOnTouchdown(t *testing.T) {
 			n.DynamicGate |= 1
 			return Code(2), true
 		},
-	}})
+	})})
 
 	q.Push(id, Node{Owner: u.Handle})
 	moveID := Lookup("Move_Ground")

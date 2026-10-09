@@ -301,7 +301,7 @@ func (s *Session) initializeSensorStatus(u *units.Unit) {
 		return
 	}
 	u.Flags &^= visibility.FriendlyMask | visibility.JammedBit
-	if u.Owner == s.ViewingOwner {
+	if s.onlineResults == nil && u.Owner == s.ViewingOwner {
 		u.Flags |= visibility.SonarBit
 	}
 }
@@ -311,6 +311,10 @@ func (s *Session) initializeSensorStatus(u *units.Unit) {
 // service additionally requires more than one active player; skipped passes
 // retain their previous status bits [03 R-SENSOR-01][03 R-VIS-01 §4].
 func (s *Session) stepSensorPhase(tick uint32) {
+	s.stepSensorPhaseFor(tick, int(s.ViewingOwner))
+}
+
+func (s *Session) stepSensorPhaseFor(tick uint32, viewer int) {
 	if s.Vis == nil || s.Units == nil {
 		return
 	}
@@ -389,6 +393,7 @@ func (s *Session) stepSensorPhase(tick uint32) {
 		}
 		sensorUnits = append(sensorUnits, visibility.SensorUnit{
 			ID:                    uint16(u.Handle),
+			AllocationSerial:      u.AllocationSerial,
 			Owner:                 visibility.PlayerID(u.Owner),
 			Status:                &u.Flags,
 			X:                     u.X,
@@ -422,7 +427,6 @@ func (s *Session) stepSensorPhase(tick uint32) {
 	//
 	// Defeated/observing friendliness is relative to the viewing player,
 	// independently of the true-local command owner [03 R-VIS-01 §4].
-	viewer := int(s.ViewingOwner)
 	defeated := false
 	if s.Econ != nil && viewer >= 0 && viewer < len(s.Econ.Players) {
 		p := &s.Econ.Players[viewer]
@@ -432,8 +436,12 @@ func (s *Session) stepSensorPhase(tick uint32) {
 		// which is this predicate once the row has created a unit.
 		defeated = p.IsObserver || s.ownerEliminated(viewer)
 	}
-	s.Vis.SetViewerDefeated(defeated)
-	s.Vis.SensorTick(tick, active, sensorUnits)
+	if s.onlineResults != nil {
+		s.Vis.SensorTickForPerspective(visibility.PlayerID(viewer), defeated, tick, active, sensorUnits)
+	} else {
+		s.Vis.SetViewerDefeated(defeated)
+		s.Vis.SensorTick(tick, active, sensorUnits)
+	}
 	s.sensorUnitScratch = sensorUnits[:0]
 }
 

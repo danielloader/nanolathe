@@ -47,11 +47,11 @@ func TestNoExplodeInterceptorMutualSweepTerminates(t *testing.T) {
 	svc.Records[second-1] = Projectile{WeaponID: weapon.ID, Pos: Vec3{X: numeric.FixedFromInt(102), Z: numeric.FixedFromInt(100)}}
 
 	impacts := 0
-	svc.Events = func(ev Event) {
+	svc.SetEvents(func(ev Event) {
 		if ev.Kind == EventProjectileImpact {
 			impacts++
 		}
-	}
+	})
 
 	// Without the guard this recurses until the stack is exhausted, which kills
 	// the test binary rather than failing this test.

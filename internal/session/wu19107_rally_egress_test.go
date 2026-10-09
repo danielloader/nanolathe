@@ -127,8 +127,8 @@ func TestAirFactoryRallyProductsLeaveThePadRetail(t *testing.T) {
 	}
 	arrived := map[pool.Handle]bool{}
 	presentation := sess.Build.OrderBinding.Presentation
-	previousStatus := presentation.Status
-	presentation.Status = func(u *units.Unit, kind uint8, text string) bool {
+	previousStatus := presentation.StatusHook()
+	presentation.SetStatus(func(u *units.Unit, kind uint8, text string) bool {
 		if kind == 6 && u.Owner == local && u.Def.CanonicalKey == productKey && wu19107HeadName(u) == "VTOL_Move" {
 			dx := world.WorldToCell(u.X) - plantCX
 			dz := world.WorldToCell(u.Z) - plantCZ
@@ -138,7 +138,7 @@ func TestAirFactoryRallyProductsLeaveThePadRetail(t *testing.T) {
 			return previousStatus(u, kind, text)
 		}
 		return false
-	}
+	})
 	produced := map[pool.Handle]bool{}
 	for i := 0; i < 12000; i++ {
 		step()

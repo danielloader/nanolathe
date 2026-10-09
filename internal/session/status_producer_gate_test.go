@@ -44,7 +44,7 @@ func TestStatusProducerGateHasThreeClauses(t *testing.T) {
 				t.Fatalf("local player = %d, want 0", got)
 			}
 			binding := s.newOrderBinding()
-			if binding == nil || binding.Presentation == nil || binding.Presentation.Status == nil {
+			if binding == nil || binding.Presentation == nil || binding.Presentation.StatusHook() == nil {
 				t.Fatal("composition did not supply the presentation status port")
 			}
 			u := &units.Unit{
@@ -54,7 +54,7 @@ func TestStatusProducerGateHasThreeClauses(t *testing.T) {
 				Dying:  tc.dying,
 				Def:    &content.UnitDef{UnitName: "armpw"},
 			}
-			got := binding.Presentation.Status(u, arrivedKind, "Arrived")
+			got := binding.Presentation.StatusHook()(u, arrivedKind, "Arrived")
 			if got != tc.want {
 				t.Fatalf("status admitted = %v, want %v [04 R-ORD-01 §1][03 R-AUD-01 §3]", got, tc.want)
 			}
@@ -89,7 +89,7 @@ func TestArrivedStatusIsNotAPlayedSoundAtTheProducer(t *testing.T) {
 		t.Fatal("fixture bound an audio service; the producer must not need one")
 	}
 	u := &units.Unit{Handle: pool.Handle(1), Alive: true, Def: &content.UnitDef{UnitName: "armpw"}}
-	if !s.newOrderBinding().Presentation.Status(u, 6, "Arrived") {
+	if !s.newOrderBinding().Presentation.StatusHook()(u, 6, "Arrived") {
 		t.Fatal("the status port refused a local, live unit with no audio service bound")
 	}
 }

@@ -190,6 +190,10 @@ func (b *battleSession) stepPostBattle(delta float64, in *input.State, cl *clien
 			b.doResultAction(ui.ResultActionContinue, cl)
 		}
 	case "SaveGame":
+		if b.onlineBattle() {
+			b.onlineNotice("Saves are unavailable in multiplayer games")
+			return
+		}
 		// ENDMSN's SaveGame opens the save dialog, and a save taken there is
 		// the between-missions bank that carries campaign progress across
 		// process runs [08 R-CAMP-01 §8] [07 R-FE-01 §10].
@@ -197,6 +201,10 @@ func (b *battleSession) stepPostBattle(delta float64, in *input.State, cl *clien
 			b.shell.openSaveLoadScreenReporting(saveScreenMode, saveLoadFromResults)
 		}
 	case "LoadGame":
+		if b.onlineBattle() {
+			b.onlineNotice("Loads are unavailable in multiplayer games")
+			return
+		}
 		if b.shell != nil {
 			b.shell.openSaveLoadScreenReporting(loadScreenMode, saveLoadFromResults)
 		}

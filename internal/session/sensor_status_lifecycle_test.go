@@ -185,7 +185,7 @@ func TestSensorStatusInitialPlacementBeforeRegisterAll(t *testing.T) {
 	if err := createAndBindServicesForTest(t, s); err != nil {
 		t.Fatal(err)
 	}
-	w.OnCreate = func(_ pool.Handle, u *units.Unit) {
+	w.SetCreateHook(func(_ pool.Handle, u *units.Unit) {
 		want := uint32(0)
 		if u.Owner == s.ViewingOwner {
 			want = visibility.SonarBit
@@ -193,7 +193,7 @@ func TestSensorStatusInitialPlacementBeforeRegisterAll(t *testing.T) {
 		if got := u.Flags & (visibility.FriendlyMask | visibility.JammedBit); got != want {
 			t.Fatalf("initial owner %d visible to creation observer with status %#x, want %#x", u.Owner, got, want)
 		}
-	}
+	})
 	for _, owner := range []uint8{1, 0} {
 		if _, err := w.Create(def, owner, 0, 0, 0); err != nil {
 			t.Fatal(err)

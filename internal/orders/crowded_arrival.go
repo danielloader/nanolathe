@@ -47,11 +47,11 @@ func (*ModernRules) CrowdedMoveArrival(u *units.Unit, n *Node, tick uint32) bool
 		return false
 	}
 	b := q.Binding()
-	if b == nil || b.Movement == nil || b.Movement.CrowdedMoveBlocked == nil {
+	if b == nil || b.Movement == nil || b.Movement.CrowdedMoveBlockedHook() == nil {
 		n.crowdedArrival = crowdedArrivalState{}
 		return false
 	}
-	x, z, blocked := b.Movement.CrowdedMoveBlocked(u, n)
+	x, z, blocked := b.Movement.CrowdedMoveBlockedHook()(u, n)
 	if !blocked {
 		n.crowdedArrival = crowdedArrivalState{}
 		return false

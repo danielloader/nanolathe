@@ -25,7 +25,7 @@ func TestRuntimeViewFollowsArenaAttachmentRatherThanLookupPresence(t *testing.T)
 		t.Fatalf("resting convenience record reported runtime state %#v", got)
 	}
 
-	svc.SequenceFrames = func(*content.FeatureDef, uint8) []int32 { return []int32{1} }
+	svc.SetSequenceFrames(func(*content.FeatureDef, uint8) []int32 { return []int32{1} })
 	svc.ShadowSequenceResolved = func(*content.FeatureDef, string) bool { return true }
 	if !svc.transitionFeatureAt(1, 1, sprite, false) {
 		t.Fatal("death transition did not attach the runtime record")
@@ -69,7 +69,7 @@ func TestRuntimeViewRestoreReattachesTheSavedSpriteRecord(t *testing.T) {
 		FootprintX:       1,
 		FootprintZ:       1,
 	}
-	svc.SequenceFrames = func(*content.FeatureDef, uint8) []int32 { return []int32{3} }
+	svc.SetSequenceFrames(func(*content.FeatureDef, uint8) []int32 { return []int32{3} })
 	svc.ShadowSequenceResolved = func(*content.FeatureDef, string) bool { return true }
 	payload := make([]byte, RetailRestorePayloadSize(1))
 	payload[9] = featureAnimSelectorDie
@@ -96,7 +96,7 @@ func TestRuntimeViewDisablesAnUnresolvedEventShadow(t *testing.T) {
 	if svc.spawnFeatureAt(1, 1, sprite) == nil {
 		t.Fatal("spawn resting sprite")
 	}
-	svc.SequenceFrames = func(*content.FeatureDef, uint8) []int32 { return []int32{1} }
+	svc.SetSequenceFrames(func(*content.FeatureDef, uint8) []int32 { return []int32{1} })
 	svc.ShadowSequenceResolved = func(*content.FeatureDef, string) bool { return false }
 	if !svc.transitionFeatureAt(1, 1, sprite, false) {
 		t.Fatal("death transition did not attach the runtime record")

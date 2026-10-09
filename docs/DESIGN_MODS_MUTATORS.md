@@ -1373,7 +1373,7 @@ leaves the line empty (DESIGN_INTERFACE_HUD_INPUT §2.6).
 |---|---|---|
 | `internal/modlibrary` | data directory layout, metadata and the mod's config (§4.2), installed listing, selection resolution (mod → root, config, minimum, preset), extraction and validation, receipts. No network. | both commands |
 | `internal/maplibrary` | separate installed-map root and map-only payload validation, reusing modlibrary extraction and receipts. No network. | desktop command |
-| `internal/modfetch` | mod and map manifest fetch and cache, downloads with resume and progress. The only package that imports `net/http`. | `cmd/nanolathe` only |
+| `internal/modfetch` | mod and map manifest fetch and cache, downloads with resume and progress. The content-download package that imports `net/http`; multiplayer WebSocket HTTP is isolated in `internal/relay` (DESIGN_MULTIPLAYER §16.5.6). | `cmd/nanolathe` only |
 | `internal/content` | `Factor`, `Mutators`, `ApplyMutators`, the mutated catalog identity; `Restrictions`, `CheckRestrictions`, `ApplyRestrictions` and the restricted identity (§15.2) | session, commands |
 | `internal/save` | the sidecar type and its read/write, separate from the bank's bytes | session, commands |
 | `internal/session` | mutators, unit restrictions and recorded Community sources in battle-entry and restore requests; building the sidecar value; reports | commands |
@@ -1381,8 +1381,9 @@ leaves the line empty (DESIGN_INTERFACE_HUD_INPUT §2.6).
 | `cmd/nanolathe` | chip, screen, in-process reload, loading-screen lines, drop-to-install, `--mod`, `--mutator`, `--restrict`, the restriction card and the unit viewer's restriction editor (§15.9) | — |
 | `cmd/nanolathe-headless` | `--mutator`, `--restrict` and `--mod` (flags only, never the settings file). `--mod` mounts an installed mod from the library as the last root with its own config, through `modlibrary`'s command-line selection; it is refused beside several `--root` flags, and the command never fetches. `--mod-config` names a config file for a manual stack or in place of the mod's own | — |
 
-**Guards.** New architecture tests: only `internal/modfetch` imports
-`net/http`; only `cmd/nanolathe` imports `internal/modfetch`; no simulation
+**Guards.** Architecture tests: only `internal/modfetch` and the multiplayer
+WebSocket transport in `internal/relay` import `net/http`; only `cmd/nanolathe`
+imports `internal/modfetch`; no simulation
 package imports either new package. `ApplyMutators` walks weapon damage
 through `DamageKeysSorted`, never by ranging a map ([INVARIANTS](INVARIANTS.md)
 I1). Everything used — `archive/zip`, `net/http`, `crypto/sha256` and, later,
@@ -1772,7 +1773,11 @@ record per copy, which is how the field keeps duplicate-name identities. The
 reverse mapping requires every record carrying a named key to be present
 with one limit, refuses the three issues above, and gives back the same
 `Restrictions`. Admission compares it with the set the frozen inputs record
-(§15.5), as it compares the mutators.
+(§15.5), as it compares the mutators. The two directions are
+`session.MatchUnitRestrictions` and `session.RestrictionsFromMatch`;
+`FreezeMatchInputs` runs the reverse mapping against the install's
+unrestricted catalog, since admission sees only the frozen catalog's
+surviving records (DESIGN_MULTIPLAYER §16.6).
 
 **Retail `.LST` lists** — the `SAVEGAME\<name>.LST` files of
 `(content checksum, restriction value)` pairs that retail's restriction
@@ -2124,6 +2129,6 @@ Units 2 and 3 can run in parallel after unit 1; unit 4 follows unit 2.
 **Follow-ups**, not in this delivery: retail `.LST` import and export
 (R-P12); rebuilding `CANBUILD` lists over a filtered table for both filters
 (§15.4); the equal-name `TODO(question)` (§15.4); the optional allowance on
-capped buttons (§15.8); and online restrictions in the lobby, field 12's
-enforcement and retail's seeded-but-unclosed state (DESIGN_MULTIPLAYER §15
-Q16).
+capped buttons (§15.8); and a restriction-editing lobby screen with retail's
+seeded-but-unclosed state (DESIGN_MULTIPLAYER §15 Q16). Field 12's online
+enforcement arrived with the first online lobby (DESIGN_MULTIPLAYER §16.6).

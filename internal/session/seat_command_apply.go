@@ -171,7 +171,7 @@ func (s *Session) admitSeatCommand(q *seatQueued) (uint8, string) {
 		if why := s.onlineSeatRole(seat); why != "" {
 			return 0, why
 		}
-		if why := onlineKindAdmission(c.Kind); why != "" {
+		if why := onlineKindAdmission(c.Kind); why != "" && !(s.onlineResults != nil && c.Kind == SeatMobileBuild) {
 			return 0, why
 		}
 	case SinglePlayerReplay:
@@ -202,6 +202,9 @@ func (s *Session) admitSeatCommand(q *seatQueued) (uint8, string) {
 		if why := s.onlineForeignActors(seat, c); why != "" {
 			return 0, why
 		}
+		if c.Kind == SeatMobileBuild && !s.onlineBuildSiteKnown(seat, c.MobileBuild) {
+			return 0, "a build site known to the issuing seat"
+		}
 	}
 	return seat, ""
 }
@@ -226,7 +229,7 @@ func (s *Session) onlineSeatRole(seat uint8) string {
 		return "a playing seat"
 	}
 	p := &s.Econ.Players[seat]
-	if !p.Exists || p.Watcher || p.IsObserver {
+	if !p.Exists || p.Watcher || p.IsObserver || s.onlineSeatEnded(int(seat)) {
 		return "a playing seat, not a watcher"
 	}
 	return ""

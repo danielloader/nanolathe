@@ -261,7 +261,7 @@ func (b *battleSession) submitHumanCommand(c session.HumanCommand) (uint64, erro
 		return 0, nil
 	}
 	local := b.localState()
-	online := b.sess.OnlineCommandContext()
+	online := b.onlineBattle()
 	switch c.Kind {
 	case session.HumanOrder:
 		if len(c.Order.Handles) == 0 {
@@ -302,6 +302,13 @@ func (b *battleSession) submitHumanCommand(c session.HumanCommand) (uint64, erro
 			b.composeCurrentFrame()
 			return 0, nil
 		}
+	}
+	if online {
+		seq, err := b.submitLocalMultiplayer(c)
+		if err != nil {
+			b.onlineNotice(err.Error())
+		}
+		return seq, err
 	}
 	due := uint32(1)
 	if b.sess.Clock != nil {

@@ -124,7 +124,7 @@ func TestBurnSmokeSamplesCentreBeforeJitter(t *testing.T) {
 		t.Fatal("stamp refused")
 	}
 	var got [3]numeric.Fixed
-	svc.BurnSmoke = func(pos [3]numeric.Fixed) { got = pos; crt.Rand() }
+	svc.SetBurnSmoke(func(pos [3]numeric.Fixed) { got = pos; crt.Rand() })
 	svc.emitBurnSmoke(inst)
 	if got != [3]numeric.Fixed{40 << 16, 50 << 16, 40 << 16} || crt.Draws() != 3 {
 		t.Fatalf("smoke=%v, CRT draws=%d", got, crt.Draws())

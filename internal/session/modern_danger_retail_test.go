@@ -65,14 +65,14 @@ func TestModernRetailFlashMovesAfterHiddenRocketImpact(t *testing.T) {
 			var impactX, impactZ numeric.Fixed
 			var impactBearing numeric.Angle
 			impactSeen := false
-			originalNotice := s.Combat.ImpactNotice
-			s.Combat.ImpactNotice = func(v, a *units.Unit, bearing numeric.Angle, tick uint32) {
+			originalNotice := s.Combat.ImpactNoticeHook()
+			s.Combat.SetImpactNotice(func(v, a *units.Unit, bearing numeric.Angle, tick uint32) {
 				if v == flash && a == tower && !impactSeen {
 					impactSeen = true
 					impactX, impactZ, impactBearing = v.X, v.Z, bearing
 				}
 				originalNotice(v, a, bearing, tick)
-			}
+			})
 			hitTick := uint32(0)
 			moved, staged, retreatGoal := false, false, false
 			for i := 0; i < 600; i++ {

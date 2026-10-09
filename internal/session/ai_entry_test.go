@@ -60,7 +60,7 @@ func TestInitializeBattleAIPrecedesUnitDraws(t *testing.T) {
 	if mgr == nil {
 		t.Fatal("manager not installed")
 	}
-	if mgr.JammerSuppresses == nil || !mgr.JammerSuppresses(1, 2) || mgr.JammerSuppresses(1, 1) {
+	if mgr.JammerSuppressesHook() == nil || !mgr.JammerSuppressesHook()(1, 2) || mgr.JammerSuppressesHook()(1, 1) {
 		t.Fatal("unbound visibility must retain Strict jammer policy")
 	}
 	// The callback follows live rule changes and Survival's team, and must
@@ -68,16 +68,16 @@ func TestInitializeBattleAIPrecedesUnitDraws(t *testing.T) {
 	s.Vis = visibility.New(terrain, 0)
 	s.Vis.Rules = visibility.CommunityRules{}
 	s.Vis.Community.AlliedJammingIgnored = true
-	s.Vis.Community.Allied = func(viewer, other visibility.PlayerID) bool { return viewer == 1 && other == 2 }
-	if mgr.JammerSuppresses(1, 2) || !mgr.JammerSuppresses(0, 2) {
+	s.Vis.Community.SetAllied(func(viewer, other visibility.PlayerID) bool { return viewer == 1 && other == 2 })
+	if mgr.JammerSuppressesHook()(1, 2) || !mgr.JammerSuppressesHook()(0, 2) {
 		t.Fatal("AI jammer binding ignored the current viewer's community policy")
 	}
 	s.Vis.Rules = visibility.StrictRules{}
-	if !mgr.JammerSuppresses(1, 2) {
+	if !mgr.JammerSuppressesHook()(1, 2) {
 		t.Fatal("AI jammer binding retained Community after switching to Strict")
 	}
 	s.Vis.SetVisionTeam([]visibility.PlayerID{1, 2})
-	if mgr.JammerSuppresses(1, 2) || !mgr.JammerSuppresses(0, 2) {
+	if mgr.JammerSuppressesHook()(1, 2) || !mgr.JammerSuppressesHook()(0, 2) {
 		t.Fatal("AI jammer binding did not preserve Survival's team exemption")
 	}
 	if mgr.MissionGateFlag != sessionKindCampaign {
@@ -101,22 +101,22 @@ func TestInitializeBattleAIPrecedesUnitDraws(t *testing.T) {
 	if mgr.Strategic.CenterX != 0 || mgr.Strategic.CenterZ != 0 || mgr.OriginX != 0 || mgr.OriginZ != 0 {
 		t.Fatalf("strategic/origin state was approximated after construction: center=(%d,%d) origin=(%d,%d)", mgr.Strategic.CenterX, mgr.Strategic.CenterZ, mgr.OriginX, mgr.OriginZ)
 	}
-	if mgr.RallyVisible == nil {
+	if mgr.RallyVisibleHook() == nil {
 		t.Fatal("ordinary rally visibility binding is nil")
 	}
-	if mgr.RallyProbeKnown == nil {
+	if mgr.RallyProbeKnownHook() == nil {
 		t.Fatal("the established rally knowledge predicate is nil")
 	}
 	// The rally member gate is bound now that [08 R-AI-01 §19] names it: the
 	// slot-1 shot-time physical gate of [06 §3.3], taken from the combat
 	// service rather than re-implemented in the planner.
-	if mgr.RallyShotTimeAdmits == nil {
+	if mgr.RallyShotTimeAdmitsHook() == nil {
 		t.Fatal("the rally slot-1 shot-time gate binding is nil")
 	}
 	if mgr.InitializeBattleState(terrain, ai.RallyBattleBindings{}) {
 		t.Fatal("battle state initialized more than once")
 	}
-	if !mgr.IsAlliance(1, 1) || mgr.IsAlliance(1, 0) || mgr.IsAlliance(10, 1) {
+	if !mgr.IsAllianceHook()(1, 1) || mgr.IsAllianceHook()(1, 0) || mgr.IsAllianceHook()(10, 1) {
 		t.Fatal("session-owned alliance binding did not validate active player rows")
 	}
 	if err := initializeBattleAI(s, 1, &ai.Profile{}, sessionKindSkirmish); err != nil {
@@ -259,12 +259,12 @@ func TestUnitLossThrottleIsControllerTwoOnly(t *testing.T) {
 		p.Exists = true
 		p.ControllerState = controller
 	}
-	s.Combat.ControlByte = func(owner uint8) uint8 {
+	s.Combat.SetControlByte(func(owner uint8) uint8 {
 		if int(owner) >= len(s.Econ.Players) || !s.Econ.Players[owner].Exists {
 			return combat.ControlByteAbsent
 		}
 		return s.Econ.Players[owner].ControllerState
-	}
+	})
 	s.bindDamageReaction()
 	s.SeedSessionRNG(123, 456)
 	s.Clock.GlobalTick = 17

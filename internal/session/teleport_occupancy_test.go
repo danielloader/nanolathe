@@ -99,7 +99,7 @@ func TestTeleportReleasesTheVacatedFootprintCells(t *testing.T) {
 	const goal = 480 * teleportOccupancyWorldUnit // cell 30
 	binding := &orders.QueueBinding{
 		SimRNG: rng.Global.Sim,
-		World: &orders.WorldQueryAdapter{
+		World: orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{
 			ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
 				stopped := false
 				unitsPool.VisitActiveSlots(func(v units.SlotVisit) {
@@ -111,9 +111,9 @@ func TestTeleportReleasesTheVacatedFootprintCells(t *testing.T) {
 					}
 				})
 			},
-		},
+		}),
 		// The binding under test: the same callback newOrderBinding installs.
-		Movement: &orders.MovementGoalAdapter{PlaceUnit: sys.PlaceUnit},
+		Movement: orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{PlaceUnit: sys.PlaceUnit}),
 	}
 	q := &orders.Queue{}
 	q.SetBinding(binding)

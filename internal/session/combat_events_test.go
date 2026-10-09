@@ -16,8 +16,8 @@ func TestCombatStartEventsPublishOrderedAudioAndSmoke(t *testing.T) {
 	}
 	pos := combat.Vec3{X: numeric.FixedFromInt(12), Y: numeric.FixedFromInt(3), Z: numeric.FixedFromInt(18)}
 	before := HashState(s)
-	s.Combat.Events(combat.Event{Kind: combat.EventStartSound, Tick: 7, Source: 4, Position: pos, Sound: "sound/start.wav"})
-	s.Combat.Events(combat.Event{Kind: combat.EventStartSmoke, Tick: 7, Source: 4, Target: 9, Position: pos})
+	s.Combat.EventsHook()(combat.Event{Kind: combat.EventStartSound, Tick: 7, Source: 4, Position: pos, Sound: "sound/start.wav"})
+	s.Combat.EventsHook()(combat.Event{Kind: combat.EventStartSmoke, Tick: 7, Source: 4, Target: 9, Position: pos})
 	if after := HashState(s); after != before {
 		t.Fatalf("presentation event publication changed authoritative state hash %s -> %s", before, after)
 	}

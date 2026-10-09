@@ -102,7 +102,7 @@ func (*ModernRules) ObserveDanger(u, attacker *units.Unit, tick uint32) {
 		return
 	}
 	b := q.Binding()
-	if b == nil || b.DangerVisible == nil || !b.DangerVisible(u, attacker) || !scanHostile(b, u, attacker) {
+	if b == nil || b.DangerVisibleHook() == nil || !b.DangerVisibleHook()(u, attacker) || !scanHostile(b, u, attacker) {
 		return
 	}
 	slot := -1
@@ -149,7 +149,7 @@ func (*ModernRules) KeepsMoveOnDamage(u *units.Unit) bool {
 		return false
 	}
 	b := bindingFor(u)
-	if b == nil || b.ModernAIPlayer == nil || !b.ModernAIPlayer(u.Owner) {
+	if b == nil || b.ModernAIPlayerHook() == nil || !b.ModernAIPlayerHook()(u.Owner) {
 		return false
 	}
 	return runningMove(QueueOfUnit(u))
@@ -331,7 +331,7 @@ func (*ModernRules) StepDangerResponse(u *units.Unit, tick uint32) {
 		return
 	}
 	b := q.Binding()
-	if b == nil || b.Lookup == nil || b.DangerVisible == nil {
+	if b == nil || b.LookupHook() == nil || b.DangerVisibleHook() == nil {
 		return
 	}
 	q.reconsiderAutomaticTarget(u, tick)
@@ -349,11 +349,11 @@ func (*ModernRules) StepDangerResponse(u *units.Unit, tick uint32) {
 		if c.unit == nil {
 			continue
 		}
-		if tick-c.tick >= dangerMemoryTicks || b.Lookup(c.handle) != c.unit {
+		if tick-c.tick >= dangerMemoryTicks || b.LookupHook()(c.handle) != c.unit {
 			*c = dangerContact{}
 			continue
 		}
-		if b.DangerVisible(u, c.unit) {
+		if b.DangerVisibleHook()(u, c.unit) {
 			if !c.unit.Alive || !scanHostile(b, u, c.unit) {
 				*c = dangerContact{}
 				continue
@@ -404,7 +404,7 @@ func (*ModernRules) StepDangerResponse(u *units.Unit, tick uint32) {
 		stationary := DescriptorFor(n.ID).Name == "Attack_NoMove"
 		valid := (move != 0 || stationary) && !dangerMovementFailed(n)
 		if n.Target != 0 {
-			target := b.Lookup(n.Target)
+			target := b.LookupHook()(n.Target)
 			known := fire == 2 && n.Target == d.opportunityTarget
 			for _, c := range d.contacts {
 				if c.unit == target && c.unit != nil {
@@ -412,7 +412,7 @@ func (*ModernRules) StepDangerResponse(u *units.Unit, tick uint32) {
 					break
 				}
 			}
-			valid = valid && fire != 0 && known && target != nil && b.DangerVisible(u, target) && target.Alive && !leashBroken(u, n)
+			valid = valid && fire != 0 && known && target != nil && b.DangerVisibleHook()(u, target) && target.Alive && !leashBroken(u, n)
 			if stationary {
 				valid = valid && canEngageSlot(u, n.Target, 0)
 			}
@@ -453,10 +453,10 @@ func (*ModernRules) StepDangerResponse(u *units.Unit, tick uint32) {
 	selectedSlot := 0
 	selectedStationary := false
 	bestDistance := int64(0)
-	if fire != 0 && b.DangerCanRespond != nil {
+	if fire != 0 && b.DangerCanRespondHook() != nil {
 		for _, c := range d.contacts {
 			target := c.unit
-			if target == nil || c.failedUntil != 0 && int32(tick-c.failedUntil) < 0 || !b.DangerVisible(u, target) || target.Def == nil || target.Def.DefinitionMask().Intersects(u.Def.NoChaseCategoryMask) {
+			if target == nil || c.failedUntil != 0 && int32(tick-c.failedUntil) < 0 || !b.DangerVisibleHook()(u, target) || target.Def == nil || target.Def.DefinitionMask().Intersects(u.Def.NoChaseCategoryMask) {
 				continue
 			}
 			// A maneuver response never moves its anchor outward between decisions.
@@ -466,7 +466,7 @@ func (*ModernRules) StepDangerResponse(u *units.Unit, tick uint32) {
 				if unitCanFly(u) && slot != 0 {
 					continue
 				} // air executors use the primary weapon
-				if !b.DangerCanRespond(u, target, slot) {
+				if !b.DangerCanRespondHook()(u, target, slot) {
 					continue
 				}
 				stationary := slot == 0 && !unitCanFly(u) && canEngageSlot(u, target.Handle, slot)
@@ -506,7 +506,7 @@ func (*ModernRules) StepDangerResponse(u *units.Unit, tick uint32) {
 	}
 	// No suitable visible threat can be answered within this stance. A mobile
 	// unit may withdraw along a movement-owned locally feasible corridor.
-	if move == 0 || !hasLiveMover(u) || !u.Def.CanMove || b.DangerStepFeasible == nil {
+	if move == 0 || !hasLiveMover(u) || !u.Def.CanMove || b.DangerStepFeasibleHook() == nil {
 		return
 	}
 	x, z, ok := q.dangerWithdrawal(u, move)
@@ -547,7 +547,7 @@ func (q *Queue) dangerWithdrawal(u *units.Unit, move uint32) (numeric.Fixed, num
 	// A clear direct escape wins over every detour. Local detour admission
 	// cannot guarantee that the ordinary path follower will execute it promptly.
 	// Only when all safer direct choices fail do we try going around a crowd.
-	for _, feasible := range [2]func(*units.Unit, numeric.Fixed, numeric.Fixed) bool{b.DangerStepFeasible, b.DangerRouteFeasible} {
+	for _, feasible := range [2]func(*units.Unit, numeric.Fixed, numeric.Fixed) bool{b.DangerStepFeasibleHook(), b.DangerRouteFeasibleHook()} {
 		if feasible == nil {
 			continue
 		}
@@ -588,7 +588,7 @@ func (*ModernRules) RetaliationOrder(*units.Unit, *units.Unit) bool { return fal
 func (q *Queue) reconsiderDangerTarget(u *units.Unit, tick uint32) bool {
 	d, b := &q.danger, q.Binding()
 	n := d.response
-	if n == nil || n.Target == 0 || u.Flags>>stanceFireShift&stanceFieldMask != 2 || d.nextDecision != 0 && int32(tick-d.nextDecision) < 0 || b.Weapons == nil || b.Weapons.Acquire == nil {
+	if n == nil || n.Target == 0 || u.Flags>>stanceFireShift&stanceFieldMask != 2 || d.nextDecision != 0 && int32(tick-d.nextDecision) < 0 || b.Weapons == nil || b.Weapons.AcquireHook() == nil {
 		return false
 	}
 	d.nextDecision = tick + dangerDecisionTicks
@@ -596,12 +596,12 @@ func (q *Queue) reconsiderDangerTarget(u *units.Unit, tick uint32) bool {
 	if DescriptorFor(n.ID).Name == "Attack_Chase" {
 		slot = int(n.Param1)
 	}
-	handle, ok := b.Weapons.Acquire(u, slot, 0)
+	handle, ok := b.Weapons.AcquireHook()(u, slot, 0)
 	if !ok || handle == 0 || handle == n.Target {
 		return false
 	}
-	target := b.Lookup(handle)
-	if target == nil || !b.DangerVisible(u, target) || !canEngageSlot(u, handle, slot) || !automaticTargetWithinLeash(n, target) {
+	target := b.LookupHook()(handle)
+	if target == nil || !b.DangerVisibleHook()(u, target) || !canEngageSlot(u, handle, slot) || !automaticTargetWithinLeash(n, target) {
 		return false
 	}
 	id := Resolve(3, u, target, nil)
@@ -680,16 +680,16 @@ func (*ModernRules) PreserveAutomaticTarget(u *units.Unit, slot int) bool {
 // a current shot and retain their authored movement leash.
 func acquireAutomaticTarget(u *units.Unit, n *Node) *units.Unit {
 	b := bindingOfUnit(u)
-	if b == nil || b.Lookup == nil || b.DangerVisible == nil || b.Weapons == nil || b.Weapons.Acquire == nil {
+	if b == nil || b.LookupHook() == nil || b.DangerVisibleHook() == nil || b.Weapons == nil || b.Weapons.AcquireHook() == nil {
 		return nil
 	}
 	slot := automaticTargetSlot(n)
-	h, ok := b.Weapons.Acquire(u, slot, 0)
+	h, ok := b.Weapons.AcquireHook()(u, slot, 0)
 	if !ok || h == 0 {
 		return nil
 	}
-	target := b.Lookup(h)
-	if target == nil || !target.Alive || !b.DangerVisible(u, target) || !canEngageSlot(u, h, slot) {
+	target := b.LookupHook()(h)
+	if target == nil || !target.Alive || !b.DangerVisibleHook()(u, target) || !canEngageSlot(u, h, slot) {
 		return nil
 	}
 	if !automaticTargetWithinLeash(n, target) {
@@ -720,8 +720,8 @@ func (*ModernRules) GuardTarget(u *units.Unit, n *Node) (pool.Handle, bool) {
 	// Return Fire retains its existing response but never scans for an opportunity.
 	if u.Flags>>stanceFireShift&stanceFieldMask != 0 {
 		b := bindingOfUnit(u)
-		if b != nil && b.Lookup != nil && b.DangerVisible != nil {
-			if target := b.Lookup(n.Target); target != nil && target.Alive && b.DangerVisible(u, target) && canEngageSlot(u, n.Target, 0) {
+		if b != nil && b.LookupHook() != nil && b.DangerVisibleHook() != nil {
+			if target := b.LookupHook()(n.Target); target != nil && target.Alive && b.DangerVisibleHook()(u, target) && canEngageSlot(u, n.Target, 0) {
 				return n.Target, true
 			}
 		}

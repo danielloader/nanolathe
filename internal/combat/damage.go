@@ -57,10 +57,10 @@ const (
 // unoccupied row does) and rejects gate 2 (as retail's does), so it is not
 // "assume eligible" in either direction.
 func (s *Service) PlayerControlByteFor(owner uint8) uint8 {
-	if s == nil || s.ControlByte == nil {
+	if s == nil || s.ControlByteHook() == nil {
 		return ControlByteAbsent
 	}
-	return s.ControlByte(owner)
+	return s.ControlByteHook()(owner)
 }
 
 // DamageRoutingAdmitted is gate 1 of [06 R-DMG-01 §8] item 1 as
@@ -393,19 +393,21 @@ func scaleAcceptedAmount(amount, defenderLevel int32, isArmored bool, damageModi
 // session-owned for the same reason. A nil seam, or a nil member, makes that
 // part a no-op — the routine's ORDER and GATES stay here regardless.
 type ReactionSeams struct {
+	checkpointCallbacks [checkpointReactionCallbackCount]checkpointReactionCallbackProof
+
 	// ObserverNotice is part 1: deliver event code 16 to every order record
 	// observing the victim [06 R-WPN-04 §2 part 1][04 R-MOV-03 §7].
-	ObserverNotice func(victim *units.Unit)
+	observerNotice func(victim *units.Unit)
 	// Allied reports the alliance relation the retaliation gate tests
 	// ("the attacker is not allied") [08 R-AI-01 §11].
-	Allied func(a, b uint8) bool
+	allied func(a, b uint8) bool
 	// ArmConstructionThrottle writes the owning player's manager throttle
 	// deadline — the one simulation draw of bound 300 in the whole damage-intake
 	// path — for a computer player [08 R-AI-01 §11].
-	ArmConstructionThrottle func(owner uint8, tick uint32)
+	armConstructionThrottle func(owner uint8, tick uint32)
 	// PurgeOrdersOnDamage selectively removes unprotected primary orders;
 	// it does not issue Stop [08 R-AI-01 §11][04 R-MOV-03 §6].
-	PurgeOrdersOnDamage func(victim *units.Unit)
+	purgeOrdersOnDamage func(victim *units.Unit)
 	// RetaliationOrder is the retaliation's order branch: the shared auto-engage
 	// issuer with force = 0, behind the front-order and category admissions
 	// [08 R-AI-01 §11][04 R-STANCE-01 §3]. It reports whether a record was
@@ -413,7 +415,7 @@ type ReactionSeams struct {
 	// third admission — slot 0's acquisition predicate against the attacker —
 	// is applied on THIS side, before the call, because the order side does not
 	// hold that predicate's operands.
-	RetaliationOrder func(victim, attacker *units.Unit) bool
+	retaliationOrder func(victim, attacker *units.Unit) bool
 	// SlotAcquisitionAdmits is the §3.1 acquisition physical gate for one of the
 	// victim's weapon slots against one candidate. The damage path does not
 	// carry the visibility, terrain, ledger and catalog operands that gate
@@ -422,13 +424,13 @@ type ReactionSeams struct {
 	// The reaction routine calls it at TWO sites: once for slot 0 against the
 	// attacker, ahead of the order branch's issuer [08 R-AI-01 §11], and once
 	// per slot inside the per-slot offer [06 R-WPN-04 §2 part 3].
-	SlotAcquisitionAdmits func(victim *units.Unit, slotIdx int, candidate *units.Unit) bool
+	slotAcquisitionAdmits func(victim *units.Unit, slotIdx int, candidate *units.Unit) bool
 	// UnderAttackSilenced reads bit 7 of the gate-mask word of the victim's
 	// front primary order [06 R-WPN-04 §2 part 4].
-	UnderAttackSilenced func(victim *units.Unit) bool
+	underAttackSilenced func(victim *units.Unit) bool
 	// UnderAttackNotice requests the interface message of kind 2. The helper
 	// applies its own viewport/ownership/liveness gates [06 R-WPN-04 §2 part 4].
-	UnderAttackNotice func(victim *units.Unit)
+	underAttackNotice func(victim *units.Unit)
 }
 
 // The slot autonomy bit is units.SlotFlagAutonomous. [04 R-UNIT-06 §5 part 3]
@@ -488,8 +490,8 @@ func (s *Service) ReactToDamage(w *units.World, victim, attacker *units.Unit, ti
 		return
 	}
 	r := s.Reaction
-	if r != nil && r.ObserverNotice != nil {
-		r.ObserverNotice(victim) // part 1 [06 R-WPN-04 §2]
+	if r != nil && r.ObserverNoticeHook() != nil {
+		r.ObserverNoticeHook()(victim) // part 1 [06 R-WPN-04 §2]
 	}
 	if attacker != nil && attacker.Def == nil {
 		attacker = nil // part 2: a freed slot is no attacker [06 R-WPN-04 §2]
@@ -521,11 +523,11 @@ func (s *Service) reactionThrottle(victim *units.Unit, tick uint32) {
 	if r == nil {
 		return
 	}
-	if r.ArmConstructionThrottle != nil {
-		r.ArmConstructionThrottle(victim.Owner, tick)
+	if r.ArmConstructionThrottleHook() != nil {
+		r.ArmConstructionThrottleHook()(victim.Owner, tick)
 	}
-	if r.PurgeOrdersOnDamage != nil {
-		r.PurgeOrdersOnDamage(victim)
+	if r.PurgeOrdersOnDamageHook() != nil {
+		r.PurgeOrdersOnDamageHook()(victim)
 	}
 }
 
@@ -561,7 +563,7 @@ func (s *Service) reactionRetaliation(w *units.World, victim, attacker *units.Un
 	if r == nil {
 		return
 	}
-	if r.Allied == nil || r.Allied(victim.Owner, attacker.Owner) {
+	if r.AlliedHook() == nil || r.AlliedHook()(victim.Owner, attacker.Owner) {
 		return // "the attacker is not allied"; with no alliance row, fail closed
 	}
 	// The order branch's last admission before the issuer: the slot admission
@@ -584,8 +586,8 @@ func (s *Service) reactionRetaliation(w *units.World, victim, attacker *units.Un
 	// An unbound predicate fails closed, the way the alliance row above does:
 	// retail always evaluates it, so a build that cannot is not entitled to
 	// issue the order.
-	if r.SlotAcquisitionAdmits != nil && r.SlotAcquisitionAdmits(victim, 0, attacker) {
-		if r.RetaliationOrder != nil && r.RetaliationOrder(victim, attacker) {
+	if r.SlotAcquisitionAdmitsHook() != nil && r.SlotAcquisitionAdmitsHook()(victim, 0, attacker) {
+		if r.RetaliationOrderHook() != nil && r.RetaliationOrderHook()(victim, attacker) {
 			return // an order was issued; the offer does not also run [08 R-AI-01 §11]
 		}
 	}
@@ -608,7 +610,7 @@ func (s *Service) reactionRetaliation(w *units.World, victim, attacker *units.Un
 // scan carries at [06 §3.2].
 func (s *Service) offerAttackerToSlots(w *units.World, victim, attacker *units.Unit) {
 	r := s.Reaction
-	if r == nil || r.SlotAcquisitionAdmits == nil {
+	if r == nil || r.SlotAcquisitionAdmitsHook() == nil {
 		return
 	}
 	for idx := 0; idx < units.NumSlots; idx++ { // numeric slot order [06 §3.2]
@@ -643,7 +645,7 @@ func (s *Service) offerAttackerToSlots(w *units.World, victim, attacker *units.U
 		if slot.Weapon.CommandFire {
 			continue // "and the weapon is not `commandfire`" [06 R-WPN-04 §2]
 		}
-		if !r.SlotAcquisitionAdmits(victim, idx, attacker) {
+		if !r.SlotAcquisitionAdmitsHook()(victim, idx, attacker) {
 			continue
 		}
 		if s.slotKeepsPresentTarget(w, victim, slot, idx) {
@@ -674,7 +676,7 @@ func (s *Service) slotKeepsPresentTarget(w *units.World, victim *units.Unit, slo
 		return false
 	}
 	r := s.Reaction
-	if r == nil || r.SlotAcquisitionAdmits == nil || !r.SlotAcquisitionAdmits(victim, idx, cur) {
+	if r == nil || r.SlotAcquisitionAdmitsHook() == nil || !r.SlotAcquisitionAdmitsHook()(victim, idx, cur) {
 		return false
 	}
 	return IsPreferredCategoryMask(cur.Def.DefinitionMask(), badMaskForSlot(victim.Def, idx))
@@ -693,16 +695,16 @@ func (s *Service) slotKeepsPresentTarget(w *units.World, victim *units.Unit, slo
 // queue insertion [07 R-HUD-03 §14.1].
 func (s *Service) reactionUnderAttackNotice(victim *units.Unit) {
 	r := s.Reaction
-	if r == nil || r.UnderAttackNotice == nil {
+	if r == nil || r.UnderAttackNoticeHook() == nil {
 		return
 	}
-	if r.UnderAttackSilenced != nil && r.UnderAttackSilenced(victim) {
+	if r.UnderAttackSilencedHook() != nil && r.UnderAttackSilencedHook()(victim) {
 		return // bit 7 set: already attacking, or an aircraft in follow/guard
 	}
 	if victim.LastDamageSide == victim.Owner && victim.LastDamageCause != uint8(CauseOrdinary) {
 		return
 	}
-	r.UnderAttackNotice(victim)
+	r.UnderAttackNoticeHook()(victim)
 }
 
 // ApplyHealing implements the early heal arm's signed-word read/store and

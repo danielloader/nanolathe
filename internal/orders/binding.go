@@ -22,13 +22,16 @@ import (
 // reconstruction an explicit value transfer instead of a collection of
 // package-level fallbacks [04 §3.3][04 §3.4][06 §11.1].
 type QueueBinding struct {
+	// Per-slot installation provenance, never gameplay or wire state (§16.3.59).
+	checkpointProofs checkpointQueueBindingProofs
+
 	// Community holds only this owner's projected feature answers (DESIGN_COMMUNITY_PATCH §3.1).
 	Community community.Features
 	// BuilderOptions returns one owner's live per-player selection for the
 	// three movement stances. Queues share this binding across players, so the
 	// owner remains an argument instead of being captured at composition. A nil
 	// callback uses DefaultBuilderOptions.
-	BuilderOptions func(owner uint8) BuilderOptions
+	builderOptions func(owner uint8) BuilderOptions
 	// Rules answers the gameplay decisions this package defers rather than
 	// deciding itself — the Hold Fire join, the bomber pass leash and the three
 	// guard assistance legs. The session selects the set from the central
@@ -40,27 +43,27 @@ type QueueBinding struct {
 	// Danger queries are read-only Modern policy inputs. Visibility is checked
 	// before consulting a remembered contact's live position. Suitability
 	// ignores range; local feasibility belongs to the movement owner.
-	DangerVisible       func(observer, target *units.Unit) bool
-	DangerCanRespond    func(observer, target *units.Unit, slot int) bool
-	DangerStepFeasible  func(u *units.Unit, x, z numeric.Fixed) bool
-	DangerRouteFeasible func(u *units.Unit, x, z numeric.Fixed) bool
+	dangerVisible       func(observer, target *units.Unit) bool
+	dangerCanRespond    func(observer, target *units.Unit, slot int) bool
+	dangerStepFeasible  func(u *units.Unit, x, z numeric.Fixed) bool
+	dangerRouteFeasible func(u *units.Unit, x, z numeric.Fixed) bool
 	// ModernAIPlayer reports whether owner is a computer player the Modern
 	// AI controller decides for. Queues share this binding across players,
 	// so the owner is an argument. Only a Modern policy that covers those
 	// players alone asks it ("Modern AI move retention",
 	// docs/DESIGN_UNITS_ORDERS_COB.md); nil answers no, so an unbound
 	// fixture plays every player as Classic.
-	ModernAIPlayer func(owner uint8) bool
+	modernAIPlayer func(owner uint8) bool
 
 	Economy interface {
 		UnitBuckets(pool.Handle) *[2]economy.Bucket
 	}
-	Lookup      func(pool.Handle) *units.Unit
-	Hostility   func(actor *units.Unit, target *units.Unit) bool
+	lookup      func(pool.Handle) *units.Unit
+	hostility   func(actor *units.Unit, target *units.Unit) bool
 	SimRNG      *rng.Simulation
-	CurrentTick func() uint32
+	currentTick func() uint32
 	// Damage delivers locally produced packets to the session's common intake [06 §9.1].
-	Damage func(uint32, combat.DamageInput) combat.DamageResult
+	damage func(uint32, combat.DamageInput) combat.DamageResult
 
 	// The following adapters are the session-owned runtime seam for the order
 	// families. They are deliberately data-shaped rather than package globals:
@@ -78,7 +81,7 @@ type QueueBinding struct {
 	// Resources supplies the owning player's current stock and storage. It is
 	// read by repair-patrol admission only; the economy service remains the
 	// owner of these values [04 R-ORD-01 §4][05 "Player slot"].
-	Resources func(uint8) (ResourceView, bool)
+	resources func(uint8) (ResourceView, bool)
 
 	// ReclaimFeature settles a finished feature reclaim at the cell the order
 	// recorded (the payout guard reads that cell's bit before hopping to the
@@ -90,7 +93,7 @@ type QueueBinding struct {
 	// a query like the two above. With none bound the payout falls back to the
 	// terrain-only transition, which is what it used before the service grew
 	// one — see finishFeatureReclaim.
-	ReclaimFeature func(cx, cz int) (metal, energy float32, ok bool)
+	reclaimFeature func(cx, cz int) (metal, energy float32, ok bool)
 
 	// BuildList reports whether a definition carries a compiled build-option
 	// list at all. It is the first half of command code 14's gate — "the
@@ -101,7 +104,7 @@ type QueueBinding struct {
 	// not any `CANBUILD` entry names them [07 §8], so the answer a composition
 	// supplies here is the `builder` flag. A builder whose compiled menu is
 	// empty still passes.
-	BuildList func(*content.UnitDef) bool
+	buildList func(*content.UnitDef) bool
 
 	// TransportAdmission is the carriable test — §10.2's nine-reject transport
 	// admission for a (carrier, candidate) pair [04 §10.2][04 R-ORD-02 §1] —
@@ -110,7 +113,7 @@ type QueueBinding struct {
 	// candidate's mover reference and committed mover mode, the map's sea
 	// level), so the resolver asks the owner rather than re-deriving a second
 	// copy of the ladder that could disagree with it.
-	TransportAdmission func(carrier, candidate *units.Unit) bool
+	transportAdmission func(carrier, candidate *units.Unit) bool
 
 	// There is deliberately no separate alliance/diplomacy query here.
 	// [04 R-ORD-02 §1] settles hostility as the acting PLAYER's diplomacy byte
@@ -185,18 +188,21 @@ type PlaceRequest struct {
 // callback itself is responsible for publishing the pending word at the
 // movement boundary; the order package does not duplicate that state machine.
 type MovementGoalAdapter struct {
+	// Per-slot installation provenance, never gameplay or wire state (§16.3.59).
+	checkpointProofs checkpointMovementGoalAdapterProofs
+
 	// DetachTakeoff commits the shared mode-2 attachment release, including its
 	// synchronous spatial projection [04 R-ORD-01 §7][04 R-COLL-01 §11].
-	DetachTakeoff func(*units.Unit) bool
+	detachTakeoff func(*units.Unit) bool
 	// CrowdedMoveBlocked reports local crowd admission and the committed anchor.
 	// It is a pure movement-owned query; orders owns the dwell and completion.
-	CrowdedMoveBlocked func(*units.Unit, *Node) (anchorX, anchorZ int32, blocked bool)
-	Ready              func() bool
-	InstallPoint       func(PointGoalRequest) bool
-	InstallAnnulus     func(AnnulusGoalRequest) bool
-	InstallRectangle   func(RectangleGoalRequest) bool
-	InstallAir         func(AirGoalRequest) bool
-	Release            func(*Node) bool
+	crowdedMoveBlocked func(*units.Unit, *Node) (anchorX, anchorZ int32, blocked bool)
+	ready              func() bool
+	installPoint       func(PointGoalRequest) bool
+	installAnnulus     func(AnnulusGoalRequest) bool
+	installRectangle   func(RectangleGoalRequest) bool
+	installAir         func(AirGoalRequest) bool
+	release            func(*Node) bool
 	// Destroy is the record destructor's half of the same port: it unbinds the
 	// controller only when this record's own object is the bound one, then
 	// deletes that object. Queue teardown uses it, because destroying a
@@ -204,10 +210,10 @@ type MovementGoalAdapter struct {
 	// that record [04 R-ORD-01 §9]. Release above is the explicit handler
 	// release, which unbinds whenever the record owns an object. A binding
 	// without Destroy tears down through Release.
-	Destroy func(*Node) bool
+	destroy func(*Node) bool
 	// RunAir is the queue-local air executor. Keeping it on the binding avoids
 	// a process-global runner when more than one session exists [04 §3.3].
-	RunAir AirLegRunner
+	runAir AirLegRunner
 
 	// AirBases returns the ally group's row of the per-side target registry's
 	// third list — the damaged-aircraft base candidates of
@@ -218,7 +224,7 @@ type MovementGoalAdapter struct {
 	// TransportAdmission gives above. The returned slice is the holder's
 	// storage and is read-only to this package; callers filter it with
 	// combat.ScanAirBaseList.
-	AirBases func(allyGroup uint8) []pool.Handle
+	airBases func(allyGroup uint8) []pool.Handle
 
 	// PlaceUnit is the direct position commit — retail's "carried-position
 	// setter", the occupancy commit's success branch without the validator
@@ -238,7 +244,7 @@ type MovementGoalAdapter struct {
 	// [04 R-ORD-01 §2]. Like every callback here it returns false when the
 	// owner cannot accept, and like every callback here it — not the handler —
 	// owns whatever the movement boundary must republish afterwards.
-	PlaceUnit func(PlaceRequest) bool
+	placeUnit func(PlaceRequest) bool
 }
 
 // FeatureView is the value-only feature identity exposed to order scans. It
@@ -266,24 +272,27 @@ type FeatureView struct {
 // queries. ForEachUnit and ForEachFeature must invoke callbacks in retail pool
 // order; callers must not replace them with map traversal [P0-00 A,D][I1].
 type WorldQueryAdapter struct {
-	LookupUnit  func(pool.Handle) *units.Unit
-	Hostile     func(*units.Unit, *units.Unit) bool
-	ForEachUnit func(func(pool.Handle, *units.Unit) bool)
+	// Per-slot installation provenance, never gameplay or wire state (§16.3.59).
+	checkpointProofs checkpointWorldQueryAdapterProofs
+
+	lookupUnit  func(pool.Handle) *units.Unit
+	hostile     func(*units.Unit, *units.Unit) bool
+	forEachUnit func(func(pool.Handle, *units.Unit) bool)
 	// ForEachUnitInRadius uses the spatial-sector walk and raw squared-distance
 	// predicate of the repair collector. Its radius is full 16.16, and true
 	// stops the visitor, as with ForEachUnit [04 R-ORD-02 §4].
-	ForEachUnitInRadius func(numeric.Fixed, numeric.Fixed, numeric.Fixed, func(pool.Handle, *units.Unit) bool)
-	LookupFeature       func(int32, int32) (FeatureView, bool)
-	ForEachFeature      func(func(FeatureView) bool)
-	TerrainHeight       func(numeric.Fixed, numeric.Fixed) (numeric.Fixed, bool)
-	SeaLevel            func() uint8
+	forEachUnitInRadius func(numeric.Fixed, numeric.Fixed, numeric.Fixed, func(pool.Handle, *units.Unit) bool)
+	lookupFeature       func(int32, int32) (FeatureView, bool)
+	forEachFeature      func(func(FeatureView) bool)
+	terrainHeight       func(numeric.Fixed, numeric.Fixed) (numeric.Fixed, bool)
+	seaLevel            func() uint8
 	// DeclaresAlliance is the one-directional row read of [05 R-SHARE-01 §1]:
 	// row A of `from` indexed by `toward`. `Hostile` above answers the
 	// symmetric question the command resolver asks [04 R-ORD-02 §1]; this
 	// answers the single-row question the guard's combat join asks
 	// [04 R-UNIT-06 §1]. Nil when the binding has no player rows, in which case
 	// the caller falls back.
-	DeclaresAlliance func(from, toward uint8) bool
+	declaresAlliance func(from, toward uint8) bool
 
 	// MappingWord reads one word of the per-player mapping word grid
 	// [03 R-LAYER §1]: one 16-bit word per 2x2-cell tile, bits 0..9 one per
@@ -300,22 +309,25 @@ type WorldQueryAdapter struct {
 	// because the grid belongs to the visibility service, which neither that
 	// package nor this one holds a handle to. Nil when the composition has no
 	// visibility service, in which case the caller runs its full test.
-	MappingWord func(tileX, tileZ int32) (uint16, bool)
+	mappingWord func(tileX, tileZ int32) (uint16, bool)
 }
 
 // WorkAdapter is the construction/repair/ownership port. The result is kept
 // as a bool at this seam; concrete work services own their detailed progress,
 // economy, packet, and callback state [P0-00 C].
 type WorkAdapter struct {
-	Ready     func() bool
-	Assist    func(*units.Unit, *Node, uint32) bool
-	Repair    func(builder, patient *units.Unit, node *Node, tick uint32) bool
-	Capture   func(*units.Unit, *Node, uint32) bool
-	Resurrect func(*units.Unit, *Node, uint32) bool
+	// Per-slot installation provenance, never gameplay or wire state (§16.3.59).
+	checkpointProofs checkpointWorkAdapterProofs
+
+	ready     func() bool
+	assist    func(*units.Unit, *Node, uint32) bool
+	repair    func(builder, patient *units.Unit, node *Node, tick uint32) bool
+	capture   func(*units.Unit, *Node, uint32) bool
+	resurrect func(*units.Unit, *Node, uint32) bool
 	// CanResurrectFeature is a read-only reclaimable-feature and corpse-name
 	// catalog query. Modern guard scans use it before issuing work; allocation
 	// and feature removal remain exclusively in Resurrect.
-	CanResurrectFeature func(FeatureView) bool
+	canResurrectFeature func(FeatureView) bool
 	// CancelNotice is the receiver for the cleanup cancel notification of
 	// [R-ORDER-02 §2] on behalf of the records this package does not hold a
 	// handler for. cleanupNode's guard — the record's dynamic gate still holding
@@ -326,46 +338,52 @@ type WorkAdapter struct {
 	// [05 "Build request and factory queue behavior"][05 C21]. It reports
 	// whether it accepted the notice; the return is advisory, since the record
 	// is already being freed.
-	CancelNotice func(owner *units.Unit, n *Node, tick uint32) bool
+	cancelNotice func(owner *units.Unit, n *Node, tick uint32) bool
 }
 
 // WeaponAdapter is the order-facing combat slot port. Slot operations remain
 // callbacks so combat remains the sole owner of authoritative weapon state
 // [P0-00 E][06 §1.2].
 type WeaponAdapter struct {
+	// Per-slot installation provenance, never gameplay or wire state (§16.3.59).
+	checkpointProofs checkpointWeaponAdapterProofs
+
 	// FiringPositionBlocked reports a physical refusal from this unit visit.
-	FiringPositionBlocked func(shooter, target *units.Unit, tick uint32) bool
+	firingPositionBlocked func(shooter, target *units.Unit, tick uint32) bool
 	// FiringPositionClear previews that launch from a candidate position.
-	FiringPositionClear func(shooter, target *units.Unit, tick uint32, x, y, z numeric.Fixed) bool
-	Ready               func() bool
-	ReleaseSlot         func(*units.Unit, int) bool
-	InhibitSlot         func(*units.Unit, int) bool
-	SetManualTarget     func(*units.Unit, int, pool.Handle) bool
-	FireTarget          func(*units.Unit, int, pool.Handle, uint32) bool
-	FirePoint           func(*units.Unit, int, numeric.Fixed, numeric.Fixed, uint32) bool
-	StopFiring          func(*units.Unit, int) bool
-	Acquire             func(*units.Unit, int, uint32) (pool.Handle, bool)
-	Engaged             func(*units.Unit, int) bool
+	firingPositionClear func(shooter, target *units.Unit, tick uint32, x, y, z numeric.Fixed) bool
+	ready               func() bool
+	releaseSlot         func(*units.Unit, int) bool
+	inhibitSlot         func(*units.Unit, int) bool
+	setManualTarget     func(*units.Unit, int, pool.Handle) bool
+	fireTarget          func(*units.Unit, int, pool.Handle, uint32) bool
+	firePoint           func(*units.Unit, int, numeric.Fixed, numeric.Fixed, uint32) bool
+	stopFiring          func(*units.Unit, int) bool
+	acquire             func(*units.Unit, int, uint32) (pool.Handle, bool)
+	engaged             func(*units.Unit, int) bool
 	// TargetsInRadius queries the owner's cached primary/secondary registry
 	// around a point, without weapon scoring or new visibility checks. Wait
 	// and Guard_NoMove share this enumeration [04 R-SPEC-01 §8].
-	TargetsInRadius func(*units.Unit, numeric.Fixed, numeric.Fixed, int32) []pool.Handle
+	targetsInRadius func(*units.Unit, numeric.Fixed, numeric.Fixed, int32) []pool.Handle
 	// CanEngage is the shot-admission gate of [04 R-ORD-01 §7]: given a
 	// shooter, a candidate target and a slot index, may that slot be bound to
 	// that target right now. `Attack_Chase` phases 1 and 3 branch on it
 	// [04 R-ORD-01 §3]. It is distinct from Engaged, which asks the same
 	// question about the target a slot has ALREADY been bound to.
-	CanEngage func(*units.Unit, pool.Handle, int) bool
+	canEngage func(*units.Unit, pool.Handle, int) bool
 }
 
 // PresentationAdapter is the committed-frame event port. It carries semantic
 // status and nanolathe events without allowing the order pump to mutate client
 // state [P0-00 F][03 §1].
 type PresentationAdapter struct {
-	Ready            func() bool
-	Status           func(*units.Unit, uint8, string) bool
-	Nanolathe        func(*units.Unit, *Node, uint32) bool
-	NanolatheFeature func(*units.Unit, *Node, FeatureView, uint32) bool
+	// Per-slot installation provenance, never gameplay or wire state (§16.3.59).
+	checkpointProofs checkpointPresentationAdapterProofs
+
+	ready            func() bool
+	status           func(*units.Unit, uint8, string) bool
+	nanolathe        func(*units.Unit, *Node, uint32) bool
+	nanolatheFeature func(*units.Unit, *Node, FeatureView, uint32) bool
 
 	// Teleport is the `Teleport` row's per-moved-unit effect: the strip-5
 	// flame-stream container spawned at the moved unit's OLD position, laying
@@ -380,7 +398,7 @@ type PresentationAdapter struct {
 	// strip 5 a "flame-weapon area scan": the teleport handler is strip 5's
 	// only producer besides burning-feature smoke, so no combat path competes
 	// for this callback.
-	Teleport func(moved *units.Unit, fromX, fromY, fromZ, toX, toY, toZ numeric.Fixed) bool
+	teleport func(moved *units.Unit, fromX, fromY, fromZ, toX, toY, toZ numeric.Fixed) bool
 }
 
 // Validate reports whether the binding is complete enough to run a battle.
@@ -396,29 +414,29 @@ func (b *QueueBinding) Validate() error {
 	if b.SimRNG == nil {
 		return fmt.Errorf("orders: missing simulation RNG")
 	}
-	if b.Economy == nil || b.Lookup == nil || b.Hostility == nil || b.Resources == nil {
+	if b.Economy == nil || b.LookupHook() == nil || b.HostilityHook() == nil || b.ResourcesHook() == nil {
 		return fmt.Errorf("orders: incomplete base queue services")
 	}
 	if b.Movement == nil || b.World == nil || b.Work == nil || b.Weapons == nil || b.Presentation == nil {
 		return fmt.Errorf("orders: incomplete single-player queue services")
 	}
-	if b.Movement.Ready == nil || !b.Movement.Ready() || b.Movement.InstallPoint == nil || b.Movement.Release == nil || b.Movement.RunAir == nil {
+	if b.Movement.ReadyHook() == nil || !b.Movement.ReadyHook()() || b.Movement.InstallPointHook() == nil || b.Movement.ReleaseHook() == nil || b.Movement.RunAirHook() == nil {
 		return fmt.Errorf("orders: incomplete movement goal service")
 	}
-	if b.Work.Ready == nil || !b.Work.Ready() || b.Weapons.Ready == nil || !b.Weapons.Ready() || b.Presentation.Ready == nil || !b.Presentation.Ready() {
+	if b.Work.ReadyHook() == nil || !b.Work.ReadyHook()() || b.Weapons.ReadyHook() == nil || !b.Weapons.ReadyHook()() || b.Presentation.ReadyHook() == nil || !b.Presentation.ReadyHook()() {
 		return fmt.Errorf("orders: incomplete single-player subsystem service")
 	}
-	if b.World.LookupUnit == nil || b.World.Hostile == nil || b.World.ForEachUnit == nil || b.World.ForEachUnitInRadius == nil || b.World.ForEachFeature == nil || b.World.LookupFeature == nil || b.World.TerrainHeight == nil || b.World.SeaLevel == nil {
+	if b.World.LookupUnitHook() == nil || b.World.HostileHook() == nil || b.World.ForEachUnitHook() == nil || b.World.ForEachUnitInRadiusHook() == nil || b.World.ForEachFeatureHook() == nil || b.World.LookupFeatureHook() == nil || b.World.TerrainHeightHook() == nil || b.World.SeaLevelHook() == nil {
 		return fmt.Errorf("orders: incomplete world query service")
 	}
 	// Command resolution's two owned-elsewhere gates: code 14's build list and
 	// the carriable test [04 R-ORD-02 §1][04 §10.2]. Both fail closed when
 	// absent, so a battle that started without them would silently refuse
 	// mobile build and every pickup.
-	if b.Damage == nil {
+	if b.DamageHook() == nil {
 		return fmt.Errorf("orders: incomplete damage intake service")
 	}
-	if b.BuildList == nil || b.TransportAdmission == nil {
+	if b.BuildListHook() == nil || b.TransportAdmissionHook() == nil {
 		return fmt.Errorf("orders: incomplete command resolution service")
 	}
 	return nil
@@ -428,30 +446,30 @@ func (b *QueueBinding) Validate() error {
 // adapter, rather than a queue handler, owns the retail slot order; returning
 // true from the visitor stops further callbacks [01 §4.4][01 §6.2][I1].
 func (b *QueueBinding) ForEachUnit(visit func(pool.Handle, *units.Unit) bool) {
-	if b == nil || b.World == nil || b.World.ForEachUnit == nil || visit == nil {
+	if b == nil || b.World == nil || b.World.ForEachUnitHook() == nil || visit == nil {
 		return
 	}
-	b.World.ForEachUnit(visit)
+	b.World.ForEachUnitHook()(visit)
 }
 
 // ForEachFeature visits live features through the composed world adapter. The
 // feature service supplies stable anchor order; this helper never ranges a
 // feature map [01 §6.2][05 "Feature instance and terrain cell"][I1].
 func (b *QueueBinding) ForEachFeature(visit func(FeatureView) bool) {
-	if b == nil || b.World == nil || b.World.ForEachFeature == nil || visit == nil {
+	if b == nil || b.World == nil || b.World.ForEachFeatureHook() == nil || visit == nil {
 		return
 	}
-	b.World.ForEachFeature(visit)
+	b.World.ForEachFeatureHook()(visit)
 }
 
 // LookupFeature resolves an anchored live feature through the same world
 // adapter used by traversal. A missing feature is represented by ok=false,
 // not by a fabricated definition [P0-00 D].
 func (b *QueueBinding) LookupFeature(cx, cz int32) (FeatureView, bool) {
-	if b == nil || b.World == nil || b.World.LookupFeature == nil {
+	if b == nil || b.World == nil || b.World.LookupFeatureHook() == nil {
 		return FeatureView{}, false
 	}
-	return b.World.LookupFeature(cx, cz)
+	return b.World.LookupFeatureHook()(cx, cz)
 }
 
 // Tick returns the session's current authoritative tick when the binding
@@ -459,10 +477,10 @@ func (b *QueueBinding) LookupFeature(cx, cz int32) (FeatureView, bool) {
 // for callbacks reached during queue cleanup outside the normal walk [01
 // §4.4][04 R-ORD-01 §1].
 func (b *QueueBinding) Tick() uint32 {
-	if b == nil || b.CurrentTick == nil {
+	if b == nil || b.CurrentTickHook() == nil {
 		return 0
 	}
-	return b.CurrentTick()
+	return b.CurrentTickHook()()
 }
 
 // SetBinding installs all per-queue authoritative inputs as one value.

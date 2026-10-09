@@ -144,7 +144,7 @@ func TestDeathDuringOwnVisitFinalizesAtVisitEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	hooks := 0
-	world.OnDeath = func(pool.Handle, DeathCause, *Unit) { hooks++ }
+	world.SetDeathHook(func(pool.Handle, DeathCause, *Unit) { hooks++ })
 	world.VisitActiveSlots(func(v SlotVisit) {
 		if v.Handle != h {
 			return
@@ -252,7 +252,7 @@ func TestFinalizeDeathExactlyOnce(t *testing.T) {
 	def := &content.UnitDef{UnitName: "sweep-finalize", MaxDamage: 100}
 	h, _ := world.Create(def, 0, 0, 0, 0)
 	hookCount := 0
-	world.OnDeath = func(_ pool.Handle, _ DeathCause, _ *Unit) { hookCount++ }
+	world.SetDeathHook(func(_ pool.Handle, _ DeathCause, _ *Unit) { hookCount++ })
 	// Mark dying via Destroy
 	world.Destroy(h, DeathKilled)
 	if hookCount != 0 {
@@ -283,8 +283,8 @@ func TestFinalizeDeathExactlyOnce(t *testing.T) {
 	if res2.Freed || res2.HookFired {
 		t.Fatalf("second finalize should be no-op, got %+v", res2)
 	}
-	if hookCount != 1 {
-		t.Fatalf("hookCount after second finalize %d want 1", hookCount)
+	if hookCount != 1 || world.DeathDispatches() != 1 {
+		t.Fatalf("counts after second finalize: hook %d, dispatches %d", hookCount, world.DeathDispatches())
 	}
 	// Test FinalizeDeath as sole hook path (without prior Destroy)
 	h2, _ := world.Create(def, 0, 0, 0, 0)
@@ -301,8 +301,8 @@ func TestFinalizeDeathExactlyOnce(t *testing.T) {
 	if !res3.Freed || !res3.HookFired {
 		t.Fatalf("FinalizeDeath should fire hook and free when Destroy not used, got %+v", res3)
 	}
-	if hookCount != 1 {
-		t.Fatalf("hookCount via finalize %d want 1", hookCount)
+	if hookCount != 1 || world.DeathDispatches() != 2 {
+		t.Fatalf("counts via finalize: hook %d, dispatches %d", hookCount, world.DeathDispatches())
 	}
 	res4 := world.FinalizeDeath(h2, 4)
 	if res4.Freed || res4.HookFired {

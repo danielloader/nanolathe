@@ -19,7 +19,7 @@ func airFixture(t *testing.T) (*System, *units.World, *units.Unit) {
 	sys, w, u := takeoffFixture(t)
 	q := orders.QueueForUnit(u)
 	sim := rng.NewSimulation(0x12345677)
-	q.SetBinding(&orders.QueueBinding{SimRNG: &sim, Lookup: w.Unit})
+	q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{SimRNG: &sim, Lookup: w.Unit}))
 	// The lean accumulator reads two words the raw fixture definition leaves at
 	// zero: `bankscale`, whose compiled default is 1.0, and the map's `gravity`,
 	// whose OTA default is 0x1FDB [04 R-AIR-01 §2]. Both are inputs, not
@@ -191,7 +191,7 @@ func wideAirFixture(t *testing.T) (*System, *units.World, *units.Unit) {
 	u := w.Unit(h)
 	sys.EnsureUnit(u)
 	sim := rng.NewSimulation(0x12345677)
-	orders.QueueForUnit(u).SetBinding(&orders.QueueBinding{SimRNG: &sim, Lookup: w.Unit})
+	orders.QueueForUnit(u).SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{SimRNG: &sim, Lookup: w.Unit}))
 	// Retain the mission word separately from projectile acceleration, as the
 	// map loader does [03 §2.2][04 R-AIR-01 §8].
 	ter.Gravity = 112 * 65536 / 900
@@ -621,10 +621,10 @@ func TestVTOLMobileBuildSnapsToProductFootprint(t *testing.T) {
 	head.Param1 = 7 // the stable catalog index the resolver receives
 
 	var gotIndex uint32
-	sys.ProductFootprint = func(catalogIndex uint32) (fx, fz int32, ok bool) {
+	sys.SetProductFootprint(func(catalogIndex uint32) (fx, fz int32, ok bool) {
 		gotIndex = catalogIndex
 		return footX, footZ, true
-	}
+	})
 
 	head.Phase = 1
 	if code := sys.VisitAirBuildApproach(u, head, 0, 1); code != 1 {
@@ -654,7 +654,7 @@ func TestVTOLMobileBuildKeepsGoalWhenResolverUnbound(t *testing.T) {
 	head := pushAirOrder(t, u, "VTOL_MobileBuild", goalX, goalZ)
 	head.Param1 = 7
 
-	if sys.ProductFootprint != nil {
+	if sys.ProductFootprintHook() != nil {
 		t.Fatal("fixture unexpectedly bound a resolver")
 	}
 	head.Phase = 1

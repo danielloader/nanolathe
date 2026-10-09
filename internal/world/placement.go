@@ -894,8 +894,8 @@ func (t *Terrain) placementGates(q PlacementQuery) (PlacementResult, placementRe
 				// identity, so a unit standing on the rectangle rejects it —
 				// the builder that issued the order included
 				// [04 R-COLL-01 §2][04 R-COLL-01 §6].
-				if t.Movers != nil {
-					if occ := t.Movers.CellOccupant(cx, cz); occ != 0 && occ != q.Self && !admit(occ) {
+				if t.Movers() != nil {
+					if occ := t.Movers().CellOccupant(cx, cz); occ != 0 && occ != q.Self && !admit(occ) {
 						return PlacementResult{}, placementRefusal{reason: refuseMover, cx: cx, cz: cz}
 					}
 				}
@@ -1130,6 +1130,17 @@ func mobileCellRefusal(cell *PlotCell, sea int32, rules PlacementRules) (placeme
 //
 // The second result is false when steps 2 or 3 reject; the first is the step-4
 // gate for the caller's cell walk.
+// KnownPlacementSite exposes only the existing knowledge gate for online
+// command admission before queue mutation (DESIGN_MULTIPLAYER §7.4.2).
+// Actual placement retains the ordinary occupancy/terrain checks later.
+func (t *Terrain) KnownPlacementSite(rect FootprintRect, viewer PlacementViewer) bool {
+	if t == nil || viewer == nil || rect.Width() <= 0 || rect.Depth() <= 0 {
+		return false
+	}
+	_, known := t.knownSiteGate(PlacementQuery{Rect: rect, Viewer: viewer})
+	return known
+}
+
 func (t *Terrain) knownSiteGate(q PlacementQuery) (occupancyApplies, ok bool) {
 	worldX := (q.Rect.Width() + 2*q.Rect.MinX()) * 8
 	worldZ := (q.Rect.Depth() + 2*q.Rect.MinZ()) * 8

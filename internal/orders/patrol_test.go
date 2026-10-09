@@ -186,13 +186,13 @@ func TestAirPatrolInstallsItsMarker(t *testing.T) {
 	u := &units.Unit{Def: &content.UnitDef{UnitName: "flier", CanFly: true}, Alive: true}
 	u.X, u.Z = numeric.Fixed(100<<16), numeric.Fixed(500<<16)
 	q := QueueForUnit(u)
-	q.SetBinding(&QueueBinding{Movement: &MovementGoalAdapter{
+	q.SetBinding(&QueueBinding{Movement: NewMovementGoalAdapter(MovementGoalAdapterConfig{
 		InstallAir: func(req AirGoalRequest) bool { got = append(got, req); return true },
 		InstallPoint: func(PointGoalRequest) bool {
 			t.Fatalf("an air patrol must not install a ground point goal")
 			return false
 		},
-	}})
+	})})
 
 	// Waypoint due +X of the aircraft at the same Z.
 	n := &Node{Owner: u.Handle, GoalX: numeric.Fixed(900 << 16), GoalZ: numeric.Fixed(500 << 16), GoalSupplied: true}
@@ -254,10 +254,10 @@ func TestVTOLPatrolSeeksAPadOnlyWhenHurt(t *testing.T) {
 	// system holds and refills on its own cadence, so the fixture supplies the
 	// list through the port rather than an enumerator [04 R-AIR-01 §11].
 	pads := map[pool.Handle]*units.Unit{padA.Handle: padA, padB.Handle: padB}
-	q.binding.Lookup = func(h pool.Handle) *units.Unit { return pads[h] }
-	q.binding.Movement = &MovementGoalAdapter{
+	q.binding.SetLookup(func(h pool.Handle) *units.Unit { return pads[h] })
+	q.binding.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{
 		AirBases: func(uint8) []pool.Handle { return []pool.Handle{padA.Handle, padB.Handle} },
-	}
+	})
 	landingID := Lookup("VTOL_Landing")
 	if landingID == 0 {
 		t.Fatal("VTOL_Landing has no descriptor")
@@ -344,13 +344,13 @@ func TestPatrolPhaseTwoArmIsTheStandingFireScan(t *testing.T) {
 				Handle: 2, Owner: 1, Def: &content.UnitDef{BMCode: 1, MaxDamage: 100}, Alive: true,
 				X: numeric.Fixed(120 << 16), Z: numeric.Fixed(90 << 16), Health: 100, MaxHealth: 100,
 			}
-			q.binding.Lookup = func(h pool.Handle) *units.Unit {
+			q.binding.SetLookup(func(h pool.Handle) *units.Unit {
 				if h == enemy.Handle {
 					return enemy
 				}
 				return nil
-			}
-			q.binding.Weapons = &WeaponAdapter{
+			})
+			q.binding.Weapons = NewWeaponAdapter(WeaponAdapterConfig{
 				Acquire: func(_ *units.Unit, slot int, limit uint32) (pool.Handle, bool) {
 					if slot != 0 {
 						return 0, false
@@ -360,7 +360,7 @@ func TestPatrolPhaseTwoArmIsTheStandingFireScan(t *testing.T) {
 					}
 					return enemy.Handle, true
 				},
-			}
+			})
 
 			// A leg at phase 2 with a second record behind it: under the retired
 			// successor reading the successor alone decided this.

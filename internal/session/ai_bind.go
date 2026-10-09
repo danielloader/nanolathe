@@ -8,6 +8,7 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -28,18 +29,22 @@ func bindAIQueue(mgr *ai.Manager, s *Session) {
 		// dispatch in phase 5 [04 §3.3][06 §11.1].
 		mgr.OrderBinding = s.Build.OrderBinding
 	}
-	mgr.QueueBuildTyped = func(req ai.BuildRequest) error {
+	mgr.SetQueueBuildTypedWithCheckpointBinding(func(req ai.BuildRequest) error {
 		if s.Units == nil || s.Catalog == nil {
-			return fmt.Errorf("ai build: session units/catalog unavailable")
+			return ai.WithCheckpointBuildVerdict(fmt.Errorf("ai build: session units/catalog unavailable"), ai.CheckpointBuildBinding)
 		}
 		builder := s.Units.Unit(req.Builder)
 		if builder == nil || !builder.Alive {
-			return fmt.Errorf("ai build: builder handle %d not alive", req.Builder)
+			return ai.WithCheckpointBuildVerdict(fmt.Errorf("ai build: builder handle %d not alive", req.Builder), ai.CheckpointBuildOwner)
 		}
 		// AI may issue its first build before this unit has ever needed a
 		// queue. Bind the lazy queue through the session-owned context before
 		// construction performs admission [04 §3.3][05][06 §11.1].
 		s.bindOrderQueue(builder)
+		// Observe only after the existing lazy bind; a first factory queue
+		// must not be created early just for diagnostics (§16.3.26–27).
+		restore := mgr.CheckpointApplicationHistory().ActiveAttempt().ObserveQueue(orders.QueueOfUnit(builder), builder)
+		defer restore()
 		switch req.Kind {
 		case ai.BuildKindFactoryQueue:
 			if def, ok := s.Catalog.Unit(req.UnitKey); ok && def != nil && stockpileAliasName(def.UnitName) {
@@ -51,18 +56,42 @@ func bindAIQueue(mgr *ai.Manager, s *Session) {
 				// computer player's queue task reaches this arm
 				// (research/extensions/prota-engine.md "authored stationary
 				// stockpile producers").
-				if !s.queueStockpileRounds(builder, req.Count, req.Tick) {
-					return fmt.Errorf("ai build: stockpile round refused for builder %d", req.Builder)
+				if verdict := s.queueStockpileRoundsResult(builder, req.Count, req.Tick); verdict != ai.CheckpointBuildSuccess {
+					return ai.WithCheckpointBuildVerdict(fmt.Errorf("ai build: stockpile round refused for builder %d", req.Builder), verdict)
 				}
 				return nil
 			}
-			return construction.QueueFactoryBuild(builder, req.UnitKey, req.Count, s.Catalog)
+			return classifyCheckpointBuildError(construction.QueueFactoryBuild(builder, req.UnitKey, req.Count, s.Catalog))
 		case ai.BuildKindMobileSite:
-			return construction.QueueMobileBuild(builder, req.UnitKey, req.X, req.Z, req.Count, s.Catalog)
+			return classifyCheckpointBuildError(construction.QueueMobileBuild(builder, req.UnitKey, req.X, req.Z, req.Count, s.Catalog))
 		default:
-			return construction.QueueFactoryBuild(builder, req.UnitKey, req.Count, s.Catalog)
+			return classifyCheckpointBuildError(construction.QueueFactoryBuild(builder, req.UnitKey, req.Count, s.Catalog))
 		}
+	}, s.checkpointBindingAuthority())
+}
+
+// classifyCheckpointBuildError adds only the diagnostic return classification
+// of DESIGN_MULTIPLAYER §16.3.25. The producer has already made every admission
+// decision; unknown errors keep their identity and remain unclassified.
+func classifyCheckpointBuildError(err error) error {
+	var verdict uint8
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, construction.ErrNilFactory):
+		verdict = ai.CheckpointBuildOwner
+	case errors.Is(err, construction.ErrEmptyDef), errors.Is(err, construction.ErrUnknownProduct), errors.Is(err, construction.ErrMissingMovementProfile):
+		verdict = ai.CheckpointBuildProduct
+	case errors.Is(err, construction.ErrNoQueue), errors.Is(err, construction.ErrNoBuildOrder):
+		verdict = ai.CheckpointBuildBinding
+	case errors.Is(err, construction.ErrLimit):
+		verdict = ai.CheckpointBuildLimit
+	case errors.Is(err, construction.ErrBadCount):
+		verdict = ai.CheckpointBuildOther
+	default:
+		return err
 	}
+	return ai.WithCheckpointBuildVerdict(err, verdict)
 }
 
 // aiCanPursueAir is the Modern wave air targets predicate the computer
@@ -88,15 +117,27 @@ func stockpileAliasName(name string) bool {
 // [07 R-P0-11 §1][06 §11.1]. It refuses a
 // slot whose weapon is not a stockpile weapon (orders.StockpileSlotAcceptsBuildWeapon).
 func (s *Session) queueStockpileRounds(u *units.Unit, count int, tick uint32) bool {
+	return s.queueStockpileRoundsResult(u, count, tick) == ai.CheckpointBuildSuccess
+}
+
+// queueStockpileRoundsResult labels the existing exits in their original
+// evaluation order, without another slot predicate or queue bind. Success is
+// the producer's return, not an insertion receipt (DESIGN_MULTIPLAYER §16.3.25).
+func (s *Session) queueStockpileRoundsResult(u *units.Unit, count int, tick uint32) uint8 {
 	id := orders.Lookup("BuildWeapon")
-	if u == nil || id == 0 || count <= 0 {
-		return false
+	switch {
+	case u == nil:
+		return ai.CheckpointBuildOwner
+	case id == 0:
+		return ai.CheckpointBuildBinding
+	case count <= 0:
+		return ai.CheckpointBuildOther
 	}
 	// The UI alias path always supplies zero, which is where shipped
 	// stockpile weapons live [06 §11.1][06 R-WPN-05 §2].
 	const stockpileAliasSlot = 0
 	if !orders.StockpileSlotAcceptsBuildWeapon(u, stockpileAliasSlot) {
-		return false
+		return ai.CheckpointBuildProduct
 	}
 	s.bindOrderQueue(u)
 	// The queued/non-queued argument is NOT the click's Shift bit: the
@@ -108,8 +149,8 @@ func (s *Session) queueStockpileRounds(u *units.Unit, count int, tick uint32) bo
 	n.Param1, n.Param2 = uint32(stockpileAliasSlot), uint32(count)
 	q := orders.QueueForUnit(u)
 	if q == nil {
-		return false
+		return ai.CheckpointBuildBinding
 	}
 	q.CoalesceTail(id, n)
-	return true
+	return ai.CheckpointBuildSuccess
 }

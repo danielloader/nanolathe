@@ -147,12 +147,12 @@ func TestMissionTriggerDeadlineLatchAndCue(t *testing.T) {
 	// ticks it actually fires on, so the cadence is asserted through the same
 	// settlement loop the battle runs, not by calling the poll by hand.
 	var fired []uint32
-	s.Econ.EndCondition = func(player int, tick uint32) {
+	s.Econ.SetEndCondition(func(player int, tick uint32) {
 		if local, ok := s.triggerLocalPlayer(); ok && local == player {
 			fired = append(fired, tick)
 		}
 		s.endConditionBlock(player, tick)
-	}
+	})
 	for tick := uint32(0); tick <= 150; tick++ {
 		s.tickPlayers(tick)
 		switch {

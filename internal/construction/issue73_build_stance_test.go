@@ -36,7 +36,7 @@ func issue73BuildFixture(t *testing.T, modern bool) (*Service, *units.Unit, *ord
 		t.Fatal(err)
 	}
 	q := orders.QueueForUnit(builder)
-	q.SetBinding(&orders.QueueBinding{Lookup: s.World.Unit, SimRNG: &sim})
+	q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: s.World.Unit, SimRNG: &sim}))
 	s.RegisterOrderHandlers(q)
 	sink := &countingNanoSink{}
 	s.Presentation = sink
@@ -212,7 +212,7 @@ func TestIssue73ReadinessWaitCancelAndProductRemoval(t *testing.T) {
 				t.Fatal("no frame")
 			}
 			q := orders.QueueForUnit(builder)
-			q.Binding().Work = &orders.WorkAdapter{CancelNotice: s.DeliverCancelNotice}
+			q.Binding().Work = orders.NewWorkAdapter(orders.WorkAdapterConfig{CancelNotice: s.DeliverCancelNotice})
 			initialBuckets := *s.Economy.UnitBuckets(builder.Handle)
 			if ending == "cancel" {
 				q.CancelAll()

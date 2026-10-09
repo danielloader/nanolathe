@@ -28,7 +28,7 @@ func modernCombatFixture(t *testing.T) (*Service, *units.World, *world.Terrain, 
 	weapon := &content.WeaponDef{ID: 77, LineOfSight: true, Turret: true, Range: 1000, WeaponVelocity: 16 << 16, AreaOfEffect: 8, DamageDefault: 60, ReloadTime: 30, Accuracy: 32, Tolerance: 65535, PitchTolerance: 65535, EnergyPerShot: 7, MetalPerShot: 3}
 	shooter.InstallWeapon(0, weapon)
 	shooter.Flags |= units.ArmedStatus
-	s := &Service{Rules: &ModernRules{}, Visibility: func(visibility.PlayerID, visibility.Target) bool { return true }, Reaction: &ReactionSeams{Allied: func(a, b uint8) bool { return a == b }}}
+	s := NewService(ServiceConfig{Rules: &ModernRules{}, Visibility: func(visibility.PlayerID, visibility.Target) bool { return true }, Reaction: NewReactionSeams(ReactionSeamsConfig{Allied: func(a, b uint8) bool { return a == b }})})
 	return s, w, terrain, shooter, target, weapon
 }
 
@@ -177,11 +177,11 @@ func TestModernThreatAcquisitionRetentionAndKnowledge(t *testing.T) {
 		t.Fatal("harmless weapon displaced retained factory")
 	}
 	tower.SlotAt(0).Weapon = &danger
-	s.Visibility = func(_ visibility.PlayerID, v visibility.Target) bool { return v.X != tower.X }
+	s.SetVisibility(func(_ visibility.PlayerID, v visibility.Target) bool { return v.X != tower.X })
 	if got, _ := s.rules().SelectTarget(s, &q); got != factory.Handle {
 		t.Fatal("invisible threat acquired")
 	}
-	s.Visibility = func(visibility.PlayerID, visibility.Target) bool { return true }
+	s.SetVisibility(func(visibility.PlayerID, visibility.Target) bool { return true })
 	// An explicit slot never enters autonomous maintenance.
 	shooter.SlotAt(0).Flags &^= units.SlotFlagAutonomous
 	s.targets.primary[shooter.Owner] = []pool.Handle{factory.Handle, tower.Handle}
@@ -200,12 +200,12 @@ func TestModernDangerNoticeIncludesUnarmedAndMissedLaunch(t *testing.T) {
 			s.Rules = StrictRules{}
 		}
 		notices := 0
-		s.DangerNotice = func(v, a *units.Unit, tick uint32) {
+		s.SetDangerNotice(func(v, a *units.Unit, tick uint32) {
 			if v != target || a != shooter || tick != 10 {
 				t.Fatal("wrong notice")
 			}
 			notices++
-		}
+		})
 		random := rng.NewSimulation(77)
 		h, _ := modernLaunch(t, s, w, terrain, shooter, target, weapon, &random)
 		s.MarkDead(h)
@@ -217,7 +217,7 @@ func TestModernDangerNoticeIncludesUnarmedAndMissedLaunch(t *testing.T) {
 		if notices != want {
 			t.Fatalf("modern=%v notices=%d want=%d", modern, notices, want)
 		}
-		s.Reaction.Allied = func(uint8, uint8) bool { return true }
+		s.Reaction.SetAllied(func(uint8, uint8) bool { return true })
 		s.AcceptDamage(w, 10, DamageInput{Victim: target.Handle, Attacker: shooter.Handle, Kind: KindOrdinary, Nominal: 1})
 		if notices != want {
 			t.Fatal("allied damage raised danger")

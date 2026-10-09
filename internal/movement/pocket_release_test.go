@@ -43,7 +43,7 @@ func newPocketFixture(t *testing.T, rules Rules, size int32, friends, voids []Ce
 	}
 	f.u = w.Unit(f.create(t, 0, mover))
 	q := orders.QueueForUnit(f.u)
-	q.SetBinding(&orders.QueueBinding{Rules: &orders.ModernRules{}, SimRNG: &rng.Simulation{}, Movement: &orders.MovementGoalAdapter{InstallPoint: sys.InstallPointGoal, Release: sys.ReleaseGoalPayload, CrowdedMoveBlocked: sys.CrowdedMoveBlocked}})
+	q.SetBinding(&orders.QueueBinding{Rules: &orders.ModernRules{}, SimRNG: &rng.Simulation{}, Movement: orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{InstallPoint: sys.InstallPointGoal, Release: sys.ReleaseGoalPayload, CrowdedMoveBlocked: sys.CrowdedMoveBlocked})})
 	q.Push(orders.Lookup("Move_Ground"), orders.Node{Owner: f.u.Handle, GoalX: world.CellToWorld(goal.X), GoalZ: world.CellToWorld(goal.Z), GoalSupplied: true})
 	f.n = q.Head()
 	if !sys.InstallPointGoal(orders.PointGoalRequest{Owner: f.u.Handle, Node: f.n, X: f.n.GoalX, Z: f.n.GoalZ, Radius: 4}) || !sys.ActivateMove(f.u, f.n) {

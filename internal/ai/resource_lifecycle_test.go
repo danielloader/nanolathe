@@ -46,7 +46,7 @@ func TestRestoredResourceMemberStartsFactoryProduction(t *testing.T) {
 			e.Players[0].Exists = true
 			attempts := 0
 			reject := true
-			m.QueueBuildTyped = func(req BuildRequest) error {
+			m.SetQueueBuildTyped(func(req BuildRequest) error {
 				attempts++
 				if req.Builder != h || req.UnitKey != "product" || req.Count != 1 || req.Kind != BuildKindFactoryQueue {
 					t.Fatalf("factory request = %+v", req)
@@ -55,7 +55,7 @@ func TestRestoredResourceMemberStartsFactoryProduction(t *testing.T) {
 					return errors.New("fixture build admission refused")
 				}
 				return construction.QueueFactoryBuild(u, req.UnitKey, req.Count, cat)
-			}
+			})
 			if orders.QueueOfUnit(u) != nil {
 				t.Fatal("fixture should begin without an allocated queue")
 			}

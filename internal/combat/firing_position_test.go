@@ -40,7 +40,7 @@ func TestFiringPositionPhysicalBlockAndTranslatedBurst(t *testing.T) {
 	shooterBefore, targetBefore := *shooter, *target
 	plotBefore := append(terrain.Plot[:0:0], terrain.Plot...)
 	count := s.Count()
-	s.Events = func(Event) { t.Fatal("candidate emitted event") }
+	s.SetEvents(func(Event) { t.Fatal("candidate emitted event") })
 	if s.FiringPositionClear(shooter, target, 10, shooter.X, shooter.Y, shooter.Z, w, terrain) {
 		t.Fatal("original blocked position was clear")
 	}
@@ -79,7 +79,7 @@ func TestFiringPositionPhysicalBlockAndTranslatedBurst(t *testing.T) {
 		t.Fatal("observation survived another unit visit")
 	}
 
-	s.Events = nil
+	s.SetEvents(nil)
 	s.Rules = StrictRules{}
 	if got := s.StepWeaponsForUnit(shooter, 10, w, nil, terrain, econ, nil, &random, nil); got.Fired != 1 {
 		t.Fatalf("Strict did not preserve ordinary launch: %+v", got)

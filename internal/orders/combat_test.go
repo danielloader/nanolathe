@@ -236,7 +236,7 @@ func TestAirAttackEntryEndsOnTheManeuverLeash(t *testing.T) {
 		q, u := gateFixture()
 		// gateFixture places the unit at (70, 90); an anchor at (70, 60) is
 		// exactly 30 whole world units away.
-		q.SetBinding(&QueueBinding{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return u }})
+		q.SetBinding(NewQueueBinding(QueueBindingConfig{SimRNG: q.binding.SimRNG, Lookup: func(pool.Handle) *units.Unit { return u }}))
 		q.Push(Lookup("AirToAir"), Node{Owner: u.Handle, Target: 7, GuardX: 70, GuardY: 60, Param3: tc.leash})
 		q.Pump(u, 40)
 
@@ -276,10 +276,10 @@ func TestCombatFamilyNeverOverwritesAnotherInstaller(t *testing.T) {
 func TestInstallPointGoalRoutesRadius(t *testing.T) {
 	var installs []PointGoalRequest
 	var releases []*Node
-	adapter := &MovementGoalAdapter{
+	adapter := NewMovementGoalAdapter(MovementGoalAdapterConfig{
 		InstallPoint: func(req PointGoalRequest) bool { installs = append(installs, req); return true },
 		Release:      func(n *Node) bool { releases = append(releases, n); return true },
-	}
+	})
 	bind := &QueueBinding{Movement: adapter}
 
 	ground := &units.Unit{Def: &content.UnitDef{UnitName: "ground"}}
@@ -444,16 +444,16 @@ func TestAttackUTypeAcquiresTheAuthoredType(t *testing.T) {
 	hostilePrey := &units.Unit{Handle: 4, Owner: 1, Def: prey, Alive: true, X: numeric.Fixed(300 << 16), Z: numeric.Fixed(90 << 16)}
 	livePool := []*units.Unit{u, friendlyPrey, hostileOther, hostilePrey}
 
-	q.binding.Hostility = func(actor, candidate *units.Unit) bool { return actor.Owner != candidate.Owner }
-	q.binding.Lookup = func(h pool.Handle) *units.Unit {
+	q.binding.SetHostility(func(actor, candidate *units.Unit) bool { return actor.Owner != candidate.Owner })
+	q.binding.SetLookup(func(h pool.Handle) *units.Unit {
 		for _, candidate := range livePool {
 			if candidate.Handle == h {
 				return candidate
 			}
 		}
 		return nil
-	}
-	q.binding.World = &WorldQueryAdapter{
+	})
+	q.binding.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{
 		SeaLevel: func() uint8 { return 0 },
 		ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
 			for _, candidate := range livePool {
@@ -462,7 +462,7 @@ func TestAttackUTypeAcquiresTheAuthoredType(t *testing.T) {
 				}
 			}
 		},
-	}
+	})
 
 	id := Lookup("AttackUType")
 	q.Push(id, Node{Owner: u.Handle, BuildDefKey: content.CanonicalKey("prey"), Param1: idx})

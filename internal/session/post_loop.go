@@ -33,6 +33,7 @@ type postLoopState struct {
 	traceLimit       int
 	traceDropped     uint64
 	publicationCount uint32
+	onlineEyeballs   [10]eyeballList
 	eyeballs         eyeballList // temporary-sight records [01 R-PLAT-02 §5]
 }
 
@@ -162,6 +163,11 @@ func (s *Session) runRetailPostLoopTail(lastTick uint32) {
 	// message-ring retire [03 R-COMP-02 §2][01 R-PLAT-02 §5].
 	state.recordTrace("eyeball-expire")
 	state.eyeballs.expire(s.Vis, lastTick)
+	if s.onlineResults != nil {
+		for i := range state.onlineEyeballs {
+			state.onlineEyeballs[i].expire(s.Vis, lastTick)
+		}
+	}
 }
 
 func (s *postLoopState) barrierOne(lastTick uint32) {

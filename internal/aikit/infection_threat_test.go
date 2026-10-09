@@ -22,7 +22,7 @@ func TestInfectionThreatObservationUsesLivePolicyAndSight(t *testing.T) {
 	binding := &orders.QueueBinding{Rules: &orders.ModernRules{}}
 	orders.BindQueueBinding(u, binding)
 	visible := true
-	m := &ai.Manager{Player: 0, Catalog: cat, UnitVisible: func(uint8, *units.Unit) bool { return visible }}
+	m := ai.NewManager(ai.ManagerConfig{Player: 0, Catalog: cat, UnitVisible: func(uint8, *units.Unit) bool { return visible }})
 	h := NewHost(m, &countBrain{}, PersonaHard)
 	defer h.Close()
 	h.kit.Table = BuildTable(cat, nil)

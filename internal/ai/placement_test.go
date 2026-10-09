@@ -20,7 +20,8 @@ func placeWithResult(m *Manager, defKey string, w *world.Terrain) PlacementResul
 	if !res.Valid {
 		return res
 	}
-	if err := queueExactResult(m, defKey, res); err != nil {
+	actor := classicApplicationActor(m.CheckpointApplicationHistory().ActiveAttempt(), m.Factory)
+	if err := queueExactResult(m, defKey, res, actor); err != nil {
 		res.Valid = false
 		res.Reason = ReasonQueueFailed
 		res.Proof = err
@@ -84,7 +85,7 @@ func makePlacementManager(cat *content.Catalog, terrain *world.Terrain, metal in
 	m.Strategic.setupDrawsReady = true
 	m.Strategic.LandRegion = PlacementRegion{CellW: 20, CellH: 20}
 	m.Strategic.WaterRegion = PlacementRegion{CellW: 20, CellH: 20}
-	m.QueueBuildTyped = func(BuildRequest) error { return nil }
+	m.SetQueueBuildTyped(func(BuildRequest) error { return nil })
 	return m
 }
 
@@ -207,7 +208,7 @@ func TestPlacementRejectsMissingDependencies(t *testing.T) {
 	}
 	cases[2].m.RNG = nil
 	cases[3].m.Factory = nil
-	cases[4].m.QueueBuildTyped = nil
+	cases[4].m.SetQueueBuildTyped(nil)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			res := placeWithResult(tc.m, "armsolar", tc.m.Terrain)
@@ -242,16 +243,17 @@ func TestPlacementPropagatesTypedMobileRequest(t *testing.T) {
 	cat := placementCatalog("armsolar", "oooo", 0)
 	m := makePlacementManager(cat, placementTerrain(16, 16, 0), 1)
 	var got BuildRequest
-	m.QueueBuildTyped = func(req BuildRequest) error {
+	m.SetQueueBuildTyped(func(req BuildRequest) error {
 		got = req
 		return nil
-	}
+	})
 	res := PlacementResult{
 		Valid:  true,
 		WorldX: placementWorldCoordinate(3, 2),
 		WorldZ: placementWorldCoordinate(4, 3),
 	}
-	if err := queueExactResult(m, "armsolar", res); err != nil {
+	actor := classicApplicationActor(m.CheckpointApplicationHistory().ActiveAttempt(), m.Factory)
+	if err := queueExactResult(m, "armsolar", res, actor); err != nil {
 		t.Fatalf("typed queue failed: %v", err)
 	}
 	if got.Kind != BuildKindMobileSite || got.Builder != m.Factory.Handle || got.UnitKey != "armsolar" || got.Count != 1 {
@@ -266,13 +268,14 @@ func TestPlacementPropagatesTypedQueueError(t *testing.T) {
 	cat := placementCatalog("armsolar", "oooo", 0)
 	m := makePlacementManager(cat, placementTerrain(16, 16, 0), 1)
 	want := errors.New("ordinary queue rejected request")
-	m.QueueBuildTyped = func(BuildRequest) error { return want }
+	m.SetQueueBuildTyped(func(BuildRequest) error { return want })
 	res := PlacementResult{
 		Valid:  true,
 		WorldX: placementWorldCoordinate(3, 2),
 		WorldZ: placementWorldCoordinate(4, 3),
 	}
-	if err := queueExactResult(m, "armsolar", res); !errors.Is(err, want) {
+	actor := classicApplicationActor(m.CheckpointApplicationHistory().ActiveAttempt(), m.Factory)
+	if err := queueExactResult(m, "armsolar", res, actor); !errors.Is(err, want) {
 		t.Fatalf("queue error must cross typed boundary: %v", err)
 	}
 }

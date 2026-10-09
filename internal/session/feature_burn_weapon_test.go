@@ -32,7 +32,7 @@ func TestBurnWeaponFiresThroughTheSharedSplashEntry(t *testing.T) {
 			tree := cat.Features["tree1"]
 			tree.BurnWeapon = tc.weapon
 			s := featureLifecycleSession(t, fs, cat)
-			if s.Features.BurnWeapon == nil {
+			if s.Features.BurnWeaponHook() == nil {
 				t.Fatal("composition left the burn weapon seam unbound")
 			}
 			if s.Features.PlaceAt(6, 6, tree) == nil || s.Features.PlaceAt(7, 6, tree) == nil {

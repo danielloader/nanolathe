@@ -158,7 +158,7 @@ func TestStagedFeatureIgnitionIsNotRepeatedByCoreRetry(t *testing.T) {
 	s := stage.Session
 	before := s.SimRNG().Draws()
 	sounds := 0
-	s.Features.BurnSound = func([3]numeric.Fixed) { sounds++ }
+	s.Features.SetBurnSound(func([3]numeric.Fixed) { sounds++ })
 	good := stage.Image.Units.Scripts[0].Data
 	stage.Image.Units.Scripts[0].Data = nil
 	if err := RestoreRetailBattleCore(stage); err == nil {

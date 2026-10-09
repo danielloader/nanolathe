@@ -85,8 +85,8 @@ func TestFiringPositionRestoredPumpDeliversSavedControl(t *testing.T) {
 					restored := newFiringFixture()
 					restored.blocked = false
 					restored.u.Pending = pending // the unit save carries this word separately
-					restored.q.Binding().Movement.Release = func(*Node) bool { return true }
-					restored.q.Binding().Weapons.CanEngage = func(*units.Unit, pool.Handle, int) bool { return true }
+					restored.q.Binding().Movement.SetRelease(func(*Node) bool { return true })
+					restored.q.Binding().Weapons.SetCanEngage(func(*units.Unit, pool.Handle, int) bool { return true })
 					if err := RetailRestoreOrdersAtTick(restored.u, records, map[uint16]pool.Handle{1: 1, 2: 2}, restored.q.Binding(), 10); err != nil {
 						t.Fatal(err)
 					}

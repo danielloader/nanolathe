@@ -16,8 +16,8 @@ func (s *Session) CursorRepairAdmits(actor, target *units.Unit) bool {
 	probe := *actor
 	probe.Orders = nil
 	sea := s.World.SeaLevel
-	orders.BindQueueBinding(&probe, &orders.QueueBinding{World: &orders.WorldQueryAdapter{
+	orders.BindQueueBinding(&probe, &orders.QueueBinding{World: orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{
 		SeaLevel: func() uint8 { return sea },
-	}})
+	})})
 	return orders.Resolve(8, &probe, target, nil) != 0
 }

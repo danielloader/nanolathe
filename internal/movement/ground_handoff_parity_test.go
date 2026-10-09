@@ -36,7 +36,7 @@ func TestGroundHandoffAcceptsDuringEveryInstaller(t *testing.T) {
 			q := orders.NewQueueWith([]*orders.Node{n}, nil)
 			orders.BindQueue(u, q)
 			tick := uint32(110)
-			q.SetBinding(&orders.QueueBinding{CurrentTick: func() uint32 { return tick }})
+			q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{CurrentTick: func() uint32 { return tick }}))
 			s.tick = 1 // deliberately stale movement-transaction tick
 			route := handleRow(s.Routes, h)
 			route.Count, route.LastRequestTick = 3, 101
@@ -131,7 +131,7 @@ func TestGroundNullHandoffRequestAgeAndDirty(t *testing.T) {
 			n := &orders.Node{ID: orders.Lookup("Move_Ground"), Owner: h}
 			q := orders.NewQueueWith([]*orders.Node{n}, nil)
 			orders.BindQueue(u, q)
-			q.SetBinding(&orders.QueueBinding{CurrentTick: func() uint32 { return tc.tick }})
+			q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{CurrentTick: func() uint32 { return tc.tick }}))
 			s.InstallPointGoal(orders.PointGoalRequest{Owner: h, Node: n, X: world.CellToWorld(9), Z: world.CellToWorld(9)})
 			route := handleRow(s.Routes, h)
 			route.LastRequestTick, route.Active, route.WantsRepath, route.Dirty = tc.stamp, true, true, false
@@ -212,7 +212,7 @@ func TestGroundRemovalDoesNotRebindRetainedSuccessor(t *testing.T) {
 	b := &orders.Node{ID: orders.Lookup("Move_Ground"), Owner: h}
 	q := orders.NewQueueWith([]*orders.Node{a, b}, nil)
 	orders.BindQueue(u, q)
-	q.SetBinding(&orders.QueueBinding{Movement: &orders.MovementGoalAdapter{Destroy: s.ReleaseGoal}})
+	q.SetBinding(&orders.QueueBinding{Movement: orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{Destroy: s.ReleaseGoal})})
 	s.InstallPointGoal(orders.PointGoalRequest{Owner: h, Node: b, X: world.CellToWorld(9), Z: world.CellToWorld(9)})
 	s.InstallPointGoal(orders.PointGoalRequest{Owner: h, Node: a, X: world.CellToWorld(12), Z: world.CellToWorld(12)})
 	q.RemoveHead()

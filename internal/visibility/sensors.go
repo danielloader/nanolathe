@@ -32,22 +32,26 @@ const primaryCandidateSlots = 10
 
 // SensorUnit is one unit as the sensor phase sees it [03 §3.4] P0-11.
 //
-// The phase mutates Status through the pointer — that is its entire
-// authoritative output. Everything else it produces lands on the backing
-// surfaces, which are presentation.
+// The ordinary phase mutates Status and DecloakDeadline through their pointers.
+// SensorTickForPerspective redirects the status writes to its allocation bank;
+// the deadline remains the shared unit field [03 R-VIS-01 §4].
 type SensorUnit struct {
 	// ID correlates the sensor result with its committed unit pool slot.
-	ID        uint16
-	Owner     PlayerID
-	Status    *uint32       // runtime status field; the phase writes 0x100/0x200/0x300/0x400/0x1000
-	X, Z      numeric.Fixed // 16.16 world position
-	Y         numeric.Fixed
-	Alive     bool
-	Dying     bool // death latch; a latched unit is not a proximity candidate [R-VIS-01 §4] pass 4
-	Hidden    bool // instance cloak bit; the seen probe's second gate [R-VIS-01 §4] pass 5
-	Stealth   bool // definition stealth: the contact callback's third reject [R-VIS-01 §5]
-	Active    bool // runtime activation/on-state bit required by the emitters [R-VIS-01 §4]
-	OnOffable bool // definition on/off flag used by selected-unit circle presentation [03 §3.9]
+	ID uint16
+	// AllocationSerial qualifies that slot for online sensor retention. Zero
+	// is an unfinished allocation and never enters a bank (DESIGN_MULTIPLAYER
+	// §16.4.1); the ordinary sensor pass does not read it.
+	AllocationSerial uint64
+	Owner            PlayerID
+	Status           *uint32       // runtime status field; the phase writes 0x100/0x200/0x300/0x400/0x1000
+	X, Z             numeric.Fixed // 16.16 world position
+	Y                numeric.Fixed
+	Alive            bool
+	Dying            bool // death latch; a latched unit is not a proximity candidate [R-VIS-01 §4] pass 4
+	Hidden           bool // instance cloak bit; the seen probe's second gate [R-VIS-01 §4] pass 5
+	Stealth          bool // definition stealth: the contact callback's third reject [R-VIS-01 §5]
+	Active           bool // runtime activation/on-state bit required by the emitters [R-VIS-01 §4]
+	OnOffable        bool // definition on/off flag used by selected-unit circle presentation [03 §3.9]
 
 	// CanCloak is the definition's DERIVED can-cloak flag — `cloakcost > 0` on
 	// the parsed value, not an authored key and not `init_cloaked` — and it is
@@ -89,8 +93,9 @@ type SensorUnit struct {
 }
 
 // SensorInput is a diagnostic snapshot of one completed sensor pass.
-// Gameplay and publication read the live unit status word instead: these
-// inputs may describe a removed occupant of a reused slot [03 R-VIS-01 §4].
+// Gameplay and publication read the live allocation's status instead (through
+// StatusForPerspective online): these inputs may describe a removed occupant
+// of a reused slot [03 R-VIS-01 §4].
 type SensorInput struct {
 	ID        uint16
 	Owner     PlayerID
@@ -216,6 +221,13 @@ func (s *Service) SensorTick(tick uint32, playerCount int, units []SensorUnit) {
 	if s == nil {
 		return
 	}
+	s.sensorTick(tick, playerCount, units, s.local, s.viewerDefeated)
+}
+
+// sensorTick is the same ordered five-pass walk for either one retail viewer
+// or one online human's perspective. Explicit arguments leave presentation's
+// viewer and the legacy defeated flag untouched (DESIGN_MULTIPLAYER §6.3).
+func (s *Service) sensorTick(tick uint32, playerCount int, units []SensorUnit, viewer PlayerID, defeated bool) {
 	s.sensorInputs = s.sensorInputs[:0]
 	s.sensorStatusByID = s.sensorStatusByID[:0]
 	if playerCount <= 1 {
@@ -231,7 +243,7 @@ func (s *Service) SensorTick(tick uint32, playerCount int, units []SensorUnit) {
 			continue
 		}
 		*u.Status &^= DecloakBit
-		if s.localSide(u.Owner) || s.viewerDefeated {
+		if s.sameSide(viewer, u.Owner) || defeated {
 			*u.Status |= FriendlyMask
 		} else {
 			*u.Status &^= sensorClearMask
@@ -260,7 +272,7 @@ func (s *Service) SensorTick(tick uint32, playerCount int, units []SensorUnit) {
 	// dead data in retail too. Do not widen this gate.
 	for i := range units {
 		e := &units[i]
-		if !e.Alive || e.Dying || !s.localSide(e.Owner) || !e.Active {
+		if !e.Alive || e.Dying || !s.sameSide(viewer, e.Owner) || !e.Active {
 			continue // alive, own, active, and not death-latched [R-VIS-01 §4] pass 2
 		}
 		if e.RadarDistance == 0 && e.SonarDistance == 0 {
@@ -287,7 +299,7 @@ func (s *Service) SensorTick(tick uint32, playerCount int, units []SensorUnit) {
 				if !c.Alive || c.Status == nil {
 					continue
 				}
-				if s.localSide(c.Owner) || c.Stealth {
+				if s.sameSide(viewer, c.Owner) || c.Stealth {
 					continue
 				}
 				d2 := planarSquared(e, c)
@@ -310,7 +322,7 @@ func (s *Service) SensorTick(tick uint32, playerCount int, units []SensorUnit) {
 				// Rejects in order: an own-side candidate, then definition
 				// stealth, which suppresses radar and sonar outright with no
 				// distance or elevation term [R-VIS-01 §5].
-				if s.localSide(c.Owner) || c.Stealth {
+				if s.sameSide(viewer, c.Owner) || c.Stealth {
 					continue
 				}
 				d2 := planarSquared(e, c)
@@ -335,7 +347,7 @@ func (s *Service) SensorTick(tick uint32, playerCount int, units []SensorUnit) {
 	// actual jammer and skips both callbacks when its owner is allied.
 	for i := range units {
 		e := &units[i]
-		if !e.Alive || !e.Active || (e.RadarJam == 0 && e.SonarJam == 0) || !s.JammerSuppresses(s.local, e.Owner) {
+		if !e.Alive || !e.Active || (e.RadarJam == 0 && e.SonarJam == 0) || !s.JammerSuppresses(viewer, e.Owner) {
 			continue
 		}
 		if e.RadarJam != 0 {
@@ -479,7 +491,7 @@ func (s *Service) SensorTick(tick uint32, playerCount int, units []SensorUnit) {
 		if u.Hidden {
 			continue // the instance cloak bit is the pass's only other gate
 		}
-		if s.VisiblePoint(s.local, u.X, u.Y, u.Z) {
+		if s.VisiblePoint(viewer, u.X, u.Y, u.Z) {
 			*u.Status |= SeenBit
 		}
 	}

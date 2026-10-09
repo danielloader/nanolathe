@@ -72,7 +72,7 @@ func setTestHostility(u *units.Unit, fn func(*units.Unit, *units.Unit) bool) {
 	if b == nil {
 		b = &QueueBinding{}
 	}
-	b.Hostility = fn
+	b.SetHostility(fn)
 	q.SetBinding(b)
 }
 
@@ -83,7 +83,7 @@ func setTestBuildList(u *units.Unit, fn func(*content.UnitDef) bool) {
 	if b == nil {
 		b = &QueueBinding{}
 	}
-	b.BuildList = fn
+	b.SetBuildList(fn)
 	q.SetBinding(b)
 }
 
@@ -95,7 +95,7 @@ func setTestAdmission(u *units.Unit, fn func(carrier, candidate *units.Unit) boo
 	if b == nil {
 		b = &QueueBinding{}
 	}
-	b.TransportAdmission = fn
+	b.SetTransportAdmission(fn)
 	q.SetBinding(b)
 }
 
@@ -110,7 +110,7 @@ func setTestSeaLevel(u *units.Unit, level uint8) {
 	if b.World == nil {
 		b.World = &WorldQueryAdapter{}
 	}
-	b.World.SeaLevel = func() uint8 { return level }
+	b.World.SetSeaLevel(func() uint8 { return level })
 	q.SetBinding(b)
 }
 
@@ -120,7 +120,7 @@ func setTestLookup(u *units.Unit, fn func(pool.Handle) *units.Unit) {
 	if b == nil {
 		b = &QueueBinding{}
 	}
-	b.Lookup = fn
+	b.SetLookup(fn)
 	q.SetBinding(b)
 }
 

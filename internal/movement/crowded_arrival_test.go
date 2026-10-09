@@ -47,7 +47,7 @@ func capturedCrowdedRally(t *testing.T, modern bool) (*System, *units.Unit, *ord
 	if modern {
 		rules = &orders.ModernRules{}
 	}
-	q.SetBinding(&orders.QueueBinding{Rules: rules, SimRNG: &rng.Simulation{}, Movement: &orders.MovementGoalAdapter{InstallPoint: sys.InstallPointGoal, Release: sys.ReleaseGoalPayload, CrowdedMoveBlocked: sys.CrowdedMoveBlocked}})
+	q.SetBinding(&orders.QueueBinding{Rules: rules, SimRNG: &rng.Simulation{}, Movement: orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{InstallPoint: sys.InstallPointGoal, Release: sys.ReleaseGoalPayload, CrowdedMoveBlocked: sys.CrowdedMoveBlocked})})
 	q.Push(orders.Lookup("Move_Ground"), orders.Node{Owner: u.Handle, GoalX: numeric.FixedFromInt(1476 - 1408), GoalZ: numeric.FixedFromInt(2425 - 2336), GoalSupplied: true, Flags: 8})
 	n := q.Head()
 	if !sys.InstallPointGoal(orders.PointGoalRequest{Owner: u.Handle, Node: n, X: n.GoalX, Z: n.GoalZ, Radius: 4}) {

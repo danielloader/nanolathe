@@ -221,6 +221,8 @@ type pendingAim struct {
 // Records is the parallel named storage (107-byte retail identity, I13) moved
 // identically to the metadata on compaction.
 type Service struct {
+	checkpointCallbacks [checkpointServiceCallbackCount]checkpointServiceCallbackProof
+
 	// Community holds only this owner's projected feature answers (DESIGN_COMMUNITY_PATCH §3.1).
 	Community community.Features
 	// Rules is the gameplay rule set the firing pipeline consults, bound by the
@@ -232,14 +234,14 @@ type Service struct {
 	Rules Rules
 	// InfectionThreat observes the existing bound orders capability. Only Modern
 	// selection asks, after direct sight and ordinary attack admission.
-	InfectionThreat func(*units.Unit) bool `json:"-"`
+	infectionThreat func(*units.Unit) bool `json:"-"`
 	// VisitOffMapFiled walks the movement owner's canonical off-map bucket in
 	// head-first (descending filing-sequence) order. It advances from the link
 	// observed after yield returns, stops when yield returns false, and allocates
 	// nothing per visit. IsOffMapFiled is the point query used by CP-DMG-1 to keep its
 	// clamped overflow index disjoint from that bucket [CP-DMG-1][CP-ENV-1].
-	VisitOffMapFiled func(yield func(pool.Handle, uint64) bool) `json:"-"`
-	IsOffMapFiled    func(pool.Handle) bool                     `json:"-"`
+	visitOffMapFiled func(yield func(pool.Handle, uint64) bool) `json:"-"`
+	isOffMapFiled    func(pool.Handle) bool                     `json:"-"`
 	// TransportDeaths is CP-DMG-3's battle-local captured death context.
 	TransportDeaths TransportDeathState
 	// Modern transient predictions follow projectile compaction; saves omit them.
@@ -248,9 +250,9 @@ type Service struct {
 	modernNextProjectileTick uint32
 	targetQuery              TargetQuery
 	// DangerNotice is composed by session, which owns contact filtering and orders.
-	DangerNotice func(victim, attacker *units.Unit, tick uint32) `json:"-"`
+	dangerNotice func(victim, attacker *units.Unit, tick uint32) `json:"-"`
 	// ImpactNotice carries accepted hostile damage, including its local bearing.
-	ImpactNotice func(victim, attacker *units.Unit, bearing numeric.Angle, tick uint32) `json:"-"`
+	impactNotice func(victim, attacker *units.Unit, bearing numeric.Angle, tick uint32) `json:"-"`
 
 	// ProjectileWind is the session-owned wind used by ballistic admission.
 	// Its phase-8 deadline bounds future wind knowledge [01 §7.3].
@@ -275,7 +277,7 @@ type Service struct {
 	// It is transient Modern observation, never saved or indexed by unit.
 	firingPosition firingPositionObservation
 
-	Events      func(Event)               // optional ordered combat event sink; nil-safe
+	events      func(Event)               // optional ordered combat event sink; nil-safe
 	pendingAims map[pendingKey]pendingAim // Aim dispatch tracking ON-04 [06 §3.3]
 	// boxCentres memoises pieceVertexBoxCentre per (model, model piece). The
 	// value is a pure function of immutable loaded model data, so the memo
@@ -305,13 +307,13 @@ type Service struct {
 
 	// Visibility is the per-session LOS predicate [03 §3.2] C8 [RS-P0-018].
 	// Moved from package-global combat.VisibilityHook to per-Service field for session isolation [INVARIANTS I1][I6][RS-P0-018].
-	Visibility func(viewer visibility.PlayerID, target visibility.Target) bool `json:"-"`
+	visibility func(viewer visibility.PlayerID, target visibility.Target) bool `json:"-"`
 
 	// ControlByte reads the player slot's control byte, the operand of the
 	// damage-intake gates of [06 R-DMG-01 §8]. The session binds it to the
 	// authoritative player record; ControlByteAbsent means the slot named has
 	// no record. Read it through PlayerControlByteFor, never directly.
-	ControlByte func(owner uint8) uint8 `json:"-"`
+	controlByte func(owner uint8) uint8 `json:"-"`
 
 	// Reaction binds the damage-intake reaction routine's seams [06 §9.1] step
 	// 4. The session installs it at composition; with none installed the
@@ -319,12 +321,12 @@ type Service struct {
 	Reaction *ReactionSeams `json:"-"`
 	// DamageActivity observes accepted non-heal intake after reaction and
 	// provenance writes, before the paralyzer branch [03 R-AUD-01 §5].
-	DamageActivity func(victim, attacker *units.Unit, tick uint32) `json:"-"`
+	damageActivity func(victim, attacker *units.Unit, tick uint32) `json:"-"`
 	// HealthLost observes the health an accepted damage packet removed from a
 	// live unit, after the write: the victim, the packet's attacker record (nil
 	// when it named none) and the health lost, never more than the victim had.
 	// Scenario scoring reads it (DESIGN_SURVIVAL §8); it changes nothing.
-	HealthLost func(victim, attacker *units.Unit, lost int32) `json:"-"`
+	healthLost func(victim, attacker *units.Unit, lost int32) `json:"-"`
 
 	// Features is the feature runtime the area walk of [06 §9.3] hands its
 	// accepted feature candidates to. Every cell inside a blast offers one, and

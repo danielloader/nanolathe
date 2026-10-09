@@ -234,6 +234,7 @@ func parse(args []string, output io.Writer) (headless.Request, string, profileOp
 	flags.StringVar(&profiles.cpuPath, "cpuprofile", "", "write a pprof CPU profile of the authoritative run to this file")
 	flags.StringVar(&profiles.heapPath, "memprofile", "", "write a pprof allocation profile of the authoritative run to this file")
 	flags.StringVar(&bench.OutputDir, "sim-benchmark", "", "run the simulation-cost benchmark and write its artifacts to this NEW directory")
+	flags.BoolVar(&bench.Checkpoints, "sim-benchmark-checkpoints", false, "record admitted full checkpoints and selected tick rows in the simulation-cost benchmark")
 	flags.StringVar(&bench.Map, "sim-benchmark-map", headless.SimBenchDefaultMap, "map for the simulation-cost benchmark scene")
 	flags.IntVar(&bench.ArmySize, "sim-benchmark-army-size", headless.SimBenchDefaultArmySize, "placed units per computer army, excluding commander (250..1000; must fit the resolved unit limit)")
 	flags.Int64Var(&warmup, "warmup-ticks", int64(headless.SimBenchDefaultWarmupTicks), "unmeasured ticks run before the benchmark window opens")

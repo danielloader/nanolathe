@@ -201,10 +201,10 @@ func TestFactoryAllocationPreservesAuthoredExitTransform(t *testing.T) {
 	// validation uses the independently snapped 2x2 rectangle.
 	exitX, exitY, exitZ := int64(12345), int64(54321), int64(-23456)
 	svc := NewService(exitTerrain(12, 12), cat, w, &economy.Service{})
-	svc.ModelForFactory = func(*units.Unit) *model.Model {
+	svc.SetModelForFactory(func(*units.Unit) *model.Model {
 		return trivialModel(1, [][3]int64{{exitX, exitY, exitZ}})
-	}
-	if _, ok := svc.QueryBuildWorldPosition(factory, svc.ModelForFactory(factory)); !ok {
+	})
+	if _, ok := svc.QueryBuildWorldPosition(factory, svc.ModelForFactoryHook()(factory)); !ok {
 		t.Fatal("query world position failed before pump")
 	}
 	svc.Pump(factory, 0)
@@ -294,7 +294,7 @@ func TestClasslessAircraftFactoryAdmission(t *testing.T) {
 	q := orders.QueueForUnit(factory)
 	q.Primary()[0].Phase = uint8(State2)
 	svc := NewService(exitTerrain(8, 8), cat, w, &economy.Service{})
-	svc.ModelForFactory = func(*units.Unit) *model.Model { return trivialModel(1, nil) }
+	svc.SetModelForFactory(func(*units.Unit) *model.Model { return trivialModel(1, nil) })
 	svc.Pump(factory, 1)
 	node := q.Primary()[0]
 	if node.Target == 0 {
@@ -826,7 +826,7 @@ func TestRallyInheritanceOrdering(t *testing.T) {
 	target := &units.Unit{Handle: 900, Alive: true}
 	hostile := &units.Unit{Handle: 901, Alive: true}
 	sim := rng.NewSimulation(77)
-	orderBinding := &orders.QueueBinding{
+	orderBinding := orders.NewQueueBinding(orders.QueueBindingConfig{
 		Economy: svc.Economy,
 		Lookup: func(h pool.Handle) *units.Unit {
 			switch h {
@@ -840,7 +840,7 @@ func TestRallyInheritanceOrdering(t *testing.T) {
 		},
 		Hostility: func(_, b *units.Unit) bool { return b == hostile },
 		SimRNG:    &sim,
-	}
+	})
 	svc.OrderBinding = orderBinding
 	// Ensure product queue empty
 	pqBefore := orders.QueueForUnit(prod).LenPrimary()
@@ -856,7 +856,7 @@ func TestRallyInheritanceOrdering(t *testing.T) {
 	// hostility gate command resolution, while the stockpile handler uses the
 	// inherited economy ledger and simulation stream.
 	prod.Def.CanGuard = true
-	if got := pq.Binding().Lookup(target.Handle); got != target {
+	if got := pq.Binding().LookupHook()(target.Handle); got != target {
 		t.Fatalf("inherited target lookup returned %p, want %p", got, target)
 	}
 	if got := orders.Resolve(7, prod, target, nil); got != orders.Lookup("Follow_Ground") {
@@ -974,7 +974,7 @@ func TestRefundArithmetic(t *testing.T) {
 		svcIsSpecial := func(owner uint8) bool { return special }
 		svc := NewService(nil, cat, w, econ)
 		bindConstructionCombat(svc)
-		svc.IsSpecialSecondState = svcIsSpecial
+		svc.SetIsSpecialSecondState(svcIsSpecial)
 		svc.ModeSelector = mode
 		svc.OnRefresh = func(u *units.Unit) {}
 		svc.handleCancelCurrent(factory, head, 100)

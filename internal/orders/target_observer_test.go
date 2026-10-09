@@ -27,7 +27,7 @@ func TestStationaryGuardBindsTargetObserver(t *testing.T) {
 	guard.InstallWeapon(0, &content.WeaponDef{Range: 100})
 	guard.SlotAt(0).Target = units.Target{Kind: units.TargetUnit, Unit: target.Handle}
 	q := QueueForUnit(guard)
-	q.SetBinding(&QueueBinding{Lookup: w.Unit})
+	q.SetBinding(NewQueueBinding(QueueBindingConfig{Lookup: w.Unit}))
 	q.Push(Lookup("Guard_NoMove"), Node{Owner: guard.Handle})
 	n := q.Primary()[0]
 	if n.StaticGate&staticTargetObserver != 0 || n.Target != 0 {

@@ -70,14 +70,14 @@ func TestNewOrderBindingUsesDirectionalDiplomacyAndResources(t *testing.T) {
 	b := s.newOrderBinding()
 	actor := &units.Unit{Owner: 0, Def: &content.UnitDef{Side: "blue"}}
 	target := &units.Unit{Owner: 1, Def: &content.UnitDef{Side: "blue"}}
-	if b.Hostility(actor, target) {
+	if b.HostilityHook()(actor, target) {
 		t.Fatal("directional player alliance should admit the candidate")
 	}
 	s.Econ.Players[0].Allies[1] = false
-	if !b.Hostility(actor, target) {
+	if !b.HostilityHook()(actor, target) {
 		t.Fatal("directional player diplomacy should reject the candidate")
 	}
-	resources, ok := b.Resources(0)
+	resources, ok := b.ResourcesHook()(0)
 	if !ok || resources.Stock != [2]float32{7, 11} || resources.Capacity != [2]float32{70, 110} {
 		t.Fatalf("resource binding = %#v, %v", resources, ok)
 	}
@@ -325,8 +325,8 @@ func TestCreateAndBindServicesChainsDeathObserver(t *testing.T) {
 	s.Econ.SeedDeadlines(0)
 	s.InitBattleWindForSession()
 	var primary, priorExtra int
-	w.OnDeath = func(pool.Handle, units.DeathCause, *units.Unit) { primary++ }
-	w.OnDeathExtra = func(pool.Handle, units.DeathCause, *units.Unit) { priorExtra++ }
+	w.SetDeathHook(func(pool.Handle, units.DeathCause, *units.Unit) { primary++ })
+	w.SetDeathExtraHook(func(pool.Handle, units.DeathCause, *units.Unit) { priorExtra++ })
 	if err := createAndBindServicesForTest(t, s); err != nil {
 		t.Fatal(err)
 	}

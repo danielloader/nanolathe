@@ -185,7 +185,7 @@ func TestModernInstalledAnnihilatorMobileEnergy(t *testing.T) {
 					first.Kills, second.Kills = 7, 7 // authored lead becomes available after five kills
 				}
 				stampBeamTarget(terrain, target)
-				s := &Service{Rules: &ModernRules{}, Visibility: func(_ visibility.PlayerID, _ visibility.Target) bool { return true }, Reaction: &ReactionSeams{Allied: func(a, b uint8) bool { return a == b }}}
+				s := NewService(ServiceConfig{Rules: &ModernRules{}, Visibility: func(_ visibility.PlayerID, _ visibility.Target) bool { return true }, Reaction: NewReactionSeams(ReactionSeamsConfig{Allied: func(a, b uint8) bool { return a == b }})})
 				if strict {
 					s.Rules = StrictRules{}
 				}

@@ -24,10 +24,10 @@ func TestPatrolScansKeepSuppliedOrderAndDrawOnlyAfterGates(t *testing.T) {
 	order := []pool.Handle{actor.Handle, friendly.Handle, hostile.Handle, wrongDef.Handle, dead.Handle}
 	seen := make([]pool.Handle, 0, len(order))
 	sim := rng.SimulationFromState(1)
-	q := &Queue{binding: &QueueBinding{
+	q := &Queue{binding: NewQueueBinding(QueueBindingConfig{
 		SimRNG:    simPtr(&sim),
 		Hostility: func(_, candidate *units.Unit) bool { return candidate.Owner == 1 },
-		World: &WorldQueryAdapter{ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
+		World: NewWorldQueryAdapter(WorldQueryAdapterConfig{ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
 			for _, h := range order {
 				seen = append(seen, h)
 				var candidate *units.Unit
@@ -52,12 +52,12 @@ func TestPatrolScansKeepSuppliedOrderAndDrawOnlyAfterGates(t *testing.T) {
 					break
 				}
 			}
-		}},
-	}}
+		}}),
+	})}
 	BindQueue(actor, q)
-	q.binding.World.ForEachUnitInRadius = func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
-		q.binding.World.ForEachUnit(visit)
-	}
+	q.binding.World.SetForEachUnitInRadius(func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
+		q.binding.World.ForEachUnitHook()(visit)
+	})
 
 	if got := scanAttackUType(actor, def.UnitDefID); got != hostile {
 		t.Fatalf("typed attack winner = %v, want hostile candidate", got)
@@ -99,17 +99,17 @@ func TestRepairFeaturePairingUsesLatticeOrderAndTournaments(t *testing.T) {
 	def := &content.UnitDef{MaxDamage: 100, SightDistance: 96}
 	actor := &units.Unit{Handle: 1, Owner: 0, Def: def, Alive: true}
 	sim := rng.SimulationFromState(1)
-	binding := &QueueBinding{SimRNG: &sim, Resources: func(uint8) (ResourceView, bool) {
+	binding := NewQueueBinding(QueueBindingConfig{SimRNG: &sim, Resources: func(uint8) (ResourceView, bool) {
 		return ResourceView{Stock: [2]float32{0, 0}, Capacity: [2]float32{100, 100}}, true
-	}}
+	}})
 	lookupCount := 0
-	binding.World = &WorldQueryAdapter{
+	binding.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{
 		LookupFeature: func(int32, int32) (FeatureView, bool) {
 			lookupCount++
 			return FeatureView{Energy: int32(lookupCount), Metal: int32(lookupCount), Reclaimable: true, Autoreclaimable: true}, true
 		},
 		TerrainHeight: func(x, z numeric.Fixed) (numeric.Fixed, bool) { return x + z, true },
-	}
+	})
 	q := &Queue{binding: binding}
 	BindQueue(actor, q)
 	energy, metal := scanFeatureLists(actor, 96)
@@ -164,10 +164,10 @@ func TestRepairRadiusEnumeratorAnswersTheStopQuestion(t *testing.T) {
 
 	var visited int
 	sim := rng.SimulationFromState(1)
-	q := &Queue{binding: &QueueBinding{
+	q := &Queue{binding: NewQueueBinding(QueueBindingConfig{
 		SimRNG:    &sim,
 		Hostility: func(_, _ *units.Unit) bool { return false },
-		World: &WorldQueryAdapter{ForEachUnitInRadius: func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
+		World: NewWorldQueryAdapter(WorldQueryAdapterConfig{ForEachUnitInRadius: func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
 			stopped := false
 			for _, candidate := range pool4 {
 				if stopped {
@@ -178,8 +178,8 @@ func TestRepairRadiusEnumeratorAnswersTheStopQuestion(t *testing.T) {
 					stopped = true
 				}
 			}
-		}},
-	}}
+		}}),
+	})}
 	BindQueue(actor, q)
 
 	visited = 0
@@ -216,9 +216,9 @@ func TestPatrolPadSeekOffersAlliedPads(t *testing.T) {
 	off := &units.Unit{Handle: 8, Owner: 1, Def: padDef, Alive: true, Activated: false}
 
 	slots := map[pool.Handle]*units.Unit{5: own, 6: ally, 7: dead, 8: off}
-	q := &Queue{binding: &QueueBinding{
+	q := &Queue{binding: NewQueueBinding(QueueBindingConfig{
 		Lookup: func(h pool.Handle) *units.Unit { return slots[h] },
-		Movement: &MovementGoalAdapter{
+		Movement: NewMovementGoalAdapter(MovementGoalAdapterConfig{
 			// The row the registry filed for ally group 0, in unit-array order.
 			AirBases: func(group uint8) []pool.Handle {
 				if group != 0 {
@@ -226,8 +226,8 @@ func TestPatrolPadSeekOffersAlliedPads(t *testing.T) {
 				}
 				return []pool.Handle{5, 6, 7, 8}
 			},
-		},
-	}}
+		}),
+	})}
 	BindQueue(flier, q)
 
 	pads := airBasePads(flier)

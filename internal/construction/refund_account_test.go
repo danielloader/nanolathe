@@ -32,12 +32,12 @@ func TestCancelRefundAccountAndFinalStore(t *testing.T) {
 			product.Remaining, product.Def.BuildCostMetal = .25, 4.9
 			product.Def.ActivateWhenBuilt = true
 			s.ModeSelector = tc.mode
-			s.IsSpecialSecondState = func(owner uint8) bool {
+			s.SetIsSpecialSecondState(func(owner uint8) bool {
 				if owner != factory.Owner {
 					t.Fatalf("discount owner = %d", owner)
 				}
 				return tc.special
-			}
+			})
 			s.Economy.UnitBuckets(factory.Handle)[economy.Metal].Production = .1
 			s.Economy.Players[0].Mirror[economy.Metal].Production = .375
 			activated := false
@@ -112,7 +112,7 @@ func TestReverseRefundRetainsTargetAccount(t *testing.T) {
 	target.Remaining = .5
 	target.Def.BuildTime, target.Def.BuildCostMetal = 100, 12
 	s.ModeSelector = 1
-	s.IsSpecialSecondState = func(owner uint8) bool { return owner == target.Owner }
+	s.SetIsSpecialSecondState(func(owner uint8) bool { return owner == target.Owner })
 	s.Economy.UnitBuckets(target.Handle)[economy.Metal].Production = .1
 	s.Economy.UnitBuckets(builder.Handle)[economy.Metal].Production = .375
 	if !s.sharedStep(builder, target, -25, 10) {

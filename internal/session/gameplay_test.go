@@ -115,8 +115,8 @@ func TestModernGuardResurrectionEligibility(t *testing.T) {
 		t.Fatal("place corpse")
 	}
 	b := s.newOrderBinding()
-	view, ok := b.World.LookupFeature(12, 12)
-	if !ok || b.Work.CanResurrectFeature == nil {
+	view, ok := b.World.LookupFeatureHook()(12, 12)
+	if !ok || b.Work.CanResurrectFeatureHook() == nil {
 		t.Fatal("missing resurrection scan binding")
 	}
 	sim, crt := *s.SimRNG(), *s.CrtRNG()
@@ -131,7 +131,7 @@ func TestModernGuardResurrectionEligibility(t *testing.T) {
 		{"unknown corpse", orders.FeatureView{DefinitionKey: "missing_dead", Reclaimable: true}, false},
 		{"unreclaimable corpse", orders.FeatureView{DefinitionKey: view.DefinitionKey}, false},
 	} {
-		if got := b.Work.CanResurrectFeature(tc.view); got != tc.want {
+		if got := b.Work.CanResurrectFeatureHook()(tc.view); got != tc.want {
 			t.Errorf("%s eligibility = %v, want %v", tc.name, got, tc.want)
 		}
 	}

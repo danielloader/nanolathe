@@ -207,7 +207,7 @@ func TestOrderlessMoverTickDrawsNoRandomValues(t *testing.T) {
 	sys.EnsureUnit(w.Unit(ah))
 
 	sim := rng.NewSimulation(0x12345677)
-	binding := &orders.QueueBinding{SimRNG: &sim, Lookup: w.Unit}
+	binding := orders.NewQueueBinding(orders.QueueBindingConfig{SimRNG: &sim, Lookup: w.Unit})
 	orders.QueueForUnit(w.Unit(gh)).SetBinding(binding)
 	orders.QueueForUnit(w.Unit(ah)).SetBinding(binding)
 	sys.BindAirOrderLegs()

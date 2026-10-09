@@ -138,7 +138,7 @@ func (s *System) installGroundPayload(owner pool.Handle, n *orders.Node, goal pa
 func (s *System) currentGoalTick(h pool.Handle) uint32 {
 	if u := s.unitFor(h); u != nil {
 		if q := orders.QueueOfUnit(u); q != nil {
-			if b := q.Binding(); b != nil && b.CurrentTick != nil {
+			if b := q.Binding(); b != nil && b.CurrentTickHook() != nil {
 				return b.Tick()
 			}
 		}

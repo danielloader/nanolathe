@@ -72,8 +72,8 @@ func (s *System) usableRepairPad(u, pad *units.Unit) bool {
 		return true
 	}
 	b := airBinding(u)
-	return b != nil && b.World != nil && b.World.DeclaresAlliance != nil &&
-		b.World.DeclaresAlliance(u.Owner, pad.Owner) && b.World.DeclaresAlliance(pad.Owner, u.Owner)
+	return b != nil && b.World != nil && b.World.DeclaresAllianceHook() != nil &&
+		b.World.DeclaresAllianceHook()(u.Owner, pad.Owner) && b.World.DeclaresAllianceHook()(pad.Owner, u.Owner)
 }
 
 // repairPlanarDistance is the raw 16.16 planar distance the queue ranks
@@ -291,9 +291,9 @@ func (s *System) repairDeparturePoint(e *repairLanding) Vec3 {
 		points[i], clearance[i] = p, 1<<60
 		feasible[i] = s.repairStationFree(e.unit, p)
 	}
-	if b := airBinding(e.unit); b != nil && b.DangerVisible != nil {
+	if b := airBinding(e.unit); b != nil && b.DangerVisibleHook() != nil {
 		for _, threat := range s.world.IterSliced() {
-			if !b.DangerVisible(e.unit, threat) {
+			if !b.DangerVisibleHook()(e.unit, threat) {
 				continue
 			}
 			var weaponRange int32

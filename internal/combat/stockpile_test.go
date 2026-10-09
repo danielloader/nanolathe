@@ -290,14 +290,14 @@ func TestInterceptorSweepMembershipAndOrdering(t *testing.T) {
 	stampGroundOccupancy(t, terrain, bystander)
 
 	var order []string
-	svc.Events = func(ev Event) {
+	svc.SetEvents(func(ev Event) {
 		switch ev.Kind {
 		case EventDamageFlash:
 			order = append(order, "unit")
 		case EventProjectileImpact:
 			order = append(order, "projectile")
 		}
-	}
+	})
 	p := &Projectile{Pos: origin, ShooterSide: 1}
 	handleProjectileImpact(svc, hExpl, p, interceptor, w, terrain, nil, nil, cat, 100, Vec3{}, nil, 0)
 

@@ -321,6 +321,6 @@ func waterAirFixtureFor(t *testing.T, amphibious bool, maxWaterDepth int32) (*Sy
 	sys.EnsureUnit(u)
 	q := orders.QueueForUnit(u)
 	sim := rng.NewSimulation(0x12345677)
-	q.SetBinding(&orders.QueueBinding{SimRNG: &sim, Lookup: w.Unit})
+	q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{SimRNG: &sim, Lookup: w.Unit}))
 	return sys, w, u
 }

@@ -24,7 +24,7 @@ func loadedSettings() settings.Settings {
 // single-player clock. Retail preserves both speed words at campaign and
 // skirmish entry; a load instead restores its scheduler [08 R-ENTRY-01 §3].
 func (b *battleSession) applyGameSpeedSetting(s settings.Settings) {
-	if b == nil || b.preview || b.entrySavedCamera != nil || b.sess == nil || b.sess.Clock == nil {
+	if b == nil || b.onlineBattle() || b.preview || b.entrySavedCamera != nil || b.sess == nil || b.sess.Clock == nil {
 		return
 	}
 	speed := s.GameSpeed
@@ -146,6 +146,9 @@ func damageBarsSettingValue() int {
 // [07 R-HUD-03 §7]. A failed write costs the persistence, never the toggle.
 func (b *battleSession) toggleDamageBars() {
 	on := client.ToggleDamageBars()
+	if b.onlineBattle() {
+		return
+	}
 	if err := settings.StoreDamageBars(on); err != nil {
 		fmt.Fprintf(os.Stderr, "nanolathe: %v\n", err)
 	}

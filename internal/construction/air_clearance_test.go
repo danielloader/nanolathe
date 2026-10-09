@@ -44,8 +44,8 @@ func airClearanceFixture(t *testing.T, installed bool) (*Service, *units.Unit, *
 	}
 	u := s.World.Unit(h)
 	s.Movement.EnsureUnit(u)
-	s.OrderBinding.Movement.RunAir = s.Movement.AirLegRunner()
-	s.OrderBinding.Movement.InstallAir = s.Movement.InstallAirGoal
+	s.OrderBinding.Movement.SetRunAir(s.Movement.AirLegRunner())
+	s.OrderBinding.Movement.SetInstallAir(s.Movement.InstallAirGoal)
 	q := s.queueForUnit(u)
 	id := orders.Lookup("VTOL_Standby")
 	q.Push(id, orders.NewNodeForOrder(id, 0, u.X, u.Y, u.Z, 0, u.Handle, true))
@@ -76,20 +76,20 @@ func checkAirSiteClearance(t *testing.T, installed bool) {
 			s.Rules = tc.rules
 			s.Community.ConstructionKickout = tc.on
 			draws := 0
-			s.CRTRandom = func(bound uint32) uint32 {
+			s.SetCRTRandom(func(bound uint32) uint32 {
 				if bound != 360 {
 					t.Fatalf("CRT bound=%d, want 360", bound)
 				}
 				draws++
 				return 0
-			}
+			})
 			q := orders.QueueOfUnit(u)
 			idle := q.Head()
 			stock := s.Economy.Players
 			sim := *s.OrderBinding.SimRNG
 			x, y, z := u.X, u.Y, u.Z
 			cellX, cellZ := world.WorldToCell(u.X), world.WorldToCell(u.Z)
-			if s.Terrain.Movers.CellOccupant(cellX, cellZ) != uint16(u.Handle) {
+			if s.Terrain.Movers().CellOccupant(cellX, cellZ) != uint16(u.Handle) {
 				t.Fatal("fixture aircraft does not hold the ground cell")
 			}
 			s.mobilePlacementVisit(builder, n, 1)
@@ -99,7 +99,7 @@ func checkAirSiteClearance(t *testing.T, installed bool) {
 			if s.Economy.Players != stock || *s.OrderBinding.SimRNG != sim || draws != tc.crt {
 				t.Fatalf("issuance changed resources/RNG: CRT draws=%d want %d", draws, tc.crt)
 			}
-			if u.X != x || u.Y != y || u.Z != z || u.Move.Mode != 1 || s.Terrain.Movers.CellOccupant(cellX, cellZ) != uint16(u.Handle) {
+			if u.X != x || u.Y != y || u.Z != z || u.Move.Mode != 1 || s.Terrain.Movers().CellOccupant(cellX, cellZ) != uint16(u.Handle) {
 				t.Fatal("clearance directly moved the aircraft or released occupancy")
 			}
 			if !tc.clear {
@@ -129,7 +129,7 @@ func checkAirSiteClearance(t *testing.T, installed bool) {
 				s.Movement.EndTick(tick)
 				s.mobilePlacementVisit(builder, n, tick)
 			}
-			if u.Move.Mode != 2 || s.Terrain.Movers.CellOccupant(cellX, cellZ) == uint16(u.Handle) || n.Target == 0 {
+			if u.Move.Mode != 2 || s.Terrain.Movers().CellOccupant(cellX, cellZ) == uint16(u.Handle) || n.Target == 0 {
 				t.Fatalf("takeoff did not clear site for allocation: mode=%d target=%d", u.Move.Mode, n.Target)
 			}
 			t.Logf("%s cleared the site and allocated %s by tick 31", u.Def.UnitName, n.BuildDefKey)

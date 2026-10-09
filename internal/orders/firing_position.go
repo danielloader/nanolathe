@@ -43,8 +43,8 @@ func (q *Queue) stopFiringPosition(tick uint32) {
 	if !f.active {
 		return
 	}
-	if b := q.Binding(); b != nil && b.Movement != nil && b.Movement.Destroy != nil {
-		b.Movement.Destroy(f.node)
+	if b := q.Binding(); b != nil && b.Movement != nil && b.Movement.DestroyHook() != nil {
+		b.Movement.DestroyHook()(f.node)
 	}
 	if q.indexOfPrimary(f.node) >= 0 {
 		// The pump delivers only the intersection with DynamicGate. Retain
@@ -75,14 +75,14 @@ func firingPositionEligible(q *Queue, u *units.Unit, n *Node, b *QueueBinding) *
 	if u.Flags>>stanceMoveShift&stanceFieldMask == 0 || automatic && u.Flags>>stanceFireShift&stanceFieldMask == 0 {
 		return nil
 	}
-	if b.Lookup == nil || b.DangerVisible == nil || b.Weapons == nil || b.Weapons.FiringPositionBlocked == nil || b.Weapons.FiringPositionClear == nil || b.Movement == nil || b.Movement.InstallPoint == nil || b.Movement.Destroy == nil || b.DangerRouteFeasible == nil || b.World == nil || b.World.TerrainHeight == nil {
+	if b.LookupHook() == nil || b.DangerVisibleHook() == nil || b.Weapons == nil || b.Weapons.FiringPositionBlockedHook() == nil || b.Weapons.FiringPositionClearHook() == nil || b.Movement == nil || b.Movement.InstallPointHook() == nil || b.Movement.DestroyHook() == nil || b.DangerRouteFeasibleHook() == nil || b.World == nil || b.World.TerrainHeightHook() == nil {
 		return nil
 	}
 	if stationary && !firingPositionWithinLeash(q, u, n, u.X, u.Z) {
 		return nil
 	}
-	target := b.Lookup(n.Target)
-	if target == nil || !target.Alive || target.Dying || !scanHostile(b, u, target) || !b.DangerVisible(u, target) {
+	target := b.LookupHook()(n.Target)
+	if target == nil || !target.Alive || target.Dying || !scanHostile(b, u, target) || !b.DangerVisibleHook()(u, target) {
 		return nil
 	}
 	return target
@@ -117,7 +117,7 @@ func (*ModernRules) StepFiringPosition(u *units.Unit, tick uint32) bool {
 	if f.node != nil && int32(tick-f.nextAttempt) < 0 {
 		return false
 	}
-	if !b.Weapons.FiringPositionBlocked(u, target, tick) {
+	if !b.Weapons.FiringPositionBlockedHook()(u, target, tick) {
 		return false
 	}
 	*f = firingPositionState{node: n, owner: u, target: target, nextAttempt: tick + firingPositionRetryTicks}
@@ -134,13 +134,13 @@ func (*ModernRules) StepFiringPosition(u *units.Unit, tick uint32) bool {
 			if !firingPositionWithinLeash(q, u, n, x, z) {
 				continue
 			}
-			y, ok := b.World.TerrainHeight(x, z)
-			if !ok || !b.DangerRouteFeasible(u, x, z) || !b.Weapons.FiringPositionClear(u, target, tick, x, y, z) {
+			y, ok := b.World.TerrainHeightHook()(x, z)
+			if !ok || !b.DangerRouteFeasibleHook()(u, x, z) || !b.Weapons.FiringPositionClearHook()(u, target, tick, x, y, z) {
 				continue
 			}
 			// Keep the record's original goal/target and parameters. The payload is
 			// the movement owner's authoritative destination [04 R-ORD-01 §9].
-			if !b.Movement.InstallPoint(PointGoalRequest{Owner: u.Handle, Node: n, X: x, Y: y, Z: z, Radius: 0}) {
+			if !b.Movement.InstallPointHook()(PointGoalRequest{Owner: u.Handle, Node: n, X: x, Y: y, Z: z, Radius: 0}) {
 				return false
 			}
 			n.Satisfied &^= 0x3E0

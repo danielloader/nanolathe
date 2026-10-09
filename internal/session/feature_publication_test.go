@@ -74,7 +74,7 @@ func TestPublishFeaturesRetainsUnchangedViewsPerSlot(t *testing.T) {
 	// Removing a feature shifts the later ones down: those positions rebuild
 	// because their identity changed, never silently keeping the old view.
 	svc.RemoveFeatureAt(1, 1, features.CauseDead)
-	svc.SequenceFrames = nil
+	svc.SetSequenceFrames(nil)
 	n, f = rebuilt(7)
 	if len(f.Features) == 3 && n < 1 {
 		t.Fatalf("removal kept every view: rebuilt %d of %d", n, len(f.Features))

@@ -29,12 +29,12 @@ func TestCloakTogglePreservesGatedMission(t *testing.T) {
 			}
 			t.Run(mission.name+"/"+insertion, func(t *testing.T) {
 				q, u := standingFixture(&content.UnitDef{BMCode: 1, CloakCost: 200})
-				q.binding.Lookup = func(h pool.Handle) *units.Unit {
+				q.binding.SetLookup(func(h pool.Handle) *units.Unit {
 					if h == u.Handle {
 						return u
 					}
 					return nil
-				}
+				})
 				q.Push(Lookup(mission.name), Node{Owner: u.Handle})
 				running := q.Primary()[0]
 				running.Phase, running.DynamicGate = mission.phase, mission.gate
@@ -46,12 +46,12 @@ func TestCloakTogglePreservesGatedMission(t *testing.T) {
 				marker := next.Flags & FlagActive
 				target := units.Target{Kind: units.TargetUnit, Unit: 2}
 				u.SlotAt(0).Target = target
-				q.binding.Movement = &MovementGoalAdapter{Release: func(n *Node) bool {
+				q.binding.Movement = NewMovementGoalAdapter(MovementGoalAdapterConfig{Release: func(n *Node) bool {
 					if n == running || n == next {
 						t.Fatal("cloak completion released a mission record")
 					}
 					return false // the cloak record owns no movement object
-				}}
+				}})
 				for i, name := range []string{"Cloak_On", "Cloak_Off"} {
 					id := Lookup(name)
 					n := NewNodeForOrder(id, 0, 0, 0, 0, 100+uint32(i), u.Handle, false)

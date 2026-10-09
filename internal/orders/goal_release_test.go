@@ -34,9 +34,9 @@ func TestReleaseGoalPayloadReachesTheMoverPort(t *testing.T) {
 	var released []*Node
 	q := &Queue{binding: &QueueBinding{
 		SimRNG: rng.Global.Sim,
-		Movement: &MovementGoalAdapter{
+		Movement: NewMovementGoalAdapter(MovementGoalAdapterConfig{
 			Release: func(n *Node) bool { released = append(released, n); return true },
-		},
+		}),
 	}}
 	BindQueue(u, q)
 

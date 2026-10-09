@@ -24,3 +24,29 @@ func clipboardTextFromPasteboard(board objc.ID) input.ClipboardText {
 	}
 	return input.ClipboardText{Text: objc.Send[string](value, objc.RegisterName("UTF8String")), Available: true}
 }
+
+// HostClipboardWritable reports whether WriteHostClipboard has a native
+// bridge on this host.
+func HostClipboardWritable() bool { return true }
+
+// WriteHostClipboard replaces the general pasteboard's contents with text, as
+// plain UTF-8, for a front-end Copy button. It reports whether AppKit took it.
+func WriteHostClipboard(text string) bool {
+	pool := objc.ID(objc.GetClass("NSAutoreleasePool")).Send(objc.RegisterName("new"))
+	defer pool.Send(objc.RegisterName("drain"))
+	board := objc.ID(objc.GetClass("NSPasteboard")).Send(objc.RegisterName("generalPasteboard"))
+	return clipboardTextToPasteboard(board, text)
+}
+
+func clipboardTextToPasteboard(board objc.ID, text string) bool {
+	if board == 0 {
+		return false
+	}
+	kind := objc.ID(objc.GetClass("NSString")).Send(objc.RegisterName("stringWithUTF8String:"), "public.utf8-plain-text")
+	value := objc.ID(objc.GetClass("NSString")).Send(objc.RegisterName("stringWithUTF8String:"), text)
+	if kind == 0 || value == 0 {
+		return false
+	}
+	board.Send(objc.RegisterName("clearContents"))
+	return objc.Send[bool](board, objc.RegisterName("setString:forType:"), value, kind)
+}

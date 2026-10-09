@@ -42,7 +42,7 @@ func guardQueueFixture(t *testing.T, modern bool) (*guardFixture, *units.Unit, *
 	firstGone := false
 	b := QueueForUnit(f.guard).Binding()
 	b.Rules = modeRules(modern)
-	b.Lookup = func(h pool.Handle) *units.Unit {
+	b.SetLookup(func(h pool.Handle) *units.Unit {
 		switch {
 		case h == f.ward.Handle && !firstGone:
 			return f.ward
@@ -50,7 +50,7 @@ func guardQueueFixture(t *testing.T, modern bool) (*guardFixture, *units.Unit, *
 			return second
 		}
 		return nil
-	}
+	})
 	return f, second, &firstGone
 }
 

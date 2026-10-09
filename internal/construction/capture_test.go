@@ -61,7 +61,7 @@ func TestTransferOwnershipCopyList(t *testing.T) {
 	victim.Slots[2].Ammo = 11
 
 	var cues []uint8
-	svc.World.OnCreate = func(_ pool.Handle, u *units.Unit) {
+	svc.World.SetCreateHook(func(_ pool.Handle, u *units.Unit) {
 		if u.Owner != 0 {
 			return
 		}
@@ -71,7 +71,7 @@ func TestTransferOwnershipCopyList(t *testing.T) {
 			}
 			cues = append(cues, code)
 		})
-	}
+	})
 	repl, ok := svc.TransferOwnership(victim, 0)
 	if !ok || repl == nil {
 		t.Fatalf("transfer of a live, differently owned, unlatched victim was refused")
@@ -180,11 +180,11 @@ func TestTransferOwnershipReplaysDeactivatedState(t *testing.T) {
 	victim.Def.ActivateWhenBuilt = true
 	victim.Activated = false
 	var cues []uint8
-	svc.World.OnCreate = func(_ pool.Handle, u *units.Unit) {
+	svc.World.SetCreateHook(func(_ pool.Handle, u *units.Unit) {
 		if u.Owner == 0 {
 			u.SetStatusCueSink(func(_ *units.Unit, code uint8) { cues = append(cues, code) })
 		}
-	}
+	})
 
 	repl, ok := svc.TransferOwnership(victim, 0)
 	if !ok || repl == nil {

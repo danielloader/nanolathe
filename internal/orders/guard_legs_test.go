@@ -39,7 +39,7 @@ func newGuardLegsFixture(t *testing.T) *guardLegsFixture {
 	f.guard.Move.Mode, f.guard.Move.ModeMirror = 1, 1 // committed mover mode [04 R-MOV-01 §8]
 	f.guard.Flags |= units.ArmedStatus
 	b := QueueForUnit(f.guard).Binding()
-	b.Lookup = func(h pool.Handle) *units.Unit {
+	b.SetLookup(func(h pool.Handle) *units.Unit {
 		switch h {
 		case 2:
 			return f.ward
@@ -47,17 +47,17 @@ func newGuardLegsFixture(t *testing.T) *guardLegsFixture {
 			return f.enemy
 		}
 		return nil
-	}
+	})
 	// Leg 1's diplomacy term reads the ATTACKER's row toward the guard
 	// [04 R-UNIT-06 §1 as corrected by RWU-19-13], so the fixture answers by
 	// owner: the ward (owner 0) is the guard's own, the attacker (owner 1) is
 	// not. The base fixture's blanket "nothing is hostile" would decline leg 1.
-	b.Hostility = func(a, t *units.Unit) bool { return a != nil && t != nil && a.Owner != t.Owner }
+	b.SetHostility(func(a, t *units.Unit) bool { return a != nil && t != nil && a.Owner != t.Owner })
 	// Leg 1 reads row A of the ATTACKER indexed by the guard's owner
 	// [04 R-UNIT-06 §1][05 R-SHARE-01 §1] — a one-directional read, not the
 	// symmetric Hostility predicate above. Here: nobody has declared toward
 	// anybody, so a different owner is hostile.
-	b.World = &WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }, DeclaresAlliance: func(from, toward uint8) bool { return from == toward }}
+	b.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 0 }, DeclaresAlliance: func(from, toward uint8) bool { return from == toward }})
 	QueueForUnit(f.guard).SetBinding(b)
 	QueueForUnit(f.enemy).SetBinding(&QueueBinding{})
 	// The ward's recorded-attacker link: the unit that last damaged it
@@ -134,7 +134,7 @@ func TestGuardCombatJoinRespectsDiplomacyAndNoChase(t *testing.T) {
 	// declaration closes the leg [04 R-UNIT-06 §1 as corrected by RWU-19-13].
 	// The ward's own rows are never consulted.
 	b := q.Binding()
-	b.World.DeclaresAlliance = func(from, toward uint8) bool { return true }
+	b.World.SetDeclaresAlliance(func(from, toward uint8) bool { return true })
 	q.SetBinding(b)
 	q.primary = nil
 	if code := guardHandler(f.guard, n, 0x10, 100); code != Code(2) || len(q.primary) != 0 {
@@ -145,14 +145,14 @@ func TestGuardCombatJoinRespectsDiplomacyAndNoChase(t *testing.T) {
 	// declared alliance to the attacker, unreciprocated, still joins. That is
 	// the case the symmetric predicate would decline, and [04 R-UNIT-06 §1]'s
 	// correction names it explicitly.
-	b.World.DeclaresAlliance = func(from, toward uint8) bool { return from == f.guard.Owner }
+	b.World.SetDeclaresAlliance(func(from, toward uint8) bool { return from == f.guard.Owner })
 	q.SetBinding(b)
 	q.primary = nil
 	if code := guardHandler(f.guard, n, 0x10, 100); code != Code(3) {
 		t.Fatalf("a one-sided declaration BY the guard must not close leg 1, got %d", code)
 	}
 
-	b.World.DeclaresAlliance = func(from, toward uint8) bool { return from == toward }
+	b.World.SetDeclaresAlliance(func(from, toward uint8) bool { return from == toward })
 	q.SetBinding(b)
 
 	// A hostile WARD is irrelevant either way — only the attacker's row is
@@ -223,16 +223,16 @@ func TestGuardSlotRetargetRebindConditions(t *testing.T) {
 	}
 	near.MaxHealth, near.Health = 100, 100
 	b := QueueForUnit(f.guard).Binding()
-	prev := b.Lookup
-	b.Lookup = func(h pool.Handle) *units.Unit {
+	prev := b.LookupHook()
+	b.SetLookup(func(h pool.Handle) *units.Unit {
 		if h == 4 {
 			return near
 		}
 		return prev(h)
-	}
-	b.Weapons = &WeaponAdapter{CanEngage: func(_ *units.Unit, target pool.Handle, slot int) bool {
+	})
+	b.Weapons = NewWeaponAdapter(WeaponAdapterConfig{CanEngage: func(_ *units.Unit, target pool.Handle, slot int) bool {
 		return target == near.Handle && slot == 0
-	}}
+	}})
 	QueueForUnit(f.guard).SetBinding(b)
 
 	armSlotAutonomous(f.guard, 0, &content.WeaponDef{Name: "long", Range: 1000})

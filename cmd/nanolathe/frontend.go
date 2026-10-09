@@ -199,6 +199,11 @@ type gameShell struct {
 	// lockOverrides is the saved list of mod ids whose rule lock the player
 	// overrode (docs/DESIGN_MODS_MUTATORS.md §4.3 "Overriding a rule lock").
 	lockOverrides []string
+	// onlineServer is the online screen's last server as the player typed
+	// it, "" for the default (DESIGN_MULTIPLAYER §16.6.2).
+	onlineServer string
+	// online is the open online screen and lobby, nil when closed.
+	online *onlineScreen
 	// baseSettings is the settings file's base block as last loaded, with
 	// every mod's patch, and presets the player's saved presets
 	// (modsettings.go, docs/DESIGN_MODS_MUTATORS.md §4.6).
@@ -895,9 +900,11 @@ func (g *gameShell) openMenuWithTokenFlush(mode shellMode, flushTokens bool) {
 			}
 			g.installRetailWindowButtonArt(window, p.art)
 			g.installRetailListScrollbars(window, p.art)
-			if mode == modeMenuMain {
-				// Multiplayer is outside this build's scope. The widget grey bit
-				// darkens MULTI and prevents pointer and key activation [07 R-WGT-01 §13].
+			if mode == modeMenuMain && !onlinePlayAvailable() {
+				// MULTI opens the online screen (DESIGN_MULTIPLAYER §16.6.2).
+				// The browser build has no relay transport, so there the widget
+				// grey bit darkens it and prevents pointer and key activation
+				// [07 R-WGT-01 §13].
 				if i := window.GadgetIndex("MULTI"); i >= 0 {
 					window.Gadgets[i].GrayedOut |= 1
 				}
@@ -1071,6 +1078,7 @@ func (g *gameShell) step(delta float64, cl *client.Client) {
 	g.pollModDrop(cl)
 	g.pollModsFetch()
 	g.pollMapsFetch()
+	g.pollOnline()
 	// The Nanolathe screen gets ready while the main menu idles, so it opens
 	// onto a staged scene (nlscreen.go).
 	if nlScreenInst != nil && g.frontend != nil {

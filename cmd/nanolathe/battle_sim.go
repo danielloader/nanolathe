@@ -121,7 +121,7 @@ func (b *battleSession) syncSimulationMode(cl *client.Client) {
 	if b == nil || b.sess == nil {
 		return
 	}
-	want := cl != nil && cl.AsyncSimulation() && b.sess.Snapshot != nil
+	want := !b.onlineBattle() && cl != nil && cl.AsyncSimulation() && b.sess.Snapshot != nil
 	switch {
 	case want && b.sim == nil:
 		r := newBattleSim()

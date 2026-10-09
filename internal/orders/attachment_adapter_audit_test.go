@@ -15,7 +15,7 @@ func TestCarriedWorkPreambleRequiresComposedDetach(t *testing.T) {
 		t.Fatal("incomplete host context performed local detach")
 	}
 	calls := 0
-	q.binding.Movement.DetachTakeoff = func(got *units.Unit) bool {
+	q.binding.Movement.SetDetachTakeoff(func(got *units.Unit) bool {
 		calls++
 		if got != u || u.Activated {
 			t.Fatal("detach must precede activation")
@@ -23,7 +23,7 @@ func TestCarriedWorkPreambleRequiresComposedDetach(t *testing.T) {
 		got.Attachment.Carrier = 0
 		got.Move.Mode = 2
 		return true
-	}
+	})
 	if code := airWorkPreamble(u, &Node{Owner: u.Handle}, "Building"); code != 1 || calls != 1 {
 		t.Fatalf("adapter calls=%d code=%d", calls, code)
 	}

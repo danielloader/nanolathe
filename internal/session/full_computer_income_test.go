@@ -159,7 +159,7 @@ func TestAModernPlayerIsPaidInFullInEveryRuleSet(t *testing.T) {
 		if s.Econ.DiscountsCredit(modern) || !s.Econ.DiscountsCredit(classic) {
 			t.Fatalf("%s: the ledger discounts the wrong computer player", set.Name)
 		}
-		if s.Build.IsSpecialSecondState(modern) || !s.Build.IsSpecialSecondState(classic) {
+		if s.Build.IsSpecialSecondStateHook()(modern) || !s.Build.IsSpecialSecondStateHook()(classic) {
 			t.Fatalf("%s: the construction refunds discount the wrong computer player", set.Name)
 		}
 	}

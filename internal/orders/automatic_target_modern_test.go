@@ -14,21 +14,21 @@ func automaticTargetFixture(modern bool) (*Queue, *units.Unit, *units.Unit, *uni
 	u.Flags = u.Flags&^(uint32(3)<<units.StandingFireShift) | 2<<units.StandingFireShift
 	tower := *factory
 	tower.Handle = 3
-	old := q.Binding().Lookup
-	q.Binding().Lookup = func(h pool.Handle) *units.Unit {
+	old := q.Binding().LookupHook()
+	q.Binding().SetLookup(func(h pool.Handle) *units.Unit {
 		if h == tower.Handle {
 			return &tower
 		}
 		return old(h)
-	}
+	})
 	chosen, calls := factory.Handle, 0
-	q.Binding().Weapons = &WeaponAdapter{CanEngage: func(*units.Unit, pool.Handle, int) bool { return true }, Acquire: func(_ *units.Unit, _ int, limit uint32) (pool.Handle, bool) {
+	q.Binding().Weapons = NewWeaponAdapter(WeaponAdapterConfig{CanEngage: func(*units.Unit, pool.Handle, int) bool { return true }, Acquire: func(_ *units.Unit, _ int, limit uint32) (pool.Handle, bool) {
 		if limit != 0 {
 			panic("automatic query must use authored range")
 		}
 		calls++
 		return chosen, true
-	}}
+	}})
 	assignSlot(u, 0, 0x02, units.Target{Kind: units.TargetUnit, Unit: factory.Handle})
 	return q, u, factory, &tower, &chosen, &calls
 }
@@ -219,9 +219,9 @@ func TestModernGuardRetainedTargetDoesNotRestartAndCancelAim(t *testing.T) {
 
 func TestStrictStationaryGuardKeepsRegistryScan(t *testing.T) {
 	q, u, factory, tower, _, calls := automaticTargetFixture(false)
-	q.Binding().Weapons.TargetsInRadius = func(*units.Unit, numeric.Fixed, numeric.Fixed, int32) []pool.Handle {
+	q.Binding().Weapons.SetTargetsInRadius(func(*units.Unit, numeric.Fixed, numeric.Fixed, int32) []pool.Handle {
 		return []pool.Handle{tower.Handle}
-	}
+	})
 	n := q.PushHead(Lookup("Guard_NoMove"), Node{Owner: u.Handle, Phase: 3})
 	n.BindTarget(factory.Handle)
 	if code := guardNoMoveHandler(u, n, 0, 1); code != 2 || n.Target != tower.Handle || n.Phase != 1 || *calls != 0 {

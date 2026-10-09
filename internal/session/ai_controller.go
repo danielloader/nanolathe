@@ -92,8 +92,10 @@ func (s *Session) plannerFor(m *ai.Manager, setStep ai.Planner) ai.Planner {
 // whatever set the battle binds. mods/aikit fills the slot from an init, so a
 // build that does not link it cannot compose a player marked Modern.
 var (
-	modernAIMu   sync.Mutex
-	modernAIStep ai.ModernAIStep
+	modernAIMu                sync.Mutex
+	modernAIStep              ai.ModernAIStep
+	modernAICheckpointWitness ai.CheckpointModernPlanner
+	modernAICheckpointSource  ai.CheckpointControllerSource
 )
 
 // RegisterModernAI installs the Modern AI controller's think step. Like
@@ -104,6 +106,10 @@ var (
 // and the controller's state belongs in each manager's Ext
 // (docs/DESIGN_GAMEPLAY_RULES.md §3).
 func RegisterModernAI(step ai.ModernAIStep) {
+	registerModernAI(step, ai.CheckpointModernPlanner{}, ai.CheckpointControllerSource{})
+}
+
+func registerModernAI(step ai.ModernAIStep, witness ai.CheckpointModernPlanner, source ai.CheckpointControllerSource) {
 	if step == nil {
 		panic("nanolathe: Modern AI registration needs a think step: logical path <mods>, providers searched [session Modern AI step], expected a zero-size ai.ModernAIStep")
 	}
@@ -116,6 +122,8 @@ func RegisterModernAI(step ai.ModernAIStep) {
 		panic(fmt.Sprintf("nanolathe: duplicate Modern AI think step %T: logical path <mods>, providers searched [session Modern AI step], expected one registration", step))
 	}
 	modernAIStep = step
+	modernAICheckpointWitness = witness
+	modernAICheckpointSource = source
 }
 
 // registeredModernAI is the installed Modern AI think step, or nil.
@@ -133,11 +141,15 @@ func (s *Session) resolveModernAI(player uint8) error {
 	if s.modernAI != nil {
 		return nil
 	}
-	step := registeredModernAI()
+	modernAIMu.Lock()
+	step, witness, source := modernAIStep, modernAICheckpointWitness, modernAICheckpointSource
+	modernAIMu.Unlock()
 	if step == nil {
 		return fmt.Errorf("nanolathe: Modern AI computer player unavailable: logical path player %d, providers searched [session Modern AI step], expected the think step mods/aikit installs (session.RegisterModernAI)", int(player)+1)
 	}
 	s.modernAI = step
+	s.modernAICheckpointWitness = witness
+	s.modernAICheckpointSource = source
 	return nil
 }
 

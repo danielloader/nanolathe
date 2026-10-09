@@ -24,7 +24,7 @@ func TestCentralImpactCopiesBlastProfile(t *testing.T) {
 				terrain = &world.Terrain{CellW: 1, CellH: 1, SeaLevel: 1, Plot: make([]world.PlotCell, 1)}
 			}
 			var events []Event
-			svc := &Service{Events: func(e Event) { events = append(events, e) }}
+			svc := NewService(ServiceConfig{Events: func(e Event) { events = append(events, e) }})
 			handleProjectileImpact(svc, 0, &Projectile{}, weapon, nil, terrain, nil, nil, nil, 7, Vec3{}, nil, 0)
 			sound, explosion := EventHitSound, EventExplosion
 			if tc.water {

@@ -101,7 +101,7 @@ func TestFatalReclaimSettlementUsesRawAttackerAtVictimFinalization(t *testing.T)
 				t.Fatalf("intake paid early: %v", got)
 			}
 			var observed bool
-			s.Units.OnDeathExtra = func(h pool.Handle, _ units.DeathCause, _ *units.Unit) {
+			s.Units.SetDeathExtraHook(func(h pool.Handle, _ units.DeathCause, _ *units.Unit) {
 				if h != victimHandle {
 					return
 				}
@@ -112,7 +112,7 @@ func TestFatalReclaimSettlementUsesRawAttackerAtVictimFinalization(t *testing.T)
 				if got := s.Econ.UnitBuckets(attacker)[economy.Metal].Production; got != want {
 					t.Errorf("refund before release=%v, want %v", got, want)
 				}
-			}
+			})
 			if result := s.Units.FinalizeDeath(victimHandle, 3); !result.Freed || !observed {
 				t.Fatal("normal finalizer did not run")
 			}

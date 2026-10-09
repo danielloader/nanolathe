@@ -34,7 +34,7 @@ func (s *Session) bindStatusCueSinks() {
 		if u == nil {
 			continue
 		}
-		u.SetStatusCueSink(s.raiseStatusCue)
+		u.SetStatusCueSinkWithCheckpointBinding(s.raiseStatusCue, s.checkpointBindingAuthority())
 	}
 }
 

@@ -32,12 +32,12 @@ func TestRepairPatrolIssuerRetainsReturnAction(t *testing.T) {
 			actor.Flags = actor.Flags&^(stanceFieldMask<<stanceMoveShift) | tc.move<<stanceMoveShift
 			actor.X, actor.Z = 70<<16|1234, -90<<16|4321
 			q := QueueOfUnit(actor)
-			q.binding.Lookup = func(h pool.Handle) *units.Unit {
+			q.binding.SetLookup(func(h pool.Handle) *units.Unit {
 				if h == target.Handle {
 					return target
 				}
 				return nil
-			}
+			})
 			if got := spawnPatrolRepair(actor, target, 7); got != tc.wantIssue {
 				t.Fatalf("issued = %v, want %v", got, tc.wantIssue)
 			}

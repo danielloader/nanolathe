@@ -20,9 +20,12 @@ import (
 // Retail's 48-byte size is record identity; Go stores named fields and a plot
 // reference rather than reproducing a packed layout [I13].
 type Instance struct {
-	Def     *content.FeatureDef // immutable catalog definition [02 "Feature record"]
-	Terrain *world.Terrain      // plot reference [01 §6.1]
-	CX, CZ  int                 // anchor cell coordinates
+	// checkpointBase is the original definition at the existing normalization
+	// site; a matching name cannot establish this relation for capture.
+	checkpointBase *content.FeatureDef
+	Def            *content.FeatureDef // immutable catalog definition [02 "Feature record"]
+	Terrain        *world.Terrain      // plot reference [01 §6.1]
+	CX, CZ         int                 // anchor cell coordinates
 
 	// Reclaim progress; the definition's `damage` is the completion threshold
 	// for reclaim [05 "Feature reclaim"]. There is no health word: weapon hits
@@ -200,6 +203,8 @@ type Service struct {
 	// activeHead is the head of the active list of [05 R-FEAT-01 §2]: LIFO,
 	// the most recently stamped or ignited record first (active.go).
 	activeHead *Instance
+	// activeWalking refuses checkpoint capture inside a lifecycle traversal.
+	activeWalking bool
 	// arenaHeld counts the live-arena slots currently held — every 3D
 	// instance and every sprite event record — so the free-list-empty test
 	// of the stamp, ignition and transition is a read, not a walk.
@@ -221,7 +226,7 @@ type Service struct {
 	// sequence": the transition replaces at once [05 R-FEAT-01 §5 step 3] and
 	// ignition refuses [05 R-FEAT-01 §9 step 1]. Nothing is invented for a
 	// miss.
-	SequenceFrames func(def *content.FeatureDef, selector uint8) []int32
+	sequenceFrames func(def *content.FeatureDef, selector uint8) []int32
 	// sequences memoises SequenceFrames per definition and selector; it is
 	// read by key only.
 	sequences map[sequenceKey][]int32
@@ -241,13 +246,13 @@ type Service struct {
 	// session binds the request — resolving the name and pushing the impact
 	// through the shared splash entry as a null-shooter, zero-side record
 	// [06 §13.1]. A nil seam is a fixture: no weapon fires.
-	BurnWeapon func(weapon string, pos [3]numeric.Fixed)
+	burnWeapon func(weapon string, pos [3]numeric.Fixed)
 
 	// BurnSound requests the successful ignition's treeburn cue at the anchor
 	// tile corner [05 R-FEAT-01 §9]. Session applies positional admission and
 	// publishes it through the committed frame; this callback never plays a
 	// backend sample or consumes authoritative RNG.
-	BurnSound func(pos [3]numeric.Fixed)
+	burnSound func(pos [3]numeric.Fixed)
 
 	// GeothermalSteam is the steam-strip producer of [05 R-ECO-02 §3], reached
 	// from the feature stamp and nowhere else. The stamp calls it once, with the
@@ -256,7 +261,7 @@ type Service struct {
 	// appends to is session state, so this is a seam rather than a call; a nil
 	// hook means no steam, which is what every fixture that does not compose a
 	// session gets.
-	GeothermalSteam func(x, y, z numeric.Fixed)
+	geothermalSteam func(x, y, z numeric.Fixed)
 
 	// BurnFrameGeometry reports the burn animation's CURRENT frame geometry —
 	// the GAF frame's width and height and its two authored offsets [fmt gaf] —
@@ -267,7 +272,7 @@ type Service struct {
 	// in burn.go is that arithmetic. A nil hook means no geometry is known and
 	// the puff is emitted unjittered at the footprint centre, which is the
 	// established base position of the same paragraph.
-	BurnFrameGeometry func(def *content.FeatureDef, visit int32) (w, h, xoff, yoff int32)
+	burnFrameGeometry func(def *content.FeatureDef, visit int32) (w, h, xoff, yoff int32)
 
 	// BurnSmoke is the strip-5 burning-feature smoke producer of
 	// [R-STRIP-01 §1 strip 5], called once per burning instance on every third
@@ -275,7 +280,10 @@ type Service struct {
 	// The strip table is session state, so this is a seam rather than a call,
 	// exactly like GeothermalSteam above; a nil hook means no puff, which is
 	// what every fixture that does not compose a session gets.
-	BurnSmoke func(pos [3]numeric.Fixed)
+	burnSmoke func(pos [3]numeric.Fixed)
+
+	// Installation proofs are diagnostics only, excluded from checkpoint bytes.
+	checkpointCallbacks [6]checkpointCallbackProof
 
 	// pendingBurnReplacement is a bounded hand-off for burn.go's established
 	// clear-then-spawn sequence. It is consumed and cleared by the next spawn
@@ -951,7 +959,9 @@ func (s *Service) stampFeature(cx, cz int, def *content.FeatureDef, pos *[3]nume
 		return nil
 	}
 	// Normalize malformed for placement without mutating catalog [P1-I05]
+	var checkpointBase *content.FeatureDef
 	if IsMalformed(def) {
+		checkpointBase = def
 		def = NormalizeDef(def)
 		if def == nil {
 			return nil
@@ -986,6 +996,7 @@ func (s *Service) stampFeature(cx, cz int, def *content.FeatureDef, pos *[3]nume
 		// a retail cap at all; [05 R-FEAT-01 §1] answers it as Established —
 		// it is not — so the refusal is gone.
 		s.Terrain.FeatureDefs = append(s.Terrain.FeatureDefs, def)
+		s.Terrain.RecordCheckpointFeatureNormalization(checkpointBase, def)
 		if s.definitionAdmissionObserver != nil {
 			s.definitionAdmissionObserver(def)
 		}
@@ -1058,13 +1069,14 @@ func (s *Service) stampFeature(cx, cz int, def *content.FeatureDef, pos *[3]nume
 	// Fresh records keep the documented host-zero velocity policy and also
 	// reset mode state; they do not emulate physical arena reuse (EC-G2).
 	inst := &Instance{
-		Def:        def,
-		Terrain:    s.Terrain,
-		CX:         cx,
-		CZ:         cz,
-		Status:     0,
-		FootprintX: footX,
-		FootprintZ: footZ,
+		checkpointBase: checkpointBase,
+		Def:            def,
+		Terrain:        s.Terrain,
+		CX:             cx,
+		CZ:             cz,
+		Status:         0,
+		FootprintX:     footX,
+		FootprintZ:     footZ,
 	}
 	// Step 4's position: "the supplied triple verbatim, or when null the
 	// footprint centre with the terrain height snapped under it"
@@ -1105,8 +1117,8 @@ func (s *Service) stampFeature(cx, cz int, def *content.FeatureDef, pos *[3]nume
 	// producer with the footprint centre and the sampled height it just stored
 	// [05 R-ECO-02 §3]. This is the producer's only reach in the whole image,
 	// which is why the steam belongs to placement and not to the feature tick.
-	if def.Geothermal && s.GeothermalSteam != nil {
-		s.GeothermalSteam(inst.X, inst.Y, inst.Z)
+	if def.Geothermal && s.GeothermalSteamHook() != nil {
+		s.GeothermalSteamHook()(inst.X, inst.Y, inst.Z)
 	}
 	return inst
 }
@@ -1529,8 +1541,8 @@ func (s *Service) PopulateFromTerrain() int {
 			// has one stamp for both cases, and the steam producer hangs off it
 			// [05 R-ECO-02 §3], so both of Nanolathe's halves have to call it or
 			// the vents a MAP places would be the ones that never steam.
-			if def.Geothermal && s.GeothermalSteam != nil {
-				s.GeothermalSteam(inst.X, inst.Y, inst.Z)
+			if def.Geothermal && s.GeothermalSteamHook() != nil {
+				s.GeothermalSteamHook()(inst.X, inst.Y, inst.Z)
 			}
 			n++
 		}

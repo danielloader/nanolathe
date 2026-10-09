@@ -23,7 +23,7 @@ func TestModernClearanceRetainsBendsWithoutScheduler(t *testing.T) {
 	u := w.Unit(h)
 	sys.EnsureUnit(u)
 	q := orders.QueueForUnit(u)
-	q.SetBinding(&orders.QueueBinding{Lookup: w.Unit, Movement: &orders.MovementGoalAdapter{InstallPoint: sys.InstallPointGoal, Release: sys.ReleaseGoalPayload}})
+	q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: w.Unit, Movement: orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{InstallPoint: sys.InstallPointGoal, Release: sys.ReleaseGoalPayload})}))
 	id := orders.Lookup("Move_Ground")
 	q.Push(id, orders.NewMoveNode(id, world.CellToWorld(4)+world.CellToWorld(1)/2, world.CellToWorld(3)+world.CellToWorld(1)/2, 1, h, true))
 	head := q.Head()

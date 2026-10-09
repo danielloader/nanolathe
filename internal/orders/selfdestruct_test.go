@@ -193,10 +193,10 @@ func runSelfDestructCountdown(t *testing.T, authored string) ([]selfDestructVisi
 	var cues []uint8
 	q := &Queue{binding: &QueueBinding{
 		SimRNG: rng.Global.Sim,
-		Presentation: &PresentationAdapter{
+		Presentation: NewPresentationAdapter(PresentationAdapterConfig{
 			Ready:  func() bool { return true },
 			Status: func(_ *units.Unit, kind uint8, _ string) bool { cues = append(cues, kind); return true },
-		},
+		}),
 	}}
 	BindQueue(u, q)
 	q.Push(Lookup("SelfDestructFG"), Node{Owner: u.Handle})
@@ -373,10 +373,10 @@ func selfDestructFixture(t *testing.T, def *content.UnitDef) (*Queue, *units.Uni
 	u := w.Unit(h)
 	u.Def = original.Def
 	u.Health, u.MaxHealth = original.Health, original.MaxHealth
-	service := &combat.Service{ControlByte: func(uint8) uint8 { return combat.ControlByteHuman }}
-	q.binding.Damage = func(tick uint32, input combat.DamageInput) combat.DamageResult {
+	service := combat.NewService(combat.ServiceConfig{ControlByte: func(uint8) uint8 { return combat.ControlByteHuman }})
+	q.binding.SetDamage(func(tick uint32, input combat.DamageInput) combat.DamageResult {
 		return service.AcceptDamage(w, tick, input)
-	}
+	})
 	BindQueue(u, q)
 	return q, u
 }

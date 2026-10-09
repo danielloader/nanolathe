@@ -97,7 +97,7 @@ func (s *Session) bindFragmentStepContext(tick uint32) {
 		context.TerrainHeight, context.SeaLevel = s.World.HeightAt, s.World.SeaLevelWorld()
 		context.Gravity, context.Lava = s.World.Gravity, s.World.LavaWorld
 	}
-	s.publication.effects.SetFragmentStepContext(context)
+	s.publication.effects.SetFragmentStepContextWithCheckpointBinding(context, s.World, tick, s.checkpointBindingAuthority())
 }
 
 type fragmentImpactSink struct{ debrisImpactSink }

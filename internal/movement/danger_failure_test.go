@@ -23,7 +23,7 @@ func TestModernDangerReceivesPublishedNoRoute(t *testing.T) {
 			enemy.Handle, enemy.Owner = u.Handle+1, 1
 			enemy.X += 100 << 16
 			u.Flags = 2<<units.StandingMoveShift | 1<<units.StandingFireShift
-			b := &orders.QueueBinding{
+			b := orders.NewQueueBinding(orders.QueueBindingConfig{
 				Rules: orders.StrictRules{},
 				Lookup: func(h pool.Handle) *units.Unit {
 					if h == enemy.Handle {
@@ -37,7 +37,7 @@ func TestModernDangerReceivesPublishedNoRoute(t *testing.T) {
 				Hostility:          func(a, b *units.Unit) bool { return a.Owner != b.Owner },
 				DangerVisible:      func(a, b *units.Unit) bool { return true },
 				DangerStepFeasible: sys.DangerStepFeasible,
-			}
+			})
 			if modern {
 				b.Rules = &orders.ModernRules{}
 			}

@@ -44,10 +44,10 @@ func stockpileTaskFixture(t *testing.T, on bool) (*Manager, *units.World, *units
 		}
 	}
 	var requests []BuildRequest
-	m.QueueBuildTyped = func(req BuildRequest) error {
+	m.SetQueueBuildTyped(func(req BuildRequest) error {
 		requests = append(requests, req)
 		return nil
-	}
+	})
 	e := testEcon(0, 800, 1000, 400, 500, 300, 10, 0, 0)
 	e.Players[0].Exists = true
 	return m, w, u, e, &requests

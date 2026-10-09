@@ -70,13 +70,13 @@ func TestCommunityKickoutDrawsBeforeProtectedWorkDecision(t *testing.T) {
 	s.Rules = CommunityRules{}
 	s.Community.ConstructionKickout = true
 	draws := 0
-	s.CRTRandom = func(bound uint32) uint32 {
+	s.SetCRTRandom(func(bound uint32) uint32 {
 		if bound != 360 {
 			t.Fatalf("CRT bound %d, want 360", bound)
 		}
 		draws++
 		return 0
-	}
+	})
 
 	blocker.Def.BuildCostEnergy = 100
 	targetHandle, err := s.World.CreateNanoframe(blocker.Def, blocker.Owner, world.CellToWorld(25), 0, world.CellToWorld(25))

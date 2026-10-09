@@ -1694,6 +1694,7 @@ func (s *Session) SetEffectEntryFrameCount(resolve func(bank, entry string) (int
 	if s == nil {
 		return
 	}
+	s.checkpointArt[0] = checkpointArtBinding{}
 	s.effectFrameCount = resolve
 	s.resolveSmokeFrameCounts()
 }
@@ -1713,5 +1714,6 @@ func (s *Session) SetFeatureSequenceResolver(resolve func(filename, sequence str
 	if s == nil {
 		return
 	}
+	s.checkpointArt[1] = checkpointArtBinding{}
 	s.featureSequence = resolve
 }

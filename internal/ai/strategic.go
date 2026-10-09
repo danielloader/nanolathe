@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/checkpoint"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/rng"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
@@ -35,6 +36,10 @@ type PlacementRegion struct {
 // "Established AI-facing data and rooted planner"] per I13.
 // Go uses named fields and embeds this state in Manager [PLAN_11 Public API].
 type Strategic struct {
+	// Installation ownership is diagnostic metadata, not serialized state
+	// (DESIGN_MULTIPLAYER §16.3.71).
+	checkpointCallbacks [2]checkpointStrategicCallbackProof
+
 	// Strategic center, recomputed every refresh on all three axes in the
 	// authoritative 16.16 fixed-point representation [08 R-AI-03 §2; I2].
 	CenterX numeric.Fixed
@@ -159,6 +164,7 @@ func (s *Strategic) BindEnergyEnvironment(read func() (windScalar, tidalStrength
 	if s == nil {
 		return
 	}
+	s.checkpointCallbacks[0] = checkpointStrategicCallbackProof{}
 	s.energyEnvironment = read
 }
 
@@ -171,7 +177,26 @@ func (s *Strategic) BindTargetRegistryRebuild(rebuild func(tick uint32, player u
 	if s == nil {
 		return
 	}
+	s.checkpointCallbacks[1] = checkpointStrategicCallbackProof{}
 	s.rebuildRegistry = rebuild
+}
+
+// BindEnergyEnvironmentWithCheckpointBinding preserves ordinary nil handling
+// and stamps only the exact Strategic that received this callback (§16.3.71).
+func (s *Strategic) BindEnergyEnvironmentWithCheckpointBinding(read func() (float32, float32), authority *checkpoint.BindingAuthority) {
+	s.BindEnergyEnvironment(read)
+	if s != nil && read != nil && authority != nil {
+		s.checkpointCallbacks[0] = checkpointStrategicCallbackProof{s, authority}
+	}
+}
+
+// BindTargetRegistryRebuildWithCheckpointBinding does no registry work; it
+// records only the installation performed by the ordinary binding (§16.3.71).
+func (s *Strategic) BindTargetRegistryRebuildWithCheckpointBinding(rebuild func(uint32, uint8), authority *checkpoint.BindingAuthority) {
+	s.BindTargetRegistryRebuild(rebuild)
+	if s != nil && rebuild != nil && authority != nil {
+		s.checkpointCallbacks[1] = checkpointStrategicCallbackProof{s, authority}
+	}
 }
 
 // TargetRegistryRebuildBound reports whether a session has bound the combat

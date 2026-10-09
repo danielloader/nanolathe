@@ -172,8 +172,8 @@ func applySelfDestructDamage(u *units.Unit, tick uint32) {
 	if u == nil {
 		return
 	}
-	if binding := bindingFor(u); binding != nil && binding.Damage != nil {
-		binding.Damage(tick, combat.DamageInput{Victim: u.Handle, Attacker: u.Handle, Nominal: selfDestructDamage, Kind: uint8(combat.CauseSelfDestruct)})
+	if binding := bindingFor(u); binding != nil && binding.DamageHook() != nil {
+		binding.DamageHook()(tick, combat.DamageInput{Victim: u.Handle, Attacker: u.Handle, Nominal: selfDestructDamage, Kind: uint8(combat.CauseSelfDestruct)})
 	}
 }
 

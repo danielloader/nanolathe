@@ -357,13 +357,13 @@ func TestKilledDedupAcrossHandleReuse(t *testing.T) {
 	def.Corpse = ""
 	h1, _ := s.Units.Create(def, 0, numeric.Fixed(10*16*65536), 0, numeric.Fixed(10*16*65536))
 	count := 0
-	origOnDeath := s.Units.OnDeath
-	s.Units.OnDeath = func(h pool.Handle, c units.DeathCause, u *units.Unit) {
+	origOnDeath := s.Units.DeathHook()
+	s.Units.SetDeathHook(func(h pool.Handle, c units.DeathCause, u *units.Unit) {
 		count++
 		if origOnDeath != nil {
 			origOnDeath(h, c, u)
 		}
-	}
+	})
 	s.Units.Destroy(h1, units.DeathKilled)
 	if count != 0 {
 		t.Fatalf("first destroy should defer hook until finalization, got %d", count)
@@ -453,16 +453,16 @@ func TestDeathHookBuildsTheCentralStackImpactRecord(t *testing.T) {
 		t.Fatal("place bystanding feature")
 	}
 
-	originalEvents := s.Combat.Events
+	originalEvents := s.Combat.EventsHook()
 	var events []combat.Event
 	corpsesAtImpact := -1
-	s.Combat.Events = func(ev combat.Event) {
+	s.Combat.SetEvents(func(ev combat.Event) {
 		events = append(events, ev)
 		if ev.Kind == combat.EventProjectileImpact {
 			corpsesAtImpact = len(s.Features.Instances())
 		}
 		originalEvents(ev)
-	}
+	})
 	s.Units.Destroy(h, units.DeathKilled)
 	s.Units.FinalizeDeath(h, s.Clock.GlobalTick)
 

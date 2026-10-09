@@ -80,12 +80,12 @@ func newAIFixtureWorld(maxDefs int, cat *content.Catalog) *units.World {
 // sees the pump's own jitter draws instead of panicking on an uninjected
 // stream [I4].
 func aiFixtureOrderBinding(cat *content.Catalog, sim *rng.Simulation) *orders.QueueBinding {
-	return &orders.QueueBinding{
+	return orders.NewQueueBinding(orders.QueueBindingConfig{
 		SimRNG: sim,
 		// Code 14's gate is list presence — the `builder` flag — not the
 		// entry count [04 R-ORD-02 §1]; the production binding answers the same.
 		BuildList: func(def *content.UnitDef) bool {
 			return def != nil && def.Builder
 		},
-	}
+	})
 }

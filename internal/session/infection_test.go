@@ -87,7 +87,7 @@ func TestSurvivalInfectionAdoptsUnchangedHostAndRefusesCapacity(t *testing.T) {
 			}
 			node := orders.NewNodeForOrder(orders.Lookup("Capture"), victim.Handle, victim.X, victim.Y, victim.Z, 10, actor.Handle, false)
 			stocks := [2][2]float32{s.Econ.Players[0].Stock, s.Econ.Players[1].Stock}
-			ok := s.orderBinding().Work.Capture(actor, &node, 10)
+			ok := s.orderBinding().Work.CaptureHook()(actor, &node, 10)
 			if ok == refuse {
 				t.Fatalf("transfer=%v, refusal=%v", ok, refuse)
 			}
@@ -173,7 +173,7 @@ func TestSurvivalInfectionAdoptsReusedAttackerSlot(t *testing.T) {
 		t.Fatal("dead slot not freed")
 	}
 	node := orders.NewNodeForOrder(orders.Lookup("Capture"), victim.Handle, victim.X, victim.Y, victim.Z, 10, actor.Handle, false)
-	if !s.orderBinding().Work.Capture(actor, &node, 10) {
+	if !s.orderBinding().Work.CaptureHook()(actor, &node, 10) {
 		t.Fatal("capture refused")
 	}
 	host := s.Units.Unit(dead)

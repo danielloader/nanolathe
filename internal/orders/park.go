@@ -89,8 +89,8 @@ func installParkRectangle(u *units.Unit, n *Node, originX, originZ, s int32) {
 	if n == nil {
 		return
 	}
-	if b := bindingOfUnit(u); b != nil && b.Movement != nil && b.Movement.InstallRectangle != nil {
-		b.Movement.InstallRectangle(RectangleGoalRequest{
+	if b := bindingOfUnit(u); b != nil && b.Movement != nil && b.Movement.InstallRectangleHook() != nil {
+		b.Movement.InstallRectangleHook()(RectangleGoalRequest{
 			Owner: n.Owner,
 			Node:  n,
 			CellX: originX,

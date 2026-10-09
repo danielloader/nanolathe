@@ -56,7 +56,7 @@ func constructionOrderGateFixture(t *testing.T) (*Manager, *units.World, *units.
 	terrain := placementTerrain(64, 64, 0)
 	sim := rng.NewSimulation(7)
 	submissions := 0
-	m := &Manager{
+	m := NewManager(ManagerConfig{
 		Player:            1,
 		Profile:           &Profile{Weight: map[string]int32{productDef.CanonicalKey: 100}, Limit: map[string]int32{}},
 		Catalog:           cat,
@@ -68,7 +68,7 @@ func constructionOrderGateFixture(t *testing.T) (*Manager, *units.World, *units.
 			submissions++
 			return nil
 		},
-	}
+	})
 	m.Strategic = Strategic{
 		CenterX:         builder.X,
 		CenterZ:         builder.Z,

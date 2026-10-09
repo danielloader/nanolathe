@@ -17,17 +17,17 @@ func TestDangerDetoursOnlyAfterAllDirectChoicesFail(t *testing.T) {
 		q, u, _ := dangerFixture(true)
 		ObserveImpact(u, 16384, 10) // hazard on the +X side
 		shortX := u.X - numeric.FixedFromInt(16)
-		q.Binding().DangerStepFeasible = func(_ *units.Unit, x, z numeric.Fixed) bool {
+		q.Binding().SetDangerStepFeasible(func(_ *units.Unit, x, z numeric.Fixed) bool {
 			return direct && x == shortX && z == u.Z
-		}
+		})
 		detourQueried := false
-		q.Binding().DangerRouteFeasible = func(*units.Unit, numeric.Fixed, numeric.Fixed) bool {
+		q.Binding().SetDangerRouteFeasible(func(*units.Unit, numeric.Fixed, numeric.Fixed) bool {
 			detourQueried = true
 			if direct {
 				t.Fatal("detour queried despite a safer direct escape")
 			}
 			return true
-		}
+		})
 		x, z, ok := q.dangerWithdrawal(u, 2)
 		if !ok || z != u.Z || direct && x != shortX || !direct && x != u.X-numeric.FixedFromInt(64) || detourQueried == direct {
 			t.Fatalf("direct=%v goal=(%v,%v) admitted=%v detour=%v", direct, x, z, ok, detourQueried)
@@ -40,7 +40,7 @@ func dangerFixture(modern bool) (*Queue, *units.Unit, *units.Unit) {
 	enemy := &units.Unit{Handle: 2, Alive: true, Owner: 1, Def: &content.UnitDef{BMCode: 1}, X: numeric.FixedFromInt(612), Z: numeric.FixedFromInt(512)}
 	u.Flags = units.ArmedStatus | 2<<units.StandingMoveShift | 1<<units.StandingFireShift
 	q := QueueForUnit(u)
-	q.SetBinding(&QueueBinding{Rules: modeRules(modern), SimRNG: &rng.Simulation{}, Lookup: func(h pool.Handle) *units.Unit {
+	q.SetBinding(NewQueueBinding(QueueBindingConfig{Rules: modeRules(modern), SimRNG: &rng.Simulation{}, Lookup: func(h pool.Handle) *units.Unit {
 		if h == u.Handle {
 			return u
 		}
@@ -48,7 +48,7 @@ func dangerFixture(modern bool) (*Queue, *units.Unit, *units.Unit) {
 			return enemy
 		}
 		return nil
-	}, Hostility: func(a, b *units.Unit) bool { return a.Owner != b.Owner }, DangerVisible: func(*units.Unit, *units.Unit) bool { return true }, DangerCanRespond: func(*units.Unit, *units.Unit, int) bool { return true }, DangerStepFeasible: func(*units.Unit, numeric.Fixed, numeric.Fixed) bool { return true }, World: &WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}})
+	}, Hostility: func(a, b *units.Unit) bool { return a.Owner != b.Owner }, DangerVisible: func(*units.Unit, *units.Unit) bool { return true }, DangerCanRespond: func(*units.Unit, *units.Unit, int) bool { return true }, DangerStepFeasible: func(*units.Unit, numeric.Fixed, numeric.Fixed) bool { return true }, World: NewWorldQueryAdapter(WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 0 }})}))
 	return q, u, enemy
 }
 
@@ -118,7 +118,7 @@ func TestDangerUsesVisibleMemoryAndRejectsReusedSlots(t *testing.T) {
 	q, u, enemy := dangerFixture(true)
 	ObserveDanger(u, enemy, 10)
 	last := q.danger.contacts[0]
-	q.Binding().DangerVisible = func(*units.Unit, *units.Unit) bool { return false }
+	q.Binding().SetDangerVisible(func(*units.Unit, *units.Unit) bool { return false })
 	enemy.X = numeric.FixedFromInt(900)
 	StepDangerResponse(u, 11)
 	if q.danger.contacts[0].x != last.x {
@@ -128,12 +128,12 @@ func TestDangerUsesVisibleMemoryAndRejectsReusedSlots(t *testing.T) {
 		t.Fatal("hidden attacker was pursued instead of withdrawing from last observed position")
 	}
 	replacement := *enemy
-	q.Binding().Lookup = func(h pool.Handle) *units.Unit {
+	q.Binding().SetLookup(func(h pool.Handle) *units.Unit {
 		if h == enemy.Handle {
 			return &replacement
 		}
 		return u
-	}
+	})
 	StepDangerResponse(u, 12)
 	if q.danger.contacts[0].unit != nil {
 		t.Fatal("reused handle retained old danger")
@@ -172,19 +172,19 @@ func TestDangerHonorsStancesAndManualOrders(t *testing.T) {
 
 func TestDangerWithdrawalConsidersAllThreatsAndFeasibility(t *testing.T) {
 	q, u, enemy := dangerFixture(true)
-	q.Binding().DangerCanRespond = func(*units.Unit, *units.Unit, int) bool { return false }
+	q.Binding().SetDangerCanRespond(func(*units.Unit, *units.Unit, int) bool { return false })
 	other := &units.Unit{Handle: 3, Alive: true, Owner: 1, Def: enemy.Def, X: numeric.FixedFromInt(412), Z: numeric.FixedFromInt(512)}
-	oldLookup := q.Binding().Lookup
-	q.Binding().Lookup = func(h pool.Handle) *units.Unit {
+	oldLookup := q.Binding().LookupHook()
+	q.Binding().SetLookup(func(h pool.Handle) *units.Unit {
 		if h == 3 {
 			return other
 		}
 		return oldLookup(h)
-	}
+	})
 	ObserveDanger(u, enemy, 10)
 	ObserveDanger(u, other, 10)
 	// Both east and west are dangerous; north is blocked, so choose south.
-	q.Binding().DangerStepFeasible = func(_ *units.Unit, x, z numeric.Fixed) bool { return x == u.X && z > u.Z }
+	q.Binding().SetDangerStepFeasible(func(_ *units.Unit, x, z numeric.Fixed) bool { return x == u.X && z > u.Z })
 	StepDangerResponse(u, 10)
 	n := q.danger.response
 	if n == nil || n.Target != 0 || n.GoalX != u.X || n.GoalZ <= u.Z {
@@ -240,7 +240,7 @@ func TestDangerCanAnswerWithSecondaryWeapon(t *testing.T) {
 	// Per-slot suitability owns the bad-target masks. Only slot two can answer.
 	enemy.Def.UnitMask = content.MaskForID(5)
 	u.Def.BadTargetCategoryWPRIMask = content.MaskForID(5)
-	q.Binding().DangerCanRespond = func(_, _ *units.Unit, slot int) bool { return slot == 2 }
+	q.Binding().SetDangerCanRespond(func(_, _ *units.Unit, slot int) bool { return slot == 2 })
 	ObserveDanger(u, enemy, 10)
 	StepDangerResponse(u, 10)
 	if q.danger.response == nil || q.danger.response.ID != Lookup("Attack_Chase") || q.danger.response.Param1 != 2 {
@@ -251,7 +251,7 @@ func TestDangerCanAnswerWithSecondaryWeapon(t *testing.T) {
 func TestDangerHoldPositionCanReturnFireWithoutMoving(t *testing.T) {
 	q, u, enemy := dangerFixture(true)
 	u.Flags &^= uint32(3) << units.StandingMoveShift
-	q.Binding().Weapons = &WeaponAdapter{CanEngage: func(*units.Unit, pool.Handle, int) bool { return true }}
+	q.Binding().Weapons = NewWeaponAdapter(WeaponAdapterConfig{CanEngage: func(*units.Unit, pool.Handle, int) bool { return true }})
 	ObserveDanger(u, enemy, 10)
 	StepDangerResponse(u, 10)
 	if q.danger.response == nil || q.danger.response.ID != Lookup("Attack_NoMove") || len(q.primary) != 1 {
@@ -274,7 +274,7 @@ func TestDangerFailedPursuitWithdrawsAndDoesNotChurnRepair(t *testing.T) {
 	}
 	u.X, u.Z = n.GoalX, n.GoalZ
 	q.RemoveHead()
-	q.Binding().DangerStepFeasible = func(*units.Unit, numeric.Fixed, numeric.Fixed) bool { return false }
+	q.Binding().SetDangerStepFeasible(func(*units.Unit, numeric.Fixed, numeric.Fixed) bool { return false })
 	StepDangerResponse(u, 71)
 	if q.danger.response == nil || q.danger.response.ID != Lookup("Wait") || q.primary[len(q.primary)-1] != patrol {
 		t.Fatal("exhausted retreat immediately resumed unsafe patrol")
@@ -367,21 +367,21 @@ func TestDangerFireAtWillReconsidersThroughCombatRanking(t *testing.T) {
 		q, u, enemy := dangerFixture(true)
 		u.Flags = u.Flags&^(uint32(3)<<units.StandingFireShift) | fire<<units.StandingFireShift
 		tower := &units.Unit{Handle: 3, Alive: true, Owner: 1, Def: enemy.Def, X: enemy.X, Z: enemy.Z}
-		oldLookup := q.Binding().Lookup
-		q.Binding().Lookup = func(h pool.Handle) *units.Unit {
+		oldLookup := q.Binding().LookupHook()
+		q.Binding().SetLookup(func(h pool.Handle) *units.Unit {
 			if h == 3 {
 				return tower
 			}
 			return oldLookup(h)
-		}
+		})
 		calls := 0
-		q.Binding().Weapons = &WeaponAdapter{CanEngage: func(*units.Unit, pool.Handle, int) bool { return true }, Acquire: func(_ *units.Unit, _ int, limit uint32) (pool.Handle, bool) {
+		q.Binding().Weapons = NewWeaponAdapter(WeaponAdapterConfig{CanEngage: func(*units.Unit, pool.Handle, int) bool { return true }, Acquire: func(_ *units.Unit, _ int, limit uint32) (pool.Handle, bool) {
 			if limit != 0 {
 				t.Fatal("acquisition used tick as range limit")
 			}
 			calls++
 			return tower.Handle, true
-		}}
+		}})
 		ObserveDanger(u, enemy, 10)
 		StepDangerResponse(u, 10)
 		initial := q.danger.response
@@ -406,8 +406,8 @@ func TestDangerFireAtWillReconsidersThroughCombatRanking(t *testing.T) {
 
 func TestDangerCanUseShorterSafeWithdrawal(t *testing.T) {
 	q, u, enemy := dangerFixture(true)
-	q.Binding().DangerCanRespond = func(*units.Unit, *units.Unit, int) bool { return false }
-	q.Binding().DangerStepFeasible = func(_ *units.Unit, x, z numeric.Fixed) bool { return z == u.Z && x == u.X-numeric.FixedFromInt(16) }
+	q.Binding().SetDangerCanRespond(func(*units.Unit, *units.Unit, int) bool { return false })
+	q.Binding().SetDangerStepFeasible(func(_ *units.Unit, x, z numeric.Fixed) bool { return z == u.Z && x == u.X-numeric.FixedFromInt(16) })
 	ObserveDanger(u, enemy, 10)
 	StepDangerResponse(u, 10)
 	if q.danger.response == nil || q.danger.response.GoalX != u.X-numeric.FixedFromInt(16) {
@@ -440,9 +440,9 @@ func TestDangerBlockedManualMoveSuspendsAndRestartsDestination(t *testing.T) {
 
 func TestDangerCanUseShorterDiagonalWithdrawal(t *testing.T) {
 	q, u, enemy := dangerFixture(true)
-	q.Binding().DangerCanRespond = func(*units.Unit, *units.Unit, int) bool { return false }
+	q.Binding().SetDangerCanRespond(func(*units.Unit, *units.Unit, int) bool { return false })
 	wantX, wantZ := u.X-numeric.FixedFromInt(11), u.Z+numeric.FixedFromInt(11)
-	q.Binding().DangerStepFeasible = func(_ *units.Unit, x, z numeric.Fixed) bool { return x == wantX && z == wantZ }
+	q.Binding().SetDangerStepFeasible(func(_ *units.Unit, x, z numeric.Fixed) bool { return x == wantX && z == wantZ })
 	ObserveDanger(u, enemy, 10)
 	StepDangerResponse(u, 10)
 	if q.danger.response == nil || q.danger.response.GoalX != wantX || q.danger.response.GoalZ != wantZ {
@@ -545,15 +545,15 @@ func TestDangerRetargetRespectsControlHeadAndStillExpires(t *testing.T) {
 			u.Flags = u.Flags&^(uint32(3)<<units.StandingFireShift) | 2<<units.StandingFireShift
 			tower := *enemy
 			tower.Handle = 3
-			old := q.Binding().Lookup
-			q.Binding().Lookup = func(h pool.Handle) *units.Unit {
+			old := q.Binding().LookupHook()
+			q.Binding().SetLookup(func(h pool.Handle) *units.Unit {
 				if h == 3 {
 					return &tower
 				}
 				return old(h)
-			}
+			})
 			acquisitions := 0
-			q.Binding().Weapons = &WeaponAdapter{CanEngage: func(*units.Unit, pool.Handle, int) bool { return true }, Acquire: func(*units.Unit, int, uint32) (pool.Handle, bool) { acquisitions++; return 3, true }}
+			q.Binding().Weapons = NewWeaponAdapter(WeaponAdapterConfig{CanEngage: func(*units.Unit, pool.Handle, int) bool { return true }, Acquire: func(*units.Unit, int, uint32) (pool.Handle, bool) { acquisitions++; return 3, true }})
 			ObserveDanger(u, enemy, 10)
 			StepDangerResponse(u, 10)
 			response := q.danger.response
@@ -573,7 +573,7 @@ func TestDangerRetargetRespectsControlHeadAndStillExpires(t *testing.T) {
 func TestDangerReturnAfterExpiryWaitsForParalyze(t *testing.T) {
 	q, u, enemy := dangerFixture(true)
 	u.Flags = u.Flags&^(uint32(3)<<units.StandingMoveShift) | 1<<units.StandingMoveShift
-	q.Binding().DangerCanRespond = func(*units.Unit, *units.Unit, int) bool { return false }
+	q.Binding().SetDangerCanRespond(func(*units.Unit, *units.Unit, int) bool { return false })
 	ObserveDanger(u, enemy, 10)
 	StepDangerResponse(u, 10)
 	response := q.danger.response

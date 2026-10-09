@@ -83,16 +83,16 @@ func TestVTOLPatrolChecksPickedRepairAdmission(t *testing.T) {
 					target.Remaining, target.Health = tc.remaining, tc.health
 					b := q.Binding()
 					b.Rules = mode.rules
-					b.Resources = func(uint8) (ResourceView, bool) {
+					b.SetResources(func(uint8) (ResourceView, bool) {
 						return ResourceView{Stock: [2]float32{100, 100}, Capacity: [2]float32{100, 100}}, true
-					}
-					b.World = &WorldQueryAdapter{
+					})
+					b.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{
 						SeaLevel:    func() uint8 { return 40 },
 						ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) { visit(target.Handle, target) },
 						ForEachUnitInRadius: func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
 							visit(target.Handle, target)
 						},
-					}
+					})
 					if candidates := scanRepairCandidates(actor, 300); len(candidates) != 1 || candidates[0] != target {
 						t.Fatal("the visitor must keep this candidate until the post-pick admission")
 					}
@@ -132,10 +132,10 @@ func TestVTOLPatrolRejectedPickReachesFeatureWork(t *testing.T) {
 	other := *target
 	other.Handle = 3
 	b := q.Binding()
-	b.Resources = func(uint8) (ResourceView, bool) {
+	b.SetResources(func(uint8) (ResourceView, bool) {
 		return ResourceView{Stock: [2]float32{0, 20}, Capacity: [2]float32{100, 100}}, true
-	}
-	b.World = &WorldQueryAdapter{
+	})
+	b.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{
 		SeaLevel: func() uint8 { return 40 },
 		ForEachUnitInRadius: func(_, _, _ numeric.Fixed, visit func(pool.Handle, *units.Unit) bool) {
 			for _, candidate := range []*units.Unit{target, &other} {
@@ -147,7 +147,7 @@ func TestVTOLPatrolRejectedPickReachesFeatureWork(t *testing.T) {
 		LookupFeature: func(int32, int32) (FeatureView, bool) {
 			return FeatureView{Metal: 1, Energy: 1, Reclaimable: true, Autoreclaimable: true}, true
 		},
-	}
+	})
 	n := &Node{ID: Lookup("VTOL_RepairPatrol"), Owner: actor.Handle, Phase: 1, Deadline: -1}
 	if code := vtolRepairPatrolHandler(actor, n, 0, 100); code != 3 {
 		t.Fatalf("feature work returned %d, want wait (3)", code)
@@ -175,14 +175,14 @@ func TestGuardCopiesConstructionOnlyWithinItsWaterReach(t *testing.T) {
 		}
 		frame.Move.Mode, frame.Move.ModeMirror = 1, 1
 		b := QueueForUnit(f.guard).Binding()
-		wardLookup := b.Lookup
-		b.Lookup = func(h pool.Handle) *units.Unit {
+		wardLookup := b.LookupHook()
+		b.SetLookup(func(h pool.Handle) *units.Unit {
 			if h == frame.Handle {
 				return frame
 			}
 			return wardLookup(h)
-		}
-		b.World = &WorldQueryAdapter{SeaLevel: func() uint8 { return 40 }}
+		})
+		b.World = NewWorldQueryAdapter(WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 40 }})
 		wq := QueueForUnit(f.ward)
 		wq.Push(rowMobileBuild, Node{Owner: f.ward.Handle})
 		wq.Head().BindTarget(frame.Handle)

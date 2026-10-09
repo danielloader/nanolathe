@@ -53,7 +53,7 @@ func TestModernInfectionAdmissionAndAttackFallback(t *testing.T) {
 		{"dying", func(_ *Queue, _, v *units.Unit) { v.Dying = true }},
 		{"carried", func(_ *Queue, _, v *units.Unit) { v.Attachment.Carrier = 9 }},
 		{"ally", func(q *Queue, _, _ *units.Unit) {
-			q.Binding().Hostility = func(*units.Unit, *units.Unit) bool { return false }
+			q.Binding().SetHostility(func(*units.Unit, *units.Unit) bool { return false })
 		}},
 		{"actor dying", func(_ *Queue, u, _ *units.Unit) { u.Dying = true }},
 		{"actor unfinished", func(_ *Queue, u, _ *units.Unit) { u.Remaining = .5 }},
@@ -117,9 +117,9 @@ func TestModernInfectionRequiresUninterruptedSpray(t *testing.T) {
 		sprays, transfers, installs := 0, 0, 0
 		beforeBuckets, beforeSim := *q.Binding().Economy.UnitBuckets(u.Handle), *q.Binding().SimRNG
 		var capturedAt uint32
-		q.Binding().Presentation = &PresentationAdapter{Nanolathe: func(*units.Unit, *Node, uint32) bool { sprays++; return true }}
-		q.Binding().Work.Capture = func(*units.Unit, *Node, uint32) bool { transfers++; return true }
-		q.Binding().Movement.InstallRectangle = func(RectangleGoalRequest) bool { installs++; return true }
+		q.Binding().Presentation = NewPresentationAdapter(PresentationAdapterConfig{Nanolathe: func(*units.Unit, *Node, uint32) bool { sprays++; return true }})
+		q.Binding().Work.SetCapture(func(*units.Unit, *Node, uint32) bool { transfers++; return true })
+		q.Binding().Movement.SetInstallRectangle(func(RectangleGoalRequest) bool { installs++; return true })
 		issueInfection(q, u, target)
 		for tick := uint32(1); tick <= 100; tick++ {
 			// Motion itself does not interrupt a spray while still in range.
@@ -155,8 +155,8 @@ func TestModernInfectionStanceIdentityAndTransferRefusal(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			q, u, target := infectionFixture()
 			calls, sprays := 0, 0
-			q.Binding().Work.Capture = func(*units.Unit, *Node, uint32) bool { calls++; return false }
-			q.Binding().Presentation = &PresentationAdapter{Nanolathe: func(*units.Unit, *Node, uint32) bool { sprays++; return true }}
+			q.Binding().Work.SetCapture(func(*units.Unit, *Node, uint32) bool { calls++; return false })
+			q.Binding().Presentation = NewPresentationAdapter(PresentationAdapterConfig{Nanolathe: func(*units.Unit, *Node, uint32) bool { sprays++; return true }})
 			issueInfection(q, u, target)
 			q.Pump(u, 1)
 			switch reason {
@@ -165,7 +165,7 @@ func TestModernInfectionStanceIdentityAndTransferRefusal(t *testing.T) {
 			case "identity":
 				target.AllocationSerial++
 			case "alliance":
-				q.Binding().Hostility = func(*units.Unit, *units.Unit) bool { return false }
+				q.Binding().SetHostility(func(*units.Unit, *units.Unit) bool { return false })
 			case "death":
 				target.Dying = true
 			case "builder":
@@ -198,8 +198,8 @@ func TestInfectionStrictBypassAndActiveModeSwitch(t *testing.T) {
 	for _, active := range []bool{false, true} {
 		q, u, target := infectionFixture()
 		calls := 0
-		q.Binding().Presentation = &PresentationAdapter{Nanolathe: func(*units.Unit, *Node, uint32) bool { calls++; return true }}
-		q.Binding().Work.Capture = func(*units.Unit, *Node, uint32) bool { calls++; return true }
+		q.Binding().Presentation = NewPresentationAdapter(PresentationAdapterConfig{Nanolathe: func(*units.Unit, *Node, uint32) bool { calls++; return true }})
+		q.Binding().Work.SetCapture(func(*units.Unit, *Node, uint32) bool { calls++; return true })
 		if active {
 			issueInfection(q, u, target)
 			q.Pump(u, 1)
@@ -224,7 +224,7 @@ func TestInfectionStrictBypassAndActiveModeSwitch(t *testing.T) {
 func TestModernInfectionSuspensionDoesNotCountAsSpray(t *testing.T) {
 	q, u, target := infectionFixture()
 	transfers := 0
-	q.Binding().Work.Capture = func(*units.Unit, *Node, uint32) bool { transfers++; return true }
+	q.Binding().Work.SetCapture(func(*units.Unit, *Node, uint32) bool { transfers++; return true })
 	issueInfection(q, u, target)
 	q.Pump(u, 1)
 	q.Pump(u, 2)
@@ -266,12 +266,12 @@ func TestModernInfectionPursuesDuringSprayWithoutRestartingStance(t *testing.T) 
 	u.ScriptState = scripted.ScriptState
 	installs, releases := 0, 0
 	var goal RectangleGoalRequest
-	q.Binding().Movement.InstallRectangle = func(req RectangleGoalRequest) bool {
+	q.Binding().Movement.SetInstallRectangle(func(req RectangleGoalRequest) bool {
 		installs++
 		goal = req
 		return true
-	}
-	q.Binding().Movement.Release = func(*Node) bool { releases++; return true }
+	})
+	q.Binding().Movement.SetRelease(func(*Node) bool { releases++; return true })
 	issueInfection(q, u, target)
 	n := q.Head()
 	policy := q.Binding().rules().Infection(u.Def)
@@ -311,7 +311,7 @@ func TestModernInfectionPursuitFailureOnlyCancelsOutsideReach(t *testing.T) {
 		if !inRange {
 			target.X += numeric.FixedFromInt(200)
 		}
-		q.Binding().Movement.InstallRectangle = func(RectangleGoalRequest) bool { return false }
+		q.Binding().Movement.SetInstallRectangle(func(RectangleGoalRequest) bool { return false })
 		issueInfection(q, u, target)
 		n := q.Head()
 		code := infectionCapture(u, n, q.Binding().rules().Infection(u.Def), gateNoRoute, 1)
@@ -325,9 +325,9 @@ func TestModernInfectionDirectCaptureCannotTakeBuilder(t *testing.T) {
 	q, u, target := infectionFixture()
 	target.Def.Builder = true
 	target.Def.UnitName = "arbitrary_mod_constructor"
-	q.Binding().World = &WorldQueryAdapter{SeaLevel: func() uint8 { return 0 }}
+	q.Binding().World = NewWorldQueryAdapter(WorldQueryAdapterConfig{SeaLevel: func() uint8 { return 0 }})
 	transfers := 0
-	q.Binding().Work.Capture = func(*units.Unit, *Node, uint32) bool { transfers++; return true }
+	q.Binding().Work.SetCapture(func(*units.Unit, *Node, uint32) bool { transfers++; return true })
 	// Bypass command resolution; the order itself must revalidate immunity.
 	q.Push(Lookup("Capture"), NewNodeForOrder(Lookup("Capture"), target.Handle, target.X, target.Y, target.Z, 1, u.Handle, false))
 	sim, crt := *q.Binding().SimRNG, *rng.Global.Crt

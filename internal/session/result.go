@@ -85,7 +85,14 @@ func (s *Session) GetResult() Result {
 	if s == nil {
 		return Result{}
 	}
-	r := s.result
+	if s.onlineResults != nil {
+		return s.ResultForSeat(s.LocalOwner)
+	}
+	return copyResult(s.result)
+}
+
+// copyResult detaches the slice payload handed to presentation.
+func copyResult(r Result) Result {
 	if len(r.Losers) > 0 {
 		cp := make([]int, len(r.Losers))
 		copy(cp, r.Losers)
@@ -521,6 +528,12 @@ func (s *Session) publishEndCountdown() {
 // countdown and the latch bits [08 R-TRIG-01 §6]. Both lists come from the same
 // row eligibility the score rows use.
 func (s *Session) resultTeams(victory bool) (int, []int) {
+	return s.resultTeamsForOwner(int(s.LocalOwner), victory)
+}
+
+// resultTeamsForOwner keeps presentation identity independent of the viewing
+// client in the two-human composition (DESIGN_MULTIPLAYER §16.4.1).
+func (s *Session) resultTeamsForOwner(local int, victory bool) (int, []int) {
 	var allTeams [10]int
 	allTeamCount := 0
 	addTeam := func(team int) {
@@ -559,7 +572,6 @@ func (s *Session) resultTeams(victory bool) (int, []int) {
 		}
 	}
 	winner := -1
-	local := int(s.LocalOwner)
 	localTeam := s.teamForOwner(local)
 	if victory {
 		winner = localTeam

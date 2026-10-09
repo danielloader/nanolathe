@@ -59,9 +59,9 @@ func initializeBattleAI(s *Session, player uint8, profile *ai.Profile, sessionKi
 	// entry WindScalar is still exactly zero; the first wind chain runs at tick
 	// one and consumes its established draws there [05 R-PROD-01 §1][08
 	// R-ENTRY-01 §3 step 19][08 R-P0-05 §5–§6].
-	mgr.Strategic.BindEnergyEnvironment(func() (windScalar, tidalStrength float32) {
+	mgr.Strategic.BindEnergyEnvironmentWithCheckpointBinding(func() (windScalar, tidalStrength float32) {
 		return s.Econ.WindScalar(), s.Econ.TidalScalar()
-	})
+	}, s.checkpointBindingAuthority())
 	// The session's per-player unit limit is the only global the class
 	// routine's half-capacity comparison reads, and it is one word for the
 	// whole battle [08 R-AI-01 §13]. It binds before Strategic.Init, whose
@@ -93,14 +93,14 @@ func initializeBattleAI(s *Session, player uint8, profile *ai.Profile, sessionKi
 	sort.Strings(allTypes)
 	mgr.SetCatalog(s.Catalog)
 	mgr.Strategic.Init(allTypes)
-	mgr.IsAlliance = func(a, b uint8) bool {
+	mgr.SetIsAllianceWithCheckpointBinding(func(a, b uint8) bool {
 		if int(a) >= len(s.Econ.Players) || int(b) >= len(s.Econ.Players) {
 			return false
 		}
 		pa, pb := &s.Econ.Players[a], &s.Econ.Players[b]
 		return pa.Exists && pb.Exists && !pa.IsObserver && !pb.IsObserver && pa.Allies[b]
-	}
-	if !mgr.InitializeBattleState(s.World, ai.RallyBattleBindings{
+	}, s.checkpointBindingAuthority())
+	if !mgr.InitializeBattleStateWithCheckpointBinding(s.World, ai.RallyBattleBindings{
 		Visible:    s.computerPlayerSees,
 		ProbeKnown: rallyProbeKnowledge(s),
 		// [08 R-AI-01 §19]: the rally task's member gate for a unit with no
@@ -115,7 +115,7 @@ func initializeBattleAI(s *Session, player uint8, profile *ai.Profile, sessionKi
 			}
 			return s.Combat.ShotTimeAdmitsPoint(unit, 0, x, y, z, s.World)
 		},
-	}) {
+	}, s.checkpointBindingAuthority()) {
 		return fmt.Errorf("session: AI battle state initialization failed for player %d", player)
 	}
 	// Public map knowledge and the computer player's own sight, for a Modern
@@ -135,12 +135,16 @@ func initializeBattleAI(s *Session, player uint8, profile *ai.Profile, sessionKi
 	// neither the seed nor the controller
 	// (docs/DESIGN_SESSIONS_AI_SAVE.md "Modern AI computer player").
 	mgr.BattleSeed = s.RNGSimSeed
-	mgr.UnitVisible = s.computerPlayerSeesOwn
-	mgr.JammerSuppresses = func(viewer, jammerOwner uint8) bool {
+	mgr.SetUnitVisibleWithCheckpointBinding(s.computerPlayerSeesOwn, s.checkpointBindingAuthority())
+	mgr.SetJammerSuppressesWithCheckpointBinding(func(viewer, jammerOwner uint8) bool {
 		return s.Vis.JammerSuppresses(visibility.PlayerID(viewer), visibility.PlayerID(jammerOwner))
-	}
+	}, s.checkpointBindingAuthority())
 	bindAIQueue(mgr, s)
 	s.AI[player] = mgr
+	s.checkpointAI[player] = sessionCheckpointAIManager{}
+	if a := s.checkpointBindingAuthority(); a != nil {
+		s.checkpointAI[player] = sessionCheckpointAIManager{s, mgr, a}
+	}
 	return nil
 }
 

@@ -2995,10 +2995,13 @@ developer table and default unit-spawn handler remain unimplemented with develop
 mode; multiplayer `TALK2.GUI`, recipient controls and network chat remain
 excluded with multiplayer `[07 R-CAM-01 §6]` `[07 R-FE-02 §12]`.
 
-* **The multiplayer lobby shell.** Out of scope for the whole engine; the
-  single-player skirmish setup screen is a different surface and is implemented
-  `[07 §12]` `[07 R-FE-02 §1]`. Until multiplayer is implemented, the authored
-  `MAINMENU` `MULTI` button is greyed and cannot be activated by pointer or key.
+* **The multiplayer lobby shell.** Retail's `SELGAME.GUI` lobby and its
+  transport remain out of scope; the single-player skirmish setup screen is a
+  different surface and is implemented `[07 §12]` `[07 R-FE-02 §1]`. The
+  authored `MAINMENU` `MULTI` button opens Nanolathe's own online screen
+  instead ([Online games](#online-games)). Only the browser build, which has
+  no relay transport, still greys it so it cannot be activated by pointer or
+  key.
 * **The front-end movie stage.** Normal launches play the original startup
   logo `Data/1.zrb` once, then open `MAINMENU` `[07 R-FE-01 §3]`. Playback
   is deferred to the first shell update so the platform PCM device is ready;
@@ -4321,6 +4324,56 @@ map that the installed game or selected mod already supplies shows "in your
 install", explains that it is already in the map list, and greys Load.
 Retail, manual and active-mod maps stay protected. Catalogue trust, library layout and mount precedence are
 owned by [DESIGN_MODS_MUTATORS §5.6](DESIGN_MODS_MUTATORS.md#56-community-map-catalogue).
+
+### Online games
+
+`MULTI` opens the online screen of
+[DESIGN_MULTIPLAYER §16.6](DESIGN_MULTIPLAYER.md#166-first-online-lobby-user-authorized-2026-10-08),
+a Nanolathe window over `MAINMENU` built on the `SELMAP` template and the Mods &
+Mutators backdrop, from the base install as those windows are, so a mod's own
+map-select window cannot move it. The map list, its scrollbar and picture are
+removed. The left frame holds a **Server** field (default
+`relay.nanolathe.gg`; a bare host means `wss://host/relay`, `host:port` is
+native TLS, a `wss://` URL is taken as typed, and a `ws://` URL is accepted
+only on a numeric loopback address, for a relay on this computer) and a
+**Room code** field that admits letters, digits and spaces; case, spaces and
+dashes are ignored. The right frame summarises what Create would host — the
+skirmish map, the mounted mod and the counts of mutators and restrictions —
+or, once a room is known, that room's game. **Change map** opens the ordinary
+map selector over the screen and returns to it. **Create Game**, **Join
+Game** (or Enter in the code field) and **Back** (or Escape) complete it; the
+status lines report progress and every refusal in plain words. The last
+server typed is saved as `onlineServer`.
+
+An unstamped build says up front that online play needs a stamped release
+build and greys Create and Join, since composition refuses it. Online games
+need the base game or an installed mod: a `--root` stack or `--mod-config`
+content is refused, and so is a mod installed from a folder, which has no
+archive identity to send.
+
+Create freezes the host's skirmish map, mounted mod, mutators and unit
+restrictions under Modern rules with a fresh seed pair, composes and
+prepares the battle on a job goroutine, and only then opens the room. Join
+first asks the relay for the room's configuration and adopts it: the room's
+map, mod, mutators and restrictions, never the joiner's. A room whose mod is
+installed but not mounted is mounted through the ordinary content reload,
+which keeps the player's own mutators and resumes the join on the new shell;
+a missing map or mod, or a different copy of the mod, is named and nothing
+is joined. Back abandons a job, closing any room it opens late.
+
+The lobby window replaces the screen's fields with the room code, drawn in
+`HATT14` in the window's heading colour as two groups of three, **Copy**
+where the host has a clipboard bridge (macOS writes AppKit plain text; other
+hosts hide it), both seats with their readiness and
+which seat is this player's. **Ready**/**Not ready** toggles this seat;
+**Start** is the host's and is greyed until both seats are present and
+ready; **Leave** (or Escape) leaves the room. The lobby is polled every
+step; a relay failure — the host leaving, the 30-minute wait, a dropped
+connection — returns to the online screen with its reason. Started enters
+the prepared battle through the paced lockstep driver, as the command-line
+play test does after its dial, with no opening arrival. Leaving the battle or
+its result returns to the online screen, which says whether the game ended,
+stopped (with the transport's reason) or was left.
 
 ### 3.17 The Nanolathe screen
 

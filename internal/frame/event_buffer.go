@@ -144,8 +144,8 @@ type Limits struct {
 }
 
 // EventBuffer admits typed value events in producer order. It has no callback,
-// session, world, or simulation reference, so admission cannot provide
-// authoritative feedback (EVENT-01/I6).
+// session or world reference. The optional independent effect window keeps
+// local presentation admissions out of simulation effect admission [I6].
 type EventBuffer struct {
 	limits       Limits
 	events       []Event
@@ -159,6 +159,10 @@ type EventBuffer struct {
 	// bound costs O(1) per admission. Recounting the window on every Admit
 	// made a tick with n events do O(n^2) classification work.
 	effects int
+	// independentEffects is an ordinary child buffer: its IDs, bounds and
+	// exhaustion depend only on simulation effect events, never local cues
+	// (DESIGN_MULTIPLAYER §16.4.1). Nil preserves the single-player window.
+	independentEffects *EventBuffer
 }
 
 // NewEventBuffer creates an admission window under limits. A non-positive
@@ -179,10 +183,17 @@ func NewEventBuffer(limits Limits) *EventBuffer {
 }
 
 // Admit appends one event if its kind, lifetime, and deterministic bounds are
-// valid. Rejected events consume neither an ID nor a sequence number.
+// valid. Its verdict and diagnostics describe the presentation window. An
+// independent effect window receives eligible events even when presentation
+// refuses them; each window consumes identities only for its own admissions.
 func (c *EventBuffer) Admit(e Event) bool {
 	if c == nil {
 		return false
+	}
+	if c.independentEffects != nil && e.Lifetime >= 0 && simulationEffectEvent(e.Kind) {
+		// The child routes and detaches its value before any presentation
+		// refusal, including exhausted presentation counters (§16.4.1).
+		c.independentEffects.Admit(e)
 	}
 	if c.exhausted {
 		c.noteDrop(true)
@@ -258,6 +269,9 @@ func (c *EventBuffer) EmitAnnounce(e Event) bool {
 func (c *EventBuffer) Reset() {
 	if c == nil {
 		return
+	}
+	if c.independentEffects != nil {
+		c.independentEffects.Reset()
 	}
 	c.events = c.events[:0]
 	c.effects = 0

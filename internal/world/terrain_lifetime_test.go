@@ -21,13 +21,13 @@ func TestLOSHeightWordReadDoesNotBuild(t *testing.T) {
 	}
 	low, high := terrain.LOSHeightWord(0, 0)
 	wordsBefore := [2]uint8{low, high}
-	// Height changes are authoritative plot deformation, but the LOS table is
-	// a load-time product and remains unchanged.
+	// An artificial fixture edit must not cause a lazy LOS rebuild. Production
+	// heights never change: there is no deformation [03 R-TERR-01 §3].
 	terrain.PlotAt(0, 0).SetHeight(200)
 	terrain.BuildLOSHeightWordsForTest()
 	low, high = terrain.LOSHeightWord(0, 0)
 	if [2]uint8{low, high} != wordsBefore {
-		t.Fatalf("LOS word changed after deformation: before %v after (%d,%d)", wordsBefore, low, high)
+		t.Fatalf("LOS word changed after fixture edit: before %v after (%d,%d)", wordsBefore, low, high)
 	}
 }
 

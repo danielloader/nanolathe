@@ -29,7 +29,7 @@ func repairQueueFixture(t *testing.T, count int) (*System, *units.World, *units.
 		aircraft = append(aircraft, u)
 	}
 	b := orders.QueueForUnit(first).Binding()
-	b.Movement = &orders.MovementGoalAdapter{RunAir: s.AirLegRunner(), Release: s.ReleaseGoalPayload}
+	b.Movement = orders.NewMovementGoalAdapter(orders.MovementGoalAdapterConfig{RunAir: s.AirLegRunner(), Release: s.ReleaseGoalPayload})
 	for _, u := range aircraft {
 		u.Health, u.Activated = 50, true
 		q := orders.QueueForUnit(u)
@@ -185,12 +185,12 @@ func TestModernRepairDepartureUsesVisibleThreatsOnly(t *testing.T) {
 	threat := spawnAirBasePadFor(t, w, s.Terrain, "threat", 1, 480<<16, 256<<16)
 	threat.SlotAt(0).Weapon = &content.WeaponDef{Range: 200}
 	b := orders.QueueForUnit(u).Binding()
-	b.DangerVisible = func(_, target *units.Unit) bool { return target == threat }
+	b.SetDangerVisible(func(_, target *units.Unit) bool { return target == threat })
 	point := s.repairDeparturePoint(e)
 	if point.X >= e.pad.X {
 		t.Fatal("departure did not move to the side away from the visible threat")
 	}
-	b.DangerVisible = func(_, _ *units.Unit) bool { return false }
+	b.SetDangerVisible(func(_, _ *units.Unit) bool { return false })
 	hidden := s.repairDeparturePoint(e)
 	threat.X = 64 << 16
 	if moved := s.repairDeparturePoint(e); hidden != moved {
@@ -228,9 +228,9 @@ func TestModernRepairDistancesDoNotWrap(t *testing.T) {
 	remote.SlotAt(0).Weapon = &content.WeaponDef{Range: 200}
 	remote.X, remote.Z = pad.X+far, pad.Z+far
 	b := orders.QueueForUnit(u).Binding()
-	b.DangerVisible = func(_, target *units.Unit) bool { return target == near }
+	b.SetDangerVisible(func(_, target *units.Unit) bool { return target == near })
 	nearOnly := s.repairDeparturePoint(e)
-	b.DangerVisible = func(_, target *units.Unit) bool { return target == near || target == remote }
+	b.SetDangerVisible(func(_, target *units.Unit) bool { return target == near || target == remote })
 	both := s.repairDeparturePoint(e)
 	if nearOnly.X <= pad.X || both != nearOnly {
 		t.Fatalf("departure near-only %+v, with remote threat %+v: a threat beyond 32,768 world units must not dominate clearance", nearOnly, both)

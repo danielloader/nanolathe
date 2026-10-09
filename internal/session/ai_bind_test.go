@@ -54,7 +54,7 @@ func TestRX01_ProductionSessionsBindAIQueue(t *testing.T) {
 		t.Fatalf("want exactly two manager records for live human+computer slots, got %d", count)
 	}
 	for i := 0; i < 2; i++ {
-		if s.AI[i] == nil || s.AI[i].QueueBuildTyped == nil {
+		if s.AI[i] == nil || s.AI[i].QueueBuildTypedHook() == nil {
 			t.Fatalf("production session left player %d manager record unbound [F-P0-004]", i)
 		}
 	}
@@ -75,7 +75,7 @@ func TestRX01_ProductionSessionsBindAIQueue(t *testing.T) {
 	}
 	// An unbound manager is a composition failure, not a silent passive slot.
 	mgr := s.AI[1] // RS-02: player-indexed, player 1 at index 1
-	mgr.QueueBuildTyped = nil
+	mgr.SetQueueBuildTyped(nil)
 	err = s.ValidateComposition()
 	if err == nil || !strings.Contains(err.Error(), "QueueBuildTyped") {
 		t.Fatalf("unbound AI manager must fail validation with binder diagnostic, got %v", err)
@@ -119,7 +119,7 @@ func TestRX01_BoundBuildRequestPreservesMobileBuildCoordinates(t *testing.T) {
 		Count:   1,
 		Kind:    ai.BuildKindMobileSite,
 	}
-	if err := s.AI[1].QueueBuildTyped(req); err != nil {
+	if err := s.AI[1].QueueBuildTypedHook()(req); err != nil {
 		t.Fatalf("typed mobile request rejected: %v", err)
 	}
 	q := orders.QueueForUnit(builder)

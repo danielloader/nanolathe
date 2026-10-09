@@ -87,13 +87,13 @@ func (*ModernRules) GuardWorksNearby(u *units.Unit, n *Node, tick uint32) bool {
 			}
 		}
 	}
-	if !canResurrect(u) || b.Work == nil || b.Work.CanResurrectFeature == nil {
+	if !canResurrect(u) || b.Work == nil || b.Work.CanResurrectFeatureHook() == nil {
 		return false
 	}
 	var candidate FeatureView
 	found := false
 	b.ForEachFeature(func(feature FeatureView) bool {
-		if !feature.Reclaimable || !withinPlanarRadius(u, feature.X, feature.Z, u.Def.SightDistance) || !modernWithinPoint(ward.X, ward.Z, feature.X, feature.Z, modernWorkRadius) || !b.Work.CanResurrectFeature(feature) {
+		if !feature.Reclaimable || !withinPlanarRadius(u, feature.X, feature.Z, u.Def.SightDistance) || !modernWithinPoint(ward.X, ward.Z, feature.X, feature.Z, modernWorkRadius) || !b.Work.CanResurrectFeatureHook()(feature) {
 			return scanNext
 		}
 		candidate, found = feature, true
@@ -156,7 +156,7 @@ func modernGuardWorkRetry(n *Node, tick uint32) {
 // Patrol's retail spatial gather has a different ordering and arithmetic.
 func scanModernGuardRepairCandidates(u *units.Unit) []*units.Unit {
 	b := bindingFor(u)
-	if b == nil || b.World == nil || b.World.ForEachUnit == nil {
+	if b == nil || b.World == nil || b.World.ForEachUnitHook() == nil {
 		return nil
 	}
 	var out []*units.Unit

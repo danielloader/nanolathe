@@ -572,29 +572,29 @@ func observe(sess *session.Session) *observer {
 		for i := range o.created {
 			o.created[i] = sess.Units.LiveCountForPlayer(i)
 		}
-		previous := sess.Units.OnCreate
-		sess.Units.OnCreate = func(handle pool.Handle, unit *units.Unit) {
+		previous := sess.Units.CreateHook()
+		sess.Units.SetCreateHook(func(handle pool.Handle, unit *units.Unit) {
 			if unit != nil && int(unit.Owner) < len(o.created) {
 				o.created[unit.Owner]++
 			}
 			if previous != nil {
 				previous(handle, unit)
 			}
-		}
+		})
 	}
 	for i, manager := range sess.AI {
-		if manager == nil || manager.QueueBuildTyped == nil {
+		if manager == nil || manager.QueueBuildTypedHook() == nil {
 			continue
 		}
 		player := i
-		previous := manager.QueueBuildTyped
-		manager.QueueBuildTyped = func(request ai.BuildRequest) error {
+		previous := manager.QueueBuildTypedHook()
+		manager.SetQueueBuildTyped(func(request ai.BuildRequest) error {
 			err := previous(request)
 			if err == nil {
 				o.submitted[player]++
 			}
 			return err
-		}
+		})
 	}
 	o.scan(sess, false)
 	o.sampleGroups(sess)

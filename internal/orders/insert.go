@@ -196,10 +196,10 @@ func (q *Queue) ownerUnit(n *Node) *units.Unit {
 		return nil
 	}
 	binding := q.Binding()
-	if binding == nil || binding.Lookup == nil {
+	if binding == nil || binding.LookupHook() == nil {
 		return nil
 	}
-	return binding.Lookup(n.Owner)
+	return binding.LookupHook()(n.Owner)
 }
 
 // cleanupNode runs the strict record-removal cleanup order [R-ORDER-02 §2]:
@@ -233,13 +233,13 @@ func (q *Queue) cleanupNode(n *Node) {
 	if n.DynamicGate&2 != 0 && u != nil { // cancel-notification guard: dynamic gate bit 1 (value 2) [R-ORDER-02 §2]
 		if h := DescriptorFor(n.ID).Handler; h != nil {
 			_ = h(u, n, 2, q.lastPumpTick)
-		} else if q.binding != nil && q.binding.Work != nil && q.binding.Work.CancelNotice != nil {
+		} else if q.binding != nil && q.binding.Work != nil && q.binding.Work.CancelNoticeHook() != nil {
 			// A record another package's state machine runs has no descriptor
 			// handler here, so the notification goes to that package's receiver
 			// instead. Retail draws no distinction: it invokes the operation
 			// handler compiled into the descriptor, and for the three
 			// construction rows that handler IS the factory production machine.
-			_ = q.binding.Work.CancelNotice(u, n, q.lastPumpTick)
+			_ = q.binding.Work.CancelNoticeHook()(u, n, q.lastPumpTick)
 		}
 	}
 	emitStopBuilding(u, n)
@@ -266,10 +266,10 @@ func (q *Queue) destroyGoal(n *Node) {
 	if q == nil || q.binding == nil || q.binding.Movement == nil {
 		return
 	}
-	if m := q.binding.Movement; m.Destroy != nil {
-		m.Destroy(n)
-	} else if m.Release != nil {
-		m.Release(n)
+	if m := q.binding.Movement; m.DestroyHook() != nil {
+		m.DestroyHook()(n)
+	} else if m.ReleaseHook() != nil {
+		m.ReleaseHook()(n)
 	}
 }
 
@@ -290,7 +290,13 @@ func (q *Queue) cleanupDetached(n *Node, hadSuccessor bool) {
 // purge-survivor bit. It writes no active marker — the producer insertion that
 // follows does [04 R-ORD-01 §13].
 func (q *Queue) PurgeUnprotected() {
-	if q == nil || len(q.primary) == 0 {
+	if q == nil {
+		return
+	}
+	if observer := q.checkpointObserver; observer != nil {
+		observer.RecordCheckpointOrder(CheckpointOrderReceipt{Kind: 1})
+	}
+	if len(q.primary) == 0 {
 		return
 	}
 	// The purge walks the live chain. It captures the original head for the
@@ -377,6 +383,9 @@ func (q *Queue) DropLeadingAutoOps() {
 	if q == nil {
 		return
 	}
+	if observer := q.checkpointObserver; observer != nil {
+		observer.RecordCheckpointOrder(CheckpointOrderReceipt{Kind: 2})
+	}
 	// [05 "Queue insertion"] issuing any primary order drops leading auto/default-op nodes – leading RUN at front of each segment
 	// Each drop is unlinked by identity after its cleanup, for the reason
 	// spliceOutPrimary documents: the cleanup's cancel notification re-enters
@@ -431,8 +440,24 @@ func (q *Queue) Push(id ID, n Node) {
 	if q == nil {
 		return
 	}
+	observer, _ := q.checkpointObserver.(CheckpointInsertionObserver)
+	inserted := q.push(id, n)
+	if observer != nil {
+		observer.RecordCheckpointInsertion(CheckpointInsertionResult{Method: 1, Row: id, Inserted: inserted})
+	}
+}
+
+// push returns only this insertion's result. Preparatory callbacks may insert
+// their own records before this call is refused (DESIGN_MULTIPLAYER §16.3.29).
+func (q *Queue) push(id ID, n Node) bool {
 	if DescriptorFor(id).StaticGate&staticRearSegment == 0 {
+		if observer := q.checkpointObserver; observer != nil {
+			observer.RecordCheckpointOrder(CheckpointOrderReceipt{Kind: 5, Preparation: 1})
+		}
 		q.stopFiringPosition(q.lastPumpTick)
+		if observer := q.checkpointObserver; observer != nil {
+			observer.RecordCheckpointOrder(CheckpointOrderReceipt{Kind: 5, Preparation: 2})
+		}
 		q.Binding().rules().BeforeCommand(q)
 	}
 	queued := n.QueuedIssue // the modifier is an argument, never record state [04 R-ORD-01 §13]
@@ -446,7 +471,7 @@ func (q *Queue) Push(id ID, n Node) {
 	// Now unbounded with OOM guard far outside stock (10000 >> 105).
 	if len(*segment) >= OOMGuardQueue {
 		q.recordDiagnostic(fmt.Sprintf("orders: queue OOM guard (%d), dropping %s", len(*segment), DescriptorFor(id).Name))
-		return
+		return false
 	}
 	// "Issuing a front-segment record drops leading auto/default records (those
 	// carrying the auto-op flag) wherever they live" [04 §3.3]. Push is the
@@ -478,7 +503,14 @@ func (q *Queue) Push(id ID, n Node) {
 			node.Flags |= (*segment)[0].Flags & FlagAutoOp
 		}
 		*segment = append([]*Node{node}, *segment...)
-		return
+		if observer := q.checkpointObserver; observer != nil {
+			kind := uint8(1)
+			if segment == &q.secondary {
+				kind = 2
+			}
+			observer.RecordCheckpointOrder(CheckpointOrderReceipt{Kind: 3, Segment: kind, Node: *node})
+		}
+		return true
 	}
 	// The inserted record takes the active marker unconditionally, and the
 	// record that held it loses it [04 R-ORD-01 §13]. That is what makes
@@ -496,6 +528,14 @@ func (q *Queue) Push(id ID, n Node) {
 		q.primary = append(q.primary, node)
 	}
 	node.Flags |= FlagActive
+	if observer := q.checkpointObserver; observer != nil {
+		index := len(q.primary) - 1
+		if act >= 0 {
+			index = act + 1
+		}
+		observer.RecordCheckpointOrder(CheckpointOrderReceipt{Kind: 3, Segment: 1, Index: int64(index), Node: *node})
+	}
+	return true
 }
 
 // PushHead is the handler-side head insert [04 R-ORD-01 §1]: a record a
@@ -540,6 +580,9 @@ func (q *Queue) PushHead(id ID, n Node) *Node {
 		node.Flags |= q.primary[0].Flags & FlagAutoOp // inherit the displaced head's auto flag [04 R-ORD-01 §1]
 	}
 	q.primary = append([]*Node{node}, q.primary...)
+	if observer := q.checkpointObserver; observer != nil {
+		observer.RecordCheckpointOrder(CheckpointOrderReceipt{Kind: 3, Segment: 1, Node: *node})
+	}
 	return node
 }
 
@@ -581,6 +624,13 @@ func (q *Queue) appendTail(id ID, n Node) *Node {
 	node := newNode(id, n)
 	node.Flags &^= FlagActive
 	*segment = append(*segment, node)
+	if observer := q.checkpointObserver; observer != nil {
+		kind := uint8(1)
+		if segment == &q.secondary {
+			kind = 2
+		}
+		observer.RecordCheckpointOrder(CheckpointOrderReceipt{Kind: 3, Segment: kind, Index: int64(len(*segment) - 1), Node: *node})
+	}
 	return node
 }
 
@@ -600,6 +650,9 @@ func (q *Queue) PushSecondary(id ID, n Node) {
 		node.Flags |= FlagAutoOp // [05 "Queue insertion"] inherit old head's auto flag
 	}
 	q.secondary = append([]*Node{node}, q.secondary...)
+	if observer := q.checkpointObserver; observer != nil {
+		observer.RecordCheckpointOrder(CheckpointOrderReceipt{Kind: 3, Segment: 2, Node: *node})
+	}
 }
 
 // CoalesceTail is [05 "Queue insertion"]'s positive insertion, whole: select
@@ -623,6 +676,16 @@ func (q *Queue) CoalesceTail(id ID, n Node) {
 	if q == nil {
 		return
 	}
+	observer, _ := q.checkpointObserver.(CheckpointInsertionObserver)
+	inserted, coalesced := q.coalesceTail(id, n)
+	if observer != nil {
+		observer.RecordCheckpointInsertion(CheckpointInsertionResult{Method: 2, Row: id, Inserted: inserted, Coalesced: coalesced})
+	}
+}
+
+// coalesceTail delegates to the insertion core so a fallback has only its
+// outer CoalesceTail completion (DESIGN_MULTIPLAYER §16.3.29).
+func (q *Queue) coalesceTail(id ID, n Node) (inserted, coalesced bool) {
 	segment := q.primary
 	if isSecondary(id) {
 		segment = q.secondary
@@ -635,11 +698,19 @@ func (q *Queue) CoalesceTail(id ID, n Node) {
 				add = 1
 			}
 			// [P2-03] arithmetic overflow: tail Param2 wraps int32 low32 like retail add/sub.
+			previous := tail.Param2
 			tail.Param2 += add
-			return
+			if observer := q.checkpointObserver; observer != nil {
+				kind := uint8(1)
+				if isSecondary(id) {
+					kind = 2
+				}
+				observer.RecordCheckpointOrder(CheckpointOrderReceipt{Kind: 4, Segment: kind, Index: int64(len(segment) - 1), Node: *tail, PreviousCount: previous, Added: add})
+			}
+			return false, true
 		}
 	}
-	q.Push(id, n)
+	return q.push(id, n), false
 }
 
 // CancelFirstOf removes the first record of descriptor id and reports whether

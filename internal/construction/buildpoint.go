@@ -150,9 +150,9 @@ func (s *Service) QueryNanoPiece(builder *units.Unit) (int32, world.ModelWorldPo
 	if s == nil || builder == nil {
 		return 0, world.ModelWorldPosition{}, false
 	}
-	m := s.ModelForUnit
+	m := s.ModelForUnitHook()
 	if m == nil {
-		m = s.ModelForFactory
+		m = s.ModelForFactoryHook()
 	}
 	var mdl *model.Model
 	if m != nil {

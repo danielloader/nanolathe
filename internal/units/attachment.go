@@ -12,6 +12,7 @@ type AttachmentObserver interface {
 func (w *World) SetAttachmentObserver(observer AttachmentObserver) {
 	if w != nil {
 		w.attachmentObserver = observer
+		w.checkpointBindings[checkpointWorldAttachment] = checkpointWorldProof{}
 	}
 }
 
@@ -19,6 +20,7 @@ func (w *World) SetAttachmentObserver(observer AttachmentObserver) {
 func (w *World) ClearAttachmentObserver(expected AttachmentObserver) {
 	if w != nil && w.attachmentObserver == expected {
 		w.attachmentObserver = nil
+		w.checkpointBindings[checkpointWorldAttachment] = checkpointWorldProof{}
 	}
 }
 

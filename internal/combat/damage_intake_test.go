@@ -75,7 +75,7 @@ func TestAcceptDamageProvenanceAndOwnerGates(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newReactionFixture(t)
-			f.svc.ControlByte = func(uint8) uint8 { return tc.control }
+			f.svc.SetControlByte(func(uint8) uint8 { return tc.control })
 			f.victim.Health = 10
 			result := f.svc.AcceptDamage(f.w, 4, DamageInput{Victim: f.victim.Handle, Nominal: 20, Kind: KindOrdinary})
 			if result.DeathLatched != tc.wantLatched || f.victim.Dying != tc.wantLatched {
@@ -106,10 +106,10 @@ func TestAcceptDamageProvenanceAndOwnerGates(t *testing.T) {
 		f.victim.LastDamageCause = uint8(CauseCargo)
 		var sawFlash uint8
 		var sawSide, sawCause uint8
-		f.svc.Reaction.ObserverNotice = func(v *units.Unit) {
+		f.svc.Reaction.SetObserverNotice(func(v *units.Unit) {
 			sawFlash = uint8(v.BlinkSuppress)
 			sawSide, sawCause = v.LastDamageSide, v.LastDamageCause
-		}
+		})
 		f.svc.AcceptDamage(f.w, 5, DamageInput{Victim: f.victim.Handle, Attacker: f.attacker.Handle, Nominal: 1, Kind: KindOrdinary})
 		if sawFlash != 240 || sawSide != f.victim.Owner || sawCause != uint8(CauseCargo) {
 			t.Fatalf("reaction saw flash/side/cause %d/%d/%d, want 240/%d/%d [06 §9.1][06 R-WPN-04 §2]", sawFlash, sawSide, sawCause, f.victim.Owner, CauseCargo)
@@ -122,7 +122,7 @@ func TestAcceptDamageProvenanceAndOwnerGates(t *testing.T) {
 	t.Run("kind eleven skips reaction", func(t *testing.T) {
 		f := newReactionFixture(t)
 		observed := 0
-		f.svc.Reaction.ObserverNotice = func(*units.Unit) { observed++ }
+		f.svc.Reaction.SetObserverNotice(func(*units.Unit) { observed++ })
 		result := f.svc.AcceptDamage(f.w, 5, DamageInput{Victim: f.victim.Handle, Nominal: 1, Kind: KindNoReaction})
 		if !result.Accepted || observed != 0 || uint8(f.victim.BlinkSuppress) != 240 || f.victim.LastDamageCause != KindNoReaction {
 			t.Fatalf("kind 11 result/reaction/flash/cause = %+v/%d/%d/%d [06 §9.1]", result, observed, uint8(f.victim.BlinkSuppress), f.victim.LastDamageCause)
@@ -132,11 +132,11 @@ func TestAcceptDamageProvenanceAndOwnerGates(t *testing.T) {
 
 func TestAcceptDamageParalyzeHealAndNonordinaryCallbacks(t *testing.T) {
 	t.Run("paralyze keeps preliminary effects and gates stun", func(t *testing.T) {
-		prior := ParalyzeTaskPush
-		t.Cleanup(func() { ParalyzeTaskPush = prior })
+		prior, proof := paralyzeTaskPush, checkpointParalyzeTaskInstallation
+		t.Cleanup(func() { paralyzeTaskPush, checkpointParalyzeTaskInstallation = prior, proof })
 		f := newReactionFixture(t)
 		var credit uint32
-		ParalyzeTaskPush = func(v *units.Unit, got uint32, tick uint32) {
+		paralyzeTaskPush = func(v *units.Unit, got uint32, tick uint32) {
 			if v != f.victim || tick != 11 {
 				t.Fatalf("paralyze push recipient/tick = %v/%d [06 §10]", v, tick)
 			}
@@ -153,7 +153,7 @@ func TestAcceptDamageParalyzeHealAndNonordinaryCallbacks(t *testing.T) {
 			t.Fatalf("immune paralyze lost preliminary effects: credit=%d cause=%d flash=%d [06 §10]", credit, f.victim.LastDamageCause, uint8(f.victim.BlinkSuppress))
 		}
 		f.victim.Def.ImmuneToParalyzer = false
-		f.svc.Reaction.ObserverNotice = func(v *units.Unit) { v.Dying = true }
+		f.svc.Reaction.SetObserverNotice(func(v *units.Unit) { v.Dying = true })
 		f.svc.AcceptDamage(f.w, 13, DamageInput{Victim: f.victim.Handle, Nominal: 20, Kind: KindParalyzer})
 		if credit != 0 {
 			t.Fatal("paralyze task queued after reaction latched the victim [06 §10]")
@@ -201,7 +201,7 @@ func TestAcceptDamageParalyzeHealAndNonordinaryCallbacks(t *testing.T) {
 		prog.ScriptsByID = []int{0, 0}
 		vm := cob.NewVM(prog)
 		attachTestCOB(victim, vm)
-		svc := &Service{ControlByte: func(uint8) uint8 { return ControlByteHuman }}
+		svc := NewService(ServiceConfig{ControlByte: func(uint8) uint8 { return ControlByteHuman }})
 		for _, kind := range []uint8{uint8(CauseSelfDestruct), uint8(CauseReclaim), uint8(CauseCargo), uint8(CauseDeconstruction), KindNoReaction} {
 			before := vm.ActiveThreadCount()
 			result := svc.AcceptDamage(w, 7, DamageInput{Victim: victim.Handle, Nominal: 1, Kind: kind})

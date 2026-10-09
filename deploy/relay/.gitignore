@@ -1,0 +1,5 @@
+/nanolathe-server
+*.log
+.env
+*.pem
+*.key

@@ -101,10 +101,10 @@ func TestTeleportPresentationSeamBuildsTheFlameContainer(t *testing.T) {
 	s.Clock.GlobalTick = 12
 
 	binding := s.newOrderBinding()
-	if binding == nil || binding.Presentation == nil || binding.Presentation.Teleport == nil {
+	if binding == nil || binding.Presentation == nil || binding.Presentation.TeleportHook() == nil {
 		t.Fatal("the composer left PresentationAdapter.Teleport unbound; the row would move units with no flame stream [03 R-LAYER §4]")
 	}
-	if !binding.Presentation.Teleport(nil,
+	if !binding.Presentation.TeleportHook()(nil,
 		teleportFlameFrom[0], teleportFlameFrom[1], teleportFlameFrom[2],
 		teleportFlameTo[0], teleportFlameTo[1], teleportFlameTo[2]) {
 		t.Fatal("the seam refused to build a container")

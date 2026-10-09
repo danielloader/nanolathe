@@ -43,6 +43,50 @@ GOMAXPROCS=2 /tmp/nanolathe-headless --sim-benchmark=/tmp/sim-a --seed=7
 GOMAXPROCS=2 /tmp/nanolathe-headless --sim-benchmark=/tmp/sim-b --seed=7
 ```
 
+## Checkpoint cost comparison
+
+`--sim-benchmark-checkpoints` opts into the full checkpoint and tick-summary
+capture path ([DESIGN_MULTIPLAYER §16.3.79](DESIGN_MULTIPLAYER.md#16379-u7-measurement-composition)).
+It uses the M2 single-seat admitted constructor with the same map, seeds,
+resources, rules and 250-unit scene, stages the armies before any tick, publishes
+the opening and enables capture once. The default remains the ordinary benchmark
+entry. Compare matching Modern runs with the flag off and on:
+
+```sh
+GOMAXPROCS=2 /tmp/nanolathe-headless --sim-benchmark=/tmp/checkpoints-off \
+  --root="$HOME/TotalAnnihilation" --gameplay=modern --seed=7 \
+  --benchmark-profiles=false --phase-timing=false --thread-cpu-timing=false
+GOMAXPROCS=2 /tmp/nanolathe-headless --sim-benchmark=/tmp/checkpoints-on \
+  --root="$HOME/TotalAnnihilation" --gameplay=modern --seed=7 \
+  --benchmark-profiles=false --phase-timing=false --thread-cpu-timing=false \
+  --sim-benchmark-checkpoints
+```
+
+The fixture's admission room uses content profile `retail`, participant identity
+1 for the passive human, player scales 1024..2048 without full-map, spectator and
+replay scales 256..2048 with full-map, policy revision/scheduling/pacing/drop/
+audience 1, 90000 ms cumulative grace and zero audience delays. These are fixed
+benchmark inputs, not lobby defaults. Admission failures are reported. Strict's
+one-computer-per-human limit refuses this three-computer scene. Enlarged
+checkpoint scenes also refuse for now: their commander relocation replaces a
+movement binding through the ordinary setup API, which invalidates its proof.
+Ordinary enlarged benchmarks retain their existing behavior.
+
+Every enabled step checks the value-only capture result; any diagnostic failure
+fails the run. The report includes `checkpoints` and, when enabled,
+`checkpoint_records` and `checkpoint_ticks` (the retained history lengths),
+`checkpoint_tick` (the latest retained full capture's tick; omitted at entry
+zero), and `checkpoint_digest` (its full SHA-256 in hexadecimal). History is
+copied once after the measured window. The normal timing and allocation series
+include the capture cadence; entry composition and the opening digest remain
+outside the window. Cumulative death census reads the world's exact primary
+hook-dispatch counter without replacing the admitted callback.
+
+Correctness tests compare partial fingerprints, RNG totals and census between
+enabled and disabled scenes and require runtime checkpoint evidence. They make
+no timing claim. Acceptance budgets and measured results belong to M3-C9 after
+exploration; a partial fingerprint alone is not full checkpoint evidence.
+
 ## The scene
 
 Scene version 1, on **Town & Country** (540×540 cells, 8640×8640 world units).

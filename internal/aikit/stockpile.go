@@ -43,16 +43,19 @@ func stockpileState(u *units.Unit) (ammo, queued [3]int32) {
 
 func (e *executor) execStockpile(c *Command, b *batch, tick uint32, w *units.World) bool {
 	if c.count != 1 || c.Slot < 0 || c.Slot >= units.NumSlots || c.Count <= 0 {
+		e.checkpointReject()
 		e.stats.Failed++
 		return false
 	}
 	u := e.actorOK(w, b.actors[c.first], b.inst[c.first])
 	if u == nil {
+		e.checkpointReject()
 		e.stats.Stale++
 		e.stats.Reasons[FailNoActor]++
 		return false
 	}
 	if u.Remaining != 0 || !orders.StockpileSlotAcceptsBuildWeapon(u, int(c.Slot)) || !weaponActive(u.Slots[c.Slot].Weapon) {
+		e.checkpointReject()
 		e.stats.Failed++
 		e.stats.Reasons[FailBuildGate]++
 		return false
@@ -63,19 +66,29 @@ func (e *executor) execStockpile(c *Command, b *batch, tick uint32, w *units.Wor
 	// actual cap, timing and resource admission; enqueue grants no rounds.
 	count := min(int64(c.Count), 200-int64(max(ammo[c.Slot], 0))-int64(queued[c.Slot]))
 	if count <= 0 {
+		e.checkpointReject()
 		e.stats.Failed++
 		e.stats.Reasons[FailQueue]++
 		return false
 	}
 	q := orders.BindQueueBinding(u, e.m.OrderBinding)
 	if q == nil {
+		e.checkpointReject()
 		e.stats.Failed++
 		e.stats.Reasons[FailQueue]++
 		return false
 	}
+	a := e.checkpointAttempt()
+	restore := a.ObserveQueue(q, u)
+	defer restore()
 	id := orders.Lookup("BuildWeapon")
 	n := orders.NewNodeForOrder(id, 0, 0, 0, 0, tick, u.Handle, false)
 	n.Param1, n.Param2 = uint32(c.Slot), uint32(count)
+	actor := e.checkpointActor(u)
+	mark := a.InsertionIndex()
 	q.CoalesceTail(id, n)
+	result, completed := a.InsertionAfter(mark, actor, 2)
+	a.RecordStockpile(actor, id, count, completed && result.Coalesced)
+	e.checkpointOrderOutcome(mark, actor, 2)
 	return true
 }

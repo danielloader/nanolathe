@@ -59,7 +59,7 @@ func TestModernHoldFireSuppressesAutonomousTargetsAndResumes(t *testing.T) {
 					beforePending, beforeReveal := u.Pending, u.RevealDeadline
 					svc := &Service{Rules: &ModernRules{}}
 					events := 0
-					svc.Events = func(Event) { events++ }
+					svc.SetEvents(func(Event) { events++ })
 					for tick := uint32(1); tick <= 3; tick++ {
 						sum := svc.StepWeaponsForUnit(u, tick, w, nil, terrain, econ, nil, &random, nil)
 						if sum.Fired != 0 || sum.Dispatched || svc.Count() != 0 {
@@ -115,7 +115,7 @@ func TestModernHoldFireAdmitsOrderedSlotLikeStrict(t *testing.T) {
 					random := rng.NewSimulation(77)
 					svc := &Service{Rules: rulesForModern(modern)}
 					o := &got[i]
-					svc.Events = func(Event) { o.launchedEvents++ }
+					svc.SetEvents(func(Event) { o.launchedEvents++ })
 					for tick := uint32(1); tick <= 4; tick++ {
 						if sum := svc.StepWeaponsForUnit(u, tick, w, nil, terrain, econ, nil, &random, nil); sum.Fired != 0 {
 							o.firedAt = append(o.firedAt, tick)
@@ -213,7 +213,7 @@ func TestModernHoldFireCancelsBurstRemainderOnly(t *testing.T) {
 			random := rng.NewSimulation(77)
 			before := random
 			events := 0
-			svc.Events = func(Event) { events++ }
+			svc.SetEvents(func(Event) { events++ })
 			svc.TickProjectiles(4, w, nil, nil, nil, nil, nil, cat, &random, nil)
 			if tc.modern && !tc.ordered {
 				if svc.Count() != 1 || svc.Records[0].BurstRemaining != 0 || svc.Records[0].Pos.X != pos.X+65536 || random != before || events != 0 {

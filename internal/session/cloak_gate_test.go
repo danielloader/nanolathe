@@ -34,7 +34,7 @@ func TestCloakGateReadsTheRequestBitAndTheSensorBreach(t *testing.T) {
 	if err := createAndBindServicesForTest(t, s); err != nil {
 		t.Fatalf("createAndBindServices: %v", err)
 	}
-	if s.Econ.CloakDue == nil {
+	if s.Econ.CloakDueHook() == nil {
 		t.Fatal("composition left the cloak gate unbound")
 	}
 
@@ -46,17 +46,17 @@ func TestCloakGateReadsTheRequestBitAndTheSensorBreach(t *testing.T) {
 	}
 	u := w.Unit(h)
 
-	if s.Econ.CloakDue(u) {
+	if s.Econ.CloakDueHook()(u) {
 		t.Fatal("a unit with no cloak request is due for the debit [05 R-ECO-01 §9] term 1")
 	}
 	u.SetCloaked(true)
-	if !s.Econ.CloakDue(u) {
+	if !s.Econ.CloakDueHook()(u) {
 		t.Fatal("a requesting unit with a zero deadline is not due on its first pass [05 R-ECO-01 §9]")
 	}
 
 	// The retained breach latch blocks the debit while it remains set.
 	u.Flags |= visibility.DecloakBit
-	if s.Econ.CloakDue(u) {
+	if s.Econ.CloakDueHook()(u) {
 		t.Fatal("the decloak-forced bit did not block the cloak debit [03 R-VIS-01 §6] term 2")
 	}
 	// The latch is cleared at the next due sensor pass, but
@@ -64,11 +64,11 @@ func TestCloakGateReadsTheRequestBitAndTheSensorBreach(t *testing.T) {
 	// remaining ticks [03 R-VIS-01 §6].
 	u.Flags &^= visibility.DecloakBit
 	u.RevealDeadline = uint32(visibility.DecloakDeadlineAdd)
-	if s.Econ.CloakDue(u) {
+	if s.Econ.CloakDueHook()(u) {
 		t.Fatal("the breach deadline did not block the cloak debit [05 R-ECO-01 §9] term 3")
 	}
 	s.Clock.GlobalTick = uint32(visibility.DecloakDeadlineAdd)
-	if !s.Econ.CloakDue(u) {
+	if !s.Econ.CloakDueHook()(u) {
 		t.Fatal("the deadline compare is not inclusive [05 R-ECO-01 §9] term 3")
 	}
 
@@ -76,7 +76,7 @@ func TestCloakGateReadsTheRequestBitAndTheSensorBreach(t *testing.T) {
 	// cleared must stop being charged.
 	u.SetCloakedInstance(true)
 	u.SetCloaked(false)
-	if s.Econ.CloakDue(u) {
+	if s.Econ.CloakDueHook()(u) {
 		t.Fatal("the gate read the instance cloaked bit instead of the request [05 R-ECO-01 §9]")
 	}
 }

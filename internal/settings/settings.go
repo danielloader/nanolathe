@@ -497,6 +497,10 @@ type Settings struct {
 	// §4.3 "Overriding a rule lock"). A listed mod no longer raises the rules
 	// to its minimum.
 	ModLockOverrides []string `json:"modLockOverrides,omitempty"`
+	// OnlineServer is the online screen's last server as the player typed
+	// it; empty selects the default (docs/DESIGN_MULTIPLAYER.md §16.6.2).
+	// It is stored verbatim; the desktop command validates it when used.
+	OnlineServer string `json:"onlineServer,omitempty"`
 	// KeyBindings is the player's keyboard profile and rebound actions
 	// (keybindings.go).
 	KeyBindings KeyBindings `json:"keyBindings,omitzero"`

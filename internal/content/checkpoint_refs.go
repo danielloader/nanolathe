@@ -6,6 +6,8 @@ package content
 import (
 	"fmt"
 	"maps"
+	"slices"
+	"strings"
 
 	"github.com/nanolathe-gg/nanolathe/internal/cob"
 	"github.com/nanolathe-gg/nanolathe/internal/model"
@@ -16,11 +18,21 @@ import (
 // Definitions remain immutable by the SimulationInputs contract. The maps are
 // lookup-only: their iteration order never enters a checkpoint.
 type CheckpointKeys struct {
-	units    map[*UnitDef]checkpoint.Definition
-	weapons  map[*WeaponDef]checkpoint.Definition
-	features map[*FeatureDef]checkpoint.Definition
-	models   map[*model.Model]checkpoint.Definition
-	programs map[*UnitDef]SimulationInput
+	inputSnapshot     *checkpointInputSnapshot
+	units             map[*UnitDef]checkpoint.Definition
+	weapons           map[*WeaponDef]checkpoint.Definition
+	features          map[*FeatureDef]checkpoint.Definition
+	models            map[*model.Model]checkpoint.Definition
+	programs          map[*UnitDef]SimulationInput
+	allocationRecords []checkpointAllocationRecord
+	sight             *SightShapes
+	los               *LOSTables
+	sequences         map[string]checkpointSequence
+}
+
+type checkpointSequence struct {
+	ref    checkpoint.Definition
+	delays []int32
 }
 
 // CheckpointKeys builds references from this battle's frozen values, including
@@ -29,6 +41,9 @@ type CheckpointKeys struct {
 func (in *SimulationInputs) CheckpointKeys() (*CheckpointKeys, error) {
 	if in == nil || in.catalog == nil || in.view == nil || len(in.manifest) == 0 {
 		return nil, checkpointReferenceError("<inputs>", "completed frozen simulation inputs")
+	}
+	if err := in.ValidateCheckpointInputs(); err != nil {
+		return nil, err
 	}
 	if err := validateSimulationInputs(in.manifest); err != nil {
 		return nil, err
@@ -51,12 +66,30 @@ func (in *SimulationInputs) CheckpointKeys() (*CheckpointKeys, error) {
 		}
 		return nil
 	}
-	keys := &CheckpointKeys{
-		units: make(map[*UnitDef]checkpoint.Definition), weapons: make(map[*WeaponDef]checkpoint.Definition),
-		features: make(map[*FeatureDef]checkpoint.Definition), models: make(map[*model.Model]checkpoint.Definition),
-		programs: make(map[*UnitDef]SimulationInput),
+	records := in.catalog.unitRecordView()
+	// A removed record would otherwise disappear from all the loops below.
+	// Prove the manifest's complete nonnil unit set before retaining the
+	// current layout for future-allocation validation (§16.3.56).
+	for _, entry := range in.manifest {
+		if entry.Family != SimulationFamilyCOB && (entry.Family != SimulationFamilyCatalog || !strings.HasPrefix(entry.Key, "unit/")) {
+			continue
+		}
+		if entry.Ordinal == 0 || uint64(entry.Ordinal) > uint64(len(records)) {
+			return nil, checkpointReferenceError(entry.Key, "every admitted unit record at its manifest ordinal")
+		}
+		unit := records[int(entry.Ordinal)-1]
+		if unit == nil || entry.Key != "unit/"+unit.CanonicalKey {
+			return nil, checkpointReferenceError(entry.Key, "every admitted unit record at its manifest ordinal")
+		}
 	}
-	for index, unit := range in.catalog.unitRecordView() {
+	keys := &CheckpointKeys{
+		inputSnapshot: in.checkpointInputs,
+		units:         make(map[*UnitDef]checkpoint.Definition), weapons: make(map[*WeaponDef]checkpoint.Definition),
+		features: make(map[*FeatureDef]checkpoint.Definition), models: make(map[*model.Model]checkpoint.Definition),
+		programs:          make(map[*UnitDef]SimulationInput),
+		allocationRecords: make([]checkpointAllocationRecord, len(records)),
+	}
+	for index, unit := range records {
 		if unit == nil {
 			continue
 		}
@@ -76,6 +109,9 @@ func (in *SimulationInputs) CheckpointKeys() (*CheckpointKeys, error) {
 			return nil, checkpointReferenceError(ref.Key, "the unit's admitted COB record, including a defined absence")
 		}
 		keys.programs[unit] = program
+		keys.allocationRecords[index] = checkpointAllocationRecord{
+			unit: unit, unitName: unit.UnitName, canonicalKey: unit.CanonicalKey, unitDefID: unit.UnitDefID,
+		}
 	}
 	for _, name := range sortedKeys(in.catalog.Weapons) {
 		weapon := in.catalog.Weapons[name]
@@ -120,6 +156,41 @@ func (in *SimulationInputs) CheckpointKeys() (*CheckpointKeys, error) {
 		if err := addCheckpointKey(keys.models, mdl, ref); err != nil {
 			return nil, err
 		}
+	}
+	// The frozen catalog owns both visibility tables. The manifest already
+	// identifies them independently; admit their actual objects, not copies
+	// that happen to advertise the same names or hashes.
+	for _, entry := range catalogEntries(in.catalog) {
+		if entry.Key != "los" && entry.Key != "sightshapes" {
+			continue
+		}
+		ref := checkpointDefinition(entry)
+		admitted, ok := entries[ref]
+		if !ok || entry != admitted {
+			return nil, checkpointReferenceError(entry.Key, "the admitted visibility table record")
+		}
+	}
+	keys.sight, keys.los = in.catalog.Sight, in.catalog.LOS
+	keys.sequences = make(map[string]checkpointSequence)
+	for _, entry := range simArtEntries(in.simArt) {
+		if !strings.HasPrefix(entry.Key, "sequence/") {
+			continue
+		}
+		ref := checkpointDefinition(entry)
+		admitted, ok := entries[ref]
+		if !ok || entry != admitted {
+			return nil, checkpointReferenceError(entry.Key, "the admitted feature sequence record")
+		}
+		name := strings.TrimPrefix(entry.Key, "sequence/")
+		sequence := in.simArt.sequences[name]
+		var delays []int32
+		if sequence != nil {
+			delays = make([]int32, len(sequence.frames))
+			for i, frame := range sequence.frames {
+				delays[i] = frame.delay
+			}
+		}
+		keys.sequences[name] = checkpointSequence{ref: ref, delays: delays}
 	}
 	return keys, nil
 }
@@ -262,4 +333,51 @@ func sameCheckpointFeature(a, b *FeatureDef) bool {
 		a.FeatureDead == b.FeatureDead && a.FeatureReclamate == b.FeatureReclamate && a.FeatureBurnt == b.FeatureBurnt &&
 		a.FeatureDeadDef == b.FeatureDeadDef && a.FeatureReclamateDef == b.FeatureReclamateDef && a.FeatureBurntDef == b.FeatureBurntDef &&
 		maps.Equal(a.Unknown, b.Unknown)
+}
+
+// SightShapes resolves the admitted sprite-mask table by object identity.
+// Nil remains the caller's explicit absence (DESIGN_MULTIPLAYER §16.3.6).
+func (k *CheckpointKeys) SightShapes(value *SightShapes) (checkpoint.Definition, error) {
+	if k != nil && value != nil && value == k.sight {
+		return checkpoint.Definition{Family: SimulationFamilyCatalog, Key: "sightshapes"}, nil
+	}
+	return checkpoint.Definition{}, checkpointReferenceError("sightshapes", "the admitted sprite-mask table")
+}
+
+// LOSTables resolves the admitted ray table, including its authored count.
+func (k *CheckpointKeys) LOSTables(value *LOSTables) (checkpoint.Definition, error) {
+	if k != nil && value != nil && value == k.los {
+		return checkpoint.Definition{Family: SimulationFamilyCatalog, Key: "los"}, nil
+	}
+	return checkpoint.Definition{}, checkpointReferenceError("los", "the admitted terrain-ray table")
+}
+
+// FeatureSequence resolves a live event cursor's sequence and verifies its
+// delay words against the frozen metadata. SequenceFrames returns detached
+// delay slices, so equality is by value, not slice address. Neither lookup nor
+// validation reads a file or calls a producer (DESIGN_MULTIPLAYER §16.3.6).
+func (k *CheckpointKeys) FeatureSequence(filename, sequence string, delays []int32) (checkpoint.Definition, error) {
+	name := simArtSequenceKey(filename, sequence)
+	if k != nil && delays != nil {
+		if value, ok := k.sequences[name]; ok && len(value.delays) != 0 && slices.Equal(value.delays, delays) {
+			return value.ref, nil
+		}
+	}
+	return checkpoint.Definition{}, checkpointReferenceError("sequence/"+name, "an admitted feature sequence with its exact delay words")
+}
+
+// FeatureSequenceAbsent verifies the no-sequence result cached by features.
+// The metadata consumer also reports absence for a blank argument or a
+// resolved zero-frame sequence. An arbitrary unrequested name is not an
+// admitted absence (DESIGN_MULTIPLAYER §16.3.11).
+func (k *CheckpointKeys) FeatureSequenceAbsent(filename, sequence string) error {
+	if k != nil {
+		if trimTDFSemantic(filename) == "" || trimTDFSemantic(sequence) == "" {
+			return nil
+		}
+		if value, ok := k.sequences[simArtSequenceKey(filename, sequence)]; ok && len(value.delays) == 0 {
+			return nil
+		}
+	}
+	return checkpointReferenceError("sequence/"+simArtSequenceKey(filename, sequence), "the admitted no-sequence result")
 }

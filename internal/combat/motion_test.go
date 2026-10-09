@@ -911,11 +911,11 @@ func TestSeededTrailCadence(t *testing.T) {
 		InitCommon(p, creation, Vec3{}, nil, 0, 0, 0, -1, weapon)
 		p.ExpiryTick = expiry
 		var ticks []uint32
-		svc.Events = func(ev Event) {
+		svc.SetEvents(func(ev Event) {
 			if ev.Kind == EventTrailSmoke {
 				ticks = append(ticks, ev.Tick)
 			}
-		}
+		})
 		sim := rng.NewSimulation(1)
 		for tick := creation + 1; tick <= last; tick++ {
 			svc.TickProjectiles(tick, nil, nil, nil, nil, nil, nil, cat, &sim, nil)

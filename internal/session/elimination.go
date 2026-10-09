@@ -15,9 +15,8 @@ import (
 // (kind 2) draws one value from the **CRT** stream and takes it modulo three to
 // pick one of three tails, formats `"%s %s"` with the owner's name and posts
 // the result as a message line of class 4 attributed to the owner's slot.
-// Campaign sessions post nothing, and a multiplayer session would instead send
-// the elimination to its peers and draw from an eight-entry table — neither is
-// in scope here (no networking).
+// Campaign sessions post nothing. Multiplayer selects the eight-entry table
+// with one CRT draw and posts locally; it sends no message [08 R-CAMP-01 §9].
 //
 // The draw is on the CRT stream and it happens INSIDE the tick, on the death
 // path, so a skirmish elimination advances the CRT stream by exactly one draw
@@ -54,6 +53,20 @@ var eliminationTails = [3]string{
 	"vermin have been exterminated",
 }
 
+// onlineEliminationTails is the kind-3 table in its authored order
+// [08 R-CAMP-01 §9]. The prototype has no removal/watch controls, so both
+// clients execute the draw at the same death boundary (DESIGN_MULTIPLAYER §16.4.1).
+var onlineEliminationTails = [8]string{
+	"has been obliterated",
+	"has been liquidated",
+	"has been eradicated",
+	"has terminated",
+	"has bowed out",
+	"has gone to a better place",
+	"has been shown the door",
+	"has left the scene",
+}
+
 // messageClassElimination is the ring class the elimination line is posted
 // under [08 R-CAMP-01 §9]. Class 4 survives the `screenchat` filter's
 // zero mode, which retains classes 1, 4 and 8 [07 R-HUD-03 §14.4].
@@ -62,14 +75,9 @@ const messageClassElimination uint8 = 4
 // postsEliminationAnnouncement is the session-kind gate of [08 R-CAMP-01 §9]:
 // only a skirmish session posts the line.
 //
-// The session kind itself is not retained on Session — it is passed to the
-// pool's player-slice comparator at construction and dropped — so this reads
-// the same discriminant every other kind-2/kind-3 site in this package reads,
-// the loaded mission's type (endConditionBlock, pollMissionTriggers,
-// player_record.go's side lookup). The two are distinct concepts and
-// mission.go says so; they coincide here because this engine builds exactly
-// two kinds of battle, and a restored non-campaign battle is re-staged as a
-// skirmish mission [08 R-SESS-01 §7 "Consequence for single-player"].
+// Both ordinary and online skirmishes retain the skirmish mission format;
+// onlineResults selects the runtime kind-3 table below. The two discriminants
+// remain distinct (DESIGN_MULTIPLAYER §6.4, §16.4.1).
 func (s *Session) postsEliminationAnnouncement() bool {
 	return s != nil && s.Mission != nil && s.Mission.Type == mission.TypeSkirmish
 }
@@ -89,10 +97,14 @@ func (s *Session) announceElimination(owner int, tick uint32) {
 	if !s.postsEliminationAnnouncement() || s.isSurvivalAttacker(owner) {
 		return
 	}
-	// One CRT draw, taken modulo three. Uint32n consumes exactly one draw at
-	// every bound and is the plain `rand() % n` at any bound below 0x8000,
-	// which is the shape retail writes this site in [01 §7.2][01 §7.5].
-	tail := eliminationTails[s.CrtRNG().Uint32n(uint32(len(eliminationTails)))]
+	// One CRT draw at either site: mask to eight entries online, modulo
+	// three in single-player [08 R-CAMP-01 §9][01 §7.2][01 §7.5].
+	var tail string
+	if s.onlineResults != nil {
+		tail = onlineEliminationTails[s.CrtRNG().Rand()&7]
+	} else {
+		tail = eliminationTails[s.CrtRNG().Uint32n(uint32(len(eliminationTails)))]
+	}
 	name := ""
 	if p := s.playerRecord(owner); p != nil {
 		name = p.Name

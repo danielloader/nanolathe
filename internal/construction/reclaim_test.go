@@ -214,13 +214,13 @@ func TestUnitReclaimCadenceDefersFatalRefund(t *testing.T) {
 	factoryNode := factoryQueue.Primary()[0]
 	s.SetBuilderLink(target.Handle, factory.Handle)
 	var deaths, extras int
-	s.World.OnDeath = func(_ pool.Handle, cause units.DeathCause, _ *units.Unit) {
+	s.World.SetDeathHook(func(_ pool.Handle, cause units.DeathCause, _ *units.Unit) {
 		deaths++
 		if cause != units.DeathReclaimed {
 			t.Errorf("death cause=%d want reclaimed", cause)
 		}
-	}
-	s.World.OnDeathExtra = func(_ pool.Handle, cause units.DeathCause, _ *units.Unit) {
+	})
+	s.World.SetDeathExtraHook(func(_ pool.Handle, cause units.DeathCause, _ *units.Unit) {
 		extras++
 		if cause != units.DeathReclaimed {
 			t.Errorf("extra death cause=%d want reclaimed", cause)
@@ -229,7 +229,7 @@ func TestUnitReclaimCadenceDefersFatalRefund(t *testing.T) {
 			t.Error("death finalizer did not release the factory product reference")
 		}
 		s.ReleasePlacement(target.Handle)
-	}
+	})
 	// Nine admitted visits are required. [05 R-WORK-01 §4] tests the counter
 	// BEFORE raising it, so the pre-check values are 0, 2, ... 16 and the pulse
 	// fires on the visit that sees 16 — the ninth, at tick 16, "eight

@@ -41,7 +41,7 @@ func TestAirEntryGoalRefreshByExecutor(t *testing.T) {
 	for _, name := range []string{"AirStrike", "AirToGround", "AirToGroundHover", "AirToAir"} {
 		t.Run(name, func(t *testing.T) {
 			q, u := gateFixture()
-			q.binding.Lookup = func(pool.Handle) *units.Unit { return u }
+			q.binding.SetLookup(func(pool.Handle) *units.Unit { return u })
 			q.Push(Lookup(name), Node{Owner: u.Handle, Target: 7})
 			n := q.Head()
 			if _, done := airEntry(u, n, 0, airInterruptMask(n.ID), 0); done {

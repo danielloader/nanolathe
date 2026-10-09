@@ -259,8 +259,8 @@ func TestLoop_DeathFinalizeBeforeLaterSlot(t *testing.T) {
 	var hA, hB, hC pool.Handle
 	var aAtFinalize, cAtFinalize uint8
 	var finalizeTick uint32
-	priorExtra := s.Units.OnDeathExtra
-	s.Units.OnDeathExtra = func(h pool.Handle, cause units.DeathCause, u *units.Unit) {
+	priorExtra := s.Units.DeathExtraHook()
+	s.Units.SetDeathExtraHook(func(h pool.Handle, cause units.DeathCause, u *units.Unit) {
 		if priorExtra != nil {
 			priorExtra(h, cause, u)
 		}
@@ -273,7 +273,7 @@ func TestLoop_DeathFinalizeBeforeLaterSlot(t *testing.T) {
 				cAtFinalize = c.CurrentSample
 			}
 		}
-	}
+	})
 	s.RegisterAll()
 	s.State = StateBattle
 	hA, _ = s.Units.Create(def, 0, numeric.Fixed(10*65536), 0, numeric.Fixed(10*65536))

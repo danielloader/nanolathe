@@ -34,16 +34,16 @@ func registryOrderFixture(t *testing.T) (*units.Unit, *units.Unit, *rng.Simulati
 	s := &combat.Service{}
 	econ := &economy.Service{}
 	sim := rng.NewSimulation(7)
-	b := &QueueBinding{
+	b := NewQueueBinding(QueueBindingConfig{
 		Lookup: w.Unit, SimRNG: &sim,
 		Hostility: func(a, b *units.Unit) bool { return a.Owner != b.Owner },
-		World: &WorldQueryAdapter{ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
+		World: NewWorldQueryAdapter(WorldQueryAdapterConfig{ForEachUnit: func(visit func(pool.Handle, *units.Unit) bool) {
 			visit(enemy.Handle, enemy)
-		}},
-		Weapons: &WeaponAdapter{TargetsInRadius: func(actor *units.Unit, x, z numeric.Fixed, radius int32) []pool.Handle {
+		}}),
+		Weapons: NewWeaponAdapter(WeaponAdapterConfig{TargetsInRadius: func(actor *units.Unit, x, z numeric.Fixed, radius int32) []pool.Handle {
 			return s.TargetsInRadius(actor.Owner, x, z, radius, w)
-		}},
-	}
+		}}),
+	})
 	QueueForUnit(u).SetBinding(b)
 	s.RebuildTargetRegistryIfDue(30, 0, w, nil, nil, econ)
 	upgrade := func() {

@@ -67,7 +67,7 @@ type AirLegRunner func(u *units.Unit, n *Node, satisfied uint32, tick uint32) (C
 // restarts the walk from the head.
 func airHandOff(u *units.Unit, n *Node, satisfied uint32, tick uint32) Code {
 	if q := QueueForUnit(u); q != nil && q.Binding() != nil && q.Binding().Movement != nil {
-		if run := q.Binding().Movement.RunAir; run != nil {
+		if run := q.Binding().Movement.RunAirHook(); run != nil {
 			if code, handled := run(u, n, satisfied, tick); handled {
 				return code
 			}

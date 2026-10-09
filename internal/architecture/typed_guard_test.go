@@ -453,12 +453,24 @@ func containsFloat64(typ types.Type) bool {
 // mapFunctionHashes binds the whole containing operation, including its sort
 // or other ordering dependency, to the same I1 review.
 var mapRangeExceptions = map[string]string{
+	"internal/session/checkpoint_scenario.go checkpointScenarioRemovedHandles 4cc033a003a9b669ce09ba5e94e9ec72351a7eaff90c1afcb1cf7dd51b7ae237":         "gathers removed handles only, then sorts numerically before reading retained health values",
+	"internal/session/checkpoint_visibility.go *Session.writeCheckpointVisibilityTail adb6a4fde822e2be9738128e112bde69bb74069256fee2ca92f32d75c783a5b6": "gathers stamp handles only, then sorts numerically before reading diagnostic visibility stamps",
+	"internal/ai/checkpoint_profile.go checkpointSortedKeys 0c0133760bc905d4ee9e25f2065e15ac040e50cdd8188571a003cbf6b93c1088":                           "gathers map keys and sorts their exact string or numeric identities before checkpoint values",
+	"internal/ai/checkpoint_profile.go *Profile.checkpointRecordIDs 27155c09f696a84913133702c4b4621afe6c25451693c75a455e281f744252a7":                   "gathers definition pointers then sorts admitted family, ordinal and key before encoding; pointer values never order rows",
+	"internal/movement/checkpoint_layers.go checkpointLayerKeys 8c5bb2615b885b438f57b1ef835360be7683f5e383dfcece867598c77c93aed3":                       "copies class registry keys and sorts exact strings before layer discovery and writing",
+	"internal/movement/checkpoint_provider.go checkpointRequestKeys 9aa03d2006fb5d6b6db275b4d90f7ad32b0eb99737901d20ce10a4096eadfefd":                   "copies actual request handles and sorts numerically before goal discovery, staged-index validation and writing",
+	"internal/combat/checkpoint.go *Service.checkpointDeathHandles b9c1bd323a0df69c32079fef4e409031fd77665ace29df762e67017af5029ea2":                    "copies death-notification handles and sorts numerically before allocation discovery and writing",
+	"internal/construction/checkpoint.go checkpointHandleKeys 4056f2b892f6d17dc1233d96e74376bfdf536fe4359f7b6597e3ce75ace48b5e":                         "copies raw product handle keys and numerically sorts them before any value read; no callbacks",
+	"internal/path/checkpoint_write.go checkpointMapEntries 174c2f3b3b3b1875876863ab89bbcbc50d3d75775c6634c27ebb9a2e5349fd0c":                           "gathers cell keys and sorts (Z,X) before diagnostic value reads; absent-equivalent zero entries omitted, no callbacks",
+	"internal/visibility/checkpoint.go *Service.checkpointObserverIDs 3a09d6228bec428a9acebdb242ea4b293c4fd2ad12e93545b4e683da85e4ddcb":                 "gathers observer keys and sorts numerically before diagnostic reads; no live cache or callback is touched",
+
 	"internal/cob/debug_capture.go *VM.DebugSnapshot 7d182462d9e252dafb59da673acdcd673414aec86225c680a2c9710ae0bc1fa0":             "host-only read copies script names into detached storage and sorts them before returning; it neither invokes scripts nor changes VM state",
 	"internal/features/debug_capture.go *Service.DebugSnapshot 0de7ab9b2ba8a95d0ba037338b670b09c17a342ce8e777aad0040ba750b1ddb8":   "host-only read gathers private keys and sorts them before copying feature values; it does not refresh the live key cache or change feature state",
-	"internal/cob/binding.go BindStrict 86205b5f7e2c831877392e584559b68dedd881a5fa3fae0d7563637ac5276a20":                          "installs distinct handlers by port key; it does not invoke them",
-	"internal/cob/binding.go BindStrict 4a375074326b6563496b3c5ce6f1f0f10af85196815ffe7d2b50a5eb84ba217c":                          "installs distinct bindings by port key; it does not invoke them",
+	"internal/cob/binding.go bindStrict 86205b5f7e2c831877392e584559b68dedd881a5fa3fae0d7563637ac5276a20":                          "installs distinct handlers by port key; it does not invoke them",
+	"internal/cob/checkpoint_ports.go checkpointPortKeys 42e9ea304ea2909bccff5ddfaa7e5c456034bb69a7c0b674064ae9c0e9b614e3":         "gathers port keys only, sorts numerically, then callers validate and encode copied rows without invoking callbacks",
+	"internal/cob/binding.go bindStrict 4a375074326b6563496b3c5ce6f1f0f10af85196815ffe7d2b50a5eb84ba217c":                          "installs distinct bindings by port key; it does not invoke them",
 	"internal/units/cob_binding.go bindUnitPortHandlers a4d09a5b9e3de58069318e1f534101f632a5819ec42cc2a8410811523b9fdb89":          "installs bindings only; no handler is run during this map walk",
-	"internal/units/cob_binding.go bindCOBWithPortsAndVisibility 8cdbf0ee30106974865028c642794614f67004c7467ebdd5035d1da25e593c4f": "installs bindings only; no handler is run during this map walk",
+	"internal/units/cob_binding.go bindCOBWithPortsAndVisibility cc431332ae7e03b1aa63d9ceaee1c96346a1c2ec2028a0f6e32296fd7d4a8f14": "installs bindings only; no handler is run during this map walk",
 	"internal/features/service.go *Service.sortedInstanceKeys 0de7ab9b2ba8a95d0ba037338b670b09c17a342ce8e777aad0040ba750b1ddb8":    "gathers keys and sorts them before every consumer sees the slice",
 	"internal/save/battle_image.go validateCarrierReferenceGraph 452bad5001b060b81ff4f96a4cf3a6dc90e812f0a597899aedfa32b66dd65c1a": "each traversal changes only local DFS colours; the verdict and diagnostic are order-independent",
 	"internal/ai/manager.go *Manager.EnsureStrategicInitialized df04ad0a0adf5788480cb3a77e4461881c9681b4a6ede1f7a59e35a29969fa7d":  "gathers catalog keys and sorts them before strategic initialization",
@@ -495,6 +507,18 @@ var mapRangeExceptions = map[string]string{
 // map range. This makes a sort, callback or other ordering dependency part of
 // the audit rather than allowing it to change behind an unchanged range body.
 var mapFunctionHashes = map[string]string{
+	"internal/cob/checkpoint_ports.go checkpointPortKeys":                              "9010bf2983f1c41445970b452bd46099bb1fdf195d88e65b257cba5cae29c11d",
+	"internal/session/checkpoint_scenario.go checkpointScenarioRemovedHandles":         "817165a098c54bd827e6c88f3165e1bd3319f64a1b3430d49b294c1c6b9f3a56",
+	"internal/session/checkpoint_visibility.go *Session.writeCheckpointVisibilityTail": "c728ef5c2b0392561eae14e27a02320946276b2496ff32e5619482cb9f8202bd",
+	"internal/ai/checkpoint_profile.go checkpointSortedKeys":                           "f4f7ed7d062c24031a97ef9d703ee48fadb66839dc9088b16b0330a8b1804d45",
+	"internal/ai/checkpoint_profile.go *Profile.checkpointRecordIDs":                   "f5bdd60fadf54b949803cdc318f4394965540b6c3af53ec794565469b4aee433",
+	"internal/movement/checkpoint_layers.go checkpointLayerKeys":                       "0584cfaa241485e03864625160d6cd7c71852c41c188c5320d8ba3156c4270e5",
+	"internal/movement/checkpoint_provider.go checkpointRequestKeys":                   "689e4a6a5d33c43a3633d16574f8dd544865e3c9af55bf39b13739c6d25eb0b4",
+	"internal/combat/checkpoint.go *Service.checkpointDeathHandles":                    "6872c150476f4a5c4e5d943ff87212f054eac16e999a0a6e880314484caae97d",
+	"internal/construction/checkpoint.go checkpointHandleKeys":                         "81c7d44ebe23d4a1ae26e800662d3e5d767d4b8a2a732912931bcc0329d6d0f3",
+	"internal/path/checkpoint_write.go checkpointMapEntries":                           "fde409145e1029b92f089b724a3ba224afb12d57375812626930977eac7b22d8",
+	"internal/visibility/checkpoint.go *Service.checkpointObserverIDs":                 "8903cc12e8a2656e58db23485e2a7498f62dc42c28045312eb010f01c32c9472",
+
 	// On-demand diagnostic projections copy into local storage only. Pin their
 	// sorts and full read operations so future edits require another I1 review.
 	"internal/cob/debug_capture.go *VM.DebugSnapshot":            "f19b940e78dceab1d9c60fabb131113f547a21ce600853d5626368935c55d2f1",
@@ -512,7 +536,7 @@ var mapFunctionHashes = map[string]string{
 	// Re-audited: the piece link now uses retail's slot pass and records link
 	// notes [04 R-COB-01 §4]. The two port-install ranges are unchanged and
 	// still only install handlers by key (I1).
-	"internal/cob/binding.go BindStrict":                        "0cbb3d03f9c57fd1b3a93bcaa6964a92a743639c281abc0aa15e97dbdd937f0a",
+	"internal/cob/binding.go bindStrict":                        "2a947c14c9ce75fbb8f23deb6f8a48e76b8bea4f9a0fa9db524c66b0742b48f4",
 	"internal/construction/placement.go *Service.BuilderLinks":  "ab64326b5234a8e82416673727052e72d47df694047af752dba5b34341f3c0bf",
 	"internal/construction/placement.go *Service.SnapshotLinks": "c001891b664d5693829dc524e5c7bad19b8a14c4341d396557013d6a5c1b40ca",
 	// Re-audited: rebuilds retain the key/value buffers and clear old pointer
@@ -528,7 +552,7 @@ var mapFunctionHashes = map[string]string{
 	// one). The jammer predicate delegates to the session's bound visibility
 	// service and introduces no iteration. The catalog-key union, its sort and
 	// the order every consumer sees are unchanged (I1).
-	"internal/session/ai_entry.go initializeBattleAI": "6060e619291cd86421ea61d2e01f14870bc07afac6e95633e27704e78739ceb6",
+	"internal/session/ai_entry.go initializeBattleAI": "fefdb3ef55acccd84956d4a8cfdec7998a8eb4f0c9f8dc7e7b213ab36ea73039",
 	// Re-audited: both immutable membership lists are filtered after the same
 	// sorted builder-key walk; no map-order-dependent decisions were added.
 	"internal/session/mission.go pruneRestrictedBuildMenus": "c3aa02729cb3a830ca92bcefe79a443222aec45bbb113205058dbd0579365b29",
@@ -536,7 +560,7 @@ var mapFunctionHashes = map[string]string{
 	// when the brain is built; a think never reaches it (I1).
 	"internal/aikit/brains/utility/params.go ParseParams":         "4e69b3d510bbaf5e0ae6ad1d6ef0e39443eae75eda7d248adc2a29c386de3e19",
 	"internal/units/cob_binding.go bindUnitPortHandlers":          "31dfa18e2683e5bec165669f55e4f5dad260588513831504622f3b1596ba5548",
-	"internal/units/cob_binding.go bindCOBWithPortsAndVisibility": "68a25d9937cf032996d5feb8d96ce60224e51e9aa8e1bc13808fd2eff2ecfe75",
+	"internal/units/cob_binding.go bindCOBWithPortsAndVisibility": "d1d6860864e573f34a1a654d7776da50141e3717b53f603b93b97e5447d26e6f",
 }
 
 func checkAuthoritativeTypedMapRanges(t *testing.T) {
@@ -633,6 +657,7 @@ var float64FieldAllowances = map[string]string{
 // names the precise retail operation that needs binary64; all other float64
 // occurrences still use the shrink-only per-file baseline.
 var float64ScopeAllowances = map[string]float64Allowance{
+	"internal/economy/checkpoint.go func writeCheckpointF64Pair":       {1, "I2 exact stored ledger binary64 totals and waste forwarded to canonical bit encoding; no floating arithmetic (DESIGN_MULTIPLAYER §16.3.13)"},
 	"internal/sim/checkpoint/encoder.go func *Encoder.F64":             {1, "I2 exact stored binary64 bits for canonical diagnostics; no floating arithmetic (DESIGN_MULTIPLAYER §16.3.6)"},
 	"internal/orders/scans.go func patrolResourceAtLeastTwenty":        {3, "I2 patrol stored stock/capacity and binary64 threshold constant compared at working precision [04 R-ORD-01 §4]"},
 	"internal/orders/scans.go func resourceFits":                       {3, "I2 patrol stored stock plus stored feature value compared without narrowing [04 R-ORD-01 §4]"},

@@ -24,8 +24,8 @@ import (
 func getHostility(actor *units.Unit) func(*units.Unit, *units.Unit) bool {
 	if actor != nil {
 		if q := QueueForUnit(actor); q != nil {
-			if binding := q.Binding(); binding != nil && binding.Hostility != nil {
-				return binding.Hostility
+			if binding := q.Binding(); binding != nil && binding.HostilityHook() != nil {
+				return binding.HostilityHook()
 			}
 		}
 	}
@@ -170,8 +170,8 @@ func hasBuildList(u *units.Unit) bool {
 	if u == nil || u.Def == nil {
 		return false
 	}
-	if b := bindingOfUnit(u); b != nil && b.BuildList != nil {
-		return b.BuildList(u.Def)
+	if b := bindingOfUnit(u); b != nil && b.BuildListHook() != nil {
+		return b.BuildListHook()(u.Def)
 	}
 	return u.Def.Builder
 }
@@ -193,10 +193,10 @@ func isCarriable(carrier, candidate *units.Unit) bool {
 		return false
 	}
 	b := bindingOfUnit(carrier)
-	if b == nil || b.TransportAdmission == nil {
+	if b == nil || b.TransportAdmissionHook() == nil {
 		return false
 	}
-	return b.TransportAdmission(carrier, candidate)
+	return b.TransportAdmissionHook()(carrier, candidate)
 }
 
 // signExtendedHealth is a unit's health the way the repair admission reads it:
@@ -309,11 +309,11 @@ func nanoReach(actor, target *units.Unit) bool {
 // different invention.)
 func nanoReachWaterClause(actor, target *units.Unit) bool {
 	b := bindingOfUnit(actor)
-	if b == nil || b.World == nil || b.World.SeaLevel == nil {
+	if b == nil || b.World == nil || b.World.SeaLevelHook() == nil {
 		return true
 	}
 	// The terrain header's sea level is a byte in whole world units [04 §10.2].
-	sea := int32(b.World.SeaLevel())
+	sea := int32(b.World.SeaLevelHook()())
 	targetTop := int32(int16(target.Y.Floor())) + int32(int16(target.Def.ModelTopFixed>>16))
 	airHalf := !actor.Def.CanFly || actor.Def.Amphibious || sea <= targetTop
 	wadeHalf := actor.Def.CanFly || sea-int32(int16(actor.Def.MaxWaterDepth)) <= targetTop
@@ -735,10 +735,10 @@ func rejectsOwnSelectableTarget(actor, target *units.Unit) bool {
 // package's only unit-table access [P0-I16].
 func lookupUnitFor(actor *units.Unit, h pool.Handle) *units.Unit {
 	b := bindingOfUnit(actor)
-	if b == nil || b.Lookup == nil {
+	if b == nil || b.LookupHook() == nil {
 		return nil
 	}
-	return b.Lookup(h)
+	return b.LookupHook()(h)
 }
 
 // contextualMoveArm is the tail both variants share: "`canmove` **and a live
@@ -979,7 +979,7 @@ func resolveAttackAt(actor *units.Unit, target *units.Unit, pos *ResolvePos) str
 		return ""
 	}
 	b := bindingOfUnit(actor)
-	if b == nil || b.World == nil || b.World.SeaLevel == nil || target.Def == nil {
+	if b == nil || b.World == nil || b.World.SeaLevelHook() == nil || target.Def == nil {
 		// No map means no water-class answer; an unbound tool must provide
 		// the same sea-level input as a composed session.
 		return ""
@@ -992,7 +992,7 @@ func resolveAttackAt(actor *units.Unit, target *units.Unit, pos *ResolvePos) str
 		water = true
 	}
 	top := int32(int16(target.Y.Floor())) + int32(int16(target.Def.ModelTopFixed>>16))
-	if top < int32(b.World.SeaLevel()) {
+	if top < int32(b.World.SeaLevelHook()()) {
 		if !water {
 			return ""
 		}

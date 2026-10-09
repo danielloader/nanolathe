@@ -22,7 +22,7 @@ func TestGuardFallbackRequiresFailedDamageJoin(t *testing.T) {
 			{name: "maintenance deadline", wake: 1},
 			{name: "no recorded attacker", wake: guardCombatJoinBit, configure: func(f *guardLegsFixture) { f.ward.EngagementTarget = 0 }},
 			{name: "allied attacker", wake: guardCombatJoinBit, configure: func(f *guardLegsFixture) {
-				QueueForUnit(f.guard).Binding().World.DeclaresAlliance = func(_, _ uint8) bool { return true }
+				QueueForUnit(f.guard).Binding().World.SetDeclaresAlliance(func(_, _ uint8) bool { return true })
 			}},
 			{name: "excluded category", wake: guardCombatJoinBit, configure: func(f *guardLegsFixture) {
 				f.enemy.Def.UnitMask = content.MaskForID(1)
@@ -89,21 +89,21 @@ func TestGuardRetainedTargetNeedsShotAdmission(t *testing.T) {
 				held := &units.Unit{Handle: 4, Owner: 1, Alive: true, Def: &content.UnitDef{}, X: f.guard.X, Z: f.guard.Z}
 				f.guard.Slots[0].Target = units.Target{Kind: units.TargetUnit, Unit: held.Handle}
 				b := QueueForUnit(f.guard).Binding()
-				lookup := b.Lookup
-				b.Lookup = func(h pool.Handle) *units.Unit {
+				lookup := b.LookupHook()
+				b.SetLookup(func(h pool.Handle) *units.Unit {
 					if h == held.Handle {
 						return held
 					}
 					return lookup(h)
-				}
+				})
 				calls := 0
-				b.Weapons = &WeaponAdapter{CanEngage: func(actor *units.Unit, target pool.Handle, slot int) bool {
+				b.Weapons = NewWeaponAdapter(WeaponAdapterConfig{CanEngage: func(actor *units.Unit, target pool.Handle, slot int) bool {
 					calls++
 					if actor != f.guard || target != held.Handle || slot != 0 {
 						t.Fatalf("shot gate actor=%p target=%d slot=%d", actor, target, slot)
 					}
 					return admitted
-				}}
+				}})
 				n := guardNode(f.guardFixture)
 				n.Phase = 1
 				if variant == "air" {

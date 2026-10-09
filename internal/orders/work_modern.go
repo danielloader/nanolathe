@@ -27,8 +27,8 @@ func (r *ModernRules) PatrolWork(req PatrolWorkRequest) PatrolWorkOption {
 		return PatrolBoth
 	}
 	options := r.DefaultBuilderOptions()
-	if b := bindingFor(u); b != nil && b.BuilderOptions != nil {
-		options = b.BuilderOptions(u.Owner)
+	if b := bindingFor(u); b != nil && b.BuilderOptionsHook() != nil {
+		options = b.BuilderOptionsHook()(u.Owner)
 	}
 	if option := options.Patrol[mode]; option <= PatrolAssistOnly {
 		return option

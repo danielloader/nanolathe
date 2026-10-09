@@ -45,6 +45,23 @@ func TestHeadlessCommandHasNoDesktopDependency(t *testing.T) {
 	}
 }
 
+// The hosted relay sequences opaque commands; it must not pull in a world,
+// original assets or graphics devices (DESIGN_MULTIPLAYER §16.5.1).
+func TestRelayCommandHasNoSimulationOrDesktopDependency(t *testing.T) {
+	cmd := exec.Command("go", "list", "-deps", "./cmd/nanolathe-server")
+	cmd.Dir = repositoryRoot(t)
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("list relay dependencies: %v", err)
+	}
+	for _, dep := range strings.Fields(string(output)) {
+		if strings.HasPrefix(dep, "github.com/hajimehoshi/ebiten/") ||
+			strings.HasPrefix(dep, nanolatheModule+"/") && dep != relayCommand && dep != relayPackage && dep != nanolatheModule+"/internal/netproto" {
+			t.Fatalf("relay imported non-protocol engine dependency %s", dep)
+		}
+	}
+}
+
 // occurrence is one counted site, kept only for failure messages.
 type occurrence struct {
 	line int

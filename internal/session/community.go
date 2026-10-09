@@ -42,11 +42,11 @@ func (s *Session) projectCommunity() {
 		state := &s.Vis.Community
 		state.AlliedJammingIgnored = f.AlliedJammingIgnored
 		state.OffMapAircraftMarginTiles = f.OffMapAircraftMarginTiles
-		if state.Allied == nil {
-			state.Allied = s.visibilityAllied
+		if state.AlliedReader() == nil {
+			s.Vis.SetAlliedWithCheckpointBinding(s.visibilityAllied, s.checkpointBindingAuthority())
 		}
-		if state.OffMap == nil {
-			state.OffMap = s.visibilityOffMap
+		if state.OffMapReader() == nil {
+			s.Vis.SetOffMapWithCheckpointBinding(s.visibilityOffMap, s.checkpointBindingAuthority())
 		}
 	}
 	if s.Combat != nil {
@@ -75,8 +75,8 @@ func (s *Session) projectCommunity() {
 		s.Build.PrepareRepairBanks(s.Units)
 		if s.Build.OrderBinding != nil {
 			s.Build.OrderBinding.Community = s.orderCommunity()
-			if s.Build.OrderBinding.BuilderOptions == nil {
-				s.Build.OrderBinding.BuilderOptions = s.builderOptionsForOwner
+			if s.Build.OrderBinding.BuilderOptionsHook() == nil {
+				s.Build.OrderBinding.SetBuilderOptionsWithCheckpointBinding(s.builderOptionsForOwner, s.checkpointBindingAuthority())
 			}
 		}
 	}

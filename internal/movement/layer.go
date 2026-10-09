@@ -26,6 +26,7 @@
 package movement
 
 import (
+	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
@@ -94,7 +95,8 @@ type ClassLayer struct {
 	// Nil means "no grid bound", which makes Passable fall through to the
 	// terrain value rather than invent a word; production binds it through the
 	// registry.
-	mapping MappingWordSource
+	mapping           MappingWordSource
+	checkpointMapping orders.CheckpointMappingWord // copied installation proof, never wire state
 
 	// movers answers whether an occupant has a mover structure, which the
 	// occupant-age gate needs: a building has none [04 R-PATH-01 §14].
@@ -582,13 +584,14 @@ func (l *ClassLayer) Revise(tick uint32, requester pool.Handle, w *units.World, 
 // allocated at first request per class (or eagerly at battle entry by calling
 // For over the compiled class table) with explicit bounds [04 §6.1].
 type ClassLayers struct {
-	terrain *world.Terrain
-	grid    *OccupancyGrid
-	world   *units.World
-	anchors AnchorSource
-	movers  MoverSource
-	ticks   CommitTickSource
-	mapping MappingWordSource
+	terrain           *world.Terrain
+	grid              *OccupancyGrid
+	world             *units.World
+	anchors           AnchorSource
+	movers            MoverSource
+	ticks             CommitTickSource
+	mapping           MappingWordSource
+	checkpointMapping orders.CheckpointMappingWord // inherited with the reader, never wire state
 
 	byName map[string]*ClassLayer // lookup only; never iterated [I1]
 	names  []string               // allocation order, for deterministic inspection
@@ -621,13 +624,19 @@ func NewClassLayers(t *world.Terrain, grid *OccupancyGrid, w *units.World, ancho
 // source is ignored so a caller with no binding cannot silently unbind a live
 // grid. Iteration is over the allocation-order slice, never the map [I1].
 func (c *ClassLayers) BindMappingWord(src MappingWordSource) {
+	c.bindMappingWord(src, orders.CheckpointMappingWord{})
+}
+
+func (c *ClassLayers) bindMappingWord(src MappingWordSource, proof orders.CheckpointMappingWord) {
 	if c == nil || src == nil {
 		return
 	}
 	c.mapping = src
+	c.checkpointMapping = proof
 	for _, name := range c.names {
 		if l := c.byName[name]; l != nil {
 			l.mapping = src
+			l.checkpointMapping = proof
 		}
 	}
 }
@@ -663,6 +672,7 @@ func (c *ClassLayers) For(name string, p Profile) *ClassLayer {
 	// is zero, so the occupant-age gate is closed.
 	l.movers = c.movers
 	l.mapping = c.mapping
+	l.checkpointMapping = c.checkpointMapping
 	c.seedCommits(l)
 	l.stampAll()
 	c.byName[name] = l

@@ -29,12 +29,12 @@ func TestSettlementIterationSkipsLaterFreedCloaker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc.CloakDue = func(u *units.Unit) bool {
+	svc.SetCloakDue(func(u *units.Unit) bool {
 		if u.Handle == h1 {
 			w.FreeImmediate(h2)
 		}
 		return true
-	}
+	})
 
 	ApplyCloakDebits(&svc, w, 0, func(*units.Unit) float32 { return 6 }, nil, nil)
 	if got, want := svc.Players[0].Stock[Energy], float32(4); got != want {
@@ -128,8 +128,8 @@ func settlementIterationTrace(t *testing.T) string {
 	b1[Metal] = Bucket{Carry: 1, Requested: 5, Accepted: 5}
 	b2[Metal] = Bucket{Carry: 1, Requested: 2, Accepted: 2}
 	b3[Metal] = Bucket{Requested: 3, Accepted: 3}
-	s.CloakCost = func(u *units.Unit) float32 { return u.CloakCost() }
-	s.CloakDue = func(u *units.Unit) bool { return u != nil && u.IsCloaked && u.RevealDeadline == 0 }
+	s.SetCloakCost(func(u *units.Unit) float32 { return u.CloakCost() })
+	s.SetCloakDue(func(u *units.Unit) bool { return u != nil && u.IsCloaked && u.RevealDeadline == 0 })
 
 	drawsBefore := sim.Draws()
 	s.Settle(0, 0, w)

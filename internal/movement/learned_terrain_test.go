@@ -29,9 +29,9 @@ func learnedFixture(t *testing.T, rules Rules) (*System, *units.World, pool.Hand
 		sys.Terrain.PlotAt(learnedWallX, z).SetMaxHeight(200)
 	}
 	u := w.Unit(h)
-	unmapped := &orders.QueueBinding{World: &orders.WorldQueryAdapter{
+	unmapped := &orders.QueueBinding{World: orders.NewWorldQueryAdapter(orders.WorldQueryAdapterConfig{
 		MappingWord: func(int32, int32) (uint16, bool) { return 0, true },
-	}}
+	})}
 	q := orders.QueueForUnit(u)
 	q.SetBinding(unmapped)
 	q.Push(orders.Lookup("Move_Ground"), orders.Node{Owner: h, GoalX: world.CellToWorld(12), GoalZ: u.Z, GoalSupplied: true})
@@ -153,7 +153,7 @@ func TestModernUnitRejectionTeachesNothing(t *testing.T) {
 // grid and leaves the retail read in place.
 func TestModernMappedRejectionTeachesNothing(t *testing.T) {
 	sys, w, h, _ := learnedFixture(t, &ModernRules{})
-	orders.QueueForUnit(w.Unit(h)).Binding().World.MappingWord = func(int32, int32) (uint16, bool) { return 1, true }
+	orders.QueueForUnit(w.Unit(h)).Binding().World.SetMappingWord(func(int32, int32) (uint16, bool) { return 1, true })
 	learnedWalkIntoWall(t, sys, w, h)
 	if sys.learned != nil {
 		t.Fatal("a rejection on mapped ground taught terrain")

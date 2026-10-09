@@ -138,7 +138,7 @@ func headOnFixture(t *testing.T, rules Rules) (sys *System, w *units.World, east
 		handleRow(sys.Collisions, h).Heading = heading
 		handleRow(sys.Steers, h).Heading, handleRow(sys.Steers, h).PendingHeading = heading, heading
 		q := orders.QueueForUnit(u)
-		q.SetBinding(&orders.QueueBinding{Lookup: w.Unit, World: &orders.WorldQueryAdapter{}})
+		q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: w.Unit, World: &orders.WorldQueryAdapter{}}))
 		q.Push(orders.Lookup("Move_Ground"), orders.Node{Owner: h, GoalX: numeric.Fixed(int64(ends[h]) << 16), GoalZ: row, GoalSupplied: true})
 		head := q.Head()
 		sys.InstallPointGoal(orders.PointGoalRequest{Owner: h, Node: head, X: head.GoalX, Z: head.GoalZ, Radius: 4})

@@ -43,7 +43,7 @@ func TestInitCloakedUnitIsVisibleUntilItsFirstPaidPass(t *testing.T) {
 	}
 
 	tick := uint32(0)
-	svc.CloakDue = gateForTest(&tick)
+	svc.SetCloakDue(gateForTest(&tick))
 	getCost := func(u *units.Unit) float32 { return u.CloakCost() }
 
 	// Pass 1: affordable — 6 of the 10 in stock.
@@ -85,7 +85,7 @@ func TestCloakOffClearsTheRequestAndTheNextPassClearsTheInstanceBit(t *testing.T
 	u := w.Unit(h)
 
 	tick := uint32(0)
-	svc.CloakDue = gateForTest(&tick)
+	svc.SetCloakDue(gateForTest(&tick))
 	getCost := func(u *units.Unit) float32 { return u.CloakCost() }
 	ApplyCloakDebits(&svc, w, 0, getCost, nil, nil)
 	if !u.Hidden {

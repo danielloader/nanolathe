@@ -35,7 +35,7 @@ func TestUnitReclaimStanceWaitThroughCOBAndConstructionWindow(t *testing.T) {
 	s.Presentation = sink
 	q := orders.QueueForUnit(builder)
 	workCues := 0
-	q.SetBinding(&orders.QueueBinding{Lookup: func(h pool.Handle) *units.Unit { return s.World.Unit(h) }, Presentation: &orders.PresentationAdapter{Status: func(_ *units.Unit, kind uint8, text string) bool {
+	q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: func(h pool.Handle) *units.Unit { return s.World.Unit(h) }, Presentation: orders.NewPresentationAdapter(orders.PresentationAdapterConfig{Status: func(_ *units.Unit, kind uint8, text string) bool {
 		if kind == 11 {
 			if node.Phase != 4 || text != "" {
 				t.Fatal("work cue outside phase 4")
@@ -43,7 +43,7 @@ func TestUnitReclaimStanceWaitThroughCOBAndConstructionWindow(t *testing.T) {
 			workCues++
 		}
 		return true
-	}}})
+	}})}))
 	s.RegisterOrderHandlers(q)
 	step := func(tick uint32) { s.StepUnit(TickContext{Tick: tick}, builder.Handle) }
 	step(0)
@@ -98,7 +98,7 @@ func TestUnitReclaimApproachEventOutcomes(t *testing.T) {
 			n.Phase, n.DynamicGate, n.Satisfied = 2, 0x10048, 0x40
 			q := orders.QueueForUnit(b)
 			sim := rng.NewSimulation(1)
-			q.SetBinding(&orders.QueueBinding{Lookup: s.World.Unit, SimRNG: &sim})
+			q.SetBinding(orders.NewQueueBinding(orders.QueueBindingConfig{Lookup: s.World.Unit, SimRNG: &sim}))
 			s.RegisterOrderHandlers(q)
 			before := sim.Draws()
 			q.Pump(b, 10)

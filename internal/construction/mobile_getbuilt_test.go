@@ -18,7 +18,7 @@ func TestMobileProductGetBuiltReadyForFirstOrderPump(t *testing.T) {
 			svc, builder, node := approachFixture(t, 10, 10)
 			svc.Economy = &economy.Service{}
 			sim := rng.NewSimulation(7)
-			svc.OrderBinding = &orders.QueueBinding{SimRNG: &sim, Lookup: svc.World.Unit}
+			svc.OrderBinding = orders.NewQueueBinding(orders.QueueBindingConfig{SimRNG: &sim, Lookup: svc.World.Unit})
 			builder.Def.CanFly = kind == "VTOL_MobileBuild"
 			node.ID = orders.Lookup(kind)
 			node.Phase, node.DynamicGate, node.Deadline = 2, 0, -1

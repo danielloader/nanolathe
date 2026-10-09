@@ -36,7 +36,7 @@ func TestPlayerMaintenanceUsesPreviousRegistryAfterWeaponPhase(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Econ.Players[0].ControllerState = 1
-	s.Combat = &combat.Service{ControlByte: func(uint8) uint8 { return combat.ControlByteHuman }}
+	s.Combat = combat.NewService(combat.ServiceConfig{ControlByte: func(uint8) uint8 { return combat.ControlByteHuman }})
 	s.AI[0] = &ai.Manager{Player: 0, Catalog: s.Catalog}
 	publishVisibilityForAll(s)
 	u := s.Units.Unit(shooter)
@@ -70,14 +70,14 @@ func TestPlayerLOSPublicationPrecedesSettlement(t *testing.T) {
 	u := s.Units.Unit(h)
 	u.X = numeric.FixedFromInt(400)
 	observed := false
-	s.Econ.EndCondition = func(player int, tick uint32) {
+	s.Econ.SetEndCondition(func(player int, tick uint32) {
 		if player == 1 {
 			observed = true
 			if s.visStamps[int(h)] == old {
 				t.Fatal("settlement reached before the current LOS stamp")
 			}
 		}
-	}
+	})
 	s.tickPlayers(1)
 	if !observed {
 		t.Fatal("local deadline block not visited")

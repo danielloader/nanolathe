@@ -214,25 +214,6 @@ func (s *Style) BevelShape(l *Layer, mask *Mask, edge, lightA, darkA, curve floa
 	}
 }
 
-// InnerShadow is the shadow a raised rim casts onto a sunken face: a soft band
-// along the edges nearest the light, fading over width pixels.
-func (s *Style) InnerShadow(l *Layer, width, alpha float64) {
-	for y := 0; y < l.H; y++ {
-		for x := 0; x < l.W; x++ {
-			dx := float64(x)
-			if s.Light.X > 0 {
-				dx = float64(l.W - 1 - x)
-			}
-			dy := float64(y)
-			if s.Light.Y > 0 {
-				dy = float64(l.H - 1 - y)
-			}
-			t := math.Max(0, 1-math.Min(dx, dy)/width)
-			l.Blend(x, y, black.WithA(alpha*t*t), 1)
-		}
-	}
-}
-
 // Recess darkens a rectangle and shades its rim as a groove: the edges nearest
 // the light are in shadow, the far edges catch it.
 func (s *Style) Recess(l *Layer, x0, y0, x1, y1 int, floor, rimDark, rimLight float64) {
@@ -586,44 +567,6 @@ func (s *Style) Wear(l *Layer, seed string, right int) {
 	l.Paint(d, 0, 0, black.WithA(0.8))
 	l.Paint(f, ax, ay, white.WithA(0.12))
 	l.Paint(f, 0, 0, black.WithA(0.22))
-}
-
-func drawLine(l *Layer, x0, y0, x1, y1 int, c RGBA) {
-	dx, dy := abs(x1-x0), -abs(y1-y0)
-	sx, sy := sign(x1-x0), sign(y1-y0)
-	e := dx + dy
-	for {
-		l.Blend(x0, y0, c, 1)
-		if x0 == x1 && y0 == y1 {
-			return
-		}
-		e2 := 2 * e
-		if e2 >= dy {
-			e += dy
-			x0 += sx
-		}
-		if e2 <= dx {
-			e += dx
-			y0 += sy
-		}
-	}
-}
-
-func abs(v int) int {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
-func sign(v int) int {
-	switch {
-	case v > 0:
-		return 1
-	case v < 0:
-		return -1
-	}
-	return 0
 }
 
 func rgbToHSL(r, g, b float64) (h, s, l float64) {

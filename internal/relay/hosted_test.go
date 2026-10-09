@@ -177,7 +177,6 @@ func TestHostedAdmissionPreservesCreatorAndRoomIsolation(t *testing.T) {
 	}
 	for _, change := range []func(*LocalHello){
 		func(h *LocalHello) { h.Seat = 0 },
-		func(h *LocalHello) { h.Identity.Build[0]++ },
 		func(h *LocalHello) { h.Identity.Content[0]++ },
 		func(h *LocalHello) { h.Identity.Map[0]++ },
 		func(h *LocalHello) { h.Identity.Rules.Name = "strict" },
@@ -392,7 +391,13 @@ func TestHostedMalformedMessagesAndPendingBounds(t *testing.T) {
 			s := listenHostedTest(t, HostedConfig{InsecureLoopback: true}, hostedDefaultTimeouts)
 			c, _ := dialHostedTest(t, s, "", 0)
 			if err := writeLocalFrame(c.conn, body); err != nil {
-				t.Fatal(err)
+				// The relay refuses an oversized frame from its length
+				// prefix and may close before the rest is written.
+				if name != "oversized frame" {
+					t.Fatal(err)
+				}
+				awaitHostedCapacity(t, s, 0, 0)
+				return
 			}
 			if err := hostedReadError(t, c); err == nil || err == io.EOF {
 				t.Fatalf("malformed message accepted: %v", err)
@@ -612,7 +617,7 @@ func TestHostedVersionAndHelloFraming(t *testing.T) {
 	// A version-1 client is told both versions.
 	old := bytes.Clone(body)
 	old[1] = 1
-	if _, _, _, _, err := decodeHostedHello(old); err == nil || !strings.Contains(err.Error(), "version 2; this client sent version 1") {
+	if _, _, _, _, err := decodeHostedHello(old); err == nil || !strings.Contains(err.Error(), "version 3; this client sent version 1") {
 		t.Fatalf("version mismatch: %v", err)
 	}
 	for _, code := range []string{"SHORT", "AAAAAAA", "AAAAA0", "aaaaaa", "AAA AA"} {

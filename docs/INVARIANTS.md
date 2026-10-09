@@ -251,14 +251,11 @@ refuses a shatter fragment before that fragment's simulation-stream draws
 its records live is a determinism input too (DESIGN_MULTIPLAYER §5.3 L9).
 
 **Multiplayer seed handoff** (DESIGN_MULTIPLAYER §8.3). In a lockstep battle
-the relay draws the explicit seed pair and every client receives it in the
-start message; it enters composition through the same handoff a
-single-player battle uses. The relay is not an authoritative package, so its
-use of `crypto/rand` is outside this rule, and no client-side history seeds
-either stream. Until the two-stage start exists, the first online lobby's host
-draws the pair in `cmd/nanolathe` when it freezes the configuration, whose
-digest covers it (DESIGN_MULTIPLAYER §16.6); that is also outside every
-authoritative package.
+the lobby's host draws the explicit seed pair in `cmd/nanolathe` when it
+freezes the configuration, whose digest covers it, and every client enters it
+into composition through the same handoff a single-player battle uses. The
+host's `crypto/rand` is outside every authoritative package, and no
+client-side history seeds either stream.
 
 **Check.** Identical seeded session setups have stable simulation and CRT draw
 counts; setup and briefing draws leave the retained battle CRT fresh; the

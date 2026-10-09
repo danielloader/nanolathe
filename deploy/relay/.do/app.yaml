@@ -21,7 +21,7 @@ services:
     instance_size_slug: apps-s-1vcpu-0.5gb
     health_check:
       # The image's separate health listener, outside the relay's
-      # 128-connection limit; the platform never routes it publicly.
+      # connection limit; the platform never routes it publicly.
       http_path: /healthz
       port: 8081
       initial_delay_seconds: 5

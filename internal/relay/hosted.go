@@ -42,12 +42,14 @@ const (
 	hostedReadyMessage       = hostedLobbyMessage + 1
 	hostedStartMessage       = hostedReadyMessage + 1
 	hostedStartedMessage     = hostedStartMessage + 1
-	hostedVersion            = 2
+	hostedVersion            = 3
 	hostedCodeLength         = 6
 	// A creator's hello flag: start as soon as the second seat joins, for the
 	// command-line play test and its probes, which have no lobby.
-	hostedAutoStart         = 1
-	hostedMaxConfigBytes    = 64 << 10
+	hostedAutoStart      = 1
+	hostedMaxConfigBytes = 64 << 10
+	// Lobby state bit: both seats are ready and their rehearsals disagree.
+	hostedLobbyMismatch     = 16
 	hostedMaxHandshakeFrame = localMaxHelloBytes + hostedMaxConfigBytes + 64
 	hostedCodeAlphabet      = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	hostedMaxAhead          = 30
@@ -482,7 +484,9 @@ func dialHostedStream(ctx context.Context, address, room string, hello LocalHell
 		return nil, "", err
 	}
 	c := newHostedClient(conn)
-	if err := c.writeMessage([]byte{hostedReadyMessage, 1}); err != nil {
+	// A command-line seat runs no rehearsal; its zero digest matches only
+	// another command-line seat, and an auto-start room ignores digests.
+	if err := c.writeMessage(append([]byte{hostedReadyMessage, 1}, make([]byte, 32)...)); err != nil {
 		_ = c.Close()
 		return nil, "", err
 	}

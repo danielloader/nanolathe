@@ -22,10 +22,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/version"
 )
 
-// currentBuildManifest is the running binary's manifest. Tests that exercise
-// a whole match substitute a stamped manifest; production never does.
-var currentBuildManifest = version.CurrentBuildManifest
-
 // onlineMatchSpec is everything the host freezes into a configuration beyond
 // the fixed two-human Modern shape of §16.4: the map, the seed pair, the
 // content transformations and the mounted mod.
@@ -140,43 +136,42 @@ func drawOnlineSeeds() (sim, crt uint32, err error) {
 
 // composeOnlineMatch freezes the inputs config names from cs, reports this
 // seat's identity and composes the battle prepared for its first grant. It
-// refuses an unstamped build: a normal room admits only a stamped release.
-func composeOnlineMatch(cs *contentSet, cat *content.Catalog, config session.EffectiveMatchConfig, seat uint8) (*session.Session, netproto.Identity, error) {
+// returns the frozen inputs too, which the pre-start rehearsal reuses. The
+// build is advisory: the rehearsal, not a stamp, shows whether two seats
+// simulate alike (DESIGN_MULTIPLAYER §16.7).
+func composeOnlineMatch(cs *contentSet, cat *content.Catalog, config session.EffectiveMatchConfig, seat uint8) (*session.Session, *content.SimulationInputs, netproto.Identity, error) {
 	var identity netproto.Identity
 	if err := onlineContentRefusal(cs); err != nil {
-		return nil, identity, err
+		return nil, nil, identity, err
 	}
-	build, err := currentBuildManifest()
-	if err != nil {
-		return nil, identity, err
-	}
-	if !build.Stamped() {
-		return nil, identity, localMultiplayerError("binary", "a stamped build shared by both clients")
-	}
+	// An unreadable stamp still names the running toolchain, which is all
+	// an advisory build identity needs.
+	build, _ := version.CurrentBuildManifest()
+	var err error
 	if cat == nil {
 		if cat, err = cs.compileCatalog(nil); err != nil {
-			return nil, identity, err
+			return nil, nil, identity, err
 		}
 	}
 	inputs, err := session.FreezeMatchInputs(cs.fs, cat, config, nil)
 	if err != nil {
-		return nil, identity, err
+		return nil, nil, identity, err
 	}
 	identity, err = (session.MatchJoin{Build: session.MatchBuild{Running: build}, Inputs: inputs, Config: config, Mod: matchModOf(cs.mod)}).Identity()
 	if err != nil {
-		return nil, identity, err
+		return nil, nil, identity, err
 	}
 	sess, err := session.NewPlaytestSkirmish(inputs, config, seat, nil)
 	if err != nil {
-		return nil, identity, err
+		return nil, nil, identity, err
 	}
 	// Entry dispatch only installs the battle state; it runs no tick, so
 	// presentation composed after it sees the same world it would have seen
 	// before. The driver requires it, and the hello's checksum follows it.
 	if err := sess.PrepareGrantedBattle(); err != nil {
-		return nil, identity, err
+		return nil, nil, identity, err
 	}
-	return sess, identity, nil
+	return sess, inputs, identity, nil
 }
 
 // onlineModName names a configuration's mod for the player.

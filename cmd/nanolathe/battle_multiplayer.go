@@ -127,13 +127,8 @@ func composeLocalMultiplayer(o Options, cs *contentSet) (headless.FreshBattle, n
 	if cs.mod != nil || cs.config != nil || cs.manualRoots {
 		return empty, identity, localMultiplayerError("mounted content", "base content with no mod or config")
 	}
-	build, err := currentBuildManifest()
-	if err != nil {
-		return empty, identity, err
-	}
-	if !build.Stamped() {
-		return empty, identity, localMultiplayerError("binary", "a stamped build shared by both clients")
-	}
+	// Any build may play: command-line rooms start without a rehearsal, and
+	// the 30-tick unit checksum stops a match whose seats diverge.
 	cat, err := cs.compileCatalog(nil)
 	if err != nil {
 		return empty, identity, err
@@ -150,7 +145,7 @@ func composeLocalMultiplayer(o Options, cs *contentSet) (headless.FreshBattle, n
 	if o.LocalMPJoin != "" || o.RelayRoom != "" {
 		seat = 1
 	}
-	sess, identity, err := composeOnlineMatch(cs, cat, config, seat)
+	sess, _, identity, err := composeOnlineMatch(cs, cat, config, seat)
 	if err != nil {
 		return empty, identity, err
 	}

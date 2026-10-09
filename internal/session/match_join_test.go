@@ -206,29 +206,28 @@ func TestMatchJoinDoesNotShortCircuitOnMatchingDigests(t *testing.T) {
 	}
 }
 
-// A normal room admits only a stamped release build; an unstamped or dirty
-// build joins a development room, whose explicit common manifest is a
-// parameter of the comparison, never an environment flag. Platform variants
-// live inside one common manifest, so another admitted variant of the same
-// release reports the same identity, while a manifest admitting other
-// variants is another release (M2-C10).
+// In a normal room an unstamped or dirty build is not refused and reports a
+// zero build identity, because the rehearsal rather than a stamp shows that
+// two builds agree (DESIGN_MULTIPLAYER §16.7). A development room's explicit
+// common manifest is a parameter of the comparison, never an environment
+// flag. Platform variants live inside one common manifest, so another
+// admitted variant of the same release reports the same identity, while a
+// manifest admitting other variants is another release (M2-C10).
 func TestMatchJoinBuildAdmission(t *testing.T) {
 	local, remote := joinPair(t)
 	release := joinRelease()
 	unstamped := version.BuildManifest{GoVersion: "go1.27.1", Variants: []version.BuildVariant{{GOOS: "darwin", GOARCH: "arm64", ArchitectureLevel: "v8.0"}}}
 
-	dirty := local
-	dirty.Build = MatchBuild{Running: unstamped}
-	if _, err := dirty.Identity(); !errors.Is(err, ErrMatchBuildMismatch) || !errors.Is(err, version.ErrUnstampedBuild) {
-		t.Fatalf("an unstamped build reported an identity for a normal room: %v", err)
+	dirty, dirtyRemote := local, remote
+	dirty.Build, dirtyRemote.Build = MatchBuild{Running: unstamped}, MatchBuild{Running: unstamped}
+	if id := joinIdentity(t, dirty); id.Build != ([32]byte{}) || id.Content != local.Inputs.Digest() || id.Configuration != local.Config.Digest() {
+		t.Fatalf("an unstamped build in a normal room reported %+v, want a zero build beside its other identities", id)
 	}
-	other := joinIdentity(t, remote)
+	requireJoinKinds(t, "two unstamped seats", CompareMatchIdentity(dirty, joinIdentity(t, dirtyRemote)))
+	// The other categories are still compared beside an advisory build.
+	other := joinIdentity(t, dirtyRemote)
 	other.Content[0] ^= 1
-	err := CompareMatchIdentity(dirty, other)
-	requireJoinKinds(t, "unstamped in a normal room", err, ErrMatchBuildMismatch, ErrMatchContentMismatch)
-	if !errors.Is(err, version.ErrUnstampedBuild) {
-		t.Fatalf("the refusal does not name the unstamped build: %v", err)
-	}
+	requireJoinKinds(t, "unstamped seats with different content", CompareMatchIdentity(dirty, other), ErrMatchContentMismatch)
 
 	dev := release
 	dev.SourceTree = sha256.Sum256([]byte("development source inventory"))

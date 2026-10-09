@@ -14,7 +14,10 @@ import (
 // (DESIGN_MULTIPLAYER §16.6.1). Seat 0 is the creator.
 type HostedLobbyState struct {
 	Present, Ready [2]bool
-	Started        bool
+	// Mismatch reports both seats ready with different rehearsal digests:
+	// their simulations disagree, so the match cannot start (§16.7).
+	Mismatch bool
+	Started  bool
 }
 
 // HostedLobby is one seat's connection to a hosted room from Create or Join
@@ -120,6 +123,7 @@ func (l *HostedLobby) read() {
 				l.state.Present[i] = bits&(1<<i) != 0
 				l.state.Ready[i] = bits&(4<<i) != 0
 			}
+			l.state.Mismatch = bits&hostedLobbyMismatch != 0
 			l.mu.Unlock()
 		case hostedStartedMessage:
 			if err := r.End(); err != nil {
@@ -167,15 +171,17 @@ func (l *HostedLobby) State() (HostedLobbyState, error) {
 	return l.state, l.err
 }
 
-func (l *HostedLobby) SetReady(ready bool) error {
+// SetReady reports this seat ready with the digest of its rehearsal
+// (session.RehearsalDigest), or not ready. The relay starts the match only
+// when both seats are ready with equal digests (§16.7).
+func (l *HostedLobby) SetReady(ready bool, rehearsal [32]byte) error {
 	if _, err := l.State(); err != nil {
 		return err
 	}
-	flag := byte(0)
-	if ready {
-		flag = 1
+	if !ready {
+		return l.client.writeMessage([]byte{hostedReadyMessage, 0})
 	}
-	return l.client.writeMessage([]byte{hostedReadyMessage, flag})
+	return l.client.writeMessage(append([]byte{hostedReadyMessage, 1}, rehearsal[:]...))
 }
 
 // Start asks the relay to begin the match; only seat 0 may, once both seats

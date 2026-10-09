@@ -77,14 +77,15 @@ func TestHostedLobbyDescribeReadyAndStart(t *testing.T) {
 			t.Fatal("the joining seat started the match")
 		}
 		// A start before both seats are ready only repeats the state.
-		if err := host.SetReady(true); err != nil {
+		rehearsal := [32]byte{7}
+		if err := host.SetReady(true, rehearsal); err != nil {
 			t.Fatal(err)
 		}
 		if err := host.Start(); err != nil {
 			t.Fatal(err)
 		}
 		awaitLobby(t, joiner, "the host ready", func(s HostedLobbyState, err error) bool { return err == nil && s.Ready[0] })
-		if err := joiner.SetReady(true); err != nil {
+		if err := joiner.SetReady(true, rehearsal); err != nil {
 			t.Fatal(err)
 		}
 		state, _ := awaitLobby(t, host, "both ready", func(s HostedLobbyState, err error) bool { return err == nil && s.Ready[0] && s.Ready[1] })
@@ -120,7 +121,7 @@ func TestHostedLobbySeatsLeaveAndExpire(t *testing.T) {
 	options := HostedDialOptions{InsecureLoopback: true}
 	host := openLobbyTest(t, s.Addr(), "", 0, []byte{1}, options)
 	first := openLobbyTest(t, s.Addr(), host.Code(), 1, nil, options)
-	if err := first.SetReady(true); err != nil {
+	if err := first.SetReady(true, [32]byte{1}); err != nil {
 		t.Fatal(err)
 	}
 	awaitLobby(t, host, "the first joiner ready", func(s HostedLobbyState, err error) bool { return err == nil && s.Ready[1] })
@@ -165,7 +166,8 @@ func TestHostedCommandLineClientJoinsLobby(t *testing.T) {
 	host := openLobbyTest(t, s.Addr(), "", 0, []byte{1}, options)
 	joiner, _ := dialHostedTest(t, s, host.Code(), 1)
 	awaitLobby(t, host, "the command-line joiner ready", func(s HostedLobbyState, err error) bool { return err == nil && s.Present[1] && s.Ready[1] })
-	if err := host.SetReady(true); err != nil {
+	// A command-line seat runs no rehearsal, so only a zero digest matches it.
+	if err := host.SetReady(true, [32]byte{}); err != nil {
 		t.Fatal(err)
 	}
 	awaitLobby(t, host, "both ready", func(s HostedLobbyState, err error) bool { return err == nil && s.Ready[0] })
@@ -179,4 +181,53 @@ func TestHostedCommandLineClientJoinsLobby(t *testing.T) {
 		t.Fatalf("first grant: %+v", g)
 	}
 	_ = battle.Close()
+}
+
+// Two seats whose rehearsals disagree cannot start (DESIGN_MULTIPLAYER §16.7),
+// and the build identity is advisory: a joiner reporting another build is
+// admitted, since only the rehearsal shows whether they simulate alike.
+func TestHostedLobbyRehearsalGatesStart(t *testing.T) {
+	s := listenHostedTest(t, HostedConfig{InsecureLoopback: true}, hostedDefaultTimeouts)
+	options := HostedDialOptions{InsecureLoopback: true}
+	host := openLobbyTest(t, s.Addr(), "", 0, []byte{1}, options)
+	other := localTestHello(1)
+	other.Identity.Build = [32]byte{9, 9, 9}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	joiner, err := OpenHostedLobby(ctx, s.Addr(), host.Code(), other, nil, options)
+	if err != nil {
+		t.Fatalf("a different advisory build was refused: %v", err)
+	}
+	t.Cleanup(func() { _ = joiner.Close() })
+	if err := host.SetReady(true, [32]byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := joiner.SetReady(true, [32]byte{2}); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range []*HostedLobby{host, joiner} {
+		awaitLobby(t, l, "the mismatch", func(s HostedLobbyState, err error) bool { return err == nil && s.Mismatch })
+	}
+	if err := host.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Un-readying on the same connection orders after the Start, so once
+	// the joiner sees it the refused Start has been handled.
+	if err := host.SetReady(false, [32]byte{}); err != nil {
+		t.Fatal(err)
+	}
+	if state, _ := awaitLobby(t, joiner, "the host un-ready", func(s HostedLobbyState, err error) bool { return err == nil && !s.Ready[0] }); state.Started {
+		t.Fatal("a start sent during a mismatch began the match")
+	}
+	// Both re-ready alike; Start then succeeds.
+	for _, l := range []*HostedLobby{host, joiner} {
+		if err := l.SetReady(true, [32]byte{1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	awaitLobby(t, host, "agreement", func(s HostedLobbyState, err error) bool { return err == nil && s.Ready[0] && s.Ready[1] && !s.Mismatch })
+	if err := host.Start(); err != nil {
+		t.Fatal(err)
+	}
+	awaitLobby(t, joiner, "Started", func(s HostedLobbyState, err error) bool { return err == nil && s.Started })
 }

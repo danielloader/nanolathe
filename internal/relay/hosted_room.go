@@ -123,6 +123,8 @@ func (r *hostedRoom) run() {
 	// (DESIGN_MULTIPLAYER §16.6.1). Grants begin only after Started.
 	var started bool
 	var lobbyReady [2]bool
+	var rehearsal [2][32]byte // each ready seat's rehearsal digest (§16.7)
+	mismatch := func() bool { return lobbyReady[0] && lobbyReady[1] && rehearsal[0] != rehearsal[1] }
 	lobby := func() error {
 		var bits uint8
 		for i, peer := range peers {
@@ -132,6 +134,9 @@ func (r *hostedRoom) run() {
 			if lobbyReady[i] {
 				bits |= 4 << i
 			}
+		}
+		if mismatch() {
+			bits |= hostedLobbyMismatch
 		}
 		for _, peer := range peers {
 			if peer != nil {
@@ -210,7 +215,7 @@ func (r *hostedRoom) run() {
 					// A joiner leaving the lobby frees seat 2 for another.
 					_ = e.peer.conn.Close()
 					e.peer.stop()
-					peers[1], lobbyReady[1] = nil, false
+					peers[1], lobbyReady[1], rehearsal[1] = nil, false, [32]byte{}
 					r.server.mu.Lock()
 					r.joined = false
 					r.server.mu.Unlock()
@@ -251,13 +256,17 @@ func (r *hostedRoom) run() {
 			switch d.U8() {
 			case hostedReadyMessage:
 				flag := d.Bool()
+				var digest [32]byte
+				if flag {
+					digest = d.Digest()
+				}
 				if err := d.End(); err != nil {
 					finish(err)
 					return
 				}
 				// After Start a late ready changes nothing (§16.6.1).
 				if !started {
-					lobbyReady[seat] = flag
+					lobbyReady[seat], rehearsal[seat] = flag, digest
 					if err := lobby(); err != nil {
 						finish(err)
 						return
@@ -275,9 +284,10 @@ func (r *hostedRoom) run() {
 					finish(hostedError("start", "the room's host"))
 					return
 				}
-				// A start that races an unready joiner just repeats the state.
+				// A start that races an unready joiner, or meets two seats
+				// whose rehearsals disagree, just repeats the state (§16.7).
 				var err error
-				if peers[1] == nil || !lobbyReady[0] || !lobbyReady[1] {
+				if peers[1] == nil || !lobbyReady[0] || !lobbyReady[1] || mismatch() {
 					err = lobby()
 				} else {
 					err = begin()

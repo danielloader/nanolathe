@@ -139,8 +139,9 @@ conversion is needed. Music starts when a battle begins. Options → Music
 controls volume, playback mode and track selection. The main menu retains its
 retail ambient loop.
 
-Multiplayer is designed and not yet built: see
-[docs/DESIGN_MULTIPLAYER.md](docs/DESIGN_MULTIPLAYER.md). For implemented
+Online multiplayer for two players starts from the main menu's MULTI button:
+one player creates a game and shares its room code, the other joins with it
+(see [docs/DESIGN_MULTIPLAYER.md](docs/DESIGN_MULTIPLAYER.md)). For implemented
 contracts and known gaps, read the design document for the relevant engine
 area.
 

@@ -206,7 +206,6 @@ func TestLocalHelloComparesEveryIdentity(t *testing.T) {
 		name   string
 		change func(*LocalHello)
 	}{
-		{"build", func(h *LocalHello) { h.Identity.Build[0]++ }},
 		{"content", func(h *LocalHello) { h.Identity.Content[0]++ }},
 		{"map", func(h *LocalHello) { h.Identity.Map[0]++ }},
 		{"rules", func(h *LocalHello) { h.Identity.Rules.Name = "strict" }},
@@ -564,5 +563,16 @@ func TestLocalEnvelopeBoundsAndLiteralFraming(t *testing.T) {
 	want := []byte{10, localGrantMessage, 2, 1, 1, 1, 1, 1, 2, 0, 255}
 	if !bytes.Equal(stream.Bytes(), want) {
 		t.Fatalf("literal grant frame = %x, want %x", stream.Bytes(), want)
+	}
+}
+
+func TestLocalHelloIgnoresTheAdvisoryBuild(t *testing.T) {
+	r := listenLocalTest(t)
+	c0 := dialLocalTest(t, r.Addr(), localTestHello(0))
+	h := localTestHello(1)
+	h.Identity.Build[0]++
+	c1 := dialLocalTest(t, r.Addr(), h)
+	if g := readLocalPair(t, [2]*LocalClient{c0, c1}); g.Tick != 1 {
+		t.Fatalf("a different advisory build blocked the first grant: %+v", g)
 	}
 }

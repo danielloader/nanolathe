@@ -30,7 +30,7 @@ has its own design document; this one only says where the boundaries are.
 | [DESIGN_COMMUNITY_PATCH](DESIGN_COMMUNITY_PATCH.md) | the Community 3.9 gameplay profile: the third reserved rule set, the feature table a content set or player configures, the mapping of every community-patch contract onto a seam, and the decisions still open (design, not implemented) |
 | [DESIGN_MODS_MUTATORS](DESIGN_MODS_MUTATORS.md) | the mod library and the nanolathe.gg catalogue, global mutators applied to the per-battle catalog in every mode, and the save sidecar that records and restores a match's selection (implemented; follow-ups in its §13 unit 9) |
 | [DESIGN_SURVIVAL](DESIGN_SURVIVAL.md) | the Survival single-player mode: the attacker slot, the wave director, build-tree tech tiers, the no-victory result and score, available in every gameplay mode |
-| [DESIGN_MULTIPLAYER](DESIGN_MULTIPLAYER.md) | adopted 2026-10-01, not yet implemented: relayed deterministic lockstep for LAN and online battles, the determinism contract it needs, replays, spectators and the relay server, delivered in the milestones of its §16 |
+| [DESIGN_MULTIPLAYER](DESIGN_MULTIPLAYER.md) | relayed deterministic lockstep: online two-human skirmish through the hosted relay and its lobby, the determinism contract, command stream, configuration and identity, the rehearsal check, and the milestones still to build (replays, more seats, Survival online) |
 
 Rules that cut across every package are in [INVARIANTS.md](INVARIANTS.md);
 places where the reference install disproves the written contract are in
@@ -46,11 +46,10 @@ damage, the COB script machine, features and fire, the skirmish planner, the
 GUI and HUD, camera and minimap, audio, effects, and save/load of a
 single-player battle.
 
-Multiplayer skirmish and Survival, with replays, came into scope on
-2026-10-01 and are not yet implemented. DESIGN_MULTIPLAYER owns the design —
-relayed deterministic lockstep, in every gameplay mode — and stages the work
-in its §16; until a milestone lands, the paragraphs above describe what the
-engine does.
+Online multiplayer runs two-human Modern skirmish by relayed deterministic
+lockstep through the hosted relay, started from the main menu's MULTI lobby.
+DESIGN_MULTIPLAYER owns the design and lists what is still to build: more
+seats, Survival online and replays.
 
 Authoritative behavior follows retail, including documented faults, except for
 the explicit Modern gameplay contracts (terrain admission in

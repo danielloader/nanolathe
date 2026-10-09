@@ -174,12 +174,13 @@ func decodeLocalGrant(r *netproto.Reader) (LocalGrant, error) {
 	return g, r.End()
 }
 
+// The build identity is advisory and never compared: a rehearsal digest, not a
+// self-reported build, shows that two seats simulate alike (DESIGN_MULTIPLAYER
+// §16.7).
 func localIdentityDifference(a, b LocalHello) string {
 	switch {
 	case a.Identity.Protocol != b.Identity.Protocol:
 		return "protocol"
-	case a.Identity.Build != b.Identity.Build:
-		return "build"
 	case a.Identity.Content != b.Identity.Content:
 		return "content"
 	case a.Identity.Map != b.Identity.Map:

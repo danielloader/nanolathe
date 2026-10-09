@@ -37,7 +37,6 @@ func onlineTestSelection(t *testing.T) (content.Mutators, content.Restrictions) 
 // the same content, reports the host's identity and initial checksum; a
 // different restriction set is a different configuration (§16.6).
 func TestOnlineConfigurationAdoptionRetail(t *testing.T) {
-	useStampedTestBuild(t)
 	cat, fs := retailcat.Shared(t)
 	cs := &contentSet{fs: fs, unmappedMount: fs, profile: "retail", limits: content.RetailLimits()}
 	mutators, restrictions := onlineTestSelection(t)
@@ -68,16 +67,27 @@ func TestOnlineConfigurationAdoptionRetail(t *testing.T) {
 	if adopted, err := session.RestrictionsFromMatch(cat, joinConfig.Request().UnitRestrictions); err != nil || !adopted.Equal(restrictions) {
 		t.Fatalf("adopted restrictions %v: %v", adopted, err)
 	}
-	host, hostID, err := composeOnlineMatch(cs, cat, hostConfig, 0)
+	host, hostInputs, hostID, err := composeOnlineMatch(cs, cat, hostConfig, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	joiner, joinID, err := composeOnlineMatch(cs, cat, joinConfig, 1)
+	joiner, joinInputs, joinID, err := composeOnlineMatch(cs, cat, joinConfig, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if hostID != joinID || host.UnitStateChecksum() != joiner.UnitStateChecksum() {
 		t.Fatal("the joiner's identity or initial checksum differs from the host's")
+	}
+	// The rehearsal reuses what each seat composed from.
+	if hostInputs == nil || hostInputs.Digest() != joinInputs.Digest() {
+		t.Fatal("the seats froze different inputs for the rehearsal")
+	}
+	hostRehearsal, err := rehearsalDigest(hostInputs, hostConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joinRehearsal, err := rehearsalDigest(joinInputs, joinConfig); err != nil || joinRehearsal != hostRehearsal {
+		t.Fatalf("the seats' rehearsals disagree: %v", err)
 	}
 	if host.LocalOwner != 0 || joiner.LocalOwner != 1 || host.IsPendingBattle() || joiner.IsPendingBattle() {
 		t.Fatal("seats or prepared entry wrong")
@@ -132,9 +142,9 @@ func awaitOnlineShells(t *testing.T, what string, done func() bool, shells ...*g
 
 // One headless two-client match through a real local relay, started from the
 // lobby with a mutator set and unit restrictions: create, describe, join,
-// ready, start and granted ticks agreed by the relay's checksums (§16.6.3).
+// rehearse, ready with the digests, start and granted ticks agreed by the
+// relay's checksums (§16.6.3, §16.7).
 func TestOnlineLobbyTwoClientsRetail(t *testing.T) {
-	useStampedTestBuild(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	server, err := relay.ListenHostedWebSocket("127.0.0.1:0", relay.HostedConfig{InsecureLoopback: true}, false)
@@ -189,6 +199,10 @@ func TestOnlineLobbyTwoClientsRetail(t *testing.T) {
 	hostRoom, guestRoom := host.online.prepared.config, guest.online.prepared.config
 	if guestRoom.Digest() != hostRoom.Digest() || guestRoom.Request().Mutators != mutators || len(guestRoom.Request().UnitRestrictions) == 0 || guestRoom.Request().MapName != mapName {
 		t.Fatal("the guest did not adopt the host's configuration")
+	}
+	awaitOnlineShells(t, "both rehearsals", func() bool { return host.online.rehearsed && guest.online.rehearsed }, host, guest)
+	if host.online.digest != guest.online.digest || host.online.digest == ([32]byte{}) {
+		t.Fatal("equal seats rehearsed different digests")
 	}
 	host.activateGadget("READY")
 	guest.activateGadget("READY")
@@ -254,9 +268,10 @@ func TestOnlineScreenCapture(t *testing.T) {
 	}
 	cl.SetUIStage(gameShellUIStage{shell: shell})
 	shell.openMenu(modeMenuMain)
+	prefix := os.Getenv("NANOLATHE_ONLINE_CAPTURE_PREFIX")
 	capture := func(name string) {
 		img := cl.ComposeFrame()
-		f, err := os.Create(filepath.Join(out, "u3-"+name+".png"))
+		f, err := os.Create(filepath.Join(out, prefix+name+".png"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -266,12 +281,6 @@ func TestOnlineScreenCapture(t *testing.T) {
 		}
 	}
 	capture("main")
-	if err := shell.openOnlineScreen(); err != nil {
-		t.Fatal(err)
-	}
-	capture("online-unstamped")
-	shell.closeOnlineScreen()
-	useStampedTestBuild(t)
 	shell.opts.Mutators, _ = onlineTestSelection(t)
 	if err := shell.openOnlineScreen(); err != nil {
 		t.Fatal(err)
@@ -287,18 +296,27 @@ func TestOnlineScreenCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostLobby := &fakeOnlineLobby{code: "K7M2QX", state: relay.HostedLobbyState{Present: [2]bool{true, true}, Ready: [2]bool{true, false}}}
+	hostLobby := &fakeOnlineLobby{code: "K7M2QX", state: relay.HostedLobbyState{Present: [2]bool{true, true}, Ready: [2]bool{false, true}}}
 	shell.online.status = ""
-	shell.openOnlineLobby(&onlinePrepared{config: config, address: "wss://relay.nanolathe.gg/relay"}, hostLobby)
-	shell.online.ready = true
+	rehearsal := make(chan onlineRehearsal, 1)
+	shell.openOnlineLobby(&onlinePrepared{config: config, address: "wss://relay.nanolathe.gg/relay"}, hostLobby, rehearsal)
+	shell.pollOnline()
+	capture("lobby-checking")
+	rehearsal <- onlineRehearsal{digest: [32]byte{1}}
 	shell.pollOnline()
 	capture("lobby-host")
-	hostLobby.state.Ready[1] = true
+	shell.activateGadget("READY")
+	hostLobby.state.Ready[0] = true
 	shell.pollOnline()
 	capture("lobby-host-ready")
+	hostLobby.state.Mismatch = true
+	shell.pollOnline()
+	capture("lobby-mismatch")
 	shell.leaveOnlineLobby("")
 	guestLobby := &fakeOnlineLobby{code: "K7M2QX", seat: 1, state: relay.HostedLobbyState{Present: [2]bool{true, true}, Ready: [2]bool{false, false}}}
-	shell.openOnlineLobby(&onlinePrepared{config: config, address: "wss://relay.nanolathe.gg/relay"}, guestLobby)
+	done := make(chan onlineRehearsal, 1)
+	done <- onlineRehearsal{digest: [32]byte{1}}
+	shell.openOnlineLobby(&onlinePrepared{config: config, address: "wss://relay.nanolathe.gg/relay"}, guestLobby, done)
 	shell.pollOnline()
 	capture("lobby-guest")
 }

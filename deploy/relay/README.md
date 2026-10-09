@@ -40,15 +40,15 @@ ends active matches. Deploy between play tests. There is no persistent disk.
 
 ## Connect the local game
 
-Both players need the same stamped client build and retail content. Create a
-room:
+Both players need the same game version and retail content. Players normally
+use the main menu's MULTI screen; from the command line, create a room:
 
 ```sh
 ./nanolathe --root ~/TotalAnnihilation --mod none --map 'ashap plateau' --fullscreen=false --relay-address wss://relay.nanolathe.gg/relay
 ```
 
-This creates the room and prints its ten-character code in the terminal and game
-message ring. Start the second client within two minutes, adding its room code:
+This creates the room and prints its six-character code in the terminal and game
+message ring. Start the second client with that room code:
 
 ```sh
 ./nanolathe --root ~/TotalAnnihilation --mod none --map 'ashap plateau' --fullscreen=false --relay-address wss://relay.nanolathe.gg/relay --relay-room ABCDEFGHJK

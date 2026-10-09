@@ -2130,5 +2130,5 @@ Units 2 and 3 can run in parallel after unit 1; unit 4 follows unit 2.
 (R-P12); rebuilding `CANBUILD` lists over a filtered table for both filters
 (§15.4); the equal-name `TODO(question)` (§15.4); the optional allowance on
 capped buttons (§15.8); and a restriction-editing lobby screen with retail's
-seeded-but-unclosed state (DESIGN_MULTIPLAYER §15 Q16). Field 12's online
-enforcement arrived with the first online lobby (DESIGN_MULTIPLAYER §16.6).
+seeded-but-unclosed state (DESIGN_MULTIPLAYER §15 Q16). Online, the lobby
+carries the host's set as field 12 (DESIGN_MULTIPLAYER §16.6).

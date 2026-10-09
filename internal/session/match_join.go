@@ -46,17 +46,23 @@ var (
 const matchMapDomain = "nanolathe/match-map/1"
 
 // MatchBuild is the build a seat joins a room with (§8.7, M2-C10).
+//
+// In a normal room a stamp is not required: a stamped build reports its
+// manifest's digest and an unstamped one reports all zeros. A stamp can be
+// faked, needs installer stamping and a stale one still vouches for edited
+// code, so the pre-start rehearsal (DESIGN_MULTIPLAYER §16.7), which runs the
+// simulation itself, decides whether two builds agree.
 type MatchBuild struct {
 	// Running is this binary's manifest as version.CurrentBuildManifest
 	// reports it: stamped for a release build, unstamped for a development
 	// build or a dirty tree.
 	Running version.BuildManifest
 	// Development is a development room's explicit common build manifest, nil
-	// for a normal room. A normal room admits only a stamped release build. A
-	// development room admits the build its explicit manifest names: an
-	// unstamped build joins under that manifest, and a stamped build only if
-	// it is that manifest. The manifest is the room's agreed value, never a
-	// flag read from the environment or inferred from a clean tree.
+	// for a normal room. A development room admits the build its explicit
+	// manifest names: an unstamped build joins under that manifest, and a
+	// stamped build only if it is that manifest. The manifest is the room's
+	// agreed value, never a flag read from the environment or inferred from a
+	// clean tree.
 	Development *version.BuildManifest
 }
 
@@ -72,9 +78,10 @@ type MatchJoin struct {
 
 // Identity is what this seat reports before it may ready. Every field this
 // seat cannot establish is zero and named in the returned error, by category:
-// an unstamped build in a normal room, a development manifest that cannot be
-// digested, missing inputs or configuration, or a mount whose mod is not the
-// configuration's.
+// a stamped manifest or a development manifest that cannot be digested,
+// missing inputs or configuration, or a mount whose mod is not the
+// configuration's. An unstamped build in a normal room is not refused; it
+// reports a zero build identity (§16.7).
 func (j MatchJoin) Identity() (netproto.Identity, error) {
 	id, errs := j.identity()
 	return id, errors.Join(errs...)
@@ -194,13 +201,14 @@ func compareMatchKind(kind error, local, remote netproto.Identity) error {
 // manifest's digest alone. A platform variant differs inside one common
 // manifest, so another admitted variant of the same release reports the same
 // digest; binary hashes are detached attestations, never a reason to refuse
-// it. A stamped build in a development room must be that room's manifest, so
-// a release cannot pass for another build.
+// it. In a normal room an unstamped build has no manifest digest and reports
+// all zeros rather than a refusal; the rehearsal establishes agreement
+// (§16.7). A stamped build in a development room must be that room's
+// manifest, so a release cannot pass for another build.
 func (b MatchBuild) digest() ([32]byte, error) {
 	if b.Development == nil {
 		if !b.Running.Stamped() {
-			return [32]byte{}, fmt.Errorf("%w: %w", matchJoinError(ErrMatchBuildMismatch, "build",
-				"a stamped release build; an unstamped or dirty build joins only a development room that names an explicit common manifest"), version.ErrUnstampedBuild)
+			return [32]byte{}, nil
 		}
 		d, err := b.Running.Digest()
 		if err != nil {

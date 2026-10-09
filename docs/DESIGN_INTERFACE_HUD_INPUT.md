@@ -4328,7 +4328,7 @@ owned by [DESIGN_MODS_MUTATORS §5.6](DESIGN_MODS_MUTATORS.md#56-community-map-c
 ### Online games
 
 `MULTI` opens the online screen of
-[DESIGN_MULTIPLAYER §16.6](DESIGN_MULTIPLAYER.md#166-first-online-lobby-user-authorized-2026-10-08),
+[DESIGN_MULTIPLAYER §16.6](DESIGN_MULTIPLAYER.md#166-first-online-lobby),
 a Nanolathe window over `MAINMENU` built on the `SELMAP` template and the Mods &
 Mutators backdrop, from the base install as those windows are, so a mod's own
 map-select window cannot move it. The map list, its scrollbar and picture are
@@ -4345,29 +4345,37 @@ Game** (or Enter in the code field) and **Back** (or Escape) complete it; the
 status lines report progress and every refusal in plain words. The last
 server typed is saved as `onlineServer`.
 
-An unstamped build says up front that online play needs a stamped release
-build and greys Create and Join, since composition refuses it. Online games
-need the base game or an installed mod: a `--root` stack or `--mod-config`
+Any build can create and join. Online games need the base game or an
+installed mod: a `--root` stack or `--mod-config`
 content is refused, and so is a mod installed from a folder, which has no
 archive identity to send.
 
 Create freezes the host's skirmish map, mounted mod, mutators and unit
 restrictions under Modern rules with a fresh seed pair, composes and
-prepares the battle on a job goroutine, and only then opens the room. Join
+prepares the battle on a job goroutine, and only then opens the room. The
+same job then runs the pre-start rehearsal of DESIGN_MULTIPLAYER §16.7 on the
+frozen inputs and configuration the battle was composed from. Join
 first asks the relay for the room's configuration and adopts it: the room's
 map, mod, mutators and restrictions, never the joiner's. A room whose mod is
 installed but not mounted is mounted through the ordinary content reload,
 which keeps the player's own mutators and resumes the join on the new shell;
 a missing map or mod, or a different copy of the mod, is named and nothing
-is joined. Back abandons a job, closing any room it opens late.
+is joined. Otherwise the joiner composes, opens the room and rehearses as
+the host does. Back abandons a job, closing any room it opens late.
 
 The lobby window replaces the screen's fields with the room code, drawn in
 `HATT14` in the window's heading colour as two groups of three, **Copy**
 where the host has a clipboard bridge (macOS writes AppKit plain text; other
 hosts hide it), both seats with their readiness and
-which seat is this player's. **Ready**/**Not ready** toggles this seat;
-**Start** is the host's and is greyed until both seats are present and
-ready; **Leave** (or Escape) leaves the room. The lobby is polled every
+which seat is this player's. While the rehearsal runs the status line says
+the game is being checked and **Ready** is greyed; a rehearsal that fails is
+reported and Ready stays greyed. **Ready** sends this seat's rehearsal
+digest and **Not ready** withdraws it. **Start** is the host's and is greyed
+until both seats are present and ready with equal digests: when both are
+ready with different digests the relay reports a mismatch, which the status
+line states in plain words ("Your games simulate differently. Both players
+need the same version.") while Start stays greyed. **Leave** (or Escape)
+leaves the room. The lobby is polled every
 step; a relay failure — the host leaving, the 30-minute wait, a dropped
 connection — returns to the online screen with its reason. Started enters
 the prepared battle through the paced lockstep driver, as the command-line

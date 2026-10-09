@@ -118,9 +118,10 @@ func TestLocalMultiplayerConfigIsCommonAndExplicit(t *testing.T) {
 	if got := seeded.Request(); got.SimulationSeed != 29 || got.CRTSeed != 29 {
 		t.Fatal("explicit seed not applied to both streams")
 	}
-	// An ordinary test binary cannot enter the relay by inventing a manifest.
+	// An ordinary, unstamped test binary may play; this empty content is
+	// refused for its content, not for the build.
 	_, _, err = composeLocalMultiplayer(second, &contentSet{fs: &vfs.FS{}, profile: "retail", limits: content.RetailLimits()})
-	if err == nil || !strings.Contains(err.Error(), "stamped") {
+	if err == nil || strings.Contains(err.Error(), "stamped") || strings.Contains(err.Error(), "logical path binary") {
 		t.Fatalf("unstamped launch: %v", err)
 	}
 }

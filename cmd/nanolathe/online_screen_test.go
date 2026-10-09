@@ -21,27 +21,8 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/relay"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
-	"github.com/nanolathe-gg/nanolathe/internal/version"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
-
-// useStampedTestBuild stands in a stamped release manifest for the test
-// binary, which is never stamped. The manifest is authored here.
-func useStampedTestBuild(t *testing.T) {
-	t.Helper()
-	saved := currentBuildManifest
-	currentBuildManifest = func() (version.BuildManifest, error) {
-		return version.BuildManifest{
-			SourceTree: sha256.Sum256([]byte("online test source")),
-			GoVersion:  "go1.27.1",
-			GoMod:      sha256.Sum256([]byte("go.mod")),
-			GoSum:      sha256.Sum256([]byte("go.sum")),
-			BuildArgs:  []string{"-mod=readonly", "-trimpath", "./cmd/nanolathe"},
-			Variants:   []version.BuildVariant{{GOOS: "darwin", GOARCH: "arm64", ArchitectureLevel: "v8.0", ToolchainArchive: sha256.Sum256([]byte("darwin"))}},
-		}, nil
-	}
-	t.Cleanup(func() { currentBuildManifest = saved })
-}
 
 // useOnlineTestTemplate replaces the SELMAP template with an authored window
 // of the same shape, so the online windows build without retail assets.
@@ -125,6 +106,7 @@ type fakeOnlineLobby struct {
 	state   relay.HostedLobbyState
 	err     error
 	readies []bool
+	digests [][32]byte
 	starts  int
 	closes  int
 	battle  lockstep.Client
@@ -133,8 +115,9 @@ type fakeOnlineLobby struct {
 func (l *fakeOnlineLobby) Code() string                           { return l.code }
 func (l *fakeOnlineLobby) Seat() uint8                            { return l.seat }
 func (l *fakeOnlineLobby) State() (relay.HostedLobbyState, error) { return l.state, l.err }
-func (l *fakeOnlineLobby) SetReady(ready bool) error {
+func (l *fakeOnlineLobby) SetReady(ready bool, rehearsal [32]byte) error {
 	l.readies = append(l.readies, ready)
+	l.digests = append(l.digests, rehearsal)
 	return nil
 }
 func (l *fakeOnlineLobby) Start() error { l.starts++; return nil }
@@ -199,9 +182,9 @@ func TestMainMenuMultiOpensTheOnlineScreen(t *testing.T) {
 			t.Fatalf("the map chooser's %s stayed on the online screen", name)
 		}
 	}
-	// The test binary is unstamped: it is told so up front and cannot act.
-	if !greyed(p, "CREATE") || !greyed(p, "LOAD") || !strings.Contains(p.TextOf("DESCRIPTION"), "stamped") {
-		t.Fatalf("unstamped build: create greyed %v, join greyed %v, status %q", greyed(p, "CREATE"), greyed(p, "LOAD"), p.TextOf("DESCRIPTION"))
+	// Any build may play: the test binary, which is unstamped, can act.
+	if greyed(p, "CREATE") || greyed(p, "LOAD") || strings.Contains(p.TextOf("DESCRIPTION"), "stamped") {
+		t.Fatalf("create greyed %v, join greyed %v, status %q", greyed(p, "CREATE"), greyed(p, "LOAD"), p.TextOf("DESCRIPTION"))
 	}
 	g.activateGadget("PREVMENU")
 	if g.online != nil || g.activePanel() != main {
@@ -253,7 +236,6 @@ func TestOnlineRefusalTextIsPlain(t *testing.T) {
 		{relayRefusal("hello mod", "identical values from both seats"), "mod differs"},
 		{relayRefusal("hello initial checksum", "identical values from both seats"), "(initial checksum)"},
 		{relayRefusal("handshake", "hosted protocol version 2; this client sent version 1"), "different online protocol"},
-		{localMultiplayerError("binary", "a stamped build shared by both clients"), "stamped release build"},
 		{localMultiplayerError("mounted content", "the base game or an installed mod"), "base game or an installed mod"},
 		{&content.RestrictionsError{Issues: []content.RestrictionIssue{{Unit: "armcom", Reason: content.RestrictionRemovesCommander}}}, "armcom"},
 		{errors.New("nanolathe: relay stream failed: logical path hosted dial, providers searched [relay transport], expected a complete transport message: dial tcp: lookup relay.example.test: no such host"), "Could not reach the server: dial tcp: lookup relay.example.test: no such host"},
@@ -265,7 +247,6 @@ func TestOnlineRefusalTextIsPlain(t *testing.T) {
 }
 
 func TestOnlineJoinChecksTheRoomBeforeComposing(t *testing.T) {
-	useStampedTestBuild(t)
 	fake := &fakeOnlineRelay{}
 	useOnlineTestRelay(t, fake)
 	g := onlineTestShell(t)
@@ -274,7 +255,7 @@ func TestOnlineJoinChecksTheRoomBeforeComposing(t *testing.T) {
 	}
 	p := g.online.panel
 	if greyed(p, "LOAD") || greyed(p, "CREATE") {
-		t.Fatal("a stamped build cannot act")
+		t.Fatal("the screen cannot act")
 	}
 	// A malformed code never reaches the server.
 	p.SetText("ROOMCODE", "abc")
@@ -333,7 +314,6 @@ func TestOnlineJoinChecksTheRoomBeforeComposing(t *testing.T) {
 }
 
 func TestOnlineCreateRefusalsAndBusyState(t *testing.T) {
-	useStampedTestBuild(t)
 	fake := &fakeOnlineRelay{}
 	useOnlineTestRelay(t, fake)
 	g := onlineTestShell(t)
@@ -387,7 +367,8 @@ func TestOnlineLobbyStateMachine(t *testing.T) {
 	}
 	stream := &fakeGrantStream{}
 	host := &fakeOnlineLobby{code: "ABC234", battle: stream}
-	g.openOnlineLobby(&onlinePrepared{config: config, address: "wss://relay.example.test/relay"}, host)
+	rehearsal := make(chan onlineRehearsal, 1)
+	g.openOnlineLobby(&onlinePrepared{config: config, address: "wss://relay.example.test/relay"}, host, rehearsal)
 	p := g.online.lobbyPanel
 	if g.activePanel() != p || g.frontend.Panels.Under() != g.online.panel {
 		t.Fatal("the lobby is not over the online screen")
@@ -397,23 +378,49 @@ func TestOnlineLobbyStateMachine(t *testing.T) {
 	}
 	host.state.Present[0] = true
 	g.pollOnline()
-	if !strings.Contains(p.TextOf("DESCRIPTION"), "Send the room code") || p.TextOf("SEAT1") != "Guest: waiting to join" {
-		t.Fatalf("waiting host: %q %q", p.TextOf("DESCRIPTION"), p.TextOf("SEAT1"))
+	if p.TextOf("SEAT1") != "Guest: waiting to join" {
+		t.Fatalf("waiting host: %q", p.TextOf("SEAT1"))
 	}
 	g.activateGadget("COPY")
 	if len(fake.copied) != 1 || fake.copied[0] != "ABC234" {
 		t.Fatalf("copy: %v", fake.copied)
 	}
+	// Ready waits for this seat's rehearsal (§16.7).
+	if !greyed(p, "READY") || !strings.Contains(p.TextOf("DESCRIPTION"), "Checking that your game matches") {
+		t.Fatalf("rehearsing: ready greyed %v, status %q", greyed(p, "READY"), p.TextOf("DESCRIPTION"))
+	}
 	g.activateGadget("READY")
-	if len(host.readies) != 1 || !host.readies[0] || p.TextOf("READY") != "Not ready" {
-		t.Fatalf("ready: %v %q", host.readies, p.TextOf("READY"))
+	if len(host.readies) != 0 {
+		t.Fatal("ready before the rehearsal finished")
+	}
+	digest := sha256.Sum256([]byte("rehearsal"))
+	rehearsal <- onlineRehearsal{digest: digest}
+	g.pollOnline()
+	if greyed(p, "READY") || !strings.Contains(p.TextOf("DESCRIPTION"), "Send the room code") {
+		t.Fatalf("rehearsed: ready greyed %v, status %q", greyed(p, "READY"), p.TextOf("DESCRIPTION"))
+	}
+	g.activateGadget("READY")
+	if len(host.readies) != 1 || !host.readies[0] || host.digests[0] != digest || p.TextOf("READY") != "Not ready" {
+		t.Fatalf("ready: %v %x %q", host.readies, host.digests, p.TextOf("READY"))
 	}
 	host.state = relay.HostedLobbyState{Present: [2]bool{true, true}, Ready: [2]bool{true, false}}
 	g.pollOnline()
 	if !greyed(p, "LOAD") || p.TextOf("SEAT1") != "Guest: not ready" {
 		t.Fatal("start offered before both seats were ready")
 	}
-	host.state.Ready[1] = true
+	// Both ready with different digests: the relay reports a mismatch and
+	// Start stays unavailable.
+	host.state.Ready[1], host.state.Mismatch = true, true
+	g.pollOnline()
+	if !greyed(p, "LOAD") || !strings.Contains(p.TextOf("DESCRIPTION"), "simulate differently") {
+		t.Fatalf("mismatch: start greyed %v, status %q", greyed(p, "LOAD"), p.TextOf("DESCRIPTION"))
+	}
+	g.activateGadget("READY")
+	g.activateGadget("READY")
+	if len(host.readies) != 3 || host.readies[1] || host.digests[1] != ([32]byte{}) || !host.readies[2] || host.digests[2] != digest {
+		t.Fatalf("not ready then ready: %v %x", host.readies, host.digests)
+	}
+	host.state.Mismatch = false
 	g.pollOnline()
 	if greyed(p, "LOAD") {
 		t.Fatal("start not offered with both seats ready")
@@ -433,7 +440,7 @@ func TestOnlineLobbyStateMachine(t *testing.T) {
 
 	// A relay failure returns to the online screen with its reason.
 	gone := &fakeOnlineLobby{code: "ABC234", state: relay.HostedLobbyState{Present: [2]bool{true, true}}}
-	g.openOnlineLobby(&onlinePrepared{config: config}, gone)
+	g.openOnlineLobby(&onlinePrepared{config: config}, gone, nil)
 	gone.err = errors.New("nanolathe: hosted relay rejected: logical path room host, providers searched [hosted transport], expected the host to stay until the match starts")
 	g.pollOnline()
 	if gone.closes != 1 || g.online.lobbyPanel != nil || g.online.status != "The host left, so the game closed." {
@@ -441,8 +448,22 @@ func TestOnlineLobbyStateMachine(t *testing.T) {
 	}
 
 	// The guest can never start; Leave closes the room's seat.
-	guest := &fakeOnlineLobby{code: "ABC234", seat: 1, state: relay.HostedLobbyState{Present: [2]bool{true, true}, Ready: [2]bool{true, true}}}
-	g.openOnlineLobby(&onlinePrepared{config: config}, guest)
+	// A rehearsal that fails is shown, and Ready stays unavailable.
+	guest := &fakeOnlineLobby{code: "ABC234", seat: 1, state: relay.HostedLobbyState{Present: [2]bool{true, true}, Ready: [2]bool{true, false}}}
+	failed := make(chan onlineRehearsal, 1)
+	failed <- onlineRehearsal{err: errors.New("nanolathe: rehearsal failed: logical path rehearsal, providers searched [session], expected a composed rehearsal battle")}
+	g.openOnlineLobby(&onlinePrepared{config: config}, guest, failed)
+	g.pollOnline()
+	p = g.online.lobbyPanel
+	if !greyed(p, "READY") || !strings.Contains(p.TextOf("DESCRIPTION"), "check of your game failed") {
+		t.Fatalf("failed rehearsal: ready greyed %v, status %q", greyed(p, "READY"), p.TextOf("DESCRIPTION"))
+	}
+	g.activateGadget("READY")
+	if len(guest.readies) != 0 {
+		t.Fatal("a failed rehearsal readied the seat")
+	}
+	guest.state.Ready[1] = true
+	g.online.rehearsalErr, g.online.rehearsed = nil, true
 	g.pollOnline()
 	p = g.online.lobbyPanel
 	if !greyed(p, "LOAD") || p.TextOf("YOU") != "You are the guest" || !strings.Contains(p.TextOf("DESCRIPTION"), "host to start") {
@@ -479,7 +500,6 @@ func TestOnlineMapPickerReturnsToTheOnlineScreen(t *testing.T) {
 // ordinary content reload, which carries the join and the player's own
 // mutators; a different copy of the mod is refused by name.
 func TestOnlineJoinRequestsTheRoomsMod(t *testing.T) {
-	useStampedTestBuild(t)
 	fake := &fakeOnlineRelay{}
 	useOnlineTestRelay(t, fake)
 	g := onlineTestShell(t)

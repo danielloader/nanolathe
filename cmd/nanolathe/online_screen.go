@@ -50,7 +50,6 @@ type onlineScreen struct {
 
 	phase          onlinePhase
 	status, detail string
-	stamped        bool
 	choosingMap    bool
 	// room is the configuration of the room being joined or hosted, shown in
 	// the summary; nil shows the host's own selection.
@@ -61,6 +60,12 @@ type onlineScreen struct {
 	prepared *onlinePrepared
 	ready    bool
 	state    relay.HostedLobbyState
+	// The pre-start rehearsal (DESIGN_MULTIPLAYER §16.7): pending while
+	// rehearsal is set, then this seat's digest or the error that stopped it.
+	rehearsal    <-chan onlineRehearsal
+	rehearsed    bool
+	digest       [32]byte
+	rehearsalErr error
 }
 
 func (g *gameShell) onlinePanelActive() bool {
@@ -150,8 +155,6 @@ func onlineRefusalText(err error) string {
 		return "Your game differs from the host's (" + field + ")."
 	case has("hosted protocol version"):
 		return "The server speaks a different online protocol. Both players and the server need matching releases."
-	case has("logical path binary,", "stamped"):
-		return "Online play needs a stamped release build."
 	case has("logical path mod,", "archive digest"):
 		return "Online games need a mod installed from its archive, which identifies it to the other player. Reinstall this mod from its zip."
 	case has("logical path mounted content,"):
@@ -326,8 +329,7 @@ func (g *gameShell) openOnlineScreenReporting() {
 	}
 }
 
-// openOnlineScreen pushes the online screen over the main menu. An
-// unstamped build is told at once that it cannot play online.
+// openOnlineScreen pushes the online screen over the main menu.
 func (g *gameShell) openOnlineScreen() error {
 	if g == nil || g.cs == nil || g.cs.fs == nil {
 		return fmt.Errorf("nanolathe: online screen: no mounted content")
@@ -336,9 +338,6 @@ func (g *gameShell) openOnlineScreen() error {
 		g.closeOnlineScreen()
 	}
 	state := &onlineScreen{}
-	if build, err := currentBuildManifest(); err == nil && build.Stamped() {
-		state.stamped = true
-	}
 	g.online = state
 	panel, err := g.loadOnlinePanel(false)
 	if err != nil {
@@ -356,9 +355,7 @@ func (g *gameShell) openOnlineScreen() error {
 	panel.SetText("SERVER", server)
 	g.frontend.Panels.Push(panel)
 	flushWindowTokens(clPtr)
-	if state.stamped {
-		panel.FocusEditor(panel.Index("ROOMCODE"))
-	}
+	panel.FocusEditor(panel.Index("ROOMCODE"))
 	g.refreshOnlinePanel()
 	return nil
 }
@@ -455,17 +452,14 @@ func (g *gameShell) refreshOnlinePanel() {
 	status := s.status
 	if status == "" {
 		status = "Create a game, or type the room code you were sent and join."
-		if !s.stamped {
-			status = "Online play needs a stamped release build. This build is unstamped."
-		}
 	}
 	p.SetText("HELP", "Create Game hosts your game on this server and gives you a room code to send. To join, type the code and choose Join Game.")
 	p.SetText("DESCRIPTION", g.fitDetail(status, 230, 2))
 	p.SetText("SIZE", g.fitDetail(s.detail, 230, 1))
 	p.SetText("LOAD", "Join Game")
 	p.SetText("PREVMENU", "Back")
-	retailGreyGadget(p.Window, "CREATE", busy || !s.stamped)
-	retailGreyGadget(p.Window, "LOAD", busy || !s.stamped)
+	retailGreyGadget(p.Window, "CREATE", busy)
+	retailGreyGadget(p.Window, "LOAD", busy)
 	retailGreyGadget(p.Window, "CHANGEMAP", busy || len(g.maps) == 0)
 }
 
@@ -501,9 +495,20 @@ func (g *gameShell) refreshOnlineLobby() {
 	p.SetText("READY", ready)
 	p.SetText("LOAD", "Start")
 	p.SetText("PREVMENU", "Leave")
-	both := st.Present[0] && st.Present[1] && st.Ready[0] && st.Ready[1]
-	status := s.status
-	if status == "" {
+	// Start needs both seats ready with equal rehearsal digests; the relay
+	// reports a difference as a mismatch and refuses Start (§16.7).
+	both := st.Present[0] && st.Present[1] && st.Ready[0] && st.Ready[1] && !st.Mismatch
+	var status string
+	switch {
+	case st.Mismatch:
+		status = "Your games simulate differently. Both players need the same version."
+	case s.rehearsalErr != nil:
+		status = "The check of your game failed: " + onlineRefusalText(s.rehearsalErr)
+	case !s.rehearsed:
+		status = "Checking that your game matches..."
+	case s.status != "":
+		status = s.status
+	default:
 		switch {
 		case seat == 0 && !st.Present[1]:
 			status = "Send the room code to the other player."
@@ -520,6 +525,8 @@ func (g *gameShell) refreshOnlineLobby() {
 	p.SetText("DESCRIPTION", g.fitDetail(status, 230, 2))
 	p.SetText("SIZE", g.fitDetail(s.detail, 230, 1))
 	p.SetActive("COPY", onlineClipboardAvailable())
+	// Ready waits for this seat's rehearsal; Not ready is always offered.
+	retailGreyGadget(p.Window, "READY", !s.ready && !s.rehearsed)
 	retailGreyGadget(p.Window, "LOAD", seat != 0 || !both)
 }
 

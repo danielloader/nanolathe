@@ -633,13 +633,13 @@ func TestHostedVersionAndHelloFraming(t *testing.T) {
 	}
 	// A joiner carries no creator flags, size or configuration; a creator
 	// names a size of 2 to 10 seats.
-	if _, err := encodeHostedHello("ABCDEF", hostedAutoStart, 0, localTestHello(1), nil); err == nil {
+	if _, err := encodeHostedHello("CFHJKM", hostedAutoStart, 0, localTestHello(1), nil); err == nil {
 		t.Fatal("joiner sent creator flags")
 	}
-	if _, err := encodeHostedHello("ABCDEF", 0, 2, localTestHello(1), nil); err == nil {
+	if _, err := encodeHostedHello("CFHJKM", 0, 2, localTestHello(1), nil); err == nil {
 		t.Fatal("joiner sent a room size")
 	}
-	if _, err := encodeHostedHello("ABCDEF", 0, 0, localTestHello(1), []byte{1}); err == nil {
+	if _, err := encodeHostedHello("CFHJKM", 0, 0, localTestHello(1), []byte{1}); err == nil {
 		t.Fatal("joiner sent a configuration")
 	}
 	for _, size := range []int{0, 1, 11} {
@@ -647,8 +647,43 @@ func TestHostedVersionAndHelloFraming(t *testing.T) {
 			t.Fatalf("created a room of %d seats", size)
 		}
 	}
-	if code, ok := NormalizeRoomCode(" abc-def "); !ok || code != "ABCDEF" {
+	if code, ok := NormalizeRoomCode(" cfh-jk5 "); !ok || code != "CFHJK5" {
 		t.Fatalf("typed code: %q %v", code, ok)
+	}
+}
+
+// Codes leave out every character a player could take for another, and a
+// typed lookalike letter reads as the digit it resembles (§16.5.1).
+func TestHostedRoomCodesAreUnambiguous(t *testing.T) {
+	for _, r := range "01OILDQSZBGAEUY" {
+		if strings.ContainsRune(hostedCodeAlphabet, r) {
+			t.Fatalf("alphabet holds %q", r)
+		}
+	}
+	if code, ok := NormalizeRoomCode("s z-b g c f"); !ok || code != "5286CF" {
+		t.Fatalf("lookalike letters: %q %v", code, ok)
+	}
+	for _, typed := range []string{"CFHJK0", "CFHJKO", "CFHJK1", "CFHJKI", "CFHJKL", "CFHJKD", "CFHJK", "CFHJKMN"} {
+		if code, ok := NormalizeRoomCode(typed); ok {
+			t.Fatalf("accepted %q as %q", typed, code)
+		}
+	}
+	seen := map[byte]bool{}
+	for range 48 {
+		code, err := newHostedCode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !validHostedCode(code) {
+			t.Fatalf("generated %q", code)
+		}
+		for i := range code {
+			seen[code[i]] = true
+		}
+	}
+	// 288 draws reach all 21 symbols except with probability below 1e-17.
+	if len(seen) != len(hostedCodeAlphabet) {
+		t.Fatalf("generated %d of %d symbols", len(seen), len(hostedCodeAlphabet))
 	}
 }
 

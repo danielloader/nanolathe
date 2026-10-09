@@ -61,9 +61,12 @@ const (
 	// Lobby state bit: both seats are ready and their rehearsals disagree.
 	hostedLobbyMismatch     = 16
 	hostedMaxHandshakeFrame = localMaxHelloBytes + hostedMaxConfigBytes + 64
-	hostedCodeAlphabet      = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	hostedMaxAhead          = 30
-	hostedMaxQueuedFrames   = 64
+	// Room codes avoid every pair a player can misread or mistype: no 0, 1,
+	// O, I, L, D or Q, and no S, Z, B or G beside 5, 2, 8 and 6. Without
+	// vowels a code cannot spell a word (§16.5.1).
+	hostedCodeAlphabet    = "CFHJKMNPRTVWX23456789"
+	hostedMaxAhead        = 30
+	hostedMaxQueuedFrames = 64
 	// Per-room byte bounds keep one misbehaving room's worst case near
 	// 2.3 MiB: pending commands, one shared queue of grant bodies, each
 	// writer's in-flight copy and each reader's frame. 128 rooms then stay
@@ -362,6 +365,25 @@ func validHostedCode(code string) bool {
 	return true
 }
 
+// newHostedCode draws a room code. Rejecting the bytes above the alphabet's
+// last whole multiple keeps every symbol equally likely.
+func newHostedCode() (string, error) {
+	var picked [hostedCodeLength]byte
+	for i := 0; i < len(picked); {
+		var random [16]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return "", localIOError("room invitation", err)
+		}
+		for _, b := range random {
+			if i < len(picked) && int(b) < 256/len(hostedCodeAlphabet)*len(hostedCodeAlphabet) {
+				picked[i] = hostedCodeAlphabet[int(b)%len(hostedCodeAlphabet)]
+				i++
+			}
+		}
+	}
+	return string(picked[:]), nil
+}
+
 func (s *HostedServer) admit(code string, flags uint8, size int, config []byte, peer *hostedPeer) (*hostedRoom, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -380,14 +402,10 @@ func (s *HostedServer) admit(code string, flags uint8, size int, config []byte, 
 			return nil, false, hostedError("room capacity", "space for another room")
 		}
 		for {
-			var random [hostedCodeLength]byte
-			if _, err := rand.Read(random[:]); err != nil {
-				return nil, false, localIOError("room invitation", err)
+			var err error
+			if code, err = newHostedCode(); err != nil {
+				return nil, false, err
 			}
-			for i := range random {
-				random[i] = hostedCodeAlphabet[random[i]&31]
-			}
-			code = string(random[:])
 			if s.rooms[code] == nil {
 				break
 			}

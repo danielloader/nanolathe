@@ -157,7 +157,7 @@ func TestHostedLobbySeatsLeaveAndExpire(t *testing.T) {
 	if _, err := awaitLobby(t, waiting, "expiry", func(_ HostedLobbyState, err error) bool { return err != nil }); !strings.Contains(err.Error(), "room wait") {
 		t.Fatalf("lobby expiry: %v", err)
 	}
-	if _, err := describeTest(s.Addr(), "ABCDEF", options); err == nil || !strings.Contains(err.Error(), "existing invitation") {
+	if _, err := describeTest(s.Addr(), "CFHJKM", options); err == nil || !strings.Contains(err.Error(), "existing invitation") {
 		t.Fatalf("describe of an unknown room: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -165,7 +165,7 @@ func TestHostedLobbySeatsLeaveAndExpire(t *testing.T) {
 	if _, err := OpenHostedLobby(ctx, s.Addr(), "", localTestHello(0), nil, 2, options); err == nil {
 		t.Fatal("created a lobby without a configuration")
 	}
-	if _, err := OpenHostedLobby(ctx, s.Addr(), "ABCDEF", localTestHello(1), []byte{1}, 0, options); err == nil {
+	if _, err := OpenHostedLobby(ctx, s.Addr(), "CFHJKM", localTestHello(1), []byte{1}, 0, options); err == nil {
 		t.Fatal("a joiner sent a configuration")
 	}
 	awaitHostedCapacity(t, s, 0, 0)

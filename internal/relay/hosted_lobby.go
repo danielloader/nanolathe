@@ -350,13 +350,27 @@ func (l *HostedLobby) Close() error {
 	return err
 }
 
+// RoomCodeAlphabet is every symbol a room code uses (§16.5.1).
+const RoomCodeAlphabet = hostedCodeAlphabet
+
 // NormalizeRoomCode accepts a typed invitation in any case, with spaces or
-// dashes, and returns the canonical code.
+// dashes, and returns the canonical code. A letter that codes never use but
+// that looks like one of their digits reads as that digit: S as 5, Z as 2,
+// B as 8 and G as 6.
 func NormalizeRoomCode(typed string) (string, bool) {
 	var b strings.Builder
 	for _, r := range strings.ToUpper(typed) {
-		if r == ' ' || r == '-' {
+		switch r {
+		case ' ', '-':
 			continue
+		case 'S':
+			r = '5'
+		case 'Z':
+			r = '2'
+		case 'B':
+			r = '8'
+		case 'G':
+			r = '6'
 		}
 		b.WriteRune(r)
 	}

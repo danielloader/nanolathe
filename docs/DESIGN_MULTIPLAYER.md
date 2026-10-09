@@ -5443,8 +5443,12 @@ func DialHosted(ctx context.Context, address, room string, hello LocalHello, opt
 **Rooms and admission.** A client sends an empty room code to create a room
 or a code to join one. The server assigns the creator seat 0 and the joiner
 seat 1, refusing a conflicting hello seat. Room codes are six characters
-from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, drawn with cryptographic
-randomness; they are private invitations, not credentials. Joining a full,
+from `CFHJKMNPRTVWX23456789`, each symbol equally likely and drawn with
+cryptographic randomness; they are private invitations, not credentials.
+The alphabet leaves out every character a player can misread or mistype as
+another (0, 1, O, I, L, D and Q, and S, Z, B and G beside 5, 2, 8 and 6) and
+every vowel, so a code never spells a word. A typed code ignores case,
+spaces and dashes, and reads S, Z, B and G as 5, 2, 8 and 6. Joining a full,
 unknown, closed or started room is refused. A join compares the joiner's
 identity and initial checksum with the creator's: Protocol, Content, Map,
 Rules, Mod and Configuration must match, and Build is advisory and not
@@ -5678,7 +5682,7 @@ is ready the host starts the match. The lobby's rules:
   prepares it, runs the rehearsal (§16.7) and reports both digests.
 - **The host draws the seed pair** with `crypto/rand` when it creates the
   room; the configuration digest covers it (§8.3).
-- **Room codes are six characters** from the 32-symbol alphabet (§16.5.1).
+- **Room codes are six characters** from the 21-symbol alphabet of §16.5.1.
   A lobby waits at most 30 minutes before Start, kept alive by the
   5-second WebSocket pings.
 - **Leaving.** Before Start, a joiner who leaves frees its seat; the host

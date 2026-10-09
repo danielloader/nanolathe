@@ -33,8 +33,8 @@ func TestServiceLoopingUICueRequiresLoopingRegisteredOutput(t *testing.T) {
 	}
 }
 
-// Host menu gain must affect this dispatch only, since battle and menu share
-// the same semantic service and the same player-selected FX gain.
+// Caller-supplied gain affects only that dispatch; ordinary cues retain the
+// same semantic service and player-selected FX gain.
 func TestUICueGainDoesNotChangeSubsequentBattleCues(t *testing.T) {
 	s := NewService(testAudioFS(t, "bgm"))
 	old := GlobalOutput()
@@ -50,6 +50,6 @@ func TestUICueGainDoesNotChangeSubsequentBattleCues(t *testing.T) {
 	}
 	base := VolumeFromCentibel(VolInView)
 	if spy.registered[0].volume != base*0.1 || spy.registered[1].volume != base || spy.loops[0].volume != base*0.1 || spy.loops[1].volume != base {
-		t.Fatal("menu gain leaked into ordinary cues")
+		t.Fatal("caller-supplied gain leaked into ordinary cues")
 	}
 }

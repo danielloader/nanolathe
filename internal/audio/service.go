@@ -370,7 +370,8 @@ func (a *Service) PlayUICue(alias string) bool {
 }
 
 // PlayUICueWithGain applies a host presentation gain to this cue alone.
-// Menu feedback uses it without changing the shared battle service or FX gain.
+// It leaves the shared service and FX gain unchanged. Retail menu playback
+// uses PlayUICue at the ordinary cue level [03 R-AUD-01 §1].
 func (a *Service) PlayUICueWithGain(alias string, gain float64) bool {
 	if a == nil || strings.TrimSpace(alias) == "" {
 		return false
@@ -390,7 +391,9 @@ func (a *Service) PlayLoopingUICue(alias string) bool {
 	return a.PlayLoopingUICueWithGain(alias, 1)
 }
 
-// PlayLoopingUICueWithGain is the menu-loop counterpart of PlayUICueWithGain.
+// PlayLoopingUICueWithGain is the looping counterpart of PlayUICueWithGain.
+// Retail's menu loop uses PlayLoopingUICue at the ordinary cue level
+// [03 R-AUD-01 §1][03 R-AUD-01 §5].
 func (a *Service) PlayLoopingUICueWithGain(alias string, gain float64) bool {
 	if a == nil || strings.TrimSpace(alias) == "" {
 		return false

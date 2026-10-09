@@ -1150,7 +1150,8 @@ The same adapter requests `BigButton` before Start validation and requests
 `Options`, the narration action, then `SmallButton` for `SHUTUP`. Prev stops
 the stream before requesting `Previous`. Successful Start and Prev stop any
 current stream even without a narration key; a failed Start leaves it running
-[07 R-FE-01 §4]. Existing menu gain and audio admission remain host-owned.
+[07 R-FE-01 §4]. Cue attenuation and audio admission follow retail
+[03 R-AUD-01 §1][03 R-AUD-01 §2].
 
 `briefing_render.go` paints wind and gravity from the panorama's custom path,
 using the hidden `SOLARSYSTEM` gadget's rectangle and selected FNT. It uses
@@ -4700,11 +4701,19 @@ included, never changes it. `TestNLRestrictionCardSummary`,
 `TestNLPresetsExcludeRestrictions` lock these; `--nl-shot-only restrictions`
 with `--restrict` entries captures the card.
 
-**Quiet audio.** Every settings preview is silent, including its visible battle,
-lead-in, restart and retirement. It has no playback binding and never changes the
-shared backend's configuration or battle preferences. Menu cues and the authored
-menu loop use 10% of their former cue amplitude; battle audio retains the player's
-FX/music settings. This is user-authorized host policy (2026-09-29).
+**Preview and menu audio.** Retail menu sound must match retail exactly:
+authored per-screen cue selection and aliases [07 R-FE-01 §2], ordinary cue
+attenuation and effects-volume application [03 R-AUD-01 §1][03 R-AUD-01 §2],
+and audio admission and the exclusive ambient-loop lifecycle [03 R-AUD-01 §5].
+Menu playback uses the standard audio-service cue APIs without additional menu
+gain. Retail's silent buttons remain silent. The additional 10% menu gain
+introduced on 2026-09-29 was removed by user decision on 2026-10-08.
+
+Every Nanolathe settings preview is silent, including its visible battle,
+lead-in, restart and retirement. It has no playback binding and never changes
+the shared backend's configuration or battle preferences. This separate preview
+policy remains user-authorized (2026-09-29). Battle audio retains the player's
+FX/music settings.
 
 **Scene reuse.** The screen keeps recently viewed scenes paused, with their client
 and last pictures, so a revisit avoids battle/client composition. The cache is

@@ -823,6 +823,14 @@ releases finished cues and streams, including the final batch with no later
 play request. This keeps playback retention independent of simulation ticks
 `[03 R-AUD-02 §2]`.
 
+Menu sound must match retail exactly: the screen's authored cue selection
+`[07 R-FE-01 §2]`, ordinary cue attenuation and FX settings
+`[03 R-AUD-01 §1]` `[03 R-AUD-01 §2]`, and the exclusive `BGM` loop's
+admission and lifetime `[03 R-AUD-01 §5]`. The shell uses `PlayUICue` and
+`PlayLoopingUICue` without additional menu gain. DESIGN_INTERFACE_HUD_INPUT
+§3.17 owns this parity requirement and the separate silent settings-preview
+policy.
+
 The selected Sound Mode crosses the same output boundary independently of the
 backend's stereo format capability. The default `Mono` branch uses the
 inclusive beam rectangle's −585/−1585 pair. Exact `3D` uses the camera's battle

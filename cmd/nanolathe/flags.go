@@ -151,6 +151,7 @@ type Options struct {
 	Zoom               camera.Zoom // presentation zoom factor from --zoom; zero is unset: all routes default to native [F-P1-008]
 	ZoomText           string      // the literal --zoom argument, kept so it can be rejected per executor after --renderer is known (DESIGN_GPU_RENDERER §16.8)
 	AutoRemaster       bool        // synthesize the detail view's 2x art at load time (DESIGN_GPU_RENDERER §14.4)
+	UIFont             string      // TrueType font for the 2x chrome remaster's captions; empty is the bundled Saira (§14.9)
 	ShotFocus          string      // "x,y" screen point kept fixed while scaling; default the screen centre
 	ShotShift          bool        // hold Shift for strategic range captures
 	ShotBuild          string      // preview a named product at the capture pointer
@@ -294,7 +295,8 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 		opts.Zoom, opts.ZoomText = zoom, text
 		return nil
 	})
-	set.BoolVar(&opts.AutoRemaster, "auto-remaster", true, "synthesize the detail view's 2x terrain and feature art at load time; off leaves every asset to nearest doubling")
+	set.BoolVar(&opts.AutoRemaster, "auto-remaster", true, "synthesize the detail view's 2x terrain, feature and interface art at load time; off leaves every asset to nearest doubling")
+	set.StringVar(&opts.UIFont, "ui-font", "", "TrueType or OpenType font for the remastered 2x interface captions (default: the bundled Saira Condensed)")
 	set.StringVar(&opts.ShotFocus, "shot-focus", "", "screen point \"x,y\" kept fixed by --zoom (default the screen centre)")
 	set.BoolVar(&opts.ShotShift, "shot-shift", false, "hold Shift for queue overlays and enabled range guides in --shot")
 	set.StringVar(&opts.ShotBuild, "shot-build", "", "preview this unit beside the first selection or at viewport centre in --shot (no construction order)")

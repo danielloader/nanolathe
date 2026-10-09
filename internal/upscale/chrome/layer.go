@@ -1,12 +1,9 @@
-package main
+package chrome
 
 import (
 	"image"
 	"image/color"
-	_ "image/jpeg" // materials often arrive as JPEG
-	"image/png"
 	"math"
-	"os"
 
 	xdraw "golang.org/x/image/draw"
 )
@@ -199,27 +196,6 @@ func (m *Mask) Resize(w, h int) *Mask {
 	return o
 }
 
-func LoadLayer(path string) (*Layer, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	img, _, err := image.Decode(f)
-	if err != nil {
-		return nil, err
-	}
-	b := img.Bounds()
-	l := NewLayer(b.Dx(), b.Dy())
-	for y := 0; y < l.H; y++ {
-		for x := 0; x < l.W; x++ {
-			c := color.NRGBA64Model.Convert(img.At(b.Min.X+x, b.Min.Y+y)).(color.NRGBA64)
-			l.Set(x, y, RGBA{float64(c.R) / 65535, float64(c.G) / 65535, float64(c.B) / 65535, float64(c.A) / 65535})
-		}
-	}
-	return l, nil
-}
-
 // Resize scales the layer with Catmull-Rom filtering.
 func (l *Layer) Resize(w, h int) *Layer {
 	dst := image.NewNRGBA64(image.Rect(0, 0, w, h))
@@ -249,23 +225,6 @@ func fromNRGBA64(img *image.NRGBA64) *Layer {
 		}
 	}
 	return l
-}
-
-func (l *Layer) Save(path string) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	q := func(v float64) uint8 { return uint8(math.Round(math.Max(0, math.Min(1, v)) * 255)) }
-	img := image.NewNRGBA(image.Rect(0, 0, l.W, l.H))
-	for y := 0; y < l.H; y++ {
-		for x := 0; x < l.W; x++ {
-			c := l.At(x, y)
-			img.SetNRGBA(x, y, color.NRGBA{q(c.R), q(c.G), q(c.B), q(c.A)})
-		}
-	}
-	return png.Encode(f, img)
 }
 
 func hex(s string) RGBA {

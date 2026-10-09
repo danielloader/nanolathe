@@ -55,6 +55,7 @@ type retailBattleHUD struct {
 	panelSide   *formats.GAFFrame
 	panelBottom *formats.GAFFrame
 	intGAF      *formats.GAF
+	intGAFPath  string
 	common      *formats.GAF
 	oldMain     *formats.GAF
 	share       *formats.GAF
@@ -234,6 +235,12 @@ type retailBattleHUD struct {
 // CORE does not load ARM-specific options unconditionally [07 "Tab options menu and manual exit"].
 // GUI/GAF loads are cached at battle entry in the HUD maps (windows/pages) so
 // the frame loop does not re-read VFS [07 §4].
+// chromeCommonGAF is the shared interface bank of every side's buttons.
+const chromeCommonGAF = "anims/commongui.gaf"
+
+// intGAFPath is a side's interface bank's logical path [02 §6].
+func intGAFPath(intGAF string) string { return "anims/" + strings.ToLower(intGAF) + ".gaf" }
+
 func loadRetailBattleHUD(fs vfs.FSOps, sess *session.Session, cat *content.Catalog, pal *palette.Tables, shell *gameShell, windowContext *battleWindowContext) (*retailBattleHUD, error) {
 	if fs == nil || sess == nil || cat == nil {
 		return nil, fmt.Errorf("nanolathe: battle HUD load failed: no mounted content, session or catalog")
@@ -287,7 +294,7 @@ func loadRetailBattleHUD(fs vfs.FSOps, sess *session.Session, cat *content.Catal
 		return nil, hudAssetError(fs, "fonts/smlfont.fnt", "developer terrain font", err)
 	}
 	// Mandatory side intgaf [02 §6][07 §6].
-	logicalIntGAF := "anims/" + strings.ToLower(side.IntGAF) + ".gaf"
+	logicalIntGAF := intGAFPath(side.IntGAF)
 	intGAF, err := formats.LoadGAFFile(fs, logicalIntGAF)
 	if err != nil {
 		return nil, hudAssetError(fs, logicalIntGAF, fmt.Sprintf("side %s intgaf %q [02 §6]", side.Name, side.IntGAF), err)
@@ -307,7 +314,7 @@ func loadRetailBattleHUD(fs vfs.FSOps, sess *session.Session, cat *content.Catal
 	}
 	// Optional support GAFs — degradable individually [07 §4][07 "Tab options menu and manual exit"].
 	// Missing optional assets log a provider-aware warning and leave nil so battle still enters.
-	common := loadGAFOptional(fs, "anims/commongui.gaf", "commongui.gaf")
+	common := loadGAFOptional(fs, chromeCommonGAF, "commongui.gaf")
 	oldMain := loadGAFOptional(fs, "anims/oldmain.gaf", "oldmain.gaf")
 	share := loadGAFOptional(fs, "anims/share.gaf", "share.gaf")
 	logoPath := "textures/logos.gaf"
@@ -387,7 +394,7 @@ func loadRetailBattleHUD(fs vfs.FSOps, sess *session.Session, cat *content.Catal
 		shell: shell, windowContext: windowContext, optionsRelabel: optionsRelabel, optionsNoSave: sess.IsSurvival(),
 		side: side, cat: cat, owner: sess.LocalOwner, anchors: anchors, console: console, guiFont: guiFont, primaryFont: primaryFont, developerFont: developerFont, pal: pal,
 		panelTop: panelTop, panelSide: panelSide, panelBottom: panelBottom,
-		intGAF: intGAF, common: common, oldMain: oldMain, share: share, logos: logos,
+		intGAF: intGAF, intGAFPath: logicalIntGAF, common: common, oldMain: oldMain, share: share, logos: logos,
 		optionsGAF: optionsGAF, optionsWin: optionsWin, talkWin: talkWin, exitWin: exitWin, confirmWin: confirmWin, restartWin: restartWin,
 		info:      info,
 		modalFont: modalFont, modalFontSmall: modalFontSmall, stripArt: stripArt,

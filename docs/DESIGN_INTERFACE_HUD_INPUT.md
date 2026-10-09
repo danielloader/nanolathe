@@ -2152,7 +2152,9 @@ is laid out on a virtual surface of the framebuffer size divided by k and
 recorded between a pair of world-space markers whose factor is k
 (`Client.BeginChromeRegion`). The modern executor magnifies everything
 between them with its existing world transform and nearest sampling, so the
-art is integer-scaled and blocky by design. The markers are flagged as
+art is integer-scaled and blocky by design, except the command buttons, tabs,
+selectors, page arrows and top strip, which take the 2x chrome remaster
+(DESIGN_GPU_RENDERER §14.9). The markers are flagged as
 chrome, so text inside them — build-queue counts, resource readouts — is
 magnified too, where world text keeps native glyphs. Rail layout, including
 the expanded sidebar's free-flow capacity, reads the virtual height, so a 2x

@@ -1,11 +1,10 @@
-package main
+package chrome
 
 import (
 	"hash/fnv"
 	"image"
 	"math"
 	"math/rand"
-	"os"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
@@ -27,6 +26,29 @@ type Style struct {
 	Material *Layer  // seamless gunmetal texture
 
 	CaptionFont, LabelFont *opentype.Font
+
+	tile  *Layer // Material resized for Scale, built on first use
+	masks map[textKey]*Mask
+}
+
+type textKey struct {
+	font    *opentype.Font
+	text    string
+	spacing float64
+}
+
+// textMask memoizes TextMask: captionWidth measures RECLAIM for every caption.
+func (s *Style) textMask(f *opentype.Font, text string, spacing float64) *Mask {
+	k := textKey{f, text, spacing}
+	if m, ok := s.masks[k]; ok {
+		return m
+	}
+	if s.masks == nil {
+		s.masks = map[textKey]*Mask{}
+	}
+	m := TextMask(f, text, spacing)
+	s.masks[k] = m
+	return m
 }
 
 func (s *Style) px(v float64) int { return int(math.Round(v * s.Scale)) }
@@ -40,9 +62,11 @@ func (s *Style) atLeast1(v float64) int { return max(1, s.px(v)) }
 // and the cool shift.
 func (s *Style) Face(w, h int, mult float64) *Layer {
 	// The material's native 1024 px spans 512 output px at 2x.
-	tw := int(math.Round(float64(s.Material.W) * s.Scale / 4))
-	th := int(math.Round(float64(s.Material.H) * s.Scale / 4))
-	tile := s.Material.Resize(tw, th)
+	if s.tile == nil {
+		s.tile = s.Material.Resize(int(math.Round(float64(s.Material.W)*s.Scale/4)), int(math.Round(float64(s.Material.H)*s.Scale/4)))
+	}
+	tile := s.tile
+	tw, th := tile.W, tile.H
 	l := NewLayer(w, h)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -359,9 +383,9 @@ type CaptionStyle struct {
 }
 
 func (s *Style) Caption(text string, w, h int, cs CaptionStyle) (*Layer, int) {
-	base := TextMask(s.CaptionFont, text, 0)
+	base := s.textMask(s.CaptionFont, text, 0)
 	k := float64(base.W) * (1/cs.SX - 1) / float64(len(text)-1)
-	spaced := TextMask(s.CaptionFont, text, k)
+	spaced := s.textMask(s.CaptionFont, text, k)
 	ch := int(math.Round(float64(h) * cs.SY))
 	pad := 3 * int(math.Ceil(s.Scale/2))
 	m := spaced.Resize(w, ch).Pad(pad)
@@ -377,7 +401,7 @@ func (s *Style) Caption(text string, w, h int, cs CaptionStyle) (*Layer, int) {
 // GradientLabel is top-bar lettering: a vertical gradient fitted to the ink,
 // squeezed into a w x h box.
 func (s *Style) GradientLabel(text string, w, h int, top, bottom RGBA) *Layer {
-	m := TextMask(s.LabelFont, text, 0).Resize(w, h)
+	m := s.textMask(s.LabelFont, text, 0).Resize(w, h)
 	l := NewLayer(w, h)
 	for y := 0; y < h; y++ {
 		c := lerp(top, bottom, float64(y)/float64(h-1))
@@ -600,18 +624,6 @@ func sign(v int) int {
 		return -1
 	}
 	return 0
-}
-
-func loadFont(path string) *opentype.Font {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		panic(err)
-	}
-	f, err := opentype.Parse(b)
-	if err != nil {
-		panic(err)
-	}
-	return f
 }
 
 func rgbToHSL(r, g, b float64) (h, s, l float64) {

@@ -11,11 +11,15 @@ import (
 type hostedOutput struct {
 	body []byte
 	last bool
+	// report marks the queue position of the peer's latest progress report,
+	// whose body the writer takes when it reaches this entry.
+	report bool
 }
 
 type hostedPeer struct {
 	conn          net.Conn
 	hello         LocalHello
+	version       uint16 // the protocol its hello spoke, answered in kind
 	room          *hostedRoom
 	seat          uint8 // assigned at admission
 	slot          uint8 // assigned at Start
@@ -27,6 +31,7 @@ type hostedPeer struct {
 	once          sync.Once
 	mu            sync.Mutex
 	bytes         int
+	pending       []byte // mu: the latest unwritten progress report, or nil
 }
 
 func newHostedPeer(conn net.Conn, hello LocalHello, timeout time.Duration) *hostedPeer {
@@ -55,7 +60,7 @@ func (p *hostedPeer) queuedBytes() int {
 func (p *hostedPeer) enqueue(body []byte, last bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	n := len(body) + netproto.UvarintLen(uint64(len(body)))
+	n := frameCharge(body)
 	if n > hostedMaxQueuedBytes-p.bytes {
 		return hostedError("peer write queue", "at most 1 MiB plus the frame header allowance")
 	}
@@ -71,6 +76,43 @@ func (p *hostedPeer) enqueue(body []byte, last bool) error {
 	default:
 		return hostedError("peer write queue", "at most 64 queued frames")
 	}
+}
+
+// report replaces the peer's unwritten progress report. At most one report
+// waits in the queue, holding its place behind the frames queued before it,
+// so a slow reader receives the latest state rather than a backlog. A report
+// that does not fit the queue's bounds is dropped: diagnostics never fail a
+// room (§16.5.2).
+func (p *hostedPeer) report(body []byte) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n, old := frameCharge(body), frameCharge(p.pending)
+	if n-old > hostedMaxQueuedBytes-p.bytes {
+		return false
+	}
+	if p.pending == nil {
+		select {
+		case <-p.written:
+			return false
+		default:
+		}
+		select {
+		case p.out <- hostedOutput{report: true}:
+		default:
+			return false
+		}
+	}
+	p.bytes += n - old
+	p.pending = body
+	return true
+}
+
+// frameCharge is what a queued body costs the peer's byte budget.
+func frameCharge(body []byte) int {
+	if body == nil {
+		return 0
+	}
+	return len(body) + netproto.UvarintLen(uint64(len(body)))
 }
 
 func minDeadline(a, b time.Time) time.Time {
@@ -89,13 +131,22 @@ func (p *hostedPeer) write() {
 		case <-p.stopped:
 			return
 		case message := <-p.out:
+			body := message.body
+			if message.report {
+				p.mu.Lock()
+				body, p.pending = p.pending, nil
+				p.mu.Unlock()
+				if body == nil {
+					continue
+				}
+			}
 			err := p.conn.SetWriteDeadline(minDeadline(firstDeadline, time.Now().Add(p.timeout)))
 			firstDeadline = time.Time{}
 			if err == nil {
-				err = writeLocalFrame(p.conn, message.body)
+				err = writeLocalFrame(p.conn, body)
 			}
 			p.mu.Lock()
-			p.bytes -= len(message.body) + netproto.UvarintLen(uint64(len(message.body)))
+			p.bytes -= frameCharge(body)
 			p.mu.Unlock()
 			if err != nil {
 				p.room.send(hostedEvent{peer: p, err: err})

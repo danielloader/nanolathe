@@ -48,9 +48,17 @@ const (
 	// from the host and the latest one to every seat.
 	hostedConfigurationMessage = hostedSideMessage + 1
 	hostedColorMessage         = hostedConfigurationMessage + 1
-	hostedVersion              = 5
-	hostedMaxTeam              = 5
-	hostedCodeLength           = 6
+	// hostedProgressMessage is the relay's match progress report, sent only
+	// to seats that spoke version 6 or later (§16.5.2).
+	hostedProgressMessage = hostedColorMessage + 1
+	// hostedVersion is the protocol this build's clients speak; the relay
+	// still serves seats that speak hostedMinVersion, each in its own
+	// version, in the same rooms (§12.2).
+	hostedVersion         = 6
+	hostedMinVersion      = 5
+	hostedProgressVersion = 6
+	hostedMaxTeam         = 5
+	hostedCodeLength      = 6
 	// hostedAnySeat is a joiner's hello seat: the relay assigns the lowest
 	// free one.
 	hostedAnySeat = 255
@@ -82,18 +90,22 @@ const (
 // also lets socket tests exercise expiry without waiting minutes (§16.5.1–2).
 type hostedTimeouts struct {
 	handshake, waiting, write, progress time.Duration
+	// ping is the WebSocket keepalive interval; report the interval between
+	// a running match's progress reports.
+	ping, report time.Duration
 }
 
 // A lobby may wait 30 minutes for both seats to start (§16.6).
-var hostedDefaultTimeouts = hostedTimeouts{10 * time.Second, 30 * time.Minute, 5 * time.Second, 10 * time.Second}
+var hostedDefaultTimeouts = hostedTimeouts{10 * time.Second, 30 * time.Minute, 5 * time.Second, 10 * time.Second, websocketPingInterval, time.Second}
 
-// hostedClientIdle bounds a running client's wait for any relay traffic. It
-// exceeds the relay's ten-second progress abort and 20-second WebSocket ping,
-// and replaces TCP keepalive's minutes of silence on a half-open route.
+// hostedClientIdle bounds a running client's wait for a relay message. It
+// exceeds the relay's ten-second progress abort, and replaces TCP keepalive's
+// minutes of silence on a half-open route. Pings do not count: a browser
+// answers them without telling the page.
 const hostedClientIdle = 25 * time.Second
 
-// HostedServer holds independent two-human rooms. It never loads game assets or
-// interprets a gameplay command (DESIGN_MULTIPLAYER §12, §16.5).
+// HostedServer holds independent rooms of 2 to 10 seats. It never loads game
+// assets or interprets a gameplay command (DESIGN_MULTIPLAYER §12, §16.5).
 type HostedServer struct {
 	listener  net.Listener
 	websocket bool
@@ -246,7 +258,7 @@ func (s *HostedServer) serve(raw net.Conn) {
 		conn = secure
 	}
 	if s.websocket {
-		stream, err := acceptHostedWebSocket(conn, s.timeouts.write, handshakeDeadline, s.statusPage)
+		stream, err := acceptHostedWebSocket(conn, s.timeouts, handshakeDeadline, s.statusPage)
 		if err != nil {
 			return
 		}
@@ -262,14 +274,14 @@ func (s *HostedServer) serve(raw net.Conn) {
 		_ = writeLocalFrame(conn, s.describe(body))
 		return
 	}
-	code, flags, size, hello, config, err := decodeHostedHello(body)
+	hello, err := decodeHostedHello(body)
 	if err != nil {
 		_ = writeLocalFrame(conn, localFailureBody(localRefusedMessage, err))
 		return
 	}
-	peer := newHostedPeer(conn, hello, s.timeouts.write)
-	peer.helloDeadline = handshakeDeadline
-	room, creator, err := s.admit(code, flags, size, config, peer)
+	peer := newHostedPeer(conn, hello.hello, s.timeouts.write)
+	peer.version, peer.helloDeadline = hello.version, handshakeDeadline
+	room, creator, err := s.admit(hello.code, hello.flags, hello.size, hello.config, peer)
 	if err != nil {
 		_ = writeLocalFrame(conn, localFailureBody(localRefusedMessage, err))
 		return
@@ -301,7 +313,8 @@ func (s *HostedServer) serve(raw net.Conn) {
 func (s *HostedServer) describe(body []byte) []byte {
 	r := netproto.NewReader(body, hostedError)
 	r.U8()
-	if v := r.U16(); v != hostedVersion {
+	// A description is the same in every served version.
+	if v := r.U16(); v < hostedMinVersion || v > hostedVersion {
 		r.Abort(hostedVersionError(v))
 	}
 	code := r.Text(hostedCodeLength)
@@ -345,8 +358,15 @@ func (r *hostedRoom) free() int {
 	return -1
 }
 
+// hostedVersionError is the relay's refusal of a version it does not serve.
 func hostedVersionError(sent uint16) error {
-	return hostedError("handshake", fmt.Sprintf("hosted protocol version %d; this client sent version %d", hostedVersion, sent))
+	return hostedError("handshake", fmt.Sprintf("hosted protocol version %d or %d; this client sent version %d", hostedMinVersion, hostedVersion, sent))
+}
+
+// hostedRelayVersionError is a client's refusal of a relay that answered in
+// another version than the one it spoke.
+func hostedRelayVersionError(spoke, answered uint16) error {
+	return hostedError("welcome", fmt.Sprintf("hosted protocol version %d; this relay answered version %d", spoke, answered))
 }
 
 func validHostedCode(code string) bool {
@@ -446,13 +466,19 @@ func (s *HostedServer) admit(code string, flags uint8, size int, config []byte, 
 	}
 	peer.room = room
 	// A fresh peer's queue is empty, so welcome always precedes its grants.
-	_ = peer.enqueue(encodeHostedWelcome(code, peer.seat), false)
+	_ = peer.enqueue(encodeHostedWelcome(code, peer.seat, peer.version), false)
 	return room, creator, nil
 }
 
 // A creator's hello carries its flags, room size and base configuration; a
 // joiner's carries none of them and asks for any seat (§16.6.1).
 func encodeHostedHello(code string, flags uint8, size int, hello LocalHello, config []byte) ([]byte, error) {
+	return encodeHostedHelloVersion(hostedVersion, code, flags, size, hello, config)
+}
+
+// encodeHostedHelloVersion speaks a served version; tests use it to play a
+// version-5 seat.
+func encodeHostedHelloVersion(version uint16, code string, flags uint8, size int, hello LocalHello, config []byte) ([]byte, error) {
 	if code != "" && !validHostedCode(code) {
 		return nil, hostedError("room code", "a six-character invitation")
 	}
@@ -474,7 +500,7 @@ func encodeHostedHello(code string, flags uint8, size int, hello LocalHello, con
 	}
 	var w netproto.Writer
 	w.U8(hostedHelloMessage)
-	w.U16(hostedVersion)
+	w.U16(version)
 	w.Text(code)
 	w.U8(flags)
 	w.U8(uint8(size))
@@ -485,13 +511,24 @@ func encodeHostedHello(code string, flags uint8, size int, hello LocalHello, con
 	return w.Bytes(), nil
 }
 
-func decodeHostedHello(body []byte) (string, uint8, int, LocalHello, []byte, error) {
+// hostedHello is a decoded hosted hello.
+type hostedHello struct {
+	version uint16
+	code    string
+	flags   uint8
+	size    int
+	hello   LocalHello
+	config  []byte
+}
+
+func decodeHostedHello(body []byte) (hostedHello, error) {
 	r := netproto.NewReader(body, hostedError)
 	if r.U8() != hostedHelloMessage {
 		r.Abort(hostedError("handshake", "a hosted hello or room description request"))
 	}
-	if v := r.U16(); v != hostedVersion {
-		r.Abort(hostedVersionError(v))
+	version := r.U16()
+	if version < hostedMinVersion || version > hostedVersion {
+		r.Abort(hostedVersionError(version))
 	}
 	code := r.Text(hostedCodeLength)
 	if code != "" && !validHostedCode(code) {
@@ -506,16 +543,17 @@ func decodeHostedHello(body []byte) (string, uint8, int, LocalHello, []byte, err
 		r.Abort(hostedError("hello flags", "a creator's known flags and 2 to 10 seats, and none of them from a joiner"))
 	}
 	if err := r.End(); err != nil {
-		return "", 0, 0, LocalHello{}, nil, err
+		return hostedHello{}, err
 	}
 	h, err := decodeLocalHello(hello)
-	return code, flags, size, h, config, err
+	return hostedHello{version: version, code: code, flags: flags, size: size, hello: h, config: config}, err
 }
 
-func encodeHostedWelcome(code string, seat uint8) []byte {
+// The welcome answers in the version the seat spoke.
+func encodeHostedWelcome(code string, seat uint8, version uint16) []byte {
 	var w netproto.Writer
 	w.U8(hostedWelcomeMessage)
-	w.U16(hostedVersion)
+	w.U16(version)
 	w.Text(code)
 	w.U8(seat)
 	return w.Bytes()
@@ -539,11 +577,10 @@ func dialHostedStream(ctx context.Context, address, room string, hello LocalHell
 	if err != nil {
 		return nil, "", err
 	}
-	conn, code, _, err := hostedHandshake(ctx, address, options, body, room, hello.Seat)
+	c, code, _, err := hostedHandshake(ctx, hostedVersion, address, options, body, room, hello.Seat)
 	if err != nil {
 		return nil, "", err
 	}
-	c := newHostedClient(conn)
 	// A command-line seat runs no rehearsal; its zero digest matches only
 	// another command-line seat, and an auto-start room ignores digests.
 	if err := c.writeMessage(append([]byte{hostedReadyMessage, 1}, make([]byte, 64)...)); err != nil {
@@ -553,17 +590,19 @@ func dialHostedStream(ctx context.Context, address, room string, hello LocalHell
 	return c, code, nil
 }
 
-// hostedHandshake connects as dialHostedTransport does and exchanges the
-// hello within the handshake deadline.
-func hostedHandshake(ctx context.Context, address string, options HostedDialOptions, body []byte, room string, seat uint8) (net.Conn, string, uint8, error) {
+// hostedHandshake connects as dialHostedTransport does, exchanges the hello
+// within the handshake deadline and returns the client that owns the stream.
+// The hello body speaks version.
+func hostedHandshake(ctx context.Context, version uint16, address string, options HostedDialOptions, body []byte, room string, seat uint8) (*LocalClient, string, uint8, error) {
 	ctx, cancel := context.WithTimeout(ctx, hostedDefaultTimeouts.handshake)
 	defer cancel()
 	conn, err := dialHostedTransport(ctx, address, options)
 	if err != nil {
 		return nil, "", 0, err
 	}
+	c := newHostedClient(conn)
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-	code, assigned, err := exchangeHostedHello(conn, body, room, seat)
+	code, assigned, err := exchangeHostedHello(conn, &c.traffic, version, body, room, seat)
 	stopped := stop()
 	if expired := handshakeExpired(ctx); err != nil || !stopped || expired != nil {
 		_ = conn.Close()
@@ -573,7 +612,7 @@ func hostedHandshake(ctx context.Context, address string, options HostedDialOpti
 		return nil, "", 0, err
 	}
 	_ = conn.SetDeadline(time.Time{})
-	return conn, code, assigned, nil
+	return c, code, assigned, nil
 }
 
 // handshakeExpired reports the context's end, including a socket deadline
@@ -590,48 +629,22 @@ func handshakeExpired(ctx context.Context) error {
 
 // dialHostedTransport opens a verified TLS stream to host:port, or a WebSocket
 // stream when address is a ws(s) URL, with the context's deadline applied.
+// The browser build has only the WebSocket (websocket_browser_js.go).
 func dialHostedTransport(ctx context.Context, address string, options HostedDialOptions) (net.Conn, error) {
 	if strings.Contains(address, "://") {
 		return dialWebSocketTransport(ctx, address, options)
 	}
-	if options.InsecureLoopback {
-		if options.TLSConfig != nil {
-			return nil, hostedError("TLS", "TLS or explicit loopback plaintext, not both")
-		}
-		if err := localAddress(address, false); err != nil {
-			return nil, err
-		}
-	} else if options.TLSConfig != nil && options.TLSConfig.InsecureSkipVerify {
-		return nil, hostedError("TLS", "server certificate verification")
-	}
-	var conn net.Conn
-	var err error
-	if options.InsecureLoopback {
-		conn, err = (&net.Dialer{}).DialContext(ctx, "tcp", address)
-	} else {
-		config := &tls.Config{}
-		if options.TLSConfig != nil {
-			config = options.TLSConfig.Clone()
-		}
-		config.MinVersion = max(config.MinVersion, tls.VersionTLS12)
-		conn, err = (&tls.Dialer{Config: config}).DialContext(ctx, "tcp", address)
-	}
-	if err != nil {
-		return nil, localIOError("hosted dial", err)
-	}
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	}
-	return conn, nil
+	return dialHostedSocket(ctx, address, options)
 }
 
 // exchangeHostedHello sends the hello and returns the welcome's code and
-// assigned seat: seat 0 for a creator, any free seat for a joiner.
-func exchangeHostedHello(conn net.Conn, body []byte, requested string, seat uint8) (string, uint8, error) {
-	if err := writeLocalFrame(conn, body); err != nil {
+// assigned seat: seat 0 for a creator, any free seat for a joiner. The relay
+// must answer in the version the hello spoke.
+func exchangeHostedHello(conn net.Conn, traffic *trafficCounter, version uint16, body []byte, requested string, seat uint8) (string, uint8, error) {
+	if err := traffic.write(conn, body); err != nil {
 		return "", 0, err
 	}
-	response, err := readLocalFrame(conn, localMaxErrorBytes+32)
+	response, err := traffic.read(conn, localMaxErrorBytes+32)
 	if err != nil {
 		return "", 0, err
 	}
@@ -647,8 +660,8 @@ func exchangeHostedHello(conn net.Conn, body []byte, requested string, seat uint
 	if kind != hostedWelcomeMessage {
 		r.Abort(hostedError("welcome", "a hosted welcome"))
 	}
-	if v := r.U16(); v != hostedVersion {
-		r.Abort(hostedVersionError(v))
+	if v := r.U16(); v != version {
+		r.Abort(hostedRelayVersionError(version, v))
 	}
 	code, assigned := r.Text(hostedCodeLength), r.U8()
 	if !validHostedCode(code) || (requested != "" && code != requested) || (requested == "" && assigned != seat) || assigned >= HostedMaxSeats {

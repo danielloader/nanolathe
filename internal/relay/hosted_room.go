@@ -183,6 +183,10 @@ func (r *hostedRoom) run() {
 	seal.Stop()
 	defer seal.Stop()
 	var ready <-chan time.Time
+	reports := time.NewTimer(time.Hour)
+	reports.Stop()
+	defer reports.Stop()
+	var reporting <-chan time.Time
 	deadline := time.NewTimer(r.server.timeouts.waiting)
 	defer deadline.Stop()
 	var started bool
@@ -359,6 +363,19 @@ func (r *hostedRoom) run() {
 		w.Raw(config)
 		return w.Bytes()
 	}
+	// report sends every playing seat that spoke version 6 or later the
+	// match's progress and restarts the interval (§16.5.2). Version-5 seats
+	// receive exactly the stream they always did.
+	report := func() {
+		body := encodeHostedProgress(&progress, func(slot int) time.Duration { return players[slot].rtt() })
+		for slot := range progress.n {
+			if p := players[slot]; progress.active[slot] && p.version >= hostedProgressVersion && p.report(body) {
+				stats.bytesOut += uint64(len(body))
+			}
+		}
+		reports.Reset(r.server.timeouts.report)
+		reporting = reports.C
+	}
 	arm := func() {
 		low, _ := progress.slowest()
 		if started && progress.playing() > 0 && ready == nil && progress.terminal == 0 && tick-low < hostedMaxAhead {
@@ -390,6 +407,8 @@ func (r *hostedRoom) run() {
 			}
 		}
 		deadline.Reset(r.server.timeouts.progress)
+		reports.Reset(r.server.timeouts.report)
+		reporting = reports.C
 		arm()
 		publish()
 		return nil
@@ -448,6 +467,8 @@ func (r *hostedRoom) run() {
 			if tick%30 == 0 {
 				publish()
 			}
+		case <-reporting:
+			report()
 		case e := <-r.events:
 			stats.bytesIn += uint64(len(e.body))
 			if e.join {
@@ -521,6 +542,7 @@ func (r *hostedRoom) run() {
 						finish(nil, finishCompleted)
 						return
 					}
+					report()
 					arm()
 					publish()
 				default:
@@ -719,6 +741,7 @@ func (r *hostedRoom) run() {
 				}
 				now := time.Now()
 				slot := int(p.slot)
+				wasFinal := progress.final[slot]
 				complete, err := progress.acknowledge(slot, tick, ack, flags&ackSeatFinal != 0, now)
 				if err != nil {
 					reason := finishProtocol
@@ -734,6 +757,9 @@ func (r *hostedRoom) run() {
 				if complete {
 					finish(nil, finishCompleted)
 					return
+				}
+				if !wasFinal && progress.final[slot] {
+					report()
 				}
 				_, oldest := progress.slowest()
 				deadline.Reset(max(0, time.Until(oldest.Add(r.server.timeouts.progress))))

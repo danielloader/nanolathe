@@ -1,6 +1,14 @@
 package relay
 
-import "time"
+import (
+	"io"
+	"math"
+	"slices"
+	"sync/atomic"
+	"time"
+
+	"github.com/nanolathe-gg/nanolathe/internal/netproto"
+)
 
 // HostedMatchProgress is the relay's latest report on a running hosted match:
 // how far every seat has acknowledged and how far the relay has compared
@@ -30,14 +38,116 @@ type LocalTraffic struct {
 }
 
 // Progress returns the relay's latest report on the running match, and false
-// before the first one or on a relay that sends none.
+// before the first one or on a relay that sends none. It never waits for the
+// reader and may be called from any goroutine.
 func (c *LocalClient) Progress() (HostedMatchProgress, bool) {
-	// TODO(mp-browser): stub until the relay unit implements the report.
-	return HostedMatchProgress{}, false
+	c.progressMu.Lock()
+	defer c.progressMu.Unlock()
+	if c.progress == nil {
+		return HostedMatchProgress{}, false
+	}
+	return HostedMatchProgress{Agreed: c.progress.Agreed, Seats: slices.Clone(c.progress.Seats)}, true
 }
 
-// Traffic returns the client's relay message counts so far.
+// Traffic returns the client's relay message counts so far, the hello and
+// lobby included. It may be called from any goroutine.
 func (c *LocalClient) Traffic() LocalTraffic {
-	// TODO(mp-browser): stub until the relay unit implements the counters.
-	return LocalTraffic{}
+	return LocalTraffic{
+		MessagesIn: c.traffic.messagesIn.Load(), MessagesOut: c.traffic.messagesOut.Load(),
+		BytesIn: c.traffic.bytesIn.Load(), BytesOut: c.traffic.bytesOut.Load(),
+	}
+}
+
+// Progress report seat flags.
+const (
+	progressPlaying = 1 << iota
+	progressFinal
+	progressFlagsMask = progressPlaying | progressFinal
+)
+
+// encodeHostedProgress is one report: the agreed tick and the slot count,
+// then per slot its flags, last acknowledged tick and round trip in
+// microseconds.
+func encodeHostedProgress(p *hostedProgress, rtt func(slot int) time.Duration) []byte {
+	var w netproto.Writer
+	w.U8(hostedProgressMessage)
+	w.U32(p.compared)
+	w.U8(uint8(p.n))
+	for slot := range p.n {
+		var flags uint8
+		if p.active[slot] {
+			flags |= progressPlaying
+		}
+		if p.final[slot] {
+			flags |= progressFinal
+		}
+		w.U8(flags)
+		w.U32(p.acked[slot])
+		w.U32(uint32(min(max(rtt(slot).Microseconds(), 0), math.MaxUint32)))
+	}
+	return w.Bytes()
+}
+
+func decodeHostedProgress(body []byte) (HostedMatchProgress, error) {
+	r := netproto.NewReader(body, hostedError)
+	if r.U8() != hostedProgressMessage {
+		r.Abort(hostedError("progress report", "a progress report"))
+	}
+	p := HostedMatchProgress{Agreed: r.U32()}
+	n := int(r.U8())
+	if n < 1 || n > HostedMaxSeats {
+		r.Abort(hostedError("progress report", "1 to 10 slots"))
+	}
+	p.Seats = make([]HostedSeatProgress, n)
+	for i := range p.Seats {
+		flags := r.U8()
+		if flags&^progressFlagsMask != 0 {
+			r.Abort(hostedError("progress report", "the playing and final bits"))
+		}
+		p.Seats[i] = HostedSeatProgress{Playing: flags&progressPlaying != 0, Final: flags&progressFinal != 0, Acked: r.U32(), RTT: time.Duration(r.U32()) * time.Microsecond}
+	}
+	if err := r.End(); err != nil {
+		return HostedMatchProgress{}, err
+	}
+	return p, nil
+}
+
+// recordProgress keeps a report for Progress.
+func (c *LocalClient) recordProgress(body []byte) error {
+	p, err := decodeHostedProgress(body)
+	if err != nil {
+		return err
+	}
+	c.progressMu.Lock()
+	c.progress = &p
+	c.progressMu.Unlock()
+	return nil
+}
+
+// trafficCounter counts whole envelopes as they are read and written.
+type trafficCounter struct {
+	messagesIn, messagesOut atomic.Uint64
+	bytesIn, bytesOut       atomic.Uint64
+}
+
+func envelopeBytes(body []byte) uint64 {
+	return uint64(len(body) + netproto.UvarintLen(uint64(len(body))))
+}
+
+func (t *trafficCounter) read(r io.Reader, limit int) ([]byte, error) {
+	body, err := readLocalFrame(r, limit)
+	if err == nil {
+		t.messagesIn.Add(1)
+		t.bytesIn.Add(envelopeBytes(body))
+	}
+	return body, err
+}
+
+func (t *trafficCounter) write(w io.Writer, body []byte) error {
+	err := writeLocalFrame(w, body)
+	if err == nil {
+		t.messagesOut.Add(1)
+		t.bytesOut.Add(envelopeBytes(body))
+	}
+	return err
 }

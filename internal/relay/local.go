@@ -16,7 +16,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/netproto"
 )
 
-// LocalHello identifies one of the two seats before the tick-zero barrier.
+// LocalHello identifies a seat before the tick-zero barrier.
 type LocalHello struct {
 	Seat            uint8
 	Identity        netproto.Identity
@@ -350,6 +350,9 @@ type LocalClient struct {
 	readTick      uint32
 	readPosition  uint64
 	readSequences [HostedMaxSeats]uint64
+	traffic       trafficCounter
+	progressMu    sync.Mutex
+	progress      *HostedMatchProgress // the latest report; never modified
 }
 
 func DialLocal(ctx context.Context, address string, hello LocalHello) (*LocalClient, error) {
@@ -364,8 +367,9 @@ func DialLocal(ctx context.Context, address string, hello LocalHello) (*LocalCli
 	if err != nil {
 		return nil, localIOError("dial", err)
 	}
+	c := &LocalClient{conn: conn}
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-	err = writeLocalFrame(conn, body)
+	err = c.writeFrame(body)
 	stopped := stop()
 	if err != nil || !stopped || ctx.Err() != nil {
 		_ = conn.Close()
@@ -374,7 +378,7 @@ func DialLocal(ctx context.Context, address string, hello LocalHello) (*LocalCli
 		}
 		return nil, err
 	}
-	return &LocalClient{conn: conn}, nil
+	return c, nil
 }
 
 func (c *LocalClient) Close() error {
@@ -405,7 +409,7 @@ func (c *LocalClient) Submit(payload []byte) (uint64, error) {
 	w.U64(sequence)
 	w.U32(uint32(len(payload)))
 	w.Raw(payload)
-	if err := writeLocalFrame(c.conn, w.Bytes()); err != nil {
+	if err := c.writeFrame(w.Bytes()); err != nil {
 		return 0, err
 	}
 	c.sequence = sequence
@@ -415,30 +419,40 @@ func (c *LocalClient) Submit(payload []byte) (uint64, error) {
 // ReadGrant waits for a sealed tick. Both terminal ACKs end it with io.EOF.
 // A sequence refusal is reported without closing the connection; other relay
 // failures abort the room. The prototype host may abort on either error.
+// A hosted relay's progress reports are consumed here and kept for Progress.
 func (c *LocalClient) ReadGrant() (LocalGrant, error) {
 	if c == nil {
 		return LocalGrant{}, localError("client", "a connected client")
 	}
-	if c.idle > 0 && c.readTick > 0 {
-		// Once grants flow, the relay sends one, a failure, or a WebSocket
-		// ping well within this bound; silence means the route is gone.
-		if err := c.conn.SetReadDeadline(time.Now().Add(c.idle)); err != nil {
+	var body []byte
+	for {
+		if c.idle > 0 && c.readTick > 0 {
+			// Once grants flow, the relay sends one, a report or a failure
+			// well within this bound; silence means the route is gone.
+			if err := c.conn.SetReadDeadline(time.Now().Add(c.idle)); err != nil {
+				return LocalGrant{}, err
+			}
+		}
+		var err error
+		if body, err = c.readFrame(localMaxGrantFrame); err != nil {
+			if c.idle > 0 && c.readTick > 0 && errors.Is(err, os.ErrDeadlineExceeded) {
+				return LocalGrant{}, fmt.Errorf("%w: %w", hostedError("relay connection", fmt.Sprintf("relay traffic within %s", c.idle)), err)
+			}
 			return LocalGrant{}, err
 		}
-	}
-	body, err := readLocalFrame(c.conn, localMaxGrantFrame)
-	if err != nil {
-		if c.idle > 0 && errors.Is(err, os.ErrDeadlineExceeded) {
-			return LocalGrant{}, fmt.Errorf("%w: %w", hostedError("relay connection", fmt.Sprintf("relay traffic within %s", c.idle)), err)
+		if body[0] == hostedProgressMessage {
+			// Host diagnostics, not a grant (§16.5.2).
+			if err := c.recordProgress(body); err != nil {
+				return LocalGrant{}, err
+			}
+			continue
 		}
-		return LocalGrant{}, err
-	}
-	// A hosted room without a lobby still reports its state and Started
-	// before the first grant (§16.6.1).
-	for c.readTick == 0 && (body[0] == hostedLobbyMessage || body[0] == hostedStartedMessage || body[0] == hostedConfigurationMessage) {
-		if body, err = readLocalFrame(c.conn, localMaxGrantFrame); err != nil {
-			return LocalGrant{}, err
+		// A hosted room without a lobby still reports its state and Started
+		// before the first grant (§16.6.1).
+		if c.readTick == 0 && (body[0] == hostedLobbyMessage || body[0] == hostedStartedMessage || body[0] == hostedConfigurationMessage) {
+			continue
 		}
+		break
 	}
 	r := netproto.NewReader(body, localError)
 	switch r.U8() {
@@ -482,7 +496,16 @@ func (c *LocalClient) ReadGrant() (LocalGrant, error) {
 func (c *LocalClient) writeMessage(body []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	return writeLocalFrame(c.conn, body)
+	return c.writeFrame(body)
+}
+
+// readFrame and writeFrame move one envelope and count it for Traffic.
+func (c *LocalClient) readFrame(limit int) ([]byte, error) {
+	return c.traffic.read(c.conn, limit)
+}
+
+func (c *LocalClient) writeFrame(body []byte) error {
+	return c.traffic.write(c.conn, body)
 }
 
 // Acknowledgement flags: the shared battle has ended, and this seat's own
@@ -516,5 +539,5 @@ func (c *LocalClient) Acknowledge(tick uint32, checksum [32]byte, ended, final b
 	if tick%30 == 0 {
 		w.Digest(checksum)
 	}
-	return writeLocalFrame(c.conn, w.Bytes())
+	return c.writeFrame(w.Bytes())
 }

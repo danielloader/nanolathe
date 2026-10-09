@@ -607,8 +607,8 @@ func TestHostedVersionAndHelloFraming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, flags, size, _, config, err := decodeHostedHello(body); err != nil || code != "" || flags != hostedAutoStart || size != 4 || string(config) != "configuration" {
-		t.Fatalf("creator hello round trip: %q %d %d %q %v", code, flags, size, config, err)
+	if h, err := decodeHostedHello(body); err != nil || h.version != hostedVersion || h.code != "" || h.flags != hostedAutoStart || h.size != 4 || string(h.config) != "configuration" {
+		t.Fatalf("creator hello round trip: %+v %v", h, err)
 	}
 	for _, mutate := range []func([]byte) []byte{
 		func(b []byte) []byte { b[0] = localHelloMessage; return b },
@@ -616,15 +616,20 @@ func TestHostedVersionAndHelloFraming(t *testing.T) {
 		func(b []byte) []byte { return append(b, 0) },
 		func(b []byte) []byte { return b[:len(b)-1] },
 	} {
-		if _, _, _, _, _, err := decodeHostedHello(mutate(bytes.Clone(body))); err == nil {
+		if _, err := decodeHostedHello(mutate(bytes.Clone(body))); err == nil {
 			t.Fatal("accepted malformed versioned hello")
 		}
 	}
-	// A version-1 client is told both versions.
+	// A version-1 client is told the served versions and its own; a
+	// version-5 hello is still served, in its own version (§12.2).
 	old := bytes.Clone(body)
 	old[1] = 1
-	if _, _, _, _, _, err := decodeHostedHello(old); err == nil || !strings.Contains(err.Error(), "version 5; this client sent version 1") {
+	if _, err := decodeHostedHello(old); err == nil || !strings.Contains(err.Error(), "version 5 or 6; this client sent version 1") {
 		t.Fatalf("version mismatch: %v", err)
+	}
+	old[1] = 5
+	if h, err := decodeHostedHello(old); err != nil || h.version != 5 {
+		t.Fatalf("version-5 hello: %+v %v", h, err)
 	}
 	for _, code := range []string{"SHORT", "AAAAAAA", "AAAAA0", "aaaaaa", "AAA AA"} {
 		if _, err := encodeHostedHello(code, 0, 0, localTestHello(1), nil); err == nil {
@@ -725,7 +730,7 @@ func TestHostedCancellationClosesPendingHandshake(t *testing.T) {
 func TestHostedClientIdleBoundOnlyAfterGrants(t *testing.T) {
 	// Before the battle a creator may wait for its peer; the relay's own
 	// waiting deadline reports that, not the client's idle bound.
-	s := listenHostedTest(t, HostedConfig{InsecureLoopback: true}, hostedTimeouts{10 * time.Second, 200 * time.Millisecond, 5 * time.Second, 10 * time.Second})
+	s := listenHostedTest(t, HostedConfig{InsecureLoopback: true}, hostedTimeouts{10 * time.Second, 200 * time.Millisecond, 5 * time.Second, 10 * time.Second, websocketPingInterval, time.Second})
 	creator, _ := dialHostedTest(t, s, "", 0)
 	creator.idle = 20 * time.Millisecond
 	if _, err := creator.ReadGrant(); err == nil || !strings.Contains(err.Error(), "room wait") {

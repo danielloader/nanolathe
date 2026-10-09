@@ -5,10 +5,11 @@ simulation and only player commands travel: a relay puts them in one order,
 tells every client which tick each one runs on, and decides how far the
 battle may advance. The model is **relayed deterministic lockstep**.
 
-**What exists.** Online skirmish for two human seats under Modern gameplay,
-through the hosted relay at `relay.nanolathe.gg` (§12, §16.5). Players
-start a match from the main menu's MULTI entry (§16.6), or from the command
-line with `--relay-address` and `--relay-room` (§16.5.4). A local
+**What exists.** Online skirmish for 2–10 human seats and online Survival
+for 2–3 survivors under Modern gameplay, through the hosted relay at
+`relay.nanolathe.gg` (§12, §16.5), from the native and browser builds.
+Players start a match from the main menu's MULTI entry (§16.6), or from the
+command line with `--relay-address` and `--relay-room` (§16.5.4). A local
 two-window play test runs over a loopback relay (§16.4). Underneath are the
 determinism milestones: one simulation on every host (M1, §16.1),
 seat-attributed commands with complete configuration and content identities
@@ -38,7 +39,8 @@ a missing number is a retired section.
 
 1. Online skirmish for 2–10 human seats with teams chosen in the lobby, and
    online Survival for 2–3 human survivors, under Modern gameplay, by
-   relayed lockstep through the hosted relay (§12, §16.5, §16.6).
+   relayed lockstep through the hosted relay (§12, §16.5, §16.6), from the
+   native and browser builds.
 2. The host's map, mod, mutators and unit restrictions, frozen into the
    room's configuration when it is created and adopted by every joiner
    (§8.6, §16.6).
@@ -904,7 +906,7 @@ layout. `S` is a supported seat schema; `D` a seat schema whose online
 application waits for M5 (rejected before mutation); `L` local-only, with no
 online or authoritative replay payload; `R` single-player replay only. S and
 D kinds also have a single-player replay form where the local operation
-exists. The two-human session additionally admits `MobileBuild`, checking
+exists. The online session additionally admits `MobileBuild`, checking
 the issuing seat's known-site predicate (§16.4.2).
 
 Fields are in wire order. Records are named `<Kind>Payload` under
@@ -1388,7 +1390,7 @@ same frozen content (map/schema, side ordinals, restrictions, content
 profile, rule/mutator inputs and supported consumer policies), and a
 constructor calls it before allocating a world or consuming either RNG. A
 hash match alone is not admission. `NewAdmittedSkirmish` composes the
-single-seat shape; the two-human battle composes through
+single-seat shape; every online battle composes through
 `NewPlaytestSkirmish` (§16.4.2).
 
 ## 9. State digest and desync
@@ -1462,11 +1464,12 @@ reporting progress is a protocol failure.
 
 ### 9.3 What a desync does
 
-**Two seats (today).** When the 30-tick checksums differ the relay fails
-the room and both clients stop at that tick without a result. With two
-participants no strict majority exists.
+**Today.** When the 30-tick checksums differ the relay fails the room and
+every client stops at that tick without a result, whatever the room's
+size. With two participants no strict majority exists; with more, a
+majority continuation needs the digest exchange of §9.2.
 
-**Later, with more seats:**
+**Later:**
 
 - **Casual rooms: the battle goes on for those who agree.** When the
   participants reporting one digest are a strict majority, they continue;
@@ -1696,11 +1699,11 @@ saved in any case (DESIGN_SURVIVAL §11).
 
 One Go package, `internal/relay`, implements the relay. It runs in:
 
-- **The hosted relay**, `cmd/nanolathe-server`: independent two-human rooms
-  reached by a six-character room code. Clients connect outward, so nobody
-  opens a port. The project's instance is `relay.nanolathe.gg` on
-  DigitalOcean App Platform (§16.5.6); the protocol is open and anyone may
-  run one.
+- **The hosted relay**, `cmd/nanolathe-server`: independent rooms of 2 to 10
+  human seats reached by a six-character room code. Clients connect
+  outward, so nobody opens a port. The project's instance is
+  `relay.nanolathe.gg` on DigitalOcean App Platform (§16.5.6); the protocol
+  is open and anyone may run one.
 - **The loopback relay** of the local two-window play test (§16.4.2).
 - Later, a relay **embedded** in the hosting player's client for LAN and
   direct-IP battles.
@@ -1711,9 +1714,19 @@ acknowledgements and checksums.
 
 ### 12.2 Messages
 
-The hosted protocol is **version 5**; §16.5.1–§16.5.2 and §16.6.1 hold its
+The hosted protocol is **version 6**; §16.5.1–§16.5.2 and §16.6.1 hold its
 rules. Messages are bounded, length-prefixed binary frames in `netproto`
 primitives, carried over TLS or WebSocket (§12.3).
+
+**Versions.** The relay serves versions 5 and 6 in the same rooms. It
+accepts a Hello or a Describe of either, records the version each seat's
+Hello spoke and answers that seat's Welcome in it; a Description is the
+same in both. Only version-6 seats receive Progress, so a version-5 seat
+receives exactly the version-5 stream. A Hello or Describe of any other
+version is refused naming the served versions and the client's. A client
+speaks version 6 and refuses a Welcome in any other version, naming both;
+against a version-5 relay it therefore receives that relay's version
+refusal.
 
 | Direction | Message | Content |
 |---|---|---|
@@ -1731,10 +1744,11 @@ primitives, carried over TLS or WebSocket (§12.3).
 | relay → client | Configuration | the room's latest base configuration, to each joiner and after every host change |
 | relay → client | Started | the match has started, with the sender's slot; grants follow |
 | relay → client | Grant | a sealed tick and its commands `{seat, sequence, position, payload}` |
+| relay → client | Progress | version 6 only, after Started: the last tick compared across playing seats, and per slot whether it still plays, whether its result is final, its last acknowledged tick and the relay's ping round trip (§16.5.2) |
 | relay → client | Refused, Failed, Done | a refused hello, join, description or command, with its reason; a room failure with its reason; explicit normal completion |
 
 **Later messages:** a resume with seat credential and connection epoch
-(§11.2), progress and digest reports with the agreed summary (§9.2), pacing
+(§11.2), digest reports with the agreed summary (§9.2), pacing
 requests (refused while Q5 stands), seat requests and removal calls and
 ballots (§11.1), chat, ping, desync and seat-status notices, and a
 two-stage start in which the relay freezes the configuration, draws the
@@ -1755,12 +1769,14 @@ inside the simulation (§7.2).
 
 Clients reach the hosted relay over TLS: natively (`host:port`) or as
 RFC 6455 WebSocket messages behind the hosting platform's TLS terminator
-(`wss://host/relay`, §16.5.6). Certificate verification is mandatory;
-plaintext is permitted only behind that terminator or for numeric-loopback
-test modes. The stream needs reliable ordered delivery, so a lost segment
-holds that one client until it is retransmitted. Per-connection queues are
-bounded and a slow reader never blocks another room. A datagram transport
-or QUIC is a later decision if impaired-network measurements justify it.
+(`wss://host/relay`, §16.5.6); the browser build only the latter, through
+the browser's own WebSocket (§16.5.1). Certificate verification is
+mandatory; plaintext is permitted only behind that terminator or for
+numeric-loopback test modes. The stream needs reliable ordered delivery, so
+a lost segment holds that one client until it is retransmitted.
+Per-connection queues are bounded and a slow reader never blocks another
+room. A datagram transport or QUIC is a later decision if impaired-network
+measurements justify it.
 
 ### 12.4 Lobby and matchmaking
 
@@ -1845,7 +1861,7 @@ payloads `[08 "Packet framing and dispatch"]`. Nanolathe's defences:
 | A client on a different simulation | Identity comparison, the initial checksum and the rehearsal before Start (§8.2, §16.7); the 30-tick checksum during play (§16.4). |
 | Changing one's own state (resources, health, build time) | Honest replicas apply no uncommanded change; a diverging client fails the checksum and the match stops. A cheat that does not diverge the simulation is undetectable by any hash. |
 | Seeing through fog | Every lockstep client holds the whole state; hashes cannot prove camera compliance. Withholding hidden state needs §12.6's different architecture. |
-| Ending or stalling a match | A two-seat room that fails, desyncs or stalls ends without a result (§9.3, §16.5.2). |
+| Ending or stalling a match | A room that fails, desyncs or stalls ends without a result (§9.3, §16.5.2). |
 | Flooding the relay | Per-room and per-connection limits; a misbehaving room fails alone (§16.5.1). Holding rooms open is a known gap (§16.5.1). |
 | Attacking an opponent's connection | The hosted relay never publishes player addresses. |
 | Removing another seat (later) | Only the relay authors another seat's final-removal event, on a passed vote against a seat out of play; there is no vote-kick (§11.1). |
@@ -1915,7 +1931,7 @@ finding.
 | Q10 | The project runs one public relay reached by room code; the protocol is open. |
 | Q11 | Display names until ranked play needs accounts. |
 | Q12 | A replay needs a simulation that reproduces it; no cross-release compatibility program is planned. |
-| Q13 | Desync: a two-seat room ends without a result. Later, casual rooms continue with a strict majority and move dissenters to rejoin or the drop state; rated rooms are uncertified until a trusted replayer or referee rules (§9.3). |
+| Q13 | Desync: a room ends without a result. Later, casual rooms continue with a strict majority and move dissenters to rejoin or the drop state; rated rooms are uncertified until a trusted replayer or referee rules (§9.3). |
 | Q14 | A client lacking the host's mod may fetch it through the verified catalogue download (later). |
 | Q15 | Identical catalogs are required; roster negotiation may come later as a catalog filter. |
 | Q16 | Retail's unit-restriction table is configuration field 12; the online lobby carries the host's restrictions (§16.6). A restriction-editing lobby screen, and a decision on retail's seeded `wacky` state, come later. |
@@ -1935,8 +1951,8 @@ finding.
 
 ## 16. Delivery plan
 
-Multiplayer is delivered in milestones, each behind the one before it. The
-two-human online play (§16.4–§16.7) took the pieces of M5 and M6 it needs,
+Multiplayer is delivered in milestones, each behind the one before it.
+Online play (§16.4–§16.7) took the pieces of M5 and M6 it needs,
 in dependency order, ahead of M4; it does not complete those milestones.
 Every single-player battle stays bit-identical except where a contract here
 explicitly says otherwise.
@@ -1944,10 +1960,10 @@ explicitly says otherwise.
 | Milestone | Delivers | State, or done when |
 |---|---|---|
 | **M0 Adoption** | The §15 decisions, the scope in ARCHITECTURE and the agent instructions, the invariant amendments (§5.4). | Done. |
-| **M1 One simulation on every host** | Effect holds in `SimArt` and the pool timed from them on every host (L9); the portable numeric kernel and defined conversions (L1); fingerprint locks from amd64 and arm64 builds and a lock scene that fills the Strict effect pool. | Done (§16.1). |
+| **M1 One simulation on every host** | Effect holds in `SimArt` and the pool timed from them on every host (L9); the portable numeric kernel and defined conversions (L1); fingerprint locks from amd64, arm64 and js/wasm builds and a lock scene that fills the Strict effect pool. | Done (§16.1). |
 | **M2 Commands, configuration and identity** | Seat-attributed commands, receiver-side permissions, allocation serials, local interface state, explicit wire schemas, complete content/build/configuration identities and the match policy fields. | Done (§16.2). |
 | **M3 Canonical checkpoints and digest** | The reviewed state inventory, the canonical writer and owner sub-digests, the bounded histories and the computer seats' application records. | Implemented; native cross-platform comparison pending (§16.3). |
-| **Two-human online play** | Perspectives and per-seat results for two hostile humans (part of M5); the loopback and hosted relays, room codes, the lobby and the rehearsal (part of M6). | Done (§16.4–§16.7). |
+| **Online play** | Perspectives, lobby teams and per-seat results for 2–10 human seats, and online Survival (part of M5); the loopback and hosted relays, room codes, the lobby, the rehearsal and the browser build's relay connection (part of M6). | Done (§16.4–§16.7). |
 | **M4 Replays** | Recorder, playback, pump ends, pacing notes, digest checks and a headless replay command. | Next. Long Strict and Modern replays agree across platforms and between a windowed recording and headless playback, through pauses, speed changes and late AI workers. |
 | **M5 One world per player** | The rest of §6 — computer seats, alliances, sharing, watchers, per-seat option bits — and the multi-seat harness (§17). | The harness passes for two to four human seats with computer seats under every registered rule set; single-seat locks unchanged. |
 | **M6 LAN and room codes** | The embedded relay and LAN/direct lobby, chat, departures with removal votes and the mode's final-removal rule (§11.1), shared view restrictions (§8.4), digest exchange, desync bundles and the casual desync policy (§9), and the pacing state table (§4.4). | Mixed-platform battles finish on a LAN and through the hosted relay; hostile commands are refused; §11.1's tests pass in every reserved mode; a seeded desync in a three-seat battle leaves two seats playing; impaired-network and CPU-stall runs meet budgets declared before acceptance. |
@@ -1961,9 +1977,10 @@ explicitly says otherwise.
 M1 makes every host compute the same battle: one portable numeric kernel for
 authoritative arithmetic (L1) and effect timing from content, not from a
 renderer (L9). It is implemented. Its vectors pass natively on darwin/arm64,
-linux/amd64 (v1 and v3) and windows/amd64; live comparisons with Go's library
-run only in `GOAMD64=v1` builds, and every target checks an independently
-generated digest of the same 16,384 radian input pairs. Full cross-platform
+linux/amd64 (v1 and v3) and windows/amd64, and under js/wasm; live
+comparisons with Go's library run only in `GOAMD64=v1` builds, and every
+target checks an independently generated digest of the same 16,384 radian
+input pairs. Full cross-platform
 world equivalence is M3's test, not M1's.
 
 | Unit | Delivers |
@@ -1972,7 +1989,7 @@ world equivalence is M3's test, not M1's.
 | **U2 Call sites and guards** | Every library call and raw float-to-integer conversion in authoritative packages routed through the kernel; the two I2 source guards. |
 | **U3 Effect timing from content** | Effect holds compiled into `SimArt`; the pool timed from them at composition; the renderer timing resolver removed; the Strict pool lock. |
 | **U4 Pool under the guards** | The fixed effect pool, its admission adapter and fragment/debris state in the authoritative package `internal/effects` (in `authoritativeDirs`); draw lists and trail particles stay in `internal/render`. |
-| **U5 Ratchets** | Locks run from an amd64 build beside the native one in `tools/check-retail`; kernel vectors in CI on linux/amd64, darwin/arm64 and windows/amd64. |
+| **U5 Ratchets** | Locks run from amd64 and js/wasm builds beside the native one in `tools/check-retail`; kernel vectors in CI on linux/amd64, darwin/arm64, windows/amd64 and js/wasm. |
 
 **Public API.** Package `internal/sim/numeric`:
 
@@ -2063,7 +2080,10 @@ func (a *SimArt) EffectEntryHolds(bank, entry string) ([]int32, bool)
   `internal/session` as authoritative, load-time input or a named
   presentation edge.
 - **M1-C11 Ratchets.** `tools/check-retail` runs the locks from an amd64
-  build where the host can execute one and says SKIPPED where it cannot.
+  build where the host can execute one, and from a js/wasm build under
+  Node 22 or later with `GOMAXPROCS=1`, because the browser build's seats
+  play beside native ones. Each says SKIPPED where the host cannot run it;
+  a lock that runs and fails fails the gate.
 
 ### 16.2 M2: commands, configuration and identity
 
@@ -2072,7 +2092,7 @@ It is implemented. Command schemas, size proof, stale references and
 command APIs are §7.4.1–§7.4.4; configuration, frozen inputs and build
 identity are §8.6–§8.8. Many detailed encoding rules are recorded at their
 code sites; this section keeps the contracts. `NewAdmittedSkirmish` composes
-only the single-seat shape; the two-human online battle composes through
+only the single-seat shape; every online battle composes through
 `NewPlaytestSkirmish` (§16.4.1). A command whose application needs per-seat
 perspectives (M5) stays refused online, naming its gate; tests never fake it
 by changing `LocalOwner` or `ViewingOwner` around dispatch.
@@ -2179,7 +2199,7 @@ MakeSelectable and Meteor need the cheat permission, Spawn the permission and
 the Modern set; `Give` follows Q8 and Q28; CommunityKickout needs its
 feature. MobileBuild, CommunityOrderDrag, View, Visibility, DoubleShot,
 HalfShot and the reserved kinds 35–45 are refused naming M5, except that the
-two-human session admits MobileBuild with its known-site check (§16.4.2).
+online session admits MobileBuild with its known-site check (§16.4.2).
 Local kinds,
 replay-only NoShake and SetLogo, lobby-only Gameplay and unlisted numbers
 are never admitted online; the single-player replay context applies every
@@ -5410,18 +5430,20 @@ nanolathe --root ~/TotalAnnihilation --mod none --map 'ashap plateau' --fullscre
 
 ### 16.5 Hosted relay
 
-The hosted relay serves §16.4's two-human Modern battle, unit checksum,
-command vocabulary and per-seat simulation over the Internet, with no
-artificial order delay. A lost connection ends the room without a result or
-any gameplay removal. Room lists, AI and Survival, configuration editing,
-reconnect and removal votes are later work.
+The hosted relay serves the online battles of §16.6 — 2–10 human seats,
+with §16.4's Modern battle, unit checksum, command vocabulary and per-seat
+simulation — over the Internet, with no artificial order delay. A lost
+connection of a seat still playing ends the room without a result or any
+gameplay removal; a seat whose result is final may leave (§16.6.1). Room
+lists, computer seats, reconnect and removal votes are later work.
 
 #### 16.5.1 Transport and admission contract
 
 `internal/relay` reuses the loopback relay's grant, command and
 acknowledgement payloads and identity comparison, and adds the hosted
-handshake and lobby (§16.6.1). The hosted protocol is version 5; a hello of
-another version is refused naming both versions.
+handshake and lobby (§16.6.1). The hosted protocol is version 6, and the
+relay also serves version-5 seats (§12.2); a hello of another version is
+refused naming the served versions and the client's.
 
 ```go
 type HostedConfig struct {
@@ -5441,19 +5463,21 @@ func DialHosted(ctx context.Context, address, room string, hello LocalHello, opt
 ```
 
 **Rooms and admission.** A client sends an empty room code to create a room
-or a code to join one. The server assigns the creator seat 0 and the joiner
-seat 1, refusing a conflicting hello seat. Room codes are six characters
-from `CFHJKMNPRTVWX23456789`, each symbol equally likely and drawn with
-cryptographic randomness; they are private invitations, not credentials.
+or a code to join one. The server assigns the creator seat 0 and each
+joiner the lowest free seat, refusing a conflicting hello seat. Room codes
+are six characters from `CFHJKMNPRTVWX23456789`, each symbol equally likely
+and drawn with cryptographic randomness; they are private invitations, not
+credentials.
 The alphabet leaves out every character a player can misread or mistype as
 another (0, 1, O, I, L, D and Q, and S, Z, B and G beside 5, 2, 8 and 6) and
 every vowel, so a code never spells a word. A typed code ignores case,
 spaces and dashes, and reads S, Z, B and G as 5, 2, 8 and 6. Joining a full,
-unknown, closed or started room is refused. A join compares the joiner's
-identity and initial checksum with the creator's: Protocol, Content, Map,
-Rules, Mod and Configuration must match, and Build is advisory and not
-compared (§8.2). A mismatch refuses the joiner, naming the field, and leaves
-the creator's identity in place.
+unknown, closed or started room is refused. A join of an auto-start room
+(§16.6.1) compares the joiner's identity and initial checksum with the
+creator's: Protocol, Content, Map, Rules, Mod and Configuration must match,
+and Build is advisory and not compared (§8.2). A mismatch refuses the
+joiner, naming the field, and leaves the creator's identity in place. A
+lobby compares digests at Ready instead (§16.7).
 
 **Trust.** TLS is mandatory except an explicitly requested numeric-loopback
 test listener and connection. Clients verify the server certificate; a
@@ -5468,23 +5492,43 @@ advertised public capacity:
 - at most 512 established and pending connections (`--max-connections`);
   the deployed image serves 128 rooms (`--max-rooms`, admitted 1..256);
 - per room at most 64 commands and 256 KiB pending; client frames of at
-  most 256 KiB; at most 1 MiB plus 4 KiB queued per peer — so one
-  misbehaving room holds about 1.3 MiB (pending commands and one shared
-  queue of grant bodies) plus 256 KiB per seat (its reader's frame and its
-  writer's in-flight copy), and every connection the relay admits at once
-  stays under the image's 384 MiB soft memory limit. A hosted client
-  refuses to send a larger command;
+  most 256 KiB; at most 1 MiB plus 4 KiB queued per peer, its one waiting
+  progress report included — so one misbehaving room holds about 1.3 MiB
+  (pending commands and one shared queue of grant bodies) plus 256 KiB per
+  seat (its reader's frame and its writer's in-flight copy), and every
+  connection the relay admits at once stays under the image's 384 MiB soft
+  memory limit. A hosted client refuses to send a larger command;
 - deadlines of 10 seconds for the handshake, 30 minutes for a lobby to
   start, 5 seconds per write, and 10 seconds without execution progress
   once the battle runs;
-- once grants flow, a client that receives no relay traffic for 25 seconds
-  stops; that exceeds the progress abort and the 5-second WebSocket ping.
+- once grants flow, a client that receives no relay message for 25 seconds
+  stops; that exceeds the 10-second progress abort. Pings do not count,
+  since a browser answers them without telling the page.
 
 Per-peer writers are bounded and separate from room pacing, so a slow
 reader blocks no other room. Every close and error path releases its
 connection and room capacity. A transient accept error, such as descriptor
 exhaustion, is retried with bounded backoff; only Close ends the service.
 The health listener sits outside the connection limit (§16.5.6).
+
+**The browser build** reaches the relay through the browser's own
+WebSocket, never a TCP socket or Go's TLS. The URL rules are the native
+client's: `wss://host/relay`, and `ws://` only with the numeric-loopback
+test switch. The browser performs TLS and certificate verification with its
+own trust store, so a custom trust root (`--relay-ca`) is refused, as is a
+`host:port` address, which needs a TCP socket; it also answers the relay's
+pings itself. The client requires subprotocol `nanolathe-relay-v1`, checks
+it once the socket opens and receives binary messages as array buffers. Its
+connection gives the client the same byte stream as the native one: reads
+cross message boundaries; a write becomes binary messages within the
+relay's client frame bound and waits, under its deadline, while the
+browser's send buffer holds more than 1 MiB plus 4 KiB; read and write
+deadlines work; and the connection fails when unread relay messages exceed
+twice the largest one it accepts. Its browser callbacks only copy, record
+or signal, so none blocks Go's single wasm thread. `tools/check-retail` and
+the CI browser job play a hosted match from a js/wasm client under Node 22
+or later, whose global WebSocket stands in for the browser's, against a
+native relay on loopback.
 
 **Known gaps (M7).** One client can hold rooms open by creating a room,
 joining it with a second socket and acknowledging at 30 Hz. The final done
@@ -5512,6 +5556,25 @@ stops granting. Both seats must report the same terminal tick and outcome
 bit, then receive explicit normal completion. Surplus grants already sent
 are drained without running any tick after the shared terminal state. A
 discrepancy fails the room instead of awarding a result.
+
+**Progress report.** After Started the relay sends each playing version-6
+seat a Progress message (§12.2) about once a second, and at once when a
+seat leaves or its result becomes final. It carries the agreed tick — the
+last tick whose ended bits, and at every 30th tick unit checksums, the
+relay has compared across every playing seat — and per slot whether it
+still plays, whether its result is final, its last acknowledged tick and
+the relay's latest WebSocket ping round trip, zero when unmeasured (over
+native TLS, or before the first pong). A seat holds at most one unwritten
+report, in its queue place behind the frames before it, so a slow reader
+receives the latest state rather than a backlog; a report that does not fit
+the seat's queue bounds is dropped and never fails a room. Reports are host
+diagnostics and never reach a simulation. `relay.LocalClient` consumes them
+inside ReadGrant and returns the latest from `Progress()
+(HostedMatchProgress, bool)`: `Agreed` and per slot `Playing`, `Final`,
+`Acked` and `RTT`. `Traffic() LocalTraffic` counts the client's relay
+messages and their bytes, length prefixes included, in each direction since
+it connected, the hello and lobby included. Both may be called from any
+goroutine.
 
 **Client playout.** `internal/lockstep` has `Client` (Submit, ReadGrant,
 Acknowledge and Close, with `relay.LocalClient`'s signatures) and
@@ -5775,9 +5838,11 @@ sides' names in index order.
 
 #### 16.6.2 Client flow
 
-- **MULTI** is enabled except in the browser build, which has no relay
-  transport. It opens a small chooser over the main menu: one sentence
-  saying how online play works, Create Game and Join Game, and Cancel.
+- **MULTI** is enabled in every build, the browser one included, with
+  imported retail content; the browser reaches the relay through its own
+  WebSocket (§16.5.1). It opens a small chooser over the main menu: one
+  sentence saying how online play works, Create Game and Join Game, and
+  Cancel.
   Join Game asks for the room code in a popup (pasted or typed; case,
   spaces and dashes ignored), which stays open with the reason in plain
   words when the join is refused. A small Server control, off the main
@@ -5875,8 +5940,12 @@ checksum, which stops the match.
   isolation, full, expiry and close, bounded input and slow readers, a
   delayed checksum mismatch and final-grant handling; WebSocket framing and
   handshake rejection, health, lifecycle and connection bounds; a headless
-  two-session match through WebSocket; and a deterministic lockstep test
-  modelling the window host at 20–240 Hz.
+  two-session match through WebSocket; a mixed version-5 and version-6
+  room in which only version-6 seats receive progress reports, through a
+  defeated seat's departure; exact traffic accounting; a js/wasm client
+  playing both seats of a hosted match under Node's WebSocket against a
+  native relay, with its deadlines, refusals and measured round trips; and
+  a deterministic lockstep test modelling the window host at 20–240 Hz.
 - **Lobby.** Relay tests for the lobby states, refusals, leaving, Describe,
   the protocol version, the readiness digests and the mismatch bit; session
   tests that field 12 is admitted online, applied to both seats' catalog
@@ -5899,10 +5968,10 @@ checksum, which stops the match.
   and cost limits (§16.3.4, §16.3.80–§16.3.83).
 - **Fingerprint locks.** The fifteen original locks are unchanged on both
   architectures; the Strict effect-pool lock runs seed 5 at step 4,500
-  (M1-C9). The locks run from an amd64 and an arm64 build on every retail
-  gate run whose host can execute both. M2 moved locks only by the
-  interface bits that left the hashed status words, plus single-player
-  changes declared under M2-C7. Later milestones move no single-seat lock
+  (M1-C9). The locks run from amd64, arm64 and js/wasm builds on every
+  retail gate run whose host can execute them (M1-C11). M2 moved locks only
+  by the interface bits that left the hashed status words, plus
+  single-player changes declared under M2-C7. Later milestones move no single-seat lock
   except where §16 says so, and each move carries its reason.
 - **Latency probe** (opt-in): §16.5.4's targets.
 

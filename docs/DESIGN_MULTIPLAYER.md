@@ -5484,9 +5484,10 @@ The health listener sits outside the connection limit (§16.5.6).
 
 **Known gaps (M7).** One client can hold rooms open by creating a room,
 joining it with a second socket and acknowledging at 30 Hz. The final done
-or failure frame can be lost to a TCP reset on Linux, and the server sends
-no WebSocket close frame. A browser's permessage-deflate offer is refused
-rather than ignored.
+or failure frame can be lost to a TCP reset on Linux. The server answers a
+client's WebSocket close frame with its own but never starts the closing
+handshake: it ends a room by closing the socket after the done or failure
+frame.
 
 #### 16.5.2 Continuous grants and client playout
 
@@ -5598,9 +5599,13 @@ HostedDialOptions) (*LocalClient, string, error)`; the native TCP APIs stay.
 WebSocket messages carry the existing bounded wire frames, with no JSON,
 command interpretation or new module dependency: RFC 6455 binary messages,
 subprotocol `nanolathe-relay-v1`, path `/relay`, with masking,
-fragmentation, control frames and close handled, extensions, text and
-oversized messages rejected, HTTP headers bounded at 8 KiB and pending
-sockets bounded. Pings every 5 seconds keep a waiting room alive at the
+fragmentation and control frames handled. An offered extension, such as the
+permessage-deflate every browser offers, is declined by naming none in the
+upgrade response (RFC 6455 §9.1), so frames with reserved bits set are still
+rejected; the Origin header is not checked. A client's close frame is
+answered with a close frame and ends that connection as a departure, never
+as normal completion. Text and oversized messages are rejected, HTTP headers
+bounded at 8 KiB and pending sockets bounded. Pings every 5 seconds keep a waiting room alive at the
 proxy. `GET /healthz` reports readiness and no room information;
 `--health-listen` serves it on a separate listener outside the connection
 limit, so connections filling the relay's slots cannot fail the platform

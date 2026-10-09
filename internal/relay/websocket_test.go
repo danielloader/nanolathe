@@ -174,7 +174,6 @@ func TestWebSocketHandshakeHealthAndPipelinedHello(t *testing.T) {
 		strings.Replace(websocketTestRequest, "Version: 13", "Version: 12", 1),
 		strings.Replace(websocketTestRequest, "dGhlIHNhbXBsZSBub25jZQ==", "YQ==", 1),
 		strings.Replace(websocketTestRequest, "nanolathe-relay-v1", "NANOLATHE-RELAY-V1", 1),
-		strings.Replace(websocketTestRequest, "\r\n\r\n", "\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n", 1),
 		strings.Replace(websocketTestRequest, "\r\n\r\n", "\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n", 1),
 		strings.Replace(websocketTestRequest, "\r\n\r\n", "\r\nContent-Length: 1\r\n\r\n", 1),
 		strings.Replace(websocketTestRequest, "\r\n\r\n", "\r\nTransfer-Encoding: chunked\r\n\r\n", 1),
@@ -230,6 +229,74 @@ func TestWebSocketHandshakeHealthAndPipelinedHello(t *testing.T) {
 	}
 	_ = stream.Close()
 	awaitHostedCapacity(t, s, 0, 0)
+}
+
+// A browser's upgrade always offers permessage-deflate; the relay accepts it
+// and declines the extension by naming none in its response (RFC 6455 §9.1).
+// A close frame from the browser is answered with a close frame and leaves
+// the lobby like any departure: the seat is freed and the room goes on.
+func TestWebSocketBrowserUpgradeAndClose(t *testing.T) {
+	s := listenWebSocketTest(t, HostedConfig{InsecureLoopback: true}, false, hostedDefaultTimeouts)
+	options := HostedDialOptions{InsecureLoopback: true}
+	host := openSizedLobby(t, "ws://"+s.Addr()+"/relay", 3, []byte{1}, options)
+	c := rawWebSocketTest(t, s.Addr())
+	hello := localTestHello(1)
+	hello.Seat = hostedAnySeat
+	body, err := encodeHostedHello(host.Code(), 0, 0, hello, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope bytes.Buffer
+	if err := writeLocalFrame(&envelope, body); err != nil {
+		t.Fatal(err)
+	}
+	request := strings.Replace(websocketTestRequest, "\r\n\r\n", "\r\nOrigin: https://example.invalid\r\nSec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n\r\n", 1)
+	if err := websocketWriteAll(c, append([]byte(request), websocketTestFrame(0x82, envelope.Bytes(), true)...)); err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReader(c)
+	response, err := http.ReadResponse(r, nil)
+	if err != nil || response.StatusCode != http.StatusSwitchingProtocols || len(response.Header.Values("Sec-WebSocket-Extensions")) != 0 {
+		t.Fatalf("browser upgrade: %v / %v", response, err)
+	}
+	awaitLobby(t, host, "the browser seat", present(true))
+	closing := []byte{3, 233} // 1001, going away
+	if err := websocketWriteAll(c, websocketTestFrame(0x88, closing, true)); err != nil {
+		t.Fatal(err)
+	}
+	// The relay's data frames (welcome, configuration, lobby states) come
+	// first, then its close frame echoing the status.
+	for {
+		var header [2]byte
+		if _, err := io.ReadFull(r, header[:]); err != nil {
+			t.Fatalf("no close frame before the connection ended: %v", err)
+		}
+		size := int(header[1] & 127)
+		if size == 126 {
+			var extended [2]byte
+			if _, err := io.ReadFull(r, extended[:]); err != nil {
+				t.Fatal(err)
+			}
+			size = int(extended[0])<<8 | int(extended[1])
+		}
+		payload := make([]byte, size)
+		if _, err := io.ReadFull(r, payload); err != nil {
+			t.Fatal(err)
+		}
+		if header[0] == 0x88 {
+			if !bytes.Equal(payload, closing) {
+				t.Fatalf("close reply %x", payload)
+			}
+			break
+		}
+		if header[0] != 0x82 && header[0] != 0x89 {
+			t.Fatalf("frame %x before the close reply", header[0])
+		}
+	}
+	awaitLobby(t, host, "the browser seat freed", present(false))
+	if _, err := host.State(); err != nil {
+		t.Fatalf("the browser leaving ended the room: %v", err)
+	}
 }
 
 func TestWebSocketConnectionBoundExpiryAndClose(t *testing.T) {

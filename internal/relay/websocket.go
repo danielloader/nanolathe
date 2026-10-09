@@ -122,9 +122,13 @@ func acceptHostedWebSocket(conn net.Conn, timeout time.Duration, deadline time.T
 			protocol = protocol || strings.TrimSpace(part) == websocketProtocol
 		}
 	}
-	if !validGet || req.RequestURI != "/relay" || !websocketToken(req.Header, "Connection", "upgrade") || !websocketToken(req.Header, "Upgrade", "websocket") || len(req.Header.Values("Sec-WebSocket-Version")) != 1 || req.Header.Get("Sec-WebSocket-Version") != "13" || len(req.Header.Values("Sec-WebSocket-Key")) != 1 || keyErr != nil || len(decoded) != 16 || !protocol || len(req.Header.Values("Sec-WebSocket-Extensions")) != 0 {
+	// An offered extension, such as the permessage-deflate every browser
+	// offers, is declined by leaving Sec-WebSocket-Extensions out of the
+	// response (RFC 6455 §9.1); the client then sends plain frames, and a
+	// frame with a reserved bit set still aborts. Origin is not checked.
+	if !validGet || req.RequestURI != "/relay" || !websocketToken(req.Header, "Connection", "upgrade") || !websocketToken(req.Header, "Upgrade", "websocket") || len(req.Header.Values("Sec-WebSocket-Version")) != 1 || req.Header.Get("Sec-WebSocket-Version") != "13" || len(req.Header.Values("Sec-WebSocket-Key")) != 1 || keyErr != nil || len(decoded) != 16 || !protocol {
 		_, _ = io.WriteString(conn, "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-		return nil, hostedError("WebSocket handshake", "a version-13 binary relay upgrade without extensions")
+		return nil, hostedError("WebSocket handshake", "a version-13 binary relay upgrade")
 	}
 	response := "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + websocketAccept(key) + "\r\nSec-WebSocket-Protocol: " + websocketProtocol + "\r\n\r\n"
 	if _, err := io.WriteString(conn, response); err != nil {

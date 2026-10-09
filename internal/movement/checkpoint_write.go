@@ -60,8 +60,13 @@ func (s *System) WriteCheckpoint(e *checkpoint.Encoder, c *CheckpointContext) er
 	m.boolean("Terrain", s.Terrain != nil)
 	writeMovementRows(e, c, s, "movement.activeOrders", s.activeOrders, writeMovementActiveMove)
 	// The concrete registry's pure List method returns its actual stale row.
-	for owner := uint8(0); owner < 10; owner++ {
-		writeMovementHandles(m, fmt.Sprintf("airBases.lists[%d]", owner), s.airBases.List(owner))
+	// Fixed names need no formatting on success (DESIGN_MULTIPLAYER §16.3.81).
+	// fmt's pooled scratch can allocate unpredictably under race instrumentation.
+	for owner, field := range [...]string{
+		"airBases.lists[0]", "airBases.lists[1]", "airBases.lists[2]", "airBases.lists[3]", "airBases.lists[4]",
+		"airBases.lists[5]", "airBases.lists[6]", "airBases.lists[7]", "airBases.lists[8]", "airBases.lists[9]",
+	} {
+		writeMovementHandles(m, field, s.airBases.List(uint8(owner)))
 	}
 	m.boolean("airLegHandler", s.airLegHandler != nil)
 	writeMovementRows(e, c, s, "movement.arrivalHandles", s.arrivalHandles, writeMovementArrivalHandle)

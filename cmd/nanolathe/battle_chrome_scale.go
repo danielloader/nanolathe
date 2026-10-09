@@ -15,8 +15,8 @@ import (
 // top and bottom strips, and the overlays anchored to the viewport's left
 // edge, keep their scale and move right by the rail's extra width.
 
-// resolveChromeScale fixes the sidebar magnification for the frame being
-// drawn; input until the next draw maps the pointer through the same value,
+// resolveChromeScale fixes the sidebar magnification at the host presentation
+// boundary; input until the next frame maps the pointer through the same value,
 // which is what the player sees. It is 1 wherever the classic executor may
 // replay the recording, which ignores the region markers, and for captures
 // that crop the chrome at retail's fixed insets (films, `--shot-renderer
@@ -113,4 +113,11 @@ func (b *battleSession) syncChromeInsets() {
 	w, h := b.cam.BattleView()
 	b.cam.Chrome = want
 	b.cam.JumpToBattleViewCenter(ox+w/2, oz+h/2)
+	// The new viewport is an immediate layout change, so the camera samples
+	// must frame its retained centre rather than blend from the old layout
+	// (DESIGN_GPU_RENDERER §13.5; DESIGN_INTERFACE_HUD_INPUT
+	// "Modern sidebar scale").
+	if b.cl != nil {
+		b.cl.SnapCameraBlend()
+	}
 }

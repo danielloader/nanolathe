@@ -928,11 +928,7 @@ func (h *retailBattleHUD) draw(c *client.Client, b *battleSession, presented cli
 	// with PANELBOT throughout — each stamp advancing by its frame width until
 	// the running x reaches the surface width [07 R-HUD-03 §1][07 R-HUD-03 §4].
 	// At 640x480 every stock frame reaches the edge in one stamp.
-	b.resolveChromeScale()
-	b.syncChromeInsets()
 	rail, strip := b.railRegion(), b.stripRegion()
-	h.chromeScale = rail.Scale
-	h.applyDisplaySize(c.Size())
 	c.BeginChromeRegion(strip)
 	screenW, screenH := c.ChromeSize()
 	blitBattlePanel(c, h.panelTop, hud.ChromeRailX, 0)

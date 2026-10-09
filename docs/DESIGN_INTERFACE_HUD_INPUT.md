@@ -2160,7 +2160,10 @@ The minimap is drawn outside the region, at k times its 126-pixel canvas, from
 a second radar service whose terrain picture is generated at that size from
 the map tiles, built once per battle and scale. Blips and projectile markers
 are drawn k times larger on that picture and the viewport rectangle is k
-pixels thick. Radar circles keep one-pixel lines. Minimap input and world
+pixels thick. The picture dimensions and letterbox offsets magnify the fitted
+canonical rectangle: truncation happens at 126 pixels before magnification,
+so every drawn edge pixel belongs to input's fitted radar rectangle.
+Radar circles keep one-pixel lines. Minimap input and world
 mapping keep the canonical 126-pixel layout through the magnified destination
 rectangle, so the retail arithmetic of `[07 §10]` is unchanged.
 Hover also converts the pointer to canonical radar pixels before the strict

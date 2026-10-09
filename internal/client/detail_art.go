@@ -47,6 +47,8 @@ func (c *Client) SetDetailArt(art *DetailArt) {
 	c.detailFrames = nil
 	c.chromeFrames = nil
 	if art == nil {
+		// Teardown: the next battle's HUD registers its own banks.
+		c.chromeBanks = nil
 		return
 	}
 	for path, bank := range c.chromeBanks { // presentation cache; no sim order [I1]
@@ -170,10 +172,14 @@ func (c *Client) indexChromeBank(path string, bank *formats.GAF) {
 	if c.chromeFrames == nil {
 		c.chromeFrames = map[*formats.GAFFrame]*formats.GAFFrame{}
 	}
+	// The remaster is built entry for entry, so pair by index: a bank may
+	// repeat an entry name, which Find would resolve to the first.
+	if len(remaster.Entries) != len(bank.Entries) {
+		return
+	}
 	for i := range bank.Entries {
-		entry := &bank.Entries[i]
-		variants, ok := remaster.Find(entry.Name)
-		if !ok || variants == nil {
+		entry, variants := &bank.Entries[i], &remaster.Entries[i]
+		if !strings.EqualFold(entry.Name, variants.Name) {
 			continue
 		}
 		for j := range min(len(entry.Frames), len(variants.Frames)) {

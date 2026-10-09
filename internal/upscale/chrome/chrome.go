@@ -113,7 +113,7 @@ func CachedBank2x(cache *upscale.Cache, bank *formats.GAF, pal [256][3]uint8, op
 				h.Write([]byte{0})
 				continue
 			}
-			fmt.Fprintf(h, "%s%d,%d\x00", FrameHash(ref.Frame), ref.Frame.XOffset, ref.Frame.YOffset)
+			fmt.Fprintf(h, "%s%d,%d,%d\x00", FrameHash(ref.Frame), ref.Frame.XOffset, ref.Frame.YOffset, ref.Frame.ColorKey)
 		}
 	}
 	key := fmt.Sprintf("%x", h.Sum(nil))
@@ -129,6 +129,12 @@ func plainFrame(f *formats.GAFFrame) bool {
 	}
 	for _, child := range f.Subframes {
 		if child == nil || child.AlternateBlitter != 0 || len(child.Subframes) != 0 {
+			return false
+		}
+		// The plain raster crops a child to the parent's rectangle; its leaves
+		// would not, so an overhanging child keeps the leaf walk.
+		dx, dy := int(f.XOffset)-int(child.XOffset), int(f.YOffset)-int(child.YOffset)
+		if dx < 0 || dy < 0 || dx+int(child.Width) > int(f.Width) || dy+int(child.Height) > int(f.Height) {
 			return false
 		}
 	}

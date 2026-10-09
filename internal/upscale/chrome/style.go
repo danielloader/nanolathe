@@ -345,6 +345,10 @@ func TextMask(f *opentype.Font, text string, spacing float64) *Mask {
 			}
 		}
 	}
+	if maxX < 0 {
+		// A font without these glyphs leaves no ink: no caption, not a panic.
+		return NewMask(1, 1)
+	}
 	m := NewMask(maxX-minX+1, maxY-minY+1)
 	for y := minY; y <= maxY; y++ {
 		for x := minX; x <= maxX; x++ {

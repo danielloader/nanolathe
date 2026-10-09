@@ -29,8 +29,8 @@ has its own design document; this one only says where the boundaries are.
 | [DESIGN_METAL_RENDERER](DESIGN_METAL_RENDERER.md) | the experimental native Metal renderer for one battle on macOS (`--metal`): retained meshes and textures, the pure-Go Objective-C call layer, its window and input, coverage, limits and verification |
 | [DESIGN_COMMUNITY_PATCH](DESIGN_COMMUNITY_PATCH.md) | the Community 3.9 gameplay profile: the third reserved rule set, the feature table a content set or player configures, the mapping of every community-patch contract onto a seam, and the decisions still open (design, not implemented) |
 | [DESIGN_MODS_MUTATORS](DESIGN_MODS_MUTATORS.md) | the mod library and the nanolathe.gg catalogue, global mutators applied to the per-battle catalog in every mode, and the save sidecar that records and restores a match's selection (implemented; follow-ups in its §13 unit 9) |
-| [DESIGN_SURVIVAL](DESIGN_SURVIVAL.md) | the Survival single-player mode: the attacker slot, the wave director, build-tree tech tiers, the no-victory result and score, available in every gameplay mode |
-| [DESIGN_MULTIPLAYER](DESIGN_MULTIPLAYER.md) | relayed deterministic lockstep: online two-human skirmish through the hosted relay and its lobby, the determinism contract, command stream, configuration and identity, the rehearsal check, and the milestones still to build (replays, more seats, Survival online) |
+| [DESIGN_SURVIVAL](DESIGN_SURVIVAL.md) | the Survival mode, alone or online: the attacker slot, the wave director, build-tree tech tiers, the no-victory result and score, available in every gameplay mode |
+| [DESIGN_MULTIPLAYER](DESIGN_MULTIPLAYER.md) | relayed deterministic lockstep: online skirmish and Survival through the hosted relay and its lobby, the determinism contract, command stream, configuration and identity, the rehearsal check, and the milestones still to build |
 
 Rules that cut across every package are in [INVARIANTS.md](INVARIANTS.md);
 places where the reference install disproves the written contract are in
@@ -46,10 +46,10 @@ damage, the COB script machine, features and fire, the skirmish planner, the
 GUI and HUD, camera and minimap, audio, effects, and save/load of a
 single-player battle.
 
-Online multiplayer runs two-human Modern skirmish by relayed deterministic
-lockstep through the hosted relay, started from the main menu's MULTI lobby.
-DESIGN_MULTIPLAYER owns the design and lists what is still to build: more
-seats, Survival online and replays.
+Online multiplayer runs skirmish for 2–10 human players and Survival for 2–3
+under Modern gameplay, by relayed deterministic lockstep through the hosted
+relay, started from the main menu's MULTI lobby. DESIGN_MULTIPLAYER owns the
+design and lists what is not built yet.
 
 Authoritative behavior follows retail, including documented faults, except for
 the explicit Modern gameplay contracts (terrain admission in
@@ -115,14 +115,15 @@ package implements.
 | `internal/maplibrary` | Installed community maps and shared feature packages: map-only validation and deterministic library roots, reusing modlibrary atomic installs; no network | DESIGN_MODS_MUTATORS §5.6 |
 | `internal/modfetch` | The nanolathe.gg mod and map manifests and resumable, SHA-256-verified downloads. The content HTTP boundary; only `cmd/nanolathe` imports it. Multiplayer WebSocket HTTP is isolated in `internal/relay` (DESIGN_MULTIPLAYER §16.5.6) | DESIGN_MODS_MUTATORS §5 |
 
-The two-human loopback and hosted play tests add `internal/relay`
-(standard library and `netproto` only) and `internal/lockstep` (host composition
-of `relay` and `session`). The relay handles opaque commands; the driver alone
-turns sealed grants into session ticks. No authoritative package imports either
-transport owner. DESIGN_MULTIPLAYER §16.4–§16.5 own these bounded slices.
-`cmd/nanolathe-server` hosts invitation rooms using native TLS or WebSockets
-behind App Platform HTTPS, without importing simulation or presentation.
-Reconnect, replays and general multiplayer lobby entry remain later work.
+Online play adds `internal/relay` (standard library and `netproto` only: the
+loopback and hosted relays, the lobby protocol and their clients) and
+`internal/lockstep` (host composition of `relay` and `session`). The relay
+handles opaque commands and configurations; the driver alone turns sealed
+grants into session ticks. No authoritative package imports either transport
+owner. DESIGN_MULTIPLAYER §16.4–§16.7 own the play test, the hosted relay, the
+lobby and the rehearsal check. `cmd/nanolathe-server` hosts invitation rooms
+using native TLS or WebSockets behind App Platform HTTPS, without importing
+simulation or presentation.
 
 ### Runtime core
 

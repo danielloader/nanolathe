@@ -64,10 +64,11 @@ func (c *Client) drawMessageLines() {
 	if c == nil || c.messageFNT == nil {
 		return
 	}
+	// Ten columns right of the rail and twenty rows below the top strip:
+	// (138, 52) beside retail's chrome.
+	left, top, _ := c.cam.ChromeInset()
 	for i, line := range c.MessageLines() {
-		y := 52 + i*int(c.messageFNT.Height)
-		// Ten columns right of the rail: 138 beside retail's.
-		left, _, _ := c.cam.ChromeInset()
+		y := int(top) + 20 + i*int(c.messageFNT.Height)
 		x := int(left) + 10
 		if line.SpeakerSlot < frame.PlayerRowSlots {
 			// The rectangle includes both endpoints. The logo height and text

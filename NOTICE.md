@@ -27,8 +27,8 @@ cached license files. They are downloaded by Go, not vendored into this tree.
 
 ## Bundled font
 
-`internal/upscale/chrome/font/SairaCondensed-750.ttf` is an instance of Saira
-(condensed width, weight 750) by The Saira Project Authors, cut from its
+`internal/upscale/chrome/font/SairaCondensed-800.ttf` is an instance of Saira
+(condensed width, weight 800) by The Saira Project Authors, cut from its
 variable font with fontTools. It is licensed under the
 [SIL Open Font License 1.1](internal/upscale/chrome/font/OFL.txt), not MIT,
 and is embedded in the binary to draw the remastered interface captions.

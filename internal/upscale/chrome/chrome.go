@@ -25,9 +25,9 @@ import (
 
 // Version names the generated art; the cache key carries it, so a change to
 // the look or the table invalidates old results.
-const Version = 1
+const Version = 7
 
-//go:embed font/SairaCondensed-750.ttf
+//go:embed font/SairaCondensed-800.ttf
 var sairaCondensed []byte
 
 // Options configures Bank2x. A nil Font uses the embedded Saira Condensed.

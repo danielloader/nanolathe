@@ -12,6 +12,9 @@ const materialSize = 1024
 // materialSeed fixes the plate, so every load and the cache agree on it.
 const materialSeed = 0x6e616e6f
 
+// materialMean is the plate's mean lightness before wear.
+const materialMean = 0.267
+
 // Material draws the seamless worn-gunmetal plate every element is cut from:
 // a mid grey with soft mottling, horizontal brushed grain, long faint
 // scratches and dark pits. Every feature wraps, so the plate tiles.
@@ -20,19 +23,21 @@ func Material() *Layer {
 	r := rand.New(rand.NewSource(materialSeed))
 	v := make([]float64, n*n)
 	for i := range v {
-		v[i] = 0.267
+		v[i] = materialMean
 	}
 	add := func(field []float64, amp float64) {
 		for i := range v {
 			v[i] += field[i] * amp
 		}
 	}
-	add(periodicNoise(r, n, 256, 256), 0.016)
-	add(periodicNoise(r, n, 64, 64), 0.010)
-	add(periodicNoise(r, n, 16, 16), 0.006)
+	add(periodicNoise(r, n, 256, 256), 0.048)
+	add(periodicNoise(r, n, 64, 64), 0.030)
+	add(periodicNoise(r, n, 16, 16), 0.018)
 	// Brushed grain: noise stretched along x, so streaks run horizontally.
-	add(periodicNoise(r, n, 128, 1), 0.012)
-	add(periodicNoise(r, n, 32, 2), 0.006)
+	add(periodicNoise(r, n, 128, 1), 0.036)
+	add(periodicNoise(r, n, 32, 2), 0.018)
+	// Tint: broad patches drift between blue-grey and a warmer grey.
+	tint := periodicNoise(r, n, 128, 128)
 
 	wrap := func(x, y int) int { return ((y%n+n)%n)*n + (x%n+n)%n }
 	// Scratches: long thin curves, mostly near vertical as on the reference
@@ -42,7 +47,7 @@ func Material() *Layer {
 		ang := math.Pi/2 + (r.Float64()-0.5)*0.9
 		bend := (r.Float64() - 0.5) * 0.004
 		length := 60 + r.Float64()*260
-		depth := 0.018 + r.Float64()*0.03
+		depth := 0.05 + r.Float64()*0.08
 		for t := 0.0; t < length; t += 0.5 {
 			fade := math.Sin(math.Pi * t / length)
 			i := wrap(int(x), int(y))
@@ -57,7 +62,7 @@ func Material() *Layer {
 	for range 90 {
 		cx, cy := r.Float64()*n, r.Float64()*n
 		rad := 0.8 + r.Float64()*1.6
-		depth := 0.05 + r.Float64()*0.08
+		depth := 0.12 + r.Float64()*0.15
 		for y := int(cy - rad - 1); y <= int(cy+rad+1); y++ {
 			for x := int(cx - rad - 1); x <= int(cx+rad+1); x++ {
 				if d := math.Hypot(float64(x)+0.5-cx, float64(y)+0.5-cy); d <= rad {
@@ -69,8 +74,9 @@ func Material() *Layer {
 	l := NewLayer(n, n)
 	for i, g := range v {
 		g = math.Max(0, math.Min(1, g))
-		// A trace of blue, as in painted steel.
-		l.Pix[i*4], l.Pix[i*4+1], l.Pix[i*4+2], l.Pix[i*4+3] = g, g, g*1.005, 1
+		// Retail's steel is blue-grey; the tint keeps it from reading as flat paint.
+		t := tint[i] * 0.12
+		l.Pix[i*4], l.Pix[i*4+1], l.Pix[i*4+2], l.Pix[i*4+3] = g*(0.94-t), g*0.98, g*(1.08+t), 1
 	}
 	return l
 }

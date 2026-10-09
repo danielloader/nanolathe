@@ -62,19 +62,23 @@ func (s *Style) TopBar() *Layer {
 }
 
 var captionNormal = CaptionStyle{Fill: hex("#dfdfb7"), NearLight: hex("#b9b996"), FarLight: hex("#f6f6e2"),
-	Outline: hex("#070f00"), OutlineR: 0.75, SX: 0.85, SY: 1.15}
+	Outline: hex("#3b3d36"), OutlineR: 1.1, SX: 0.85, SY: 1.0}
 
 // captionGreyed follows retail's disabled art: the lettering loses its cream
 // for neutral greys and its outline fades from near-black to dark grey.
 var captionGreyed = CaptionStyle{Fill: hex("#6b6b6b"), NearLight: hex("#4b4b4b"), FarLight: hex("#7b7b7b"),
-	Outline: hex("#2b2b2b"), OutlineR: 0.75, SX: 0.85, SY: 1.15}
+	Outline: hex("#2b2b2b"), OutlineR: 1.1, SX: 0.85, SY: 1.0}
 
-const faceBright = 2.0
+// faceBright is the button face brightness; retail's faces are dark steel.
+const faceBright = 1.25
 
 // pressedLift is the pressed face's brightness over the normal one. Retail's
 // art doubles it (98 against 50 at 1x); from this brighter base 1.75 reads
 // the same.
 const pressedLift = 1.75
+
+// bevelLight and bevelDark are the rim strengths on the lit and shaded edges.
+const bevelLight, bevelDark = 0.7, 0.8
 
 // recessSoft is the Gaussian blur on the light recesses, in 1x pixels.
 const recessSoft = 0.35
@@ -110,7 +114,7 @@ func (s *Style) faceFor(st State) (mult float64, sunken bool, cs CaptionStyle, s
 func (s *Style) Button(w, h, captionY int, text string, st State, seed string) *Layer {
 	mult, sunken, cs, shift := s.faceFor(st)
 	l := s.Face(s.px(float64(w)), s.px(float64(h)), mult)
-	s.Bevel(l, s.px(2), 0.40, 0.65, 0.12, sunken)
+	s.Bevel(l, s.px(3), bevelLight, bevelDark, 0.12, sunken)
 	s.Wear(l, seed, l.W)
 	limit := float64(w - 8)
 	cw := s.captionWidth(text, limit)
@@ -134,7 +138,7 @@ const (
 func (s *Style) Toggle(w int, seed, text string, lights []led, st State) *Layer {
 	mult, sunken, cs, shift := s.faceFor(st)
 	l := s.Face(s.px(float64(w)), s.px(21), mult)
-	s.Bevel(l, s.px(2), 0.40, 0.65, 0.12, sunken)
+	s.Bevel(l, s.px(3), bevelLight, bevelDark, 0.12, sunken)
 	// Retail keeps the lights in the three right-hand slots of a 113 px
 	// selector; wider art moves them with its right edge.
 	right := float64(w - 113)
@@ -185,7 +189,7 @@ func (s *Style) PageArrow(next bool, st State) *Layer {
 	// The point: inside where the distance from the pointed end exceeds the
 	// distance from the vertical centre line, so it closes at 45 degrees.
 	mask, edge := ArrowMask(w, h, next), float64(s.px(2))
-	s.BevelShape(l, mask, edge, 0.40, 0.65, 0.12, sunken)
+	s.BevelShape(l, mask, edge, bevelLight, bevelDark, 0.12, sunken)
 	return l
 }
 

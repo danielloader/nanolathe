@@ -56,6 +56,9 @@ func (s *Style) px(v float64) int { return int(math.Round(v * s.Scale)) }
 // atLeast1 is a scaled thickness that never vanishes.
 func (s *Style) atLeast1(v float64) int { return max(1, s.px(v)) }
 
+// faceContrast is how far Face stretches the plate's light variation.
+const faceContrast = 2.2
+
 // Face fills a w x h surface with the material, tiled at a density that keeps
 // its detail constant across scales, then grades it:
 // brightness 48%, saturation 60%, a 95% white point, a brightness multiplier
@@ -72,6 +75,9 @@ func (s *Style) Face(w, h int, mult float64) *Layer {
 		for x := 0; x < w; x++ {
 			c := tile.At(x%tw, y%th)
 			hh, ss, ll := rgbToHSL(c.R, c.G, c.B)
+			// Stretch the plate's light variation about its mean, so the
+			// mottling and scratches survive the darkening and the palette.
+			ll = materialMean + (ll-materialMean)*faceContrast
 			r, g, b := hslToRGB(hh, ss*0.60, ll*0.48)
 			k := mult / 0.95
 			l.Set(x, y, RGBA{r * k * (1 - s.Cool), g * k, b * k * (1 + s.Cool), 1})
@@ -114,6 +120,20 @@ func (s *Style) Bevel(l *Layer, steps int, lightA, darkA, curve float64, sunken 
 		l.Rect(i, l.H-1-i, l.W-1-i, l.H-1-i, edge(bottomLit)) // bottom
 		l.Rect(i, i, i, l.H-1-i, edge(leftLit))               // left
 		l.Rect(l.W-1-i, i, l.W-1-i, l.H-1-i, edge(!leftLit))  // right
+	}
+	// A bright line just inside the lit edges, as on the retail art.
+	if !sunken {
+		hl := white.WithA(0.45)
+		if bottomLit {
+			l.Rect(1, l.H-2, l.W-2, l.H-2, hl)
+		} else {
+			l.Rect(1, 1, l.W-2, 1, hl)
+		}
+		if leftLit {
+			l.Rect(1, 1, 1, l.H-2, hl)
+		} else {
+			l.Rect(l.W-2, 1, l.W-2, l.H-2, hl)
+		}
 	}
 	// One-pixel dark outline.
 	o := black.WithA(0.9)
@@ -380,6 +400,16 @@ func (s *Style) Caption(text string, w, h int, cs CaptionStyle) (*Layer, int) {
 	// Concave: the stroke edge whose neighbour toward the light is open is in shadow.
 	l.Paint(m.EdgeToward(s.Light.X, s.Light.Y), 0, 0, cs.NearLight)
 	l.Paint(m.EdgeToward(-s.Light.X, -s.Light.Y), 0, 0, cs.FarLight)
+	// Inner border: the rim of each stroke, half way from outline to fill.
+	open := NewMask(m.W, m.H)
+	for i, v := range m.V {
+		open.V[i] = 1 - v
+	}
+	rim := open.Dilate(s.Scale / 2)
+	for i, v := range m.V {
+		rim.V[i] = math.Min(rim.V[i], v)
+	}
+	l.Paint(rim, 0, 0, lerp(cs.Outline, cs.Fill, 0.5))
 	return l, pad
 }
 
@@ -497,18 +527,17 @@ func (s *Style) Wear(l *Layer, seed string, right int) {
 		}
 	}
 	switch n := r.Intn(6); {
-	case n == 0: // unmarked
-	case n == 5:
+	case n >= 4:
 		gouge(1)
 		gouge(0.7)
 	default:
 		gouge(1)
 	}
 	// Dents.
-	for range 2 + r.Intn(3) {
-		cx := (6 + float64(r.Intn(max(1, int(limit/k)-12)))) * k
-		cy := (5 + float64(r.Intn(max(1, int(float64(l.H)/k)-10)))) * k
-		disc(deep, cx, cy, (0.8+0.7*r.Float64())*k, 0.4+0.25*r.Float64())
+	for range 6 + r.Intn(5) {
+		cx := (4 + float64(r.Intn(max(1, int(limit/k)-8)))) * k
+		cy := (3 + float64(r.Intn(max(1, int(float64(l.H)/k)-6)))) * k
+		disc(deep, cx, cy, (0.8+1.4*r.Float64())*k, 0.45+0.35*r.Float64())
 	}
 	// Faint scratches.
 	for range 2 + r.Intn(2) {

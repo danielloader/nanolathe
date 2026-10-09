@@ -25,7 +25,7 @@ type localRead struct {
 type Client interface {
 	Submit([]byte) (uint64, error)
 	ReadGrant() (relay.LocalGrant, error)
-	Acknowledge(uint32, [32]byte, bool) error
+	Acknowledge(tick uint32, checksum [32]byte, ended, final bool) error
 	Close() error
 }
 
@@ -193,7 +193,7 @@ func (d *LocalDriver) step() (bool, error) {
 		commands := make([]session.SeatCommand, len(g.Commands))
 		pos := d.position
 		for i, c := range g.Commands {
-			if c.Seat > 1 || c.Sequence == 0 || c.Position != pos+1 || c.Position > g.Position {
+			if c.Seat >= relay.HostedMaxSeats || c.Sequence == 0 || c.Position != pos+1 || c.Position > g.Position {
 				return false, d.fail(localError("grant command", "contiguous stream positions and admitted seats"))
 			}
 			var err error
@@ -222,7 +222,9 @@ func (d *LocalDriver) step() (bool, error) {
 		if g.Tick%30 == 0 {
 			hash = d.sess.UnitStateChecksum()
 		}
-		if err := d.client.Acknowledge(g.Tick, hash, d.sess.OnlineBattleEnded()); err != nil {
+		// A seat whose own result is final may leave a hosted match.
+		final := d.sess.ResultForSeat(d.sess.LocalOwner).Ended
+		if err := d.client.Acknowledge(g.Tick, hash, d.sess.OnlineBattleEnded(), final); err != nil {
 			return true, d.fail(err)
 		}
 		if d.cancel != nil && d.movePosition != 0 && !d.sess.OnlineBattleEnded() {

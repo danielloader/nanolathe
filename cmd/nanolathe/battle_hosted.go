@@ -61,12 +61,13 @@ func (b *battleSession) startHostedMultiplayer(o Options, identity netproto.Iden
 	if err != nil {
 		return err
 	}
-	driver, err := lockstep.NewPacedDriver(b.sess, connection)
+	stats := newOnlineNetStats(connection, b.sess.LocalOwner, 2)
+	driver, err := lockstep.NewPacedDriver(b.sess, stats)
 	if err != nil {
 		_ = connection.Close()
 		return err
 	}
-	b.multiplayer = &battleMultiplayer{driver: driver, completed: driver.Completed}
+	b.multiplayer = &battleMultiplayer{driver: driver, completed: driver.Completed, net: stats}
 	b.onlineNotice(fmt.Sprintf("Hosted room %s at %s: seat %d, waiting for both clients", room, o.RelayAddress, b.sess.LocalOwner+1))
 	return nil
 }

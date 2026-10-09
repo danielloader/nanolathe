@@ -4329,60 +4329,88 @@ owned by [DESIGN_MODS_MUTATORS §5.6](DESIGN_MODS_MUTATORS.md#56-community-map-c
 ### Online games
 
 `MULTI` opens the online screen of
-[DESIGN_MULTIPLAYER §16.6](DESIGN_MULTIPLAYER.md#166-first-online-lobby),
-a Nanolathe window over `MAINMENU` built on the `SELMAP` template and the Mods &
+[DESIGN_MULTIPLAYER §16.6](DESIGN_MULTIPLAYER.md#166-first-online-lobby), a
+Nanolathe window over `MAINMENU` built on the `SELMAP` template and the Mods &
 Mutators backdrop, from the base install as those windows are, so a mod's own
-map-select window cannot move it. The map list, its scrollbar and picture are
-removed. The left frame holds a **Server** field (default
+map-select window cannot move it. It holds a **Server** field (default
 `relay.nanolathe.gg`; a bare host means `wss://host/relay`, `host:port` is
 native TLS, a `wss://` URL is taken as typed, and a `ws://` URL is accepted
-only on a numeric loopback address, for a relay on this computer) and a
-**Room code** field that admits letters, digits and spaces; case, spaces and
-dashes are ignored. The right frame summarises what Create would host — the
-skirmish map, the mounted mod and the counts of mutators and restrictions —
-or, once a room is known, that room's game. **Change map** opens the ordinary
-map selector over the screen and returns to it. **Create Game**, **Join
-Game** (or Enter in the code field) and **Back** (or Escape) complete it; the
-status lines report progress and every refusal in plain words. The last
-server typed is saved as `onlineServer`.
+only on a numeric loopback address, for a relay on this computer), **Create
+Game**, a **Room code** field (letters, digits and spaces; case, spaces and
+dashes are ignored) with **Join Game** (or Enter in the field), and **Back**
+(or Escape). The status lines report progress and every refusal in plain
+words. The last server typed is saved as `onlineServer`.
 
 Any build can create and join. Online games need the base game or an
-installed mod: a `--root` stack or `--mod-config`
-content is refused, and so is a mod installed from a folder, which has no
-archive identity to send.
+installed mod: a `--root` stack or `--mod-config` content is refused, and so
+is a mod installed from a folder, which has no archive identity to send.
 
-Create freezes the host's skirmish map, mounted mod, mutators and unit
-restrictions under Modern rules with a fresh seed pair, composes and
-prepares the battle on a job goroutine, and only then opens the room. The
-same job then runs the pre-start rehearsal of DESIGN_MULTIPLAYER §16.7 on the
-frozen inputs and configuration the battle was composed from. Join
-first asks the relay for the room's configuration and adopts it: the room's
-map, mod, mutators and restrictions, never the joiner's. A room whose mod is
-installed but not mounted is mounted through the ordinary content reload,
-which keeps the player's own mutators and resumes the join on the new shell;
-a missing map or mod, or a different copy of the mod, is named and nothing
-is joined. Otherwise the joiner composes, opens the room and rehearses as
-the host does. Back abandons a job, closing any room it opens late.
+**Create** opens a ten-seat room at once with the host's defaults: a skirmish
+on its current skirmish map with its four skirmish options, its mounted mod,
+mutators and unit restrictions, and a fresh seed pair. **Join** asks the relay
+for the room's base configuration and adopts its mod, which is fixed for the
+room. A mod that is installed but not mounted is mounted through the ordinary
+content reload, which keeps the player's own mutators and resumes the join on
+the new shell; a missing mod, or a different copy of it, is named and nothing
+is joined. Compiling the catalog and opening the room run on a job goroutine;
+Back abandons the job and closes any room it opens late.
 
-The lobby window replaces the screen's fields with the room code, drawn in
-`HATT14` in the window's heading colour as two groups of three, **Copy**
-where the host has a clipboard bridge (macOS writes AppKit plain text; other
-hosts hide it), both seats with their readiness and
-which seat is this player's. While the rehearsal runs the status line says
-the game is being checked and **Ready** is greyed; a rehearsal that fails is
-reported and Ready stays greyed. **Ready** sends this seat's rehearsal
-digest and **Not ready** withdraws it. **Start** is the host's and is greyed
-until both seats are present and ready with equal digests: when both are
-ready with different digests the relay reports a mismatch, which the status
-line states in plain words ("Your games simulate differently. Both players
-need the same version.") while Start stays greyed. **Leave** (or Escape)
-leaves the room. The lobby is polled every
-step; a relay failure — the host leaving, the 30-minute wait, a dropped
-connection — returns to the online screen with its reason. Started enters
-the prepared battle through the paced lockstep driver, as the command-line
-play test does after its dial, with no opening arrival. Leaving the battle or
-its result returns to the online screen, which says whether the game ended,
-stopped (with the transport's reason) or was left.
+The lobby is the authored `SKIRMISH.GUI` window, opened as the setup screen
+with its ten runtime rows. Each present player has a row in seat order:
+"Player n", marked "(You)" or "(Host)", their side in the setup screen's side
+art (any side the catalog defines), their team as the allegiance symbols
+(none, or teams 1–5, joined when shared and split when alone; hidden in
+Survival) and "Ready" in the metal column; the lobby's copy of the backdrop
+paints over the unused Color, Metal and Energy headings and draws a Ready
+heading. Players click their own side and team to cycle them while not ready.
+The room code is drawn beside the title in `HATT14`, in two groups of three,
+with **Copy** where the host has a clipboard bridge (macOS writes AppKit plain
+text; other hosts hide it).
+
+The host's settings stay open until Start: the game type (Skirmish or
+Survival, in Difficulty's place), **Select Map** through the ordinary map
+selector, which returns to the lobby, the four standard skirmish options
+(Commander, Location, Mapping, Line of Sight) and, for Survival, the Survival
+setup screen's Wave Pace, Air Waves and Naval Waves. Each change replaces the
+room's base configuration, which every seat adopts as it arrives; the mod,
+mutators, restrictions and seeds never change. A guest sees the controls
+greyed, and a map it lacks is named on the status line ("The host chose
+_map_, which you don't have.") with Ready greyed.
+
+**Ready** composes the final configuration from the latest base and the
+present seats in seat order, with their teams and sides, prepares this seat's
+battle at its slot and runs the pre-start rehearsal of DESIGN_MULTIPLAYER
+§16.7 on a job goroutine, then sends the configuration-identity and rehearsal
+digests; **Not ready** withdraws them. While the check runs the status line
+says so and Ready is greyed; a check that fails is reported. Any join, leave,
+team, side or settings change clears every seat's ready, and the status line
+says which. Ready is greyed, and the status line explains, while fewer than
+two players are present, a skirmish has more players than the map's start
+positions or everyone on one team, or Survival has more than three players.
+**Start** is the host's, enabled when everyone present is ready and the
+digests agree; a mismatch is stated in plain words ("Your games simulate
+differently. Every player needs the same version."). Hovering a control shows
+its help in the status line instead. **Leave** (or Escape) leaves the room. A
+relay failure — the host leaving, the 30-minute wait, a dropped connection —
+returns to the online screen with its reason.
+
+Started enters the prepared battle at the slot the relay reports, which must
+be the slot this seat composed, through the paced lockstep driver, as the
+command-line play test does after its dial, with no opening arrival. A
+player's own result shows as soon as it is final, and a defeated player may
+leave while the others play on. Leaving the battle or its result returns to
+the online screen, which says whether the game ended, stopped (with the
+transport's reason) or was left.
+
+In an online battle `+net`, or the FPS display, shows a network overlay at the
+top left of the world view: executed ticks per second, buffered grants,
+stalls (gaps of more than three tick intervals between executed ticks), this
+seat's order latency from submission to the executed tick (median and 95th
+percentile of the recent orders), the last tick a checksum was sent, and each
+player as playing, defeated or won. At the end the host prints a summary to
+standard error: how the match ended, its duration and ticks, the average and
+worst ticks per second, order latency and stalls. These are host timings
+only.
 
 ### 3.17 The Nanolathe screen
 

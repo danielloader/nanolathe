@@ -42,8 +42,17 @@ const (
 	hostedReadyMessage       = hostedLobbyMessage + 1
 	hostedStartMessage       = hostedReadyMessage + 1
 	hostedStartedMessage     = hostedStartMessage + 1
-	hostedVersion            = 3
-	hostedCodeLength         = 6
+	hostedTeamMessage        = hostedStartedMessage + 1
+	hostedSideMessage        = hostedTeamMessage + 1
+	// hostedConfigurationMessage carries a replacement base configuration
+	// from the host and the latest one to every seat.
+	hostedConfigurationMessage = hostedSideMessage + 1
+	hostedVersion              = 4
+	hostedMaxTeam              = 5
+	hostedCodeLength           = 6
+	// hostedAnySeat is a joiner's hello seat: the relay assigns the lowest
+	// free one.
+	hostedAnySeat = 255
 	// A creator's hello flag: start as soon as the second seat joins, for the
 	// command-line play test and its probes, which have no lobby.
 	hostedAutoStart      = 1
@@ -92,6 +101,8 @@ type HostedServer struct {
 	mu        sync.Mutex
 	rooms     map[string]*hostedRoom
 	conns     map[net.Conn]struct{}
+	nextRoom  uint64      // protected by mu
+	stats     serverStats // protected by mu
 }
 
 func hostedError(path, expected string) error {
@@ -141,7 +152,7 @@ func listenHostedTransport(address string, config HostedConfig, timeouts hostedT
 	if err != nil {
 		return nil, localIOError("hosted listen", err)
 	}
-	s := &HostedServer{listener: listener, websocket: websocket, config: config, timeouts: timeouts, done: make(chan struct{}), rooms: make(map[string]*hostedRoom), conns: make(map[net.Conn]struct{})}
+	s := &HostedServer{listener: listener, websocket: websocket, config: config, timeouts: timeouts, done: make(chan struct{}), rooms: make(map[string]*hostedRoom), conns: make(map[net.Conn]struct{}), stats: serverStats{started: time.Now()}}
 	s.wg.Add(1)
 	go s.accept()
 	return s, nil
@@ -231,7 +242,7 @@ func (s *HostedServer) serve(raw net.Conn) {
 		conn = secure
 	}
 	if s.websocket {
-		stream, err := acceptHostedWebSocket(conn, s.timeouts.write, handshakeDeadline)
+		stream, err := acceptHostedWebSocket(conn, s.timeouts.write, handshakeDeadline, s.statusPage)
 		if err != nil {
 			return
 		}
@@ -247,14 +258,14 @@ func (s *HostedServer) serve(raw net.Conn) {
 		_ = writeLocalFrame(conn, s.describe(body))
 		return
 	}
-	code, flags, hello, config, err := decodeHostedHello(body)
+	code, flags, size, hello, config, err := decodeHostedHello(body)
 	if err != nil {
 		_ = writeLocalFrame(conn, localFailureBody(localRefusedMessage, err))
 		return
 	}
 	peer := newHostedPeer(conn, hello, s.timeouts.write)
 	peer.helloDeadline = handshakeDeadline
-	room, creator, err := s.admit(code, flags, config, peer)
+	room, creator, err := s.admit(code, flags, size, config, peer)
 	if err != nil {
 		_ = writeLocalFrame(conn, localFailureBody(localRefusedMessage, err))
 		return
@@ -280,8 +291,9 @@ func (s *HostedServer) serve(raw net.Conn) {
 	<-peer.written
 }
 
-// describe answers a joiner's request for a room's configuration before it
-// composes anything (DESIGN_MULTIPLAYER §16.6.1). The connection then closes.
+// describe answers a joiner's request for a room's base configuration and
+// size before it composes anything (DESIGN_MULTIPLAYER §16.6.1). The
+// connection then closes.
 func (s *HostedServer) describe(body []byte) []byte {
 	r := netproto.NewReader(body, hostedError)
 	r.U8()
@@ -295,15 +307,17 @@ func (s *HostedServer) describe(body []byte) []byte {
 	s.mu.Lock()
 	room := s.rooms[code]
 	var refusal error
+	var config []byte
+	size := 0
 	switch {
 	case room == nil:
 		refusal = hostedError("room", "an existing invitation")
-	case room.joined:
-		refusal = hostedError("room", "an unoccupied second seat")
-	}
-	var config []byte
-	if room != nil {
-		config = room.config
+	case room.started:
+		refusal = hostedError("room", "a room still in its lobby")
+	case room.free() < 0:
+		refusal = hostedError("room", "an unoccupied seat")
+	default:
+		config, size = room.config, room.size
 	}
 	s.mu.Unlock()
 	if refusal != nil {
@@ -311,9 +325,20 @@ func (s *HostedServer) describe(body []byte) []byte {
 	}
 	var w netproto.Writer
 	w.U8(hostedDescriptionMessage)
+	w.U8(uint8(size))
 	w.U32(uint32(len(config)))
 	w.Raw(config)
 	return w.Bytes()
+}
+
+// free is the lowest unreserved seat, or -1; the caller holds server.mu.
+func (r *hostedRoom) free() int {
+	for i := range r.size {
+		if !r.taken[i] {
+			return i
+		}
+	}
+	return -1
 }
 
 func hostedVersionError(sent uint16) error {
@@ -336,7 +361,7 @@ func validHostedCode(code string) bool {
 	return true
 }
 
-func (s *HostedServer) admit(code string, flags uint8, config []byte, peer *hostedPeer) (*hostedRoom, bool, error) {
+func (s *HostedServer) admit(code string, flags uint8, size int, config []byte, peer *hostedPeer) (*hostedRoom, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	select {
@@ -345,15 +370,11 @@ func (s *HostedServer) admit(code string, flags uint8, config []byte, peer *host
 	default:
 	}
 	creator := code == ""
-	seat := uint8(1)
+	var room *hostedRoom
 	if creator {
-		seat = 0
-	}
-	if peer.hello.Seat != seat {
-		return nil, false, hostedError("hello seat", "creator seat 0 or joining seat 1")
-	}
-	room := s.rooms[code]
-	if creator {
+		if peer.hello.Seat != 0 {
+			return nil, false, hostedError("hello seat", "creator seat 0")
+		}
 		if len(s.rooms) >= s.config.MaxRooms {
 			return nil, false, hostedError("room capacity", "space for another room")
 		}
@@ -370,10 +391,15 @@ func (s *HostedServer) admit(code string, flags uint8, config []byte, peer *host
 				break
 			}
 		}
-		room = &hostedRoom{server: s, code: code, creator: peer, config: config, autoStart: flags&hostedAutoStart != 0, events: make(chan hostedEvent), done: make(chan struct{})}
+		s.nextRoom++
+		s.stats.rooms++
+		room = &hostedRoom{server: s, id: s.nextRoom, code: code, size: size, creator: peer, config: config, autoStart: flags&hostedAutoStart != 0,
+			created: time.Now(), events: make(chan hostedEvent), done: make(chan struct{})}
+		room.taken[0] = true
 		s.rooms[code] = room
 		s.wg.Add(1)
 	} else {
+		room = s.rooms[code]
 		if room == nil {
 			return nil, false, hostedError("room", "an existing invitation")
 		}
@@ -382,28 +408,40 @@ func (s *HostedServer) admit(code string, flags uint8, config []byte, peer *host
 			return nil, false, hostedError("room", "an open room")
 		default:
 		}
-		if room.joined {
-			return nil, false, hostedError("room", "an unoccupied second seat")
+		if room.started {
+			return nil, false, hostedError("room", "a room still in its lobby")
 		}
-		if field := localIdentityDifference(room.creator.hello, peer.hello); field != "" {
-			return nil, false, hostedError("hello "+field, "identical values from both seats")
+		seat := room.free()
+		if seat < 0 {
+			return nil, false, hostedError("room", "an unoccupied seat")
 		}
-		room.joined = true
+		// A command-line room has no Ready digests, so its joiner's
+		// identity is compared here; a lobby compares at Ready (§16.6.1).
+		if room.autoStart {
+			if field := localIdentityDifference(room.creator.hello, peer.hello); field != "" {
+				return nil, false, hostedError("hello "+field, "identical values from every seat")
+			}
+		}
+		room.taken[seat] = true
+		peer.seat = uint8(seat)
 	}
 	peer.room = room
 	// A fresh peer's queue is empty, so welcome always precedes its grants.
-	_ = peer.enqueue(encodeHostedWelcome(code, seat), false)
+	_ = peer.enqueue(encodeHostedWelcome(code, peer.seat), false)
 	return room, creator, nil
 }
 
-// A creator's hello carries its configuration and flags; a joiner's carries
-// neither (§16.6.1).
-func encodeHostedHello(code string, flags uint8, hello LocalHello, config []byte) ([]byte, error) {
+// A creator's hello carries its flags, room size and base configuration; a
+// joiner's carries none of them and asks for any seat (§16.6.1).
+func encodeHostedHello(code string, flags uint8, size int, hello LocalHello, config []byte) ([]byte, error) {
 	if code != "" && !validHostedCode(code) {
 		return nil, hostedError("room code", "a six-character invitation")
 	}
-	if code != "" && (flags != 0 || len(config) != 0) {
-		return nil, hostedError("join", "no creator flags or configuration")
+	if code != "" && (flags != 0 || size != 0 || len(config) != 0) {
+		return nil, hostedError("join", "no creator flags, size or configuration")
+	}
+	if code == "" && (size < 2 || size > HostedMaxSeats) {
+		return nil, hostedError("room size", "2 to 10 seats")
 	}
 	if len(config) > hostedMaxConfigBytes {
 		return nil, hostedError("room configuration", "at most 64 KiB")
@@ -420,6 +458,7 @@ func encodeHostedHello(code string, flags uint8, hello LocalHello, config []byte
 	w.U16(hostedVersion)
 	w.Text(code)
 	w.U8(flags)
+	w.U8(uint8(size))
 	w.U32(uint32(len(body)))
 	w.Raw(body)
 	w.U32(uint32(len(config)))
@@ -427,7 +466,7 @@ func encodeHostedHello(code string, flags uint8, hello LocalHello, config []byte
 	return w.Bytes(), nil
 }
 
-func decodeHostedHello(body []byte) (string, uint8, LocalHello, []byte, error) {
+func decodeHostedHello(body []byte) (string, uint8, int, LocalHello, []byte, error) {
 	r := netproto.NewReader(body, hostedError)
 	if r.U8() != hostedHelloMessage {
 		r.Abort(hostedError("handshake", "a hosted hello or room description request"))
@@ -440,17 +479,18 @@ func decodeHostedHello(body []byte) (string, uint8, LocalHello, []byte, error) {
 		r.Abort(hostedError("room code", "a six-character invitation"))
 	}
 	flags := r.U8()
+	size := int(r.U8())
 	n := r.Count(localMaxHelloBytes, 1)
 	hello := r.Raw(n)
 	config := r.Raw(r.Count(hostedMaxConfigBytes, 1))
-	if flags&^hostedAutoStart != 0 || (code != "" && (flags != 0 || len(config) != 0)) {
-		r.Abort(hostedError("hello flags", "known creator flags, and none with a configuration from a joiner"))
+	if flags&^hostedAutoStart != 0 || (code != "" && (flags != 0 || size != 0 || len(config) != 0)) || (code == "" && (size < 2 || size > HostedMaxSeats)) {
+		r.Abort(hostedError("hello flags", "a creator's known flags and 2 to 10 seats, and none of them from a joiner"))
 	}
 	if err := r.End(); err != nil {
-		return "", 0, LocalHello{}, nil, err
+		return "", 0, 0, LocalHello{}, nil, err
 	}
 	h, err := decodeLocalHello(hello)
-	return code, flags, h, config, err
+	return code, flags, size, h, config, err
 }
 
 func encodeHostedWelcome(code string, seat uint8) []byte {
@@ -472,21 +512,22 @@ func DialHosted(ctx context.Context, address, room string, hello LocalHello, opt
 
 func dialHostedStream(ctx context.Context, address, room string, hello LocalHello, options HostedDialOptions) (*LocalClient, string, error) {
 	var flags uint8
+	size := 0
 	if room == "" {
-		flags = hostedAutoStart
+		flags, size = hostedAutoStart, 2
 	}
-	body, err := encodeHostedHello(room, flags, hello, nil)
+	body, err := encodeHostedHello(room, flags, size, hello, nil)
 	if err != nil {
 		return nil, "", err
 	}
-	conn, code, err := hostedHandshake(ctx, address, options, body, room, hello.Seat)
+	conn, code, _, err := hostedHandshake(ctx, address, options, body, room, hello.Seat)
 	if err != nil {
 		return nil, "", err
 	}
 	c := newHostedClient(conn)
 	// A command-line seat runs no rehearsal; its zero digest matches only
 	// another command-line seat, and an auto-start room ignores digests.
-	if err := c.writeMessage(append([]byte{hostedReadyMessage, 1}, make([]byte, 32)...)); err != nil {
+	if err := c.writeMessage(append([]byte{hostedReadyMessage, 1}, make([]byte, 64)...)); err != nil {
 		_ = c.Close()
 		return nil, "", err
 	}
@@ -495,25 +536,25 @@ func dialHostedStream(ctx context.Context, address, room string, hello LocalHell
 
 // hostedHandshake connects as dialHostedTransport does and exchanges the
 // hello within the handshake deadline.
-func hostedHandshake(ctx context.Context, address string, options HostedDialOptions, body []byte, room string, seat uint8) (net.Conn, string, error) {
+func hostedHandshake(ctx context.Context, address string, options HostedDialOptions, body []byte, room string, seat uint8) (net.Conn, string, uint8, error) {
 	ctx, cancel := context.WithTimeout(ctx, hostedDefaultTimeouts.handshake)
 	defer cancel()
 	conn, err := dialHostedTransport(ctx, address, options)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-	code, err := exchangeHostedHello(conn, body, room, seat)
+	code, assigned, err := exchangeHostedHello(conn, body, room, seat)
 	stopped := stop()
 	if expired := handshakeExpired(ctx); err != nil || !stopped || expired != nil {
 		_ = conn.Close()
 		if expired != nil {
-			return nil, "", localIOError("hosted handshake", expired)
+			return nil, "", 0, localIOError("hosted handshake", expired)
 		}
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	_ = conn.SetDeadline(time.Time{})
-	return conn, code, nil
+	return conn, code, assigned, nil
 }
 
 // handshakeExpired reports the context's end, including a socket deadline
@@ -565,22 +606,24 @@ func dialHostedTransport(ctx context.Context, address string, options HostedDial
 	return conn, nil
 }
 
-func exchangeHostedHello(conn net.Conn, body []byte, requested string, seat uint8) (string, error) {
+// exchangeHostedHello sends the hello and returns the welcome's code and
+// assigned seat: seat 0 for a creator, any free seat for a joiner.
+func exchangeHostedHello(conn net.Conn, body []byte, requested string, seat uint8) (string, uint8, error) {
 	if err := writeLocalFrame(conn, body); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	response, err := readLocalFrame(conn, localMaxErrorBytes+32)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	r := netproto.NewReader(response, hostedError)
 	kind := r.U8()
 	if kind == localRefusedMessage || kind == localFailedMessage {
 		message := r.Text(localMaxErrorBytes)
 		if err := r.End(); err != nil {
-			return "", err
+			return "", 0, err
 		}
-		return "", errors.New(message)
+		return "", 0, errors.New(message)
 	}
 	if kind != hostedWelcomeMessage {
 		r.Abort(hostedError("welcome", "a hosted welcome"))
@@ -589,10 +632,10 @@ func exchangeHostedHello(conn net.Conn, body []byte, requested string, seat uint
 		r.Abort(hostedVersionError(v))
 	}
 	code, assigned := r.Text(hostedCodeLength), r.U8()
-	if !validHostedCode(code) || (requested != "" && code != requested) || assigned != seat {
+	if !validHostedCode(code) || (requested != "" && code != requested) || (requested == "" && assigned != seat) || assigned >= HostedMaxSeats {
 		r.Abort(hostedError("welcome", "the requested room and assigned seat"))
 	}
-	return code, r.End()
+	return code, assigned, r.End()
 }
 
 func newHostedClient(conn net.Conn) *LocalClient {

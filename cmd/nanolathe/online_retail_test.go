@@ -6,6 +6,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/relay"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/testsupport"
@@ -40,7 +42,7 @@ func TestOnlineConfigurationAdoptionRetail(t *testing.T) {
 	cat, fs := retailcat.Shared(t)
 	cs := &contentSet{fs: fs, unmappedMount: fs, profile: "retail", limits: content.RetailLimits()}
 	mutators, restrictions := onlineTestSelection(t)
-	schema, err := onlineMapSchema(cs, cat, "ashap plateau")
+	schema, err := session.OnlineMapSchema(cs.fs, cat, "ashap plateau", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,6 +127,11 @@ func awaitOnlineShells(t *testing.T, what string, done func() bool, shells ...*g
 	t.Helper()
 	end := time.Now().Add(60 * time.Second)
 	for !done() {
+		for _, g := range shells {
+			if g.online != nil && g.online.phase == onlineIdle && g.online.status != "" && g.online.job == nil {
+				t.Fatalf("waiting for %s: %q", what, g.online.status)
+			}
+		}
 		if time.Now().After(end) {
 			for _, g := range shells {
 				if g.online != nil {
@@ -140,27 +147,33 @@ func awaitOnlineShells(t *testing.T, what string, done func() bool, shells ...*g
 	}
 }
 
-// One headless two-client match through a real local relay, started from the
-// lobby with a mutator set and unit restrictions: create, describe, join,
-// rehearse, ready with the digests, start and granted ticks agreed by the
-// relay's checksums (§16.6.3, §16.7).
-func TestOnlineLobbyTwoClientsRetail(t *testing.T) {
+// onlineRetailRoom starts a match through a real local WebSocket relay: the
+// host creates the room with mutators and restrictions, the guests join with
+// their own different selection, each player picks its team, every seat
+// readies with its own rehearsal and the host starts. It returns the shells
+// with their battles entered. survival switches the room to Survival first.
+func onlineRetailRoom(t *testing.T, players int, survival bool, teams []uint8) []*gameShell {
+	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	server, err := relay.ListenHostedWebSocket("127.0.0.1:0", relay.HostedConfig{InsecureLoopback: true}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer server.Close()
+	t.Cleanup(func() { _ = server.Close() })
 	address := "ws://" + server.Addr() + "/relay"
 	opts := Options{Root: testsupport.RetailRoot(t), Seed: -1}
 	cs, err := openContent(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cs.Close()
+	t.Cleanup(func() { _ = cs.Close() })
 	opts.Root, opts.Roots = cs.root, cs.roots
-	host, guest := onlineRetailShell(t, cs, opts), onlineRetailShell(t, cs, opts)
+	shells := make([]*gameShell, players)
+	for i := range shells {
+		shells[i] = onlineRetailShell(t, cs, opts)
+	}
+	host := shells[0]
 	mapName := ""
 	for _, m := range host.maps {
 		if strings.EqualFold(m, "ashap plateau") {
@@ -173,68 +186,223 @@ func TestOnlineLobbyTwoClientsRetail(t *testing.T) {
 	mutators, restrictions := onlineTestSelection(t)
 	host.setup.MapName = mapName
 	host.opts.Mutators, host.opts.Restrictions = mutators, restrictions
-	// The joiner's own selection must not reach the room's battle.
-	guest.setup.MapName = host.maps[0]
-	guest.opts.Mutators = content.Mutators{Health: content.Factor{Num: 3, Den: 1}}
-
 	if err := host.openOnlineScreen(); err != nil {
 		t.Fatal(err)
 	}
 	host.online.panel.SetText("SERVER", address)
 	host.activateGadget("CREATE")
 	awaitOnlineShells(t, "the host's lobby", func() bool { return host.online.phase == onlineInLobby }, host)
-	code := host.online.lobby.Code()
-	if len(code) != 6 {
-		t.Fatalf("room code %q", code)
-	}
-	if err := guest.openOnlineScreen(); err != nil {
-		t.Fatal(err)
-	}
-	guest.online.panel.SetText("SERVER", address)
-	guest.online.panel.SetText("ROOMCODE", strings.ToLower(code[:3]+" "+code[3:]))
-	guest.activateGadget("LOAD")
-	awaitOnlineShells(t, "the guest's lobby", func() bool {
-		return guest.online.phase == onlineInLobby && host.online.state.Present[1]
-	}, host, guest)
-	hostRoom, guestRoom := host.online.prepared.config, guest.online.prepared.config
-	if guestRoom.Digest() != hostRoom.Digest() || guestRoom.Request().Mutators != mutators || len(guestRoom.Request().UnitRestrictions) == 0 || guestRoom.Request().MapName != mapName {
-		t.Fatal("the guest did not adopt the host's configuration")
-	}
-	awaitOnlineShells(t, "both rehearsals", func() bool { return host.online.rehearsed && guest.online.rehearsed }, host, guest)
-	if host.online.digest != guest.online.digest || host.online.digest == ([32]byte{}) {
-		t.Fatal("equal seats rehearsed different digests")
-	}
-	host.activateGadget("READY")
-	guest.activateGadget("READY")
-	awaitOnlineShells(t, "both seats ready", func() bool {
-		return host.online.state.Ready == [2]bool{true, true} && !greyed(host.online.lobbyPanel, "LOAD")
-	}, host, guest)
-	host.activateGadget("LOAD")
-	awaitOnlineShells(t, "both battles", func() bool { return host.battle != nil && guest.battle != nil }, host, guest)
-	defer host.teardownBattle(nil)
-	defer guest.teardownBattle(nil)
-	if host.online != nil || guest.online != nil || host.frontend.Mode != modeBattle || guest.battle.sess.LocalOwner != 1 {
-		t.Fatal("entering the battle left the online screen open")
-	}
-	const target = 95 // past three checksum ticks
-	end := time.Now().Add(30 * time.Second)
-	for host.battle.sess.Clock.GlobalTick < target || guest.battle.sess.Clock.GlobalTick < target {
-		if time.Now().After(end) {
-			t.Fatalf("ticks %d/%d", host.battle.sess.Clock.GlobalTick, guest.battle.sess.Clock.GlobalTick)
+	if survival {
+		host.activateGadget(lobbyGameType)
+		if !host.online.room.settings.survival {
+			t.Fatalf("the room did not switch to Survival: %q", host.online.room.notice)
 		}
-		for _, g := range []*gameShell{host, guest} {
-			g.battle.pumpLocalMultiplayer(nil)
+	}
+	code := host.online.room.lobby.Code()
+	for i, guest := range shells[1:] {
+		// A guest's own selection never reaches the room's battle.
+		guest.setup.MapName = guest.maps[0]
+		guest.opts.Mutators = content.Mutators{Health: content.Factor{Num: 3, Den: 1}}
+		if err := guest.openOnlineScreen(); err != nil {
+			t.Fatal(err)
+		}
+		guest.online.panel.SetText("SERVER", address)
+		guest.online.panel.SetText("ROOMCODE", strings.ToLower(code[:3]+" "+code[3:]))
+		guest.activateGadget("LOAD")
+		joined := i + 2
+		awaitOnlineShells(t, "a guest's lobby", func() bool {
+			return guest.online != nil && guest.online.phase == onlineInLobby && len(host.online.room.presentSeats()) == joined
+		}, shells...)
+	}
+	for i, g := range shells {
+		r := &g.online.room
+		awaitOnlineShells(t, "the room's configuration", func() bool { return r.base.Digest() == host.online.room.base.Digest() }, shells...)
+		if r.baseReq.Mutators != mutators || len(r.baseReq.UnitRestrictions) == 0 || r.settings.survival != survival {
+			t.Fatalf("player %d did not adopt the room's configuration", i+1)
+		}
+		for range teams[i] {
+			before := r.state.Seats[r.lobby.Seat()].Team
+			g.activateGadget("Allies" + strconv.Itoa(i))
+			awaitOnlineShells(t, "a team change", func() bool { return r.state.Seats[r.lobby.Seat()].Team != before }, shells...)
+		}
+	}
+	for i, g := range shells {
+		r := &g.online.room
+		awaitOnlineShells(t, "the teams", func() bool { return r.state.Seats[i].Team == teams[i] }, shells...)
+	}
+	for _, g := range shells {
+		g.activateGadget(lobbyReady)
+	}
+	awaitOnlineShells(t, "every seat ready", func() bool { return host.onlineCanStart() }, shells...)
+	for i, g := range shells {
+		if g.online.room.prepared.identity != host.online.room.prepared.identity || g.online.room.prepared.rehearsal != host.online.room.prepared.rehearsal {
+			t.Fatalf("player %d's digests differ from the host's", i+1)
+		}
+	}
+	host.activateGadget("Start")
+	awaitOnlineShells(t, "every battle", func() bool {
+		for _, g := range shells {
+			if g.battle == nil {
+				return false
+			}
+		}
+		return true
+	}, shells...)
+	for i, g := range shells {
+		t.Cleanup(func() { g.teardownBattle(nil) })
+		if g.online != nil || g.battle.sess.LocalOwner != uint8(i) {
+			t.Fatalf("player %d entered at slot %d", i+1, g.battle.sess.LocalOwner)
+		}
+	}
+	return shells
+}
+
+// pumpOnlineRetail runs every battle to ticks, the relay comparing their
+// checksums; cl, when given, presents the first.
+func pumpOnlineRetail(t *testing.T, shells []*gameShell, ticks uint32, cl *client.Client) {
+	t.Helper()
+	end := time.Now().Add(60 * time.Second)
+	for {
+		done := true
+		for i, g := range shells {
+			var presenter *client.Client
+			if i == 0 {
+				presenter = cl
+			}
+			g.battle.pumpLocalMultiplayer(presenter)
 			if mp := g.battle.multiplayer; mp == nil || mp.failure != nil {
 				t.Fatalf("multiplayer stopped: %v", mp.failure)
 			}
+			done = done && g.battle.sess.Clock.GlobalTick >= ticks
+		}
+		if done {
+			return
+		}
+		if time.Now().After(end) {
+			t.Fatalf("ticks %d of %d", shells[0].battle.sess.Clock.GlobalTick, ticks)
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
 }
 
-// TestOnlineScreenCapture renders the online screen and both lobbies to PNGs
-// for review. A review diagnostic: it runs only when NANOLATHE_ONLINE_CAPTURE
-// names an output directory.
+func onlineRetailMatch(t *testing.T, players int, survival bool, teams []uint8, ticks uint32) {
+	t.Helper()
+	pumpOnlineRetail(t, onlineRetailRoom(t, players, survival, teams), ticks, nil)
+}
+
+// TestOnlineOverlayCapture renders a two-player online battle with the
+// network overlay. A review diagnostic, run only when
+// NANOLATHE_ONLINE_CAPTURE names an output directory.
+func TestOnlineOverlayCapture(t *testing.T) {
+	out := os.Getenv("NANOLATHE_ONLINE_CAPTURE")
+	if out == "" {
+		t.Skip("NANOLATHE_ONLINE_CAPTURE is unset")
+	}
+	shells := onlineRetailRoom(t, 2, false, []uint8{0, 0})
+	host := shells[0]
+	cl, err := client.New(client.Options{Buffer: host.battle.sess.Snapshot, Width: retailScreenW, Height: retailScreenH})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installBattleClient(cl, host.battle)
+	cl.PrepareBattlePresentation()
+	host.netVisible = true
+	// An order from each seat, so the overlay has latencies to show.
+	pumpOnlineRetail(t, shells, 60, cl)
+	for _, g := range shells {
+		for _, u := range g.battle.sess.Units.IterSliced() {
+			if u.Alive && u.Owner == g.battle.sess.LocalOwner {
+				_, _ = g.battle.multiplayer.driver.Submit(session.HumanCommand{Kind: session.HumanStop, Stop: session.HumanStopCommand{Handles: []pool.Handle{u.Handle}}})
+				break
+			}
+		}
+	}
+	pumpOnlineRetail(t, shells, 150, cl)
+	f, err := os.Create(filepath.Join(out, os.Getenv("NANOLATHE_ONLINE_CAPTURE_PREFIX")+"overlay.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, cl.ComposeFrame()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// One headless two-client match through a real local relay, started from the
+// lobby with a mutator set and unit restrictions (§16.6.3, §16.7).
+func TestOnlineLobbyTwoClientsRetail(t *testing.T) {
+	onlineRetailMatch(t, 2, false, []uint8{0, 0}, 95)
+}
+
+// Three players on teams of two and one, and two Survival survivors, through
+// a real local relay to a few hundred ticks (§16.6).
+func TestOnlineLobbyTeamsAndSurvivalRetail(t *testing.T) {
+	t.Run("2v1", func(t *testing.T) { onlineRetailMatch(t, 3, false, []uint8{1, 1, 2}, 300) })
+	t.Run("survival", func(t *testing.T) { onlineRetailMatch(t, 2, true, []uint8{0, 0}, 300) })
+}
+
+// Final configurations from lobby seats: 2, 4 and 10 skirmish players with
+// teams, and 3 Survival survivors, compose on the retail content and agree
+// on every slot (§16.6).
+func TestOnlineRoomCompositionRetail(t *testing.T) {
+	cat, fs := retailcat.Shared(t)
+	cs := &contentSet{fs: fs, unmappedMount: fs, profile: "retail", limits: content.RetailLimits()}
+	mutators, restrictions := onlineTestSelection(t)
+	records, err := onlineMatchRestrictions(restrictions, cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frozen := onlineCreationFrozen(cs, [2]uint32{29, 31}, mutators, restrictions, records)
+	tenMap := ""
+	for _, name := range []string{"ashap plateau", "the pass", "seven islands", "comet catcher"} {
+		if n, err := onlineMapCapacity(cat, name); err == nil && n >= 10 {
+			tenMap = name
+			break
+		}
+	}
+	for _, c := range []struct {
+		name     string
+		mapName  string
+		survival bool
+		teams    []uint8
+	}{
+		{"2", "ashap plateau", false, []uint8{0, 0}},
+		{"4", "ashap plateau", false, []uint8{1, 1, 2, 2}},
+		{"10", tenMap, false, []uint8{1, 2, 3, 4, 5, 1, 2, 3, 4, 5}},
+		{"survival-3", "ashap plateau", true, []uint8{0, 0, 0}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if c.mapName == "" {
+				t.Skip("no retail map seats ten players")
+			}
+			settings := onlineSettings{survival: c.survival, mapName: c.mapName, location: 1, commanderDeath: 1}
+			seats := make([]session.OnlineSeat, len(c.teams))
+			for i, team := range c.teams {
+				seats[i] = session.OnlineSeat{Team: team, Side: uint8(i % 2)}
+			}
+			config, err := onlineConfig(cs, cat, settings, seats, frozen)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var identity [32]byte
+			for slot := range seats {
+				sess, _, id, err := composeOnlineMatch(cs, cat, config, uint8(slot))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if slot == 0 {
+					identity = onlineIdentityDigest(id)
+				} else if onlineIdentityDigest(id) != identity || sess.LocalOwner != uint8(slot) {
+					t.Fatalf("slot %d differs", slot)
+				}
+			}
+		})
+	}
+}
+
+// TestOnlineScreenCapture renders the online screen, lobbies and the network
+// overlay to PNGs for review. A review diagnostic: it runs only when
+// NANOLATHE_ONLINE_CAPTURE names an output directory.
 func TestOnlineScreenCapture(t *testing.T) {
 	out := os.Getenv("NANOLATHE_ONLINE_CAPTURE")
 	if out == "" {
@@ -267,7 +435,6 @@ func TestOnlineScreenCapture(t *testing.T) {
 		cl.SetFNT(shell.font)
 	}
 	cl.SetUIStage(gameShellUIStage{shell: shell})
-	shell.openMenu(modeMenuMain)
 	prefix := os.Getenv("NANOLATHE_ONLINE_CAPTURE_PREFIX")
 	capture := func(name string) {
 		img := cl.ComposeFrame()
@@ -280,51 +447,44 @@ func TestOnlineScreenCapture(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	capture("main")
+	shell.openMenu(modeMenuMain)
 	shell.opts.Mutators, _ = onlineTestSelection(t)
 	if err := shell.openOnlineScreen(); err != nil {
 		t.Fatal(err)
 	}
 	shell.online.panel.SetText("ROOMCODE", "K7M 2QX")
 	capture("online")
-	shell.online.status = onlineRefusalText(relayRefusalForCapture())
-	shell.refreshOnlinePanel()
-	capture("online-refused")
-	fake := &fakeOnlineRelay{}
-	useOnlineTestRelay(t, fake)
-	config, err := onlineMatchConfig(onlineMatchSpec{mapName: shell.setup.MapName, mutators: shell.opts.Mutators}, &contentSet{profile: "retail", limits: content.RetailLimits()}, 0)
+	// A four-player skirmish lobby: the host, two teams, both sides.
+	fake := newFakeOnlineLobby(1, 0, 1, 2, 3)
+	fake.code = "K7M2QX"
+	copy(fake.state.Seats[:], []relay.HostedSeatState{{Present: true, Team: 1, Ready: true}, {Present: true, Team: 1, Side: 1}, {Present: true, Team: 2, Side: 1, Ready: true}, {Present: true, Team: 2}})
+	cat, err := cs.compileCatalog(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostLobby := &fakeOnlineLobby{code: "K7M2QX", state: relay.HostedLobbyState{Present: [2]bool{true, true}, Ready: [2]bool{false, true}}}
-	shell.online.status = ""
-	rehearsal := make(chan onlineRehearsal, 1)
-	shell.openOnlineLobby(&onlinePrepared{config: config, address: "wss://relay.nanolathe.gg/relay"}, hostLobby, rehearsal)
+	base, err := onlineConfig(cs, cat, onlineSettingsFromSetup(shell.setup), onlinePlaceholderSeats(), onlineCreationFrozen(cs, [2]uint32{1, 2}, shell.opts.Mutators, content.Restrictions{}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shell.openOnlineLobby(fake, cat, base, "wss://relay.nanolathe.gg/relay")
 	shell.pollOnline()
-	capture("lobby-checking")
-	rehearsal <- onlineRehearsal{digest: [32]byte{1}}
+	capture("lobby-teams")
+	r := &shell.online.room
+	r.prepared, r.ready = &onlinePrepared{key: r.key()}, true
+	fake.state.Seats[1].Ready, fake.state.Seats[3].Ready = true, true
 	shell.pollOnline()
-	capture("lobby-host")
-	shell.activateGadget("READY")
-	hostLobby.state.Ready[0] = true
-	shell.pollOnline()
-	capture("lobby-host-ready")
-	hostLobby.state.Mismatch = true
+	capture("lobby-ready")
+	fake.state.Mismatch = true
 	shell.pollOnline()
 	capture("lobby-mismatch")
+	// The host's Survival lobby.
 	shell.leaveOnlineLobby("")
-	guestLobby := &fakeOnlineLobby{code: "K7M2QX", seat: 1, state: relay.HostedLobbyState{Present: [2]bool{true, true}, Ready: [2]bool{false, false}}}
-	done := make(chan onlineRehearsal, 1)
-	done <- onlineRehearsal{digest: [32]byte{1}}
-	shell.openOnlineLobby(&onlinePrepared{config: config, address: "wss://relay.nanolathe.gg/relay"}, guestLobby, done)
+	hostLobby := newFakeOnlineLobby(0, 0, 1, 2)
+	hostLobby.code = "K7M2QX"
+	shell.openOnlineLobby(hostLobby, cat, base, "wss://relay.nanolathe.gg/relay")
+	shell.online.room.settings.survival, shell.online.room.settings.pace = true, 1
 	shell.pollOnline()
-	capture("lobby-guest")
-}
-
-func relayRefusalForCapture() error {
-	return relayError("room", "an existing invitation")
-}
-
-func relayError(path, expected string) error {
-	return &missingProductError{what: "hosted relay rejected", logical: path, providers: []string{"hosted transport"}, expected: expected}
+	shell.refreshOnlineLobby()
+	capture("lobby-survival")
+	shell.leaveOnlineLobby("")
 }

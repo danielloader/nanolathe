@@ -206,7 +206,7 @@ func TestWebSocketHandshakeHealthAndPipelinedHello(t *testing.T) {
 	_ = c.Close()
 	c = rawWebSocketTest(t, s.Addr())
 	var envelope bytes.Buffer
-	hello, err := encodeHostedHello("", hostedAutoStart, localTestHello(0), nil)
+	hello, err := encodeHostedHello("", hostedAutoStart, 2, localTestHello(0), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-// Command nanolathe-server hosts bounded two-human relay rooms without assets.
+// Command nanolathe-server hosts bounded relay rooms without assets.
 package main
 
 import (
@@ -10,7 +10,9 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/nanolathe-gg/nanolathe/internal/relay"
 )
@@ -87,8 +89,27 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		fmt.Fprintf(out, "Nanolathe relay health on %s\n", health.Addr())
 	}
 	fmt.Fprintf(out, "Nanolathe relay listening on %s (%s, at most %d rooms and %d connections)\n", server.Addr(), transport, *maxRooms, *maxConnections)
-	<-ctx.Done()
-	return nil
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			logServerStats(out, server.Status())
+		}
+	}
+}
+
+// logServerStats writes one line for the operator's logs. Process-level
+// figures appear only here, never on the public status page
+// (DESIGN_MULTIPLAYER §12.5).
+func logServerStats(out io.Writer, st relay.HostedStatus) {
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	fmt.Fprintf(out, "relay: players=%d matches=%d lobbies=%d connections=%d started=%d completed=%d failed=%d heap=%dMiB sys=%dMiB goroutines=%d\n",
+		st.Players, st.Matches, st.Lobbies, st.Connections, st.Totals.Matches, st.Totals.Completed, st.Totals.Failed,
+		mem.HeapAlloc>>20, mem.Sys>>20, runtime.NumGoroutine())
 }
 
 func serverError(path, expected string) error {

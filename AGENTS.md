@@ -104,8 +104,9 @@ and it neither reproduces retail's transport nor interoperates with it.
 The online policies apply in every mode and are Nanolathe's, not retail's:
 a command that changes the world needs the lobby's cheat permission even
 where retail leaves it ungated; online battles run at normal speed with no
-pause in the first releases; and a room may restrict views for all its
-players. Follow-up policies approved 2026-10-02 use one shared directed
+pause in the first releases; a room may restrict views for all its
+players; and teammates in an online skirmish share sight and radar
+(user-authorized 2026-10-09). Follow-up policies approved 2026-10-02 use one shared directed
 alliance matrix, canonical per-player explored histories with only the
 entering human/hosted-computer reset scope, and request-tick map sharing.
 Computer difficulty is explicit per seat; computers are excluded from

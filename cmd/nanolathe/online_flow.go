@@ -1,12 +1,13 @@
 package main
 
-// The online screen's work: Create, Join, the lobby and the battle it starts
-// (DESIGN_MULTIPLAYER §16.6.2). Composition and every network call that can
-// wait run on a job goroutine; the game goroutine polls the job and the
-// lobby's never-blocking state from the shell's step.
+// The online screen's work: Create, Join, Ready and the battle Start enters
+// (DESIGN_MULTIPLAYER §16.6.2). Compiling, composing, rehearsing and every
+// network call that can wait run on a job goroutine; the game goroutine polls
+// the jobs and the lobby's never-blocking state from the shell's step.
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -15,7 +16,9 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/lockstep"
+	"github.com/nanolathe-gg/nanolathe/internal/netproto"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/ebitenapp"
 	"github.com/nanolathe-gg/nanolathe/internal/relay"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
@@ -25,8 +28,8 @@ import (
 // onlineRelay is the hosted relay as the online screen uses it. Tests
 // substitute a fake; production uses the relay package.
 type onlineRelay interface {
-	Describe(ctx context.Context, address, room string, options relay.HostedDialOptions) ([]byte, error)
-	Open(ctx context.Context, address, room string, hello relay.LocalHello, config []byte, options relay.HostedDialOptions) (onlineLobby, error)
+	Describe(ctx context.Context, address, room string, options relay.HostedDialOptions) (relay.HostedRoomDescription, error)
+	Open(ctx context.Context, address, room string, hello relay.LocalHello, config []byte, size int, options relay.HostedDialOptions) (onlineLobby, error)
 }
 
 // onlineLobby is one seat's room before Start (relay.HostedLobby).
@@ -34,9 +37,13 @@ type onlineLobby interface {
 	Code() string
 	Seat() uint8
 	State() (relay.HostedLobbyState, error)
-	// SetReady reports readiness with this seat's rehearsal digest; not
-	// ready carries the zero digest (DESIGN_MULTIPLAYER §16.7).
-	SetReady(ready bool, rehearsal [32]byte) error
+	Configuration() []byte
+	SetConfiguration(config []byte) error
+	SetTeam(team uint8) error
+	SetSide(side uint8) error
+	// SetReady reports readiness with this seat's configuration-identity and
+	// rehearsal digests; not ready carries zero digests (§16.6.1, §16.7).
+	SetReady(ready bool, identity, rehearsal [32]byte) error
 	Start() error
 	// Battle is the grant stream once Started, nil before.
 	Battle() lockstep.Client
@@ -45,12 +52,12 @@ type onlineLobby interface {
 
 type hostedOnlineRelay struct{}
 
-func (hostedOnlineRelay) Describe(ctx context.Context, address, room string, options relay.HostedDialOptions) ([]byte, error) {
+func (hostedOnlineRelay) Describe(ctx context.Context, address, room string, options relay.HostedDialOptions) (relay.HostedRoomDescription, error) {
 	return relay.DescribeHostedRoom(ctx, address, room, options)
 }
 
-func (hostedOnlineRelay) Open(ctx context.Context, address, room string, hello relay.LocalHello, config []byte, options relay.HostedDialOptions) (onlineLobby, error) {
-	l, err := relay.OpenHostedLobby(ctx, address, room, hello, config, options)
+func (hostedOnlineRelay) Open(ctx context.Context, address, room string, hello relay.LocalHello, config []byte, size int, options relay.HostedDialOptions) (onlineLobby, error) {
+	l, err := relay.OpenHostedLobby(ctx, address, room, hello, config, size, options)
 	if err != nil {
 		return nil, err
 	}
@@ -91,21 +98,10 @@ var onlineWork sync.WaitGroup
 type onlineJob struct {
 	cancel context.CancelFunc
 	done   chan onlineJobResult
-	// rehearsal receives the digest of a job that opened a lobby: the job
-	// goes on to rehearse after reporting the lobby, so the room's code shows
-	// while the check runs.
-	rehearsal chan onlineRehearsal
 }
 
-// onlineRehearsal is a finished rehearsal: this seat's digest, or why the
-// rehearsal could not run.
-type onlineRehearsal struct {
-	digest [32]byte
-	err    error
-}
-
-// onlineRoom is a room the player is joining: where it is and the
-// configuration bytes the relay described.
+// onlineRoom is a room the player is joining: where it is and the base
+// configuration the relay described.
 type onlineRoom struct {
 	address string
 	options relay.HostedDialOptions
@@ -115,39 +111,27 @@ type onlineRoom struct {
 
 type onlineJobResult struct {
 	described *onlineRoom // a Describe that succeeded
-	prepared  *onlinePrepared
-	lobby     onlineLobby
-	err       error
-}
-
-// onlinePrepared is a battle composed and prepared for its first grant,
-// with the frozen inputs and configuration it was composed from, which the
-// rehearsal reuses.
-type onlinePrepared struct {
-	sess    *session.Session
-	inputs  *content.SimulationInputs
-	config  session.EffectiveMatchConfig
-	detail  *client.DetailArt
+	// An opened room: its lobby, the catalog compiled for it, its base
+	// configuration and its server.
+	lobby   onlineLobby
+	cat     *content.Catalog
+	base    session.EffectiveMatchConfig
 	address string
+	err     error
 }
 
 func (s *onlineScreen) run(work func(context.Context) onlineJobResult) {
 	ctx, cancel := context.WithCancel(context.Background())
-	job := &onlineJob{cancel: cancel, done: make(chan onlineJobResult, 1), rehearsal: make(chan onlineRehearsal, 1)}
+	job := &onlineJob{cancel: cancel, done: make(chan onlineJobResult, 1)}
 	s.job = job
 	onlineWork.Add(1)
 	go func() {
 		defer onlineWork.Done()
-		r := work(ctx)
-		job.done <- r
-		if r.err == nil && r.lobby != nil && r.prepared != nil {
-			digest, err := rehearsalDigest(r.prepared.inputs, r.prepared.config)
-			job.rehearsal <- onlineRehearsal{digest: digest, err: err}
-		}
+		job.done <- work(ctx)
 	}()
 }
 
-// cancelJob abandons the running job. A lobby it opens anyway is closed.
+// cancelJob abandons the running job. A room it opens anyway is closed.
 func (s *onlineScreen) cancelJob() {
 	job := s.job
 	if job == nil {
@@ -162,9 +146,9 @@ func (s *onlineScreen) cancelJob() {
 	}()
 }
 
-// fail returns the screen to idle with a plain-words reason.
+// onlineFail returns the screen to idle with a plain-words reason.
 func (g *gameShell) onlineFail(err error) {
-	if s := g.online; s != nil {
+	if g.online != nil {
 		fmt.Fprintf(os.Stderr, "nanolathe: online: %v\n", err)
 		g.onlineIdleStatus(onlineRefusalText(err))
 	}
@@ -175,7 +159,7 @@ func (g *gameShell) onlineIdleStatus(status string) {
 	if s == nil {
 		return
 	}
-	s.phase, s.status, s.room = onlineIdle, status, nil
+	s.phase, s.status = onlineIdle, status
 	g.refreshOnlinePanel()
 }
 
@@ -193,37 +177,16 @@ func (g *gameShell) onlineServerFromPanel() (string, relay.HostedDialOptions, bo
 	return address, options, true
 }
 
-// prepareOnline composes the battle config describes for seat, prepares it
-// and opens the room: a new one carrying encoded for the host, the named one
-// for a joiner.
-func prepareOnline(ctx context.Context, opts Options, cs *contentSet, cat *content.Catalog, config session.EffectiveMatchConfig, encoded []byte, seat uint8, address, room string, options relay.HostedDialOptions) onlineJobResult {
-	sess, inputs, identity, err := composeOnlineMatch(cs, cat, config, seat)
-	if err != nil {
-		return onlineJobResult{err: err}
-	}
-	if err := ctx.Err(); err != nil {
-		return onlineJobResult{err: err}
-	}
-	// Optional load-time art, prepared here as the loading screen's goroutine
-	// prepares it (DESIGN_GPU_RENDERER §14.4).
-	detail := detailArtFor(opts, cs, sess.World, nil)
-	hello := relay.LocalHello{Seat: seat, Identity: identity, InitialChecksum: sess.UnitStateChecksum()}
-	var payload []byte
-	if seat == 0 {
-		payload = encoded
-	}
-	dial, cancel := context.WithTimeout(ctx, onlineOpenTimeout)
-	defer cancel()
-	lobby, err := onlineRelayService.Open(dial, address, room, hello, payload, options)
-	if err != nil {
-		return onlineJobResult{err: err}
-	}
-	return onlineJobResult{prepared: &onlinePrepared{sess: sess, inputs: inputs, config: config, detail: detail, address: address}, lobby: lobby}
+// onlineHello is a lobby hello. The relay compares only the protocol before
+// Ready, when the identity digest compares the rest; a joiner asks for any
+// seat. The rule name is the one every room plays, for the hello's encoding.
+func onlineHello(seat uint8) relay.LocalHello {
+	return relay.LocalHello{Seat: seat, Identity: netproto.Identity{Protocol: netproto.CommandSchemaVersion, Rules: netproto.RuleIdentity{Name: string(gameplay.Modern)}}}
 }
 
-// startOnlineCreate freezes the host's configuration — its skirmish map, mod,
-// mutators and restrictions, Modern rules and a fresh seed pair — and opens a
-// room for it (§16.6).
+// startOnlineCreate opens a ten-seat room at once with the host's defaults: a
+// skirmish on its current skirmish map with its skirmish options, its mod,
+// mutators and restrictions, and a fresh seed pair (§16.6).
 func (g *gameShell) startOnlineCreate() {
 	s := g.online
 	if s == nil || s.job != nil || s.phase != onlineIdle {
@@ -244,7 +207,7 @@ func (g *gameShell) startOnlineCreate() {
 		return
 	}
 	if strings.TrimSpace(g.setup.MapName) == "" {
-		g.onlineIdleStatus("Choose a map first.")
+		g.onlineIdleStatus("Choose a skirmish map first.")
 		return
 	}
 	sim, crt, err := drawOnlineSeeds()
@@ -252,31 +215,33 @@ func (g *gameShell) startOnlineCreate() {
 		g.onlineFail(err)
 		return
 	}
-	spec := onlineMatchSpec{mapName: g.setup.MapName, simSeed: sim, crtSeed: crt, mutators: g.opts.Mutators, mod: matchModOf(g.cs.mod), community: g.cs.gameplayFeatures}
-	restrictions, cs, opts := g.opts.Restrictions, g.cs, g.opts
-	s.phase, s.status = onlinePreparing, "Preparing the battle..."
+	settings := onlineSettingsFromSetup(g.setup)
+	cs, mutators, restrictions := g.cs, g.opts.Mutators, g.opts.Restrictions
+	s.phase, s.status = onlineConnecting, "Opening a room..."
 	s.run(func(ctx context.Context) onlineJobResult {
 		cat, err := cs.compileCatalog(nil)
 		if err != nil {
 			return onlineJobResult{err: err}
 		}
-		if spec.restrictions, err = onlineMatchRestrictions(restrictions, cat); err != nil {
-			return onlineJobResult{err: err}
-		}
-		spec.restrictionSet = restrictions
-		schema, err := onlineMapSchema(cs, cat, spec.mapName)
+		records, err := onlineMatchRestrictions(restrictions, cat)
 		if err != nil {
 			return onlineJobResult{err: err}
 		}
-		config, err := onlineMatchConfig(spec, cs, schema)
+		base, err := onlineConfig(cs, cat, settings, onlinePlaceholderSeats(), onlineCreationFrozen(cs, [2]uint32{sim, crt}, mutators, restrictions, records))
 		if err != nil {
 			return onlineJobResult{err: err}
 		}
-		encoded, err := session.EncodeMatchConfig(config)
+		encoded, err := session.EncodeMatchConfig(base)
 		if err != nil {
 			return onlineJobResult{err: err}
 		}
-		return prepareOnline(ctx, opts, cs, cat, config, encoded, 0, address, "", options)
+		dial, cancel := context.WithTimeout(ctx, onlineOpenTimeout)
+		defer cancel()
+		lobby, err := onlineRelayService.Open(dial, address, "", onlineHello(0), encoded, relay.HostedMaxSeats, options)
+		if err != nil {
+			return onlineJobResult{err: err}
+		}
+		return onlineJobResult{lobby: lobby, cat: cat, base: base, address: address}
 	})
 	g.refreshOnlinePanel()
 }
@@ -304,37 +269,35 @@ func (g *gameShell) startOnlineJoin() {
 	s.run(func(ctx context.Context) onlineJobResult {
 		ctx, cancel := context.WithTimeout(ctx, onlineDescribeTimeout)
 		defer cancel()
-		config, err := onlineRelayService.Describe(ctx, address, code, options)
-		if err == nil && len(config) == 0 {
+		d, err := onlineRelayService.Describe(ctx, address, code, options)
+		if err == nil && len(d.Config) == 0 {
 			err = localMultiplayerError("room configuration", "the host's configuration")
 		}
 		if err != nil {
 			return onlineJobResult{err: err}
 		}
-		return onlineJobResult{described: &onlineRoom{address: address, options: options, code: code, config: config}}
+		return onlineJobResult{described: &onlineRoom{address: address, options: options, code: code, config: d.Config}}
 	})
 	g.refreshOnlinePanel()
 }
 
 // adoptOnlineRoom checks that this install can play the described room and
-// composes for it. The room's map, mod, mutators and restrictions come from
-// its configuration, never from this player's preferences. A mod that is
-// installed but not mounted is mounted through the ordinary content reload,
-// which resumes the join on the new shell (resumeOnlineJoin).
+// joins it. The room's mod is fixed; one that is installed but not mounted is
+// mounted through the ordinary content reload, which resumes the join on the
+// new shell (resumeOnlineJoin). The room's map may change until Start, so a
+// missing map is reported in the lobby instead.
 func (g *gameShell) adoptOnlineRoom(room onlineRoom, remounted bool) {
 	s := g.online
 	if s == nil {
 		return
 	}
-	config, err := session.DecodeMatchConfig(room.config)
+	base, err := session.DecodeMatchConfig(room.config)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nanolathe: online: %v\n", err)
 		g.onlineIdleStatus("This game's settings could not be read. The host may be running a different release.")
 		return
 	}
-	r := config.Request()
-	s.room = &r
-	if want := r.Mod; want != matchModOf(g.cs.mod) {
+	if want := base.Request().Mod; want != matchModOf(g.cs.mod) {
 		if remounted {
 			g.onlineIdleStatus("This game's mod " + onlineModName(want) + " could not be selected.")
 			return
@@ -344,7 +307,7 @@ func (g *gameShell) adoptOnlineRoom(room onlineRoom, remounted bool) {
 			g.onlineIdleStatus(refusal)
 			return
 		}
-		s.phase, s.status = onlinePreparing, "Loading "+onlineModName(want)+" for this game..."
+		s.phase, s.status = onlineConnecting, "Loading "+onlineModName(want)+" for this game..."
 		g.refreshOnlinePanel()
 		pendingContentReload = &contentReloadRequest{
 			selector: selector,
@@ -354,17 +317,23 @@ func (g *gameShell) adoptOnlineRoom(room onlineRoom, remounted bool) {
 		}
 		return
 	}
-	if !g.hasSkirmishMap(r.MapName) {
-		g.onlineIdleStatus("This game uses the map " + r.MapName + ", which is not installed. Get it with More maps on the skirmish map screen, then join again.")
-		return
-	}
-	cs, opts := g.cs, g.opts
-	s.phase = onlinePreparing
+	cs := g.cs
+	s.phase = onlineConnecting
 	if !remounted {
-		s.status = "Preparing the battle..."
+		s.status = "Joining game " + room.code + "..."
 	}
 	s.run(func(ctx context.Context) onlineJobResult {
-		return prepareOnline(ctx, opts, cs, nil, config, nil, 1, room.address, room.code, room.options)
+		cat, err := cs.compileCatalog(nil)
+		if err != nil {
+			return onlineJobResult{err: err}
+		}
+		dial, cancel := context.WithTimeout(ctx, onlineOpenTimeout)
+		defer cancel()
+		lobby, err := onlineRelayService.Open(dial, room.address, room.code, onlineHello(1), nil, 0, room.options)
+		if err != nil {
+			return onlineJobResult{err: err}
+		}
+		return onlineJobResult{lobby: lobby, cat: cat, base: base, address: room.address}
 	})
 	g.refreshOnlinePanel()
 }
@@ -409,7 +378,7 @@ func (g *gameShell) resumeOnlineJoin(room onlineRoom) {
 	if g.cs.mod != nil {
 		mod = g.cs.mod.Name + " " + g.cs.mod.Version
 	}
-	s.status = "Switched to " + mod + " for this game. Preparing the battle..."
+	s.status = "Switched to " + mod + " for this game. Joining..."
 	g.adoptOnlineRoom(room, true)
 }
 
@@ -423,8 +392,8 @@ func (g *gameShell) hasSkirmishMap(name string) bool {
 	return false
 }
 
-// pollOnline takes a finished job and the lobby's latest state. It runs
-// every shell step; nothing in it waits.
+// pollOnline takes a finished job and follows the lobby. It runs every shell
+// step; nothing in it waits.
 func (g *gameShell) pollOnline() {
 	s := g.online
 	if s == nil {
@@ -435,167 +404,187 @@ func (g *gameShell) pollOnline() {
 		case r := <-job.done:
 			s.job = nil
 			job.cancel()
-			g.finishOnlineJob(r, job.rehearsal)
+			g.finishOnlineJob(r)
 		default:
 		}
 	}
-	if s = g.online; s != nil && s.phase == onlineInLobby && s.lobby != nil {
-		if s.rehearsal != nil {
-			select {
-			case r := <-s.rehearsal:
-				s.rehearsal = nil
-				s.rehearsed, s.digest, s.rehearsalErr, s.status = r.err == nil, r.digest, r.err, ""
-				if r.err != nil {
-					fmt.Fprintf(os.Stderr, "nanolathe: online rehearsal: %v\n", r.err)
-				}
-				g.refreshOnlineLobby()
-			default:
-			}
-		}
+	if s = g.online; s != nil && s.phase == onlineInLobby && s.room.lobby != nil {
 		g.pollOnlineLobby()
 	}
 }
 
-func (g *gameShell) finishOnlineJob(r onlineJobResult, rehearsal <-chan onlineRehearsal) {
+func (g *gameShell) finishOnlineJob(r onlineJobResult) {
 	switch {
 	case r.err != nil:
 		g.onlineFail(r.err)
 	case r.described != nil:
 		g.adoptOnlineRoom(*r.described, false)
 	case r.lobby != nil:
-		g.openOnlineLobby(r.prepared, r.lobby, rehearsal)
+		g.openOnlineLobby(r.lobby, r.cat, r.base, r.address)
 	default:
 		g.onlineIdleStatus("")
 	}
 }
 
-// openOnlineLobby shows the room a job opened.
-func (g *gameShell) openOnlineLobby(prepared *onlinePrepared, lobby onlineLobby, rehearsal <-chan onlineRehearsal) {
-	s := g.online
-	panel, err := g.loadOnlinePanel(true)
-	if err != nil || prepared == nil {
-		_ = lobby.Close()
-		if err == nil {
-			err = localMultiplayerError("lobby", "a prepared battle")
-		}
-		g.onlineFail(err)
-		return
-	}
-	r := prepared.config.Request()
-	s.room = &r
-	s.lobby, s.prepared, s.ready, s.state = lobby, prepared, false, relay.HostedLobbyState{}
-	s.rehearsal, s.rehearsed, s.digest, s.rehearsalErr = rehearsal, false, [32]byte{}, nil
-	s.phase, s.status, s.detail = onlineInLobby, "", "Server "+prepared.address
-	s.lobbyPanel = panel
-	g.frontend.Panels.Push(panel)
-	flushWindowTokens(clPtr)
-	g.refreshOnlineLobby()
+// ---------------------------------------------------------------------------
+// Ready.
+
+// onlinePrepared is this seat's final configuration, composed and prepared
+// for its first grant, with what Ready reports and the room key it was
+// composed for.
+type onlinePrepared struct {
+	sess      *session.Session
+	inputs    *content.SimulationInputs
+	config    session.EffectiveMatchConfig
+	detail    *client.DetailArt
+	slot      uint8
+	key       onlineRoomKey
+	identity  [32]byte
+	rehearsal [32]byte
 }
 
-// pollOnlineLobby follows the room: a failure returns to the online screen
-// with its reason, and Started enters the battle.
-func (g *gameShell) pollOnlineLobby() {
-	s := g.online
-	state, err := s.lobby.State()
-	if err != nil {
-		g.leaveOnlineLobby(onlineRefusalText(err))
-		return
-	}
-	if state.Started {
-		g.startOnlineBattle()
-		return
-	}
-	if state != s.state {
-		s.state = state
-		g.refreshOnlineLobby()
-	}
+type onlineReadyJob struct {
+	cancel context.CancelFunc
+	done   chan onlineReadyResult
 }
 
-// leaveOnlineLobby closes the room and its prepared battle and uncovers the
-// online screen with status.
-func (g *gameShell) leaveOnlineLobby(status string) {
-	s := g.online
-	if s == nil {
-		return
-	}
-	if s.lobby != nil {
-		_ = s.lobby.Close()
-	}
-	s.lobby, s.prepared, s.ready, s.state = nil, nil, false, relay.HostedLobbyState{}
-	s.rehearsal, s.rehearsed, s.digest, s.rehearsalErr = nil, false, [32]byte{}, nil
-	if s.lobbyPanel != nil && g.frontend.Panels.Top() == s.lobbyPanel {
-		s.lobbyPanel.ResetPress()
-		g.frontend.Panels.Pop()
-	}
-	s.lobbyPanel = nil
-	flushWindowTokens(clPtr)
-	g.onlineIdleStatus(status)
+type onlineReadyResult struct {
+	prepared *onlinePrepared
+	err      error
 }
 
-// setOnlineReady reports this seat ready with its rehearsal digest, which
-// the relay compares with the other seat's before it allows Start, or not
-// ready with the zero digest. Ready waits for a successful rehearsal.
+// setOnlineReady reports this seat ready, composing, preparing and
+// rehearsing the final configuration first unless the room is unchanged
+// since the last time; or not ready, with zero digests.
 func (g *gameShell) setOnlineReady(ready bool) {
-	s := g.online
-	if s == nil || s.lobby == nil || ready && !s.rehearsed {
+	r := &g.online.room
+	if !ready {
+		if r.readyJob != nil {
+			r.readyJob.cancel()
+			r.readyJob = nil
+		}
+		if r.ready {
+			if err := r.lobby.SetReady(false, [32]byte{}, [32]byte{}); err != nil {
+				g.leaveOnlineLobby(onlineRefusalText(err))
+				return
+			}
+		}
+		r.ready, r.notice = false, ""
+		g.refreshOnlineLobby()
 		return
 	}
-	var digest [32]byte
-	if ready {
-		digest = s.digest
-	}
-	if err := s.lobby.SetReady(ready, digest); err != nil {
-		g.leaveOnlineLobby(onlineRefusalText(err))
+	if r.ready || r.readyJob != nil || g.onlineLobbyBlock() != "" {
 		return
 	}
-	s.ready, s.status = ready, ""
+	if p := r.prepared; p != nil && p.key == r.key() {
+		g.reportOnlineReady(p)
+		return
+	}
+	r.prepared, r.readyErr, r.notice = nil, nil, ""
+	seats, slot, ok := onlineSeatsOf(r.state, r.lobby.Seat(), r.settings.survival)
+	if !ok {
+		return
+	}
+	key, base, settings, cat, cs, opts := r.key(), r.base, r.settings, r.cat, g.cs, g.opts
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &onlineReadyJob{cancel: cancel, done: make(chan onlineReadyResult, 1)}
+	r.readyJob = job
+	onlineWork.Add(1)
+	go func() {
+		defer onlineWork.Done()
+		job.done <- composeOnlineReady(ctx, cs, cat, opts, base, settings, seats, slot, key)
+	}()
 	g.refreshOnlineLobby()
 }
 
-// startOnlineMatch is the host's Start. A refused start leaves the room open.
-func (g *gameShell) startOnlineMatch() {
-	s := g.online
-	if s == nil || s.lobby == nil || s.lobby.Seat() != 0 {
-		return
+// composeOnlineReady composes the final configuration — the base plus the
+// present seats as slots with their teams and sides — prepares this seat's
+// battle at its slot and rehearses it (§16.6, §16.7).
+func composeOnlineReady(ctx context.Context, cs *contentSet, cat *content.Catalog, opts Options, base session.EffectiveMatchConfig, settings onlineSettings, seats []session.OnlineSeat, slot uint8, key onlineRoomKey) onlineReadyResult {
+	config, err := onlineConfig(cs, cat, settings, seats, onlineFrozenOf(base.Request()))
+	if err != nil {
+		return onlineReadyResult{err: err}
 	}
-	if err := s.lobby.Start(); err != nil {
+	sess, inputs, identity, err := composeOnlineMatch(cs, cat, config, slot)
+	if err != nil {
+		return onlineReadyResult{err: err}
+	}
+	if err := ctx.Err(); err != nil {
+		return onlineReadyResult{err: err}
+	}
+	rehearsal, err := rehearsalDigest(inputs, config)
+	if err != nil {
+		return onlineReadyResult{err: err}
+	}
+	if err := ctx.Err(); err != nil {
+		return onlineReadyResult{err: err}
+	}
+	// Optional load-time art, prepared here as the loading screen's goroutine
+	// prepares it (DESIGN_GPU_RENDERER §14.4).
+	detail := detailArtFor(opts, cs, sess.World, nil)
+	return onlineReadyResult{prepared: &onlinePrepared{sess: sess, inputs: inputs, config: config, detail: detail, slot: slot, key: key,
+		identity: onlineIdentityDigest(identity), rehearsal: rehearsal}}
+}
+
+// finishOnlineReady reports Ready once the check passed for the room as it
+// still is; a room that changed meanwhile needs another Ready.
+func (g *gameShell) finishOnlineReady(result onlineReadyResult) {
+	r := &g.online.room
+	switch {
+	case result.err != nil:
+		if errors.Is(result.err, context.Canceled) {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "nanolathe: online ready: %v\n", result.err)
+		r.readyErr = result.err
+	case result.prepared.key != r.key():
+		r.notice = "The game changed while it was being checked. Choose Ready again."
+	default:
+		r.prepared = result.prepared
+		g.reportOnlineReady(result.prepared)
+	}
+}
+
+func (g *gameShell) reportOnlineReady(p *onlinePrepared) {
+	r := &g.online.room
+	if err := r.lobby.SetReady(true, p.identity, p.rehearsal); err != nil {
 		g.leaveOnlineLobby(onlineRefusalText(err))
 		return
 	}
-	s.status = "Starting..."
+	r.ready, r.notice = true, ""
 	g.refreshOnlineLobby()
 }
 
-func (g *gameShell) copyOnlineCode() {
-	s := g.online
-	if s == nil || s.lobby == nil {
-		return
-	}
-	s.status = "Copied the room code " + s.lobby.Code() + "."
-	if !onlineClipboardWrite(s.lobby.Code()) {
-		s.status = "The room code could not be copied. It is " + s.lobby.Code() + "."
-	}
-	g.refreshOnlineLobby()
-}
+// ---------------------------------------------------------------------------
+// The battle.
 
 // startOnlineBattle enters the prepared battle with the stream the lobby
-// handed over, and closes the online screen behind it.
-func (g *gameShell) startOnlineBattle() {
-	s := g.online
-	conn := s.lobby.Battle()
-	if conn == nil {
+// handed over. The relay's slot for this seat must be the slot it composed.
+func (g *gameShell) startOnlineBattle(state relay.HostedLobbyState) {
+	r := &g.online.room
+	p := r.prepared
+	conn := r.lobby.Battle()
+	switch {
+	case conn == nil:
 		g.leaveOnlineLobby("The game could not start.")
 		return
+	case p == nil || !r.ready || p.slot != state.Slot:
+		_ = conn.Close()
+		g.leaveOnlineLobby("The game started without your prepared battle. Join again.")
+		return
 	}
-	prepared, code := s.prepared, s.lobby.Code()
-	if err := g.enterOnlineBattle(prepared, conn, code); err != nil {
+	humans := len(p.config.Request().Seats)
+	if r.settings.survival {
+		humans--
+	}
+	code := r.lobby.Code()
+	if err := g.enterOnlineBattle(p, conn, code, humans); err != nil {
 		fmt.Fprintf(os.Stderr, "nanolathe: online: %v\n", err)
 		g.leaveOnlineLobby("The game could not start: " + noticeReason(err))
 		return
 	}
 	// The battle owns the connection now, and the lobby's Close does nothing.
-	// The online windows stay under the battle until it returns to the menu.
-	s.lobby, s.prepared = nil, nil
+	// The lobby window stays under the battle until it returns to the menu.
 	g.online = nil
 }
 
@@ -604,13 +593,14 @@ func (g *gameShell) startOnlineBattle() {
 // online battle has no opening arrival: the opening holds the pump, and
 // grants keep arriving (§16.4.2). The driver is made before the presentation
 // so a failure closes the connection with nothing adopted.
-func (g *gameShell) enterOnlineBattle(p *onlinePrepared, conn lockstep.Client, code string) error {
+func (g *gameShell) enterOnlineBattle(p *onlinePrepared, conn lockstep.Client, code string, humans int) error {
 	if p == nil || p.sess == nil {
 		_ = conn.Close()
 		return localMultiplayerError("battle", "a prepared online battle")
 	}
 	sess := p.sess
-	driver, err := lockstep.NewPacedDriver(sess, conn)
+	stats := newOnlineNetStats(conn, sess.LocalOwner, humans)
+	driver, err := lockstep.NewPacedDriver(sess, stats)
 	if err != nil {
 		_ = conn.Close()
 		return err
@@ -630,18 +620,19 @@ func (g *gameShell) enterOnlineBattle(p *onlinePrepared, conn lockstep.Client, c
 	g.importedRetailBattle, g.lastBattleSurvival = false, false
 	g.pendingDetail = p.detail
 	g.commitBattleCandidate(battle)
-	battle.multiplayer = &battleMultiplayer{driver: driver, completed: driver.Completed}
+	battle.multiplayer = &battleMultiplayer{driver: driver, completed: driver.Completed, net: stats}
 	battle.returnToMenu = g.returnFromOnlineBattle
 	battle.returnToSkirmish = g.returnFromOnlineBattle
 	if clPtr != nil {
 		clPtr.PrepareBattlePresentation()
 	}
-	battle.onlineNotice(fmt.Sprintf("Online game %s: you are seat %d", code, sess.LocalOwner+1))
+	battle.onlineNotice(fmt.Sprintf("Online game %s: you are player %d of %d", code, sess.LocalOwner+1, humans))
 	return nil
 }
 
 // returnFromOnlineBattle leaves an online battle, or its result, for the
-// online screen, saying how the game ended.
+// online screen, saying how the game ended. A seat whose result is final may
+// leave while the others play on (§16.6).
 func (g *gameShell) returnFromOnlineBattle(cl *client.Client) {
 	message := "You left the game."
 	if b := g.battle; b != nil {
@@ -650,6 +641,8 @@ func (g *gameShell) returnFromOnlineBattle(cl *client.Client) {
 			message = "The game stopped: " + onlineRefusalText(b.multiplayer.failure)
 		case b.sess != nil && b.sess.OnlineBattleEnded():
 			message = "The game has ended."
+		case b.sess != nil && b.sess.ResultForSeat(b.sess.LocalOwner).Ended:
+			message = "You left after your defeat; the others play on."
 		}
 	}
 	g.returnFromBattle(cl)

@@ -241,6 +241,8 @@ type gameShell struct {
 	clockVisible bool
 	// fpsVisible retains the opt-in modern FPS display across battles in this process.
 	fpsVisible bool
+	// netVisible retains the online network overlay (+net) the same way.
+	netVisible bool
 	showRanges bool // process-only Shift overlay detail switch [07 R-CAM-01 §6]
 
 	campaigns       []mission.Campaign

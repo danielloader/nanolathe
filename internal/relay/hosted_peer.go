@@ -17,6 +17,8 @@ type hostedPeer struct {
 	conn          net.Conn
 	hello         LocalHello
 	room          *hostedRoom
+	seat          uint8 // assigned at admission
+	slot          uint8 // assigned at Start
 	timeout       time.Duration
 	helloDeadline time.Time
 	out           chan hostedOutput
@@ -32,6 +34,21 @@ func newHostedPeer(conn net.Conn, hello LocalHello, timeout time.Duration) *host
 }
 
 func (p *hostedPeer) stop() { p.once.Do(func() { close(p.stopped) }) }
+
+// rtt is the last WebSocket ping round trip, or zero when unmeasured.
+func (p *hostedPeer) rtt() time.Duration {
+	if c, ok := p.conn.(*websocketConn); ok {
+		return time.Duration(c.rtt.Load())
+	}
+	return 0
+}
+
+// queuedBytes is what the peer's writer still holds.
+func (p *hostedPeer) queuedBytes() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.bytes
+}
 
 // Charge queued and in-flight frames together. Neither a blocked writer nor
 // tiny refusal floods may consume unbounded storage (§16.5.1).

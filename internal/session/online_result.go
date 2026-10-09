@@ -1,8 +1,8 @@
 package session
 
-// The prototype is explicitly two hostile humans, without watching, removal,
-// shared victory or respawn (DESIGN_MULTIPLAYER §16.4.1). Each row below is the
-// countdown and result that its owner's machine would retain [08 R-TRIG-01 §6].
+// Online results are per human seat, without watching, removal or respawn
+// (DESIGN_MULTIPLAYER §16.4.1, §16.6). Each row below is the countdown and
+// result that its owner's machine would retain [08 R-TRIG-01 §6].
 type onlineSeatResult struct {
 	present bool
 	latch   EndLatch
@@ -12,6 +12,10 @@ type onlineSeatResult struct {
 
 type onlineResultState struct {
 	seats [10]onlineSeatResult
+	// sharedVictory is each row's shared-victory bit, set at entry exactly
+	// for members of teams of two or more and never changed online, since no
+	// seat command can clear it [08 R-SKIR-01 §3] [05 R-SHARE-01 §1].
+	sharedVictory [10]bool
 }
 
 func newOnlineResultState(seats [10]bool) *onlineResultState {
@@ -37,22 +41,74 @@ func (s *Session) evaluateOnlineSeatResult(player int, tick uint32) {
 		return
 	}
 	s.processPendingCommanderDeaths(tick)
-	// Defeat wins a simultaneous wipe. Otherwise the closed, hostile prototype
-	// needs every opponent to have created something and now own no live unit
-	// [08 R-SKIR-01 §3]. In particular, kind 2's zero-live skip is insufficient.
+	// Defeat wins a simultaneous wipe: the defeat predicate is the own live
+	// count, evaluated before the victory sweep [08 R-SKIR-01 §3].
 	if s.Units.LiveCountForPlayer(player) == 0 {
 		s.advanceOnlineSeatResult(player, tick, false)
 		return
 	}
-	for other := range s.onlineResults.seats {
-		if other == player || !s.onlineResults.seats[other].present {
+	// Survival has no victory: an empty attacker between waves must never
+	// arm the countdown (DESIGN_SURVIVAL §8).
+	if s.Survival != nil {
+		return
+	}
+	if s.onlineVictorySweep(player) {
+		s.advanceOnlineSeatResult(player, tick, true)
+	}
+	// A false due retains both the countdown and its pending view.
+}
+
+// onlineVictorySweep is the kind-3 victory sweep for the local row local
+// [08 R-SKIR-01 §3] "Victory detection". It is false at once under the
+// Deathmatch rule. Otherwise every other row j that is seated, has
+// controller 1, 2 or 3 and is not watching is visited in slot order: a j
+// that has created nothing denies victory; a j with no live unit is skipped;
+// any other j needs both rows' shared-victory bits, both directions of the
+// alliance between local and j, and j's declaration toward every seated row
+// that is not eliminated (live units, or nothing created yet) — local, j
+// itself and watchers included. With no surviving j the sweep is true.
+//
+// One shared directed matrix holds the declarations (§6.7 Q22): row B of the
+// research, local.B[j], is j's declaration toward local. Online the matrix is
+// the entry's team rows, which no seat command changes, so the sweep reduces
+// to "every surviving opponent is a teammate on a team of two or more", but
+// it is written out as retail's walk so declarations, once admitted, need no
+// second rule.
+func (s *Session) onlineVictorySweep(local int) bool {
+	if CommanderDeathMode(s.Skirmish.CommanderDeath) == CommanderDeathDeathmatch {
+		return false
+	}
+	seated := func(i int) bool {
+		p := &s.Econ.Players[i]
+		return p.Exists && (p.ControllerState == 1 || p.ControllerState == 2 || p.ControllerState == 3)
+	}
+	for j := range s.Econ.Players {
+		if j == local || !seated(j) || s.Econ.Players[j].Watcher || s.Econ.Players[j].IsObserver {
 			continue
 		}
-		if s.Units.CreatedCountForPlayer(other) == 0 || s.Units.LiveCountForPlayer(other) != 0 {
-			return // A false due retains both the countdown and its pending view.
+		if s.Units.CreatedCountForPlayer(j) == 0 {
+			return false
+		}
+		if s.Units.LiveCountForPlayer(j) == 0 {
+			continue
+		}
+		if !s.onlineResults.sharedVictory[j] || !s.onlineResults.sharedVictory[local] ||
+			!s.Econ.DeclaresAlliance(uint8(local), uint8(j)) || !s.Econ.DeclaresAlliance(uint8(j), uint8(local)) {
+			return false
+		}
+		for k := range s.Econ.Players {
+			if !s.Econ.Players[k].Exists {
+				continue
+			}
+			if s.Units.LiveCountForPlayer(k) == 0 && s.Units.CreatedCountForPlayer(k) != 0 {
+				continue // eliminated
+			}
+			if !s.Econ.DeclaresAlliance(uint8(j), uint8(k)) {
+				return false
+			}
 		}
 	}
-	s.advanceOnlineSeatResult(player, tick, true)
+	return true
 }
 
 // stepOnlineNoHumanEnd is the after-player-loop site, once per tick. It shares
@@ -118,6 +174,9 @@ func (s *Session) advanceOnlineSeatResult(player int, tick uint32, victory bool)
 	}
 	if ended {
 		row.result.Tick = tick
+		// Each survivor's final result carries the Survival line, as the
+		// single-player ended view does (DESIGN_SURVIVAL §8).
+		row.result.Survival = s.survivalResult(tick)
 	}
 }
 

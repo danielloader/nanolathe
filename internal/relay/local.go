@@ -243,6 +243,9 @@ func (r *LocalRelay) run() {
 			}
 			if !e.peer.registered {
 				h, err := decodeLocalHello(e.body)
+				if err == nil && h.Seat > 1 {
+					err = localError("hello seat", "seat 0 or 1")
+				}
 				if err != nil {
 					fail(err)
 					return
@@ -299,7 +302,11 @@ func (r *LocalRelay) run() {
 				})
 				pending.bytes += n
 			case localAckMessage:
-				ackTick, end := d.U32(), d.Bool()
+				ackTick, flags := d.U32(), d.U8()
+				if flags > ackFlagsMask {
+					d.Abort(localError("acknowledgment flags", "the battle-ended and seat-final bits"))
+				}
+				end := flags&ackBattleEnded != 0
 				var check [32]byte
 				if ackTick%30 == 0 {
 					check = d.Digest()
@@ -342,7 +349,7 @@ type LocalClient struct {
 	sequence      uint64
 	readTick      uint32
 	readPosition  uint64
-	readSequences [2]uint64
+	readSequences [HostedMaxSeats]uint64
 }
 
 func DialLocal(ctx context.Context, address string, hello LocalHello) (*LocalClient, error) {
@@ -428,7 +435,7 @@ func (c *LocalClient) ReadGrant() (LocalGrant, error) {
 	}
 	// A hosted room without a lobby still reports its state and Started
 	// before the first grant (§16.6.1).
-	for c.readTick == 0 && (body[0] == hostedLobbyMessage || body[0] == hostedStartedMessage) {
+	for c.readTick == 0 && (body[0] == hostedLobbyMessage || body[0] == hostedStartedMessage || body[0] == hostedConfigurationMessage) {
 		if body, err = readLocalFrame(c.conn, localMaxGrantFrame); err != nil {
 			return LocalGrant{}, err
 		}
@@ -478,7 +485,18 @@ func (c *LocalClient) writeMessage(body []byte) error {
 	return writeLocalFrame(c.conn, body)
 }
 
-func (c *LocalClient) Acknowledge(tick uint32, checksum [32]byte, ended bool) error {
+// Acknowledgement flags: the shared battle has ended, and this seat's own
+// result is final, which lets a defeated seat leave a hosted match
+// (DESIGN_MULTIPLAYER §16.6.1). The loopback relay reads only the first.
+const (
+	ackBattleEnded = 1 << iota
+	ackSeatFinal
+	ackFlagsMask = ackBattleEnded | ackSeatFinal
+)
+
+// Acknowledge reports tick executed, with the unit checksum at every 30th
+// tick, whether the battle has ended and whether this seat's result is final.
+func (c *LocalClient) Acknowledge(tick uint32, checksum [32]byte, ended, final bool) error {
 	if c == nil {
 		return localError("client", "a connected client")
 	}
@@ -487,7 +505,14 @@ func (c *LocalClient) Acknowledge(tick uint32, checksum [32]byte, ended bool) er
 	var w netproto.Writer
 	w.U8(localAckMessage)
 	w.U32(tick)
-	w.Bool(ended)
+	var flags uint8
+	if ended {
+		flags |= ackBattleEnded
+	}
+	if final {
+		flags |= ackSeatFinal
+	}
+	w.U8(flags)
 	if tick%30 == 0 {
 		w.Digest(checksum)
 	}

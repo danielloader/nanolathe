@@ -1083,19 +1083,20 @@ func (s *Session) survivalAdoptCaptured(captor, host *units.Unit, tick uint32) {
 	delete(st.removed, host.Handle)
 }
 
-// survivalTarget is the nearest living unit of the human team to u,
-// structures before mobile units; ties go to pool order.
+// survivalTarget is the nearest living unit of the survivor team to u,
+// structures before mobile units; ties go to pool order. The team is the
+// director's own record of the survivors, never the local seat, which is a
+// presentation value an online battle holds differently on every client
+// (DESIGN_MULTIPLAYER §6.3 "Survival waves"). In single-player the team is
+// the human and every buddy, all on the human's ally group, so the set is the
+// one the human's alliance row named before.
 func (s *Session) survivalTarget(u *units.Unit) *units.Unit {
 	st := s.Survival
-	local := s.LocalOwner
 	var best *units.Unit
 	bestD, bestStruct := int64(-1), false
 	st.walk = s.Units.AppendLiveSliced(st.walk[:0])
 	for _, v := range st.walk {
-		if v == nil || !v.Alive || v.Def == nil || v.Owner == st.attacker {
-			continue
-		}
-		if v.Owner != local && (s.Econ == nil || !s.Econ.DeclaresAlliance(local, v.Owner)) {
+		if v == nil || !v.Alive || v.Def == nil || v.Owner == st.attacker || !st.onTeam(v.Owner) {
 			continue
 		}
 		isStruct := v.Def.BMCode == 0

@@ -30,6 +30,8 @@ type battleMultiplayer struct {
 	relay     *relay.LocalRelay
 	failure   error
 	completed func() bool // Hosted results wait for explicit relay agreement.
+	// net measures a hosted battle for the overlay and the summary.
+	net *onlineNetStats
 }
 
 func (o Options) localMultiplayer() bool    { return o.LocalMPListen != "" || o.LocalMPJoin != "" }
@@ -133,7 +135,7 @@ func composeLocalMultiplayer(o Options, cs *contentSet) (headless.FreshBattle, n
 	if err != nil {
 		return empty, identity, err
 	}
-	schema, err := onlineMapSchema(cs, cat, o.Map)
+	schema, err := session.OnlineMapSchema(cs.fs, cat, o.Map, 2)
 	if err != nil {
 		return empty, identity, err
 	}
@@ -224,6 +226,7 @@ func (b *battleSession) pumpLocalMultiplayer(cl *client.Client) {
 		return
 	}
 	advanced, err := b.multiplayer.driver.Pump()
+	b.multiplayer.net.observe(b.sess, time.Now())
 	for _, receipt := range b.sess.DrainCommandReceipts() {
 		if receipt.Stamp.Seat == b.sess.LocalOwner && receipt.Outcome == session.CommandRejected {
 			b.onlineNotice(receipt.Diagnostic)

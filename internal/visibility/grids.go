@@ -43,7 +43,7 @@ type Service struct {
 	fog       FogCache
 	local     PlayerID
 	// team is each owner's vision team as player bits; zero means the owner
-	// alone. Only a Survival battle sets it (SetVisionTeam).
+	// alone. Only Survival and online skirmish teams set it (SetVisionTeam).
 	team [10]uint16
 	// mappingVersion identifies the local viewer's immutable minimap inputs;
 	// fogVersion identifies completed derived fog bytes. They are presentation
@@ -289,11 +289,13 @@ func validPlayer(p PlayerID) bool { return p < 10 }
 // and sonar from any member's units count for each of them, and a member's
 // jammers never blind the others. It is not retail behaviour — retail never
 // merges an ally's current sight, and copies explored memory only on request
-// in multiplayer [03 R-VIS-01 §7] — and only a Survival battle
-// calls it, once at battle entry, before any coverage is published
-// (docs/DESIGN_SURVIVAL.md §4.3). Reference counts stay balanced because the
-// team is fixed for the battle: a stamp and its later removal reach the same
-// grids.
+// in multiplayer [03 R-VIS-01 §7] — and only two battles call it, at battle
+// entry before any coverage is published: a Survival battle once, for its
+// survivors (docs/DESIGN_SURVIVAL.md §4.3), and an online skirmish once per
+// lobby team of two or more (docs/DESIGN_MULTIPLAYER.md §6.7 "Allied sight").
+// Members must be disjoint across calls. Reference counts stay balanced
+// because every team is fixed for the battle: a stamp and its later removal
+// reach the same grids.
 func (s *Service) SetVisionTeam(members []PlayerID) {
 	if s == nil {
 		return
@@ -323,8 +325,8 @@ func (s *Service) localSide(owner PlayerID) bool {
 	return s.sameSide(s.local, owner)
 }
 
-// sameSide retains the fixed Survival vision-team exception for an explicit
-// viewer. Ordinary skirmish has no team bits [DESIGN_SURVIVAL §4.3].
+// sameSide retains the fixed vision-team exception for an explicit
+// viewer. Single-player skirmish has no team bits [DESIGN_SURVIVAL §4.3].
 func (s *Service) sameSide(viewer, owner PlayerID) bool {
 	return owner == viewer || (validPlayer(viewer) && validPlayer(owner) && s.team[viewer]&cellBit(owner) != 0)
 }

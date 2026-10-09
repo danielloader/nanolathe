@@ -14,11 +14,11 @@ import (
 
 // The pre-start rehearsal of DESIGN_MULTIPLAYER §16.7. Before a seat readies,
 // it composes a private battle from the match's frozen inputs and
-// configuration, runs a fixed script of ordinary seat commands for both seats
-// and reports the digest of what happened. The relay starts the match only
-// when both seats report the same digest, so two clients whose simulations
-// disagree on this content are refused before play rather than at the first
-// 30-tick unit checksum. It is a behavioral check of the build and the
+// configuration, runs a fixed script of ordinary seat commands for every
+// human seat and reports the digest of what happened. The relay starts the
+// match only when every seat reports the same digest, so clients whose
+// simulations disagree on this content are refused before play rather than
+// at the first 30-tick unit checksum. It is a behavioral check of the build and the
 // content together: it needs no stamp and vouches only for what it ran.
 //
 // Everything here is Nanolathe protocol, not retail behavior: the script,
@@ -27,11 +27,12 @@ import (
 // rehearsalDomain with it.
 
 // rehearsalDomain separates the rehearsal digest from every other digest.
-const rehearsalDomain = "nanolathe/rehearsal/v1"
+const rehearsalDomain = "nanolathe/rehearsal/v2"
 
 // The script's timing and geometry. Ticks are granted ticks at 30 Hz.
 const (
-	// rehearsalTicks is the rehearsal's length: 30 seconds of battle.
+	// rehearsalTicks is a skirmish rehearsal's length, and a Survival
+	// rehearsal's least: 30 seconds of battle.
 	rehearsalTicks = 900
 	// rehearsalMoveTick is when each seat's lead unit is ordered to move.
 	rehearsalMoveTick = 1
@@ -50,13 +51,20 @@ const (
 	// build-site search visits beyond the first ring whose sites clear the
 	// builder's own footprint.
 	rehearsalSiteRings = 10
+	// rehearsalWaveTicks bounds a Survival rehearsal: it stops once the
+	// first wave has spawned, and at the latest this many ticks after the
+	// director's planned arrival (its first-wave delay plus its warning).
+	rehearsalWaveTicks = 300
 )
 
 // RehearsalDigest runs the room's pre-start rehearsal: a short deterministic
 // battle composed from the same frozen inputs and configuration as the match,
-// driven by a fixed script of commands for both seats, and returns the digest
-// of its final state (DESIGN_MULTIPLAYER §16.7). Two seats whose simulations
-// agree report the same digest; the relay starts the match only then.
+// driven by a fixed script of commands for every human seat, and returns the
+// digest of its final state (DESIGN_MULTIPLAYER §16.7). Seats whose
+// simulations agree report the same digest; the relay starts the match only
+// then. A skirmish rehearsal runs rehearsalTicks ticks; a Survival rehearsal
+// runs at least as long and on until the director's first wave has spawned,
+// so the wave director is part of what it checks.
 //
 // The rehearsal composes its own session through the match's constructor,
 // NewPlaytestSkirmish, and never touches another: the caller's match
@@ -88,11 +96,11 @@ func rehearse(inputs *content.SimulationInputs, config EffectiveMatchConfig, loc
 	}
 	r := rehearsal{s: s, h: sha256.New()}
 	r.h.Write([]byte(rehearsalDomain))
-	r.findLeads()
+	r.findLeads(config)
 	tick := uint32(0)
 	// A battle that ends early, such as by a commander's death, stops the
 	// script at that tick on every replica.
-	for tick < rehearsalTicks && s.State == StateBattle && !s.OnlineBattleEnded() {
+	for !r.done(tick) && s.State == StateBattle && !s.OnlineBattleEnded() {
 		tick++
 		if err := r.issue(tick); err != nil {
 			return [32]byte{}, err
@@ -108,35 +116,76 @@ func rehearse(inputs *content.SimulationInputs, config EffectiveMatchConfig, loc
 	return r.finish(tick)
 }
 
+// done reports whether the rehearsal has run its course after tick ticks:
+// rehearsalTicks for a skirmish; for Survival also until the first wave has
+// spawned, bounded by rehearsalWaveTicks past its planned arrival.
+func (r *rehearsal) done(tick uint32) bool {
+	if tick < rehearsalTicks {
+		return false
+	}
+	st := r.s.Survival
+	if st == nil {
+		return true
+	}
+	return st.firstWaveSpawned() || tick >= st.tuning.FirstWaveDelay+st.tuning.WarningTime+rehearsalWaveTicks
+}
+
+// firstWaveSpawned reports whether the director has created its first wave:
+// the spawn cursor has passed every group of wave 1, or a later phase or
+// wave has begun (DESIGN_SURVIVAL §6.1, §6.5).
+func (st *survivalState) firstWaveSpawned() bool {
+	switch {
+	case st.wave > 1:
+		return true
+	case st.wave == 1 && st.phase == survivalActive:
+		return st.nextG >= len(st.plan.Groups)
+	case st.wave == 1 && st.phase == survivalDowntime:
+		return true
+	}
+	return false
+}
+
 // rehearsal is one running rehearsal: its session, the running digest, the
-// last stream position it assigned, and each seat's lead unit and build site.
+// last stream position it assigned, and for each human seat, in slot order,
+// its slot, lead unit and build site.
 type rehearsal struct {
 	s        *Session
 	h        hash.Hash
 	position uint64
-	leads    [2]pool.UnitRef
-	sites    [2]CommandPoint
-	sited    [2]bool
+	seats    []uint8
+	leads    []pool.UnitRef
+	sites    []CommandPoint
+	sited    []bool
 }
 
-// findLeads picks each seat's lead unit: its first live unit in slice order
-// at battle entry, which is the commander an ordinary start creates first. A
-// seat with no unit has a null lead, and its commands are skipped.
-func (r *rehearsal) findLeads() {
-	for seat := range r.leads {
+// findLeads lists the configuration's human rows and picks each one's lead
+// unit: its first live unit in slice order at battle entry, which is the
+// commander an ordinary start creates first. A seat with no unit has a null
+// lead, and its commands are skipped.
+func (r *rehearsal) findLeads(config EffectiveMatchConfig) {
+	for i := range config.request.Seats {
+		if config.request.Seats[i].Role == MatchRoleHuman {
+			r.seats = append(r.seats, uint8(i))
+		}
+	}
+	r.leads = make([]pool.UnitRef, len(r.seats))
+	r.sites = make([]CommandPoint, len(r.seats))
+	r.sited = make([]bool, len(r.seats))
+	for i, seat := range r.seats {
 		found := false
-		r.s.Units.ForEachPlayerSliceLive(seat, func(u *units.Unit) {
+		r.s.Units.ForEachPlayerSliceLive(int(seat), func(u *units.Unit) {
 			if !found {
-				r.leads[seat] = pool.UnitRef{Handle: u.Handle, Serial: u.AllocationSerial}
+				r.leads[i] = pool.UnitRef{Handle: u.Handle, Serial: u.AllocationSerial}
 				found = true
 			}
 		})
 	}
 }
 
-// lead returns seat's lead unit while that allocation is alive.
-func (r *rehearsal) lead(seat int) *units.Unit {
-	ref := r.leads[seat]
+// lead returns the lead unit of the i-th human seat while that allocation is
+// alive.
+func (r *rehearsal) lead(i int) *units.Unit {
+	ref := r.leads[i]
 	if ref.Handle == 0 {
 		return nil
 	}
@@ -147,20 +196,21 @@ func (r *rehearsal) lead(seat int) *units.Unit {
 	return u
 }
 
-// issue enqueues the script's commands for tick, seat 0 first, as one stream
-// would order them. Each command is computed from the rehearsal's state after
-// the previous tick, which every replica holds identically. The script is the
-// same for both seats: move toward the map's centre, build the first
-// structure on the lead's own build list at the nearest known legal site, and
-// fire at that site with an ordinary attack order. A command the session
-// refuses or cannot carry out is refused identically on every replica.
+// issue enqueues the script's commands for tick, human seats in slot order,
+// as one stream would order them. Each command is computed from the
+// rehearsal's state after the previous tick, which every replica holds
+// identically. The script is the same for every seat: move toward the map's
+// centre, build the first structure on the lead's own build list at the
+// nearest known legal site, and fire at that site with an ordinary attack
+// order. A command the session refuses or cannot carry out is refused
+// identically on every replica.
 func (r *rehearsal) issue(tick uint32) error {
-	for seat := range r.leads {
-		u := r.lead(seat)
+	for i, seat := range r.seats {
+		u := r.lead(i)
 		if u == nil {
 			continue
 		}
-		ref := r.leads[seat]
+		ref := r.leads[i]
 		var c SeatCommand
 		switch tick {
 		case rehearsalMoveTick:
@@ -172,24 +222,24 @@ func (r *rehearsal) issue(tick uint32) error {
 			if def == nil {
 				continue
 			}
-			site, ok := r.site(uint8(seat), u, def)
+			site, ok := r.site(i, u, def)
 			if !ok {
 				continue
 			}
-			r.sites[seat], r.sited[seat] = site, true
+			r.sites[i], r.sited[i] = site, true
 			c = SeatCommand{Kind: SeatMobileBuild, MobileBuild: MobileBuildPayload{Builder: ref, Product: def.CanonicalKey, Position: site}}
 		case rehearsalAttackTick:
-			if !r.sited[seat] {
+			if !r.sited[i] {
 				continue
 			}
-			site := r.sites[seat]
+			site := r.sites[i]
 			c = SeatCommand{Kind: SeatOrder, Order: OrderPayload{Actors: []pool.UnitRef{ref}, Code: 3,
 				Position: CommandPosition{X: site.X, Y: site.Y, Z: site.Z}}}
 		default:
 			continue
 		}
 		r.position++
-		if err := r.s.EnqueueSeatCommand(CommandStamp{Seat: uint8(seat), Tick: tick, Position: r.position}, c); err != nil {
+		if err := r.s.EnqueueSeatCommand(CommandStamp{Seat: seat, Tick: tick, Position: r.position}, c); err != nil {
 			return err
 		}
 	}
@@ -222,15 +272,16 @@ func (r *rehearsal) product(u *units.Unit) *content.UnitDef {
 	return nil
 }
 
-// site finds the nearest legal, known build site for def around u, searching
+// site finds the nearest legal, known build site for def around u, the lead
+// of the i-th human seat, searching
 // square rings of cells nearest first and each ring in row order. The first
 // ring is the nearest whose sites clear the builder's own footprint, so the
 // builder never stands on its site. It tests placement through the issuing
 // seat's own knowledge and passes no builder, so the answer never depends on
 // the local seat, and it requires the exact known-site admission phase 1
 // applies to the command it becomes.
-func (r *rehearsal) site(seat uint8, u *units.Unit, def *content.UnitDef) (CommandPoint, bool) {
-	s := r.s
+func (r *rehearsal) site(i int, u *units.Unit, def *content.UnitDef) (CommandPoint, bool) {
+	s, seat := r.s, r.seats[i]
 	geometry, err := s.Build.StructureGeometry(def, units.FacingSouth)
 	if err != nil {
 		return CommandPoint{}, false
@@ -251,7 +302,7 @@ func (r *rehearsal) site(seat uint8, u *units.Unit, def *content.UnitDef) (Comma
 					continue
 				}
 				point := CommandPoint{X: numeric.Fixed(int64(fx+2*x) << 19), Y: numeric.Fixed(int64(result.SiteHeight) << 16), Z: numeric.Fixed(int64(fz+2*z) << 19)}
-				if s.onlineBuildSiteKnown(seat, MobileBuildPayload{Builder: r.leads[seat], Product: def.CanonicalKey, Position: point}) {
+				if s.onlineBuildSiteKnown(seat, MobileBuildPayload{Builder: r.leads[i], Product: def.CanonicalKey, Position: point}) {
 					return point, true
 				}
 			}

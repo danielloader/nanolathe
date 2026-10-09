@@ -18,9 +18,11 @@ import (
 )
 
 const (
-	websocketProtocol     = "nanolathe-relay-v1"
-	websocketHeaderLimit  = 8 << 10
-	websocketPingInterval = 20 * time.Second
+	websocketProtocol    = "nanolathe-relay-v1"
+	websocketHeaderLimit = 8 << 10
+	// Pings keep idle proxied connections open and measure each seat's round
+	// trip for the status page.
+	websocketPingInterval = 5 * time.Second
 )
 
 // ListenHostedWebSocket serves the same rooms over RFC 6455 binary streams.
@@ -77,7 +79,10 @@ func readWebSocketHeader(r *bufio.Reader) ([]byte, error) {
 	}
 }
 
-func acceptHostedWebSocket(conn net.Conn, timeout time.Duration, deadline time.Time) (*websocketConn, error) {
+// page answers a GET for a status path, or reports that path is not one.
+type statusPageFunc func(path string) (contentType string, body []byte, ok bool)
+
+func acceptHostedWebSocket(conn net.Conn, timeout time.Duration, deadline time.Time, page statusPageFunc) (*websocketConn, error) {
 	r := bufio.NewReader(conn)
 	header, err := readWebSocketHeader(r)
 	if err != nil {
@@ -98,6 +103,15 @@ func acceptHostedWebSocket(conn net.Conn, timeout time.Duration, deadline time.T
 			return nil, localIOError("WebSocket health response", err)
 		}
 		return nil, io.EOF // The owner closes this one-request health connection.
+	}
+	if validGet && page != nil {
+		if contentType, body, ok := page(req.URL.Path); ok {
+			response := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n", contentType, len(body))
+			if err := websocketWriteAll(conn, append([]byte(response), body...)); err != nil {
+				return nil, localIOError("WebSocket status response", err)
+			}
+			return nil, io.EOF
+		}
 	}
 	key := req.Header.Get("Sec-WebSocket-Key")
 	decoded, keyErr := base64.StdEncoding.Strict().DecodeString(key)

@@ -821,11 +821,17 @@ func composeSkirmish(entry skirmishEntry, options SkirmishEntryOptions, audio vf
 		EnemyOwner:          uint8(enemyOwner),
 	}
 	if entry.online != nil {
+		// Only human rows are seats with a perspective, a result and a
+		// sensor pass; the Survival attacker is a scenario row
+		// (DESIGN_MULTIPLAYER §6.2, DESIGN_SURVIVAL §4.1).
 		var seats [10]bool
-		for i := range entry.online.request.Seats {
-			seats[i] = true
+		for i, seat := range entry.online.request.Seats {
+			seats[i] = seat.Role == MatchRoleHuman
 		}
 		s.onlineResults = newOnlineResultState(seats)
+		for i, seat := range entry.online.request.Seats {
+			s.onlineResults.sharedVictory[i] = seat.SharedVictory
+		}
 		s.publication = newPublicationState(frame.NewEventBufferWithIndependentEffects(frame.Limits{}), s.EntryCommunity.ExplosionCapacity, s.simArt)
 		if err := setOnlineSeatCommands(s, *entry.online); err != nil {
 			return nil, err
@@ -990,6 +996,9 @@ func composeSkirmish(entry skirmishEntry, options SkirmishEntryOptions, audio vf
 	}
 	if a := cfg.survivalAttacker(); a >= 0 && s.AI[a] != nil {
 		s.AI[a].Passive = true
+	}
+	if entry.online != nil {
+		s.setOnlineVisionTeams(&entry.online.request)
 	}
 	if err := applyAIOverrides(s, options.AIOverrides); err != nil {
 		return nil, err

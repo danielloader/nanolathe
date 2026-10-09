@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -30,13 +31,17 @@ type websocketConn struct {
 	deadlineMu              sync.Mutex
 	writeDeadline           time.Time
 	closeSent               bool // writeMu
-	once                    sync.Once
-	done                    chan struct{}
-	pingDone                chan struct{}
+	// rtt is the last ping's round trip in nanoseconds; each ping carries
+	// its send time since epoch so the pong needs no bookkeeping.
+	epoch    time.Time
+	rtt      atomic.Int64
+	once     sync.Once
+	done     chan struct{}
+	pingDone chan struct{}
 }
 
 func newWebSocketConn(conn net.Conn, reader *bufio.Reader, client bool, limit int, timeout, pingInterval time.Duration) *websocketConn {
-	c := &websocketConn{Conn: conn, reader: reader, client: client, limit: uint64(limit), timeout: timeout, done: make(chan struct{}), pingDone: make(chan struct{})}
+	c := &websocketConn{Conn: conn, reader: reader, client: client, limit: uint64(limit), timeout: timeout, epoch: time.Now(), done: make(chan struct{}), pingDone: make(chan struct{})}
 	if pingInterval > 0 {
 		go c.keepalive(pingInterval)
 	} else {
@@ -64,7 +69,9 @@ func (c *websocketConn) keepalive(interval time.Duration) {
 		case <-c.done:
 			return
 		case <-ticker.C:
-			if err := c.writeControl(9, nil); err != nil {
+			var sent [8]byte
+			binary.BigEndian.PutUint64(sent[:], uint64(time.Since(c.epoch)))
+			if err := c.writeControl(9, sent[:]); err != nil {
 				c.shutdown()
 				return
 			}
@@ -196,7 +203,14 @@ func (c *websocketConn) readHeader() error {
 	case 9:
 		return c.writeControl(10, body)
 	default:
-		return nil // Unsolicited pongs are permitted by RFC 6455 §5.5.3.
+		// A pong echoing one of this side's pings measures the round trip;
+		// unsolicited pongs are permitted by RFC 6455 §5.5.3.
+		if !c.client && len(body) == 8 {
+			if sent := time.Duration(binary.BigEndian.Uint64(body)); sent > 0 && sent <= time.Since(c.epoch) {
+				c.rtt.Store(int64(time.Since(c.epoch) - sent))
+			}
+		}
+		return nil
 	}
 }
 

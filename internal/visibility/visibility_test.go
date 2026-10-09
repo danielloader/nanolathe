@@ -246,3 +246,27 @@ func TestVisionTeamSharesCoverage(t *testing.T) {
 		t.Fatalf("member 1's explored area is not member 0's")
 	}
 }
+
+// An online skirmish sets one vision team per lobby team (DESIGN_MULTIPLAYER
+// §6.7 "Allied sight"): each team shares its members' coverage, and the
+// teams stay apart.
+func TestVisionTeamsStayApart(t *testing.T) {
+	terrain := &world.Terrain{CellW: 128, CellH: 128}
+	s := newTestService(terrain, ModeHistoryEnabled|ModeCurrentEnabled)
+	s.SetVisionTeam([]PlayerID{0, 1})
+	s.SetVisionTeam([]PlayerID{2, 3})
+	s.Publish(0, 20, 20, 0, 320)
+	s.Publish(3, 50, 50, 0, 320)
+
+	west := Target{Owner: 9, X: tileWorld(20), Z: tileWorld(20)}
+	east := Target{Owner: 9, X: tileWorld(50), Z: tileWorld(50)}
+	if !s.IsVisible(1, west) || !s.IsVisible(2, east) {
+		t.Fatal("a teammate does not see what its ally covers")
+	}
+	if s.IsVisible(2, west) || s.IsVisible(3, west) || s.IsVisible(0, east) || s.IsVisible(1, east) {
+		t.Fatal("an opponent saw the other team's coverage")
+	}
+	if s.IsVisible(4, west) || s.IsVisible(4, east) {
+		t.Fatal("a player on no team saw a team's coverage")
+	}
+}

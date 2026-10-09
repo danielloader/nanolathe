@@ -346,7 +346,7 @@ func (c *observedHostedClient) ReadGrant() (relay.LocalGrant, error) {
 	}
 	return g, nil
 }
-func (c *observedHostedClient) Acknowledge(tick uint32, hash [32]byte, ended bool) error {
+func (c *observedHostedClient) Acknowledge(tick uint32, hash [32]byte, ended, final bool) error {
 	c.mu.Lock()
 	for _, start := range c.assigned[tick] {
 		c.samples = append(c.samples, time.Since(start))
@@ -356,7 +356,7 @@ func (c *observedHostedClient) Acknowledge(tick uint32, hash [32]byte, ended boo
 		c.checks[tick] = hash
 	}
 	c.mu.Unlock()
-	return c.LocalClient.Acknowledge(tick, hash, ended)
+	return c.LocalClient.Acknowledge(tick, hash, ended, final)
 }
 
 type hostedDelayProxy struct {

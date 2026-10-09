@@ -211,6 +211,12 @@ func (g *gameShell) refreshRetailPanel() {
 	case modeMenuMap:
 		g.refreshMapPanel()
 	case modeMenuSkirmish:
+		// The online lobby borrows the setup window; its rows are the room's
+		// (online_lobby.go), never the skirmish setup's.
+		if g.onlineLobbyActive() {
+			g.refreshOnlineLobby()
+			return
+		}
 		g.refreshSkirmishPanel()
 		g.refreshSurvivalPanel()
 	}

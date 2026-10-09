@@ -978,6 +978,7 @@ func (h *retailBattleHUD) draw(c *client.Client, b *battleSession, presented cli
 	h.drawClock(c, b, cur)
 	h.drawSurvivalStatus(c, cur)
 	h.drawCommunityBPS(c, b)
+	h.drawOnlineNetwork(c, b)
 	h.drawCommunityIncome(c, b, cur)
 	h.drawCommunityWeather(c, b, cur)
 	if b != nil {

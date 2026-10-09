@@ -36,14 +36,15 @@ a missing number is a retired section.
 
 **Current scope.**
 
-1. Online skirmish for exactly two hostile human seats under Modern
-   gameplay, by relayed lockstep through the hosted relay (§12, §16.5).
+1. Online skirmish for 2–10 human seats with teams chosen in the lobby, and
+   online Survival for 2–3 human survivors, under Modern gameplay, by
+   relayed lockstep through the hosted relay (§12, §16.5, §16.6).
 2. The host's map, mod, mutators and unit restrictions, frozen into the
-   battle configuration when the room is created and adopted by the joiner
+   room's configuration when it is created and adopted by every joiner
    (§8.6, §16.6).
-3. Pre-start checks — matching identities, the initial unit checksum and
-   the rehearsal digest (§8.2, §16.7) — and a unit checksum every 30 ticks
-   during play (§16.4).
+3. Pre-start checks — matching configuration identities and rehearsal
+   digests from every seat (§8.2, §16.7) — and a unit checksum every 30
+   ticks during play (§16.4).
 4. A local two-window play test over a loopback relay (§16.4).
 
 **Designed for later.** The contracts here also cover what the design grows
@@ -55,8 +56,8 @@ spectators (§11.4); rejoining after a disconnect (§11.2); match-wide view
 restrictions (§8.4); and eventual competitive play with verified results
 (§12.6).
 
-**Not built yet.** Computer seats; Survival online; more than two seats;
-Strict 3.1 and Community online; watchers and spectators; replays (M4);
+**Not built yet.** Computer seats; Strict 3.1 and Community online; side
+and colour choice in the lobby; alliance changes during a battle; watchers and spectators; replays (M4);
 reconnect, departures and removal votes; room lists, chat and display
 names; the embedded LAN relay; pause and speed changes; relay-drawn seeds;
 ranked play.
@@ -570,10 +571,12 @@ control byte's "local human") moves to a perspective or a seat:
 | Loss statistics | Requested-snapshot receipt latch `[06 §12.1]`. | File the victim owner's loss once; the single-player path keeps its separately reviewed correction. |
 | Known-site gate | The placement check consults the viewer's map knowledge `[04 R-P0-08-B §1]`. | The issuing seat's perspective. |
 
-For two hostile human seats with common visibility settings the session
-implements the sensor, predicate, COB-effect, effect-pool, temporary-sight,
-end-condition, end-countdown, known-site and builder-option rows
-(§16.4.1–§16.4.2). The other rows are M5 work.
+For 2–10 human seats on static lobby teams, and for 2–3 Survival survivors,
+the session implements the sensor, predicate, COB-effect, effect-pool,
+temporary-sight, end-condition, end-countdown, known-site, builder-option and
+Survival-wave rows (§16.4.1–§16.4.2, §16.6). Only human rows are present, so
+a Survival attacker has no sensor pass, temporary sight, effect-union entry
+or result row. The other rows are M5 work.
 
 ### 6.4 Session kind
 
@@ -711,6 +714,16 @@ unrelated players' histories and modes are kept. Retail's wipe of the
 entering machine's copies of every player's history is deliberately
 omitted. Current sight, radar sharing, sharing eligibility and Survival's
 team sight are unchanged.
+
+**Allied sight.** In an online skirmish, seats on the same lobby team share
+current sight and radar: each member's perspective sees what any teammate's
+sensors cover, as Survival's survivors already do (DESIGN_SURVIVAL). Explored
+history stays one grid per player (Q24); what a teammate sees also explores
+each member's own grid, as it does for Survival's survivors, so a teammate's
+view never draws as unexplored. Resource, mapping and radar sharing commands
+stay refused online. This is Nanolathe's online policy;
+retail never merges allies' sight by default `[03 §3.2]`. Single-player
+battles are unchanged.
 
 **Sharing time (Q25).** Periodic explored-map shares run at their existing
 due site on the request tick, humans in canonical seat order, each copying
@@ -1698,22 +1711,25 @@ acknowledgements and checksums.
 
 ### 12.2 Messages
 
-The hosted protocol is **version 3**; §16.5.1–§16.5.2 and §16.6.1 hold its
+The hosted protocol is **version 4**; §16.5.1–§16.5.2 and §16.6.1 hold its
 rules. Messages are bounded, length-prefixed binary frames in `netproto`
 primitives, carried over TLS or WebSocket (§12.3).
 
 | Direction | Message | Content |
 |---|---|---|
-| client → relay | Hello | protocol version, room code (empty to create), the seat's `LocalHello` (identity and initial unit checksum), flags (auto-start), and from a creator the encoded configuration |
-| client → relay | Describe | a room code; answered with that room's configuration |
-| client → relay | Ready | the ready flag and the 32-byte rehearsal digest (§16.7) |
+| client → relay | Hello | protocol version, room code (empty to create), the seat's `LocalHello` (a joiner asks for any seat), flags (auto-start), and from a creator the room size and the encoded base configuration |
+| client → relay | Describe | a room code; answered with that room's base configuration and size |
+| client → relay | Team, Side | the sender's team or side, while it is not ready |
+| client → relay | Configuration | from the host before Start, a replacement base configuration |
+| client → relay | Ready | the ready flag, and when set the seat's configuration-identity digest and rehearsal digest (§16.7) |
 | client → relay | Start | from the host seat only |
 | client → relay | Submit | the client sequence and an opaque command payload (§4.2, §7.4) |
-| client → relay | Acknowledge | the tick executed, the unit checksum at every 30th tick, and the terminal bit |
-| relay → client | Welcome | the room code and the seat |
-| relay → client | Description | the room's configuration bytes |
-| relay → client | Lobby state | present and ready bits per seat, and a mismatch bit when both are ready with different rehearsal digests |
-| relay → client | Started | the match has started; grants follow |
+| client → relay | Acknowledge | the tick executed, the unit checksum at every 30th tick, the battle-ended bit and the seat-final bit |
+| relay → client | Welcome | the room code and the assigned seat |
+| relay → client | Description | the room's base configuration bytes and size |
+| relay → client | Lobby state | the room size; per seat whether it is present and ready, its team and side; and a mismatch bit when every present seat is ready but their digests differ |
+| relay → client | Configuration | the room's latest base configuration, to each joiner and after every host change |
+| relay → client | Started | the match has started, with the sender's slot; grants follow |
 | relay → client | Grant | a sealed tick and its commands `{seat, sequence, position, payload}` |
 | relay → client | Refused, Failed, Done | a refused hello, join, description or command, with its reason; a room failure with its reason; explicit normal completion |
 
@@ -1763,11 +1779,27 @@ configuration `[08 R-SKIR-01 §12]`; a room has its own defaults
 One always-running relay instance; a restart or redeploy ends its live
 rooms without a result, and there is no cross-instance room lookup,
 database, autoscaling or reconnect. The room, connection, byte and time
-bounds are §16.5.1, so one misbehaving room fails alone. Routine logs carry
-no room codes or credentials. A separate health listener reports readiness
-outside the connection limit (§16.5.6). Later: process metrics, stream
-retention for rejoin, archives under a declared release policy, and the
-trusted roles of §12.6.
+bounds are §16.5.1, so one misbehaving room fails alone. A separate health
+listener reports readiness outside the connection limit (§16.5.6).
+
+**Public status.** `/status` (an HTML page that refreshes itself) and
+`/status.json` on the relay's port show: players, matches, lobbies and
+connections; totals since start of rooms, matches started, completed and
+ended early by reason, and the peak player count; each open room by
+sequence number with its phase, size, players, age or duration, ticks and
+tick rate, orders and orders per second, bytes in and out, bytes still
+queued and the last checksum-compared tick; each seat's readiness, team,
+side, WebSocket round trip, acknowledgement lag in ticks and milliseconds,
+and whether it is defeated or has left; and the last 20 closed rooms with
+duration, players, ticks, orders and how each ended. Room pings every 5
+seconds carry their send time, so each pong measures the round trip. The
+page shows no room code (an invitation), address or process-level resource
+figure.
+
+**Operator log.** Once a minute the server writes one line with the same
+counts plus process heap, total memory and goroutines. Routine logs carry
+no room codes or credentials. Later: stream retention for rejoin, archives
+under a declared release policy, and the trusted roles of §12.6.
 
 ### 12.6 Competitive authority and future state delivery
 
@@ -5263,8 +5295,14 @@ respawn are refused at entry. Single-player results are unchanged.
 #### 16.4.2 Play-test entry and local transport interfaces
 
 `session.NewPlaytestSkirmish(inputs, config, localSeat, progress)` admits
-only two hostile humans and composes both with controller byte 1 in
-canonical seat order. `PrepareGrantedBattle()` completes entry dispatch
+Modern online skirmish with 2–10 human rows on static teams, and online
+Survival with 2–3 human survivors plus the attacker as the last row, and
+composes every human with controller byte 1 in canonical seat order. The
+local seat must be a human row; computer and watcher rows, cheats, watching,
+Deathmatch and other rule sets are refused. Victory is retail's kind-3 sweep
+with shared victory `[08 R-SKIR-01 §3]`, reading row B as the transpose of
+the one shared matrix (Q22); Survival has no victory and each seat gets the
+Survival result line. `PrepareGrantedBattle()` completes entry dispatch
 without wall-clock stepping; composition calls it before presentation
 exists, which is the same world because dispatch runs no tick, and the map
 schema comes from the compiled catalog's headers. `StepGranted(tick)`
@@ -5427,15 +5465,16 @@ advertised public capacity:
   the deployed image serves 128 rooms (`--max-rooms`, admitted 1..256);
 - per room at most 64 commands and 256 KiB pending; client frames of at
   most 256 KiB; at most 1 MiB plus 4 KiB queued per peer — so one
-  misbehaving room stays near 2.3 MiB (pending commands, one shared queue of
-  grant bodies, each writer's in-flight copy and each reader's frame), and
-  128 failing rooms stay under the image's 384 MiB soft memory limit. A
-  hosted client refuses to send a larger command;
+  misbehaving room holds about 1.3 MiB (pending commands and one shared
+  queue of grant bodies) plus 256 KiB per seat (its reader's frame and its
+  writer's in-flight copy), and every connection the relay admits at once
+  stays under the image's 384 MiB soft memory limit. A hosted client
+  refuses to send a larger command;
 - deadlines of 10 seconds for the handshake, 30 minutes for a lobby to
   start, 5 seconds per write, and 10 seconds without execution progress
   once the battle runs;
 - once grants flow, a client that receives no relay traffic for 25 seconds
-  stops; that exceeds the progress abort and the 20-second WebSocket ping.
+  stops; that exceeds the progress abort and the 5-second WebSocket ping.
 
 Per-peer writers are bounded and separate from room pacing, so a slow
 reader blocks no other room. Every close and error path releases its
@@ -5473,7 +5512,9 @@ discrepancy fails the room instead of awarding a result.
 Acknowledge and Close, with `relay.LocalClient`'s signatures) and
 `NewPacedDriver(*session.Session, Client) (*LocalDriver, error)`.
 `Completed() bool` reports explicit normal relay completion, never a local
-result, close or failure, and the hosted result overlay waits for it. The
+result, close or failure. At the shared end the hosted result overlay waits
+for it; a seat defeated while others play on sees its own result at once
+(§16.6.2). The
 paced driver uses a bounded 32-entry receive queue, monotonic host time, a
 one-tick reserve (about 33 ms) and a steady-state release of at most 30
 ticks a second. It starts with two grants and refills the reserve after an
@@ -5559,7 +5600,7 @@ command interpretation or new module dependency: RFC 6455 binary messages,
 subprotocol `nanolathe-relay-v1`, path `/relay`, with masking,
 fragmentation, control frames and close handled, extensions, text and
 oversized messages rejected, HTTP headers bounded at 8 KiB and pending
-sockets bounded. Pings every 20 seconds keep a waiting room alive at the
+sockets bounded. Pings every 5 seconds keep a waiting room alive at the
 proxy. `GET /healthz` reports readiness and no room information;
 `--health-listen` serves it on a separate listener outside the connection
 limit, so connections filling the relay's slots cannot fail the platform
@@ -5589,110 +5630,160 @@ certificate.
 ### 16.6 First online lobby
 
 The main menu's MULTI entry opens an online screen with a server field
-(default `relay.nanolathe.gg`) and Create and Join buttons. Create freezes
-the host's battle configuration and opens a lobby with a room code; a
-joiner enters the code; when both players are ready the host starts the
-match. The lobby's rules:
+(default `relay.nanolathe.gg`), Create Game, and a room code with Join Game.
+Create opens a lobby at once; players join with its code; the host adjusts
+the settings while everyone picks a team and side; when every player is
+ready the host starts the match. The lobby's rules:
 
-- **Two human seats, Modern gameplay** (§16.4). The session admits nothing
-  else yet.
-- **The host's map, mod, mutators and unit restrictions are frozen into the
-  configuration at Create.** Every joining client composes from that
-  configuration, never from its own preferences, and the identity
-  comparison at join refuses any difference. Field 12 carries the host's
-  restrictions, mapped from `content.Restrictions` as DESIGN_MODS_MUTATORS
-  §15.3 states, with nothing seeded; retail's seeded-but-never-closed
-  `wacky` state cannot arise, because the lobby has no restriction screen.
-  The host edits restrictions where single-player does.
+- **Rooms hold up to 10 players.** A skirmish can start with 2 up to the
+  most start positions any of the map's network schemas offers; Survival
+  with 2–3 survivors, ignoring start positions (DESIGN_SURVIVAL). Gameplay
+  is Modern.
+- **The host's settings stay open until Start.** The host chooses the game
+  type (Skirmish or Survival), the map, Survival's pace and its no-air and
+  no-naval options, and the standard skirmish options the configuration
+  carries. Each change replaces the room's base configuration, which every
+  seat adopts. The room starts from the host's current skirmish map.
+- **The host's mod, mutators and unit restrictions are fixed when the room
+  is created.** Every seat composes from the room's configuration, never
+  from its own preferences. Field 12 carries the host's restrictions,
+  mapped from `content.Restrictions` as DESIGN_MODS_MUTATORS §15.3 states,
+  with nothing seeded. A different mod means a new room.
+- **Teams and sides.** Each player picks their own team (none or 1–5) and
+  side (any side the catalog defines) by clicking them while not ready.
+  Teams are static: alliances are set from them at entry, teams of two or
+  more share victory `[08 R-SKIR-01 §3]` `[05 R-SHARE-01 §1]`, declaration
+  and sharing commands stay refused online, and teammates share sight
+  (§6.7). A skirmish with every player on one team cannot start
+  `[08 R-SKIR-01 §12]`. Survival has no team choice: the survivors are one
+  side.
+- **Readiness follows the final configuration.** Any host setting, team or
+  side change, join or leave clears every seat's ready, because it changes
+  the configuration every seat composes. Pressing Ready composes the final
+  configuration — the base configuration plus the present seats in
+  ascending seat order as slots, with their teams and sides — prepares it,
+  runs the rehearsal (§16.7) and reports both digests.
+- **The host draws the seed pair** with `crypto/rand` when it creates the
+  room; the configuration digest covers it (§8.3).
 - **Room codes are six characters** from the 32-symbol alphabet (§16.5.1).
-- **No configuration change after Create.** A different map or mod means a
-  new room, so readiness never has to reset.
-- **The host draws the seed pair** with `crypto/rand` when it freezes the
-  configuration; the configuration digest covers it (§8.3).
-- **A lobby waits at most 30 minutes before Start**, kept alive by the
-  20-second WebSocket pings. A joiner who leaves before Start frees seat 2;
-  the host leaving closes the room. After Start, §16.5 applies.
+  A lobby waits at most 30 minutes before Start, kept alive by the
+  5-second WebSocket pings.
+- **Leaving.** Before Start, a joiner who leaves frees its seat; the host
+  leaving closes the room. After Start, a player whose result is final
+  (defeated) may leave and the match continues; any other disconnect ends
+  the match for everyone, since there is no reconnect yet (§11.2).
+- **Survival online** keeps the single-player rules: the survivors share
+  sight, radar and income, the waves hunt the survivor team, there is no
+  victory, each seat gets the Survival result line, and the battle cannot
+  be saved. It records no best scores.
 
 #### 16.6.1 Relay lobby protocol
 
 The relay treats configurations as opaque bytes and interprets no gameplay.
 
-- **Create**: the hello carries an empty code, the `LocalHello`, the flags
-  and the host's encoded configuration (`session.EncodeMatchConfig`, at most
-  64 KiB). The welcome returns the new code and seat 0, and the room enters
-  its lobby.
-- **Describe**: a short-lived connection sends only a code and receives that
-  room's configuration bytes, or a refusal for an unknown, full, closed or
-  started room, and is then closed. A joiner uses it to learn what to
-  compose.
-- **Join**: the hello carries the code and the `LocalHello` and no
-  configuration. Admission compares identity and initial checksum with the
-  creator's (§16.5.1), refusing a joiner whose composition differs and
-  naming the field.
-- **Lobby state** (relay to both, after every change): which seats are
-  present and ready, and a mismatch bit when both are ready with different
-  rehearsal digests.
-- **Ready** (client to relay): the ready flag and the 32-byte rehearsal
-  digest (§16.7). **Start** (host only): accepted only when both seats are
-  present and ready with equal digests; otherwise the relay repeats the
-  lobby state and the lobby stays open. **Started** then goes to both,
-  before the first grant (§16.5.2).
+- **Create**: the hello carries an empty code, the `LocalHello` for seat 0,
+  the flags, the room size (2–10) and the host's encoded base configuration
+  (`session.EncodeMatchConfig`, at most 64 KiB). The welcome returns the
+  new code and seat 0.
+- **Describe**: a short-lived connection sends only a code and receives the
+  base configuration and the room size, or a refusal for an unknown, full,
+  closed or started room.
+- **Join**: the hello carries the code and a `LocalHello` asking for any
+  seat, and no configuration. The relay compares only the protocol and
+  assigns the lowest free seat, returned in the welcome. Content and
+  configuration are compared at Ready instead, because they depend on who
+  is present.
+- **Lobby state** (relay to every seat, after every change): the room size;
+  per seat, present, ready and team; and a mismatch bit when every present
+  seat is ready but their digests differ.
+- **Team** and **Side** (client to relay): the sender's team (0–5) or side,
+  accepted only while that seat is not ready.
+- **Configuration** (host to relay, before Start): a replacement base
+  configuration, at most 64 KiB, which the relay keeps for Describe and
+  sends to every seat. Each joiner also receives the current configuration
+  after its welcome.
+- A host setting, team or side change, join or leave clears every seat's
+  ready.
+- **Ready** (client to relay): the ready flag and, when set, the seat's
+  configuration-identity digest (its final `MatchJoin` identity without the
+  advisory build) and its rehearsal digest. **Start** (host only): accepted
+  when at least two seats are present, all of them ready, with equal
+  digests; otherwise the relay repeats the lobby state. **Started** then
+  goes to every seat with its slot, the rank of its seat among the present
+  seats, before the first grant; grants stamp commands with slots.
+- **During the match** acknowledgements carry the battle-ended bit and the
+  seat-final bit. The relay compares every playing seat's checksum at the
+  same tick and runs the terminal handshake across all of them. A seat that
+  has reported its result final may disconnect: the relay stops waiting for
+  it. Any other disconnect after Start fails the room.
 - Commands submitted before Start wait for the first grant. An
-  acknowledgement before Start fails the room. Ready and Start after Start
-  are ignored. A peer that leaves the lobby frees its seat (seat 2) or
-  closes the room (seat 1).
+  acknowledgement before Start fails the room. Ready, Team and Start after
+  Start are ignored.
 - A creator's hello may set the **auto-start** flag: the room starts as soon
-  as a second seat joins. `DialHosted` and `DialHostedWebSocket` set it when
-  creating and report ready at once when joining, so a command-line client
-  can also join a lobby room and play once its host starts.
+  as it is full. `DialHosted` and `DialHostedWebSocket` create two-seat
+  auto-start rooms and report ready at once with zero digests, for the
+  command-line play test.
 
 `internal/relay`'s lobby API: `DescribeHostedRoom(ctx, address, room,
-options) ([]byte, error)`; `OpenHostedLobby(ctx, address, room, hello,
-config, options) (*HostedLobby, error)`; and on `*HostedLobby`, `Code()`,
-`Seat()`, `State()` (the latest `HostedLobbyState` snapshot — present and
-ready per seat, the mismatch bit and Started — never blocking), `SetReady`
-(the ready flag with the rehearsal digest), `Start()` (seat 0 only),
-`Battle()` (the battle client once Started, which then owns the connection)
-and `Close()`. `address` is `host:port` for TLS or a `wss://host/relay` URL,
-as for `--relay-address`. The lobby reads relay messages on its own
-goroutine and stops reading exactly after Started, so the first grant
-reaches the battle client.
+options) (HostedRoomDescription, error)` with the configuration and size;
+`OpenHostedLobby(ctx, address, room, hello, config, size, options)
+(*HostedLobby, error)`; and on `*HostedLobby`, `Code()`, `Seat()`,
+`State()` (the latest `HostedLobbyState` snapshot — size, per seat present,
+ready, team and side, the mismatch bit, the configuration version and
+Started, with the local slot once started — never blocking),
+`Configuration()` (the latest base configuration bytes), `SetTeam(team)`,
+`SetSide(side)`, `SetConfiguration(config)` (host only),
+`SetReady(ready, identity, rehearsal)`, `Start()` (seat 0 only), `Battle()` (the battle client once
+Started, which then owns the connection) and `Close()`. `address` is
+`host:port` for TLS or a `wss://host/relay` URL, as for `--relay-address`.
+
+The session's lobby helpers: `session.OnlineMatchSetup{Survival, MapName,
+Seats []OnlineSeat{Team, Side}, SimSeed, CRTSeed, SurvivalOptions,
+SideCount}` with `Rows()` (the seats, plus the attacker in Survival);
+`NewOnlineMatchRequest(setup, options, room)`, which names each seat
+"Player n" with participant slot+1, its own side, colour by slot and the
+ally group of its team (survivors share group 2 with colours 0, 2 and 3);
+`OnlineMapCapacity(cat, map)`, the most start positions any network schema
+offers, at most 10, which the lobby enforces; `OnlineMapSchema(fs, cat,
+map, rows)`, the schema for the total row count; and `OnlineSides(cat)`, the
+sides' names in index order.
 
 #### 16.6.2 Client flow
 
 - **MULTI** is enabled except in the browser build, which has no relay
   transport. It opens the online screen: a server field (a bare host
   expands to `wss://host/relay`; `ws://` is the plaintext test opt-in,
-  accepted only on a numeric loopback address), a room-code field (case and
-  spaces ignored), Create Game, Join Game and Back. A status line reports
-  refusals in plain words.
-- **Create** uses the host's current skirmish map, with a button to change
-  it through the ordinary map picker, and its current mod, mutators and
-  restrictions. Only a mod installed from its archive can be hosted,
-  because field 8 needs the archive digest; a folder install is refused
-  with a request to reinstall from the zip. Field 10 holds only the mounted
-  content's own Community table, and both seats use the default builder
-  options. The client composes and prepares the session off the game
-  goroutine, then opens the lobby.
-- **Join** describes the room, decodes its configuration and adopts its
-  map, mod, mutators and restrictions. If the room's mod is installed but
-  not mounted, the client remounts it through the ordinary content reload,
-  telling the player and saving it as the player's selection. A missing mod
-  or map is reported by name and nothing is joined. It then composes,
-  prepares and opens the lobby.
-- **Before Ready** each client runs the rehearsal on its prepared inputs
-  (§16.7) and sends its digest with the ready flag.
+  accepted only on a numeric loopback address), Create Game, a room-code
+  field (case and spaces ignored) with Join Game, and Back. A status line
+  reports refusals in plain words.
+- **Create** opens a 10-seat room with the host's current skirmish map,
+  mod, mutators and restrictions. Only a mod installed from its archive can
+  be hosted, because field 8 needs the archive digest. Field 10 holds only
+  the mounted content's own Community table, and every seat uses the default
+  builder options.
+- **Join** describes the room and adopts its mod; if the room's mod is
+  installed but not mounted, the client remounts it through the ordinary
+  content reload, telling the player and saving it as the player's
+  selection. A missing mod is reported by name and nothing is joined. Each
+  later base configuration is adopted as it arrives; a map the player does
+  not have is reported by name and keeps Ready disabled.
 - **Lobby**: the room code shown large, with Copy where the host clipboard
-  allows; both seats with their readiness; Ready/Not ready; Start for the
-  host, enabled when both are ready; Leave.
+  allows; a row per player with their team, side and readiness, the local
+  player's own team and side changed by clicking while not ready; the
+  host's settings (game type, Change map through the ordinary map picker,
+  Survival's options and the standard skirmish options); Ready/Not ready;
+  Start for the host, enabled when everyone present is ready, the digests
+  agree and the player count fits the map or Survival's limit; Leave. Ready
+  composes, prepares and rehearses off the game goroutine before reporting.
 - **Started**: the client enters its prepared battle and drives it from the
-  lobby's battle client. When the battle ends or the connection fails,
+  lobby's battle client. A defeated player sees their result and may leave
+  while the others play on. When the battle ends or the connection fails,
   leaving returns to the online screen.
 
 ### 16.7 Rehearsal check
 
 **Purpose.** Before a player presses Ready, the client proves that its
-simulation computes what its opponent's does. Identities (§8.2) can only
+simulation computes what every other player's does. Identities (§8.2) can only
 say that the declared inputs match; two builds with different simulation
 code can report equal identities. The rehearsal runs the simulation itself.
 
@@ -5700,13 +5791,15 @@ code can report equal identities. The rehearsal runs the simulation itself.
 deterministic battle composed from the room's same frozen inputs and
 effective configuration, separate from the match session, and returns a
 32-byte digest of its final state. A fixed, seat-symmetric script of
-ordinary seat commands drives both seats: commander moves, builds and
+ordinary seat commands drives every human seat: commander moves, builds and
 weapon fire, derived from the frozen catalog so that it exercises the
-room's own content. The script is defined by the code beside
+room's own content. It runs 900 ticks; in Survival it runs until the first
+wave has finished spawning, at most the first wave's delay plus its warning
+plus 300 ticks, so the wave director is exercised too. The script is defined by the code beside
 `RehearsalDigest`; this document does not duplicate it. The final state
 is digested under its own domain separation. The client sends the digest
-with Ready (§16.6.1); the relay accepts Start only when both seats are
-ready with equal digests, and reports a mismatch otherwise. The 30-tick
+with Ready (§16.6.1); the relay accepts Start only when every present seat
+is ready with equal digests, and reports a mismatch otherwise. The 30-tick
 checksum during play (§16.4) remains the final guard.
 
 **Determinism.** The digest depends only on the frozen inputs and the
@@ -5714,8 +5807,8 @@ configuration. It is independent of which seat is local, of local
 preferences and presentation, and of host time; no wall clock enters it.
 Two honest clients of the same simulation always report the same digest.
 
-**Bound.** It runs well under a second for a two-player map, so readiness
-stays prompt.
+**Bound.** It runs within about a second for a ten-player map and for
+Survival up to its first wave, so readiness stays prompt.
 
 **What it covers.** Honest version mismatches: builds whose simulations
 differ in a way the script reaches, which the identities cannot see. This

@@ -175,8 +175,8 @@ func TestHostedAdmissionPreservesCreatorAndRoomIsolation(t *testing.T) {
 	if !validHostedCode(code) {
 		t.Fatalf("invalid invitation: %q", code)
 	}
+	// A joiner's requested seat is ignored: the relay assigns it.
 	for _, change := range []func(*LocalHello){
-		func(h *LocalHello) { h.Seat = 0 },
 		func(h *LocalHello) { h.Identity.Content[0]++ },
 		func(h *LocalHello) { h.Identity.Map[0]++ },
 		func(h *LocalHello) { h.Identity.Rules.Name = "strict" },
@@ -291,13 +291,13 @@ func TestHostedDelayedChecksumFailureAndTerminalDisagreement(t *testing.T) {
 		clients, _ := hostedTestPair(t, s)
 		for tick := uint32(1); tick <= 30; tick++ {
 			readLocalPair(t, clients)
-			if err := clients[0].Acknowledge(tick, [32]byte{1}, false); err != nil {
+			if err := clients[0].Acknowledge(tick, [32]byte{1}, false, false); err != nil {
 				t.Fatal(err)
 			}
 		}
 		// The slower peer reports tick 30 after the first peer's later grants.
 		for tick := uint32(1); tick <= 30; tick++ {
-			if err := clients[1].Acknowledge(tick, [32]byte{2}, false); err != nil {
+			if err := clients[1].Acknowledge(tick, [32]byte{2}, false, false); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -312,10 +312,10 @@ func TestHostedDelayedChecksumFailureAndTerminalDisagreement(t *testing.T) {
 			s := listenHostedTest(t, HostedConfig{InsecureLoopback: true}, hostedDefaultTimeouts)
 			clients, _ := hostedTestPair(t, s)
 			g := readLocalPair(t, clients)
-			if err := clients[0].Acknowledge(g.Tick, [32]byte{}, terminalFirst); err != nil {
+			if err := clients[0].Acknowledge(g.Tick, [32]byte{}, terminalFirst, false); err != nil {
 				t.Fatal(err)
 			}
-			if err := clients[1].Acknowledge(g.Tick, [32]byte{}, !terminalFirst); err != nil {
+			if err := clients[1].Acknowledge(g.Tick, [32]byte{}, !terminalFirst, false); err != nil {
 				t.Fatal(err)
 			}
 			for _, c := range clients {
@@ -472,27 +472,33 @@ func TestHostedConnectionCapacityAndCanceledHandshake(t *testing.T) {
 	}
 }
 
+func twoSlotProgress() hostedProgress {
+	p := hostedProgress{n: 2}
+	p.active[0], p.active[1] = true, true
+	return p
+}
+
 func TestHostedProgressRetainsSameTickReports(t *testing.T) {
-	var progress hostedProgress
+	progress := twoSlotProgress()
 	for tick := uint32(1); tick <= 89; tick++ {
 		if tick > hostedMaxAhead {
 			slow := tick - hostedMaxAhead
-			if _, err := progress.acknowledge(1, tick-1, hostedAck{tick: slow, check: [32]byte{byte(slow)}}, time.Now()); err != nil {
+			if _, err := progress.acknowledge(1, tick-1, hostedAck{tick: slow, check: [32]byte{byte(slow)}}, false, time.Now()); err != nil {
 				t.Fatalf("same-tick report fell out of the bounded history: %v", err)
 			}
 		}
-		if _, err := progress.acknowledge(0, tick, hostedAck{tick: tick, check: [32]byte{byte(tick)}}, time.Now()); err != nil {
+		if _, err := progress.acknowledge(0, tick, hostedAck{tick: tick, check: [32]byte{byte(tick)}}, false, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := progress.acknowledge(1, 89, hostedAck{tick: 60, check: [32]byte{1}}, time.Now()); err == nil || !strings.Contains(err.Error(), "tick 60 checksum") {
+	if _, err := progress.acknowledge(1, 89, hostedAck{tick: 60, check: [32]byte{1}}, false, time.Now()); err == nil || !strings.Contains(err.Error(), "tick 60 checksum") {
 		t.Fatalf("wrapped checksum history compared different ticks: %v", err)
 	}
 	for _, sequence := range [][]uint32{{0}, {2}, {1, 1}, {1, 3}, {1, 2, 3}} {
-		var p hostedProgress
+		p := twoSlotProgress()
 		var err error
 		for _, tick := range sequence {
-			_, err = p.acknowledge(0, 2, hostedAck{tick: tick}, time.Now())
+			_, err = p.acknowledge(0, 2, hostedAck{tick: tick}, false, time.Now())
 			if err != nil {
 				break
 			}
@@ -597,12 +603,12 @@ func TestHostedSlowReaderDoesNotBlockOtherRoom(t *testing.T) {
 }
 
 func TestHostedVersionAndHelloFraming(t *testing.T) {
-	body, err := encodeHostedHello("", hostedAutoStart, localTestHello(0), []byte("configuration"))
+	body, err := encodeHostedHello("", hostedAutoStart, 4, localTestHello(0), []byte("configuration"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, flags, _, config, err := decodeHostedHello(body); err != nil || code != "" || flags != hostedAutoStart || string(config) != "configuration" {
-		t.Fatalf("creator hello round trip: %q %d %q %v", code, flags, config, err)
+	if code, flags, size, _, config, err := decodeHostedHello(body); err != nil || code != "" || flags != hostedAutoStart || size != 4 || string(config) != "configuration" {
+		t.Fatalf("creator hello round trip: %q %d %d %q %v", code, flags, size, config, err)
 	}
 	for _, mutate := range []func([]byte) []byte{
 		func(b []byte) []byte { b[0] = localHelloMessage; return b },
@@ -610,27 +616,36 @@ func TestHostedVersionAndHelloFraming(t *testing.T) {
 		func(b []byte) []byte { return append(b, 0) },
 		func(b []byte) []byte { return b[:len(b)-1] },
 	} {
-		if _, _, _, _, err := decodeHostedHello(mutate(bytes.Clone(body))); err == nil {
+		if _, _, _, _, _, err := decodeHostedHello(mutate(bytes.Clone(body))); err == nil {
 			t.Fatal("accepted malformed versioned hello")
 		}
 	}
 	// A version-1 client is told both versions.
 	old := bytes.Clone(body)
 	old[1] = 1
-	if _, _, _, _, err := decodeHostedHello(old); err == nil || !strings.Contains(err.Error(), "version 3; this client sent version 1") {
+	if _, _, _, _, _, err := decodeHostedHello(old); err == nil || !strings.Contains(err.Error(), "version 4; this client sent version 1") {
 		t.Fatalf("version mismatch: %v", err)
 	}
 	for _, code := range []string{"SHORT", "AAAAAAA", "AAAAA0", "aaaaaa", "AAA AA"} {
-		if _, err := encodeHostedHello(code, 0, localTestHello(1), nil); err == nil {
+		if _, err := encodeHostedHello(code, 0, 0, localTestHello(1), nil); err == nil {
 			t.Fatalf("accepted invalid invitation %q", code)
 		}
 	}
-	// A joiner carries neither creator flags nor a configuration.
-	if _, err := encodeHostedHello("ABCDEF", hostedAutoStart, localTestHello(1), nil); err == nil {
+	// A joiner carries no creator flags, size or configuration; a creator
+	// names a size of 2 to 10 seats.
+	if _, err := encodeHostedHello("ABCDEF", hostedAutoStart, 0, localTestHello(1), nil); err == nil {
 		t.Fatal("joiner sent creator flags")
 	}
-	if _, err := encodeHostedHello("ABCDEF", 0, localTestHello(1), []byte{1}); err == nil {
+	if _, err := encodeHostedHello("ABCDEF", 0, 2, localTestHello(1), nil); err == nil {
+		t.Fatal("joiner sent a room size")
+	}
+	if _, err := encodeHostedHello("ABCDEF", 0, 0, localTestHello(1), []byte{1}); err == nil {
 		t.Fatal("joiner sent a configuration")
+	}
+	for _, size := range []int{0, 1, 11} {
+		if _, err := encodeHostedHello("", 0, size, localTestHello(0), []byte{1}); err == nil {
+			t.Fatalf("created a room of %d seats", size)
+		}
 	}
 	if code, ok := NormalizeRoomCode(" abc-def "); !ok || code != "ABCDEF" {
 		t.Fatalf("typed code: %q %v", code, ok)

@@ -79,7 +79,7 @@ func readLocalPair(t *testing.T, clients [2]*LocalClient) LocalGrant {
 func ackLocalPair(t *testing.T, clients [2]*LocalClient, tick uint32, check [32]byte, end bool) {
 	t.Helper()
 	for _, c := range clients {
-		if err := c.Acknowledge(tick, check, end); err != nil {
+		if err := c.Acknowledge(tick, check, end, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -232,7 +232,7 @@ func TestLocalHelloComparesEveryIdentity(t *testing.T) {
 			}
 		})
 	}
-	for _, h := range []LocalHello{{Seat: 2, Identity: localTestHello(0).Identity}, {Seat: 0, Identity: netproto.Identity{Protocol: 2}}} {
+	for _, h := range []LocalHello{{Seat: HostedMaxSeats, Identity: localTestHello(0).Identity}, {Seat: 0, Identity: netproto.Identity{Protocol: 2}}} {
 		if _, err := encodeLocalHello(h); err == nil {
 			t.Fatal("accepted invalid hello")
 		}
@@ -263,7 +263,7 @@ func TestLocalDuplicateIgnoredAndGapRecoverable(t *testing.T) {
 func TestLocalAckBarrierAndNormalPacing(t *testing.T) {
 	_, clients := localTestPair(t)
 	g := readLocalPair(t, clients)
-	if err := clients[0].Acknowledge(g.Tick, [32]byte{1}, false); err != nil {
+	if err := clients[0].Acknowledge(g.Tick, [32]byte{1}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	next := make(chan error, 1)
@@ -273,7 +273,7 @@ func TestLocalAckBarrierAndNormalPacing(t *testing.T) {
 		t.Fatalf("advanced without second ack: %v", err)
 	case <-time.After(2 * localTickInterval):
 	}
-	if err := clients[1].Acknowledge(g.Tick, [32]byte{2}, false); err != nil {
+	if err := clients[1].Acknowledge(g.Tick, [32]byte{2}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -313,13 +313,13 @@ func TestLocalPeriodicChecksumAndBothEnded(t *testing.T) {
 				t.Fatalf("tick = %d, want %d", g.Tick, tick)
 			}
 			check := [32]byte{9}
-			if err := clients[0].Acknowledge(tick, check, tick == 30); err != nil {
+			if err := clients[0].Acknowledge(tick, check, tick == 30, false); err != nil {
 				t.Fatal(err)
 			}
 			if mismatch && tick == 30 {
 				check[0]++
 			}
-			if err := clients[1].Acknowledge(tick, check, tick == 30); err != nil {
+			if err := clients[1].Acknowledge(tick, check, tick == 30, false); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -339,10 +339,10 @@ func TestLocalPeriodicChecksumAndBothEnded(t *testing.T) {
 func TestLocalOneEndedSeatKeepsRunning(t *testing.T) {
 	_, clients := localTestPair(t)
 	g := readLocalPair(t, clients)
-	if err := clients[0].Acknowledge(g.Tick, [32]byte{}, true); err != nil {
+	if err := clients[0].Acknowledge(g.Tick, [32]byte{}, true, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := clients[1].Acknowledge(g.Tick, [32]byte{}, false); err != nil {
+	if err := clients[1].Acknowledge(g.Tick, [32]byte{}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	g = readLocalPair(t, clients)
@@ -364,11 +364,11 @@ func TestLocalRejectsWrongAndDuplicateAcks(t *testing.T) {
 		tick := g.Tick + 1
 		if duplicate {
 			tick = g.Tick
-			if err := clients[0].Acknowledge(tick, [32]byte{}, false); err != nil {
+			if err := clients[0].Acknowledge(tick, [32]byte{}, false, false); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if err := clients[0].Acknowledge(tick, [32]byte{}, false); err != nil {
+		if err := clients[0].Acknowledge(tick, [32]byte{}, false, false); err != nil {
 			t.Fatal(err)
 		}
 		for _, c := range clients {
@@ -453,7 +453,7 @@ func TestLocalConcurrentWriters(t *testing.T) {
 		go func(i int) { defer wg.Done(); _, err := clients[0].Submit([]byte{byte(i)}); errs <- err }(i)
 	}
 	wg.Add(1)
-	go func() { defer wg.Done(); errs <- clients[0].Acknowledge(g.Tick, [32]byte{}, false) }()
+	go func() { defer wg.Done(); errs <- clients[0].Acknowledge(g.Tick, [32]byte{}, false, false) }()
 	wg.Wait()
 	close(errs)
 	for err := range errs {
@@ -467,7 +467,7 @@ func TestLocalConcurrentWriters(t *testing.T) {
 	if _, err := clients[0].ReadGrant(); err == nil || !strings.Contains(err.Error(), "sequence 17") {
 		t.Fatalf("concurrent writer fence: %v", err)
 	}
-	if err := clients[1].Acknowledge(g.Tick, [32]byte{}, false); err != nil {
+	if err := clients[1].Acknowledge(g.Tick, [32]byte{}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	g = readLocalPair(t, clients)

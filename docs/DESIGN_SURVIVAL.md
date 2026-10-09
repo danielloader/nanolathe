@@ -39,8 +39,12 @@ combat, the computer player, the HUD. It adds only four things:
 4. **An entry.** A Survival button on the single-player menu and a
    `--survival` flag (§9, §10).
 
-**Out of scope.** Co-op (later, when multiplayer exists: a buddy row becomes
-a human slot and nothing in the director changes). Saving (D2). Campaign
+**Online.** Two or three human survivors can play Survival online
+(DESIGN_MULTIPLAYER §16.6): each survivor is a human row, the director is
+unchanged and its waves hunt the survivor team it records, never the local
+seat, and there are no computer buddies, saves or best scores online.
+
+**Out of scope.** Saving (D2). Campaign
 integration. Scripted or authored wave lists; waves are generated from the
 catalog so every content mod works without Survival data. An optional authored
 attacker roster selects eligible units and tiers (§5.1); it does not script

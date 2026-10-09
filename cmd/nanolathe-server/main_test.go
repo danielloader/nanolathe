@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/nanolathe-gg/nanolathe/internal/relay"
 	"io"
 	"strings"
 	"testing"
@@ -43,5 +44,13 @@ func TestHealthListenFlag(t *testing.T) {
 	var out strings.Builder
 	if err := run(ctx, []string{"--insecure-loopback", "--listen", "127.0.0.1:0", "--health-listen", "127.0.0.1:0"}, &out); err != nil || !strings.Contains(out.String(), "relay health on 127.0.0.1:") {
 		t.Fatalf("health flag: %v %q", err, out.String())
+	}
+}
+
+func TestServerStatsLine(t *testing.T) {
+	var out strings.Builder
+	logServerStats(&out, relay.HostedStatus{Players: 3, Matches: 1})
+	if !strings.HasPrefix(out.String(), "relay: players=3 matches=1 ") || !strings.Contains(out.String(), "heap=") {
+		t.Fatalf("stats line: %q", out.String())
 	}
 }

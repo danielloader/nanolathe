@@ -25,7 +25,7 @@ import (
 )
 
 // useOnlineTestTemplate replaces the SELMAP template with an authored window
-// of the same shape, so the online windows build without retail assets.
+// of the same shape, so the online screen builds without retail assets.
 func useOnlineTestTemplate(t *testing.T) {
 	t.Helper()
 	saved := onlineTemplate
@@ -41,6 +41,33 @@ func useOnlineTestTemplate(t *testing.T) {
 		}}, nil, nil
 	}
 	t.Cleanup(func() { onlineTemplate = saved })
+}
+
+// onlineTestSkirmishWindow is an authored window with SKIRMISH.GUI's controls
+// in their authored places, which the lobby builds on.
+func onlineTestSkirmishWindow() *gui.Window {
+	button := func(name, text string, stages uint8, x, y, w int32) gui.Gadget {
+		return gui.Gadget{Kind: gui.KindButton, Name: name, Text: text, Stages: stages, Active: 1, Rect: gui.Rect{X: x, Y: y, W: w, H: 20}}
+	}
+	label := func(name, text string, x, y int32) gui.Gadget {
+		return gui.Gadget{Kind: gui.KindLabel, Name: name, Text: text, Active: 1, Attribs: 0x11, ColorF: 15, Rect: gui.Rect{X: x, Y: y, W: 117, H: 13}}
+	}
+	return &gui.Window{Name: "Skirmish.gui", Rect: gui.Rect{W: 640, H: 480}, Gadgets: []gui.Gadget{
+		{Kind: gui.KindPanel, Name: "Skirmish.gui", Active: 1, Rect: gui.Rect{W: 640, H: 480}},
+		button("Start", "Start", 0, 502, 430, 96),
+		button("PrevMenu", "Previous Menu", 0, 476, 379, 120),
+		label("TEXT", "Location", 476, 132),
+		label("TEXT", "Commander", 476, 76),
+		button("SelectMap", "Select Map", 0, 263, 379, 120),
+		button("StartLocation", "Fixed|Random", 2, 476, 153, 120),
+		button("CommanderDeath", "Game ends|Continues", 2, 476, 96, 120),
+		button("Mapping", "Unmapped|Mapped", 2, 476, 210, 120),
+		label("MapName", "", 47, 382),
+		button("LineOfSight", "Permanent|True|Circular", 3, 476, 267, 120),
+		{Kind: gui.KindLabel, Name: "HELPTEXT", Active: 1, Attribs: 0x11, Rect: gui.Rect{X: 42, Y: 330, W: 447, H: 20}},
+		button("Difficulty", "Easy|Medium|Hard", 3, 476, 324, 120),
+		label("TEXT", "Difficulty", 476, 303),
+	}}
 }
 
 // useOnlineTestRelay installs a fake relay for the test.
@@ -62,36 +89,78 @@ func onlineTestShell(t *testing.T) *gameShell {
 		{Kind: gui.KindButton, Name: "MULTI", Active: 1, Rect: gui.Rect{X: 20, Y: 20, W: 80, H: 30}},
 		{Kind: gui.KindButton, Name: "SINGLE", Active: 1, Rect: gui.Rect{X: 20, Y: 60, W: 80, H: 30}},
 	}}
-	g := &gameShell{frontend: ui.NewFrontend(modeMenuMain), cs: testContentSet(vfs.New()), maps: []string{"Test Map"},
-		assets: &menuAssets{panel: map[shellMode]*retailPanelAssets{modeMenuMain: {window: main}}}}
+	g := &gameShell{frontend: ui.NewFrontend(modeMenuMain), cs: testContentSet(vfs.New()), maps: []string{"Test Map", "Second Map"}, skirmishSides: 2,
+		assets: &menuAssets{panel: map[shellMode]*retailPanelAssets{modeMenuMain: {window: main}, modeMenuSkirmish: {window: onlineTestSkirmishWindow()}}}}
 	g.setup.MapName = "Test Map"
 	g.openMenu(modeMenuMain)
 	return g
+}
+
+// useOnlineSessionSeams records every online setup the lobby composes, and
+// stands in for the map schema, which needs map files these tests do not
+// mount. capacity, when positive, stands in for the map's start positions.
+func useOnlineSessionSeams(t *testing.T, capacity int) *[]session.OnlineMatchSetup {
+	t.Helper()
+	var setups []session.OnlineMatchSetup
+	savedRequest, savedCapacity, savedSchema := newOnlineMatchRequest, onlineMapCapacity, onlineMapSchema
+	newOnlineMatchRequest = func(setup session.OnlineMatchSetup, options session.SkirmishEntryOptions, room session.MatchRoomInputs) (session.MatchConfigRequest, error) {
+		setups = append(setups, setup)
+		return savedRequest(setup, options, room)
+	}
+	onlineMapSchema = func(vfs.FSOps, *content.Catalog, string, int) (uint32, error) { return 0, nil }
+	if capacity > 0 {
+		onlineMapCapacity = func(*content.Catalog, string) (int, error) { return capacity, nil }
+	}
+	t.Cleanup(func() {
+		newOnlineMatchRequest, onlineMapCapacity, onlineMapSchema = savedRequest, savedCapacity, savedSchema
+	})
+	return &setups
+}
+
+// onlineTestCatalog is a catalog with the two retail sides' names, authored
+// here, for the lobby's side count.
+func onlineTestCatalog() *content.Catalog {
+	return &content.Catalog{Sides: []*content.SideDef{{Name: "ARM"}, {Name: "CORE"}}}
+}
+
+// onlineTestBase is a two-seat skirmish base configuration on mapName.
+func onlineTestBase(t *testing.T, mapName string, mod session.MatchMod, mutators content.Mutators) session.EffectiveMatchConfig {
+	t.Helper()
+	cs := &contentSet{profile: "retail", limits: content.RetailLimits()}
+	frozen := onlineCreationFrozen(cs, [2]uint32{1, 2}, mutators, content.Restrictions{}, nil)
+	frozen.room.Mod = mod
+	base, err := onlineConfig(cs, onlineTestCatalog(), onlineSettings{mapName: mapName, location: 1, commanderDeath: 1}, onlinePlaceholderSeats(), frozen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base
 }
 
 type fakeOnlineRelay struct {
 	mu        sync.Mutex
 	describes []string
 	opens     []relay.LocalHello
+	sizes     []int
 	configs   [][]byte
-	describe  func(room string) ([]byte, error)
+	describe  func(room string) (relay.HostedRoomDescription, error)
 	open      func(room string, hello relay.LocalHello, config []byte) (onlineLobby, error)
 	copied    []string
 }
 
-func (r *fakeOnlineRelay) Describe(_ context.Context, address, room string, _ relay.HostedDialOptions) ([]byte, error) {
+func (r *fakeOnlineRelay) Describe(_ context.Context, address, room string, _ relay.HostedDialOptions) (relay.HostedRoomDescription, error) {
 	r.mu.Lock()
 	r.describes = append(r.describes, address+" "+room)
 	r.mu.Unlock()
 	if r.describe == nil {
-		return nil, errors.New("no describe")
+		return relay.HostedRoomDescription{}, errors.New("no describe")
 	}
 	return r.describe(room)
 }
 
-func (r *fakeOnlineRelay) Open(_ context.Context, _, room string, hello relay.LocalHello, config []byte, _ relay.HostedDialOptions) (onlineLobby, error) {
+func (r *fakeOnlineRelay) Open(_ context.Context, _, room string, hello relay.LocalHello, config []byte, size int, _ relay.HostedDialOptions) (onlineLobby, error) {
 	r.mu.Lock()
 	r.opens = append(r.opens, hello)
+	r.sizes = append(r.sizes, size)
 	r.configs = append(r.configs, config)
 	r.mu.Unlock()
 	if r.open == nil {
@@ -100,24 +169,66 @@ func (r *fakeOnlineRelay) Open(_ context.Context, _, room string, hello relay.Lo
 	return r.open(room, hello, config)
 }
 
+// fakeOnlineLobby behaves as the relay's lobby does for one seat: a team,
+// side, settings, join or leave change clears every seat's ready.
 type fakeOnlineLobby struct {
-	code    string
-	seat    uint8
-	state   relay.HostedLobbyState
-	err     error
-	readies []bool
-	digests [][32]byte
-	starts  int
-	closes  int
-	battle  lockstep.Client
+	code       string
+	seat       uint8
+	state      relay.HostedLobbyState
+	config     []byte
+	err        error
+	readies    []bool
+	identities [][32]byte
+	digests    [][32]byte
+	teams      []uint8
+	sides      []uint8
+	starts     int
+	closes     int
+	battle     lockstep.Client
+}
+
+func newFakeOnlineLobby(seat uint8, present ...int) *fakeOnlineLobby {
+	l := &fakeOnlineLobby{code: "ABC234", seat: seat, state: relay.HostedLobbyState{Size: relay.HostedMaxSeats}}
+	for _, i := range present {
+		l.state.Seats[i].Present = true
+	}
+	return l
+}
+
+func (l *fakeOnlineLobby) clearReady() {
+	for i := range l.state.Seats {
+		l.state.Seats[i].Ready = false
+	}
+	l.state.Mismatch = false
 }
 
 func (l *fakeOnlineLobby) Code() string                           { return l.code }
 func (l *fakeOnlineLobby) Seat() uint8                            { return l.seat }
 func (l *fakeOnlineLobby) State() (relay.HostedLobbyState, error) { return l.state, l.err }
-func (l *fakeOnlineLobby) SetReady(ready bool, rehearsal [32]byte) error {
+func (l *fakeOnlineLobby) Configuration() []byte                  { return l.config }
+func (l *fakeOnlineLobby) SetConfiguration(config []byte) error {
+	l.config = config
+	l.state.ConfigVersion++
+	l.clearReady()
+	return nil
+}
+func (l *fakeOnlineLobby) SetTeam(team uint8) error {
+	l.teams = append(l.teams, team)
+	l.state.Seats[l.seat].Team = team
+	l.clearReady()
+	return nil
+}
+func (l *fakeOnlineLobby) SetSide(side uint8) error {
+	l.sides = append(l.sides, side)
+	l.state.Seats[l.seat].Side = side
+	l.clearReady()
+	return nil
+}
+func (l *fakeOnlineLobby) SetReady(ready bool, identity, rehearsal [32]byte) error {
 	l.readies = append(l.readies, ready)
+	l.identities = append(l.identities, identity)
 	l.digests = append(l.digests, rehearsal)
+	l.state.Seats[l.seat].Ready = ready
 	return nil
 }
 func (l *fakeOnlineLobby) Start() error { l.starts++; return nil }
@@ -135,19 +246,19 @@ func (c *fakeGrantStream) Submit([]byte) (uint64, error) { return 0, nil }
 func (c *fakeGrantStream) ReadGrant() (relay.LocalGrant, error) {
 	return relay.LocalGrant{}, errors.New("closed")
 }
-func (c *fakeGrantStream) Acknowledge(uint32, [32]byte, bool) error { return nil }
-func (c *fakeGrantStream) Close() error                             { c.closes++; return nil }
+func (c *fakeGrantStream) Acknowledge(uint32, [32]byte, bool, bool) error { return nil }
+func (c *fakeGrantStream) Close() error                                   { c.closes++; return nil }
 
 func greyed(p *ui.Panel, name string) bool {
 	i := p.Index(name)
 	return i < 0 || p.Window.Gadgets[i].GrayedOut&1 != 0
 }
 
-// awaitOnline polls the shell until the online screen leaves its busy phases.
+// awaitOnline polls the shell until its running job finishes.
 func awaitOnline(t *testing.T, g *gameShell) {
 	t.Helper()
 	end := time.Now().Add(10 * time.Second)
-	for g.online != nil && g.online.job != nil {
+	for g.online != nil && (g.online.job != nil || g.online.room.readyJob != nil) {
 		if time.Now().After(end) {
 			t.Fatalf("online job never finished: %+v", g.online)
 		}
@@ -177,14 +288,16 @@ func TestMainMenuMultiOpensTheOnlineScreen(t *testing.T) {
 	if p.TextOf("SERVER") != defaultOnlineServer || p.TextOf("NTITLE") != onlineTitle {
 		t.Fatalf("server %q title %q", p.TextOf("SERVER"), p.TextOf("NTITLE"))
 	}
-	for _, name := range []string{"MAPNAMES", "SLIDER"} {
+	// The screen offers the server, Create, the code with Join, and Back.
+	for _, name := range []string{"MAPNAMES", "SLIDER", "CHANGEMAP"} {
 		if p.Index(name) >= 0 {
-			t.Fatalf("the map chooser's %s stayed on the online screen", name)
+			t.Fatalf("the online screen kept %s", name)
 		}
 	}
-	// Any build may play: the test binary, which is unstamped, can act.
-	if greyed(p, "CREATE") || greyed(p, "LOAD") || strings.Contains(p.TextOf("DESCRIPTION"), "stamped") {
-		t.Fatalf("create greyed %v, join greyed %v, status %q", greyed(p, "CREATE"), greyed(p, "LOAD"), p.TextOf("DESCRIPTION"))
+	for _, name := range []string{"SERVER", "ROOMCODE", "CREATE", "LOAD", "PREVMENU"} {
+		if p.Index(name) < 0 || greyed(p, name) {
+			t.Fatalf("%s missing or unavailable", name)
+		}
 	}
 	g.activateGadget("PREVMENU")
 	if g.online != nil || g.activePanel() != main {
@@ -226,16 +339,13 @@ func TestOnlineRefusalTextIsPlain(t *testing.T) {
 		want string
 	}{
 		{relayRefusal("room", "an existing invitation"), "No game has that code"},
-		{relayRefusal("room", "an unoccupied second seat"), "full or has already started"},
+		{relayRefusal("room", "an unoccupied seat"), "full or has already started"},
 		{relayRefusal("room", "an open room"), "That game has closed"},
 		{relayRefusal("room host", "the host to stay until the match starts"), "The host left"},
 		{relayRefusal("room wait", "a started match within 30 minutes"), "30 minutes"},
 		{relayRefusal("room capacity", "space for another room"), "server is full"},
-		{relayRefusal("hello build", "identical values from both seats"), "build differs"},
-		{relayRefusal("hello content", "identical values from both seats"), "game files differ"},
-		{relayRefusal("hello mod", "identical values from both seats"), "mod differs"},
-		{relayRefusal("hello initial checksum", "identical values from both seats"), "(initial checksum)"},
-		{relayRefusal("handshake", "hosted protocol version 2; this client sent version 1"), "different online protocol"},
+		{relayRefusal("hello protocol", "identical values from every seat"), "(protocol)"},
+		{relayRefusal("handshake", "hosted protocol version 4; this client sent version 3"), "different online protocol"},
 		{localMultiplayerError("mounted content", "the base game or an installed mod"), "base game or an installed mod"},
 		{&content.RestrictionsError{Issues: []content.RestrictionIssue{{Unit: "armcom", Reason: content.RestrictionRemovesCommander}}}, "armcom"},
 		{errors.New("nanolathe: relay stream failed: logical path hosted dial, providers searched [relay transport], expected a complete transport message: dial tcp: lookup relay.example.test: no such host"), "Could not reach the server: dial tcp: lookup relay.example.test: no such host"},
@@ -246,39 +356,29 @@ func TestOnlineRefusalTextIsPlain(t *testing.T) {
 	}
 }
 
-func TestOnlineJoinChecksTheRoomBeforeComposing(t *testing.T) {
+func TestOnlineJoinChecksTheRoomBeforeJoining(t *testing.T) {
 	fake := &fakeOnlineRelay{}
 	useOnlineTestRelay(t, fake)
+	useOnlineSessionSeams(t, 0)
 	g := onlineTestShell(t)
 	if err := g.openOnlineScreen(); err != nil {
 		t.Fatal(err)
 	}
 	p := g.online.panel
-	if greyed(p, "LOAD") || greyed(p, "CREATE") {
-		t.Fatal("the screen cannot act")
-	}
 	// A malformed code never reaches the server.
 	p.SetText("ROOMCODE", "abc")
 	g.activateGadget("LOAD")
 	if len(fake.describes) != 0 || !strings.Contains(g.online.status, "six-character") {
 		t.Fatalf("short code: %v %q", fake.describes, g.online.status)
 	}
-	// The joiner's own selection must not leak into the room it adopts.
-	g.opts.Mutators = content.Mutators{Health: content.Factor{Num: 2, Den: 1}}
-	cs := &contentSet{profile: "retail", limits: content.RetailLimits()}
-	roomConfig := func(spec onlineMatchSpec) []byte {
-		config, err := onlineMatchConfig(spec, cs, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		encoded, err := session.EncodeMatchConfig(config)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return encoded
+	room := onlineTestBase(t, "Test Map", session.MatchMod{ID: "absentmod", Version: "1.0", Archive: sha256.Sum256([]byte("absentmod"))}, content.Mutators{})
+	encoded, err := session.EncodeMatchConfig(room)
+	if err != nil {
+		t.Fatal(err)
 	}
-	next := roomConfig(onlineMatchSpec{mapName: "Absent Map", simSeed: 1, crtSeed: 2})
-	fake.describe = func(string) ([]byte, error) { return next, nil }
+	fake.describe = func(string) (relay.HostedRoomDescription, error) {
+		return relay.HostedRoomDescription{Config: encoded, Size: relay.HostedMaxSeats}, nil
+	}
 	p.SetText("SERVER", "relay.example.test")
 	p.SetText("ROOMCODE", "abc 234")
 	g.activateGadget("ROOMCODE") // Enter in the code field joins
@@ -289,27 +389,9 @@ func TestOnlineJoinChecksTheRoomBeforeComposing(t *testing.T) {
 	if len(fake.describes) != 1 || fake.describes[0] != "wss://relay.example.test/relay ABC234" || g.onlineServer != "relay.example.test" {
 		t.Fatalf("describe calls %v, remembered server %q", fake.describes, g.onlineServer)
 	}
-	if len(fake.opens) != 0 || !strings.Contains(g.online.status, "Absent Map") || !strings.Contains(g.online.status, "not installed") {
-		t.Fatalf("missing map: opens %d, status %q", len(fake.opens), g.online.status)
-	}
-	// A mod that is not installed is named, and nothing is joined.
-	next = roomConfig(onlineMatchSpec{mapName: "Test Map", mod: session.MatchMod{ID: "absentmod", Version: "1.0", Archive: sha256.Sum256([]byte("absentmod"))}})
-	g.activateGadget("LOAD")
-	awaitOnline(t, g)
+	// The room's mod is fixed: a missing one is named and nothing is joined.
 	if len(fake.opens) != 0 || pendingContentReload != nil || !strings.Contains(g.online.status, "absentmod 1.0") {
 		t.Fatalf("missing mod: opens %d, reload %v, status %q", len(fake.opens), pendingContentReload, g.online.status)
-	}
-	// A room on this content composes from the room's configuration. The
-	// empty test content cannot compose, so the refusal comes from
-	// composition, after the room was adopted.
-	next = roomConfig(onlineMatchSpec{mapName: "Test Map"})
-	g.activateGadget("LOAD")
-	if g.online.room != nil {
-		t.Fatal("the summary showed a room before it was described")
-	}
-	awaitOnline(t, g)
-	if len(fake.opens) != 0 || g.online.phase != onlineIdle || g.online.status == "" {
-		t.Fatalf("composition refusal: opens %d, phase %d, status %q", len(fake.opens), g.online.phase, g.online.status)
 	}
 }
 
@@ -340,7 +422,7 @@ func TestOnlineCreateRefusalsAndBusyState(t *testing.T) {
 	}
 	g.cs.mod = nil
 	g.activateGadget("CREATE")
-	if g.online.phase != onlinePreparing || !greyed(p, "CREATE") || !greyed(p, "CHANGEMAP") {
+	if g.online.phase != onlineConnecting || !greyed(p, "CREATE") || !greyed(p, "LOAD") {
 		t.Fatal("create did not run off the game goroutine")
 	}
 	// Back abandons the job; its result never reaches a closed screen.
@@ -354,154 +436,13 @@ func TestOnlineCreateRefusalsAndBusyState(t *testing.T) {
 	}
 }
 
-func TestOnlineLobbyStateMachine(t *testing.T) {
-	fake := &fakeOnlineRelay{}
-	useOnlineTestRelay(t, fake)
-	g := onlineTestShell(t)
-	if err := g.openOnlineScreen(); err != nil {
-		t.Fatal(err)
-	}
-	config, err := onlineMatchConfig(onlineMatchSpec{mapName: "Test Map", mutators: content.Mutators{Sight: content.Factor{Num: 2, Den: 1}}}, &contentSet{profile: "retail", limits: content.RetailLimits()}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stream := &fakeGrantStream{}
-	host := &fakeOnlineLobby{code: "ABC234", battle: stream}
-	rehearsal := make(chan onlineRehearsal, 1)
-	g.openOnlineLobby(&onlinePrepared{config: config, address: "wss://relay.example.test/relay"}, host, rehearsal)
-	p := g.online.lobbyPanel
-	if g.activePanel() != p || g.frontend.Panels.Under() != g.online.panel {
-		t.Fatal("the lobby is not over the online screen")
-	}
-	if !greyed(p, "LOAD") || p.TextOf("SUM2") != "1 mutator" || p.TextOf("SUMLABEL") != "This game" {
-		t.Fatalf("new lobby: start greyed %v, summary %q %q", greyed(p, "LOAD"), p.TextOf("SUMLABEL"), p.TextOf("SUM2"))
-	}
-	host.state.Present[0] = true
-	g.pollOnline()
-	if p.TextOf("SEAT1") != "Guest: waiting to join" {
-		t.Fatalf("waiting host: %q", p.TextOf("SEAT1"))
-	}
-	g.activateGadget("COPY")
-	if len(fake.copied) != 1 || fake.copied[0] != "ABC234" {
-		t.Fatalf("copy: %v", fake.copied)
-	}
-	// Ready waits for this seat's rehearsal (§16.7).
-	if !greyed(p, "READY") || !strings.Contains(p.TextOf("DESCRIPTION"), "Checking that your game matches") {
-		t.Fatalf("rehearsing: ready greyed %v, status %q", greyed(p, "READY"), p.TextOf("DESCRIPTION"))
-	}
-	g.activateGadget("READY")
-	if len(host.readies) != 0 {
-		t.Fatal("ready before the rehearsal finished")
-	}
-	digest := sha256.Sum256([]byte("rehearsal"))
-	rehearsal <- onlineRehearsal{digest: digest}
-	g.pollOnline()
-	if greyed(p, "READY") || !strings.Contains(p.TextOf("DESCRIPTION"), "Send the room code") {
-		t.Fatalf("rehearsed: ready greyed %v, status %q", greyed(p, "READY"), p.TextOf("DESCRIPTION"))
-	}
-	g.activateGadget("READY")
-	if len(host.readies) != 1 || !host.readies[0] || host.digests[0] != digest || p.TextOf("READY") != "Not ready" {
-		t.Fatalf("ready: %v %x %q", host.readies, host.digests, p.TextOf("READY"))
-	}
-	host.state = relay.HostedLobbyState{Present: [2]bool{true, true}, Ready: [2]bool{true, false}}
-	g.pollOnline()
-	if !greyed(p, "LOAD") || p.TextOf("SEAT1") != "Guest: not ready" {
-		t.Fatal("start offered before both seats were ready")
-	}
-	// Both ready with different digests: the relay reports a mismatch and
-	// Start stays unavailable.
-	host.state.Ready[1], host.state.Mismatch = true, true
-	g.pollOnline()
-	if !greyed(p, "LOAD") || !strings.Contains(p.TextOf("DESCRIPTION"), "simulate differently") {
-		t.Fatalf("mismatch: start greyed %v, status %q", greyed(p, "LOAD"), p.TextOf("DESCRIPTION"))
-	}
-	g.activateGadget("READY")
-	g.activateGadget("READY")
-	if len(host.readies) != 3 || host.readies[1] || host.digests[1] != ([32]byte{}) || !host.readies[2] || host.digests[2] != digest {
-		t.Fatalf("not ready then ready: %v %x", host.readies, host.digests)
-	}
-	host.state.Mismatch = false
-	g.pollOnline()
-	if greyed(p, "LOAD") {
-		t.Fatal("start not offered with both seats ready")
-	}
-	g.activateGadget("LOAD")
-	if host.starts != 1 {
-		t.Fatal("the host's Start did not reach the relay")
-	}
-	// Started hands the connection to the battle. This lobby carries no
-	// composed battle, so entry fails, the stream closes and the screen
-	// says so.
-	host.state.Started = true
-	g.pollOnline()
-	if stream.closes != 1 || host.closes != 1 || g.activePanel() != g.online.panel || !strings.Contains(g.online.status, "could not start") {
-		t.Fatalf("failed entry: stream closes %d, lobby closes %d, status %q", stream.closes, host.closes, g.online.status)
-	}
-
-	// A relay failure returns to the online screen with its reason.
-	gone := &fakeOnlineLobby{code: "ABC234", state: relay.HostedLobbyState{Present: [2]bool{true, true}}}
-	g.openOnlineLobby(&onlinePrepared{config: config}, gone, nil)
-	gone.err = errors.New("nanolathe: hosted relay rejected: logical path room host, providers searched [hosted transport], expected the host to stay until the match starts")
-	g.pollOnline()
-	if gone.closes != 1 || g.online.lobbyPanel != nil || g.online.status != "The host left, so the game closed." {
-		t.Fatalf("host left: closes %d, status %q", gone.closes, g.online.status)
-	}
-
-	// The guest can never start; Leave closes the room's seat.
-	// A rehearsal that fails is shown, and Ready stays unavailable.
-	guest := &fakeOnlineLobby{code: "ABC234", seat: 1, state: relay.HostedLobbyState{Present: [2]bool{true, true}, Ready: [2]bool{true, false}}}
-	failed := make(chan onlineRehearsal, 1)
-	failed <- onlineRehearsal{err: errors.New("nanolathe: rehearsal failed: logical path rehearsal, providers searched [session], expected a composed rehearsal battle")}
-	g.openOnlineLobby(&onlinePrepared{config: config}, guest, failed)
-	g.pollOnline()
-	p = g.online.lobbyPanel
-	if !greyed(p, "READY") || !strings.Contains(p.TextOf("DESCRIPTION"), "check of your game failed") {
-		t.Fatalf("failed rehearsal: ready greyed %v, status %q", greyed(p, "READY"), p.TextOf("DESCRIPTION"))
-	}
-	g.activateGadget("READY")
-	if len(guest.readies) != 0 {
-		t.Fatal("a failed rehearsal readied the seat")
-	}
-	guest.state.Ready[1] = true
-	g.online.rehearsalErr, g.online.rehearsed = nil, true
-	g.pollOnline()
-	p = g.online.lobbyPanel
-	if !greyed(p, "LOAD") || p.TextOf("YOU") != "You are the guest" || !strings.Contains(p.TextOf("DESCRIPTION"), "host to start") {
-		t.Fatalf("guest lobby: %q %q", p.TextOf("YOU"), p.TextOf("DESCRIPTION"))
-	}
-	g.activateGadget("LOAD")
-	g.activateGadget("PREVMENU")
-	if guest.starts != 0 || guest.closes != 1 || g.activePanel() != g.online.panel || g.online.status != "You left the game." {
-		t.Fatalf("guest leave: starts %d closes %d status %q", guest.starts, guest.closes, g.online.status)
-	}
-}
-
-func TestOnlineMapPickerReturnsToTheOnlineScreen(t *testing.T) {
-	g := onlineTestShell(t)
-	selmap := &gui.Window{Name: "selmap", Rect: gui.Rect{X: 84, Y: 12, W: 494, H: 420}, Gadgets: []gui.Gadget{{Kind: gui.KindPanel, Active: 1}}}
-	g.assets.panel[modeMenuMap] = &retailPanelAssets{window: selmap}
-	g.maps = []string{"First", "Second"}
-	if err := g.openOnlineScreen(); err != nil {
-		t.Fatal(err)
-	}
-	online := g.online.panel
-	g.activateGadget("CHANGEMAP")
-	if g.frontend.Mode != modeMenuMap || g.frontend.Panels.Under() != online {
-		t.Fatal("Change map did not open the map selector over the online screen")
-	}
-	g.mapIdx = 1
-	g.activateGadget("LOAD")
-	if g.frontend.Mode != modeMenuMain || g.activePanel() != online || g.setup.MapName != "Second" || online.TextOf("SUM0") != "Second" {
-		t.Fatalf("map choice: mode %d, map %q, summary %q", g.frontend.Mode, g.setup.MapName, online.TextOf("SUM0"))
-	}
-}
-
 // A room's mod that is installed but not mounted is mounted through the
 // ordinary content reload, which carries the join and the player's own
 // mutators; a different copy of the mod is refused by name.
 func TestOnlineJoinRequestsTheRoomsMod(t *testing.T) {
 	fake := &fakeOnlineRelay{}
 	useOnlineTestRelay(t, fake)
+	useOnlineSessionSeams(t, 0)
 	g := onlineTestShell(t)
 	t.Cleanup(func() { pendingContentReload = nil })
 	var archive bytes.Buffer
@@ -537,11 +478,7 @@ func TestOnlineJoinRequestsTheRoomsMod(t *testing.T) {
 	}
 	g.opts.Mutators = content.Mutators{Damage: content.Factor{Num: 2, Den: 1}}
 	encode := func(mod session.MatchMod) []byte {
-		config, err := onlineMatchConfig(onlineMatchSpec{mapName: "Test Map", mod: mod, mutators: content.Mutators{Sight: content.Factor{Num: 2, Den: 1}}}, &contentSet{profile: "retail", limits: content.RetailLimits()}, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		encoded, err := session.EncodeMatchConfig(config)
+		encoded, err := session.EncodeMatchConfig(onlineTestBase(t, "Test Map", mod, content.Mutators{Sight: content.Factor{Num: 2, Den: 1}}))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -559,7 +496,7 @@ func TestOnlineJoinRequestsTheRoomsMod(t *testing.T) {
 	if r == nil || r.selector != "testmod@1" || r.mod.ID != "testmod" || r.online == nil || r.online.code != "ABC234" || r.mutators != g.opts.Mutators {
 		t.Fatalf("reload request %+v", r)
 	}
-	if !strings.Contains(g.online.status, "testmod 1") || g.online.phase != onlinePreparing || len(fake.opens) != 0 {
+	if !strings.Contains(g.online.status, "testmod 1") || g.online.phase != onlineConnecting || len(fake.opens) != 0 {
 		t.Fatalf("status %q phase %d", g.online.status, g.online.phase)
 	}
 	// After the reload the mod must be the room's; if it is not, the join

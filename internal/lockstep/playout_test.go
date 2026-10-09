@@ -190,7 +190,7 @@ func (c *testClient) ReadGrant() (relay.LocalGrant, error) {
 		return relay.LocalGrant{}, io.ErrClosedPipe
 	}
 }
-func (c *testClient) Acknowledge(tick uint32, hash [32]byte, ended bool) error {
+func (c *testClient) Acknowledge(tick uint32, hash [32]byte, ended, _ bool) error {
 	c.acks = append(c.acks, clientAck{tick, hash, ended})
 	return c.ackError
 }

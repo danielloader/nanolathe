@@ -239,14 +239,25 @@ func TestWebSocketKeepaliveAndCloseUnblocksIO(t *testing.T) {
 	// An old data deadline must not kill an idle room's periodic ping.
 	_ = c.SetWriteDeadline(time.Now().Add(-time.Second))
 	_ = b.SetDeadline(time.Now().Add(time.Second))
-	var ping [2]byte
-	if _, err := io.ReadFull(b, ping[:]); err != nil || ping != [2]byte{0x89, 0} {
+	// Each ping carries its send time, so an echoing pong measures the
+	// round trip for the status page.
+	var ping [10]byte
+	if _, err := io.ReadFull(b, ping[:]); err != nil || ping[0] != 0x89 || ping[1] != 8 {
 		t.Fatalf("keepalive: %x / %v", ping, err)
 	}
 	readDone := make(chan error, 1)
 	go func() { var p [1]byte; _, err := c.Read(p[:]); readDone <- err }()
+	if err := websocketWriteAll(b, websocketTestFrame(0x8a, ping[2:], true)); err != nil {
+		t.Fatal(err)
+	}
 	if err := websocketWriteAll(b, websocketTestFrame(0x8a, nil, true)); err != nil {
 		t.Fatal(err)
+	}
+	for end := time.Now().Add(time.Second); c.rtt.Load() <= 0; {
+		if time.Now().After(end) {
+			t.Fatal("an echoed ping did not record its round trip")
+		}
+		time.Sleep(time.Millisecond)
 	}
 	if err := c.Close(); err != nil {
 		t.Fatal(err)

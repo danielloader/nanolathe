@@ -14,7 +14,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/community"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
-	"github.com/nanolathe-gg/nanolathe/internal/mission"
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/netproto"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
@@ -67,23 +66,6 @@ func onlineMatchConfig(spec onlineMatchSpec, cs *contentSet, schema uint32) (ses
 	second.Participant[0] = 2
 	second.BuilderOptions = builder
 	return session.ResolveMatchConfig(request)
-}
-
-// onlineMapSchema is the network schema the map-entry code selects for two
-// seats, as its index in the compiled map header that admission reads.
-func onlineMapSchema(cs *contentSet, cat *content.Catalog, mapName string) (uint32, error) {
-	m, err := mission.LoadWithType(cs.fs, mission.TypeSkirmish, mapName, 0, 2, nil)
-	if err != nil {
-		return 0, err
-	}
-	if header := cat.Maps[content.CanonicalKey(m.TerrainKey)]; header != nil {
-		for i, candidate := range header.Schemas {
-			if candidate.Name == m.Schema.Name {
-				return uint32(i), nil
-			}
-		}
-	}
-	return 0, localMultiplayerError(mapName, "the selected network schema in the compiled map header")
 }
 
 // matchModOf is a mounted mod's public identity (configuration field 8): its

@@ -164,7 +164,8 @@ func (b *battleSession) dispatchLocalCommand(text string) {
 		// established local interface gestures; refuse every other +command
 		// before developer dispatch and exact-unit spawn fallbacks.
 		switch strings.ToLower(words[0]) {
-		case "bigbrother", "noshake", "logo", "switchalt":
+		case "bigbrother", "noshake", "logo", "switchalt", "fps", "net":
+			// Local displays and interface gestures only.
 		default:
 			b.onlineNotice("This +command is unavailable in multiplayer games")
 			return
@@ -228,6 +229,16 @@ func (b *battleSession) dispatchLocalCommand(text string) {
 		b.fpsVisible = !b.fpsShown()
 		if b.shell != nil {
 			b.shell.fpsVisible = b.fpsVisible
+		}
+	case "net":
+		// The online network overlay (online_net.go); host display only.
+		visible := b.netVisible
+		if b.shell != nil {
+			visible = b.shell.netVisible
+		}
+		b.netVisible = !visible
+		if b.shell != nil {
+			b.shell.netVisible = b.netVisible
 		}
 	case "clock":
 		value := !b.clockShown()

@@ -221,6 +221,8 @@ type battleSession struct {
 	bpsVisible   bool
 	// fpsVisible is the direct-battle fallback for the host-only +fps display.
 	fpsVisible bool
+	// netVisible is the direct-battle fallback for the online +net overlay.
+	netVisible bool
 	// clockUsePrimaryFont records the stateful FNT selection at the retail
 	// clock draw site for a direct battle. A shell-backed battle reads its live
 	// text-line setting because MAXLINES may change it while battle is running.
@@ -914,6 +916,7 @@ func (b *battleSession) teardown(cl *client.Client) {
 	}
 	// The session is retired below; its simulation goroutine goes first.
 	b.stopSimulation(cl)
+	b.multiplayer.summarizeOnline(b.sess)
 	b.multiplayer.close()
 	// LoadGame can leave ENDMSN through replacement rather than its Start or
 	// MainMenu routes. Retire the same temporary display state on every exit.

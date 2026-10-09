@@ -282,6 +282,13 @@ func TestLocalMultiplayerLocalResultWaitsForSharedEnd(t *testing.T) {
 	if d.pumps != 1 || b.isResultVisible() {
 		t.Fatal("local result prevented other seat's simulation from finishing")
 	}
+	// A hosted seat defeated while the others play on sees its result before
+	// any relay completion (DESIGN_MULTIPLAYER §16.6.2); the shared end's wait
+	// for completion is TestHostedRelayLatencyRetail's.
+	b.multiplayer = &battleMultiplayer{driver: d, completed: func() bool { return false }}
+	if !b.isResultVisible() {
+		t.Fatal("hosted early defeat waited for the shared end")
+	}
 	b.multiplayer = nil
 	if !b.isResultVisible() {
 		t.Fatal("ordinary local result was suppressed")

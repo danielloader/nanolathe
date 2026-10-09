@@ -11,20 +11,33 @@ import (
 )
 
 // isResultVisible reports whether the authoritative result overlay should be shown [RS-05][08][P1-01].
-// It is presentation-only: the result comes from the committed view (I6),
-// and hosted transport must confirm shared completion before displaying it.
+// It is presentation-only: the result comes from the committed view (I6).
 // The overlay is visible when the terminal result is latched (Ended) and has not been dismissed.
 func (b *battleSession) isResultVisible() bool {
 	if b == nil || b.battleState().Input.ResultDismissed {
 		return false
 	}
-	// A local defeat may finish before the other seat's countdown. Keep
-	// pumping grants before offering any result route that retires transport.
-	if b.onlineBattle() && (b.sess == nil || !b.sess.OnlineBattleEnded()) {
-		return false
-	}
-	if mp := b.multiplayer; mp != nil && (mp.failure != nil || mp.completed != nil && !mp.completed()) {
-		return false
+	if b.onlineBattle() {
+		mp := b.multiplayer
+		if mp != nil && mp.failure != nil {
+			return false
+		}
+		ended := b.sess != nil && b.sess.OnlineBattleEnded()
+		hosted := mp != nil && mp.completed != nil
+		switch {
+		case hosted && ended && !mp.completed():
+			// The shared end waits for the relay's explicit completion, so
+			// replicas that disagree fail the room instead of showing a
+			// result (DESIGN_MULTIPLAYER §16.5).
+			return false
+		case !hosted && !ended:
+			// The loopback play test's relay stops when a seat leaves, so a
+			// local result waits for the shared end before offering any
+			// route that retires transport.
+			return false
+		}
+		// A hosted seat defeated while others play on sees its own result at
+		// once and may leave; grants keep running underneath (§16.6.2).
 	}
 	cur, ok := b.currentSnapshot()
 	return ok && cur.Result.Ended

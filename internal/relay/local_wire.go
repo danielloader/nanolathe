@@ -129,8 +129,8 @@ func decodeLocalHello(body []byte) (LocalHello, error) {
 	h.Identity.Mod.Archive = r.Digest()
 	h.Identity.Configuration = r.Digest()
 	h.InitialChecksum = r.Digest()
-	if h.Seat > 1 {
-		r.Abort(localError("hello seat", "seat 0 or 1"))
+	if h.Seat >= HostedMaxSeats && h.Seat != hostedAnySeat {
+		r.Abort(localError("hello seat", "a seat below 10, or any seat"))
 	}
 	if h.Identity.Protocol != netproto.CommandSchemaVersion {
 		r.Abort(localError("hello protocol", "the current command schema version"))
@@ -166,7 +166,7 @@ func decodeLocalGrant(r *netproto.Reader) (LocalGrant, error) {
 		c.Seat, c.Sequence, c.Position = r.U8(), r.U64(), r.U64()
 		n := r.Count(netproto.MaxCommandBytes, 1)
 		bytes += n
-		if c.Seat > 1 || c.Sequence == 0 || c.Position == 0 || bytes > localMaxPendingBytes {
+		if c.Seat >= HostedMaxSeats || c.Sequence == 0 || c.Position == 0 || bytes > localMaxPendingBytes {
 			r.Abort(localError("grant command", "a valid seat/sequence/position within the pending byte limit"))
 		}
 		c.Payload = r.Raw(n)

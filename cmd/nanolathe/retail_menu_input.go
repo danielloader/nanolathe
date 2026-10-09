@@ -123,7 +123,7 @@ func (g *gameShell) serviceMenuWidgets(p *ui.Panel, in *input.State) bool {
 	})
 	g.pollRetailMusicPage(p)
 	in.DiscardTokens(result.ConsumedTokens)
-	if g.frontend.Mode == modeMenuSkirmish && editorIndex < 0 && !result.Fired && result.ConsumedTokens != 0 && len(frame.Tokens) != 0 && !g.survivalMenu {
+	if g.frontend.Mode == modeMenuSkirmish && editorIndex < 0 && !result.Fired && result.ConsumedTokens != 0 && len(frame.Tokens) != 0 && !g.survivalMenu && !g.onlineLobbyActive() {
 		g.skirmishPlayerCountToken(frame.Tokens[0])
 	}
 	if editorIndex >= 0 && g.saveLoadPanelActive() {
@@ -138,7 +138,7 @@ func (g *gameShell) serviceMenuWidgets(p *ui.Panel, in *input.State) bool {
 	if !ok {
 		return true
 	}
-	if result.FiredButton == 2 && g.frontend.Mode == modeMenuSkirmish {
+	if result.FiredButton == 2 && g.frontend.Mode == modeMenuSkirmish && !g.onlineLobbyActive() {
 		if slot, kind, ok := dynamicSlot(gad.Name); ok {
 			if kind == "Metal" {
 				g.setup.Players[slot].Metal = decreaseResource(g.setup.Players[slot].Metal)

@@ -425,7 +425,8 @@ func nlCardEqual(c nlCard, a, b *nlDraft) bool {
 		return a.resolution == b.resolution
 	}
 	if c.key == "sidebar" {
-		return a.pres.ExpandedSidebar == b.pres.ExpandedSidebar && a.pres.BuildMenuPageSize == b.pres.BuildMenuPageSize && a.pres.SidebarOrders == b.pres.SidebarOrders
+		return a.pres.ExpandedSidebar == b.pres.ExpandedSidebar && a.pres.BuildMenuPageSize == b.pres.BuildMenuPageSize &&
+			a.pres.SidebarOrders == b.pres.SidebarOrders && a.pres.UIScale == b.pres.UIScale
 	}
 	if c.copy != nil {
 		var left, right nlDraft
@@ -444,6 +445,7 @@ func nlCopyCard(c nlCard, to, from *nlDraft) {
 	if c.key == "sidebar" {
 		to.pres.ExpandedSidebar, to.pres.BuildMenuPageSize = from.pres.ExpandedSidebar, from.pres.BuildMenuPageSize
 		to.pres.SidebarOrders = from.pres.SidebarOrders
+		to.pres.UIScale = from.pres.UIScale
 		return
 	}
 	if c.copy != nil {

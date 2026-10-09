@@ -28,7 +28,7 @@ func TestFrontendAvailabilityFollowsMountedContent(t *testing.T) {
 		}
 		return w
 	}
-	main := window("SINGLE", "INTRO", "Credits", "EXIT")
+	main := window("SINGLE", "MULTI", "INTRO", "Credits", "EXIT")
 	main.Gadgets[main.GadgetIndex("INTRO")].GrayedOut = 2   // Only the low bit is grey.
 	main.Gadgets[main.GadgetIndex("Credits")].GrayedOut = 1 // Preserve an authored restriction.
 	g.assets = &menuAssets{missionLayout: missionLayoutFixedCampaign, panel: map[shellMode]*retailPanelAssets{
@@ -58,7 +58,9 @@ func TestFrontendAvailabilityFollowsMountedContent(t *testing.T) {
 			}
 		}
 	}
-	assertEntries(modeMenuMain, []string{"SINGLE", "EXIT"}, []string{"INTRO", "Credits"})
+	// Without a skirmish map MULTI is greyed with Skirmish: online rooms are
+	// skirmish or Survival battles.
+	assertEntries(modeMenuMain, []string{"SINGLE", "EXIT"}, []string{"MULTI", "INTRO", "Credits"})
 	if g.activePanel().Window.Gadgets[g.activePanel().Index("INTRO")].GrayedOut != 3 {
 		t.Fatal("disabling Intro changed unrelated grey-word bits")
 	}
@@ -80,13 +82,14 @@ func TestFrontendAvailabilityFollowsMountedContent(t *testing.T) {
 	if err := g.cs.unmappedMount.MountDirectory(root, 20); err != nil {
 		t.Fatal(err)
 	}
-	assertEntries(modeMenuMain, []string{"INTRO"}, []string{"Credits"})
+	assertEntries(modeMenuMain, []string{"MULTI", "INTRO"}, []string{"Credits"})
 	if g.activePanel().Window.Gadgets[g.activePanel().Index("INTRO")].GrayedOut != 2 {
 		t.Fatal("reopening did not restore Intro's authored grey word")
 	}
 	assertEntries(modeMenuSingle, []string{"Skirmish", survivalButton}, []string{"AnyMsn"})
 	g.assets.panel[modeMenuMap].window = nil
 	assertEntries(modeMenuSingle, []string{"NewCamp"}, []string{"Skirmish", survivalButton})
+	assertEntries(modeMenuMain, []string{"SINGLE"}, []string{"MULTI"})
 	g.assets.panel[modeMenuMission].window = nil
 	assertEntries(modeMenuSingle, []string{"Options", "LoadGame"}, []string{"NewCamp"})
 	g.assets.panel[modeMenuSingle].window = nil

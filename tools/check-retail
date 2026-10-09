@@ -108,6 +108,42 @@ darwin/arm64)
 	;;
 esac
 
+# The browser build runs under Node here. Node 22 is the first release with a
+# global WebSocket, which the browser's relay client uses as it does in a page.
+wasm_node_available() {
+	node_major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null) || return 1
+	[ "$node_major" -ge 22 ] 2>/dev/null
+}
+
+# The browser build plays online beside native seats, so it executes the same
+# fingerprint selection as the amd64 step (DESIGN_MULTIPLAYER §16.1). Go's
+# wasm port has one thread, so the binary runs with GOMAXPROCS=1 whatever
+# budget the compiler uses.
+run_wasm_fingerprints() {
+	set -- -tags retail -short="$short" -timeout "${NANOLATHE_TEST_TIMEOUT:-20m}" \
+		-run '^Test.*Fingerprint.*Locked$' \
+		-exec "env GOMAXPROCS=1 $(go env GOROOT)/lib/wasm/go_js_wasm_exec"
+	[ "$fresh" = false ] || set -- -count=1 "$@"
+	GOOS=js GOARCH=wasm go test "$@" ./internal/headless
+	echo "==> js/wasm fingerprint locks: PASSED"
+}
+echo "==> js/wasm fingerprint locks (short=$short)"
+if wasm_node_available; then
+	run_wasm_fingerprints
+else
+	echo "==> js/wasm fingerprint locks: SKIPPED (Node 22 or later is not on PATH)"
+fi
+
+# A js/wasm client plays a hosted match through Node's WebSocket against a
+# native relay on loopback (DESIGN_MULTIPLAYER §16.5.1). It needs no assets.
+echo "==> js/wasm relay client"
+if wasm_node_available; then
+	NANOLATHE_WASM_RELAY=1 go test -count=1 -run '^TestWasmClientPlaysHostedMatch$' ./internal/relay
+	echo "==> js/wasm relay client: PASSED"
+else
+	echo "==> js/wasm relay client: SKIPPED (Node 22 or later is not on PATH)"
+fi
+
 # The modern executor's authored pixel fixtures are the only pixel-level lock on
 # the model lane, the pass scheduler and the Enhanced effect layers, and they can
 # only run against a real graphics device (C-G10). Most need no retail assets,

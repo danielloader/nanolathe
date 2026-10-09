@@ -200,6 +200,10 @@ jobs:
           GOARCH: wasm
           GOMAXPROCS: '1'
         run: go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./internal/sim/numeric
+      - name: play a hosted match from the Wasm relay client
+        env:
+          NANOLATHE_WASM_RELAY: '1'
+        run: go test -count=1 -run '^TestWasmClientPlaysHostedMatch$' -v ./internal/relay
       - name: build asset-free browser distribution
         run: tools/browser-build
       - name: keep the browser distribution

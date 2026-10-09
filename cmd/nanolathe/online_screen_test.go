@@ -13,8 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
+	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/lockstep"
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
 	"github.com/nanolathe-gg/nanolathe/internal/relay"
@@ -197,7 +200,7 @@ type fakeOnlineLobby struct {
 }
 
 func newFakeOnlineLobby(seat uint8, present ...int) *fakeOnlineLobby {
-	l := &fakeOnlineLobby{code: "ABC234", seat: seat, state: relay.HostedLobbyState{Size: relay.HostedMaxSeats}}
+	l := &fakeOnlineLobby{code: "CFH234", seat: seat, state: relay.HostedLobbyState{Size: relay.HostedMaxSeats}}
 	// Each arrival takes the lowest colour no present seat holds, as the
 	// relay assigns it.
 	for _, i := range present {
@@ -301,12 +304,23 @@ func TestMainMenuMultiOpensTheOnlineChooser(t *testing.T) {
 	g := onlineTestShell(t)
 	main := g.activePanel()
 	multi := main.Index("MULTI")
-	if !onlinePlayAvailable() {
-		if main.Window.Gadgets[multi].GrayedOut&1 == 0 || main.Fires(multi) {
-			t.Fatal("the browser build offered MULTI")
-		}
-		return
+	// The shell has no skirmish map yet, and MULTI greys as Skirmish does.
+	if main.Window.Gadgets[multi].GrayedOut&1 == 0 || main.Fires(multi) {
+		t.Fatal("MULTI was offered without skirmish content")
 	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "maps"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "maps", "Test Map.tnt"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.cs.unmappedMount.MountDirectory(root, 20); err != nil {
+		t.Fatal(err)
+	}
+	g.assets.panel[modeMenuMap] = &retailPanelAssets{window: &gui.Window{Rect: gui.Rect{W: 640, H: 480}, Gadgets: []gui.Gadget{{Kind: gui.KindPanel, Active: 1}}}}
+	g.openMenu(modeMenuMain)
+	main = g.activePanel()
 	if main.Window.Gadgets[multi].GrayedOut != 0 || !main.Fires(multi) {
 		t.Fatal("MULTI is not enabled")
 	}
@@ -337,9 +351,9 @@ func TestMainMenuMultiOpensTheOnlineChooser(t *testing.T) {
 		t.Fatal("the code popup did not replace the chooser")
 	}
 	// A typed or pasted code shows in capitals.
-	p.SetText("ADDRESS", "k7m-2qx")
+	p.SetText("ADDRESS", "k7m-2px")
 	g.pollOnline()
-	if p.TextOf("ADDRESS") != "K7M-2QX" {
+	if p.TextOf("ADDRESS") != "K7M-2PX" {
 		t.Fatalf("code field %q", p.TextOf("ADDRESS"))
 	}
 	g.activateGadget("PREV")
@@ -449,10 +463,15 @@ func TestOnlineJoinChecksTheRoomBeforeJoining(t *testing.T) {
 		t.Fatalf("an emptied field acted: %q", g.online.status)
 	}
 	// A malformed code never reaches the server, and the popup stays open.
-	p.SetText("ADDRESS", "abc")
+	p.SetText("ADDRESS", "cfh")
 	g.activateGadget("OK")
 	if len(fake.describes) != 0 || g.online.view != onlineCodeEntry || !strings.Contains(p.TextOf("STATUS"), "six letters and digits") {
 		t.Fatalf("short code: %v %q", fake.describes, p.TextOf("STATUS"))
+	}
+	p.SetText("ADDRESS", "cfh-j0k")
+	g.activateGadget("OK")
+	if len(fake.describes) != 0 || !strings.Contains(p.TextOf("STATUS"), `never use '0'`) {
+		t.Fatalf("misread code: %v %q", fake.describes, p.TextOf("STATUS"))
 	}
 	room := onlineTestBase(t, "Test Map", session.MatchMod{ID: "absentmod", Version: "1.0", Archive: sha256.Sum256([]byte("absentmod"))}, content.Mutators{})
 	encoded, err := session.EncodeMatchConfig(room)
@@ -462,13 +481,13 @@ func TestOnlineJoinChecksTheRoomBeforeJoining(t *testing.T) {
 	fake.describe = func(string) (relay.HostedRoomDescription, error) {
 		return relay.HostedRoomDescription{Config: encoded, Size: relay.HostedMaxSeats}, nil
 	}
-	p.SetText("ADDRESS", "abc-234")
+	p.SetText("ADDRESS", "cfh-234")
 	g.activateGadget("ADDRESS") // Enter in the field joins
 	if g.online.phase != onlineDescribing || !greyed(p, "OK") {
 		t.Fatal("the join did not wait for the room's description")
 	}
 	awaitOnline(t, g)
-	if len(fake.describes) != 1 || fake.describes[0] != "wss://relay.example.test/relay ABC234" {
+	if len(fake.describes) != 1 || fake.describes[0] != "wss://relay.example.test/relay CFH234" {
 		t.Fatalf("describe calls %v", fake.describes)
 	}
 	// The room's mod is fixed: a missing one is named, nothing is joined,
@@ -579,14 +598,14 @@ func TestOnlineJoinRequestsTheRoomsMod(t *testing.T) {
 	}
 	other := want
 	other.Archive[0] ^= 1
-	g.adoptOnlineRoom(onlineRoom{address: "wss://relay.example.test/relay", code: "ABC234", config: encode(other)}, false)
+	g.adoptOnlineRoom(onlineRoom{address: "wss://relay.example.test/relay", code: "CFH234", config: encode(other)}, false)
 	if pendingContentReload != nil || !strings.Contains(g.online.status, "different copy") {
 		t.Fatalf("another copy: reload %v, status %q", pendingContentReload, g.online.status)
 	}
-	room := onlineRoom{address: "wss://relay.example.test/relay", code: "ABC234", config: encode(want)}
+	room := onlineRoom{address: "wss://relay.example.test/relay", code: "CFH234", config: encode(want)}
 	g.adoptOnlineRoom(room, false)
 	r := pendingContentReload
-	if r == nil || r.selector != "testmod@1" || r.mod.ID != "testmod" || r.online == nil || r.online.code != "ABC234" || r.mutators != g.opts.Mutators {
+	if r == nil || r.selector != "testmod@1" || r.mod.ID != "testmod" || r.online == nil || r.online.code != "CFH234" || r.mutators != g.opts.Mutators {
 		t.Fatalf("reload request %+v", r)
 	}
 	if !strings.Contains(g.online.status, "testmod 1") || g.online.phase != onlineConnecting || len(fake.opens) != 0 {
@@ -598,5 +617,37 @@ func TestOnlineJoinRequestsTheRoomsMod(t *testing.T) {
 	g.adoptOnlineRoom(room, true)
 	if pendingContentReload != nil || !strings.Contains(g.online.status, "could not be selected") {
 		t.Fatalf("remounted mismatch: %q", g.online.status)
+	}
+}
+
+// A browser hands a pasted code to the engine as a paste key's token
+// (web/clipboard.js): Ctrl+V as pressed, and Insert for Command+V and its
+// menus. Either fills the focused code field, shown as the relay spells codes;
+// a paste with no text leaves the field alone [07 §2].
+func TestOnlineCodeFieldTakesAPastedCode(t *testing.T) {
+	g := onlineTestShell(t)
+	g.activateGadget("MULTI")
+	g.activateGadget("JOIN")
+	cl, err := client.New(client.Options{Buffer: &frame.Buffer{}, Width: 640, Height: 480})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paste := func(token input.Token) string {
+		cl.Input().EnqueueToken(token)
+		g.menuInput(cl)
+		g.pollOnline()
+		return g.online.panel.TextOf("ADDRESS")
+	}
+	if got := paste(input.Token{Kind: input.TokenEdit, Key: input.KeyInsert, Clipboard: input.ClipboardText{Text: "k7m-2px", Available: true}}); got != "K7M-2PX" {
+		t.Fatalf("Insert paste: %q", got)
+	}
+	if got := paste(input.Token{Kind: input.TokenEdit, Key: input.KeyV, Ctrl: true, Clipboard: input.ClipboardText{Text: "cfh 234", Available: true}}); got != "CFH 234" {
+		t.Fatalf("Ctrl+V paste: %q", got)
+	}
+	if got := paste(input.Token{Kind: input.TokenEdit, Key: input.KeyInsert}); got != "CFH 234" {
+		t.Fatalf("a paste with no text changed the field: %q", got)
+	}
+	if g.online.view != onlineCodeEntry || !g.online.panel.EditorCaptured() {
+		t.Fatal("pasting left the code entry")
 	}
 }

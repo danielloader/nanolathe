@@ -1,13 +1,18 @@
 import {BrowserFS} from './fs.js';
 import {BrowserStorage} from './storage.js';
 import {installBrowserGestures} from './gestures.js';
+import {installFrameGate} from './frames.js';
+import {installBrowserClipboard} from './clipboard.js';
 
 const run = new URLSearchParams(location.search).get('run');
 const host = parent.nanolatheBrowserHost;
 const config = host?.getLaunch(run);
 const post = (type, payload) => parent.postMessage({channel:'nanolathe', run, type, payload}, location.origin);
 if (config) {
+  // Online play keeps a hidden page in step between the engine's frames.
+  installFrameGate(window);
   const stopGestures = installBrowserGestures(window, event => window.nanolatheBrowserGesture?.(event));
+  const stopClipboard = installBrowserClipboard(window, text => window.nanolatheBrowserPaste?.(text));
   try {
     const storage = new BrowserStorage(config.storage, () => post('storage'));
     const install = new BrowserFS(config.files, storage, text => post('log', text), result => post('persistence', result));
@@ -44,5 +49,6 @@ if (config) {
     post('stopped', 'Startup failed: ' + error.message);
   } finally {
     stopGestures();
+    stopClipboard();
   }
 }

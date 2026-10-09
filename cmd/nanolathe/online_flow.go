@@ -248,6 +248,17 @@ func (g *gameShell) startOnlineCreate() {
 	g.refreshOnlinePanel()
 }
 
+// onlineCodeHint says why a normalized code is not one: the first character
+// codes never use, such as O or 1, or else its length.
+func onlineCodeHint(code string) string {
+	for _, r := range code {
+		if !strings.ContainsRune(relay.RoomCodeAlphabet, r) {
+			return fmt.Sprintf("Room codes never use %q. Check the code your friend sent.", r)
+		}
+	}
+	return "Room codes are six letters and digits. Check the code your friend sent."
+}
+
 // startOnlineJoin asks the relay for the typed room's configuration.
 func (g *gameShell) startOnlineJoin() {
 	s := g.online
@@ -256,7 +267,7 @@ func (g *gameShell) startOnlineJoin() {
 	}
 	code, ok := relay.NormalizeRoomCode(s.panel.TextOf("ADDRESS"))
 	if !ok {
-		g.onlineIdleStatus("Room codes are six letters and digits. Check the code your friend sent.")
+		g.onlineIdleStatus(onlineCodeHint(code))
 		return
 	}
 	address, options, ok := g.onlineServerChoice()

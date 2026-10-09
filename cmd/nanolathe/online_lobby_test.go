@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
@@ -355,57 +354,5 @@ func TestOnlineDefeatedSeatSeesItsResult(t *testing.T) {
 	b.multiplayer.failure = errors.New("test disconnect")
 	if b.isResultVisible() {
 		t.Fatal("a failed transport showed a result")
-	}
-}
-
-type fakeNetClient struct {
-	fakeGrantStream
-	grants []relay.LocalGrant
-	seq    uint64
-}
-
-func (c *fakeNetClient) Submit([]byte) (uint64, error) { c.seq++; return c.seq, nil }
-func (c *fakeNetClient) ReadGrant() (relay.LocalGrant, error) {
-	g := c.grants[0]
-	c.grants = c.grants[1:]
-	return g, nil
-}
-
-func TestOnlineNetStatsMeasureOrdersStallsAndRate(t *testing.T) {
-	b := newTestBattle(testCatalogON05(), testWorldON05(20, 20))
-	sess := b.sess
-	fake := &fakeNetClient{grants: []relay.LocalGrant{{Tick: 5, Commands: []relay.LocalCommand{{Seat: 1, Sequence: 1}, {Seat: 0, Sequence: 1}}}}}
-	n := newOnlineNetStats(fake, 1, 2)
-	start := time.Now()
-	if _, err := n.Submit(nil); err != nil {
-		t.Fatal(err)
-	}
-	n.submitted[1] = start
-	if _, err := n.ReadGrant(); err != nil {
-		t.Fatal(err)
-	}
-	sess.Clock.GlobalTick = 1
-	n.observe(sess, start.Add(10*time.Millisecond))
-	sess.Clock.GlobalTick = 5
-	n.observe(sess, start.Add(80*time.Millisecond))
-	if len(n.latency) != 1 || n.latency[0] != 80 {
-		t.Fatalf("latency %v", n.latency)
-	}
-	sess.Clock.GlobalTick = 6
-	n.observe(sess, start.Add(380*time.Millisecond))
-	if n.stalls != 1 {
-		t.Fatalf("stalls %d", n.stalls)
-	}
-	lines := strings.Join(n.overlayLines(sess), "\n")
-	for _, want := range []string{"tick 6", "p50 80 ms", "Checksum sent at tick 0", "Player 2 (You)  playing"} {
-		if !strings.Contains(lines, want) {
-			t.Fatalf("overlay %q lacks %q", lines, want)
-		}
-	}
-	summary := n.summary(sess, "ended")
-	for _, want := range []string{"online match ended", "6 ticks", "p50 80 ms", "stalls 1"} {
-		if !strings.Contains(summary, want) {
-			t.Fatalf("summary %q lacks %q", summary, want)
-		}
 	}
 }

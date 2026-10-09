@@ -4,7 +4,7 @@
 
 Nanolathe is an independent, open-source **2.5D real-time strategy engine in Go**.
 Its current focus is a clean-room reimplementation of Total Annihilation for
-single-player skirmish and campaign play, with documented game formats and an
+skirmish, campaign and online play, with documented game formats and an
 experimental GPU renderer. It is under active development, with incomplete
 behavior and compatibility gaps.
 
@@ -139,11 +139,15 @@ conversion is needed. Music starts when a battle begins. Options → Music
 controls volume, playback mode and track selection. The main menu retains its
 retail ambient loop.
 
-Online multiplayer for two players starts from the main menu's MULTI button:
-one player creates a game and shares its room code, the other joins with it
-(see [docs/DESIGN_MULTIPLAYER.md](docs/DESIGN_MULTIPLAYER.md)). For implemented
-contracts and known gaps, read the design document for the relevant engine
-area.
+Online multiplayer starts from the main menu's MULTI button: one player
+creates a game and shares its six-character room code, and the others join
+with it. A room plays skirmish for 2–10 players, as many as the map's start
+positions allow, or Survival for 2–3 survivors. In the lobby each player
+picks a team, side and colour, and the host chooses the map and options.
+Every player needs their own game files and the host's mod, if it uses one.
+[docs/DESIGN_MULTIPLAYER.md](docs/DESIGN_MULTIPLAYER.md) describes what is
+built and what comes next. For implemented contracts and known gaps, read the
+design document for the relevant engine area.
 
 ## Contributors and AI agents
 

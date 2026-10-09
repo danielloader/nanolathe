@@ -336,9 +336,7 @@ func (g *gameShell) activateGadget(name string) {
 				g.openModsScreenReporting()
 			}
 		case "MULTI":
-			if onlinePlayAvailable() {
-				g.openOnlineScreenReporting()
-			}
+			g.openOnlineScreenReporting()
 		case "INTRO":
 			reportRetailMessageError(g.startIntro(clPtr))
 		case "Credits":

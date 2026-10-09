@@ -607,8 +607,8 @@ func TestHostedVersionAndHelloFraming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, flags, size, _, config, err := decodeHostedHello(body); err != nil || code != "" || flags != hostedAutoStart || size != 4 || string(config) != "configuration" {
-		t.Fatalf("creator hello round trip: %q %d %d %q %v", code, flags, size, config, err)
+	if h, err := decodeHostedHello(body); err != nil || h.version != hostedVersion || h.code != "" || h.flags != hostedAutoStart || h.size != 4 || string(h.config) != "configuration" {
+		t.Fatalf("creator hello round trip: %+v %v", h, err)
 	}
 	for _, mutate := range []func([]byte) []byte{
 		func(b []byte) []byte { b[0] = localHelloMessage; return b },
@@ -616,15 +616,20 @@ func TestHostedVersionAndHelloFraming(t *testing.T) {
 		func(b []byte) []byte { return append(b, 0) },
 		func(b []byte) []byte { return b[:len(b)-1] },
 	} {
-		if _, _, _, _, _, err := decodeHostedHello(mutate(bytes.Clone(body))); err == nil {
+		if _, err := decodeHostedHello(mutate(bytes.Clone(body))); err == nil {
 			t.Fatal("accepted malformed versioned hello")
 		}
 	}
-	// A version-1 client is told both versions.
+	// A version-1 client is told the served versions and its own; a
+	// version-5 hello is still served, in its own version (§12.2).
 	old := bytes.Clone(body)
 	old[1] = 1
-	if _, _, _, _, _, err := decodeHostedHello(old); err == nil || !strings.Contains(err.Error(), "version 5; this client sent version 1") {
+	if _, err := decodeHostedHello(old); err == nil || !strings.Contains(err.Error(), "version 5 or 6; this client sent version 1") {
 		t.Fatalf("version mismatch: %v", err)
+	}
+	old[1] = 5
+	if h, err := decodeHostedHello(old); err != nil || h.version != 5 {
+		t.Fatalf("version-5 hello: %+v %v", h, err)
 	}
 	for _, code := range []string{"SHORT", "AAAAAAA", "AAAAA0", "aaaaaa", "AAA AA"} {
 		if _, err := encodeHostedHello(code, 0, 0, localTestHello(1), nil); err == nil {
@@ -633,13 +638,13 @@ func TestHostedVersionAndHelloFraming(t *testing.T) {
 	}
 	// A joiner carries no creator flags, size or configuration; a creator
 	// names a size of 2 to 10 seats.
-	if _, err := encodeHostedHello("ABCDEF", hostedAutoStart, 0, localTestHello(1), nil); err == nil {
+	if _, err := encodeHostedHello("CFHJKM", hostedAutoStart, 0, localTestHello(1), nil); err == nil {
 		t.Fatal("joiner sent creator flags")
 	}
-	if _, err := encodeHostedHello("ABCDEF", 0, 2, localTestHello(1), nil); err == nil {
+	if _, err := encodeHostedHello("CFHJKM", 0, 2, localTestHello(1), nil); err == nil {
 		t.Fatal("joiner sent a room size")
 	}
-	if _, err := encodeHostedHello("ABCDEF", 0, 0, localTestHello(1), []byte{1}); err == nil {
+	if _, err := encodeHostedHello("CFHJKM", 0, 0, localTestHello(1), []byte{1}); err == nil {
 		t.Fatal("joiner sent a configuration")
 	}
 	for _, size := range []int{0, 1, 11} {
@@ -647,8 +652,43 @@ func TestHostedVersionAndHelloFraming(t *testing.T) {
 			t.Fatalf("created a room of %d seats", size)
 		}
 	}
-	if code, ok := NormalizeRoomCode(" abc-def "); !ok || code != "ABCDEF" {
+	if code, ok := NormalizeRoomCode(" cfh-jk5 "); !ok || code != "CFHJK5" {
 		t.Fatalf("typed code: %q %v", code, ok)
+	}
+}
+
+// Codes leave out every character a player could take for another, and a
+// typed lookalike letter reads as the digit it resembles (§16.5.1).
+func TestHostedRoomCodesAreUnambiguous(t *testing.T) {
+	for _, r := range "01OILDQSZBGAEUY" {
+		if strings.ContainsRune(hostedCodeAlphabet, r) {
+			t.Fatalf("alphabet holds %q", r)
+		}
+	}
+	if code, ok := NormalizeRoomCode("s z-b g c f"); !ok || code != "5286CF" {
+		t.Fatalf("lookalike letters: %q %v", code, ok)
+	}
+	for _, typed := range []string{"CFHJK0", "CFHJKO", "CFHJK1", "CFHJKI", "CFHJKL", "CFHJKD", "CFHJK", "CFHJKMN"} {
+		if code, ok := NormalizeRoomCode(typed); ok {
+			t.Fatalf("accepted %q as %q", typed, code)
+		}
+	}
+	seen := map[byte]bool{}
+	for range 48 {
+		code, err := newHostedCode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !validHostedCode(code) {
+			t.Fatalf("generated %q", code)
+		}
+		for i := range code {
+			seen[code[i]] = true
+		}
+	}
+	// 288 draws reach all 21 symbols except with probability below 1e-17.
+	if len(seen) != len(hostedCodeAlphabet) {
+		t.Fatalf("generated %d of %d symbols", len(seen), len(hostedCodeAlphabet))
 	}
 }
 
@@ -690,7 +730,7 @@ func TestHostedCancellationClosesPendingHandshake(t *testing.T) {
 func TestHostedClientIdleBoundOnlyAfterGrants(t *testing.T) {
 	// Before the battle a creator may wait for its peer; the relay's own
 	// waiting deadline reports that, not the client's idle bound.
-	s := listenHostedTest(t, HostedConfig{InsecureLoopback: true}, hostedTimeouts{10 * time.Second, 200 * time.Millisecond, 5 * time.Second, 10 * time.Second})
+	s := listenHostedTest(t, HostedConfig{InsecureLoopback: true}, hostedTimeouts{10 * time.Second, 200 * time.Millisecond, 5 * time.Second, 10 * time.Second, websocketPingInterval, time.Second})
 	creator, _ := dialHostedTest(t, s, "", 0)
 	creator.idle = 20 * time.Millisecond
 	if _, err := creator.ReadGrant(); err == nil || !strings.Contains(err.Error(), "room wait") {

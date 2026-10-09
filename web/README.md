@@ -40,6 +40,48 @@ The default artifact is asset-free. Generated output under `build/browser` is
 ignored; no original assets are committed. Public demo hosting is the
 website's decision and pipeline, recorded in DESIGN_BROWSER_HOST §3 and §6.
 
+## Online play
+
+With an imported retail folder, **MULTI** plays online through the relay's
+WebSocket (`relay.nanolathe.gg` by default). To try it against a relay on this
+computer, start one from the same checkout and enter its loopback URL in the
+browser's **Server** popup:
+
+```sh
+go run ./cmd/nanolathe-server --websocket --insecure-loopback --listen 127.0.0.1:39032
+# Server: ws://127.0.0.1:39032/relay
+```
+
+A native client joins the same rooms through its own MULTI screen with the
+same server. Ctrl+V and Command+V paste a room code, and the lobby's **Copy**
+writes it to the clipboard. A hidden or backgrounded tab keeps its online
+game in step (DESIGN_BROWSER_HOST §4 contract 10).
+
+## Online acceptance — 2026-10-09
+
+Headless desktop Chrome 154 on macOS with an imported retail folder played
+three online skirmishes with a native seat (an in-process shell driving the
+ordinary MULTI screen, lobby and paced driver) through a loopback
+`nanolathe-server --websocket --insecure-loopback` relay at protocol 6:
+
+- native host, browser joiner on Ashap Plateau: the code pasted with
+  Command+V, Copy returned it, 4 minutes and 7,245 ticks, the tab hidden for
+  44 seconds mid-battle; both seats stopped at tick 7,245 when the native
+  seat left;
+- native host, browser joiner, the tab hidden before the host pressed Start
+  and again for six and a half minutes: the browser entered the battle in the
+  background, and the native summary reports 15,256 ticks in 8 minutes
+  28 seconds, average and worst 30.0 ticks/s, no stalls;
+- browser host on Acid Foursome, the native seat joining with the code Copy
+  wrote, the tab hidden for 32 seconds: 2,249 ticks, one opening stall.
+
+Every `+net` capture on both seats showed "Checksums agreed through tick N"
+within a second of the current tick, and the relay logged no checksum
+failure. Hiding a headless tab needs focus emulation turned off first: with
+it on, Chrome keeps a background tab visible. The one stall a seat saw, 0.6–
+0.8 s at tick 32, came when a visible browser entered the battle and drew
+its first frames.
+
 ## Publishing
 
 Every push to `main` whose browser, hygiene and simulation CI jobs pass runs

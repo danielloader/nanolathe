@@ -23,10 +23,14 @@ func (g *gameShell) disableUnavailableFrontendEntries(window *gui.Window, mode s
 	switch mode {
 	case modeMenuMain:
 		disable("SINGLE", !g.frontendPanelAvailable(modeMenuSingle))
+		// Online rooms are skirmish or Survival battles, so MULTI needs what
+		// those entries need: the browser's demo, with no skirmish maps,
+		// greys it (DESIGN_MULTIPLAYER §16.6.2, DESIGN_BROWSER_HOST §3).
+		disable("MULTI", !g.skirmishContentAvailable())
 		disable("INTRO", !g.frontendFilesPresent(introPath))
 		disable("Credits", !g.frontendFilesPresent(creditsMoviePath))
 	case modeMenuSingle:
-		maps := g.frontendPanelAvailable(modeMenuSkirmish) && g.frontendPanelAvailable(modeMenuMap) && g.hasSkirmishTerrain()
+		maps := g.skirmishContentAvailable()
 		disable("Skirmish", !maps)
 		disable(survivalButton, !maps)
 		campaign := g.frontendPanelAvailable(modeMenuMission) && g.frontendFilesPresent("guis/msnbrief.gui") && g.hasFrontendCampaign()
@@ -35,6 +39,12 @@ func (g *gameShell) disableUnavailableFrontendEntries(window *gui.Window, mode s
 		disable("Options", !g.frontendFilesPresent(retailOptionsGUI, retailOptionsBackdrop))
 		disable("LoadGame", !g.frontendLoadDialogAvailable())
 	}
+}
+
+// skirmishContentAvailable reports that the mounted content can set up and
+// play a skirmish: its setup and map screens load and it has a map.
+func (g *gameShell) skirmishContentAvailable() bool {
+	return g.frontendPanelAvailable(modeMenuSkirmish) && g.frontendPanelAvailable(modeMenuMap) && g.hasSkirmishTerrain()
 }
 
 func (g *gameShell) frontendPanelAvailable(mode shellMode) bool {

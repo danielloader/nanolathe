@@ -392,9 +392,9 @@ type Client struct {
 	// (DESIGN_GPU_RENDERER §14.3) [I1][I6].
 	detailArt    *DetailArt
 	detailFrames map[*formats.GAFFrame]*formats.GAFFrame
-	// chromeBanks are the interface banks the HUD registered, by logical path;
-	// chromeFrames maps their frames to the provider's 2x chrome remaster.
-	chromeBanks  map[string]*formats.GAF
+	// chromeBanks are the interface banks the HUD registered; chromeFrames maps
+	// their frames to the provider's 2x chrome remaster.
+	chromeBanks  []chromeBank
 	chromeFrames map[*formats.GAFFrame]*formats.GAFFrame
 	// doubledFrames is the nearest-doubled fallback cache, provider-independent
 	// and kept for the client's life. enhanced records that the Enhanced

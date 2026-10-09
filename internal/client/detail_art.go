@@ -51,8 +51,8 @@ func (c *Client) SetDetailArt(art *DetailArt) {
 		c.chromeBanks = nil
 		return
 	}
-	for path, bank := range c.chromeBanks { // presentation cache; no sim order [I1]
-		c.indexChromeBank(path, bank)
+	for _, registered := range c.chromeBanks {
+		c.indexChromeBank(registered.path, registered.bank)
 	}
 	c.detailFrames = map[*formats.GAFFrame]*formats.GAFFrame{}
 	for name, bank := range c.featureGAFs { // presentation cache; no sim order [I1]
@@ -144,18 +144,26 @@ func (c *Client) indexDetailBank(name string, bank *formats.GAF) {
 	}
 }
 
-// RegisterChromeBank records an interface bank the HUD loaded, under its
-// logical path, so its frames can take the provider's 2x chrome remaster.
-// Registering a path again replaces the earlier bank.
+type chromeBank struct {
+	path string
+	bank *formats.GAF
+}
+
+// RegisterChromeBank records an interface bank the HUD draws from, under its
+// logical path, so its frames can take the provider's 2x chrome remaster. One
+// path may have several loaded copies: with a menu shell the HUD's buttons
+// take their art from the shell's own commongui, not the HUD's.
 func (c *Client) RegisterChromeBank(path string, bank *formats.GAF) {
 	if c == nil || bank == nil {
 		return
 	}
-	path = strings.ToLower(strings.TrimSpace(path))
-	if c.chromeBanks == nil {
-		c.chromeBanks = map[string]*formats.GAF{}
+	for _, registered := range c.chromeBanks {
+		if registered.bank == bank {
+			return
+		}
 	}
-	c.chromeBanks[path] = bank
+	path = strings.ToLower(strings.TrimSpace(path))
+	c.chromeBanks = append(c.chromeBanks, chromeBank{path, bank})
 	c.indexChromeBank(path, bank)
 }
 

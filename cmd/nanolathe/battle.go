@@ -808,6 +808,9 @@ func installBattleClient(cl *client.Client, b *battleSession) {
 	// The detail-art provider is installed with the terrain it belongs to and
 	// cleared by the SetTerrain(nil) of teardown (DESIGN_GPU_RENDERER §14.3).
 	cl.RegisterChromeBank(chromeCommonGAF, b.hud.common)
+	if b.shell != nil && b.shell.assets != nil {
+		cl.RegisterChromeBank(chromeCommonGAF, b.shell.assets.common)
+	}
 	cl.RegisterChromeBank(b.hud.intGAFPath, b.hud.intGAF)
 	cl.SetDetailArt(b.detail)
 	cl.SetCamera(b.cam)

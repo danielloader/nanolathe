@@ -79,6 +79,12 @@ func TestChromeRemasterOnlyInsideTwoXRegions(t *testing.T) {
 	if c.chromeDetail(source) != variant {
 		t.Fatal("Enhanced inside a 2x region must draw the remaster")
 	}
+	// A second loaded copy of the bank, as a menu shell keeps, maps too.
+	shellCopy := &formats.GAFFrame{Width: 1, Height: 1, Pixels: []byte{1}, Transparent: []bool{false}}
+	c.RegisterChromeBank("anims/commongui.gaf", &formats.GAF{Entries: []formats.GAFEntry{{Name: "ARMMOVE", Frames: []formats.GAFFrameRef{{Frame: shellCopy}}}}})
+	if c.chromeDetail(shellCopy) != variant {
+		t.Fatal("every registered copy of a bank must draw the remaster")
+	}
 	c.chrome.scale = 3
 	if c.chromeDetail(source) != nil {
 		t.Fatal("only a 2x region matches the remaster's resolution")

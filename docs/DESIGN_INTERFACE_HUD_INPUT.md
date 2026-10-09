@@ -4423,14 +4423,46 @@ the chooser, which says whether the game ended, stopped (with the
 transport's reason) or was left.
 
 In an online battle `+net`, or the FPS display, shows a network overlay at the
-top left of the world view: executed ticks per second, buffered grants,
-stalls (gaps of more than three tick intervals between executed ticks), this
-seat's order latency from submission to the executed tick (median and 95th
-percentile of the recent orders), the last tick a checksum was sent, and each
-player as playing, defeated or won. At the end the host prints a summary to
-standard error: how the match ended, its duration and ticks, the average and
-worst ticks per second, order latency and stalls. These are host timings
-only.
+top left of the world view, below the resource strip, in the side's console
+face. Its first line gives the executed tick, the ticks executed in the last
+second and the stalls (gaps of more than three tick intervals between
+executed ticks). The second gives the grants received ahead of the executed
+tick and the grant jitter: the 95th percentile, over the last five seconds,
+of how far each grant's arrival gap strays from a thirtieth of a second.
+Then come the relay round trip, from this seat submitting an order to the
+grant that carries it, and the order latency, from submission to the
+executed tick, each as the median and 95th percentile of the latest 64
+orders; and the traffic in and out over the last second, in kilobytes and
+messages a second, from the connection's own counters ("Traffic not
+reported" on a connection without them).
+
+With the relay's match report
+([DESIGN_MULTIPLAYER §16.5.2](DESIGN_MULTIPLAYER.md#1652-continuous-grants-and-client-playout))
+the next line reads "Checksums agreed through tick _n_", the last tick whose
+battle-ended bits, and on every 30th tick unit checksums, the relay has
+compared across every playing seat. A table of the human seats follows, one
+row each: "Player _n_", marked "(You)"; the state; the relay's ping to the
+seat ("--" until measured, in seconds from one second); and how many ticks
+the seat is behind the newest grant this client holds. The state is playing,
+defeated or won from the shared results, left once the relay no longer
+compares the seat, or holding, in red, for the slowest playing seat once it
+is 30 ticks behind — the relay's lead bound, where every other seat stalls —
+unless every playing seat is as far behind, as while the opening holds them
+all. Without a report (an older relay, or the loopback play test) the line
+reads "No match report from the relay" and each seat shows only playing,
+defeated or won, so a seat that left cannot be told from one still there.
+
+With the FPS panel also shown the overlay stays beside the panel where it
+fits and otherwise goes below it, its seat rows in two blocks when one is
+too tall for the space left. Cells are two spaces apart, closing towards one
+where the width is short. From 640×480 up it covers neither strip nor the
+panel.
+
+At the end the host prints one line to standard error: how the match ended,
+its duration and ticks, the average and worst ticks per second, the relay
+round trip and order latency (median and 95th percentile over the match),
+the connection's traffic in and out (bytes and messages) and the stalls.
+All of these are host timings; nothing reaches the simulation.
 
 ### 3.17 The Nanolathe screen
 

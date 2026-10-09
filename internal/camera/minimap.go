@@ -21,13 +21,21 @@ func LayoutMinimap(mapW, mapH int32) Minimap {
 	return LayoutMinimapCanvas(mapW, mapH, MinimapLongSide)
 }
 
-// LayoutMinimapCanvas fits the playable map into a side×side canvas by
-// LayoutMinimap's arithmetic. Only the magnified sidebar's radar picture uses
-// another side (DESIGN_INTERFACE_HUD_INPUT "Modern UI scale"); input and
-// world mapping keep the 126-pixel canvas.
+// LayoutMinimapCanvas magnifies the canonical fitted rectangle into a side×side
+// canvas. Fit truncation and half-padding happen before magnification, so sharp
+// picture edges agree with input's canonical lens (Modern UI scale).
 func LayoutMinimapCanvas(mapW, mapH, side int32) Minimap {
 	if mapW <= 0 || mapH <= 0 || side <= 0 {
 		return Minimap{}
+	}
+	if side != MinimapLongSide {
+		m := LayoutMinimap(mapW, mapH)
+		return Minimap{
+			PadX: m.PadX * side / MinimapLongSide,
+			PadY: m.PadY * side / MinimapLongSide,
+			W:    max(m.W*side/MinimapLongSide, 1),
+			H:    max(m.H*side/MinimapLongSide, 1),
+		}
 	}
 	if mapW < mapH {
 		w := int32(int64(mapW) * int64(side) / int64(mapH))

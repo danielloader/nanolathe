@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/nanolathe-gg/nanolathe/formats"
+	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
-	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/lockstep"
 	"github.com/nanolathe-gg/nanolathe/internal/relay"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
@@ -556,13 +556,15 @@ func (l onlineNetLayout) blockGap() int { return 2 * l.space }
 // beside the panel when it fits there, and otherwise goes below it, its seat
 // rows then in two blocks when one block is too tall for the space left.
 // Cells are two spaces apart, closing to one where the width is short.
-func (l onlineNetLayout) place(screenW, screenH int, fps bool, messages int) onlineNetLayout {
+func (l onlineNetLayout) place(screenW, screenH int, fps bool, messages int, chrome camera.ChromeInsets) onlineNetLayout {
 	const clearance = 2
-	left, top := hud.ChromeRailX+2, hud.ChromeStripHeight+4
+	cam := camera.Camera{Chrome: chrome}
+	rail, strip, footer := cam.ChromeInset()
+	left, top := int(rail)+2, int(strip)+4
 	// The message column shares the corner; its visible lines stay readable
 	// above the overlay, which moves down while they show.
 	top = max(top, messages+clearance)
-	right, bottom := screenW-clearance, int(hud.BottomStripY(int32(screenH)))-clearance
+	right, bottom := screenW-clearance, screenH-int(footer)-clearance
 	type candidate struct{ y, blocks, right int }
 	candidates := []candidate{{top, 1, right}, {top, 2, right}}
 	var panel image.Rectangle
@@ -608,7 +610,8 @@ func (h *retailBattleHUD) drawOnlineNetwork(c *client.Client, b *battleSession) 
 	}
 	o := b.multiplayer.net.overlay(b.sess)
 	screenW, screenH := c.Size()
-	l := onlineNetMeasure(h.console, o).place(screenW, screenH, b.fpsShown(), c.MessageColumnBottom())
+	railInset, topInset, bottomInset := b.cam.ChromeInset()
+	l := onlineNetMeasure(h.console, o).place(screenW, screenH, b.fpsShown(), c.MessageColumnBottom(), camera.ChromeInsets{Left: railInset, Top: topInset, Bottom: bottomInset})
 	r := l.backdrop
 	c.UIFillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), h.guiColor(0))
 	for i, line := range o.lines {

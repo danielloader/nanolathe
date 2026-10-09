@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/checkpoint"
+	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
 // Most physical per-handle rows are empty. Adding empty slots must not format
@@ -183,6 +186,40 @@ func TestMovementCheckpointIndexedRowsAllocation(t *testing.T) {
 				t.Fatalf("indexed rows allocate diagnostic paths: small=%g large=%g", small, large)
 			}
 		})
+	}
+}
+
+// Fixed air-base diagnostic names must preserve the ten row counts, handle
+// payloads and exact sink-error paths (DESIGN_MULTIPLAYER §16.3.81).
+func TestMovementCheckpointAirBaseRowsVectorAndErrors(t *testing.T) {
+	s := &System{}
+	empty := movementCheckpointBytes(t, s)
+	pads := make([]*units.Unit, 10)
+	var rows [20]uint32
+	for owner := range pads {
+		handle := pool.Handle(100 - owner)
+		pads[owner] = &units.Unit{Handle: handle, Owner: uint8(owner), Alive: true, Activated: true,
+			Def: &content.UnitDef{Builder: true, IsAirBase: true}}
+		rows[owner*2], rows[owner*2+1] = 1, uint32(handle)
+	}
+	s.airBases.Rebuild(0, pads, nil)
+	c := movementCheckpointContext()
+	collectMovementCheckpoint(t, s, c)
+	write := func(e *checkpoint.Encoder) { _ = s.WriteCheckpoint(e, c) }
+	got := movementCheckpointWrite(t, write)
+	// The existing System vector has 206 bytes before the ten air-base rows.
+	// Empty rows are ten u32 counts; each authored row adds one u32 handle.
+	const prefix, emptyRows = 206, 40
+	wantRows := movementCheckpointVector(t, rows)
+	if len(got) != len(empty)+emptyRows || !bytes.Equal(got[:prefix], empty[:prefix]) ||
+		!bytes.Equal(got[prefix:prefix+len(wantRows)], wantRows) ||
+		!bytes.Equal(got[prefix+len(wantRows):], empty[prefix+emptyRows:]) {
+		t.Fatal("air-base row order, framing, handles or surrounding System bytes changed")
+	}
+	for owner := range pads {
+		path := fmt.Sprintf("movement.airBases.lists[%d]", owner)
+		assertMovementCheckpointOffsetError(t, write, prefix+owner*8, path)
+		assertMovementCheckpointOffsetError(t, write, prefix+owner*8+4, path)
 	}
 }
 

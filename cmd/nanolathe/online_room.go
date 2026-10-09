@@ -71,8 +71,11 @@ func onlineSettingsOf(r session.MatchConfigRequest) onlineSettings {
 }
 
 // onlinePlaceholderSeats seat a base configuration, which no battle composes:
-// the smallest room, two players without teams on the first side.
-func onlinePlaceholderSeats() []session.OnlineSeat { return make([]session.OnlineSeat, 2) }
+// the smallest room, two players without teams on the first side, in the
+// colours a room's first two seats take, 0 and 1 (no two seats share one).
+func onlinePlaceholderSeats() []session.OnlineSeat {
+	return []session.OnlineSeat{{Color: 0}, {Color: 1}}
+}
 
 // onlineFrozen is what a room keeps from its creation and never changes: the
 // seeds, the content's identity and transformations, and the request's fixed
@@ -164,7 +167,8 @@ func onlineConfig(cs *contentSet, cat *content.Catalog, settings onlineSettings,
 }
 
 // onlineSeatsOf are a lobby's present seats in ascending seat order, which is
-// slot order, and the local seat's slot. Survival has no teams.
+// slot order, with their teams, sides and colours, and the local seat's slot.
+// Survival has no teams.
 func onlineSeatsOf(state relay.HostedLobbyState, local uint8, survival bool) ([]session.OnlineSeat, uint8, bool) {
 	var seats []session.OnlineSeat
 	slot, found := uint8(0), false
@@ -180,7 +184,7 @@ func onlineSeatsOf(state relay.HostedLobbyState, local uint8, survival bool) ([]
 		if survival {
 			team = 0
 		}
-		seats = append(seats, session.OnlineSeat{Team: team, Side: seat.Side})
+		seats = append(seats, session.OnlineSeat{Team: team, Side: seat.Side, Color: seat.Color})
 	}
 	return seats, slot, found
 }

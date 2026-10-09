@@ -56,8 +56,8 @@ spectators (§11.4); rejoining after a disconnect (§11.2); match-wide view
 restrictions (§8.4); and eventual competitive play with verified results
 (§12.6).
 
-**Not built yet.** Computer seats; Strict 3.1 and Community online; side
-and colour choice in the lobby; alliance changes during a battle; watchers and spectators; replays (M4);
+**Not built yet.** Computer seats; Strict 3.1 and Community online;
+alliance changes during a battle; watchers and spectators; replays (M4);
 reconnect, departures and removal votes; room lists, chat and display
 names; the embedded LAN relay; pause and speed changes; relay-drawn seeds;
 ranked play.
@@ -1711,7 +1711,7 @@ acknowledgements and checksums.
 
 ### 12.2 Messages
 
-The hosted protocol is **version 4**; §16.5.1–§16.5.2 and §16.6.1 hold its
+The hosted protocol is **version 5**; §16.5.1–§16.5.2 and §16.6.1 hold its
 rules. Messages are bounded, length-prefixed binary frames in `netproto`
 primitives, carried over TLS or WebSocket (§12.3).
 
@@ -1719,7 +1719,7 @@ primitives, carried over TLS or WebSocket (§12.3).
 |---|---|---|
 | client → relay | Hello | protocol version, room code (empty to create), the seat's `LocalHello` (a joiner asks for any seat), flags (auto-start), and from a creator the room size and the encoded base configuration |
 | client → relay | Describe | a room code; answered with that room's base configuration and size |
-| client → relay | Team, Side | the sender's team or side, while it is not ready |
+| client → relay | Team, Side, Colour | the sender's team, side or colour (0–9), while it is not ready; a colour another present seat holds changes nothing |
 | client → relay | Configuration | from the host before Start, a replacement base configuration |
 | client → relay | Ready | the ready flag, and when set the seat's configuration-identity digest and rehearsal digest (§16.7) |
 | client → relay | Start | from the host seat only |
@@ -1727,7 +1727,7 @@ primitives, carried over TLS or WebSocket (§12.3).
 | client → relay | Acknowledge | the tick executed, the unit checksum at every 30th tick, the battle-ended bit and the seat-final bit |
 | relay → client | Welcome | the room code and the assigned seat |
 | relay → client | Description | the room's base configuration bytes and size |
-| relay → client | Lobby state | the room size; per seat whether it is present and ready, its team and side; and a mismatch bit when every present seat is ready but their digests differ |
+| relay → client | Lobby state | the room size; per seat whether it is present and ready, its team, side and colour; and a mismatch bit when every present seat is ready but their digests differ |
 | relay → client | Configuration | the room's latest base configuration, to each joiner and after every host change |
 | relay → client | Started | the match has started, with the sender's slot; grants follow |
 | relay → client | Grant | a sealed tick and its commands `{seat, sequence, position, payload}` |
@@ -1766,8 +1766,8 @@ or QUIC is a later decision if impaired-network measurements justify it.
 
 A room today is a frozen battle configuration reached by its code: the host
 creates it, a joiner enters the code, both ready, and the host starts
-(§16.6). Later the lobby grows room lists, seat, side, colour and team
-editing, computer seats, chat, display names and, last, accounts, ratings
+(§16.6). Later the lobby grows room lists, seat editing, computer seats,
+chat, display names and, last, accounts, ratings
 and matchmaking as web services beside the relay. The retail battleroom
 `[07 §12]` is the reference for what it offers (§3.3). Of retail's host
 options, *game closed* stays room state and *watching allowed* goes into the
@@ -5420,7 +5420,7 @@ reconnect and removal votes are later work.
 
 `internal/relay` reuses the loopback relay's grant, command and
 acknowledgement payloads and identity comparison, and adds the hosted
-handshake and lobby (§16.6.1). The hosted protocol is version 3; a hello of
+handshake and lobby (§16.6.1). The hosted protocol is version 5; a hello of
 another version is refused naming both versions.
 
 ```go
@@ -5637,8 +5637,8 @@ certificate.
 The main menu's MULTI entry offers two choices, Create Game and Join Game,
 with the server (default `relay.nanolathe.gg`) off the main path (§16.6.2).
 Create opens a lobby at once; players join with its code; the host adjusts
-the settings while everyone picks a team and side; when every player is
-ready the host starts the match. The lobby's rules:
+the settings while everyone picks a team, side and colour; when every player
+is ready the host starts the match. The lobby's rules:
 
 - **Rooms hold up to 10 players.** A skirmish can start with 2 up to the
   most start positions any of the map's network schemas offers; Survival
@@ -5662,12 +5662,20 @@ ready the host starts the match. The lobby's rules:
   (§6.7). A skirmish with every player on one team cannot start
   `[08 R-SKIR-01 §12]`. Survival has no team choice: the survivors are one
   side.
-- **Readiness follows the final configuration.** Any host setting, team or
-  side change, join or leave clears every seat's ready, because it changes
-  the configuration every seat composes. Pressing Ready composes the final
-  configuration — the base configuration plus the present seats in
-  ascending seat order as slots, with their teams and sides — prepares it,
-  runs the rehearsal (§16.7) and reports both digests.
+- **Colours.** Each player has one of the ten player colours (0–9, the logo
+  colours) and no two present players share one. A seat that is created or
+  joins takes the lowest colour no present seat holds, so a room's first
+  players are 0, 1, 2 and so on, and a leaver's colour is free again. A
+  player changes their own colour while not ready; a colour another present
+  player holds cannot be taken, and asking for it changes nothing. In
+  Survival the survivors keep their colours and the attacker takes the
+  first colour no survivor holds, red when it is free (DESIGN_SURVIVAL §4.1).
+- **Readiness follows the final configuration.** Any host setting, team,
+  side or colour change, join or leave clears every seat's ready, because
+  it changes the configuration every seat composes. Pressing Ready composes
+  the final configuration — the base configuration plus the present seats
+  in ascending seat order as slots, with their teams, sides and colours —
+  prepares it, runs the rehearsal (§16.7) and reports both digests.
 - **The host draws the seed pair** with `crypto/rand` when it creates the
   room; the configuration digest covers it (§8.3).
 - **Room codes are six characters** from the 32-symbol alphabet (§16.5.1).
@@ -5699,16 +5707,21 @@ The relay treats configurations as opaque bytes and interprets no gameplay.
   configuration are compared at Ready instead, because they depend on who
   is present.
 - **Lobby state** (relay to every seat, after every change): the room size;
-  per seat, present, ready and team; and a mismatch bit when every present
-  seat is ready but their digests differ.
+  per seat, present, ready, team, side and colour; and a mismatch bit when
+  every present seat is ready but their digests differ.
 - **Team** and **Side** (client to relay): the sender's team (0–5) or side,
   accepted only while that seat is not ready.
+- **Colour** (client to relay): the sender's colour (0–9), accepted only
+  while that seat is not ready and no other present seat holds it; otherwise
+  the room keeps its state. A colour above 9 is a protocol error, as a team
+  above 5 is. The creator's seat takes colour 0 and each joiner the lowest
+  colour no present seat holds; a room never has more seats than colours.
 - **Configuration** (host to relay, before Start): a replacement base
   configuration, at most 64 KiB, which the relay keeps for Describe and
   sends to every seat. Each joiner also receives the current configuration
   after its welcome.
-- A host setting, team or side change, join or leave clears every seat's
-  ready.
+- A host setting, team, side or colour change, join or leave clears every
+  seat's ready.
 - **Ready** (client to relay): the ready flag and, when set, the seat's
   configuration-identity digest (its final `MatchJoin` identity without the
   advisory build) and its rehearsal digest. **Start** (host only): accepted
@@ -5722,8 +5735,8 @@ The relay treats configurations as opaque bytes and interprets no gameplay.
   has reported its result final may disconnect: the relay stops waiting for
   it. Any other disconnect after Start fails the room.
 - Commands submitted before Start wait for the first grant. An
-  acknowledgement before Start fails the room. Ready, Team and Start after
-  Start are ignored.
+  acknowledgement before Start fails the room. Ready, Team, Side, Colour and
+  Start after Start are ignored.
 - A creator's hello may set the **auto-start** flag: the room starts as soon
   as it is full. `DialHosted` and `DialHostedWebSocket` create two-seat
   auto-start rooms and report ready at once with zero digests, for the
@@ -5734,20 +5747,23 @@ options) (HostedRoomDescription, error)` with the configuration and size;
 `OpenHostedLobby(ctx, address, room, hello, config, size, options)
 (*HostedLobby, error)`; and on `*HostedLobby`, `Code()`, `Seat()`,
 `State()` (the latest `HostedLobbyState` snapshot — size, per seat present,
-ready, team and side, the mismatch bit, the configuration version and
-Started, with the local slot once started — never blocking),
+ready, team, side and colour, the mismatch bit, the configuration version
+and Started, with the local slot once started — never blocking),
 `Configuration()` (the latest base configuration bytes), `SetTeam(team)`,
-`SetSide(side)`, `SetConfiguration(config)` (host only),
+`SetSide(side)`, `SetColor(color)` (below `HostedColors`, 10),
+`SetConfiguration(config)` (host only),
 `SetReady(ready, identity, rehearsal)`, `Start()` (seat 0 only), `Battle()` (the battle client once
 Started, which then owns the connection) and `Close()`. `address` is
 `host:port` for TLS or a `wss://host/relay` URL, as for `--relay-address`.
 
 The session's lobby helpers: `session.OnlineMatchSetup{Survival, MapName,
-Seats []OnlineSeat{Team, Side}, SimSeed, CRTSeed, SurvivalOptions,
+Seats []OnlineSeat{Team, Side, Color}, SimSeed, CRTSeed, SurvivalOptions,
 SideCount}` with `Rows()` (the seats, plus the attacker in Survival);
 `NewOnlineMatchRequest(setup, options, room)`, which names each seat
-"Player n" with participant slot+1, its own side, colour by slot and the
-ally group of its team (survivors share group 2 with colours 0, 2 and 3);
+"Player n" with participant slot+1, its own side and colour and the ally
+group of its team (survivors share group 2, and the attacker takes the first
+colour no survivor holds, red when free), and refuses a colour above 9 or
+one two seats share;
 `OnlineMapCapacity(cat, map)`, the most start positions any network schema
 offers, at most 10, which the lobby enforces; `OnlineMapSchema(fs, cat,
 map, rows)`, the schema for the total row count; and `OnlineSides(cat)`, the
@@ -5776,13 +5792,21 @@ sides' names in index order.
   later base configuration is adopted as it arrives; a map the player does
   not have is reported by name and keeps Ready disabled.
 - **Lobby**: the room code shown large, with Copy where the host clipboard
-  allows; a row per player with their team, side and readiness, the local
-  player's own team and side changed by clicking while not ready; the
-  host's settings (game type, Change map through the ordinary map picker,
-  Survival's options and the standard skirmish options); Ready/Not ready;
-  Start for the host, enabled when everyone present is ready, the digests
-  agree and the player count fits the map or Survival's limit; Leave. Ready
-  composes, prepares and rehearses off the game goroutine before reporting.
+  allows; a row per player with their team, side, colour and readiness, the
+  local player's own team, side and colour changed by clicking while not
+  ready; the host's settings (game type, Change map through the ordinary
+  map picker, Survival's options and the standard skirmish options);
+  Ready/Not ready; Start for the host, enabled when everyone present is
+  ready, the digests agree and the player count fits the map or Survival's
+  limit; Leave. Ready composes, prepares and rehearses off the game
+  goroutine before reporting.
+- **Colours**: the lobby shows the colour the relay gave each arrival, the
+  lowest free one. A left click on the player's own colour steps it one on
+  and a right click one back, skipping every colour another present player
+  holds, as the single-player setup screen does. Only present players hold
+  colours. The Survival attacker has no row and holds none: it takes the
+  first colour no survivor holds when the battle is composed, so with the
+  default 0, 1, 2 it is not red unless a survivor moves off red.
 - **Started**: the client enters its prepared battle and drives it from the
   lobby's battle client. A defeated player sees their result and may leave
   while the others play on. When the battle ends or the connection fails,

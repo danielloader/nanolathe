@@ -623,7 +623,7 @@ func TestHostedVersionAndHelloFraming(t *testing.T) {
 	// A version-1 client is told both versions.
 	old := bytes.Clone(body)
 	old[1] = 1
-	if _, _, _, _, _, err := decodeHostedHello(old); err == nil || !strings.Contains(err.Error(), "version 4; this client sent version 1") {
+	if _, _, _, _, _, err := decodeHostedHello(old); err == nil || !strings.Contains(err.Error(), "version 5; this client sent version 1") {
 		t.Fatalf("version mismatch: %v", err)
 	}
 	for _, code := range []string{"SHORT", "AAAAAAA", "AAAAA0", "aaaaaa", "AAA AA"} {

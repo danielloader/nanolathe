@@ -71,3 +71,35 @@ func TestSurvivalAbsentRosterUsesBoundBuildProducts(t *testing.T) {
 		t.Fatal("default director pool changed")
 	}
 }
+
+// TestSurvivalColoursAreDistinct locks the attacker's colour as the first one
+// no survivor holds, red when free, with a later survivor's colour 0 kept as
+// chosen rather than replaced by its row index (DESIGN_SURVIVAL §4.1).
+func TestSurvivalColoursAreDistinct(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		survivors []int
+		attacker  int
+	}{
+		{"defaults", []int{0, 2, 3}, 1},
+		{"human on red", []int{1}, 0},
+		{"later survivor on blue", []int{2, 0}, 1},
+		{"red and blue held", []int{2, 1}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			players := make([]SkirmishPlayer, len(tc.survivors))
+			for i, c := range tc.survivors {
+				players[i].Color = c
+			}
+			cfg := SurvivalConfigFor("fixture", players, SurvivalOptions{})
+			for i, c := range tc.survivors {
+				if cfg.Players[i].Color != c {
+					t.Fatalf("survivor %d colour %d, want %d", i, cfg.Players[i].Color, c)
+				}
+			}
+			if got := cfg.Players[len(tc.survivors)].Color; got != tc.attacker {
+				t.Fatalf("attacker colour %d, want %d", got, tc.attacker)
+			}
+		})
+	}
+}

@@ -14,11 +14,19 @@ import (
 // HostedMaxSeats is the largest hosted room (DESIGN_MULTIPLAYER §16.6).
 const HostedMaxSeats = 10
 
+// HostedColors is how many player colours a seat may choose: the colour
+// indices 0..9, one per frame of the logo art (DESIGN_MULTIPLAYER §16.6).
+const HostedColors = 10
+
+// Every seat of a full room can hold its own colour.
+const _ = uint(HostedColors - HostedMaxSeats)
+
 // HostedSeatState is one seat as the lobby reports it. Team is 0 for none or
-// 1..5 (Survival ignores it); Side indexes the catalog's sides.
+// 1..5 (Survival ignores it); Side indexes the catalog's sides; Color is the
+// seat's player colour, below HostedColors and held by no other present seat.
 type HostedSeatState struct {
-	Present, Ready bool
-	Team, Side     uint8
+	Present, Ready    bool
+	Team, Side, Color uint8
 }
 
 // HostedLobbyState is one seat's latest view of its room before Start
@@ -161,7 +169,10 @@ func (l *HostedLobby) read() {
 			}
 			for i := range st.Size {
 				bits := r.U8()
-				st.Seats[i] = HostedSeatState{Present: bits&1 != 0, Ready: bits&2 != 0, Team: r.U8(), Side: r.U8()}
+				st.Seats[i] = HostedSeatState{Present: bits&1 != 0, Ready: bits&2 != 0, Team: r.U8(), Side: r.U8(), Color: r.U8()}
+				if st.Seats[i].Color >= HostedColors {
+					r.Abort(hostedError("lobby state", "colours 0 to 9"))
+				}
 			}
 			st.Mismatch = flags&hostedLobbyMismatch != 0
 			if err := r.End(); err != nil {
@@ -255,6 +266,16 @@ func (l *HostedLobby) SetTeam(team uint8) error {
 // not ready.
 func (l *HostedLobby) SetSide(side uint8) error {
 	return l.send([]byte{hostedSideMessage, side})
+}
+
+// SetColor chooses this seat's player colour, 0..HostedColors-1, while not
+// ready. The relay ignores a colour another present seat holds, and a change
+// clears every seat's ready, as a team or side change does.
+func (l *HostedLobby) SetColor(color uint8) error {
+	if color >= HostedColors {
+		return hostedError("colour", "colours 0 to 9")
+	}
+	return l.send([]byte{hostedColorMessage, color})
 }
 
 // SetConfiguration replaces the room's base configuration (host only, at

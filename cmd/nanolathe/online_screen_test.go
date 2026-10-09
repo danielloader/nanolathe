@@ -190,6 +190,7 @@ type fakeOnlineLobby struct {
 	digests    [][32]byte
 	teams      []uint8
 	sides      []uint8
+	colors     []uint8
 	starts     int
 	closes     int
 	battle     lockstep.Client
@@ -197,10 +198,22 @@ type fakeOnlineLobby struct {
 
 func newFakeOnlineLobby(seat uint8, present ...int) *fakeOnlineLobby {
 	l := &fakeOnlineLobby{code: "ABC234", seat: seat, state: relay.HostedLobbyState{Size: relay.HostedMaxSeats}}
+	// Each arrival takes the lowest colour no present seat holds, as the
+	// relay assigns it.
 	for _, i := range present {
 		l.state.Seats[i].Present = true
+		l.state.Seats[i].Color = l.freeColor(i)
 	}
 	return l
+}
+
+func (l *fakeOnlineLobby) freeColor(seat int) uint8 {
+	for c := range uint8(relay.HostedColors) {
+		if !onlineColorHeld(l.state, seat, c) {
+			return c
+		}
+	}
+	return 0
 }
 
 func (l *fakeOnlineLobby) clearReady() {
@@ -229,6 +242,15 @@ func (l *fakeOnlineLobby) SetTeam(team uint8) error {
 func (l *fakeOnlineLobby) SetSide(side uint8) error {
 	l.sides = append(l.sides, side)
 	l.state.Seats[l.seat].Side = side
+	l.clearReady()
+	return nil
+}
+func (l *fakeOnlineLobby) SetColor(color uint8) error {
+	l.colors = append(l.colors, color)
+	if color >= relay.HostedColors || l.state.Seats[l.seat].Ready || onlineColorHeld(l.state, int(l.seat), color) {
+		return nil
+	}
+	l.state.Seats[l.seat].Color = color
 	l.clearReady()
 	return nil
 }

@@ -386,6 +386,80 @@ func TestHostedLobbyThreeSeatsTeamsSidesSettingsAndSlots(t *testing.T) {
 	awaitHostedCapacity(t, s, 0, 0)
 }
 
+// Player colours (DESIGN_MULTIPLAYER §16.6.1): each seat takes the lowest
+// colour no present seat holds; a colour another seat holds, or one asked for
+// while ready, changes nothing; a free colour is taken and clears every
+// seat's ready; a leaver's colour is free again; and a colour past the ten
+// is a protocol error.
+func TestHostedLobbyColours(t *testing.T) {
+	s := listenHostedTest(t, HostedConfig{InsecureLoopback: true}, hostedDefaultTimeouts)
+	options := HostedDialOptions{InsecureLoopback: true}
+	host := openSizedLobby(t, s.Addr(), 4, []byte{1}, options)
+	a := openLobbyTest(t, s.Addr(), host.Code(), 1, nil, options)
+	b := openLobbyTest(t, s.Addr(), host.Code(), 1, nil, options)
+	colours := func(want ...uint8) func(HostedLobbyState, error) bool {
+		return func(st HostedLobbyState, err error) bool {
+			for i, c := range want {
+				if !st.Seats[i].Present || st.Seats[i].Color != c {
+					return false
+				}
+			}
+			return err == nil
+		}
+	}
+	awaitLobby(t, host, "colours 0, 1 and 2", colours(0, 1, 2))
+	if err := a.SetColor(HostedColors); err == nil {
+		t.Fatal("a colour past the ten was sent")
+	}
+	// A held colour, and any colour from a ready seat, change nothing. The
+	// last message on a's connection, a ready with another rehearsal, makes
+	// a mismatch that only its arrival can show; by then the colours are
+	// handled, and had either applied, the others would not be ready.
+	readyAll(t, host, host, b)
+	steps := []func() error{
+		func() error { return a.SetColor(0) },
+		func() error { return a.SetReady(true, [32]byte{1}, [32]byte{2}) },
+		func() error { return a.SetColor(3) },
+		func() error { return a.SetReady(true, [32]byte{1}, [32]byte{9}) },
+	}
+	for _, step := range steps {
+		if err := step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	awaitLobby(t, host, "everyone ready in colours 0, 1 and 2, mismatched", func(st HostedLobbyState, err error) bool {
+		return colours(0, 1, 2)(st, err) && st.Seats[0].Ready && st.Seats[1].Ready && st.Seats[2].Ready && st.Mismatch
+	})
+	// A free colour is taken and clears every seat's ready.
+	if err := a.SetReady(false, [32]byte{}, [32]byte{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetColor(3); err != nil {
+		t.Fatal(err)
+	}
+	awaitLobby(t, host, "a in colour 3, nobody ready", func(st HostedLobbyState, err error) bool {
+		return colours(0, 3, 2)(st, err) && !st.Seats[0].Ready && !st.Seats[2].Ready
+	})
+	// b leaving frees colour 2 for the host; the next joiner takes the
+	// lowest free colour, the host's old 0.
+	_ = b.Close()
+	awaitLobby(t, host, "b gone", func(st HostedLobbyState, err error) bool { return err == nil && !st.Seats[2].Present })
+	if err := host.SetColor(2); err != nil {
+		t.Fatal(err)
+	}
+	awaitLobby(t, a, "the host in colour 2", colours(2, 3))
+	c := openLobbyTest(t, s.Addr(), host.Code(), 1, nil, options)
+	awaitLobby(t, host, "the next joiner in colour 0", colours(2, 3, 0))
+	// The relay refuses a colour past the ten that SetColor would not send.
+	if err := c.send([]byte{hostedColorMessage, HostedColors}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := awaitLobby(t, host, "the room failed", func(_ HostedLobbyState, err error) bool { return err != nil }); !strings.Contains(err.Error(), "colour") {
+		t.Fatalf("out-of-range colour: %v", err)
+	}
+	awaitHostedCapacity(t, s, 0, 0)
+}
+
 // A defeated seat may leave and the others play on; a seat that is still
 // playing may not (DESIGN_MULTIPLAYER §16.6).
 func TestHostedDefeatedSeatMayLeave(t *testing.T) {

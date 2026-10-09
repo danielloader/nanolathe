@@ -13,7 +13,7 @@ import (
 
 // The online lobby's configuration (DESIGN_MULTIPLAYER §16.6). Every value
 // below is Nanolathe lobby policy, not a retail record: the seat-to-row
-// mapping, the default names and colours, and the team numbering.
+// mapping, the default names, the colour rule and the team numbering.
 
 // OnlineTeamNone is the lobby team of a seat on no team. Teams 1..5 are the
 // configuration's ally groups 0..4; none is the unassigned group 5.
@@ -21,6 +21,10 @@ const OnlineTeamNone = 0
 
 // OnlineMaxTeam is the highest lobby team number.
 const OnlineMaxTeam = 5
+
+// onlineColors is how many player colours a seat may hold, the configuration
+// row's 0..9.
+const onlineColors = 10
 
 // OnlineSurvivalMaxSurvivors is how many human survivors an online Survival
 // battle seats: the single-player survivor layout's human and buddy rows
@@ -30,10 +34,12 @@ const OnlineSurvivalMaxSurvivors = 1 + SurvivalMaxBuddies
 // OnlineSeat is one present lobby seat, in slot order (DESIGN_MULTIPLAYER
 // §16.6). Team is OnlineTeamNone or 1..OnlineMaxTeam; Survival ignores it.
 // Side indexes the frozen catalog's sides in their compiled order, the order
-// OnlineSides names them.
+// OnlineSides names them. Color is the player's colour, 0..9, held by no
+// other seat.
 type OnlineSeat struct {
-	Team uint8
-	Side uint8
+	Team  uint8
+	Side  uint8
+	Color uint8
 }
 
 // OnlineMatchSetup is what a lobby decides beyond the host's frozen content:
@@ -66,11 +72,11 @@ func (s OnlineMatchSetup) Rows() int {
 // attacker row as SurvivalConfigFor builds it. A human row carries the
 // participant identity whose first byte is its slot plus one (room's own
 // Participants are not read), the nickname "Player n" for slot n-1, the
-// seat's side, and the skirmish default resources. A skirmish row's colour is
-// its slot and its ally group its team's (team t is group t-1, no team is the
-// unassigned group); every survivor shares the Survival team, with the
-// survivor colours of the single-player layout (0, then 2 and 3), so the
-// attacker keeps the first free colour, red (DESIGN_SURVIVAL §4.1).
+// seat's side and colour, and the skirmish default resources. A skirmish
+// row's ally group is its team's (team t is group t-1, no team is the
+// unassigned group); every survivor shares the Survival team, and the
+// attacker takes the first colour no survivor holds, red when free
+// (SurvivalConfigFor, DESIGN_SURVIVAL §4.1).
 //
 // The rule words and the unit limit are the single-player skirmish defaults
 // under Modern, as DirectSkirmishConfig writes them; options and room are as
@@ -80,7 +86,8 @@ func (s OnlineMatchSetup) Rows() int {
 //
 // A skirmish seats 2..10 humans and refuses one team holding every seat
 // [08 R-SKIR-01 §12]; whether the map offers that many start positions is
-// the lobby's cap (OnlineMapCapacity). Survival seats 2..3 survivors.
+// the lobby's cap (OnlineMapCapacity). Survival seats 2..3 survivors. A
+// colour above 9, or one two seats share, is refused.
 func NewOnlineMatchRequest(setup OnlineMatchSetup, options SkirmishEntryOptions, room MatchRoomInputs) (MatchConfigRequest, error) {
 	n := len(setup.Seats)
 	most := SkirmishMaxPlayers
@@ -108,10 +115,18 @@ func NewOnlineMatchRequest(setup OnlineMatchSetup, options SkirmishEntryOptions,
 		if int(seat.Side) >= setup.SideCount {
 			return MatchConfigRequest{}, matchFieldError(path+".side", fmt.Sprintf("a side below the catalog's %d sides", setup.SideCount))
 		}
+		if seat.Color >= onlineColors {
+			return MatchConfigRequest{}, matchFieldError(path+".color", fmt.Sprintf("0..%d", onlineColors-1))
+		}
+		for j := range i {
+			if setup.Seats[j].Color == seat.Color {
+				return MatchConfigRequest{}, matchFieldError(path+".color", fmt.Sprintf("a colour no other seat holds, not seat %d's", j))
+			}
+		}
 		players[i] = SkirmishPlayer{
 			Controller: SkirmishControllerHuman,
 			Side:       int(seat.Side),
-			Color:      i,
+			Color:      int(seat.Color),
 			AllyGroup:  onlineAllyGroup(seat.Team),
 			Metal:      SkirmishDefaultMetal,
 			Energy:     SkirmishDefaultEnergy,
@@ -127,9 +142,6 @@ func NewOnlineMatchRequest(setup OnlineMatchSetup, options SkirmishEntryOptions,
 	}
 	cfg.NumPlayers = n
 	if setup.Survival {
-		for i := range players {
-			players[i].Color = survivorColor(i)
-		}
 		layout := SurvivalConfigFor(setup.MapName, players, setup.SurvivalOptions)
 		cfg.Survival = layout.Survival
 		cfg.NumPlayers = n + 1
@@ -149,16 +161,6 @@ func onlineAllyGroup(team uint8) int {
 		return SkirmishDefaultAllyGroup
 	}
 	return int(team) - 1
-}
-
-// survivorColor is the single-player Survival layout's colour for survivor
-// row i: the human 0 and the buddies 2 and 3, leaving red to the attacker
-// (SurvivalSkirmishConfig).
-func survivorColor(i int) int {
-	if i == 0 {
-		return 0
-	}
-	return 1 + i
 }
 
 // OnlineMapCapacity is the most players an online skirmish on mapName can

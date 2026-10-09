@@ -138,6 +138,14 @@ func (g *gameShell) serviceMenuWidgets(p *ui.Panel, in *input.State) bool {
 	if !ok {
 		return true
 	}
+	if result.FiredButton == 2 && g.onlineLobbyActive() {
+		// The lobby's colour steps back on the right button as the setup
+		// screen's does; its other controls treat both buttons alike.
+		if slot, kind, ok := dynamicSlot(gad.Name); ok && kind == "Color" {
+			g.activateOnlineColorBack(slot)
+			return true
+		}
+	}
 	if result.FiredButton == 2 && g.frontend.Mode == modeMenuSkirmish && !g.onlineLobbyActive() {
 		if slot, kind, ok := dynamicSlot(gad.Name); ok {
 			if kind == "Metal" {

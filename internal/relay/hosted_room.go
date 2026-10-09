@@ -157,7 +157,7 @@ func (p *hostedProgress) playing() int {
 type lobbySeat struct {
 	peer                *hostedPeer
 	ready               bool
-	team, side          uint8
+	team, side, color   uint8
 	identity, rehearsal [32]byte
 }
 
@@ -169,6 +169,7 @@ func (r *hostedRoom) run() {
 		r.server.mu.Unlock()
 	}()
 	var seats [HostedMaxSeats]lobbySeat
+	// The creator takes colour 0, the lowest free one.
 	seats[0].peer = r.creator
 	var players [HostedMaxSeats]*hostedPeer // by slot, after Start
 	var sequences [HostedMaxSeats]uint64    // by slot after Start; seat 0 before it
@@ -258,6 +259,15 @@ func (r *hostedRoom) run() {
 		}
 		r.server.recordFinished(r, &stats, started, progress.n, tick, reason)
 	}
+	// held reports a colour some present seat other than skip holds.
+	held := func(color uint8, skip int) bool {
+		for i := range r.size {
+			if i != skip && seats[i].peer != nil && seats[i].color == color {
+				return true
+			}
+		}
+		return false
+	}
 	present := func() int {
 		n := 0
 		for i := range r.size {
@@ -326,6 +336,7 @@ func (r *hostedRoom) run() {
 			w.U8(bits)
 			w.U8(s.team)
 			w.U8(s.side)
+			w.U8(s.color)
 		}
 		body := w.Bytes()
 		var err error
@@ -440,8 +451,14 @@ func (r *hostedRoom) run() {
 		case e := <-r.events:
 			stats.bytesIn += uint64(len(e.body))
 			if e.join {
+				// A joiner takes the lowest colour no present seat holds; a
+				// room has at least as many colours as seats.
 				seat := e.peer.seat
-				seats[seat] = lobbySeat{peer: e.peer}
+				color := uint8(0)
+				for held(color, int(seat)) {
+					color++
+				}
+				seats[seat] = lobbySeat{peer: e.peer, color: color}
 				clearReady()
 				if r.autoStart && present() == r.size {
 					for i := range r.size {
@@ -551,6 +568,27 @@ func (r *hostedRoom) run() {
 				} else {
 					seats[p.seat].side = value
 				}
+				clearReady()
+				if err := lobby(); err != nil {
+					finish(err, finishDisconnected)
+					return
+				}
+			case hostedColorMessage:
+				value := d.U8()
+				if err := d.End(); err != nil {
+					finish(err, finishProtocol)
+					return
+				}
+				if value >= HostedColors {
+					finish(hostedError("colour", "colours 0 to 9"), finishProtocol)
+					return
+				}
+				// A colour another present seat holds changes nothing, as a
+				// change from a ready seat or after Start does (§16.6.1).
+				if started || seats[p.seat].ready || held(value, int(p.seat)) {
+					continue
+				}
+				seats[p.seat].color = value
 				clearReady()
 				if err := lobby(); err != nil {
 					finish(err, finishDisconnected)
@@ -705,7 +743,7 @@ func (r *hostedRoom) run() {
 				}
 				arm()
 			default:
-				finish(hostedError("client message", "ready, team, side, configuration, start, submit or acknowledgment after hello"), finishProtocol)
+				finish(hostedError("client message", "ready, team, side, colour, configuration, start, submit or acknowledgment after hello"), finishProtocol)
 				return
 			}
 		}

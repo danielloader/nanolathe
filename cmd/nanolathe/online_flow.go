@@ -41,6 +41,10 @@ type onlineLobby interface {
 	SetConfiguration(config []byte) error
 	SetTeam(team uint8) error
 	SetSide(side uint8) error
+	// SetColor chooses this seat's player colour, 0..relay.HostedColors-1.
+	// A colour another present seat holds, or any change while ready,
+	// changes nothing; otherwise every seat's ready clears.
+	SetColor(color uint8) error
 	// SetReady reports readiness with this seat's configuration-identity and
 	// rehearsal digests; not ready carries zero digests (§16.6.1, §16.7).
 	SetReady(ready bool, identity, rehearsal [32]byte) error

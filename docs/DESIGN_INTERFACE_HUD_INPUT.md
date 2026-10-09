@@ -4374,11 +4374,15 @@ window does the same for a join.
 The lobby is the authored `SKIRMISH.GUI` window, opened as the setup screen
 with its ten runtime rows. Each present player has a row in seat order:
 "Player n", marked "(You)" or "(Host)", their side in the setup screen's side
-art (any side the catalog defines), their team as the allegiance symbols
-(none, or teams 1–5, joined when shared and split when alone; hidden in
-Survival) and "Ready" in the metal column; the lobby's copy of the backdrop
-paints over the unused Color, Metal and Energy headings and draws a Ready
-heading. Players click their own side and team to cycle them while not ready.
+art (any side the catalog defines), their colour in the setup screen's
+`logos.gaf` column, their team as the allegiance symbols (none, or teams 1–5,
+joined when shared and split when alone; hidden in Survival) and "Ready" in
+the metal column; the lobby's copy of the backdrop paints over the unused
+Metal and Energy headings and draws a Ready heading. Players click their own
+side and team to cycle them while not ready. Their own colour steps as the
+setup screen's does `[08 R-SKIR-01 §1]`: a left click one colour on, a right
+click one back, past every colour another present player holds. Each arrival
+takes the lowest free colour, so every player's is their own.
 The room code is drawn beside the title in `HATT14`, in two groups of three,
 with **Copy** where the host has a clipboard bridge (macOS writes AppKit plain
 text; other hosts hide it).
@@ -4399,8 +4403,8 @@ battle at its slot and runs the pre-start rehearsal of DESIGN_MULTIPLAYER
 §16.7 on a job goroutine, then sends the configuration-identity and rehearsal
 digests; **Not ready** withdraws them. While the check runs the status line
 says so and Ready is greyed; a check that fails is reported. Any join, leave,
-team, side or settings change clears every seat's ready, and the status line
-says which. Ready is greyed, and the status line explains, while fewer than
+team, side, colour or settings change clears every seat's ready, and the
+status line says which. Ready is greyed, and the status line explains, while fewer than
 two players are present, a skirmish has more players than the map's start
 positions or everyone on one team, or Survival has more than three players.
 **Start** is the host's, enabled when everyone present is ready and the

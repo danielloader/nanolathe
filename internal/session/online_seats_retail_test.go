@@ -40,7 +40,7 @@ func onlineRetailMatch(t *testing.T, setup OnlineMatchSetup) (*content.Simulatio
 func onlineRetailSetup(survivalBattle bool, pace survival.Pace, teams ...uint8) OnlineMatchSetup {
 	setup := OnlineMatchSetup{Survival: survivalBattle, MapName: admittedSkirmishMap, SimSeed: 7, CRTSeed: 11}
 	for i, team := range teams {
-		setup.Seats = append(setup.Seats, OnlineSeat{Team: team, Side: uint8(i & 1)})
+		setup.Seats = append(setup.Seats, OnlineSeat{Team: team, Side: uint8(i & 1), Color: uint8(i)})
 	}
 	if survivalBattle {
 		setup.SurvivalOptions = SurvivalOptions{Pace: pace}

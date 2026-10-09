@@ -232,6 +232,20 @@ func onlineRetailRoom(t *testing.T, players int, survival bool, teams []uint8) [
 		r := &g.online.room
 		awaitOnlineShells(t, "the teams", func() bool { return r.state.Seats[i].Team == teams[i] }, shells...)
 	}
+	// Each arrival took its own colour; the last player steps theirs on.
+	last := shells[len(shells)-1]
+	lastSeat := last.online.room.lobby.Seat()
+	before := last.online.room.state.Seats[lastSeat].Color
+	last.activateGadget("Color" + strconv.Itoa(int(lastSeat)))
+	awaitOnlineShells(t, "a colour change", func() bool { return host.online.room.state.Seats[lastSeat].Color != before }, shells...)
+	held := map[uint8]bool{}
+	for _, i := range host.online.room.presentSeats() {
+		c := host.online.room.state.Seats[i].Color
+		if held[c] {
+			t.Fatalf("two players hold colour %d", c)
+		}
+		held[c] = true
+	}
 	for _, g := range shells {
 		g.activateGadget(lobbyReady)
 	}
@@ -380,11 +394,16 @@ func TestOnlineRoomCompositionRetail(t *testing.T) {
 			settings := onlineSettings{survival: c.survival, mapName: c.mapName, location: 1, commanderDeath: 1}
 			seats := make([]session.OnlineSeat, len(c.teams))
 			for i, team := range c.teams {
-				seats[i] = session.OnlineSeat{Team: team, Side: uint8(i % 2)}
+				seats[i] = session.OnlineSeat{Team: team, Side: uint8(i % 2), Color: uint8(i * 3 % relay.HostedColors)}
 			}
 			config, err := onlineConfig(cs, cat, settings, seats, frozen)
 			if err != nil {
 				t.Fatal(err)
+			}
+			for i, seat := range seats {
+				if got := config.Request().Seats[i].Color; got != seat.Color {
+					t.Fatalf("player %d's colour %d, chose %d", i+1, got, seat.Color)
+				}
 			}
 			var identity [32]byte
 			for slot := range seats {
@@ -474,7 +493,7 @@ func TestOnlineScreenCapture(t *testing.T) {
 	// A four-player skirmish lobby: the host, two teams, both sides.
 	fake := newFakeOnlineLobby(1, 0, 1, 2, 3)
 	fake.code = "K7M2QX"
-	copy(fake.state.Seats[:], []relay.HostedSeatState{{Present: true, Team: 1, Ready: true}, {Present: true, Team: 1, Side: 1}, {Present: true, Team: 2, Side: 1, Ready: true}, {Present: true, Team: 2}})
+	copy(fake.state.Seats[:], []relay.HostedSeatState{{Present: true, Team: 1, Ready: true}, {Present: true, Team: 1, Side: 1, Color: 3}, {Present: true, Team: 2, Side: 1, Ready: true, Color: 1}, {Present: true, Team: 2, Color: 5}})
 	cat, err := cs.compileCatalog(nil)
 	if err != nil {
 		t.Fatal(err)

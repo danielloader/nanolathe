@@ -1,11 +1,11 @@
 package main
 
 // The online lobby (DESIGN_MULTIPLAYER §16.6, §16.6.2): the room code, a row
-// per present player with their team, side and readiness, the host's settings
-// until Start, Ready, Start and Leave. It is the authored SKIRMISH.GUI window,
-// whose ten runtime rows, side art and allegiance symbols already fit a
-// ten-player room, opened as the front end's skirmish screen. Its own
-// controls replace the setup screen's handlers while it is open.
+// per present player with their team, side, colour and readiness, the host's
+// settings until Start, Ready, Start and Leave. It is the authored SKIRMISH.GUI
+// window, whose ten runtime rows, side art, colours and allegiance symbols
+// already fit a ten-player room, opened as the front end's skirmish screen.
+// Its own controls replace the setup screen's handlers while it is open.
 
 import (
 	"fmt"
@@ -67,8 +67,8 @@ type onlineRoomState struct {
 }
 
 // onlineRoomKey is what the final configuration depends on: the base
-// configuration and every seat's presence, team and side. A prepared battle
-// is valid only while the key is unchanged.
+// configuration and every seat's presence, team, side and colour. A prepared
+// battle is valid only while the key is unchanged.
 type onlineRoomKey struct {
 	base  [32]byte
 	seats [relay.HostedMaxSeats]relay.HostedSeatState
@@ -78,7 +78,7 @@ func (r *onlineRoomState) key() onlineRoomKey {
 	k := onlineRoomKey{base: r.base.Digest()}
 	for i, seat := range r.state.Seats {
 		if seat.Present {
-			k.seats[i] = relay.HostedSeatState{Present: true, Team: seat.Team, Side: seat.Side}
+			k.seats[i] = relay.HostedSeatState{Present: true, Team: seat.Team, Side: seat.Side, Color: seat.Color}
 		}
 	}
 	return k
@@ -193,8 +193,8 @@ func splitStages(stages string) []string {
 }
 
 // lobbyBackdrop copies the setup screen's backdrop and paints plain texture
-// over its Color, Metal and Energy headings, which the lobby does not use;
-// the Ready heading is drawn in their place.
+// over its Metal and Energy headings, which the lobby does not use; the Ready
+// heading is drawn in their place. The Color heading stays over its column.
 func lobbyBackdrop(source *formats.PCX) *formats.PCX {
 	if source == nil {
 		return nil
@@ -214,7 +214,6 @@ func lobbyBackdrop(source *formats.PCX) *formats.PCX {
 	// The plain strip between the Energy heading and the Commander box
 	// supplies the texture.
 	const y, h = 50, 18
-	patch(395, 205, y, 40, h)
 	patch(395, 283, y, 52, h)
 	patch(395, 335, y, 52, h)
 	return &pcx
@@ -370,11 +369,12 @@ func onlineReadyClearedReason(before, after relay.HostedLobbyState) string {
 		}
 	}
 	for i := range before.Seats {
-		if before.Seats[i].Team != after.Seats[i].Team || before.Seats[i].Side != after.Seats[i].Side {
-			return "A player changed team or side. Choose Ready again."
+		b, a := before.Seats[i], after.Seats[i]
+		if b.Team != a.Team || b.Side != a.Side || b.Color != a.Color {
+			return "A player changed team, side or colour. Choose Ready again."
 		}
 	}
-	return "A player joined, left or changed team. Choose Ready again."
+	return "A player joined, left or changed team, side or colour. Choose Ready again."
 }
 
 // onlineLobbyBlock is why the room cannot become ready now, for every seat,
@@ -431,10 +431,9 @@ func (g *gameShell) refreshOnlineLobby() {
 	for row := 0; row < relay.HostedMaxSeats; row++ {
 		suffix := strconv.Itoa(row)
 		shown := row < len(present)
-		for _, name := range []string{"Player", "Side", "Allies", "Metal"} {
+		for _, name := range []string{"Player", "Side", "Color", "Allies", "Metal"} {
 			p.SetActive(name+suffix, shown)
 		}
-		p.SetActive("Color"+suffix, false)
 		p.SetActive("Energy"+suffix, false)
 		if !shown {
 			continue
@@ -452,6 +451,7 @@ func (g *gameShell) refreshOnlineLobby() {
 		p.SetStatus("Player"+suffix, 0)
 		p.SetStatus("Side"+suffix, 0)
 		p.SetStageAt(p.Index("Side"+suffix), clampMenuStage(int(seat.Side), sides))
+		p.SetStatus("Color"+suffix, int(seat.Color))
 		p.SetStatus("Allies"+suffix, onlineTeamIcon(r.state, present, seatIndex))
 		p.SetActive("Allies"+suffix, !r.settings.survival)
 		p.SetActive("Metal"+suffix, seat.Ready)
@@ -460,12 +460,15 @@ func (g *gameShell) refreshOnlineLobby() {
 		switch {
 		case own && editable:
 			p.SetHelp("Side"+suffix, "Click to choose your side.")
+			p.SetHelp("Color"+suffix, "Click to choose your colour; right-click to step back.")
 			p.SetHelp("Allies"+suffix, "Click to choose your team. Teammates are allies and share sight.")
 		case own:
 			p.SetHelp("Side"+suffix, "Choose Not ready to change your side.")
+			p.SetHelp("Color"+suffix, "Choose Not ready to change your colour.")
 			p.SetHelp("Allies"+suffix, "Choose Not ready to change your team.")
 		default:
 			p.SetHelp("Side"+suffix, "This player's side.")
+			p.SetHelp("Color"+suffix, "This player's colour.")
 			p.SetHelp("Allies"+suffix, "This player's team.")
 		}
 		help := ""
@@ -600,7 +603,7 @@ func (g *gameShell) onlineLobbyStatus(block string) string {
 	case everyone:
 		return "Waiting for the host to start the game."
 	}
-	return "Choose your team and side, then Ready."
+	return "Choose your team, side and colour, then Ready."
 }
 
 // setOnlineLobbyStatus keeps the status for the hover help to fall back to.
@@ -635,7 +638,7 @@ func (g *gameShell) activateOnlineLobbyGadget(name string) bool {
 	}
 	g.playMenuCue("SmallButton")
 	if slot, kind, ok := dynamicSlot(name); ok {
-		g.activateOnlineRow(slot, kind)
+		g.activateOnlineRow(slot, kind, 1)
 		return true
 	}
 	set := r.settings
@@ -690,9 +693,21 @@ func nextOnlineLineOfSight(lineOfSight, losType uint8) (uint8, uint8) {
 	return 0, 1
 }
 
-// activateOnlineRow cycles the local player's own side or team while not
-// ready; another player's row does nothing.
-func (g *gameShell) activateOnlineRow(row int, kind string) {
+// activateOnlineColorBack is a right click on a row's colour: the local
+// player's own colour steps back while not ready, as the setup screen's
+// right click does [08 R-SKIR-01 §1].
+func (g *gameShell) activateOnlineColorBack(row int) {
+	if !g.onlineLobbyActive() || g.online.room.readyJob == nil && g.online.room.ready {
+		return
+	}
+	g.playMenuCue("SmallButton")
+	g.activateOnlineRow(row, "Color", -1)
+}
+
+// activateOnlineRow cycles the local player's own side, colour or team while
+// not ready; another player's row does nothing. delta steps the colour, +1
+// for a left click and -1 for a right click.
+func (g *gameShell) activateOnlineRow(row int, kind string, delta int) {
 	r := &g.online.room
 	present := r.presentSeats()
 	if row >= len(present) || uint8(present[row]) != r.lobby.Seat() || r.ready || r.readyJob != nil {
@@ -703,6 +718,12 @@ func (g *gameShell) activateOnlineRow(row int, kind string) {
 	switch kind {
 	case "Side":
 		err = r.lobby.SetSide(uint8((int(seat.Side) + 1) % g.onlineSideCount()))
+	case "Color":
+		next, ok := nextOnlineColor(r.state, present[row], delta)
+		if !ok {
+			return
+		}
+		err = r.lobby.SetColor(next)
 	case "Allies":
 		if r.settings.survival {
 			return
@@ -715,6 +736,32 @@ func (g *gameShell) activateOnlineRow(row int, kind string) {
 		r.notice = onlineRefusalText(err)
 	}
 	g.refreshOnlineLobby()
+}
+
+// nextOnlineColor is the setup screen's colour step for the room: one logo
+// frame per click, +1 or -1 modulo the room's colours, stepping again past a
+// colour another present seat holds [08 R-SKIR-01 §1]. A room never has more
+// seats than colours, so a free one is always found; false means none is.
+func nextOnlineColor(state relay.HostedLobbyState, seat, delta int) (uint8, bool) {
+	const colors = relay.HostedColors
+	candidate := int(state.Seats[seat].Color)
+	for range colors {
+		candidate = ((candidate+delta)%colors + colors) % colors
+		if !onlineColorHeld(state, seat, uint8(candidate)) {
+			return uint8(candidate), uint8(candidate) != state.Seats[seat].Color
+		}
+	}
+	return 0, false
+}
+
+// onlineColorHeld reports whether a present seat other than seat holds color.
+func onlineColorHeld(state relay.HostedLobbyState, seat int, color uint8) bool {
+	for i, other := range state.Seats {
+		if i != seat && other.Present && other.Color == color {
+			return true
+		}
+	}
+	return false
 }
 
 // pushOnlineSettings is the host replacing the room's base configuration with

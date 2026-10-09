@@ -40,8 +40,8 @@ func TestOnlineLobbyRowsTeamsAndSides(t *testing.T) {
 			t.Fatalf("row %d: %q, want %q", row, got, want)
 		}
 	}
-	if p.ActiveOf("Player3") || p.ActiveOf("Color0") || p.ActiveOf("Energy0") {
-		t.Fatal("rows past the present players, or the colour and energy columns, are shown")
+	if p.ActiveOf("Player3") || p.ActiveOf("Color3") || p.ActiveOf("Energy0") || !p.ActiveOf("Color0") {
+		t.Fatal("rows past the present players, or the energy column, are shown, or the colour column is not")
 	}
 	if p.StatusAt(p.Index("Allies1")) != 10 {
 		t.Fatal("a player without a team shows an allegiance symbol")
@@ -79,6 +79,61 @@ func TestOnlineLobbyRowsTeamsAndSides(t *testing.T) {
 	g.refreshOnlineLobby()
 	if p.ActiveOf("Allies0") || !p.ActiveOf(survivalPaceButton) || p.ActiveOf("StartLocation") || lobbyText(g, lobbyLocLabel) != "Wave Pace" {
 		t.Fatal("the Survival lobby shows teams or lacks its options")
+	}
+}
+
+// The colour column is the setup screen's: a left click steps the local
+// player's colour forward and a right click back, past colours other present
+// players hold [08 R-SKIR-01 §1], and only while not ready.
+func TestOnlineLobbyColours(t *testing.T) {
+	useOnlineSessionSeams(t, 4)
+	g := onlineTestShell(t)
+	fake := newFakeOnlineLobby(2, 0, 2, 5)
+	openTestLobby(t, g, fake, onlineTestCatalog())
+	r := &g.online.room
+	p := r.panel
+	colour := func(row string) int { return p.StatusAt(p.Index("Color" + row)) }
+	if colour("0") != 0 || colour("1") != 1 || colour("2") != 2 {
+		t.Fatalf("arrival colours %d %d %d", colour("0"), colour("1"), colour("2"))
+	}
+	g.activateGadget("Color0")
+	g.activateOnlineColorBack(2)
+	if len(fake.colors) != 0 {
+		t.Fatal("another player's colour changed")
+	}
+	steps := []struct {
+		back bool
+		want uint8
+	}{{false, 3}, {true, 1}, {true, 9}, {false, 1}}
+	for _, step := range steps {
+		if step.back {
+			g.activateOnlineColorBack(1)
+		} else {
+			g.activateGadget("Color1")
+		}
+		g.pollOnline()
+		if got := fake.colors[len(fake.colors)-1]; got != step.want || colour("1") != int(step.want) {
+			t.Fatalf("back %v: sent %d, shown %d, want %d", step.back, got, colour("1"), step.want)
+		}
+	}
+	// A ready seat changes nothing, with either button.
+	r.prepared = &onlinePrepared{key: r.key()}
+	g.activateGadget(lobbyReady)
+	sent := len(fake.colors)
+	g.activateGadget("Color1")
+	g.activateOnlineColorBack(1)
+	if len(fake.colors) != sent {
+		t.Fatal("a ready seat changed its colour")
+	}
+	// Another player's colour change clears readiness, and the lobby says so.
+	fake.state.Seats[0].Color = 4
+	fake.clearReady()
+	g.pollOnline()
+	if r.ready || !strings.Contains(lobbyText(g, lobbyStatus), "changed team, side or colour") {
+		t.Fatalf("colour change: ready %v, status %q", r.ready, lobbyText(g, lobbyStatus))
+	}
+	if next, ok := nextOnlineColor(fake.state, 2, -1); !ok || next != 0 {
+		t.Fatalf("a freed colour is not offered: %d %v", next, ok)
 	}
 }
 
@@ -226,16 +281,16 @@ func TestOnlineLobbyStartedChecksTheSlot(t *testing.T) {
 func TestOnlineSeatsAndFinalSetup(t *testing.T) {
 	setups := useOnlineSessionSeams(t, 0)
 	state := relay.HostedLobbyState{Size: relay.HostedMaxSeats}
-	for i, s := range map[int]relay.HostedSeatState{0: {Present: true, Team: 1}, 3: {Present: true, Team: 2, Side: 1}, 7: {Present: true, Team: 1, Side: 1}} {
+	for i, s := range map[int]relay.HostedSeatState{0: {Present: true, Team: 1, Color: 2}, 3: {Present: true, Team: 2, Side: 1}, 7: {Present: true, Team: 1, Side: 1, Color: 5}} {
 		state.Seats[i] = s
 	}
 	seats, slot, ok := onlineSeatsOf(state, 3, false)
-	want := []session.OnlineSeat{{Team: 1}, {Team: 2, Side: 1}, {Team: 1, Side: 1}}
+	want := []session.OnlineSeat{{Team: 1, Color: 2}, {Team: 2, Side: 1}, {Team: 1, Side: 1, Color: 5}}
 	if !ok || slot != 1 || len(seats) != 3 || seats[0] != want[0] || seats[1] != want[1] || seats[2] != want[2] {
 		t.Fatalf("seats %+v slot %d", seats, slot)
 	}
-	if seats, _, _ := onlineSeatsOf(state, 3, true); seats[0].Team != 0 || seats[2].Side != 1 {
-		t.Fatal("Survival kept teams or lost sides")
+	if seats, _, _ := onlineSeatsOf(state, 3, true); seats[0].Team != 0 || seats[2].Side != 1 || seats[2].Color != 5 {
+		t.Fatal("Survival kept teams or lost sides or colours")
 	}
 	if _, _, ok := onlineSeatsOf(state, 4, false); ok {
 		t.Fatal("an absent seat has a slot")
@@ -248,13 +303,13 @@ func TestOnlineSeatsAndFinalSetup(t *testing.T) {
 	base := onlineTestBase(t, "Test Map", session.MatchMod{}, content.Mutators{Health: content.Factor{Num: 2, Den: 1}})
 	settings := onlineSettingsOf(base.Request())
 	settings.commanderDeath, settings.mapping = 0, 1
-	final, err := onlineConfig(nil, onlineTestCatalog(), settings, []session.OnlineSeat{{}, {Side: 1}}, onlineFrozenOf(base.Request()))
+	final, err := onlineConfig(nil, onlineTestCatalog(), settings, []session.OnlineSeat{{}, {Side: 1, Color: 1}}, onlineFrozenOf(base.Request()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	last := (*setups)[len(*setups)-1]
 	r := final.Request()
-	if last.MapName != "Test Map" || last.SimSeed != 1 || last.CRTSeed != 2 || len(last.Seats) != 2 || last.Seats[1].Side != 1 || last.Survival {
+	if last.MapName != "Test Map" || last.SimSeed != 1 || last.CRTSeed != 2 || len(last.Seats) != 2 || last.Seats[1].Side != 1 || last.Seats[1].Color != 1 || last.Survival {
 		t.Fatalf("setup %+v", last)
 	}
 	if r.Mutators != base.Request().Mutators || r.CommanderDeath != 0 || r.Mapping != 1 || r.Seats[1].Side != 1 || r.Community != base.Request().Community {
@@ -262,7 +317,7 @@ func TestOnlineSeatsAndFinalSetup(t *testing.T) {
 	}
 	// Survival's options reach the setup.
 	settings.survival, settings.pace, settings.noAir = true, 2, true
-	_, _ = onlineConfig(nil, onlineTestCatalog(), settings, []session.OnlineSeat{{}, {}}, onlineFrozenOf(base.Request()))
+	_, _ = onlineConfig(nil, onlineTestCatalog(), settings, []session.OnlineSeat{{}, {Color: 1}}, onlineFrozenOf(base.Request()))
 	last = (*setups)[len(*setups)-1]
 	if !last.Survival || !last.SurvivalOptions.Enabled || last.SurvivalOptions.Pace != 2 || !last.SurvivalOptions.NoAir {
 		t.Fatalf("Survival setup %+v", last)

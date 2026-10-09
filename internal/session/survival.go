@@ -97,6 +97,14 @@ func SurvivalConfigFor(mapName string, players []SkirmishPlayer, opts SurvivalOp
 	}
 	cfg.Players[len(players)] = SkirmishPlayer{Controller: SkirmishControllerComputer, AllyGroup: SkirmishDefaultAllyGroup, Side: 1, Color: color, Metal: SkirmishDefaultMetal, Energy: SkirmishDefaultEnergy}
 	_ = cfg.Normalize()
+	// Normalize's first pass reads a zero colour as a missing preference and
+	// gives the row its own index. Every colour here is already a choice —
+	// the survivors' own and the attacker's free one — so a later row on
+	// colour 0 keeps it rather than taking a colour someone else holds.
+	for i, p := range players {
+		cfg.Players[i].Color = p.Color
+	}
+	cfg.Players[len(players)].Color = color
 	return cfg
 }
 

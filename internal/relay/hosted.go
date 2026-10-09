@@ -47,7 +47,8 @@ const (
 	// hostedConfigurationMessage carries a replacement base configuration
 	// from the host and the latest one to every seat.
 	hostedConfigurationMessage = hostedSideMessage + 1
-	hostedVersion              = 4
+	hostedColorMessage         = hostedConfigurationMessage + 1
+	hostedVersion              = 5
 	hostedMaxTeam              = 5
 	hostedCodeLength           = 6
 	// hostedAnySeat is a joiner's hello seat: the relay assigns the lowest

@@ -366,7 +366,7 @@ func TestOnlineNetOverlayPlacement(t *testing.T) {
 		world := image.Rect(hud.ChromeRailX, hud.ChromeStripHeight, w, int(hud.BottomStripY(int32(h))))
 		for _, fps := range []bool{false, true} {
 			for _, seats := range []int{2, 10} {
-				l := onlineNetMeasure(font, netWidestOverlay(seats)).place(w, h, fps, 0)
+				l := onlineNetMeasure(font, netWidestOverlay(seats)).place(w, h, fps, 0, camera.ChromeInsets{})
 				if !l.fits || !l.backdrop.In(world) || fps && l.backdrop.Overlaps(panel) {
 					t.Errorf("%dx%d fps %v, %d seats: backdrop %v in world %v, panel %v", w, h, fps, seats, l.backdrop, world, panel)
 				}
@@ -375,14 +375,14 @@ func TestOnlineNetOverlayPlacement(t *testing.T) {
 	}
 	// Ten seats sit beside the panel where it leaves room, and below it in
 	// two blocks where it does not.
-	if l := onlineNetMeasure(font, netWidestOverlay(10)).place(1024, 768, true, 0); l.blocks != 1 || l.backdrop.Min.Y > hud.ChromeStripHeight+4 {
+	if l := onlineNetMeasure(font, netWidestOverlay(10)).place(1024, 768, true, 0, camera.ChromeInsets{}); l.blocks != 1 || l.backdrop.Min.Y > hud.ChromeStripHeight+4 {
 		t.Fatalf("1024x768: %d blocks at %v", l.blocks, l.backdrop)
 	}
-	if l := onlineNetMeasure(font, netWidestOverlay(10)).place(640, 480, true, 0); l.blocks != 2 || l.backdrop.Min.Y < onlineFPSPanelMargin+onlineFPSPanelH {
+	if l := onlineNetMeasure(font, netWidestOverlay(10)).place(640, 480, true, 0, camera.ChromeInsets{}); l.blocks != 2 || l.backdrop.Min.Y < onlineFPSPanelMargin+onlineFPSPanelH {
 		t.Fatalf("640x480: %d blocks at %v", l.blocks, l.backdrop)
 	}
 	// Visible message lines keep the top left; the overlay starts below them.
-	if l := onlineNetMeasure(font, netWidestOverlay(2)).place(1024, 768, false, 94); l.backdrop.Min.Y < 94 || !l.fits {
+	if l := onlineNetMeasure(font, netWidestOverlay(2)).place(1024, 768, false, 94, camera.ChromeInsets{}); l.backdrop.Min.Y < 94 || !l.fits {
 		t.Fatalf("below three message lines: %v", l.backdrop)
 	}
 }
@@ -464,7 +464,7 @@ func TestOnlineNetOverlayCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, size := range [][2]int{{640, 480}, {800, 600}, {1024, 768}} {
-		if l := onlineNetMeasure(h.console, netWidestOverlay(10)).place(size[0], size[1], true, 0); !l.fits {
+		if l := onlineNetMeasure(h.console, netWidestOverlay(10)).place(size[0], size[1], true, 0, camera.ChromeInsets{}); !l.fits {
 			t.Errorf("%dx%d: the widest ten-seat overlay does not fit beside or below the +fps panel: %v", size[0], size[1], l.backdrop)
 		}
 	}
@@ -501,7 +501,7 @@ func TestOnlineNetOverlayCapture(t *testing.T) {
 		for i := range c.messages {
 			cl.MessageRing().Append(fmt.Sprintf("<Player> message line %d", i+1), 1, 0, 10, tick)
 		}
-		l := onlineNetMeasure(h.console, o).place(c.width, c.height, c.fps, cl.MessageColumnBottom())
+		l := onlineNetMeasure(h.console, o).place(c.width, c.height, c.fps, cl.MessageColumnBottom(), cam.Chrome)
 		if c.messages > 0 && l.backdrop.Min.Y < cl.MessageColumnBottom() {
 			t.Errorf("%s: the overlay covers the message column", c.name)
 		}
@@ -534,6 +534,21 @@ func TestOnlineNetOverlayCapture(t *testing.T) {
 		t.Logf("%s: backdrop %v, %d block(s), fits %v\n%s", path, l.backdrop, l.blocks, l.fits, o)
 		if !l.fits {
 			t.Errorf("%s: the overlay overlaps the resource strip, bottom strip or +fps panel", c.name)
+		}
+	}
+}
+
+func TestOnlineNetOverlayClearsScaledChrome(t *testing.T) {
+	for _, chrome := range []camera.ChromeInsets{{Left: 257}, {Left: 257, Top: 64, Bottom: 64}} {
+		cam := &camera.Camera{Chrome: chrome}
+		left, top, bottom := cam.ChromeInset()
+		world := image.Rect(int(left), int(top), 2560, 1440-int(bottom))
+		messages := int(top) + 20 + 3*12
+		for _, fps := range []bool{false, true} {
+			l := onlineNetMeasure(netTestFont(), netWidestOverlay(10)).place(2560, 1440, fps, messages, chrome)
+			if !l.fits || !l.backdrop.In(world) || l.backdrop.Min.Y < messages+2 {
+				t.Fatalf("chrome %+v fps %v: overlay %v covers chrome or messages in %v", chrome, fps, l.backdrop, world)
+			}
 		}
 	}
 }

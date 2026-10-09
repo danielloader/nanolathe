@@ -1017,7 +1017,11 @@ func (h *retailBattleHUD) draw(c *client.Client, b *battleSession, presented cli
 	h.drawClock(c, b, cur)
 	h.drawSurvivalStatus(c, cur)
 	h.drawCommunityBPS(c, b)
+	c.EndChromeRegion()
+	// The network layout already uses physical chrome/message/FPS bounds.
+	// Record it outside affine regions (DESIGN_INTERFACE_HUD_INPUT §3.3).
 	h.drawOnlineNetwork(c, b)
+	c.BeginChromeRegion(strip)
 	h.drawCommunityIncome(c, b, cur)
 	h.drawCommunityWeather(c, b, cur)
 	c.EndChromeRegion()

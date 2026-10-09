@@ -179,7 +179,7 @@ func (f *Foreground) World(w drawlist.WorldSpace) {
 	f.ch = max(f.h, int(w.RecordH))
 	if f.chrome {
 		// Magnified interface commands are clipped on their smaller virtual
-		// surface (DESIGN_INTERFACE_HUD_INPUT "Modern UI scale").
+		// surface (DESIGN_INTERFACE_HUD_INPUT §3.3).
 		f.cw, f.ch = int(w.RecordW), int(w.RecordH)
 	}
 	step := float32(camera.ZoomOf(w.Step)) / float32(camera.ZoomUnit)

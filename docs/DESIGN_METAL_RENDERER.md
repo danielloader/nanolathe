@@ -72,8 +72,8 @@ required.
   edge per scene).
 - **Chrome text.** Magnified chrome regions use their virtual bounds for
   text admission and scale glyph dimensions, baseline and advance with the
-  region's sprites and primitives (DESIGN_INTERFACE_HUD_INPUT "Modern UI
-  scale"). World text continues to project only its anchor and keeps native
+  region's sprites and primitives (DESIGN_INTERFACE_HUD_INPUT §3.3). World
+  text continues to project only its anchor and keeps native
   glyph dimensions and screen offsets (DESIGN_GPU_RENDERER §16.3).
 - **No allocation churn.** Steady-state frames reuse their publication and
   upload storage; a few hundred allocations per draw remain, mostly the

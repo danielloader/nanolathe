@@ -42,7 +42,7 @@ func foregroundTestFont() *formats.FNT {
 
 // The native host replays RecordRetainedForeground. Chrome text uses its
 // virtual surface for admission and scales the whole glyph, baseline and
-// advance with adjacent sprites (Modern UI scale), then closes cleanly.
+// advance with adjacent sprites (DESIGN_INTERFACE_HUD_INPUT §3.3), then closes cleanly.
 func TestProductionForegroundChromeText(t *testing.T) {
 	for _, tc := range []struct {
 		w, h int

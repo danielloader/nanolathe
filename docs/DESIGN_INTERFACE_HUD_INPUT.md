@@ -4328,18 +4328,32 @@ owned by [DESIGN_MODS_MUTATORS §5.6](DESIGN_MODS_MUTATORS.md#56-community-map-c
 
 ### Online games
 
-`MULTI` opens the online screen of
+`MULTI` opens the online chooser of
 [DESIGN_MULTIPLAYER §16.6](DESIGN_MULTIPLAYER.md#166-first-online-lobby), a
-Nanolathe window over `MAINMENU` built on the `SELMAP` template and the Mods &
-Mutators backdrop, from the base install as those windows are, so a mod's own
-map-select window cannot move it. It holds a **Server** field (default
-`relay.nanolathe.gg`; a bare host means `wss://host/relay`, `host:port` is
-native TLS, a `wss://` URL is taken as typed, and a `ws://` URL is accepted
-only on a numeric loopback address, for a relay on this computer), **Create
-Game**, a **Room code** field (letters, digits and spaces; case, spaces and
-dashes are ignored) with **Join Game** (or Enter in the field), and **Back**
-(or Escape). The status lines report progress and every refusal in plain
-words. The last server typed is saved as `onlineServer`.
+small popup over `MAINMENU` on the base install's message-box frame
+(`guis/msgbox.gui`, its OK button cloned for every control), so a mod cannot
+move it. It holds one sentence ("Play online with friends: create a game and
+send them its code, or join with the code a friend sent you."), **Create
+Game** and **Join Game** in the stock 96×31 button size, a status line, and
+off the main path a small **Server** button with the current server beside it
+and **Cancel** (or Escape).
+
+**Join Game** replaces the chooser with the base install's address window
+(`guis/tcp.gui`), captioned "Enter the room code your friend sent you", with
+**Join** and **Cancel**. Its field takes focus at once; the code may be typed
+or pasted (Ctrl+V, Cmd+V or Shift+Insert where the host has a clipboard
+bridge, which is macOS only for now), is shown in capitals, and ignores case,
+spaces and dashes. Enter joins. Escape clears the field and a second Escape
+cancels. Each refusal — no game with that code, a full or started game, a mod
+that is missing or cannot be mounted, a server that cannot be reached —
+keeps the window open with the reason in plain words under the field.
+**Server** opens the same window captioned "Enter the server address", filled
+with the current server (default `relay.nanolathe.gg`; a bare host means
+`wss://host/relay`, `host:port` is native TLS, a `wss://` URL is taken as
+typed, and a `ws://` URL is accepted only on a numeric loopback address, for
+a relay on this computer). OK saves it as `onlineServer` and returns to the
+chooser; an address that is not one is refused in the window, and OK on an
+empty field restores the default.
 
 Any build can create and join. Online games need the base game or an
 installed mod: a `--root` stack or `--mod-config` content is refused, and so
@@ -4353,7 +4367,9 @@ room. A mod that is installed but not mounted is mounted through the ordinary
 content reload, which keeps the player's own mutators and resumes the join on
 the new shell; a missing mod, or a different copy of it, is named and nothing
 is joined. Compiling the catalog and opening the room run on a job goroutine;
-Back abandons the job and closes any room it opens late.
+While Create connects, the chooser says so with its choices greyed, and
+Cancel abandons the job and closes any room it opens late; Cancel in the code
+window does the same for a join.
 
 The lobby is the authored `SKIRMISH.GUI` window, opened as the setup screen
 with its ten runtime rows. Each present player has a row in seat order:
@@ -4392,14 +4408,14 @@ digests agree; a mismatch is stated in plain words ("Your games simulate
 differently. Every player needs the same version."). Hovering a control shows
 its help in the status line instead. **Leave** (or Escape) leaves the room. A
 relay failure — the host leaving, the 30-minute wait, a dropped connection —
-returns to the online screen with its reason.
+returns to the chooser with its reason.
 
 Started enters the prepared battle at the slot the relay reports, which must
 be the slot this seat composed, through the paced lockstep driver, as the
 command-line play test does after its dial, with no opening arrival. A
 player's own result shows as soon as it is final, and a defeated player may
 leave while the others play on. Leaving the battle or its result returns to
-the online screen, which says whether the game ended, stopped (with the
+the chooser, which says whether the game ended, stopped (with the
 transport's reason) or was left.
 
 In an online battle `+net`, or the FPS display, shows a network overlay at the

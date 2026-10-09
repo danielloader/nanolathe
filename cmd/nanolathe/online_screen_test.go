@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
 	"github.com/nanolathe-gg/nanolathe/internal/lockstep"
@@ -24,23 +23,32 @@ import (
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
-// useOnlineTestTemplate replaces the SELMAP template with an authored window
-// of the same shape, so the online screen builds without retail assets.
+// useOnlineTestTemplate replaces the popup windows with authored windows of
+// the same shapes — the message window's frame and OK, and the address
+// window's prompt, field, OK and Cancel — so the entry builds without retail
+// assets.
 func useOnlineTestTemplate(t *testing.T) {
 	t.Helper()
-	saved := onlineTemplate
-	onlineTemplate = func(*gameShell) (*gui.Window, *formats.PCX, error) {
-		return &gui.Window{Name: "Selmap.GUI", Rect: gui.Rect{X: 84, Y: 12, W: 494, H: 420}, Gadgets: []gui.Gadget{
-			{Kind: gui.KindPanel, Name: "Selmap.GUI", Active: 1, Rect: gui.Rect{X: 84, Y: 12, W: 494, H: 420}},
-			{Kind: gui.KindListBox, Name: "MAPNAMES", Active: 1, Rect: gui.Rect{X: 60, Y: 86, W: 230, H: 193}},
-			{Kind: gui.KindButton, Name: "PREVMENU", Text: "Cancel", Active: 1, QuickKey: 'C', Rect: gui.Rect{X: 356, Y: 360, W: 96, H: 20}},
-			{Kind: gui.KindButton, Name: "LOAD", Text: "Select Map", Active: 1, QuickKey: 'S', Rect: gui.Rect{X: 357, Y: 325, W: 96, H: 20}},
-			{Kind: gui.KindScrollBar, Name: "SLIDER", Active: 1, Rect: gui.Rect{X: 305, Y: 75, W: 16, H: 203}},
-			{Kind: gui.KindLabel, Name: "DESCRIPTION", Text: "Description", Active: 1, Attribs: 0x11, ColorF: 15, Rect: gui.Rect{X: 60, Y: 300, W: 235, H: 31}},
-			{Kind: gui.KindLabel, Name: "SIZE", Text: "Size", Active: 1, Attribs: 0x11, ColorF: 15, Rect: gui.Rect{X: 60, Y: 330, W: 235, H: 18}},
-		}}, nil, nil
+	saved := onlinePopupTemplate
+	onlinePopupTemplate = func(_ *gameShell, logical string) (*gui.Window, error) {
+		switch logical {
+		case onlineChooserGUI:
+			return &gui.Window{Name: "MSGBOX", Rect: gui.Rect{X: 116, Y: 82, W: 372, H: 272}, Header: gui.Header{Panel: "BackTile", CrDefault: "OK", EscDefault: "OK"}, Gadgets: []gui.Gadget{
+				{Kind: gui.KindPanel, Name: "HEADER", Active: 1, Rect: gui.Rect{X: 116, Y: 82, W: 372, H: 272}},
+				{Kind: gui.KindButton, Name: "OK", Text: "OK", Active: 1, QuickKey: 13, ColorF: 15, Attribs: 2, Rect: gui.Rect{X: 264, Y: 208, W: 80, H: 42}},
+			}}, nil
+		case onlineAddressGUI:
+			return &gui.Window{Name: "TCP", Rect: gui.Rect{X: 70, Y: 97, W: 501, H: 154}, Header: gui.Header{Panel: "BackTile", CrDefault: "HOST", EscDefault: "PREV", DefaultFocus: "ADDRESS"}, Gadgets: []gui.Gadget{
+				{Kind: gui.KindPanel, Name: "HEADER", Rect: gui.Rect{X: 70, Y: 97, W: 501, H: 154}},
+				{Kind: gui.KindButton, Name: "PREV", Text: "Cancel", Active: 1, ColorF: 15, Attribs: 2, Rect: gui.Rect{X: 358, Y: 123, W: 120, H: 20}},
+				{Kind: gui.KindLabel, Name: "TEXT", Text: "Enter TCP address (leave blank to search)", Active: 1, ColorF: 15, Attribs: 0x11, Rect: gui.Rect{X: 51, Y: 39, W: 276, H: 17}},
+				{Kind: gui.KindButton, Name: "OK", Text: "OK", Active: 1, ColorF: 15, Attribs: 2, Rect: gui.Rect{X: 358, Y: 94, W: 120, H: 20}},
+				{Kind: gui.KindTextBox, Name: "ADDRESS", Text: "Test String", Active: 1, ColorF: 15, MaxChars: 63, Rect: gui.Rect{X: 53, Y: 61, W: 252, H: 26}},
+			}}, nil
+		}
+		return nil, errors.New("no test template " + logical)
 	}
-	t.Cleanup(func() { onlineTemplate = saved })
+	t.Cleanup(func() { onlinePopupTemplate = saved })
 }
 
 // onlineTestSkirmishWindow is an authored window with SKIRMISH.GUI's controls
@@ -267,7 +275,7 @@ func awaitOnline(t *testing.T, g *gameShell) {
 	}
 }
 
-func TestMainMenuMultiOpensTheOnlineScreen(t *testing.T) {
+func TestMainMenuMultiOpensTheOnlineChooser(t *testing.T) {
 	g := onlineTestShell(t)
 	main := g.activePanel()
 	multi := main.Index("MULTI")
@@ -281,27 +289,73 @@ func TestMainMenuMultiOpensTheOnlineScreen(t *testing.T) {
 		t.Fatal("MULTI is not enabled")
 	}
 	g.activateGadget("MULTI")
-	if g.online == nil || g.activePanel() != g.online.panel || g.frontend.Panels.Under() != main {
-		t.Fatal("MULTI did not push the online screen over the main menu")
+	if g.online == nil || g.online.view != onlineChooser || g.activePanel() != g.online.panel || g.frontend.Panels.Under() != main {
+		t.Fatal("MULTI did not open the chooser over the main menu")
 	}
+	// One sentence, the two choices, and Server and Cancel off the main path.
 	p := g.online.panel
-	if p.TextOf("SERVER") != defaultOnlineServer || p.TextOf("NTITLE") != onlineTitle {
-		t.Fatalf("server %q title %q", p.TextOf("SERVER"), p.TextOf("NTITLE"))
+	if p.TextOf("PROMPT") != onlineIntro || !strings.Contains(p.TextOf("SERVERNAME"), defaultOnlineServer) {
+		t.Fatalf("prompt %q server %q", p.TextOf("PROMPT"), p.TextOf("SERVERNAME"))
 	}
-	// The screen offers the server, Create, the code with Join, and Back.
-	for _, name := range []string{"MAPNAMES", "SLIDER", "CHANGEMAP"} {
-		if p.Index(name) >= 0 {
-			t.Fatalf("the online screen kept %s", name)
-		}
-	}
-	for _, name := range []string{"SERVER", "ROOMCODE", "CREATE", "LOAD", "PREVMENU"} {
+	for _, name := range []string{"CREATE", "JOIN", "SERVER", "PREVMENU"} {
 		if p.Index(name) < 0 || greyed(p, name) {
 			t.Fatalf("%s missing or unavailable", name)
 		}
 	}
+	if r := p.Window.Rect; r.X+r.W/2 != retailScreenW/2 || r.Y+r.H/2 != retailScreenH/2 {
+		t.Fatalf("the chooser is not centred: %+v", r)
+	}
+	// Join asks for the code in the address window, with the field focused.
+	g.activateGadget("JOIN")
+	p = g.online.panel
+	if g.online.view != onlineCodeEntry || p.TextOf("TEXT") != onlineCodePrompt || p.TextOf("OK") != "Join" || p.TextOf("ADDRESS") != "" || !p.EditorCaptured() || p.EditorIndex() != p.Index("ADDRESS") {
+		t.Fatalf("code popup: %q %q %q captured %v", p.TextOf("TEXT"), p.TextOf("OK"), p.TextOf("ADDRESS"), p.EditorCaptured())
+	}
+	if g.frontend.Panels.Under() != main {
+		t.Fatal("the code popup did not replace the chooser")
+	}
+	// A typed or pasted code shows in capitals.
+	p.SetText("ADDRESS", "k7m-2qx")
+	g.pollOnline()
+	if p.TextOf("ADDRESS") != "K7M-2QX" {
+		t.Fatalf("code field %q", p.TextOf("ADDRESS"))
+	}
+	g.activateGadget("PREV")
+	if g.online.view != onlineChooser {
+		t.Fatal("Cancel did not return to the chooser")
+	}
 	g.activateGadget("PREVMENU")
 	if g.online != nil || g.activePanel() != main {
-		t.Fatal("Back did not return to the main menu")
+		t.Fatal("Cancel did not return to the main menu")
+	}
+}
+
+func TestOnlineServerPopupRemembersTheServer(t *testing.T) {
+	g := onlineTestShell(t)
+	if err := g.openOnlineScreen(); err != nil {
+		t.Fatal(err)
+	}
+	g.activateGadget("SERVER")
+	p := g.online.panel
+	if g.online.view != onlineServerEntry || p.TextOf("TEXT") != onlineHostPrompt || p.TextOf("ADDRESS") != defaultOnlineServer || !p.EditorCaptured() {
+		t.Fatalf("server popup: %q %q", p.TextOf("TEXT"), p.TextOf("ADDRESS"))
+	}
+	// Escape empties the field, which saves nothing.
+	p.SetText("ADDRESS", "")
+	g.activateGadget("ADDRESS")
+	if g.online.view != onlineServerEntry || g.onlineServer != "" {
+		t.Fatal("an emptied server field was saved")
+	}
+	// A bad address keeps the popup open with the reason.
+	p.SetText("ADDRESS", "ws://192.0.2.1:8080/relay")
+	g.activateGadget("ADDRESS")
+	if g.online.view != onlineServerEntry || !strings.Contains(p.TextOf("STATUS"), "not a server address") || g.onlineServer != "" {
+		t.Fatalf("bad server: %q", p.TextOf("STATUS"))
+	}
+	p.SetText("ADDRESS", "relay.example.test")
+	g.activateGadget("OK")
+	if g.online.view != onlineChooser || g.onlineServer != "relay.example.test" || !strings.Contains(g.online.panel.TextOf("SERVERNAME"), "relay.example.test") {
+		t.Fatalf("server %q, chooser %q", g.onlineServer, g.online.panel.TextOf("SERVERNAME"))
 	}
 }
 
@@ -324,7 +378,7 @@ func TestOnlineServerAddress(t *testing.T) {
 	for _, typed := range []string{"ws://relay.example.test/relay", "ws://192.0.2.1:8080/relay", "https://relay.example.test/relay", "wss://relay.example.test/", "relay.example.test:0", "wss://user@relay.example.test/relay", "relay example"} {
 		if _, _, err := onlineServerAddress(typed); err == nil {
 			t.Fatalf("admitted %q", typed)
-		} else if text := onlineRefusalText(err); !strings.Contains(text, "server address is not valid") {
+		} else if text := onlineRefusalText(err); !strings.Contains(text, "not a server address") {
 			t.Fatalf("%q refusal: %q", typed, text)
 		}
 	}
@@ -345,7 +399,7 @@ func TestOnlineRefusalTextIsPlain(t *testing.T) {
 		{relayRefusal("room wait", "a started match within 30 minutes"), "30 minutes"},
 		{relayRefusal("room capacity", "space for another room"), "server is full"},
 		{relayRefusal("hello protocol", "identical values from every seat"), "(protocol)"},
-		{relayRefusal("handshake", "hosted protocol version 4; this client sent version 3"), "different online protocol"},
+		{relayRefusal("handshake", "hosted protocol version 4; this client sent version 3"), "different version of online play"},
 		{localMultiplayerError("mounted content", "the base game or an installed mod"), "base game or an installed mod"},
 		{&content.RestrictionsError{Issues: []content.RestrictionIssue{{Unit: "armcom", Reason: content.RestrictionRemovesCommander}}}, "armcom"},
 		{errors.New("nanolathe: relay stream failed: logical path hosted dial, providers searched [relay transport], expected a complete transport message: dial tcp: lookup relay.example.test: no such host"), "Could not reach the server: dial tcp: lookup relay.example.test: no such host"},
@@ -361,15 +415,22 @@ func TestOnlineJoinChecksTheRoomBeforeJoining(t *testing.T) {
 	useOnlineTestRelay(t, fake)
 	useOnlineSessionSeams(t, 0)
 	g := onlineTestShell(t)
+	g.onlineServer = "relay.example.test"
 	if err := g.openOnlineScreen(); err != nil {
 		t.Fatal(err)
 	}
+	g.activateGadget("JOIN")
 	p := g.online.panel
-	// A malformed code never reaches the server.
-	p.SetText("ROOMCODE", "abc")
-	g.activateGadget("LOAD")
-	if len(fake.describes) != 0 || !strings.Contains(g.online.status, "six-character") {
-		t.Fatalf("short code: %v %q", fake.describes, g.online.status)
+	// Escape clears the field and fires it empty, which joins nothing.
+	g.activateGadget("ADDRESS")
+	if g.online.view != onlineCodeEntry || g.online.status != "" || g.online.job != nil {
+		t.Fatalf("an emptied field acted: %q", g.online.status)
+	}
+	// A malformed code never reaches the server, and the popup stays open.
+	p.SetText("ADDRESS", "abc")
+	g.activateGadget("OK")
+	if len(fake.describes) != 0 || g.online.view != onlineCodeEntry || !strings.Contains(p.TextOf("STATUS"), "six letters and digits") {
+		t.Fatalf("short code: %v %q", fake.describes, p.TextOf("STATUS"))
 	}
 	room := onlineTestBase(t, "Test Map", session.MatchMod{ID: "absentmod", Version: "1.0", Archive: sha256.Sum256([]byte("absentmod"))}, content.Mutators{})
 	encoded, err := session.EncodeMatchConfig(room)
@@ -379,19 +440,28 @@ func TestOnlineJoinChecksTheRoomBeforeJoining(t *testing.T) {
 	fake.describe = func(string) (relay.HostedRoomDescription, error) {
 		return relay.HostedRoomDescription{Config: encoded, Size: relay.HostedMaxSeats}, nil
 	}
-	p.SetText("SERVER", "relay.example.test")
-	p.SetText("ROOMCODE", "abc 234")
-	g.activateGadget("ROOMCODE") // Enter in the code field joins
-	if g.online.phase != onlineDescribing || !greyed(p, "LOAD") || !greyed(p, "CREATE") {
+	p.SetText("ADDRESS", "abc-234")
+	g.activateGadget("ADDRESS") // Enter in the field joins
+	if g.online.phase != onlineDescribing || !greyed(p, "OK") {
 		t.Fatal("the join did not wait for the room's description")
 	}
 	awaitOnline(t, g)
-	if len(fake.describes) != 1 || fake.describes[0] != "wss://relay.example.test/relay ABC234" || g.onlineServer != "relay.example.test" {
-		t.Fatalf("describe calls %v, remembered server %q", fake.describes, g.onlineServer)
+	if len(fake.describes) != 1 || fake.describes[0] != "wss://relay.example.test/relay ABC234" {
+		t.Fatalf("describe calls %v", fake.describes)
 	}
-	// The room's mod is fixed: a missing one is named and nothing is joined.
-	if len(fake.opens) != 0 || pendingContentReload != nil || !strings.Contains(g.online.status, "absentmod 1.0") {
-		t.Fatalf("missing mod: opens %d, reload %v, status %q", len(fake.opens), pendingContentReload, g.online.status)
+	// The room's mod is fixed: a missing one is named, nothing is joined,
+	// and the popup stays open to try another code.
+	if len(fake.opens) != 0 || pendingContentReload != nil || g.online.view != onlineCodeEntry || !strings.Contains(p.TextOf("STATUS"), "absentmod 1.0") || greyed(p, "OK") {
+		t.Fatalf("missing mod: opens %d, reload %v, status %q", len(fake.opens), pendingContentReload, p.TextOf("STATUS"))
+	}
+	// A relay refusal is said in plain words, in the same popup.
+	fake.describe = func(string) (relay.HostedRoomDescription, error) {
+		return relay.HostedRoomDescription{}, errors.New("nanolathe: hosted relay rejected: logical path room, providers searched [hosted transport], expected an existing invitation")
+	}
+	g.activateGadget("OK")
+	awaitOnline(t, g)
+	if g.online.view != onlineCodeEntry || !strings.Contains(p.TextOf("STATUS"), "No game has that code") {
+		t.Fatalf("unknown room: %q", p.TextOf("STATUS"))
 	}
 }
 
@@ -403,13 +473,13 @@ func TestOnlineCreateRefusalsAndBusyState(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := g.online.panel
-	p.SetText("SERVER", "ws://192.0.2.1:8080/relay")
+	g.onlineServer = "ws://192.0.2.1:8080/relay"
 	g.activateGadget("CREATE")
-	if g.online.job != nil || !strings.Contains(g.online.status, "not valid") {
-		t.Fatalf("bad server: %q", g.online.status)
+	if g.online.job != nil || !strings.Contains(p.TextOf("STATUS"), "not a server address") {
+		t.Fatalf("bad server: %q", p.TextOf("STATUS"))
 	}
+	g.onlineServer = ""
 	g.cs.manualRoots = true
-	p.SetText("SERVER", "")
 	g.activateGadget("CREATE")
 	if g.online.job != nil || !strings.Contains(g.online.status, "installed mod") {
 		t.Fatalf("manual roots: %q", g.online.status)
@@ -422,13 +492,13 @@ func TestOnlineCreateRefusalsAndBusyState(t *testing.T) {
 	}
 	g.cs.mod = nil
 	g.activateGadget("CREATE")
-	if g.online.phase != onlineConnecting || !greyed(p, "CREATE") || !greyed(p, "LOAD") {
-		t.Fatal("create did not run off the game goroutine")
+	if g.online.phase != onlineConnecting || !greyed(p, "CREATE") || !greyed(p, "JOIN") || !strings.Contains(p.TextOf("STATUS"), "Opening a room") {
+		t.Fatal("create did not say it is connecting")
 	}
-	// Back abandons the job; its result never reaches a closed screen.
+	// Cancel stops the opening room and keeps the chooser.
 	g.activateGadget("PREVMENU")
-	if g.online != nil {
-		t.Fatal("Back during a job left the screen open")
+	if g.online == nil || g.online.job != nil || g.online.phase != onlineIdle || greyed(p, "CREATE") {
+		t.Fatal("Cancel did not stop the opening room")
 	}
 	onlineWork.Wait()
 	if len(fake.opens) != 0 {
@@ -476,6 +546,7 @@ func TestOnlineJoinRequestsTheRoomsMod(t *testing.T) {
 	if err := g.openOnlineScreen(); err != nil {
 		t.Fatal(err)
 	}
+	g.activateGadget("JOIN")
 	g.opts.Mutators = content.Mutators{Damage: content.Factor{Num: 2, Den: 1}}
 	encode := func(mod session.MatchMod) []byte {
 		encoded, err := session.EncodeMatchConfig(onlineTestBase(t, "Test Map", mod, content.Mutators{Sight: content.Factor{Num: 2, Den: 1}}))

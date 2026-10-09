@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -189,7 +190,7 @@ func onlineRetailRoom(t *testing.T, players int, survival bool, teams []uint8) [
 	if err := host.openOnlineScreen(); err != nil {
 		t.Fatal(err)
 	}
-	host.online.panel.SetText("SERVER", address)
+	host.onlineServer = address
 	host.activateGadget("CREATE")
 	awaitOnlineShells(t, "the host's lobby", func() bool { return host.online.phase == onlineInLobby }, host)
 	if survival {
@@ -206,9 +207,10 @@ func onlineRetailRoom(t *testing.T, players int, survival bool, teams []uint8) [
 		if err := guest.openOnlineScreen(); err != nil {
 			t.Fatal(err)
 		}
-		guest.online.panel.SetText("SERVER", address)
-		guest.online.panel.SetText("ROOMCODE", strings.ToLower(code[:3]+" "+code[3:]))
-		guest.activateGadget("LOAD")
+		guest.onlineServer = address
+		guest.activateGadget("JOIN")
+		guest.online.panel.SetText("ADDRESS", strings.ToLower(code[:3]+" "+code[3:]))
+		guest.activateGadget("OK")
 		joined := i + 2
 		awaitOnlineShells(t, "a guest's lobby", func() bool {
 			return guest.online != nil && guest.online.phase == onlineInLobby && len(host.online.room.presentSeats()) == joined
@@ -452,8 +454,23 @@ func TestOnlineScreenCapture(t *testing.T) {
 	if err := shell.openOnlineScreen(); err != nil {
 		t.Fatal(err)
 	}
-	shell.online.panel.SetText("ROOMCODE", "K7M 2QX")
-	capture("online")
+	capture("chooser")
+	shell.activateGadget("JOIN")
+	capture("code")
+	shell.online.panel.SetText("ADDRESS", "k7m-2qx")
+	shell.syncOnlineCodeField()
+	shell.online.status = onlineRefusalText(errors.New("nanolathe: hosted relay rejected: logical path room, providers searched [hosted transport], expected an existing invitation"))
+	shell.refreshOnlinePanel()
+	capture("code-error")
+	shell.activateGadget("PREV")
+	shell.activateGadget("SERVER")
+	capture("server")
+	shell.activateGadget("PREV")
+	shell.online.status = "Opening a room on relay.nanolathe.gg..."
+	shell.online.phase = onlineConnecting
+	shell.refreshOnlinePanel()
+	capture("chooser-connecting")
+	shell.online.phase, shell.online.status = onlineIdle, ""
 	// A four-player skirmish lobby: the host, two teams, both sides.
 	fake := newFakeOnlineLobby(1, 0, 1, 2, 3)
 	fake.code = "K7M2QX"

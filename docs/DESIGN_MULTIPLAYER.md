@@ -5629,8 +5629,8 @@ certificate.
 
 ### 16.6 First online lobby
 
-The main menu's MULTI entry opens an online screen with a server field
-(default `relay.nanolathe.gg`), Create Game, and a room code with Join Game.
+The main menu's MULTI entry offers two choices, Create Game and Join Game,
+with the server (default `relay.nanolathe.gg`) off the main path (§16.6.2).
 Create opens a lobby at once; players join with its code; the host adjusts
 the settings while everyone picks a team and side; when every player is
 ready the host starts the match. The lobby's rules:
@@ -5751,11 +5751,14 @@ sides' names in index order.
 #### 16.6.2 Client flow
 
 - **MULTI** is enabled except in the browser build, which has no relay
-  transport. It opens the online screen: a server field (a bare host
-  expands to `wss://host/relay`; `ws://` is the plaintext test opt-in,
-  accepted only on a numeric loopback address), Create Game, a room-code
-  field (case and spaces ignored) with Join Game, and Back. A status line
-  reports refusals in plain words.
+  transport. It opens a small chooser over the main menu: one sentence
+  saying how online play works, Create Game and Join Game, and Cancel.
+  Join Game asks for the room code in a popup (pasted or typed; case,
+  spaces and dashes ignored), which stays open with the reason in plain
+  words when the join is refused. A small Server control, off the main
+  path, changes the relay (a bare host expands to `wss://host/relay`;
+  `ws://` is the plaintext test opt-in, accepted only on a numeric loopback
+  address).
 - **Create** opens a 10-seat room with the host's current skirmish map,
   mod, mutators and restrictions. Only a mod installed from its archive can
   be hosted, because field 8 needs the archive digest. Field 10 holds only
@@ -5778,7 +5781,7 @@ sides' names in index order.
 - **Started**: the client enters its prepared battle and drives it from the
   lobby's battle client. A defeated player sees their result and may leave
   while the others play on. When the battle ends or the connection fails,
-  leaving returns to the online screen.
+  leaving returns to the chooser.
 
 ### 16.7 Rehearsal check
 

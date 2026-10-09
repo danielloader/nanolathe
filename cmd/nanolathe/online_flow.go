@@ -163,17 +163,15 @@ func (g *gameShell) onlineIdleStatus(status string) {
 	g.refreshOnlinePanel()
 }
 
-// onlineServerFromPanel reads and remembers the server field.
-func (g *gameShell) onlineServerFromPanel() (string, relay.HostedDialOptions, bool) {
-	s := g.online
-	typed := s.panel.TextOf("SERVER")
-	address, options, err := onlineServerAddress(typed)
+// onlineServerChoice is the server the player chose (Server on the
+// chooser), or the default.
+func (g *gameShell) onlineServerChoice() (string, relay.HostedDialOptions, bool) {
+	address, options, err := onlineServerAddress(g.onlineServer)
 	if err != nil {
-		g.onlineIdleStatus(onlineRefusalText(err))
+		g.onlineIdleStatus(onlineRefusalText(err) + " Choose Server to change it.")
 		return "", options, false
 	}
-	g.rememberOnlineServer(typed)
-	s.detail = "Server " + address
+	g.online.detail = "Server " + address
 	return address, options, true
 }
 
@@ -192,7 +190,7 @@ func (g *gameShell) startOnlineCreate() {
 	if s == nil || s.job != nil || s.phase != onlineIdle {
 		return
 	}
-	address, options, ok := g.onlineServerFromPanel()
+	address, options, ok := g.onlineServerChoice()
 	if !ok {
 		return
 	}
@@ -217,7 +215,7 @@ func (g *gameShell) startOnlineCreate() {
 	}
 	settings := onlineSettingsFromSetup(g.setup)
 	cs, mutators, restrictions := g.cs, g.opts.Mutators, g.opts.Restrictions
-	s.phase, s.status = onlineConnecting, "Opening a room..."
+	s.phase, s.status = onlineConnecting, "Opening a room on "+g.onlineServerLabel()+"..."
 	s.run(func(ctx context.Context) onlineJobResult {
 		cat, err := cs.compileCatalog(nil)
 		if err != nil {
@@ -252,12 +250,12 @@ func (g *gameShell) startOnlineJoin() {
 	if s == nil || s.job != nil || s.phase != onlineIdle {
 		return
 	}
-	code, ok := relay.NormalizeRoomCode(s.panel.TextOf("ROOMCODE"))
+	code, ok := relay.NormalizeRoomCode(s.panel.TextOf("ADDRESS"))
 	if !ok {
-		g.onlineIdleStatus("Type the six-character room code the host sent you.")
+		g.onlineIdleStatus("Room codes are six letters and digits. Check the code your friend sent.")
 		return
 	}
-	address, options, ok := g.onlineServerFromPanel()
+	address, options, ok := g.onlineServerChoice()
 	if !ok {
 		return
 	}
@@ -372,7 +370,11 @@ func (g *gameShell) resumeOnlineJoin(room onlineRoom) {
 		return
 	}
 	s := g.online
-	s.panel.SetText("ROOMCODE", room.code)
+	if err := g.showOnlineView(onlineCodeEntry); err != nil {
+		reportRetailMessageError(g.showRetailMessage(err.Error()))
+		return
+	}
+	s.panel.SetText("ADDRESS", room.code)
 	s.detail = "Server " + room.address
 	mod := "the base game"
 	if g.cs.mod != nil {
@@ -408,6 +410,7 @@ func (g *gameShell) pollOnline() {
 		default:
 		}
 	}
+	g.syncOnlineCodeField()
 	if s = g.online; s != nil && s.phase == onlineInLobby && s.room.lobby != nil {
 		g.pollOnlineLobby()
 	}

@@ -245,7 +245,10 @@ func runShot(opts Options, cs *contentSet) error {
 	// presents only the last one, so the capture route observes each tick as
 	// the window would (DESIGN_GPU_RENDERER §15). The executor choice is the
 	// same one the capture below installs.
-	cl.SetEnhanced(effectiveShotRenderer(opts) != "classic")
+	shotRenderer := effectiveShotRenderer(opts)
+	// A shared classic/modern recording keeps the fixed retail crop.
+	b.chromeFixed = shotRenderer == "both"
+	cl.SetEnhanced(shotRenderer != "classic")
 	for i := 0; i < opts.ShotTicks; i++ {
 		millis.step = uint32(i) + 1
 		b.viewerStep(tickSeconds, cl)
@@ -301,6 +304,10 @@ func runShot(opts Options, cs *contentSet) error {
 			state.PanelOffset, state.PanelTarget = ui.PanelParked, ui.PanelParked
 		}
 	}
+
+	// Settle chrome geometry before capture-only pointer projections and zoom.
+	// This is the same joined presentation boundary used by the window [I6].
+	cl.BeginPresentationFrame()
 
 	// The view scale is presentation-only [F-P1-008]; it is applied after the
 	// ticks so the simulation is identical to a native capture of the same seed
@@ -387,9 +394,6 @@ func runShot(opts Options, cs *contentSet) error {
 			per(stepTotal), per(presentTotal))
 	}
 
-	shotRenderer := effectiveShotRenderer(opts)
-	// Classic replays the same recording for "both" and ignores chrome regions.
-	b.chromeFixed = shotRenderer == "both"
 	// The renderer switch is the one sanctioned presentation choice [I11]: both
 	// executors replay the same committed frame, and the capture picks which one
 	// writes the --shot PNG [DESIGN_GPU_RENDERER.md §2.5]. classic is the
@@ -405,8 +409,6 @@ func runShot(opts Options, cs *contentSet) error {
 		}
 		cl.SetArrivalSeconds(float32(opts.ShotArrivalTime))
 	}
-	// One presented state for either executor, including the both capture.
-	cl.BeginPresentationFrame()
 	switch shotRenderer {
 	case "classic":
 		if err := encodeShotPNG(opts.Shot, cl.ComposeFrame()); err != nil {

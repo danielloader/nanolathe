@@ -2178,8 +2178,8 @@ out of date behind it. It is:
 - **the committed frame**, by pointer identity and tick, as a cross-check on the
   epoch;
 - **the two blend fractions of §13.5** and whether the camera's is set at all;
-- **the camera origin and its two stepped samples**, the surface size, and the
-  interpolation and Enhanced switches;
+- **the camera origin, chrome insets and its two stepped samples**, the surface
+  size, and the interpolation and Enhanced switches;
 - **the caption ring's producer and display cursors**, because the audio drain
   is the one thing that runs on the game goroutine between a launch and the Draw
   that consumes it, and the ring is what it writes that the recorder reads
@@ -2313,8 +2313,8 @@ switches discard the retained image; resizing replaces its allocation.
 
 `PausedWorldInputs` compares the committed frame identity and tick, frozen tick
 fraction, interpolation and Enhanced switches, actual blended camera origin,
-viewport and map extents, scale and smooth zoom factor, dimensions, world/asset
-binding revision, terrain, detail art, font, palette and display colours, the
+viewport and map extents, chrome insets, scale and smooth zoom factor, dimensions,
+world/asset binding revision, terrain, detail art, font, palette and display colours, the
 shadow, shading, antialias, fog and damage-bar options, and the effect selection
 (§30). The actual origin uses §13.5's integer blend and teleport snap, so a
 stationary camera can reuse across changing camera fractions while pan, follow

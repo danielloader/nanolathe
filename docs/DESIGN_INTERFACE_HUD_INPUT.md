@@ -2132,7 +2132,8 @@ and 1x below, which always leaves the rail at least the 480 rows every stock
 page and the side panel art are authored for. A fixed 2x applies as chosen
 even when it leaves fewer; the bottom of a page may then fall off the rail
 (`hud.ChromeScale`), and a centred modal too wide for the space beside the
-rail is kept on the surface. The scale is resolved once per drawn frame, and
+rail is kept on the surface. The scale is resolved at the joined host
+presentation boundary, before camera blending and world recording, and
 input until the next draw maps the pointer through that value, which is what
 the player sees. It is always 1x when the Classic executor may replay the
 recording, since that executor ignores the region markers below, and for
@@ -2162,13 +2163,19 @@ are drawn k times larger on that picture and the viewport rectangle is k
 pixels thick. Radar circles keep one-pixel lines. Minimap input and world
 mapping keep the canonical 126-pixel layout through the magnified destination
 rectangle, so the retail arithmetic of `[07 §10]` is unchanged.
+Hover also converts the pointer to canonical radar pixels before the strict
+squared-distance test `[07 R-SEL-02B2]`, so a magnified blip retains the
+canonical pick radius.
 
 The camera's left chrome inset becomes 129k-1, the magnified 129-column side
 panel less one column as retail's 128 is (`camera.ChromeInsets`), which
 moves the clamp floor, centring, the battle viewport rectangle, picking
 clamps, wheel-zoom and on-screen tests with it, so every playable column stays
 reachable beside the wider rail. Changing the inset keeps the point at the
-viewport's centre. The top and bottom strips, the slide strip, the clock and
+viewport's centre. A changed inset refreshes both camera blend endpoints to
+that centred host camera. The pre-record and paused-world validity digests
+include the insets, so neither can reuse a picture with old viewport bounds.
+The top and bottom strips, the slide strip, the clock and
 the viewport overlays anchored to the viewport's left edge keep their scale
 and move right by 129(k-1) in a translated region; the message column moves
 with the inset. Centred modals, the unit information screen and the chat

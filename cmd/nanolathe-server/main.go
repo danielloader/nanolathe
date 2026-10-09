@@ -35,7 +35,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	insecure := flags.Bool("insecure-loopback", false, "plaintext on numeric loopback for local tests only")
 	websocket := flags.Bool("websocket", false, "serve WebSocket /relay and HTTP /healthz")
 	proxyTLS := flags.Bool("behind-tls-proxy", false, "serve HTTP behind a trusted HTTPS proxy (requires --websocket)")
-	maxRooms := flags.Int("max-rooms", 16, "maximum simultaneous two-player rooms, 1..256")
+	maxRooms := flags.Int("max-rooms", 16, "maximum simultaneous rooms, 1..256")
 	maxConnections := flags.Int("max-connections", 512, "maximum established and pending connections, 2..1024 and at least two per room")
 	healthAddress := flags.String("health-listen", "", "also answer HTTP GET /healthz here, outside the relay's connection limit; never route it publicly")
 	if err := flags.Parse(args); err != nil {

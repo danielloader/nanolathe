@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha1" // RFC 6455's handshake digest, not an authentication primitive.
-	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -82,7 +81,8 @@ func readWebSocketHeader(r *bufio.Reader) ([]byte, error) {
 // page answers a GET for a status path, or reports that path is not one.
 type statusPageFunc func(path string) (contentType string, body []byte, ok bool)
 
-func acceptHostedWebSocket(conn net.Conn, timeout time.Duration, deadline time.Time, page statusPageFunc) (*websocketConn, error) {
+func acceptHostedWebSocket(conn net.Conn, timeouts hostedTimeouts, deadline time.Time, page statusPageFunc) (*websocketConn, error) {
+	timeout := timeouts.write
 	r := bufio.NewReader(conn)
 	header, err := readWebSocketHeader(r)
 	if err != nil {
@@ -134,7 +134,7 @@ func acceptHostedWebSocket(conn net.Conn, timeout time.Duration, deadline time.T
 	if _, err := io.WriteString(conn, response); err != nil {
 		return nil, localIOError("WebSocket upgrade", err)
 	}
-	return newWebSocketConn(conn, r, false, hostedMaxClientFrame+5, timeout, websocketPingInterval), nil
+	return newWebSocketConn(conn, r, false, hostedMaxClientFrame+5, timeout, timeouts.ping), nil
 }
 
 // DialHostedWebSocket verifies a wss server certificate and exchanges the
@@ -147,12 +147,13 @@ func DialHostedWebSocket(ctx context.Context, address, room string, hello LocalH
 	return dialHostedStream(ctx, address, room, hello, options)
 }
 
-// dialWebSocketTransport validates a ws(s)://host/relay URL, dials it and
-// completes the upgrade within the context's deadline.
-func dialWebSocketTransport(ctx context.Context, address string, options HostedDialOptions) (net.Conn, error) {
+// hostedWebSocketURL applies the URL and trust rules every build shares: a
+// wss://host/relay URL with verified TLS, or ws:// only with the explicit
+// numeric-loopback test switch. It returns the URL and its host:port target.
+func hostedWebSocketURL(address string, options HostedDialOptions) (*url.URL, string, error) {
 	u, err := url.Parse(address)
 	if err != nil || u == nil || (u.Scheme != "wss" && u.Scheme != "ws") || u.Opaque != "" || u.Hostname() == "" || u.User != nil || u.EscapedPath() != "/relay" || u.RawQuery != "" || u.ForceQuery || strings.Contains(address, "#") {
-		return nil, hostedError("WebSocket URL", "ws(s)://host/relay without credentials, query or fragment")
+		return nil, "", hostedError("WebSocket URL", "ws(s)://host/relay without credentials, query or fragment")
 	}
 	port := u.Port()
 	if port == "" {
@@ -164,44 +165,15 @@ func dialWebSocketTransport(ctx context.Context, address string, options HostedD
 	target := net.JoinHostPort(u.Hostname(), port)
 	if u.Scheme == "ws" {
 		if !options.InsecureLoopback || options.TLSConfig != nil {
-			return nil, hostedError("WebSocket TLS", "explicit numeric-loopback plaintext without TLS configuration")
+			return nil, "", hostedError("WebSocket TLS", "explicit numeric-loopback plaintext without TLS configuration")
 		}
 		if err := localAddress(target, false); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	} else if options.InsecureLoopback || (options.TLSConfig != nil && options.TLSConfig.InsecureSkipVerify) {
-		return nil, hostedError("WebSocket TLS", "verified TLS without the plaintext switch")
+		return nil, "", hostedError("WebSocket TLS", "verified TLS without the plaintext switch")
 	}
-	var raw net.Conn
-	if u.Scheme == "ws" {
-		raw, err = (&net.Dialer{}).DialContext(ctx, "tcp", target)
-	} else {
-		config := &tls.Config{}
-		if options.TLSConfig != nil {
-			config = options.TLSConfig.Clone()
-		}
-		config.MinVersion = max(config.MinVersion, tls.VersionTLS12)
-		config.NextProtos = []string{"http/1.1"}
-		raw, err = (&tls.Dialer{Config: config}).DialContext(ctx, "tcp", target)
-	}
-	if err != nil {
-		return nil, localIOError("WebSocket dial", err)
-	}
-	stop := context.AfterFunc(ctx, func() { _ = raw.Close() })
-	defer stop()
-	deadline, _ := ctx.Deadline()
-	_ = raw.SetDeadline(deadline)
-	_ = raw.SetWriteDeadline(minDeadline(deadline, time.Now().Add(hostedDefaultTimeouts.write)))
-	stream, err := dialWebSocketUpgrade(raw, u.Host)
-	if err != nil {
-		_ = raw.Close()
-		if ctx.Err() != nil {
-			return nil, localIOError("WebSocket handshake", ctx.Err())
-		}
-		return nil, err
-	}
-	_ = stream.SetDeadline(deadline)
-	return stream, nil
+	return u, target, nil
 }
 
 func dialWebSocketUpgrade(conn net.Conn, host string) (*websocketConn, error) {

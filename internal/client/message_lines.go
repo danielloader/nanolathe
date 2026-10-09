@@ -47,6 +47,27 @@ func (c *Client) MessageRing() *frame.MessageRing {
 	return &c.messages
 }
 
+// MessageColumnBottom is the y just below the message column's visible
+// lines, or 0 while it shows none, so a host overlay at the top left of the
+// world view can start below it. Presentation-only [I6].
+func (c *Client) MessageColumnBottom() int {
+	if c == nil || c.messageFNT == nil {
+		return 0
+	}
+	n := len(c.MessageLines())
+	if n == 0 {
+		return 0
+	}
+	return c.messageColumnTop() + n*int(c.messageFNT.Height)
+}
+
+// messageColumnTop keeps messages and overlays below the active top strip:
+// twenty rows below retail's 32-row strip is y=52 [07 R-HUD-03 §14.4].
+func (c *Client) messageColumnTop() int {
+	_, top, _ := c.cam.ChromeInset()
+	return int(top) + 20
+}
+
 // drawMessageLines is the master-composer message column. Unit captions use
 // the no-speaker sentinel, so they draw directly at x=138; the same consumer
 // also handles chat and announcement lines [07 R-HUD-03 §14.4].
@@ -64,11 +85,10 @@ func (c *Client) drawMessageLines() {
 	if c == nil || c.messageFNT == nil {
 		return
 	}
-	// Ten columns right of the rail and twenty rows below the top strip:
-	// (138, 52) beside retail's chrome.
-	left, top, _ := c.cam.ChromeInset()
 	for i, line := range c.MessageLines() {
-		y := int(top) + 20 + i*int(c.messageFNT.Height)
+		y := c.messageColumnTop() + i*int(c.messageFNT.Height)
+		// Ten columns right of the rail: 138 beside retail's.
+		left, _, _ := c.cam.ChromeInset()
 		x := int(left) + 10
 		if line.SpeakerSlot < frame.PlayerRowSlots {
 			// The rectangle includes both endpoints. The logo height and text

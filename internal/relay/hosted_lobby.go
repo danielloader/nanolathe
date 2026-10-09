@@ -127,21 +127,27 @@ func DescribeHostedRoom(ctx context.Context, address, room string, options Hoste
 // or joins one, passing config nil and size 0, and takes its lowest free
 // seat.
 func OpenHostedLobby(ctx context.Context, address, room string, hello LocalHello, config []byte, size int, options HostedDialOptions) (*HostedLobby, error) {
+	return openHostedLobby(ctx, hostedVersion, address, room, hello, config, size, options)
+}
+
+// openHostedLobby speaks a served version; tests use it to play a version-5
+// seat, which the relay never sends a progress report.
+func openHostedLobby(ctx context.Context, version uint16, address, room string, hello LocalHello, config []byte, size int, options HostedDialOptions) (*HostedLobby, error) {
 	if room == "" && len(config) == 0 {
 		return nil, hostedError("room configuration", "the creator's encoded configuration")
 	}
 	if room != "" {
 		hello.Seat = hostedAnySeat
 	}
-	body, err := encodeHostedHello(room, 0, size, hello, config)
+	body, err := encodeHostedHelloVersion(version, room, 0, size, hello, config)
 	if err != nil {
 		return nil, err
 	}
-	conn, code, seat, err := hostedHandshake(ctx, address, options, body, room, hello.Seat)
+	c, code, seat, err := hostedHandshake(ctx, version, address, options, body, room, hello.Seat)
 	if err != nil {
 		return nil, err
 	}
-	l := &HostedLobby{code: code, seat: seat, conn: conn, client: newHostedClient(conn), done: make(chan struct{})}
+	l := &HostedLobby{code: code, seat: seat, conn: c.conn, client: c, done: make(chan struct{})}
 	if room == "" {
 		l.config = bytes.Clone(config)
 	}
@@ -152,7 +158,7 @@ func OpenHostedLobby(ctx context.Context, address, room string, hello LocalHello
 func (l *HostedLobby) read() {
 	defer close(l.done)
 	for {
-		body, err := readLocalFrame(l.conn, hostedMaxConfigBytes+64)
+		body, err := l.client.readFrame(hostedMaxConfigBytes + 64)
 		if err != nil {
 			l.fail(err)
 			return
@@ -350,13 +356,27 @@ func (l *HostedLobby) Close() error {
 	return err
 }
 
+// RoomCodeAlphabet is every symbol a room code uses (§16.5.1).
+const RoomCodeAlphabet = hostedCodeAlphabet
+
 // NormalizeRoomCode accepts a typed invitation in any case, with spaces or
-// dashes, and returns the canonical code.
+// dashes, and returns the canonical code. A letter that codes never use but
+// that looks like one of their digits reads as that digit: S as 5, Z as 2,
+// B as 8 and G as 6.
 func NormalizeRoomCode(typed string) (string, bool) {
 	var b strings.Builder
 	for _, r := range strings.ToUpper(typed) {
-		if r == ' ' || r == '-' {
+		switch r {
+		case ' ', '-':
 			continue
+		case 'S':
+			r = '5'
+		case 'Z':
+			r = '2'
+		case 'B':
+			r = '8'
+		case 'G':
+			r = '6'
 		}
 		b.WriteRune(r)
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nanolathe-gg/nanolathe/internal/client"
+	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/headless"
 	"github.com/nanolathe-gg/nanolathe/internal/lockstep"
@@ -32,6 +33,9 @@ type battleMultiplayer struct {
 	completed func() bool // Hosted results wait for explicit relay agreement.
 	// net measures a hosted battle for the overlay and the summary.
 	net *onlineNetStats
+	// dropped holds the presentation events of ticks a hidden page ran,
+	// between a background pump and the next (pumpBackground).
+	dropped []frame.EventView
 }
 
 func (o Options) localMultiplayer() bool    { return o.LocalMPListen != "" || o.LocalMPJoin != "" }
@@ -225,6 +229,9 @@ func (b *battleSession) pumpLocalMultiplayer(cl *client.Client) {
 	if b == nil || b.multiplayer == nil || b.multiplayer.driver == nil || b.multiplayer.failure != nil {
 		return
 	}
+	// A browser page that stops presenting frames keeps pumping from its
+	// background step (online_browser_js.go); native hosts have none.
+	watchOnlineBackground(b.shell, cl)
 	advanced, err := b.multiplayer.driver.Pump()
 	b.multiplayer.net.observe(b.sess, time.Now())
 	for _, receipt := range b.sess.DrainCommandReceipts() {
@@ -253,4 +260,72 @@ func (b *battleSession) submitLocalMultiplayer(c session.HumanCommand) (uint64, 
 		return 0, localMultiplayerError("command", "a connected, running local relay")
 	}
 	return b.multiplayer.driver.Submit(c)
+}
+
+// ---------------------------------------------------------------------------
+// Online play while a browser page is hidden (DESIGN_BROWSER_HOST §4
+// contract 10). The relay holds every seat within 30 ticks of the slowest
+// acknowledgement and ends a match that makes no progress for 10 seconds
+// (DESIGN_MULTIPLAYER §16.5.1–§16.5.2), and a browser stops animation frames,
+// and with them every Update and Draw, while its page is hidden. A seat in the
+// lobby or an online battle therefore gets a background step whenever its
+// page presents no frames: it runs exactly what the host step would have run
+// for the room, never at the same time as a frame.
+
+// onlineBackgroundFrames is the page's frame loop as the background step sees
+// it (online_browser_js.go).
+type onlineBackgroundFrames interface {
+	// Idle reports that no frame is running and none is being presented: the
+	// page is hidden, or its animation frames have stopped.
+	Idle() bool
+	// Hold keeps the loop from starting a frame while held.
+	Hold(bool)
+}
+
+// serviceOnlineBackground runs step while the page's frames are idle, holding
+// them so that no Update or Draw can start until step returns. It reports
+// whether step ran.
+func serviceOnlineBackground(frames onlineBackgroundFrames, step func()) bool {
+	if frames == nil || !frames.Idle() {
+		return false
+	}
+	frames.Hold(true)
+	defer frames.Hold(false)
+	step()
+	return true
+}
+
+// onlineBackgroundStep is a hidden page's host step for the shell's online
+// game, and reports whether one remains to keep in step. An online battle
+// runs its granted ticks; an open room is followed, so a Start the host makes
+// meanwhile enters the battle. Anything else — the main menu, a single-player
+// battle — waits for the page's frames as it always has.
+func (g *gameShell) onlineBackgroundStep(cl *client.Client) bool {
+	if g == nil {
+		return false
+	}
+	if b := g.battle; b != nil {
+		if b.multiplayer == nil {
+			return false
+		}
+		b.pumpBackground(cl)
+		return b.multiplayer.driver != nil && b.multiplayer.failure == nil
+	}
+	if s := g.online; s != nil && (s.job != nil || s.room.lobby != nil) {
+		g.pollOnline()
+		return g.online != nil || g.battle != nil
+	}
+	return false
+}
+
+// pumpBackground runs the ticks the relay has granted, as the host step does,
+// and drops the cues and notices they raised: no frame presented them, and a
+// page shown again resumes from its latest committed tick rather than
+// replaying them all at once.
+func (b *battleSession) pumpBackground(cl *client.Client) {
+	b.pumpLocalMultiplayer(cl)
+	if m := b.multiplayer; m != nil && b.sess != nil && b.sess.Snapshot != nil {
+		m.dropped = b.sess.Snapshot.DrainCommittedEvents(m.dropped)
+		clear(m.dropped)
+	}
 }

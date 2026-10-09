@@ -3077,9 +3077,9 @@ excluded with multiplayer `[07 R-CAM-01 §6]` `[07 R-FE-02 §12]`.
   transport remain out of scope; the single-player skirmish setup screen is a
   different surface and is implemented `[07 §12]` `[07 R-FE-02 §1]`. The
   authored `MAINMENU` `MULTI` button opens Nanolathe's own online screen
-  instead ([Online games](#online-games)). Only the browser build, which has
-  no relay transport, still greys it so it cannot be activated by pointer or
-  key.
+  instead ([Online games](#online-games)). Where the mounted content has no
+  skirmish map, such as the browser's demo, it is greyed with Skirmish so it
+  cannot be activated by pointer or key.
 * **The front-end movie stage.** Normal launches play the original startup
   logo `Data/1.zrb` once, then open `MAINMENU` `[07 R-FE-01 §3]`. Playback
   is deferred to the first shell update so the platform PCM device is ready;
@@ -3131,8 +3131,9 @@ excluded with multiplayer `[07 R-CAM-01 §6]` `[07 R-FE-02 §12]`.
   The front-end `DRDEATH` cheat sequence also lacks its token-history consumer
   `[07 R-FE-02 §10]`.
 * **Clipboard portability.** macOS Insert, Ctrl+V and the host Cmd+V alias read
-  AppKit plain text on the initial paste key transition. Other native hosts and
-  VM guests still lack a clipboard bridge. Translating non-ASCII Unicode text
+  AppKit plain text on the initial paste key transition. The browser build
+  takes the text of the page's paste event (DESIGN_BROWSER_HOST §4 contract
+  9). Other native hosts and VM guests still lack a clipboard bridge. Translating non-ASCII Unicode text
   into the retail code page remains unresolved; an unavailable format, failed
   read or unmapped text preserves the current editor `[07 §2]`.
 * **Never-opened GUIs.** The windows retail's own code never opens are not
@@ -4419,7 +4420,8 @@ and **Cancel** (or Escape).
 (`guis/tcp.gui`), captioned "Enter the room code your friend sent you", with
 **Join** and **Cancel**. Its field takes focus at once; the code may be typed
 or pasted (Ctrl+V, Cmd+V or Shift+Insert where the host has a clipboard
-bridge, which is macOS only for now), is shown in capitals, and ignores case,
+bridge: macOS and the browser build, DESIGN_BROWSER_HOST §4 contract 9), is
+shown in capitals, and ignores case,
 spaces and dashes. Enter joins. Escape clears the field and a second Escape
 cancels. Each refusal — no game with that code, a full or started game, a mod
 that is missing or cannot be mounted, a server that cannot be reached —
@@ -4462,7 +4464,8 @@ click one back, past every colour another present player holds. Each arrival
 takes the lowest free colour, so every player's is their own.
 The room code is drawn beside the title in `HATT14`, in two groups of three,
 with **Copy** where the host has a clipboard bridge (macOS writes AppKit plain
-text; other hosts hide it).
+text and the browser build `navigator.clipboard.writeText` on secure pages;
+other hosts hide it).
 
 The host's settings stay open until Start: the game type (Skirmish or
 Survival, in Difficulty's place), **Select Map** through the ordinary map
@@ -4500,14 +4503,46 @@ the chooser, which says whether the game ended, stopped (with the
 transport's reason) or was left.
 
 In an online battle `+net`, or the FPS display, shows a network overlay at the
-top left of the world view: executed ticks per second, buffered grants,
-stalls (gaps of more than three tick intervals between executed ticks), this
-seat's order latency from submission to the executed tick (median and 95th
-percentile of the recent orders), the last tick a checksum was sent, and each
-player as playing, defeated or won. At the end the host prints a summary to
-standard error: how the match ended, its duration and ticks, the average and
-worst ticks per second, order latency and stalls. These are host timings
-only.
+top left of the world view, below the resource strip, in the side's console
+face. Its first line gives the executed tick, the ticks executed in the last
+second and the stalls (gaps of more than three tick intervals between
+executed ticks). The second gives the grants received ahead of the executed
+tick and the grant jitter: the 95th percentile, over the last five seconds,
+of how far each grant's arrival gap strays from a thirtieth of a second.
+Then come the relay round trip, from this seat submitting an order to the
+grant that carries it, and the order latency, from submission to the
+executed tick, each as the median and 95th percentile of the latest 64
+orders; and the traffic in and out over the last second, in kilobytes and
+messages a second, from the connection's own counters ("Traffic not
+reported" on a connection without them).
+
+With the relay's match report
+([DESIGN_MULTIPLAYER §16.5.2](DESIGN_MULTIPLAYER.md#1652-continuous-grants-and-client-playout))
+the next line reads "Checksums agreed through tick _n_", the last tick whose
+battle-ended bits, and on every 30th tick unit checksums, the relay has
+compared across every playing seat. A table of the human seats follows, one
+row each: "Player _n_", marked "(You)"; the state; the relay's ping to the
+seat ("--" until measured, in seconds from one second); and how many ticks
+the seat is behind the newest grant this client holds. The state is playing,
+defeated or won from the shared results, left once the relay no longer
+compares the seat, or holding, in red, for the slowest playing seat once it
+is 30 ticks behind — the relay's lead bound, where every other seat stalls —
+unless every playing seat is as far behind, as while the opening holds them
+all. Without a report (an older relay, or the loopback play test) the line
+reads "No match report from the relay" and each seat shows only playing,
+defeated or won, so a seat that left cannot be told from one still there.
+
+With the FPS panel also shown the overlay stays beside the panel where it
+fits and otherwise goes below it, its seat rows in two blocks when one is
+too tall for the space left. Cells are two spaces apart, closing towards one
+where the width is short. From 640×480 up it covers neither strip nor the
+panel.
+
+At the end the host prints one line to standard error: how the match ended,
+its duration and ticks, the average and worst ticks per second, the relay
+round trip and order latency (median and 95th percentile over the match),
+the connection's traffic in and out (bytes and messages) and the stalls.
+All of these are host timings; nothing reaches the simulation.
 
 ### 3.17 The Nanolathe screen
 

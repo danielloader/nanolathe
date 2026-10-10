@@ -2121,6 +2121,74 @@ command input is admitted for that state `[07 §6]` `[07 R-HUD-05]`.
 `TestRailWindowReachesBelowArt` locks the extent test; seeded `--shot`
 comparisons against the retail path must match outside the rail columns.
 
+#### Modern sidebar scale
+
+**Nanolathe host presentation policy** (issue #95), a renderer preference
+independent of gameplay selection. Retail draws the rail at one framebuffer
+pixel per authored pixel `[07 R-HUD-05]`, which is small on a 1440- or
+2160-row surface. `presentation.sidebarScale` stores Auto (0, the default)
+or a fixed 1 or 2; a larger stored value reads as 2. Auto is 2x from 1440 rows
+and 1x below, which always leaves the rail at least the 480 rows every stock
+page and the side panel art are authored for. A fixed 2x applies as chosen
+even when it leaves fewer; the bottom of a page may then fall off the rail
+(`hud.ChromeScale`), and a centred modal too wide for the space beside the
+rail is kept on the surface. The scale is resolved at the joined host
+presentation boundary, before camera blending and world recording, and
+input until the next draw maps the pointer through that value, which is what
+the player sees. It is always 1x when the Classic executor may replay the
+recording, since that executor ignores the region markers below, and for
+captures that crop the chrome at retail's fixed insets: films,
+`--shot-renderer both` and Nanolathe screen previews. The Nanolathe screen's
+Sidebar card and the in-battle Nanolathe page offer the choice, with the usual
+Undo and Restore.
+
+At scale k the rail — backdrop, side page and the community rotation menu —
+is laid out on a virtual surface of the framebuffer size divided by k and
+recorded between a pair of world-space markers whose factor is k
+(`Client.BeginChromeRegion`). The modern executor magnifies everything
+between them with its existing world transform and nearest sampling, so the
+art is integer-scaled and blocky by design. The markers are flagged as chrome,
+so text inside them — build-queue counts, readouts — is magnified too, where
+world text keeps native glyphs. Rail layout, including the
+expanded sidebar's free-flow capacity, reads the virtual height, so a 2x rail
+at 1440 rows has the build capacity of a 720-row surface. Rail input maps the
+pointer onto the virtual surface before every gadget test, the widget pass
+included. At 1x the region records nothing, so recordings and captures are
+unchanged.
+
+The minimap is drawn outside the region, at k times its 126-pixel canvas, from
+a second radar service whose terrain picture is generated at that size from
+the map tiles, built once per battle and scale. Blips and projectile markers
+are drawn k times larger on that picture and the viewport rectangle is k
+pixels thick. The picture dimensions and letterbox offsets magnify the fitted
+canonical rectangle: truncation happens at 126 pixels before magnification,
+so every drawn edge pixel belongs to input's fitted radar rectangle.
+Radar circles keep one-pixel lines. Minimap input and world
+mapping keep the canonical 126-pixel layout through the magnified destination
+rectangle, so the retail arithmetic of `[07 §10]` is unchanged.
+Hover also converts the pointer to canonical radar pixels before the strict
+squared-distance test `[07 R-SEL-02B2]`, so a magnified blip retains the
+canonical pick radius.
+
+The camera's left chrome inset becomes 129k-1, the magnified 129-column side
+panel less one column as retail's 128 is (`camera.ChromeInsets`), which
+moves the clamp floor, centring, the battle viewport rectangle, picking
+clamps, wheel-zoom and on-screen tests with it, so every playable column stays
+reachable beside the wider rail. Changing the inset keeps the point at the
+viewport's centre. A changed inset refreshes both camera blend endpoints to
+that centred host camera. The pre-record and paused-world validity digests
+include the insets, so neither can reuse a picture with old viewport bounds.
+The top and bottom strips, the slide strip, the clock and
+the viewport overlays anchored to the viewport's left edge keep their scale
+and move right by 129(k-1) in a translated region; the message column moves
+with the inset. Centred modals, the unit information screen and the chat
+window are placed beside the wider rail. A save's radar thumbnail rebuilds
+the canonical radar, so it is unchanged by the scale.
+
+`TestChromeScale`, `TestChromeInsetWidensTheViewport` and `TestChromeRegion`
+lock the scale rule, the insets and the region mapping. Magnifying the top and
+bottom strips is a separate preference.
+
 ### 3.4 Screens, dispatch and preferences (C16…C18)
 
 **C16 — the front-end subset is resource-driven.** `mainmenu.gui`, `single.gui`,

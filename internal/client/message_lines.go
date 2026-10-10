@@ -58,11 +58,15 @@ func (c *Client) MessageColumnBottom() int {
 	if n == 0 {
 		return 0
 	}
-	return messageColumnTop + n*int(c.messageFNT.Height)
+	return c.messageColumnTop() + n*int(c.messageFNT.Height)
 }
 
-// messageColumnTop is the first message line's y [07 R-HUD-03 §14.4].
-const messageColumnTop = 52
+// messageColumnTop keeps messages and overlays below the active top strip:
+// twenty rows below retail's 32-row strip is y=52 [07 R-HUD-03 §14.4].
+func (c *Client) messageColumnTop() int {
+	_, top, _ := c.cam.ChromeInset()
+	return int(top) + 20
+}
 
 // drawMessageLines is the master-composer message column. Unit captions use
 // the no-speaker sentinel, so they draw directly at x=138; the same consumer
@@ -82,15 +86,17 @@ func (c *Client) drawMessageLines() {
 		return
 	}
 	for i, line := range c.MessageLines() {
-		y := messageColumnTop + i*int(c.messageFNT.Height)
-		x := 138
+		y := c.messageColumnTop() + i*int(c.messageFNT.Height)
+		// Ten columns right of the rail: 138 beside retail's.
+		left, _, _ := c.cam.ChromeInset()
+		x := int(left) + 10
 		if line.SpeakerSlot < frame.PlayerRowSlots {
 			// The rectangle includes both endpoints. The logo height and text
 			// offset each truncate their complete double expression [07
 			// R-HUD-03 §14.4]. Missing art must not change the text geometry.
 			a := int(float64(c.messageFNT.Height) * 0.8)
-			c.UIBlitFrameScaled(c.messageLogo(line.SpeakerSlot), 138, y, a+1, a+1)
-			x = int(138.0 + 1.5*float64(a))
+			c.UIBlitFrameScaled(c.messageLogo(line.SpeakerSlot), x, y, a+1, a+1)
+			x = int(float64(x) + 1.5*float64(a))
 		}
 		if c.messageGAF != nil {
 			c.drawMessageGAFText(line.Text, x, y)

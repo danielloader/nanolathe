@@ -18,27 +18,43 @@ type Minimap struct {
 // The longer axis occupies 126 pixels; the shorter axis uses truncating
 // integer scale and is centered by truncating half-padding [03 §3.6][07 §10].
 func LayoutMinimap(mapW, mapH int32) Minimap {
-	if mapW <= 0 || mapH <= 0 {
+	return LayoutMinimapCanvas(mapW, mapH, MinimapLongSide)
+}
+
+// LayoutMinimapCanvas magnifies the canonical fitted rectangle into a side×side
+// canvas. Fit truncation and half-padding happen before magnification, so sharp
+// picture edges agree with input's canonical lens (Modern sidebar scale).
+func LayoutMinimapCanvas(mapW, mapH, side int32) Minimap {
+	if mapW <= 0 || mapH <= 0 || side <= 0 {
 		return Minimap{}
 	}
+	if side != MinimapLongSide {
+		m := LayoutMinimap(mapW, mapH)
+		return Minimap{
+			PadX: m.PadX * side / MinimapLongSide,
+			PadY: m.PadY * side / MinimapLongSide,
+			W:    max(m.W*side/MinimapLongSide, 1),
+			H:    max(m.H*side/MinimapLongSide, 1),
+		}
+	}
 	if mapW < mapH {
-		w := int32(int64(mapW) * MinimapLongSide / int64(mapH))
+		w := int32(int64(mapW) * int64(side) / int64(mapH))
 		if w < 1 {
 			w = 1
 		}
-		if w > MinimapLongSide {
-			w = MinimapLongSide
+		if w > side {
+			w = side
 		}
-		return Minimap{PadX: (MinimapLongSide - w) / 2, W: w, H: MinimapLongSide}
+		return Minimap{PadX: (side - w) / 2, W: w, H: side}
 	}
-	h := int32(int64(mapH) * MinimapLongSide / int64(mapW))
+	h := int32(int64(mapH) * int64(side) / int64(mapW))
 	if h < 1 {
 		h = 1
 	}
-	if h > MinimapLongSide {
-		h = MinimapLongSide
+	if h > side {
+		h = side
 	}
-	return Minimap{PadY: (MinimapLongSide - h) / 2, W: MinimapLongSide, H: h}
+	return Minimap{PadY: (side - h) / 2, W: side, H: h}
 }
 
 // Right and Bottom return the inclusive radar edges in canvas coordinates.
